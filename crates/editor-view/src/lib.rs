@@ -8,7 +8,9 @@ pub use editor_state;
 
 mod bridge;
 mod editor;
+pub mod hover;
 pub mod slash;
 pub mod tile;
 
 pub use editor::{DecorationSource, Editor};
+pub use hover::{HoverPopup, HoverTooltipView};

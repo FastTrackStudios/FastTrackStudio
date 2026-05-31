@@ -1210,3 +1210,28 @@
     max-height: 320px;
     overflow: auto;
 }
+
+/* ── Hover tooltip ──────────────────────────────────────────────
+   Floating panel shown when a `HoverSource` returns content for the
+   pointer position. Positioned imperatively (fixed, viewport coords)
+   by `HoverTooltipView`; `pointer-events: none` so it never steals
+   the pointer from the editor (which would fire mouseleave). The
+   language layer styles its own inner content (e.g. keyflow's
+   `.kf-hover-*` / `.kf-inlay`). */
+.editor-hover-tooltip {
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
+    z-index: 9999;
+    max-width: 380px;
+    padding: 6px 9px;
+    border-radius: 6px;
+    background: var(--ed-bg-elev);
+    border: 1px solid var(--ed-border);
+    color: var(--ed-text);
+    font-size: 12.5px;
+    line-height: 1.45;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    white-space: normal;
+}

@@ -136,6 +136,12 @@ pub fn Editor(
     /// keeps the state in sync with the doc.
     #[props(default)]
     slash: Option<Signal<Option<crate::slash::SlashState>>>,
+    /// Optional hover-tooltip source. When `Some`, the editor tracks the
+    /// pointer (debounced), resolves it to a document offset, and calls this
+    /// source; a returned [`editor_state::HoverTooltip`] is shown as a floating
+    /// panel. Mirrors CM6's `hoverTooltip` — keyflow plugs `keyflow_hover` here.
+    #[props(default)]
+    hover: Option<editor_state::HoverSource>,
 ) -> Element {
     // True when a decoration widget cell currently has focus
     // (frontmatter property contenteditable, chip-add box, etc.).
@@ -146,6 +152,9 @@ pub fn Editor(
     // the whole doc even when we `stopPropagation` in capture
     // phase on the editor root.
     let widget_focus = use_signal(|| false);
+    // Hover-tooltip popup (resolved content + anchor coords). Driven by the
+    // `hover`/`hover-end` bridge messages below; rendered as a floating panel.
+    let hover_state = use_signal(|| None::<crate::hover::HoverPopup>);
     // Tile-tree build moved into the imperative-patch
     // `use_effect` below. The component body itself no longer
     // computes a render — it just allocates the editor id and
@@ -179,6 +188,9 @@ pub fn Editor(
         // can rebuild the tile tree + visible-text mirror when
         // diffing each input message.
         let deco_source = decorations;
+        // Hover source + popup signal captured for the recv loop below.
+        let hover_source = hover;
+        let mut hover_sig = hover_state;
         use_hook(move || {
             spawn(async move {
                 let script = format!(
@@ -1559,6 +1571,44 @@ pub fn Editor(
                                     n = n.parentNode;
                                 }}
                             }});
+                            // ── Hover tooltips ──────────────────
+                            // Debounced pointer → doc position →
+                            // `hover` message. Rust runs the hover
+                            // source and shows/hides the floating
+                            // panel. Mirrors CM6's HoverPlugin
+                            // (`view/src/tooltip.ts`): rest the
+                            // pointer ~300ms, map coords to a doc
+                            // offset, ask the source.
+                            let hoverTimer = null;
+                            el.addEventListener('mousemove', evt => {{
+                                const x = evt.clientX, y = evt.clientY;
+                                if (hoverTimer) clearTimeout(hoverTimer);
+                                hoverTimer = setTimeout(() => {{
+                                    hoverTimer = null;
+                                    let node = null, off = 0;
+                                    if (document.caretPositionFromPoint) {{
+                                        const cp = document.caretPositionFromPoint(x, y);
+                                        if (cp) {{ node = cp.offsetNode; off = cp.offset; }}
+                                    }} else if (document.caretRangeFromPoint) {{
+                                        const r = document.caretRangeFromPoint(x, y);
+                                        if (r) {{ node = r.startContainer; off = r.startOffset; }}
+                                    }}
+                                    if (!node || !el.contains(node)) {{
+                                        dioxus.send({{ kind: 'hover-end' }});
+                                        return;
+                                    }}
+                                    const pos = posFromDOM(node, off);
+                                    dioxus.send({{ kind: 'hover', pos: pos, x: x, y: y }});
+                                }}, 300);
+                            }});
+                            el.addEventListener('mouseleave', () => {{
+                                if (hoverTimer) {{ clearTimeout(hoverTimer); hoverTimer = null; }}
+                                dioxus.send({{ kind: 'hover-end' }});
+                            }});
+                            el.addEventListener('scroll', () => {{
+                                if (hoverTimer) {{ clearTimeout(hoverTimer); hoverTimer = null; }}
+                                dioxus.send({{ kind: 'hover-end' }});
+                            }}, true);
                             sendSel();
                         }}
                         attach();
@@ -1567,7 +1617,32 @@ pub fn Editor(
                 );
                 let mut handle = document::eval(&script);
                 while let Ok(v) = handle.recv::<serde_json::Value>().await {
-                    crate::bridge::handle_bridge_msg(state, deco_source, vim, widget_focus, &v);
+                    match v.get("kind").and_then(|k| k.as_str()).unwrap_or("") {
+                        // Pointer hover → run the hover source (if any) and
+                        // show/hide the floating tooltip. Pure UI state, so it
+                        // bypasses the transaction-producing dispatcher.
+                        "hover" => {
+                            if let Some(src) = hover_source {
+                                let pos =
+                                    v.get("pos").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+                                let x = v.get("x").and_then(|n| n.as_f64()).unwrap_or(0.0);
+                                let y = v.get("y").and_then(|n| n.as_f64()).unwrap_or(0.0);
+                                let cur = state.read().clone();
+                                hover_sig.set(
+                                    src(&cur, pos)
+                                        .map(|tip| crate::hover::HoverPopup { tip, x, y }),
+                                );
+                            }
+                        }
+                        "hover-end" => hover_sig.set(None),
+                        _ => crate::bridge::handle_bridge_msg(
+                            state,
+                            deco_source,
+                            vim,
+                            widget_focus,
+                            &v,
+                        ),
+                    }
                 }
             });
         });
@@ -1987,6 +2062,9 @@ pub fn Editor(
             contenteditable: "{contenteditable}",
             spellcheck: "false",
             onkeydown: on_keydown,
+        }
+        if let Some(popup) = hover_state.read().clone() {
+            crate::hover::HoverTooltipView { popup }
         }
     }
 }
