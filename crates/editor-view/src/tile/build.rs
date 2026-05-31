@@ -3,7 +3,7 @@
 //! `view/src/buildtile.ts:39+` (the `TileBuilder` class) +
 //! the main `TileUpdate.build` entry point.
 //!
-//! ## Tree shape (Phase 8: with LineTiles)
+//! ## Tree shape (Phase 8: with `LineTiles`)
 //!
 //! ```text
 //! DocTile
@@ -58,6 +58,7 @@ use crate::tile::{Tile, TileBody, TileKind};
 /// ties: Replace decorations are applied before Mark
 /// decorations at the same start offset (so a Replace doesn't
 /// get accidentally wrapped in a Mark).
+#[must_use]
 pub fn build_tiles(text: &str, decorations: &[DecoratedRange]) -> (Arena, TileId) {
     let mut arena = Arena::new();
     let doc_id = arena.insert(Tile {
@@ -80,7 +81,7 @@ pub fn build_tiles(text: &str, decorations: &[DecoratedRange]) -> (Arena, TileId
 struct TileBuilder<'a> {
     arena: &'a mut Arena,
     root: TileId,
-    /// Current LineTile under which inline children are
+    /// Current `LineTile` under which inline children are
     /// appended. `None` between lines (e.g. right after a
     /// `\n`) — re-created lazily by [`Self::ensure_line`].
     /// Mirrors CM6's `TileBuilder.curLine` (`buildtile.ts:40`).
@@ -99,7 +100,7 @@ impl<'a> TileBuilder<'a> {
         }
     }
 
-    /// Lazily create the current LineTile, attaching it to
+    /// Lazily create the current `LineTile`, attaching it to
     /// the Doc. Called from every emit_* method — guarantees
     /// inline content always has a line to live in.
     fn ensure_line(&mut self) -> TileId {
@@ -113,7 +114,7 @@ impl<'a> TileBuilder<'a> {
         line_id
     }
 
-    /// Close the current LineTile by marking it `BreakAfter`.
+    /// Close the current `LineTile` by marking it `BreakAfter`.
     /// Next emit will start a fresh line via `ensure_line`.
     /// Mirrors `TileBuilder.endLine` (`buildtile.ts:125`) — the
     /// observable effect, anyway; CM6 also flushes widget
@@ -121,7 +122,10 @@ impl<'a> TileBuilder<'a> {
     /// fold in once those land.
     fn end_line(&mut self) {
         let line_id = self.ensure_line();
-        self.arena.get_mut(line_id).flags.insert(TileFlag::BreakAfter);
+        self.arena
+            .get_mut(line_id)
+            .flags
+            .insert(TileFlag::BreakAfter);
         self.cur_line = None;
     }
 
@@ -189,10 +193,7 @@ impl<'a> TileBuilder<'a> {
             // What's the next event position? Cap any emitted
             // segment so it ends at the next event (and we
             // re-enter the inner loop above).
-            let next_event_pos = events
-                .get(event_idx)
-                .map(|e| e.at)
-                .unwrap_or(text.len());
+            let next_event_pos = events.get(event_idx).map_or(text.len(), |e| e.at);
 
             if let Some(replace_until) = active_replace_until {
                 // We're inside a Replace decoration: emit one
@@ -235,7 +236,7 @@ impl<'a> TileBuilder<'a> {
 
     /// Emit text spanning `slice` under the current mark stack.
     /// On every `\n` we [`end_line`], so the next emit starts a
-    /// fresh LineTile. CM6's analogous flow lives in
+    /// fresh `LineTile`. CM6's analogous flow lives in
     /// `buildtile.ts` where text is broken at line boundaries
     /// by the calling iteration loop.
     fn emit_text_run(&mut self, slice: &str, marks: &[MarkSpec]) {
@@ -259,14 +260,12 @@ impl<'a> TileBuilder<'a> {
         }
     }
 
-    /// Emit one TextTile under the current mark stack. Wraps
+    /// Emit one `TextTile` under the current mark stack. Wraps
     /// the text in `MarkTile`s outermost-first to match the
     /// CSS class layering you'd expect (`<span class="bold">
     /// <span class="italic">…</span></span>`).
     fn emit_text(&mut self, text: &str, marks: &[MarkSpec]) {
-        let text_tile = self.insert_under_marks(marks, |arena| {
-            arena.insert(new_text_tile(text))
-        });
+        let text_tile = self.insert_under_marks(marks, |arena| arena.insert(new_text_tile(text)));
         let len = text.len();
         // Bubble length up the parent chain.
         self.bump_lengths_up(text_tile, len);
@@ -298,9 +297,9 @@ impl<'a> TileBuilder<'a> {
         self.pos += length;
     }
 
-    /// Walk the mark stack and ensure the chain of MarkTiles
-    /// exists under the current LineTile, without inserting a
-    /// leaf. Empty MarkTiles are valid — `render_dx` emits
+    /// Walk the mark stack and ensure the chain of `MarkTiles`
+    /// exists under the current `LineTile`, without inserting a
+    /// leaf. Empty `MarkTiles` are valid — `render_dx` emits
     /// `<span><br></span>` for them so the DOM has a cursor
     /// anchor and the shape stays stable when the user later
     /// types content into the mark.
@@ -329,10 +328,10 @@ impl<'a> TileBuilder<'a> {
     }
 
     /// Walk the mark stack from outermost to innermost,
-    /// finding (or creating) a MarkTile of each spec under the
+    /// finding (or creating) a `MarkTile` of each spec under the
     /// previous one. Returns the inner-most parent into which
     /// the caller should insert their text/widget tile. Always
-    /// rooted in the current LineTile.
+    /// rooted in the current `LineTile`.
     fn insert_under_marks(
         &mut self,
         marks: &[MarkSpec],
@@ -375,10 +374,10 @@ impl<'a> TileBuilder<'a> {
     }
 
     /// Walk up from `tile` adding `length` to each ancestor's
-    /// length. Stops at the root (DocTile) because we set its
+    /// length. Stops at the root (`DocTile`) because we set its
     /// length once at the top of `build_tiles` from the full
     /// `text.len()` — bumping it again would double-count.
-    /// (Intermediate composites like MarkTile still need this
+    /// (Intermediate composites like `MarkTile` still need this
     /// to sum their children correctly.)
     fn bump_lengths_up(&mut self, tile: TileId, length: usize) {
         let mut cur = self.arena.get(tile).parent;
@@ -573,10 +572,7 @@ mod tests {
     #[test]
     fn multiple_line_decorations_concatenate() {
         // Second line gets two classes; first line stays bare.
-        let decs = vec![
-            Decoration::line(3, "md-h1"),
-            Decoration::line(3, "active"),
-        ];
+        let decs = vec![Decoration::line(3, "md-h1"), Decoration::line(3, "active")];
         let (arena, doc) = build_tiles("ab\ncd", &decs);
         let l1 = arena.get(doc).children[0];
         let l2 = arena.get(doc).children[1];

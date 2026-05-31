@@ -70,6 +70,7 @@ impl Patch {
 /// Returns the *children* of the editor root — the patcher
 /// applies them to the existing `<div data-editor-id>` mount
 /// element rather than replacing it.
+#[must_use]
 pub fn build_patch(arena: &Arena, root: TileId) -> Vec<Patch> {
     let root_tile = arena.get(root);
     let mut out = Vec::new();
@@ -180,7 +181,7 @@ fn render_node(arena: &Arena, tile: TileId) -> Option<Patch> {
             ];
             // Extra spec attrs (e.g. `data-href` for links). The
             // JS-side click handler in editor.rs reads these.
-            attrs.extend(spec.attrs.into_iter());
+            attrs.extend(spec.attrs);
             Some(Patch::element("span", attrs, kids))
         }
         TileKind::Widget | TileKind::WidgetBuffer => {
@@ -232,6 +233,7 @@ fn render_node(arena: &Arena, tile: TileId) -> Option<Patch> {
 }
 
 #[cfg(test)]
+#[allow(clippy::match_wildcard_for_single_variants)]
 mod tests {
     use super::*;
     use crate::tile::build::build_tiles;

@@ -11,6 +11,7 @@ use crate::state::EditorState;
 use crate::transaction::TransactionSpec;
 
 /// Select the entire document. Bound by convention to `Mod-a`.
+#[must_use]
 pub fn select_all(state: &EditorState) -> Option<TransactionSpec> {
     Some(TransactionSpec::new().selection(Selection::single(Range::new(0, state.doc.len()))))
 }
@@ -18,6 +19,7 @@ pub fn select_all(state: &EditorState) -> Option<TransactionSpec> {
 /// Insert a newline at the caret. If there's a non-empty
 /// selection, replace it with `"\n"`. Bound by convention to
 /// `Enter`.
+#[must_use]
 pub fn insert_newline(state: &EditorState) -> Option<TransactionSpec> {
     let p = state.selection.primary();
     let (from, to) = (p.from(), p.to());
@@ -32,13 +34,17 @@ pub const INDENT_UNIT: &str = "  ";
 /// Toggle a fold range. If a fold with the same `start` exists
 /// it's removed; otherwise the given range is inserted sorted
 /// by start. Called by the gutter / heading fold-arrow widgets.
+#[must_use]
 pub fn toggle_fold(state: &EditorState, range: std::ops::Range<usize>) -> Option<TransactionSpec> {
     let mut folds = state.folds.clone();
     let existing = folds.iter().position(|f| f.start == range.start);
     if let Some(i) = existing {
         folds.remove(i);
     } else {
-        let pos = folds.iter().position(|f| f.start > range.start).unwrap_or(folds.len());
+        let pos = folds
+            .iter()
+            .position(|f| f.start > range.start)
+            .unwrap_or(folds.len());
         folds.insert(pos, range);
     }
     Some(TransactionSpec::new().folds(folds))
@@ -46,6 +52,7 @@ pub fn toggle_fold(state: &EditorState, range: std::ops::Range<usize>) -> Option
 
 /// Flip the reading-mode flag. Bound to `Mod-e` to match
 /// Obsidian's "toggle preview" shortcut.
+#[must_use]
 pub fn toggle_reading_mode(state: &EditorState) -> Option<TransactionSpec> {
     Some(TransactionSpec::new().reading_mode(!state.reading_mode))
 }
@@ -64,6 +71,7 @@ pub fn toggle_reading_mode(state: &EditorState) -> Option<TransactionSpec> {
 ///   it instead of inserting (caret moves +1, no text change).
 /// - `'` / `"` / `` ` `` (same-char pairs): tap-to-skip when
 ///   the next char is already that quote.
+#[must_use]
 pub fn insert_bracket(state: &EditorState, input: &str) -> Option<TransactionSpec> {
     if input.chars().count() != 1 {
         return None;
@@ -105,10 +113,7 @@ pub fn insert_bracket(state: &EditorState, input: &str) -> Option<TransactionSpe
     if same {
         let next_byte = doc.as_bytes().get(from).copied();
         if next_byte == Some(ch as u8) {
-            return Some(
-                TransactionSpec::new()
-                    .selection(Selection::caret(from + 1)),
-            );
+            return Some(TransactionSpec::new().selection(Selection::caret(from + 1)));
         }
     }
 
@@ -119,8 +124,12 @@ pub fn insert_bracket(state: &EditorState, input: &str) -> Option<TransactionSpe
     let next_byte = doc.as_bytes().get(from).copied();
     let can_close = match next_byte {
         None => true,
-        Some(b) => b == b' ' || b == b'\n' || b == b'\t'
-            || matches!(b, b')' | b']' | b'}' | b',' | b';' | b':' | b'>'),
+        Some(b) => {
+            b == b' '
+                || b == b'\n'
+                || b == b'\t'
+                || matches!(b, b')' | b']' | b'}' | b',' | b';' | b':' | b'>')
+        }
     };
     if !can_close {
         return None;
@@ -149,9 +158,7 @@ fn handle_close(state: &EditorState, close_char: char) -> Option<TransactionSpec
     let from = p.head;
     let next = state.doc.to_string().as_bytes().get(from).copied();
     if next == Some(close_char as u8) {
-        return Some(
-            TransactionSpec::new().selection(Selection::caret(from + 1)),
-        );
+        return Some(TransactionSpec::new().selection(Selection::caret(from + 1)));
     }
     None
 }
@@ -161,6 +168,7 @@ fn handle_close(state: &EditorState, close_char: char) -> Option<TransactionSpec
 /// pressed on a caret sitting between a matching `()` / `[]` /
 /// `{}` / `''` / `""` / ` `` ` pair, delete both characters at
 /// once instead of just the opening one.
+#[must_use]
 pub fn delete_bracket_pair(state: &EditorState) -> Option<TransactionSpec> {
     let p = state.selection.primary();
     if p.anchor != p.head || p.head == 0 {
@@ -184,14 +192,17 @@ pub fn delete_bracket_pair(state: &EditorState) -> Option<TransactionSpec> {
     )
 }
 
-/// Enter — but if the caret is on a list / task item, continue
-/// the list on the next line. On an *empty* list item (marker
-/// + whitespace only), instead remove the marker, exiting the
-/// list. Ports CM6's `insertNewlineContinueMarkup`
+/// Enter — but if the caret is on a list / task item,
+/// continue the list on the next line. On an *empty* list
+/// item (marker followed by whitespace only), instead remove
+/// the marker, exiting the list.
+///
+/// Ports CM6's `insertNewlineContinueMarkup`
 /// (`lang-markdown/src/commands.ts:98`).
 ///
 /// Falls back to a plain `\n` insert when the line isn't a list
 /// item.
+#[must_use]
 pub fn enter_continue_list(state: &EditorState) -> Option<TransactionSpec> {
     let p = state.selection.primary();
     let (from, to) = (p.from(), p.to());
@@ -326,6 +337,7 @@ fn renumber_following_ordered(
 /// Indent the line(s) intersecting the primary selection by one
 /// [`INDENT_UNIT`]. Ports CM6's `indentMore`
 /// (`commands/src/commands.ts:906`).
+#[must_use]
 pub fn indent_more(state: &EditorState) -> Option<TransactionSpec> {
     let doc = state.doc.to_string();
     let lines = selected_line_starts(state, &doc);
@@ -346,6 +358,7 @@ pub fn indent_more(state: &EditorState) -> Option<TransactionSpec> {
 /// Outdent — remove up to [`INDENT_UNIT`] worth of leading
 /// whitespace from each selected line. Ports CM6's `indentLess`
 /// (`commands/src/commands.ts:916`).
+#[must_use]
 pub fn indent_less(state: &EditorState) -> Option<TransactionSpec> {
     let doc = state.doc.to_string();
     let lines = selected_line_starts(state, &doc);
@@ -357,9 +370,7 @@ pub fn indent_less(state: &EditorState) -> Option<TransactionSpec> {
     for &line_from in &lines {
         let bytes = doc.as_bytes();
         let mut leading = 0;
-        while leading < unit
-            && bytes.get(line_from + leading) == Some(&b' ')
-        {
+        while leading < unit && bytes.get(line_from + leading) == Some(&b' ') {
             leading += 1;
         }
         if leading > 0 {
@@ -543,10 +554,9 @@ fn parse_list_continuation(line: &str) -> Option<ListContinuation> {
     let mut marker_end = after_marker_abs + ws_count;
 
     // Optional task box `[ ]` / `[x]`.
-    let task = bytes
-        .get(marker_end..marker_end + 3)
-        .map(|sl| sl.len() == 3 && sl[0] == b'[' && sl[2] == b']' && matches!(sl[1], b' ' | b'x' | b'X'))
-        .unwrap_or(false);
+    let task = bytes.get(marker_end..marker_end + 3).is_some_and(|sl| {
+        sl.len() == 3 && sl[0] == b'[' && sl[2] == b']' && matches!(sl[1], b' ' | b'x' | b'X')
+    });
     if task {
         marker_end += 3;
         if bytes.get(marker_end) == Some(&b' ') {
@@ -570,6 +580,7 @@ fn parse_list_continuation(line: &str) -> Option<ListContinuation> {
 /// First tries [`delete_bracket_pair`] so Backspace between an
 /// empty `()` / `[]` / `{}` / `""` / `''` / ` `` ` pair deletes
 /// both characters, matching CM6's `closeBracketsKeymap`.
+#[must_use]
 pub fn delete_backward(state: &EditorState) -> Option<TransactionSpec> {
     if let Some(spec) = delete_bracket_pair(state) {
         return Some(spec);
@@ -599,12 +610,14 @@ pub fn delete_backward(state: &EditorState) -> Option<TransactionSpec> {
 ///   keeping the wrapped range selected.
 ///
 /// Bound by convention to `Mod-b`.
+#[must_use]
 pub fn toggle_bold(state: &EditorState) -> Option<TransactionSpec> {
     toggle_marker(state, "**")
 }
 
 /// Same as [`toggle_bold`] but with single `*…*` for italic.
 /// Bound to `Mod-i`.
+#[must_use]
 pub fn toggle_italic(state: &EditorState) -> Option<TransactionSpec> {
     toggle_marker(state, "*")
 }
@@ -620,7 +633,7 @@ fn toggle_marker(state: &EditorState, marker: &str) -> Option<TransactionSpec> {
     if from == to {
         // Empty caret. If the next bytes are the marker, skip
         // past it — closes an open span the user just filled.
-        if doc.get(from..).map_or(false, |s| s.starts_with(m)) {
+        if doc.get(from..).is_some_and(|s| s.starts_with(m)) {
             return Some(TransactionSpec::new().selection(Selection::caret(from + mlen)));
         }
         // Open a new span: insert "marker + marker" with caret
@@ -648,6 +661,7 @@ fn toggle_marker(state: &EditorState, marker: &str) -> Option<TransactionSpec> {
 /// user types the link text first. With a selection that looks
 /// like an existing link (`[text](url)`) the markers are
 /// stripped (toggle behavior).
+#[must_use]
 pub fn toggle_link(state: &EditorState) -> Option<TransactionSpec> {
     let sel = state.selection.primary();
     let (from, to) = (sel.from(), sel.to());
@@ -688,6 +702,7 @@ pub fn toggle_link(state: &EditorState) -> Option<TransactionSpec> {
 /// Strips any existing `#…#` prefix first, then prepends the
 /// new one. Level `0` removes the heading entirely. Operates on
 /// every line covered by the selection.
+#[must_use]
 pub fn set_heading(state: &EditorState, level: u8) -> Option<TransactionSpec> {
     let doc = state.doc.to_string();
     let starts = selected_line_starts(state, &doc);
@@ -698,18 +713,16 @@ pub fn set_heading(state: &EditorState, level: u8) -> Option<TransactionSpec> {
     for line_start in starts {
         let line_end = doc[line_start..]
             .find('\n')
-            .map(|n| line_start + n)
-            .unwrap_or(doc.len());
+            .map_or(doc.len(), |n| line_start + n);
         let line = &doc[line_start..line_end];
         // Strip existing prefix.
         let hashes = line.chars().take_while(|c| *c == '#').count();
-        let strip_to = if (1..=6).contains(&hashes)
-            && line.as_bytes().get(hashes).copied() == Some(b' ')
-        {
-            hashes + 1
-        } else {
-            0
-        };
+        let strip_to =
+            if (1..=6).contains(&hashes) && line.as_bytes().get(hashes).copied() == Some(b' ') {
+                hashes + 1
+            } else {
+                0
+            };
         let body = &line[strip_to..];
         let new_line = if level == 0 {
             body.to_string()
@@ -734,6 +747,7 @@ pub fn set_heading(state: &EditorState, level: u8) -> Option<TransactionSpec> {
 /// `none → -  → 1. → - [ ] → none`. Operates on every line in
 /// the selection, snapping all of them to the same target so a
 /// multi-line cycle stays predictable.
+#[must_use]
 pub fn cycle_list(state: &EditorState) -> Option<TransactionSpec> {
     let doc = state.doc.to_string();
     let starts = selected_line_starts(state, &doc);
@@ -748,8 +762,7 @@ pub fn cycle_list(state: &EditorState) -> Option<TransactionSpec> {
     for line_start in starts {
         let line_end = doc[line_start..]
             .find('\n')
-            .map(|n| line_start + n)
-            .unwrap_or(doc.len());
+            .map_or(doc.len(), |n| line_start + n);
         let current = list_marker_state(&doc, line_start);
         let body_start = line_start + current.prefix_bytes();
         let body = doc.get(body_start..line_end).unwrap_or("");
@@ -770,8 +783,8 @@ pub fn cycle_list(state: &EditorState) -> Option<TransactionSpec> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ListMarkerState {
     None,
-    Unordered,    // `- `
-    Ordered,      // `1. `
+    Unordered,     // `- `
+    Ordered,       // `1. `
     UnorderedTask, // `- [ ] `
 }
 
@@ -818,10 +831,7 @@ fn list_marker_state(doc: &str, line_start: usize) -> ListMarkerState {
     if b.len() >= 3 && b[0].is_ascii_digit() && b[1] == b'.' && b[2] == b' ' {
         return ListMarkerState::Ordered;
     }
-    if b.len() >= 2
-        && (b[0] == b'-' || b[0] == b'*' || b[0] == b'+')
-        && b[1] == b' '
-    {
+    if b.len() >= 2 && (b[0] == b'-' || b[0] == b'*' || b[0] == b'+') && b[1] == b' ' {
         return ListMarkerState::Unordered;
     }
     ListMarkerState::None
@@ -833,14 +843,14 @@ fn list_marker_state(doc: &str, line_start: usize) -> ListMarkerState {
 ///
 /// Returns `(TransactionSpec, ref_string)` so callers can
 /// also copy `((uuid))` to the clipboard.
+#[must_use]
 pub fn add_block_id(state: &EditorState) -> Option<(TransactionSpec, String)> {
     let doc = state.doc.to_string();
     let caret = state.selection.primary().head.min(doc.len());
-    let line_start = doc[..caret].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let line_start = doc[..caret].rfind('\n').map_or(0, |n| n + 1);
     let line_end = doc[line_start..]
         .find('\n')
-        .map(|n| line_start + n)
-        .unwrap_or(doc.len());
+        .map_or(doc.len(), |n| line_start + n);
     let line = &doc[line_start..line_end];
     if line.trim().is_empty() {
         return None;
@@ -850,8 +860,7 @@ pub fn add_block_id(state: &EditorState) -> Option<(TransactionSpec, String)> {
         let next_start = line_end + 1;
         let next_end = doc[next_start..]
             .find('\n')
-            .map(|n| next_start + n)
-            .unwrap_or(doc.len());
+            .map_or(doc.len(), |n| next_start + n);
         let next_line = &doc[next_start..next_end];
         if let Some(uuid) = next_line.strip_prefix("id:: ") {
             let uuid = uuid.trim();
@@ -879,6 +888,7 @@ pub fn add_block_id(state: &EditorState) -> Option<(TransactionSpec, String)> {
 /// `[ ]` ↔ `[x]`. Non-task lines first promote to `- [ ]` (cycle
 /// → task) so the user can `Mod-t` an empty line and start
 /// checking off immediately.
+#[must_use]
 pub fn toggle_task(state: &EditorState) -> Option<TransactionSpec> {
     let doc = state.doc.to_string();
     let starts = selected_line_starts(state, &doc);
@@ -889,8 +899,7 @@ pub fn toggle_task(state: &EditorState) -> Option<TransactionSpec> {
     for line_start in starts {
         let line_end = doc[line_start..]
             .find('\n')
-            .map(|n| line_start + n)
-            .unwrap_or(doc.len());
+            .map_or(doc.len(), |n| line_start + n);
         let line = &doc[line_start..line_end];
         let b = line.as_bytes();
         let is_task = b.len() >= 5
@@ -924,6 +933,7 @@ pub fn toggle_task(state: &EditorState) -> Option<TransactionSpec> {
 /// Delete the character after the caret. With a non-empty
 /// selection, deletes the selection. Bound by convention to
 /// `Delete`.
+#[must_use]
 pub fn delete_forward(state: &EditorState) -> Option<TransactionSpec> {
     let p = state.selection.primary();
     let (from, to) = (p.from(), p.to());

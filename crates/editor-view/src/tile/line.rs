@@ -6,7 +6,7 @@
 //! port the constructor + the default `cm-line` class; the
 //! `resolveInline` / `coordsIn` / `domIn` methods from CM6 are
 //! satisfied by our generic [`crate::tile::dom_pos`] walker
-//! since our v1 LineTile carries no per-line attrs beyond the
+//! since our v1 `LineTile` carries no per-line attrs beyond the
 //! base class. Line decorations from extensions would extend
 //! [`TileBody`] with `Line { attrs }` later.
 
@@ -17,6 +17,7 @@ use crate::tile::{Tile, TileBody, TileKind};
 /// inline children are appended.
 ///
 /// Mirrors `LineTile.start` (`tile.ts:293-297`).
+#[must_use]
 pub fn new_line_tile() -> Tile {
     Tile {
         parent: None,
@@ -30,7 +31,7 @@ pub fn new_line_tile() -> Tile {
     }
 }
 
-/// Append a class to the LineTile's `extra_classes`. No-op if
+/// Append a class to the `LineTile`'s `extra_classes`. No-op if
 /// the class is already present (idempotent — multiple Line
 /// decorations of the same class collapse).
 pub fn push_line_class(tile: &mut Tile, class: &str) {
@@ -41,8 +42,9 @@ pub fn push_line_class(tile: &mut Tile, class: &str) {
     }
 }
 
-/// Read the extra classes of a LineTile. Empty slice for tiles
+/// Read the extra classes of a `LineTile`. Empty slice for tiles
 /// without any Line decorations.
+#[must_use]
 pub fn line_extra_classes(tile: &Tile) -> &[String] {
     match &tile.body {
         TileBody::Line { extra_classes } => extra_classes,

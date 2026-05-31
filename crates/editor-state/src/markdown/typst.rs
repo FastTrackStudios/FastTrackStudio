@@ -64,7 +64,7 @@ pub(crate) fn render_typst(kind: TypstKind, body: &str) -> Option<String> {
     if let Some(cached) = with_typst_cache(|c| c.get(kind, body)) {
         return Some(cached);
     }
-    let budget = COMPILE_BUDGET.with(|c| c.get());
+    let budget = COMPILE_BUDGET.with(std::cell::Cell::get);
     if budget == 0 {
         return None;
     }
@@ -110,10 +110,16 @@ struct TypstCache {
 
 impl TypstCache {
     fn new(cap: usize) -> Self {
-        Self { entries: Vec::with_capacity(cap), cap }
+        Self {
+            entries: Vec::with_capacity(cap),
+            cap,
+        }
     }
     fn get(&mut self, kind: TypstKind, body: &str) -> Option<String> {
-        let i = self.entries.iter().position(|(k, b, _)| *k == kind && b == body)?;
+        let i = self
+            .entries
+            .iter()
+            .position(|(k, b, _)| *k == kind && b == body)?;
         let hit = self.entries.remove(i);
         let svg = hit.2.clone();
         self.entries.push(hit);

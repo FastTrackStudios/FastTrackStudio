@@ -14,24 +14,65 @@
 //! it's a renderer trick, not a document-model change.
 //!
 //! The parser is single-pass and intentionally tiny. Not a real
-//! CommonMark implementation; just enough to demo the
+//! `CommonMark` implementation; just enough to demo the
 //! decoration pipeline. A future commit can swap in a proper
 //! markdown parser (pulldown-cmark or a port of CM6's
 //! lang-markdown) without touching the decoration shape.
 
-use crate::decoration::{Decoration, DecoratedRange};
+use crate::decoration::{DecoratedRange, Decoration};
 use crate::selection::Range;
 use crate::state::EditorState;
 
 /// The full live-preview decoration source. Suitable to register
 /// as `editor_view::DecorationSource`.
+/// Trait the editor uses to resolve cross-file references —
+/// `((uuid))`, `[[Page]]`, `![[Page#Heading]]`, etc. — without
+/// pulling a vault implementation into `editor-state`. The
+/// `vault` crate provides the canonical impl; tests / single-
+/// file uses pass `None`.
+pub trait VaultLookup {
+    /// Find a block by full UUID across the vault. Returns the
+    /// containing page's basename and a short preview.
+    fn lookup_block(&self, uuid: &str) -> Option<VaultBlockHit>;
+    /// Find a page by basename (case-insensitive). Returns a
+    /// content preview suitable for an embed card.
+    fn lookup_page(&self, name: &str) -> Option<VaultPageHit>;
+    /// Find a section `Page#Heading`. Returns the body of the
+    /// section (heading line + content until next same-or-
+    /// higher heading), or None when the page or heading is
+    /// missing.
+    fn lookup_section(&self, page: &str, heading: &str) -> Option<String>;
+    /// Find a block by Obsidian short-id `Page#^id`.
+    fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String>;
+}
+
+#[derive(Clone, Debug)]
+pub struct VaultBlockHit {
+    pub page: String,
+    pub preview: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct VaultPageHit {
+    pub preview: String,
+}
+
+#[must_use]
 pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
+    live_preview_with(state, None)
+}
+
+pub fn live_preview_with(
+    state: &EditorState,
+    vault: Option<&dyn VaultLookup>,
+) -> Vec<DecoratedRange> {
     // Per-pass compile budget for Typst — bounds the worst
     // case at a couple of cold compiles per render so a doc
     // full of fresh math doesn't block typing. See `typst`
     // submodule for the budget value and rationale.
     reset_compile_budget();
     reset_mermaid_budget();
+    reset_keyflow_budget();
     reset_block_index();
 
     let text = state.doc.to_string();
@@ -120,20 +161,35 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             // widget; the chip itself is the only visible form.
             if span.class == "md-block-ref" {
                 let uuid = &text[span.body.clone()];
-                let (preview, resolved) = match block_anchor_for_uuid(uuid) {
-                    Some(anchor) => (block_preview(&text, anchor), true),
-                    None => (format!("unresolved {}", &uuid[..8]), false),
-                };
-                let cls = if resolved {
+                // Resolve in this order: intra-doc block index →
+                // vault lookup → unresolved. The vault hit
+                // brings its own preview (target page may live
+                // anywhere); intra-doc hits read from this
+                // doc's text directly.
+                let (preview, source_page, is_resolved) =
+                    if let Some(anchor) = block_anchor_for_uuid(uuid) {
+                        (block_preview(&text, anchor), None, true)
+                    } else if let Some(hit) = vault.and_then(|v| v.lookup_block(uuid)) {
+                        (hit.preview, Some(hit.page), true)
+                    } else {
+                        (
+                            format!("unresolved {}", &uuid[..8.min(uuid.len())]),
+                            None,
+                            false,
+                        )
+                    };
+                let cls = if is_resolved {
                     "md-block-ref-chip"
                 } else {
                     "md-block-ref-chip md-block-ref-unresolved"
                 };
+                let page_hint = source_page.map(|p| format!(" › {p}")).unwrap_or_default();
                 let html = format!(
-                    r#"<span class="{cls}" data-uuid="{uuid}" title="{full}">{glyph} {preview}</span>"#,
+                    r#"<span class="{cls}" data-uuid="{uuid}" title="{full}">{glyph} {preview}{page}</span>"#,
                     glyph = "🔗",
                     full = escape_html(uuid),
                     preview = escape_html(&preview),
+                    page = escape_html(&page_hint),
                 );
                 out.push(Decoration::replace(span.outer.clone()));
                 out.push(Decoration::widget(span.outer.start, html));
@@ -145,17 +201,31 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             // hidden-source treatment as block refs.
             if span.class == "md-block-embed" {
                 let uuid = &text[span.body.clone()];
-                let (content, resolved) = match block_anchor_for_uuid(uuid) {
-                    Some(anchor) => (block_preview(&text, anchor), true),
-                    None => (format!("unresolved {}", &uuid[..8]), false),
-                };
-                let cls = if resolved {
+                let (content, source_page, is_resolved) =
+                    if let Some(anchor) = block_anchor_for_uuid(uuid) {
+                        (block_preview(&text, anchor), None, true)
+                    } else if let Some(hit) = vault.and_then(|v| v.lookup_block(uuid)) {
+                        (hit.preview, Some(hit.page), true)
+                    } else {
+                        (
+                            format!("unresolved {}", &uuid[..8.min(uuid.len())]),
+                            None,
+                            false,
+                        )
+                    };
+                let cls = if is_resolved {
                     "md-block-embed-card"
                 } else {
                     "md-block-embed-card md-block-ref-unresolved"
                 };
+                let page_chip = source_page
+                    .map(|p| format!(
+                        r#"<div class="md-embed-head">📄 <span class="md-embed-title">{title}</span></div>"#,
+                        title = escape_html(&p),
+                    ))
+                    .unwrap_or_default();
                 let html = format!(
-                    r#"<div class="{cls}" data-uuid="{uuid}">{content}</div>"#,
+                    r#"<div class="{cls}" data-uuid="{uuid}">{page_chip}{content}</div>"#,
                     uuid = escape_html(uuid),
                     content = escape_html(&content),
                 );
@@ -188,7 +258,7 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             if span.class == "md-embed" {
                 let raw = &text[span.body.clone()];
                 if !cursor_touches(primary, span.outer.clone()) {
-                    if let Some(html) = embed_widget_html(raw, &text) {
+                    if let Some(html) = embed_widget_html(raw, &text, vault) {
                         out.push(Decoration::replace(span.outer.clone()));
                         out.push(Decoration::widget(span.outer.start, html));
                         continue;
@@ -213,14 +283,20 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
                 _ => None,
             };
             if let Some(h) = href {
-                // Wikilinks get an extra class once we know if
-                // the target resolves. v1 has no vault, so
-                // every link is `unresolved` — CSS colors it
-                // red. When a vault layer lands, swap this for
-                // a real lookup (resolved → purple,
-                // unresolved → red, matches Obsidian).
+                // Wikilinks: consult the vault to decide
+                // resolved (purple, default) vs unresolved
+                // (red). Without a vault the link stays
+                // unresolved — `#Heading` / `#^id` suffixes are
+                // stripped before the page-name lookup so
+                // `[[Page#Section]]` resolves when Page exists.
                 let cls = if span.class == "md-wikilink" {
-                    "md-wikilink md-wikilink-unresolved"
+                    let page_part = h.split(['#', '|']).next().unwrap_or(&h).trim();
+                    let resolved = vault.is_some_and(|v| v.lookup_page(page_part).is_some());
+                    if resolved {
+                        "md-wikilink"
+                    } else {
+                        "md-wikilink md-wikilink-unresolved"
+                    }
                 } else {
                     span.class
                 };
@@ -278,24 +354,24 @@ fn now_ms_native() -> f64 {
     {
         web_sys::window()
             .and_then(|w| w.performance())
-            .map(|p| p.now())
-            .unwrap_or(0.0)
+            .map_or(0.0, |p| p.now())
     }
 }
 
 // YAML frontmatter lives in its own submodule — parser,
 // serializer, and Properties widget renderer.
 pub mod frontmatter;
-pub use frontmatter::{
-    parse_frontmatter, serialize_property, FrontMatter, Property, PropValue,
-};
 use frontmatter::render_properties_html;
+pub use frontmatter::{FrontMatter, PropValue, Property, parse_frontmatter, serialize_property};
 
 mod typst;
-use typst::{render_typst, reset_compile_budget, TypstKind};
+use typst::{TypstKind, render_typst, reset_compile_budget};
 
 mod mermaid;
 use mermaid::{render_mermaid, reset_compile_budget as reset_mermaid_budget};
+
+mod keyflow;
+use keyflow::{render_keyflow, reset_compile_budget as reset_keyflow_budget};
 
 pub(crate) fn escape_html(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -322,7 +398,7 @@ fn in_fenced_code(ranges: &[std::ops::Range<usize>], pos: usize) -> bool {
 /// formats) — the caller then falls back to a wikilink-style
 /// mark so the source stays visible. Quartz reference: same
 /// dispatch in `ofm.ts:233-265`.
-fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
+fn embed_widget_html(raw: &str, doc: &str, vault: Option<&dyn VaultLookup>) -> Option<String> {
     let (target, opts) = match raw.split_once('|') {
         Some((t, o)) => (t.trim(), Some(o.trim())),
         None => (raw.trim(), None),
@@ -330,9 +406,7 @@ fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
     let ext = target.rsplit_once('.').map(|x| x.1.to_ascii_lowercase());
     let ext = ext.as_deref().unwrap_or("");
     let safe_target = html_escape(target);
-    let style = opts
-        .and_then(|o| parse_size_opts(o))
-        .unwrap_or_default();
+    let style = opts.and_then(parse_size_opts).unwrap_or_default();
     // 1. Media extensions first (image / video / audio / pdf).
     match ext {
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "avif" | "bmp" => {
@@ -374,14 +448,15 @@ fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
     } else {
         html_escape(page_part)
     };
-    // Section: `#Heading` (no leading `^`).
+    // Section / short-id fragment.
     if let Some(frag) = frag_part {
         if let Some(short_id) = frag.strip_prefix('^') {
-            // Block embed via short id. Resolve intra-doc.
+            // Block embed via short id. Intra-doc resolution
+            // first; cross-doc through the vault.
             let resolved = if is_intra_doc {
                 resolve_block_short_id(doc, short_id)
             } else {
-                None
+                vault.and_then(|v| v.lookup_block_short(page_part, short_id))
             };
             return Some(render_embed_card_short(
                 "🔗",
@@ -390,11 +465,12 @@ fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
                 resolved.as_deref(),
             ));
         }
-        // Section embed.
+        // Section embed. Intra-doc walks this file's headings;
+        // cross-doc asks the vault.
         let resolved = if is_intra_doc {
             resolve_heading_section(doc, frag)
         } else {
-            None
+            vault.and_then(|v| v.lookup_section(page_part, frag))
         };
         return Some(render_embed_card_section(
             "📄",
@@ -403,11 +479,21 @@ fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
             resolved.as_deref(),
         ));
     }
-    // 3. Whole-page embed — no intra-doc concept for "embed this
-    //    whole page from itself", so always a placeholder until
-    //    multi-file resolution lands.
-    let _ = is_intra_doc;
-    Some(render_embed_card_page("📄", &safe_page, None))
+    // 3. Whole-page embed. Cross-doc resolution via vault;
+    //    intra-doc has no meaningful behavior (a page embedding
+    //    itself), so falls back to placeholder.
+    let resolved = if is_intra_doc {
+        None
+    } else {
+        vault
+            .and_then(|v| v.lookup_page(page_part))
+            .map(|h| h.preview)
+    };
+    Some(render_embed_card_page(
+        "📄",
+        &safe_page,
+        resolved.as_deref(),
+    ))
 }
 
 /// Walk the doc for a heading whose text matches `name` (case-
@@ -449,11 +535,8 @@ fn resolve_heading_section(doc: &str, name: &str) -> Option<String> {
 fn resolve_block_short_id(doc: &str, short_id: &str) -> Option<String> {
     let needle = format!("^{short_id}");
     let pos = doc.find(&needle)?;
-    let line_start = doc[..pos].rfind('\n').map(|n| n + 1).unwrap_or(0);
-    let line_end = doc[pos..]
-        .find('\n')
-        .map(|n| pos + n)
-        .unwrap_or(doc.len());
+    let line_start = doc[..pos].rfind('\n').map_or(0, |n| n + 1);
+    let line_end = doc[pos..].find('\n').map_or(doc.len(), |n| pos + n);
     let line = &doc[line_start..line_end];
     // Strip the trailing `^id` so the embed shows the body text.
     Some(line[..line.len() - needle.len()].trim_end().to_string())
@@ -462,9 +545,9 @@ fn resolve_block_short_id(doc: &str, short_id: &str) -> Option<String> {
 fn render_embed_card_page(icon: &str, page: &str, resolved: Option<&str>) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(
-            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
-        ),
+        None => {
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#.to_string()
+        }
     };
     format!(
         r#"<div class="md-embed-card md-embed-page"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span></div><div class="md-embed-body">{body}</div></div>"#
@@ -479,26 +562,21 @@ fn render_embed_card_section(
 ) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(
-            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
-        ),
+        None => {
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#.to_string()
+        }
     };
     format!(
         r#"<div class="md-embed-card md-embed-section"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span> <span class="md-embed-sep">›</span> <span class="md-embed-frag">{heading}</span></div><div class="md-embed-body">{body}</div></div>"#
     )
 }
 
-fn render_embed_card_short(
-    icon: &str,
-    page: &str,
-    short: &str,
-    resolved: Option<&str>,
-) -> String {
+fn render_embed_card_short(icon: &str, page: &str, short: &str, resolved: Option<&str>) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(
-            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
-        ),
+        None => {
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#.to_string()
+        }
     };
     format!(
         r#"<div class="md-embed-card md-embed-block"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span> <span class="md-embed-sep">›</span> <span class="md-embed-frag">{short}</span></div><div class="md-embed-body">{body}</div></div>"#
@@ -584,7 +662,10 @@ fn scan_blocks(
     if let Some(fm) = parse_frontmatter(text) {
         fenced_ranges.push(fm.outer.clone());
         let caret = primary.head;
-        let active_idx = fm.props.iter().position(|p| caret >= p.range.start && caret < p.range.end);
+        let active_idx = fm
+            .props
+            .iter()
+            .position(|p| caret >= p.range.start && caret < p.range.end);
         let html = render_properties_html(&fm.props, active_idx);
         out.push(Decoration::replace(fm.outer.clone()));
         out.push(Decoration::widget(fm.outer.start, html));
@@ -619,8 +700,7 @@ fn scan_blocks(
     let all_lines = line_ranges(text);
     let mut setext_content_level: std::collections::HashMap<usize, u8> =
         std::collections::HashMap::new();
-    let mut setext_underline: std::collections::HashSet<usize> =
-        std::collections::HashSet::new();
+    let mut setext_underline: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for win in all_lines.windows(2) {
         let (lf, lt) = win[0];
         let (ulf, ult) = win[1];
@@ -678,13 +758,20 @@ fn scan_blocks(
         if let Some(uuid_range) = parse_block_id_line(line, line_from) {
             // Replace the whole line content + its trailing
             // newline so neighbouring lines collapse together.
-            let end = if line_to < text.len() { line_to + 1 } else { line_to };
+            let end = if line_to < text.len() {
+                line_to + 1
+            } else {
+                line_to
+            };
             out.push(Decoration::replace(line_from..end));
             out.push(Decoration::atomic(line_from..end));
             // Index this block id against the byte offset of the
             // line above (its block content). Stashed for
             // cross-line resolution + the `🔗` widget.
-            register_block_id(&text[uuid_range.clone()], find_block_anchor(text, line_from));
+            register_block_id(
+                &text[uuid_range.clone()],
+                find_block_anchor(text, line_from),
+            );
             continue;
         }
 
@@ -717,7 +804,7 @@ fn scan_blocks(
             None
         };
         if let Some(rows) = table_match {
-            let table_end = rows.last().map(|r| r.1).unwrap_or(line_to);
+            let table_end = rows.last().map_or(line_to, |r| r.1);
             // Header / separator + body cells.
             let cells = collect_table_cells(text, &rows);
             let html = render_table_html(&cells);
@@ -772,7 +859,11 @@ fn scan_blocks(
                 out.push(Decoration::replace(line_from..line_to));
             }
             let info = trimmed[info_start..].trim();
-            let content_start = if line_to < text.len() { line_to + 1 } else { line_to };
+            let content_start = if line_to < text.len() {
+                line_to + 1
+            } else {
+                line_to
+            };
             fence = Some((line_from, mc, mlen));
             // The lang+copy header overlays the opener line for
             // ordinary code fences. Skip it for fences we
@@ -781,7 +872,8 @@ fn scan_blocks(
             // floating header would be a leftover when the user
             // moves the caret onto the fence to edit source.
             let is_rendered_fence = info.eq_ignore_ascii_case("typst")
-                || info.eq_ignore_ascii_case("mermaid");
+                || info.eq_ignore_ascii_case("mermaid")
+                || info.eq_ignore_ascii_case("kf");
             if !caret_on_opener && !is_rendered_fence {
                 let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
                 let header_html = format!(
@@ -801,7 +893,10 @@ fn scan_blocks(
             // code. Skip when the caret is anywhere inside the
             // fence range (so the user sees the raw source while
             // editing).
-            if info.eq_ignore_ascii_case("typst") || info.eq_ignore_ascii_case("mermaid") {
+            if info.eq_ignore_ascii_case("typst")
+                || info.eq_ignore_ascii_case("mermaid")
+                || info.eq_ignore_ascii_case("kf")
+            {
                 let body_end = find_fence_close(text, content_start, mc, mlen);
                 let body = &text[content_start..body_end];
                 // Extend the replace range to cover the closing
@@ -813,25 +908,40 @@ fn scan_blocks(
                     close_end += 1;
                 }
                 let fence_range = line_from..close_end;
-                if !cursor_touches(primary, fence_range.clone())
-                    && !body.trim().is_empty()
-                {
+                if !cursor_touches(primary, fence_range.clone()) && !body.trim().is_empty() {
                     let is_mermaid = info.eq_ignore_ascii_case("mermaid");
-                    let svg = if is_mermaid {
+                    let is_keyflow = info.eq_ignore_ascii_case("kf");
+                    let svg = if is_keyflow {
+                        render_keyflow(body)
+                    } else if is_mermaid {
                         render_mermaid(body)
                     } else {
                         render_typst(TypstKind::Block, body)
                     };
                     if let Some(svg) = svg {
-                        let class = if is_mermaid {
-                            "md-mermaid-widget"
+                        // Keyflow shows source AND render together: a
+                        // flex-wrap row that sits side-by-side when the
+                        // editor is wide and stacks when it's narrow.
+                        // The source `<pre>` carries `data-focus-pos`
+                        // like the render, so clicking either drops the
+                        // caret back into the fence body to edit (next
+                        // pass the caret-on branch shows raw source).
+                        // Typst/mermaid keep the plain render-only widget.
+                        let html = if is_keyflow {
+                            format!(
+                                r#"<div class="md-keyflow-widget md-keyflow-split" data-focus-pos="{content_start}"><pre class="md-keyflow-source">{src}</pre><div class="md-keyflow-render">{svg}</div></div>"#,
+                                src = escape_html(body),
+                            )
                         } else {
-                            "md-typst-widget"
+                            let class = if is_mermaid {
+                                "md-mermaid-widget"
+                            } else {
+                                "md-typst-widget"
+                            };
+                            format!(
+                                r#"<div class="{class}" data-focus-pos="{content_start}">{svg}</div>"#,
+                            )
                         };
-                        let html = format!(
-                            r#"<div class="{class}" data-focus-pos="{pos}">{svg}</div>"#,
-                            pos = content_start,
-                        );
                         out.push(Decoration::replace(fence_range.clone()));
                         out.push(Decoration::widget(fence_range.start, html));
                     }
@@ -889,14 +999,10 @@ fn scan_blocks(
             // directly and clicks/motions land on real text.
             let html = if checked {
                 format!(
-                    r#"<span class="md-task-checkbox checked" data-task-pos="{p}">✓</span>"#,
-                    p = line_from
+                    r#"<span class="md-task-checkbox checked" data-task-pos="{line_from}">✓</span>"#
                 )
             } else {
-                format!(
-                    r#"<span class="md-task-checkbox" data-task-pos="{p}"></span>"#,
-                    p = line_from
-                )
+                format!(r#"<span class="md-task-checkbox" data-task-pos="{line_from}"></span>"#)
             };
             // Two states: source-visible when the caret is on
             // the line (so `- [ ]` is editable), checkbox-widget
@@ -1038,7 +1144,7 @@ fn parse_callout_header(after: &str) -> Option<(&'static str, usize)> {
     // `+`/`-` on the closing bracket — `[!note]+` / `[!note]-`.
     let kind = canonical_callout_kind(raw)?;
     let mut end = 2 + close + 1;
-    if matches!(b.get(end), Some(b'+') | Some(b'-')) {
+    if matches!(b.get(end), Some(b'+' | b'-')) {
         end += 1;
     }
     // Consume the space that typically follows.
@@ -1110,7 +1216,11 @@ fn try_parse_table(
         }
     }
     let mut rows = vec![(header_from, header_to), (sep_from, sep_end)];
-    let mut i = if sep_end < bytes.len() { sep_end + 1 } else { sep_end };
+    let mut i = if sep_end < bytes.len() {
+        sep_end + 1
+    } else {
+        sep_end
+    };
     while i < bytes.len() {
         let row_from = i;
         let mut row_end = row_from;
@@ -1122,7 +1232,11 @@ fn try_parse_table(
             break;
         }
         rows.push((row_from, row_end));
-        i = if row_end < bytes.len() { row_end + 1 } else { row_end };
+        i = if row_end < bytes.len() {
+            row_end + 1
+        } else {
+            row_end
+        };
     }
     Some(rows)
 }
@@ -1135,7 +1249,7 @@ fn split_pipe_cells(line: &str) -> Vec<&str> {
     if let Some(stripped) = t.strip_suffix('|') {
         t = stripped;
     }
-    t.split('|').map(|s| s.trim()).collect()
+    t.split('|').map(str::trim).collect()
 }
 
 fn collect_table_cells(text: &str, rows: &[(usize, usize)]) -> Vec<Vec<String>> {
@@ -1145,7 +1259,7 @@ fn collect_table_cells(text: &str, rows: &[(usize, usize)]) -> Vec<Vec<String>> 
         .map(|(_, (f, t))| {
             split_pipe_cells(&text[*f..*t])
                 .into_iter()
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .collect()
         })
         .collect()
@@ -1160,7 +1274,7 @@ fn render_table_html(cells: &[Vec<String>]) -> String {
     if let Some(header) = iter.next() {
         s.push_str("<thead><tr>");
         for c in header {
-            s.push_str(r#"<th>"#);
+            s.push_str(r"<th>");
             s.push_str(&html_escape(c));
             s.push_str("</th>");
         }
@@ -1170,7 +1284,7 @@ fn render_table_html(cells: &[Vec<String>]) -> String {
     for row in iter {
         s.push_str("<tr>");
         for c in row {
-            s.push_str(r#"<td>"#);
+            s.push_str(r"<td>");
             s.push_str(&html_escape(c));
             s.push_str("</td>");
         }
@@ -1373,12 +1487,7 @@ fn opens_fence(trimmed: &str) -> Option<(u8, usize, usize)> {
 /// Find the byte offset of the closing fence's `\n` (or doc end)
 /// when walking forward from `content_start`. Used by both the
 /// syntax-highlighter and the lang/copy header widget.
-fn find_fence_close(
-    text: &str,
-    content_start: usize,
-    marker_char: u8,
-    marker_len: usize,
-) -> usize {
+fn find_fence_close(text: &str, content_start: usize, marker_char: u8, marker_len: usize) -> usize {
     let bytes = text.as_bytes();
     let mut i = content_start;
     while i < bytes.len() {
@@ -1423,13 +1532,12 @@ fn emit_fence_tokens(
     let t_tok = now_ms_native();
     let cached = with_fence_cache(|cache| cache.get(lang, body));
     let was_cached = cached.is_some();
-    let tokens = match cached {
-        Some(toks) => toks,
-        None => {
-            let toks = editor_syntax::highlight(lang, body);
-            with_fence_cache(|cache| cache.put(lang, body.to_string(), toks.clone()));
-            toks
-        }
+    let tokens = if let Some(toks) = cached {
+        toks
+    } else {
+        let toks = editor_syntax::highlight(lang, body);
+        with_fence_cache(|cache| cache.put(lang, body.to_string(), toks.clone()));
+        toks
     };
     let tok_ms = now_ms_native() - t_tok;
     tracing::trace!(
@@ -1464,7 +1572,10 @@ impl FenceCache {
         }
     }
     fn get(&mut self, lang: editor_syntax::Lang, body: &str) -> Option<Vec<editor_syntax::Token>> {
-        let idx = self.entries.iter().position(|(l, b, _)| *l == lang && b == body)?;
+        let idx = self
+            .entries
+            .iter()
+            .position(|(l, b, _)| *l == lang && b == body)?;
         // Move to back so this entry is "freshest".
         let hit = self.entries.remove(idx);
         let toks = hit.2.clone();
@@ -1697,9 +1808,7 @@ fn find_spans(text: &str) -> Vec<Span> {
             && (i == 0 || matches!(b[i - 1], b' ' | b'\t' | b'\n'))
         {
             let mut j = i + 1;
-            while j < b.len()
-                && (b[j].is_ascii_alphanumeric() || b[j] == b'-' || b[j] == b'_')
-            {
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'-' || b[j] == b'_') {
                 j += 1;
             }
             if j == b.len() || b[j] == b'\n' {
@@ -1760,9 +1869,7 @@ fn find_spans(text: &str) -> Vec<Span> {
                 let is_url = body.starts_with("http://")
                     || body.starts_with("https://")
                     || body.starts_with("mailto:")
-                    || (body.contains('@')
-                        && !body.contains(' ')
-                        && body.contains('.'));
+                    || (body.contains('@') && !body.contains(' ') && body.contains('.'));
                 if is_url {
                     out.push(Span {
                         outer: i..end + 1,
@@ -1871,7 +1978,7 @@ fn find_block_anchor(text: &str, id_line_from: usize) -> usize {
     // `id::` line should be flush against the block).
     let mut end = id_line_from;
     while end > 0 {
-        let prev_nl = prefix[..end - 1].rfind('\n').map(|n| n + 1).unwrap_or(0);
+        let prev_nl = prefix[..end - 1].rfind('\n').map_or(0, |n| n + 1);
         let line = &text[prev_nl..end - 1];
         if !line.trim().is_empty() {
             return prev_nl;
@@ -1881,11 +1988,11 @@ fn find_block_anchor(text: &str, id_line_from: usize) -> usize {
     0
 }
 
-/// Per-`live_preview`-pass registry of UUIDs in the current
-/// doc. Refreshed on each pass via `reset_block_index`. Used by
-/// the `((uuid))` chip renderer to look up the target block's
-/// first-line content and by the `🔗` indicator to know which
-/// blocks have ids.
+// Per-`live_preview`-pass registry of UUIDs in the current
+// doc. Refreshed on each pass via `reset_block_index`. Used by
+// the `((uuid))` chip renderer to look up the target block's
+// first-line content and by the `🔗` indicator to know which
+// blocks have ids.
 thread_local! {
     static BLOCK_INDEX: std::cell::RefCell<std::collections::HashMap<String, usize>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
@@ -1905,14 +2012,17 @@ pub(crate) fn register_block_id(uuid: &str, block_anchor: usize) {
 /// markdown markers for chip display. Stops at the first
 /// newline.
 pub(crate) fn block_preview(text: &str, anchor: usize) -> String {
-    let line_end = text[anchor..]
-        .find('\n')
-        .map(|n| anchor + n)
-        .unwrap_or(text.len());
+    let line_end = text[anchor..].find('\n').map_or(text.len(), |n| anchor + n);
     let line = &text[anchor..line_end];
     let cleaned = line.trim_start_matches(|c: char| {
-        c == '#' || c == '>' || c == '-' || c == '*' || c == '+'
-            || c == ' ' || c == '\t' || c == '['
+        c == '#'
+            || c == '>'
+            || c == '-'
+            || c == '*'
+            || c == '+'
+            || c == ' '
+            || c == '\t'
+            || c == '['
     });
     let cleaned = cleaned.trim_end();
     let max = 40;
@@ -1980,7 +2090,7 @@ fn find_close(b: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::doc::Doc;
-    use crate::selection::{Range, Selection};
+    use crate::selection::Selection;
 
     fn state(text: &str, caret: usize) -> EditorState {
         EditorState {
@@ -2104,7 +2214,11 @@ mod tests {
         // Class is space-separated `md-wikilink
         // md-wikilink-unresolved` until a vault layer resolves
         // the target, so check the prefix rather than equality.
-        assert!(mark_classes(&decs).iter().any(|c| c.starts_with("md-wikilink")));
+        assert!(
+            mark_classes(&decs)
+                .iter()
+                .any(|c| c.starts_with("md-wikilink"))
+        );
         assert!(decs.iter().any(|d| d.from == 2 && d.to == 11));
     }
 
@@ -2144,9 +2258,7 @@ mod tests {
         assert!(has_line_class(&decs, 0, "md-h1"));
         // Marker `# ` (2 bytes) replaced when caret elsewhere.
         assert!(decs.iter().any(|d| {
-            d.from == 0
-                && d.to == 2
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 2 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         }));
     }
 
@@ -2168,9 +2280,7 @@ mod tests {
         assert!(has_line_class(&decs, 0, "md-h1"));
         // … but no Replace on the `# `.
         let replace_on_marker = decs.iter().any(|d| {
-            d.from == 0
-                && d.to == 2
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 2 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!replace_on_marker);
     }
@@ -2186,9 +2296,11 @@ mod tests {
     fn table_recognized() {
         let s = state("| A | B |\n|---|---|\n| 1 | 2 |", 100);
         let decs = live_preview(&s);
-        let widget = decs.iter().any(|d| matches!(&d.kind,
+        let widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-table")));
+                if html.contains("md-table"))
+        });
         assert!(widget);
     }
 
@@ -2198,8 +2310,9 @@ mod tests {
         // recognized but no Replace, source stays editable.
         let s = state("| A | B |\n|---|---|\n| 1 | 2 |", 5);
         let decs = live_preview(&s);
-        let has_replace = decs.iter().any(|d| matches!(d.kind,
-            crate::decoration::DecorationKind::Replace));
+        let has_replace = decs
+            .iter()
+            .any(|d| matches!(d.kind, crate::decoration::DecorationKind::Replace));
         assert!(!has_replace);
     }
 
@@ -2208,9 +2321,11 @@ mod tests {
         // No separator → not a table.
         let s = state("| A | B |\n| 1 | 2 |", 100);
         let decs = live_preview(&s);
-        let widget = decs.iter().any(|d| matches!(&d.kind,
+        let widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-table")));
+                if html.contains("md-table"))
+        });
         assert!(!widget);
     }
 
@@ -2220,9 +2335,11 @@ mod tests {
         // widget shown.
         let s = state("see ^[a side note] here", 0);
         let decs = live_preview(&s);
-        let has_marker = decs.iter().any(|d| matches!(&d.kind,
+        let has_marker = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-inline-footnote-marker")));
+                if html.contains("md-inline-footnote-marker"))
+        });
         assert!(has_marker);
     }
 
@@ -2233,7 +2350,8 @@ mod tests {
         let decs = live_preview(&s);
         assert!(mark_classes(&decs).contains(&"md-inline-footnote"));
         let has_replace = decs.iter().any(|d| {
-            d.from == 4 && d.to == 18
+            d.from == 4
+                && d.to == 18
                 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
@@ -2243,9 +2361,11 @@ mod tests {
     fn embed_page_renders_card() {
         let s = state("![[OtherPage]]", 100);
         let decs = live_preview(&s);
-        let has_card = decs.iter().any(|d| matches!(&d.kind,
+        let has_card = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-page")));
+                if html.contains("md-embed-page"))
+        });
         assert!(has_card);
     }
 
@@ -2256,11 +2376,17 @@ mod tests {
         let src = "Before\n\n## Section\nbody line\nmore body\n\n## Next\n\n![[#Section]]";
         let s = state(src, 100);
         let decs = live_preview(&s);
-        let card_html = decs.iter().find_map(|d| match &d.kind {
-            crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-section") => Some(html.clone()),
-            _ => None,
-        }).expect("section card");
+        let card_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-embed-section") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("section card");
         assert!(card_html.contains("body line"));
         assert!(!card_html.contains("md-embed-placeholder"));
     }
@@ -2271,11 +2397,17 @@ mod tests {
         // yet, so renders the placeholder.
         let s = state("![[OtherPage#Section]]", 100);
         let decs = live_preview(&s);
-        let card_html = decs.iter().find_map(|d| match &d.kind {
-            crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-section") => Some(html.clone()),
-            _ => None,
-        }).expect("section card");
+        let card_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-embed-section") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("section card");
         assert!(card_html.contains("md-embed-placeholder"));
     }
 
@@ -2284,11 +2416,17 @@ mod tests {
         let src = "Paragraph body ^anchor-here\n\n![[#^anchor-here]]";
         let s = state(src, 100);
         let decs = live_preview(&s);
-        let card_html = decs.iter().find_map(|d| match &d.kind {
-            crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-block") => Some(html.clone()),
-            _ => None,
-        }).expect("block card");
+        let card_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-embed-block") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("block card");
         assert!(card_html.contains("Paragraph body"));
     }
 
@@ -2303,8 +2441,7 @@ mod tests {
         let id_line_start = src.find("id::").unwrap();
         let id_line_end = src[id_line_start..]
             .find('\n')
-            .map(|n| id_line_start + n + 1)
-            .unwrap_or(src.len());
+            .map_or(src.len(), |n| id_line_start + n + 1);
         let has_replace = decs.iter().any(|d| {
             d.from == id_line_start
                 && d.to == id_line_end
@@ -2319,9 +2456,11 @@ mod tests {
         let src = format!("see (({uuid})) for details");
         let s = state(&src, 0);
         let decs = live_preview(&s);
-        let has_chip = decs.iter().any(|d| matches!(&d.kind,
+        let has_chip = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-block-ref-chip")));
+                if html.contains("md-block-ref-chip"))
+        });
         assert!(has_chip);
     }
 
@@ -2331,10 +2470,125 @@ mod tests {
         let src = format!("{{{{embed (({uuid}))}}}}\n");
         let s = state(&src, 0);
         let decs = live_preview(&s);
-        let has_card = decs.iter().any(|d| matches!(&d.kind,
+        let has_card = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-block-embed-card")));
+                if html.contains("md-block-embed-card"))
+        });
         assert!(has_card);
+    }
+
+    /// Stub vault for cross-doc resolution tests.
+    #[allow(clippy::struct_field_names)]
+    struct FakeVault {
+        block_hits: std::collections::HashMap<String, super::VaultBlockHit>,
+        page_hits: std::collections::HashMap<String, super::VaultPageHit>,
+        section_hits: std::collections::HashMap<(String, String), String>,
+    }
+    impl super::VaultLookup for FakeVault {
+        fn lookup_block(&self, u: &str) -> Option<super::VaultBlockHit> {
+            self.block_hits.get(u).cloned()
+        }
+        fn lookup_page(&self, n: &str) -> Option<super::VaultPageHit> {
+            self.page_hits.get(n).cloned()
+        }
+        fn lookup_section(&self, p: &str, h: &str) -> Option<String> {
+            self.section_hits.get(&(p.into(), h.into())).cloned()
+        }
+        fn lookup_block_short(&self, _p: &str, _id: &str) -> Option<String> {
+            None
+        }
+    }
+
+    #[test]
+    fn block_ref_resolves_across_pages_via_vault() {
+        let uuid = "11111111-1111-4111-8111-111111111111";
+        let s = state(&format!("see (({uuid})) for context"), 0);
+        let mut block_hits = std::collections::HashMap::new();
+        block_hits.insert(
+            uuid.to_string(),
+            super::VaultBlockHit {
+                page: "OtherPage".into(),
+                preview: "Target block content".into(),
+            },
+        );
+        let vault = FakeVault {
+            block_hits,
+            page_hits: Default::default(),
+            section_hits: Default::default(),
+        };
+        let decs = super::live_preview_with(&s, Some(&vault));
+        let chip_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-block-ref-chip") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("chip widget");
+        assert!(chip_html.contains("Target block content"));
+        assert!(chip_html.contains("OtherPage"));
+        assert!(!chip_html.contains("md-block-ref-unresolved"));
+    }
+
+    #[test]
+    fn wikilink_resolved_class_when_vault_finds_page() {
+        let s = state("see [[OtherPage]]", 0);
+        let mut page_hits = std::collections::HashMap::new();
+        page_hits.insert(
+            "OtherPage".into(),
+            super::VaultPageHit {
+                preview: "Body".into(),
+            },
+        );
+        let vault = FakeVault {
+            block_hits: Default::default(),
+            page_hits,
+            section_hits: Default::default(),
+        };
+        let decs = super::live_preview_with(&s, Some(&vault));
+        // The wikilink's mark class should NOT carry the
+        // unresolved suffix when the vault confirms existence.
+        let has_resolved = decs.iter().any(|d| {
+            matches!(&d.kind,
+            crate::decoration::DecorationKind::Mark { class, .. }
+                if class == "md-wikilink")
+        });
+        assert!(has_resolved, "decs = {decs:?}");
+    }
+
+    #[test]
+    fn cross_page_section_embed_resolves_via_vault() {
+        // Caret well past the embed so the widget actually
+        // fires (caret on the span keeps the source visible).
+        let s = state("![[Project README#Goals]]\n\nbody", 50);
+        let mut section_hits = std::collections::HashMap::new();
+        section_hits.insert(
+            ("Project README".into(), "Goals".into()),
+            "Make notes good.\nShip quickly.".into(),
+        );
+        let vault = FakeVault {
+            block_hits: Default::default(),
+            page_hits: Default::default(),
+            section_hits,
+        };
+        let decs = super::live_preview_with(&s, Some(&vault));
+        let card = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-embed-section") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("section card");
+        assert!(card.contains("Make notes good."));
+        assert!(!card.contains("md-embed-placeholder"));
     }
 
     #[test]
@@ -2343,18 +2597,25 @@ mod tests {
         // the `((uuid))` chip should render the target's
         // first-line content (not "unresolved").
         let uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
-        let src = format!(
-            "First block content here\nid:: {uuid}\n\nA later paragraph with (({uuid}))."
-        );
+        let src =
+            format!("First block content here\nid:: {uuid}\n\nA later paragraph with (({uuid})).");
         let s = state(&src, 0);
         let decs = live_preview(&s);
-        let chip_html = decs.iter().find_map(|d| match &d.kind {
-            crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-block-ref-chip") => Some(html.clone()),
-            _ => None,
-        }).expect("chip widget");
-        assert!(chip_html.contains("First block content here"),
-            "expected chip to preview target, got: {}", chip_html);
+        let chip_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-block-ref-chip") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("chip widget");
+        assert!(
+            chip_html.contains("First block content here"),
+            "expected chip to preview target, got: {chip_html}"
+        );
         assert!(!chip_html.contains("md-block-ref-unresolved"));
     }
 
@@ -2388,9 +2649,11 @@ mod tests {
     fn setext_h1_recognized() {
         let s = state("Big Title\n=========\nbody", 0);
         let decs = live_preview(&s);
-        let has_h1 = decs.iter().any(|d| matches!(&d.kind,
+        let has_h1 = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-h1"));
+                if class == "md-h1")
+        });
         assert!(has_h1);
     }
 
@@ -2398,9 +2661,11 @@ mod tests {
     fn setext_h2_recognized() {
         let s = state("Subtitle\n--------\nbody", 0);
         let decs = live_preview(&s);
-        let has_h2 = decs.iter().any(|d| matches!(&d.kind,
+        let has_h2 = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-h2"));
+                if class == "md-h2")
+        });
         assert!(has_h2);
     }
 
@@ -2410,20 +2675,28 @@ mod tests {
         // as a task line, just with a non-canonical status char.
         let s = state("- [/] working on it\n- [>] later", 0);
         let decs = live_preview(&s);
-        let has_task_line = decs.iter().filter(|d| matches!(&d.kind,
+        let has_task_line = decs
+            .iter()
+            .filter(|d| {
+                matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-task")).count();
+                if class == "md-task")
+            })
+            .count();
         assert!(has_task_line >= 2);
     }
 
     #[test]
     fn frontmatter_parsed() {
-        let src = "---\ntitle: Hello\ntags: [a, b]\npublished: true\naliases:\n  - x\n  - y\n---\n# body";
+        let src =
+            "---\ntitle: Hello\ntags: [a, b]\npublished: true\naliases:\n  - x\n  - y\n---\n# body";
         let fm = super::parse_frontmatter(src).expect("fm found");
         assert_eq!(fm.props.len(), 4);
         assert_eq!(fm.props[0].key, "title");
         assert!(matches!(&fm.props[0].value, super::PropValue::Text(s) if s == "Hello"));
-        assert!(matches!(&fm.props[1].value, super::PropValue::List(v) if v == &vec!["a".to_string(), "b".to_string()]));
+        assert!(
+            matches!(&fm.props[1].value, super::PropValue::List(v) if v == &vec!["a".to_string(), "b".to_string()])
+        );
         assert!(matches!(&fm.props[2].value, super::PropValue::Bool(true)));
         assert!(matches!(&fm.props[3].value, super::PropValue::List(v) if v.len() == 2));
     }
@@ -2474,8 +2747,10 @@ mod tests {
         assert!(s.starts_with("description: |\n"));
         assert!(s.contains("  first line\n"));
         // Range covers the block + the closing indent line.
-        assert_eq!(&src[desc.range.clone()],
-            "description: |\n  first line\n  second line\n  third\n");
+        assert_eq!(
+            &src[desc.range.clone()],
+            "description: |\n  first line\n  second line\n  third\n"
+        );
     }
 
     #[test]
@@ -2489,9 +2764,11 @@ mod tests {
     fn frontmatter_emits_widget_when_caret_away() {
         let s = state("---\ntitle: x\n---\n# body", 20);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-properties")));
+                if html.contains("md-properties"))
+        });
         assert!(has_widget);
     }
 
@@ -2500,9 +2777,11 @@ mod tests {
         // Caret away: source replaced + math widget emitted.
         let s = state("Cost is $x^2$ today", 0);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-math-widget")));
+                if html.contains("md-math-widget"))
+        });
         assert!(has_widget);
     }
 
@@ -2513,9 +2792,11 @@ mod tests {
         // exercises a real render.
         let s = state("Before\n$$E = m c^2$$\nAfter", 0);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-math-widget-block")));
+                if html.contains("md-math-widget-block"))
+        });
         assert!(has_widget);
     }
 
@@ -2540,9 +2821,11 @@ mod tests {
         let src = "```mermaid\nflowchart TD\n  A --> B\n```\nx";
         let s = state(src, src.len() - 1);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-mermaid-widget")));
+                if html.contains("md-mermaid-widget"))
+        });
         assert!(has_widget);
     }
 
@@ -2553,9 +2836,11 @@ mod tests {
         let src = "```typst\n= Section\n```\nx";
         let s = state(src, src.len() - 1);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-typst-widget")));
+                if html.contains("md-typst-widget"))
+        });
         assert!(has_widget);
     }
 
@@ -2577,8 +2862,10 @@ mod tests {
         // Caret inside the comment: body styled as `md-comment`.
         let s = state("a %% hidden %% b", 6);
         let decs = live_preview(&s);
-        let has_mark = decs.iter().any(|d| matches!(&d.kind,
-            crate::decoration::DecorationKind::Mark { class, .. } if class == "md-comment"));
+        let has_mark = decs.iter().any(|d| {
+            matches!(&d.kind,
+            crate::decoration::DecorationKind::Mark { class, .. } if class == "md-comment")
+        });
         assert!(has_mark);
     }
 
@@ -2586,9 +2873,11 @@ mod tests {
     fn image_embed_recognized() {
         let s = state("![[pic.png]]", 100);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-image")));
+                if html.contains("md-embed-image"))
+        });
         assert!(has_widget);
     }
 
@@ -2609,9 +2898,11 @@ mod tests {
     fn video_embed_recognized() {
         let s = state("![[clip.mp4]]", 100);
         let decs = live_preview(&s);
-        let has_video = decs.iter().any(|d| matches!(&d.kind,
+        let has_video = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-video")));
+                if html.contains("md-embed-video"))
+        });
         assert!(has_video);
     }
 
@@ -2620,9 +2911,11 @@ mod tests {
         // .md isn't a media kind — should NOT emit an embed widget.
         let s = state("![[other.md]]", 100);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.starts_with("<img") || html.starts_with("<video")));
+                if html.starts_with("<img") || html.starts_with("<video"))
+        });
         assert!(!has_widget);
     }
 
@@ -2630,9 +2923,11 @@ mod tests {
     fn callout_note_emits_md_callout_class() {
         let s = state("> [!note] Title", 100);
         let decs = live_preview(&s);
-        let has_callout = decs.iter().any(|d| matches!(&d.kind,
+        let has_callout = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-note")));
+                if class.contains("md-callout-note"))
+        });
         assert!(has_callout);
     }
 
@@ -2644,12 +2939,18 @@ mod tests {
         // Inner header line gets both `md-callout-warning` and
         // a depth-2 class.
         let inner_line_from = src.find("> > [!warning]").unwrap();
-        let has_warning = decs.iter().any(|d| matches!(&d.kind,
+        let has_warning = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-warning")) && d.from == inner_line_from);
-        let has_depth = decs.iter().any(|d| matches!(&d.kind,
+                if class.contains("md-callout-warning"))
+                && d.from == inner_line_from
+        });
+        let has_depth = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-callout-nested-2") && d.from == inner_line_from);
+                if class == "md-callout-nested-2")
+                && d.from == inner_line_from
+        });
         assert!(has_warning, "expected inner line to be warning-classed");
         assert!(has_depth, "expected inner line to carry depth-2 class");
     }
@@ -2660,9 +2961,12 @@ mod tests {
         let s = state(src, 100);
         let decs = live_preview(&s);
         let body_from = src.find("> > body").unwrap();
-        let body_is_warning = decs.iter().any(|d| matches!(&d.kind,
+        let body_is_warning = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-warning")) && d.from == body_from);
+                if class.contains("md-callout-warning"))
+                && d.from == body_from
+        });
         assert!(body_is_warning);
     }
 
@@ -2675,9 +2979,12 @@ mod tests {
         let s = state(src, 100);
         let decs = live_preview(&s);
         let back_from = src.find("> back to outer").unwrap();
-        let back_is_note = decs.iter().any(|d| matches!(&d.kind,
+        let back_is_note = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-note")) && d.from == back_from);
+                if class.contains("md-callout-note"))
+                && d.from == back_from
+        });
         assert!(back_is_note);
     }
 
@@ -2685,9 +2992,11 @@ mod tests {
     fn callout_warning_alias_resolves() {
         let s = state("> [!caution] Hey", 100);
         let decs = live_preview(&s);
-        let has_warning = decs.iter().any(|d| matches!(&d.kind,
+        let has_warning = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-warning")));
+                if class.contains("md-callout-warning"))
+        });
         assert!(has_warning);
     }
 
@@ -2696,9 +3005,14 @@ mod tests {
         let s = state("> [!note] T\n> body line", 100);
         let decs = live_preview(&s);
         // Both lines should have a `md-callout-note` class.
-        let count = decs.iter().filter(|d| matches!(&d.kind,
+        let count = decs
+            .iter()
+            .filter(|d| {
+                matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-note"))).count();
+                if class.contains("md-callout-note"))
+            })
+            .count();
         assert_eq!(count, 2);
     }
 
@@ -2713,7 +3027,7 @@ mod tests {
         });
         // Either no Line at "after" (it's a plain line) or one
         // without the callout class.
-        assert!(after_class.map_or(true, |c| !c.contains("md-callout")));
+        assert!(after_class.is_none_or(|c| !c.contains("md-callout")));
     }
 
     #[test]
@@ -2730,8 +3044,7 @@ mod tests {
         assert!(has_line_class(&decs, 0, "md-hr-active"));
         // And the `---` source isn't replaced — user can edit.
         let has_replace = decs.iter().any(|d| {
-            d.from == 0 && d.to == 3
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 3 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
     }
@@ -2757,10 +3070,12 @@ mod tests {
         let s = state("- item", 3);
         let decs = live_preview(&s);
         let has_replace = decs.iter().any(|d| {
-            d.from == 0 && d.to == 2
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 2 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
-        assert!(!has_replace, "marker source must stay visible while caret is on the line");
+        assert!(
+            !has_replace,
+            "marker source must stay visible while caret is on the line"
+        );
         let has_widget = decs
             .iter()
             .any(|d| matches!(&d.kind, crate::decoration::DecorationKind::Widget { .. }));
@@ -2772,8 +3087,7 @@ mod tests {
         let s = state("1. foo", 3);
         let decs = live_preview(&s);
         let has_replace = decs.iter().any(|d| {
-            d.from == 0 && d.to == 3
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 3 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
     }
@@ -2788,8 +3102,10 @@ mod tests {
             .iter()
             .any(|d| matches!(d.kind, crate::decoration::DecorationKind::Replace));
         assert!(!has_replace);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
-            crate::decoration::DecorationKind::Widget { html } if html.contains("md-task-checkbox")));
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html } if html.contains("md-task-checkbox"))
+        });
         assert!(!has_widget);
     }
 
@@ -2821,9 +3137,11 @@ mod tests {
     fn code_fence_with_lang_emits_syntax_tokens() {
         let s = state("```rust\nfn main() {}\n```", 999);
         let decs = live_preview(&s);
-        let has_token = decs.iter().any(|d| matches!(&d.kind,
+        let has_token = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Mark { class, .. }
-                if class.starts_with("md-tok-")));
+                if class.starts_with("md-tok-"))
+        });
         assert!(has_token, "expected at least one md-tok-* mark");
     }
 

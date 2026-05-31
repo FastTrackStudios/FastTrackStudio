@@ -1,0 +1,18 @@
+[package]
+name = "editor-keyflow-lang"
+description = "Keyflow language support for the Editor: syntax highlighting + live IDE diagnostics surfaced as editor `DecoratedRange` decorations. Pairs with `editor-keyflow` (which renders `.kf` fences to inline SVG). Pure functions — no Dioxus — so it stays wasm-friendly and view-agnostic."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Decoration model + EditorState we map keyflow spans/diagnostics onto.
+editor-state = { workspace = true }
+# `text` gives the IDE analyzer (`ide::analyze`); `highlighting` gives the
+# line highlighter + theme→CSS renderer. Both enabled via the workspace dep.
+keyflow = { workspace = true }
+
+[lints]
+workspace = true

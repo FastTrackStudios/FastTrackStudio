@@ -7,18 +7,19 @@ use editor_state::EditorState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextObject {
-    Word,       // w
+    Word,        // w
     DoubleQuote, // "
     SingleQuote, // '
-    Backtick,   // `
-    Paren,      // ( or )
-    Bracket,    // [ or ]
-    Brace,      // { or }
-    AngleTag,   // t — XML/HTML tag (v1: stub, returns caret-only)
-    Paragraph,  // p
+    Backtick,    // `
+    Paren,       // ( or )
+    Bracket,     // [ or ]
+    Brace,       // { or }
+    AngleTag,    // t — XML/HTML tag (v1: stub, returns caret-only)
+    Paragraph,   // p
 }
 
 impl TextObject {
+    #[must_use]
     pub fn from_char(ch: char) -> Option<Self> {
         Some(match ch {
             'w' => Self::Word,
@@ -38,7 +39,13 @@ impl TextObject {
 /// Resolve a text object to a half-open byte range `[lo, hi)`
 /// around `pos`. `around=true` for `a<obj>` (includes delimiters
 /// / trailing space); `around=false` for `i<obj>` (inner).
-pub fn apply(state: &EditorState, obj: TextObject, around: bool, pos: usize) -> std::ops::Range<usize> {
+#[must_use]
+pub fn apply(
+    state: &EditorState,
+    obj: TextObject,
+    around: bool,
+    pos: usize,
+) -> std::ops::Range<usize> {
     let s = state.doc.to_string();
     let bytes = s.as_bytes();
     match obj {
@@ -83,12 +90,12 @@ fn word_object(bytes: &[u8], pos: usize, around: bool) -> std::ops::Range<usize>
             while hi < bytes.len() && bytes[hi] == b' ' {
                 hi += 1;
             }
-            if !had_trail {
+            if had_trail {
+                // also strip leading ws to mop up isolated words
                 while lo > 0 && bytes[lo - 1] == b' ' {
                     lo -= 1;
                 }
             } else {
-                // also strip leading ws to mop up isolated words
                 while lo > 0 && bytes[lo - 1] == b' ' {
                     lo -= 1;
                 }
@@ -130,6 +137,7 @@ fn pair_object(
             }
         }
         let mut hi = None;
+        #[allow(clippy::needless_range_loop)]
         for i in pos..bytes.len() {
             if bytes[i] == close && Some(i) != lo {
                 hi = Some(i);
@@ -160,6 +168,7 @@ fn pair_object(
     };
     let mut depth = 0i32;
     let mut close_idx = None;
+    #[allow(clippy::needless_range_loop)]
     for i in open_idx..bytes.len() {
         if bytes[i] == open {
             depth += 1;
@@ -183,7 +192,9 @@ fn pair_object(
 
 fn paragraph_object(bytes: &[u8], pos: usize, around: bool) -> std::ops::Range<usize> {
     let is_blank = |line_start: usize, line_end: usize| {
-        bytes[line_start..line_end].iter().all(|b| b.is_ascii_whitespace())
+        bytes[line_start..line_end]
+            .iter()
+            .all(u8::is_ascii_whitespace)
     };
     // find current line start
     let p = pos.min(bytes.len());

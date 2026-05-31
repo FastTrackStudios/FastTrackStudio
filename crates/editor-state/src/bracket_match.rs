@@ -6,7 +6,7 @@
 //! one and emit `Mark` decorations on both. The view paints them
 //! via `.md-bracket-match` / `.md-bracket-mismatch`.
 
-use crate::decoration::{Decoration, DecoratedRange};
+use crate::decoration::{DecoratedRange, Decoration};
 use crate::state::EditorState;
 
 const PAIRS: &[(u8, u8)] = &[(b'(', b')'), (b'[', b']'), (b'{', b'}')];
@@ -15,6 +15,7 @@ const PAIRS: &[(u8, u8)] = &[(b'(', b')'), (b'[', b']'), (b'{', b'}')];
 /// Walks at most [`SCAN_LIMIT`] bytes from the caret looking for
 /// the matching bracket. Stops if the doc is malformed or the
 /// match falls outside the scan window.
+#[must_use]
 pub fn bracket_match(state: &EditorState) -> Vec<DecoratedRange> {
     let primary = state.selection.primary();
     if primary.anchor != primary.head {
@@ -43,7 +44,11 @@ pub fn bracket_match(state: &EditorState) -> Vec<DecoratedRange> {
 }
 
 fn push_pair(out: &mut Vec<DecoratedRange>, from: usize, to: usize, matched: bool) {
-    let class = if matched { "md-bracket-match" } else { "md-bracket-mismatch" };
+    let class = if matched {
+        "md-bracket-match"
+    } else {
+        "md-bracket-mismatch"
+    };
     out.push(Decoration::mark(from..from + 1, class));
     if to != from {
         out.push(Decoration::mark(to..to + 1, class));
@@ -70,6 +75,11 @@ fn match_at(bytes: &[u8], at: usize) -> Option<(usize, usize, bool)> {
 fn scan_forward(bytes: &[u8], at: usize, open: u8, close: u8) -> Option<usize> {
     let mut depth = 1;
     let end = (at + 1 + SCAN_LIMIT).min(bytes.len());
+    // Bracket scan walks a tight inner loop; the `for i in
+    // start..end` shape is the natural one even though
+    // clippy's `needless_range_loop` would prefer a slice
+    // iter. We need `i` itself for the `Some(i)` return.
+    #[allow(clippy::needless_range_loop)]
     for i in (at + 1)..end {
         let b = bytes[i];
         if b == open {

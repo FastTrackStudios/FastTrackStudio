@@ -24,10 +24,10 @@
 //! derivation) — we collapse them here because our diff is
 //! simpler (whole-string trim, not per-mutation analysis).
 
+use crate::tile::TileKind;
 use crate::tile::arena::{Arena, TileId};
 use crate::tile::pos::pos_at_start;
 use crate::tile::text::text_of;
-use crate::tile::TileKind;
 
 /// Visible-space mirror plus a visible↔doc offset map.
 #[derive(Clone, Debug, Default)]
@@ -54,6 +54,7 @@ pub struct MapEntry {
 impl VisibleText {
     /// Walk the arena starting at `root` and accumulate text +
     /// offset map.
+    #[must_use]
     pub fn from_arena(arena: &Arena, root: TileId) -> Self {
         let mut out = Self {
             text: String::new(),
@@ -75,7 +76,9 @@ impl VisibleText {
     ///   leading `**`, inside bold).
     /// - `visible_to_doc(4)` → 6 (just past "d" — before
     ///   trailing `**`, still inside bold).
+    ///
     /// User typing at either edge extends the bold span.
+    #[must_use]
     pub fn visible_to_doc(&self, visible_pos: usize) -> usize {
         if self.map.is_empty() {
             return visible_pos;
@@ -83,9 +86,7 @@ impl VisibleText {
         // partition_point on `e.visible <= visible_pos` gives
         // first index where the predicate becomes false; `-1`
         // is the last index where it was true.
-        let i = self
-            .map
-            .partition_point(|e| e.visible <= visible_pos);
+        let i = self.map.partition_point(|e| e.visible <= visible_pos);
         let idx = i.saturating_sub(1);
         let e = self.map[idx];
         e.doc + (visible_pos - e.visible)

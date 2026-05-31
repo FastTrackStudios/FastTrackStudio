@@ -72,7 +72,33 @@ rebuildable from the files.
   block's title/first line is the important thing; the id is
   a footnote.
 
-## Done
+## Done — multi-file resolution
+
+- ✅ `VaultLookup` trait in `editor_state::markdown`: methods
+  for `lookup_block(uuid)`, `lookup_page(name)`,
+  `lookup_section(page, heading)`,
+  `lookup_block_short(page, short_id)`. `editor-state` stays
+  vault-agnostic; the `vault` crate provides the canonical
+  impl (`VaultLookupView::new(&vault, &block_index)`).
+- ✅ `live_preview_with(state, Some(&lookup))` —
+  vault-threaded entry point. The old `live_preview(state)`
+  still works (passes `None`); existing callers don't change.
+- ✅ `((uuid))` block-ref resolves in three steps: intra-doc
+  index → vault → unresolved. Resolved refs show
+  `🔗 preview › page-name` so the user knows where the target
+  lives.
+- ✅ `{{embed ((uuid))}}` block-embed card shows the target
+  page as a header chip + content body.
+- ✅ `![[Page]]`, `![[Page#Heading]]`, `![[Page#^short-id]]`
+  cross-doc resolution via the vault. Intra-doc forms
+  (`![[#…]]`) still hit the local scanner first.
+- ✅ `[[Page]]` wikilink resolved/unresolved class flips
+  based on vault.lookup_page existence — drops the "always
+  red" placeholder behavior.
+- 3 new editor-state tests + 4 new vault tests cover the
+  cross-doc paths end-to-end.
+
+## Done — block-mode core
 
 - ✅ UUID v7 generation (time-prefixed, sortable). Switched
   from v4 — Logseq's squuid model. Version-tracking friendly.

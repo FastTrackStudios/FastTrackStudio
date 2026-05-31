@@ -39,8 +39,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use editor_state::{
-    Changes, DecoratedRange, EditorState, KeySpec, Keymap, Range, Selection,
-    TransactionSpec,
+    Changes, DecoratedRange, EditorState, KeySpec, Keymap, Range, Selection, TransactionSpec,
 };
 
 use crate::tile::build::build_tiles;
@@ -84,8 +83,12 @@ fn now_ms() -> f64 {
 #[cfg(target_arch = "wasm32")]
 fn widget_focused_dom() -> bool {
     use web_sys::wasm_bindgen::JsCast;
-    let Some(win) = web_sys::window() else { return false };
-    let Some(doc) = win.document() else { return false };
+    let Some(win) = web_sys::window() else {
+        return false;
+    };
+    let Some(doc) = win.document() else {
+        return false;
+    };
     let Some(el) = doc.query_selector("[data-editor-id]").ok().flatten() else {
         return false;
     };
@@ -106,8 +109,7 @@ fn now_ms() -> f64 {
     // some reason there's no `performance` (Workers etc.).
     web_sys::window()
         .and_then(|w| w.performance())
-        .map(|p| p.now())
-        .unwrap_or(0.0)
+        .map_or(0.0, |p| p.now())
 }
 
 /// `keymap` is optional. When `None` the browser handles every
@@ -124,14 +126,16 @@ pub fn Editor(
     /// (if any) is applied and preventDefault'd. Returning
     /// `None` from vim falls through to the keymap and normal
     /// browser-side text input.
-    #[props(default)] vim: Option<Signal<editor_vim::VimState>>,
+    #[props(default)]
+    vim: Option<Signal<editor_vim::VimState>>,
     /// Optional slash-command menu state. When `Some`, the
     /// editor watches doc changes and refreshes the open state
     /// via `slash::detect_slash`. Arrow keys, Enter, and Escape
     /// route into the menu when it's open. Owner is responsible
     /// for rendering the menu component itself — the editor just
     /// keeps the state in sync with the doc.
-    #[props(default)] slash: Option<Signal<Option<crate::slash::SlashState>>>,
+    #[props(default)]
+    slash: Option<Signal<Option<crate::slash::SlashState>>>,
 ) -> Element {
     // True when a decoration widget cell currently has focus
     // (frontmatter property contenteditable, chip-add box, etc.).
@@ -1569,7 +1573,6 @@ pub fn Editor(
         });
     }
 
-
     // ── onkeydown: vim → keymap dispatch ─────────────────────────
     let keymap_for_keys = keymap.clone();
     let vim_for_keys = vim;
@@ -1685,7 +1688,11 @@ pub fn Editor(
                     "j" => ("forward", "line"),
                     _ => unreachable!(),
                 };
-                let action = if vim_snap.is_visual() { "extend" } else { "move" };
+                let action = if vim_snap.is_visual() {
+                    "extend"
+                } else {
+                    "move"
+                };
                 let script = format!(
                     r#"
                     (function() {{
@@ -1717,7 +1724,9 @@ pub fn Editor(
             // *and* the parsed FM exists).
             let vim_peek = vim_sig.peek().clone();
             if matches!(vim_peek.mode, editor_vim::Mode::Normal)
-                && !press.ctrl && !press.alt && !press.meta
+                && !press.ctrl
+                && !press.alt
+                && !press.meta
             {
                 let pre = cur.selection.primary().head;
                 let doc_str = cur.doc.to_string();
@@ -1725,7 +1734,9 @@ pub fn Editor(
                     if pre >= fm.outer.start && pre < fm.outer.end && !fm.props.is_empty() {
                         let key = press.key.as_str();
                         if key == "j" || key == "k" {
-                            let cur_idx = fm.props.iter()
+                            let cur_idx = fm
+                                .props
+                                .iter()
                                 .position(|p| pre >= p.range.start && pre < p.range.end)
                                 .unwrap_or(if key == "j" { 0 } else { fm.props.len() - 1 });
                             let next_idx = if key == "j" {
@@ -1734,11 +1745,13 @@ pub fn Editor(
                                 cur_idx.saturating_sub(1)
                             };
                             let target = fm.props[next_idx].range.start;
-                            state.set(cur.update(
-                                editor_state::TransactionSpec::new()
-                                    .selection(editor_state::Selection::caret(target))
-                                    .annotate("origin", "fm-row-nav"),
-                            ));
+                            state.set(
+                                cur.update(
+                                    editor_state::TransactionSpec::new()
+                                        .selection(editor_state::Selection::caret(target))
+                                        .annotate("origin", "fm-row-nav"),
+                                ),
+                            );
                             evt.prevent_default();
                             return;
                         }
@@ -1758,10 +1771,11 @@ pub fn Editor(
                             // Dispatch a JS focus to the row's
                             // value cell. The contenteditable
                             // handles the rest.
-                            let row_key = fm.props.iter()
+                            let row_key = fm
+                                .props
+                                .iter()
                                 .find(|p| pre >= p.range.start && pre < p.range.end)
-                                .map(|p| p.key.as_str())
-                                .unwrap_or("");
+                                .map_or("", |p| p.key.as_str());
                             let safe_key = row_key.replace('"', "\\\"");
                             let script = format!(
                                 r#"(()=>{{const r=document.querySelector('.md-property-row[data-prop-key="{safe_key}"]');if(!r)return;const c=r.querySelector('[data-edit-role]');if(c){{c.focus();if(c.matches('input'))return;const rng=document.createRange();rng.selectNodeContents(c);rng.collapse(false);const s=window.getSelection();s.removeAllRanges();s.addRange(rng);}}}})();"#
@@ -1792,19 +1806,24 @@ pub fn Editor(
                 // sees it. Insert `/` as a Rust transaction
                 // and let the slash-state `use_effect` pick up
                 // the trigger.
-                if !press.ctrl && !press.alt && !press.meta
-                    && press.key == "/" && slash_for_keys.is_some()
+                if !press.ctrl
+                    && !press.alt
+                    && !press.meta
+                    && press.key == "/"
+                    && slash_for_keys.is_some()
                 {
                     let head = cur.selection.primary().head;
                     let mut next_vim = vim_sig.peek().clone();
                     next_vim.mode = editor_vim::Mode::Insert;
                     vim_sig.set(next_vim);
-                    state.set(cur.update(
-                        TransactionSpec::new()
-                            .changes(Changes::insert(head, "/"))
-                            .selection(Selection::caret(head + 1))
-                            .annotate("origin", "slash-trigger"),
-                    ));
+                    state.set(
+                        cur.update(
+                            TransactionSpec::new()
+                                .changes(Changes::insert(head, "/"))
+                                .selection(Selection::caret(head + 1))
+                                .annotate("origin", "slash-trigger"),
+                        ),
+                    );
                     evt.prevent_default();
                     return;
                 }
@@ -1925,7 +1944,7 @@ pub fn Editor(
             let patch_json_lit =
                 serde_json::to_string(&patch_json).unwrap_or_else(|_| "\"\"".into());
             let script = format!(
-                r#"
+                r"
                 (function() {{
                     const payload = {patch_json_lit};
                     // Always stash the latest payload — the
@@ -1935,7 +1954,7 @@ pub fn Editor(
                     const fn = window['__cm_patch_{id}'];
                     if (typeof fn === 'function') fn(payload);
                 }})();
-                "#
+                "
             );
             let _ = document::eval(&script);
         });
@@ -1944,17 +1963,15 @@ pub fn Editor(
     // CSS hook so caret-shape / theming can branch on vim mode.
     // Falls back to `vim-mode-insert` (bar caret) when vim is
     // disabled — same as plain editing.
-    let vim_class = vim
-        .map(|sig| match sig.peek().mode {
-            editor_vim::Mode::Normal => "vim-mode-normal",
-            editor_vim::Mode::Insert => "vim-mode-insert",
-            editor_vim::Mode::VisualChar
-            | editor_vim::Mode::VisualLine
-            | editor_vim::Mode::VisualBlock => "vim-mode-visual",
-            editor_vim::Mode::Replace => "vim-mode-replace",
-            editor_vim::Mode::Command => "vim-mode-command",
-        })
-        .unwrap_or("vim-mode-insert");
+    let vim_class = vim.map_or("vim-mode-insert", |sig| match sig.peek().mode {
+        editor_vim::Mode::Normal => "vim-mode-normal",
+        editor_vim::Mode::Insert => "vim-mode-insert",
+        editor_vim::Mode::VisualChar
+        | editor_vim::Mode::VisualLine
+        | editor_vim::Mode::VisualBlock => "vim-mode-visual",
+        editor_vim::Mode::Replace => "vim-mode-replace",
+        editor_vim::Mode::Command => "vim-mode-command",
+    });
     let read_only = state.read().reading_mode;
     let root_class = if read_only {
         format!("editor-root reading-mode {vim_class}")
@@ -1973,7 +1990,6 @@ pub fn Editor(
         }
     }
 }
-
 
 /// Clamp-detection guard: when state has a selection that
 /// covers more doc than the DOM can currently represent (e.g.,
@@ -2051,11 +2067,13 @@ pub(crate) fn push_selection(
         "editor.selection"
     );
     let new_sel = Selection::single(Range::new(s, e));
-    state.set(cur.update(
-        TransactionSpec::new()
-            .selection(new_sel)
-            .annotate("origin", "input"),
-    ));
+    state.set(
+        cur.update(
+            TransactionSpec::new()
+                .selection(new_sel)
+                .annotate("origin", "input"),
+        ),
+    );
 }
 
 /// Compute a minimal `Changes` between two strings by trimming

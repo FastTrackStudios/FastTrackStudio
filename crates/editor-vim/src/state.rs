@@ -1,11 +1,9 @@
 //! [`VimState`] + the central dispatcher.
 //!
 //! vim ref: zed/crates/vim/src/state.rs:45 (`Mode`, `Operator`)
-//! vim ref: codemirror-vim/src/vim.js (vim_api / commandDispatcher)
+//! vim ref: codemirror-vim/src/vim.js (`vim_api` / commandDispatcher)
 
-use editor_state::{
-    Changes, EditorState, KeySpec, Range, Selection, TransactionSpec,
-};
+use editor_state::{Changes, EditorState, KeySpec, Range, Selection, TransactionSpec};
 
 use crate::motions::{self, Motion};
 use crate::operators::{self, Operator};
@@ -57,12 +55,12 @@ pub struct VimState {
 /// Which pending command is waiting on a character.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MotionInput {
-    FindForward,        // `f`
-    FindBackward,       // `F`
-    TillForward,        // `t`
-    TillBackward,       // `T`
-    Replace,            // `r`
-    Register,           // `"` — the next char names a register
+    FindForward,  // `f`
+    FindBackward, // `F`
+    TillForward,  // `t`
+    TillBackward, // `T`
+    Replace,      // `r`
+    Register,     // `"` — the next char names a register
 }
 
 /// Recorded last change for `.` repeat. We store *intent* rather
@@ -90,6 +88,7 @@ pub enum LastChange {
 }
 
 impl VimState {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -105,6 +104,7 @@ impl VimState {
         self.pending_g_case = None;
     }
 
+    #[must_use]
     pub fn is_visual(&self) -> bool {
         matches!(
             self.mode,
@@ -116,6 +116,7 @@ impl VimState {
     /// fall through to the contenteditable / text-input path.
     /// Used by `editor-view`'s onkeydown to gate
     /// `preventDefault` between non-Insert and Insert modes.
+    #[must_use]
     pub fn is_inserting(&self) -> bool {
         matches!(self.mode, Mode::Insert | Mode::Replace)
     }
@@ -123,6 +124,7 @@ impl VimState {
     /// Hook for the editor's history system. Returns `None`
     /// today; the dispatcher emits `request_undo` / `request_redo`
     /// via metadata on the returned [`TransactionSpec`].
+    #[must_use]
     pub fn request_undo(&self) -> Option<TransactionSpec> {
         Some(
             TransactionSpec::new()
@@ -131,6 +133,7 @@ impl VimState {
         )
     }
 
+    #[must_use]
     pub fn request_redo(&self) -> Option<TransactionSpec> {
         Some(
             TransactionSpec::new()
@@ -157,9 +160,7 @@ pub(crate) fn dispatch(
     match vim.mode {
         Mode::Normal => dispatch_normal(state, vim, key),
         Mode::Insert => dispatch_insert(state, vim, key),
-        Mode::VisualChar | Mode::VisualLine | Mode::VisualBlock => {
-            dispatch_visual(state, vim, key)
-        }
+        Mode::VisualChar | Mode::VisualLine | Mode::VisualBlock => dispatch_visual(state, vim, key),
         Mode::Replace => dispatch_replace(state, vim, key),
         Mode::Command => crate::command_line::dispatch(state, vim, key),
     }
@@ -186,10 +187,7 @@ fn dispatch_normal(
         return dispatch_normal_modified(state, vim, key);
     }
 
-    let ch = match single_char(key) {
-        Some(c) => c,
-        None => return None,
-    };
+    let ch = single_char(key)?;
 
     // Count accumulation: `0` only starts a count if there's
     // already one in flight — otherwise `0` is the line-start
@@ -241,7 +239,7 @@ fn dispatch_normal(
     // Operator-pending: if `pending_operator` is `Some`, this
     // keystroke must produce a motion or be the doubled-op
     // shorthand (`dd`/`cc`/`yy`).
-    if let Some(op) = vim.pending_operator.clone() {
+    if let Some(op) = vim.pending_operator {
         return finish_operator(state, vim, op, ch);
     }
 
@@ -424,13 +422,25 @@ fn single_char_normal_command(
             // Change to end of line. `c$` shorthand.
             let from = caret(state);
             let to = motions::line_end(state, from);
-            Some(operators::apply_range(state, vim, operators::Operator::Change, from, to))
+            Some(operators::apply_range(
+                state,
+                vim,
+                operators::Operator::Change,
+                from,
+                to,
+            ))
         }
         'D' => {
             // Delete to end of line. `d$` shorthand.
             let from = caret(state);
             let to = motions::line_end(state, from);
-            Some(operators::apply_range(state, vim, operators::Operator::Delete, from, to))
+            Some(operators::apply_range(
+                state,
+                vim,
+                operators::Operator::Delete,
+                from,
+                to,
+            ))
         }
         'Y' => {
             // Yank the line (`yy`). Neovim default; classic vim
@@ -438,7 +448,13 @@ fn single_char_normal_command(
             let from = motions::line_start(state, caret(state));
             let line_end = motions::line_end(state, caret(state));
             let to = (line_end + 1).min(state.doc.len());
-            Some(operators::apply_linewise(state, vim, operators::Operator::Yank, from, to))
+            Some(operators::apply_linewise(
+                state,
+                vim,
+                operators::Operator::Yank,
+                from,
+                to,
+            ))
         }
         '~' => Some(toggle_case_char(state, vim)),
         '.' => crate::macros::replay_last(state, vim),
@@ -449,11 +465,7 @@ fn single_char_normal_command(
 /// Resolve a `g`-prefixed normal-mode command. The first `g`
 /// has already been consumed (we entered with `pending_g`
 /// cleared), and `ch` is whatever the user pressed next.
-fn finish_g_command(
-    state: &EditorState,
-    vim: &mut VimState,
-    ch: char,
-) -> Option<TransactionSpec> {
+fn finish_g_command(state: &EditorState, vim: &mut VimState, ch: char) -> Option<TransactionSpec> {
     match ch {
         'g' => {
             // `gg` — go to first non-blank of (count-th) line. No
@@ -520,7 +532,7 @@ fn finish_operator(
 ) -> Option<TransactionSpec> {
     // Doubled-op shorthand: `dd`, `cc`, `yy` act on the current
     // line.
-    if Operator::from_char(ch) == Some(op.clone()) {
+    if Operator::from_char(ch) == Some(op) {
         let count = vim.pending_count.take().unwrap_or(1);
         let from = motions::line_start(state, caret(state));
         let to = motions::line_end_n(state, caret(state), count);
@@ -528,7 +540,11 @@ fn finish_operator(
         // semantics: `dd` is linewise).
         let to_inclusive = (to + 1).min(state.doc.len());
         return Some(operators::apply_linewise(
-            state, vim, op, from, to_inclusive,
+            state,
+            vim,
+            op,
+            from,
+            to_inclusive,
         ));
     }
 
@@ -559,7 +575,7 @@ fn finish_operator(
         let to = motions::apply(state, motion, count);
         let (lo, hi) = if from <= to { (from, to) } else { (to, from) };
         vim.last_change = Some(LastChange::OperatorMotion {
-            operator: op.clone(),
+            operator: op,
             motion,
             count,
         });
@@ -602,13 +618,13 @@ fn finish_pending_input(
             // If we got here via the text-object hack inside
             // `finish_operator`, `pending_operator` is `Some` and
             // `ch` is the object key (`w`/`"`/`{`/...).
-            if let Some(op) = vim.pending_operator.clone() {
+            if let Some(op) = vim.pending_operator {
                 let around = matches!(input, MotionInput::TillForward);
                 if let Some(obj) = TextObject::from_char(ch) {
                     let count = vim.pending_count.take().unwrap_or(1);
                     let range = text_objects::apply(state, obj, around, caret(state));
                     vim.last_change = Some(LastChange::OperatorTextObject {
-                        operator: op.clone(),
+                        operator: op,
                         object: obj,
                         around,
                         count,
@@ -620,7 +636,7 @@ fn finish_pending_input(
             // Plain f/F/t/T motion case — apply directly.
             let count = vim.pending_count.take().unwrap_or(1);
             let target = motions::find_char(state, caret(state), ch, input, count)?;
-            if let Some(op) = vim.pending_operator.clone() {
+            if let Some(op) = vim.pending_operator {
                 let from = caret(state);
                 let (lo, hi) = if from <= target {
                     (from, target + 1)
@@ -718,7 +734,9 @@ fn dispatch_visual(
         let count = vim.pending_count.take().unwrap_or(1);
         let new_head = motions::apply(state, motion, count);
         let anchor = vim.visual_anchor.unwrap_or(caret(state));
-        return Some(TransactionSpec::new().selection(Selection::single(Range::new(anchor, new_head))));
+        return Some(
+            TransactionSpec::new().selection(Selection::single(Range::new(anchor, new_head))),
+        );
     }
     None
 }

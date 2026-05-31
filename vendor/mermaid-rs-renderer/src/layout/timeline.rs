@@ -16,7 +16,7 @@ pub(super) fn compute_timeline_layout(
 
     let num_events = data.events.len().max(1);
     let total_events_width =
-        num_events as f32 * event_width + (num_events - 1).max(0) as f32 * event_spacing;
+        num_events as f32 * event_width + (num_events - 1) as f32 * event_spacing;
 
     let width = padding * 2.0 + total_events_width;
     let height = padding * 2.0 + title_height + event_height + 100.0;

@@ -47,6 +47,7 @@ impl MarkSpec {
             inclusive_end: false,
         }
     }
+    #[must_use]
     pub fn with_attrs(mut self, attrs: Vec<(String, String)>) -> Self {
         self.attrs = attrs;
         self
@@ -60,6 +61,7 @@ impl MarkSpec {
 /// Mirrors `MarkTile.of` (`tile.ts:376-380`). The DOM element
 /// is produced by Dioxus at render-time; we just record the
 /// spec so the renderer knows how to wrap children.
+#[must_use]
 pub fn new_mark_tile(spec: MarkSpec) -> Tile {
     Tile {
         parent: None,
@@ -73,6 +75,7 @@ pub fn new_mark_tile(spec: MarkSpec) -> Tile {
 
 /// Read the spec out of a [`TileKind::Mark`] tile. Panics if
 /// called on a non-mark tile.
+#[must_use]
 pub fn mark_spec_of(tile: &Tile) -> &MarkSpec {
     match &tile.body {
         TileBody::Mark { spec } => spec,

@@ -16,9 +16,10 @@
 //! ## What's missing in v1
 //!
 //! - **Generation counters / slot recycling.** A removed
-//!   tile's slot is just left as `None`. We'll add slot reuse
-//!   + generation when memory becomes a concern; for now,
-//!   editor docs are small and the arena resets per view.
+//!   tile's slot is just left as `None`. We'll add
+//!   slot reuse + generation when memory becomes a
+//!   concern; for now, editor docs are small and the
+//!   arena resets per view.
 //! - **Bulk destroy.** CM6's `destroy()` chains; we'll add a
 //!   recursive remove once the tree mutators land.
 
@@ -30,6 +31,7 @@ use crate::tile::Tile;
 pub struct TileId(pub u32);
 
 impl TileId {
+    #[must_use]
     pub fn as_usize(self) -> usize {
         self.0 as usize
     }
@@ -44,6 +46,7 @@ pub struct Arena {
 }
 
 impl Arena {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -57,6 +60,7 @@ impl Arena {
 
     /// Read access. Panics if the id is unknown — that's a
     /// bug in caller code, not a runtime error.
+    #[must_use]
     pub fn get(&self, id: TileId) -> &Tile {
         self.tiles[id.as_usize()]
             .as_ref()
@@ -80,13 +84,15 @@ impl Arena {
     }
 
     /// Total live tile count.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.tiles.iter().filter(|s| s.is_some()).count()
     }
 
     /// `true` when no live tiles.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.tiles.iter().all(|s| s.is_none())
+        self.tiles.iter().all(std::option::Option::is_none)
     }
 }
 
@@ -106,8 +112,8 @@ impl std::ops::IndexMut<TileId> for Arena {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tile::{TileBody, TileKind};
     use crate::tile::flag::TileFlagSet;
+    use crate::tile::{TileBody, TileKind};
 
     fn tile(kind: TileKind, length: usize) -> Tile {
         Tile {

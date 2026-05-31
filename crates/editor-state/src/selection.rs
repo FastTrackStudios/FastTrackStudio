@@ -21,6 +21,7 @@ pub struct Range {
 
 impl Range {
     /// A caret at `pos`.
+    #[must_use]
     pub fn caret(pos: usize) -> Self {
         Self {
             anchor: pos,
@@ -30,17 +31,20 @@ impl Range {
 
     /// A range with explicit endpoints. `anchor` is where the
     /// selection started, `head` is where the caret is.
+    #[must_use]
     pub fn new(anchor: usize, head: usize) -> Self {
         Self { anchor, head }
     }
 
     /// `true` when `anchor == head`.
+    #[must_use]
     pub fn is_caret(self) -> bool {
         self.anchor == self.head
     }
 
     /// Inclusive-start, exclusive-end byte range covering the
     /// selection. `from..to` with `from <= to`.
+    #[must_use]
     pub fn byte_range(self) -> std::ops::Range<usize> {
         let lo = self.anchor.min(self.head);
         let hi = self.anchor.max(self.head);
@@ -48,11 +52,13 @@ impl Range {
     }
 
     /// Forward-direction `from`. Equivalent to `byte_range().start`.
+    #[must_use]
     pub fn from(self) -> usize {
         self.anchor.min(self.head)
     }
 
     /// Forward-direction `to`. Equivalent to `byte_range().end`.
+    #[must_use]
     pub fn to(self) -> usize {
         self.anchor.max(self.head)
     }
@@ -66,6 +72,7 @@ impl Range {
     /// - For a **non-caret** selection, the anchor is a fixed
     ///   pivot (`Before`) and the head extends with following
     ///   text (`After`).
+    #[must_use]
     pub fn map(self, changes: &Changes) -> Self {
         let (anchor_bias, head_bias) = if self.anchor == self.head {
             (Assoc::After, Assoc::After)
@@ -90,6 +97,7 @@ pub struct Selection {
 
 impl Selection {
     /// A single-range selection — by far the common case.
+    #[must_use]
     pub fn single(range: Range) -> Self {
         Self {
             ranges: vec![range],
@@ -98,12 +106,14 @@ impl Selection {
     }
 
     /// A single caret at `pos`.
+    #[must_use]
     pub fn caret(pos: usize) -> Self {
         Self::single(Range::caret(pos))
     }
 
     /// Multi-range selection. Panics if `ranges` is empty or
     /// `primary` is out of bounds.
+    #[must_use]
     pub fn many(ranges: Vec<Range>, primary: usize) -> Self {
         assert!(!ranges.is_empty(), "Selection must have at least one range");
         assert!(primary < ranges.len(), "primary index out of bounds");
@@ -112,22 +122,26 @@ impl Selection {
 
     /// The "active" range — where the caret is for cursor-aware
     /// behaviors (active-line highlight, format-text!, etc.).
+    #[must_use]
     pub fn primary(&self) -> Range {
         self.ranges[self.primary]
     }
 
     /// All ranges in order.
+    #[must_use]
     pub fn ranges(&self) -> &[Range] {
         &self.ranges
     }
 
     /// Index of the primary range in `ranges()`.
+    #[must_use]
     pub fn primary_index(&self) -> usize {
         self.primary
     }
 
     /// Map every range through a change set. Used by
     /// `Transaction::apply` to keep selections valid across edits.
+    #[must_use]
     pub fn map(&self, changes: &Changes) -> Self {
         Self {
             ranges: self.ranges.iter().map(|r| r.map(changes)).collect(),

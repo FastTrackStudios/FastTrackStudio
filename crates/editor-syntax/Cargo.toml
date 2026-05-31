@@ -30,3 +30,6 @@ lang-python = ["arborium/lang-python"]
 lang-json = ["arborium/lang-json"]
 lang-bash = ["arborium/lang-bash"]
 lang-markdown = ["arborium/lang-markdown"]
+
+[lints]
+workspace = true

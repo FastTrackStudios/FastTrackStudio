@@ -22,6 +22,7 @@ pub enum Lang {
 
 impl Lang {
     /// Map a fenced-code-block info tag (e.g. `rs`, `rust`, `ts`) to a [`Lang`].
+    #[must_use]
     pub fn from_fence_tag(tag: &str) -> Option<Self> {
         let normalized = tag.trim().to_ascii_lowercase();
         match normalized.as_str() {
@@ -95,6 +96,7 @@ fn grammar_for(lang: Lang) -> (arborium_tree_sitter::LanguageFn, &'static str) {
 /// Parse `src` with `lang`'s grammar and return non-overlapping byte-range tokens
 /// sorted by start. Overlapping captures are resolved by preferring the innermost
 /// (most recently opened) one.
+#[must_use]
 pub fn highlight(lang: Lang, src: &str) -> Vec<Token> {
     let (language_fn, highlights_query) = grammar_for(lang);
     let ts_language: arborium_tree_sitter::Language = language_fn.into();

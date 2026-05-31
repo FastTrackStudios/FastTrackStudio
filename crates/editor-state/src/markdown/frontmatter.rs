@@ -11,6 +11,7 @@
 //!   - `key: [a, b]` (flow list)
 //!   - `key: true|false` (checkbox)
 //!   - `tags: [...]` and other arrays
+//!
 //! Anything we don't understand falls back to a plain text row.
 //! A real YAML lib (`saphyr` / `yaml-rust2`) can replace this
 //! later — the byte-range-per-property contract is what the
@@ -62,6 +63,7 @@ impl PropValue {
     }
 }
 
+#[must_use]
 pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
     let bytes = text.as_bytes();
     // Opening fence must be at position 0: literal `---` then
@@ -69,10 +71,7 @@ pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
     if !text.starts_with("---") {
         return None;
     }
-    let opener_end = match bytes.iter().position(|&b| b == b'\n') {
-        Some(n) => n,
-        None => return None,
-    };
+    let opener_end = bytes.iter().position(|&b| b == b'\n')?;
     let first_line = &text[..opener_end];
     if first_line.trim_end() != "---" {
         return None;
@@ -99,8 +98,7 @@ pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
     let closer_end = bytes[closer_start..]
         .iter()
         .position(|&b| b == b'\n')
-        .map(|n| closer_start + n + 1)
-        .unwrap_or(bytes.len());
+        .map_or(bytes.len(), |n| closer_start + n + 1);
     let props = parse_frontmatter_body(text, body_start, closer_start);
     Some(FrontMatter {
         outer: 0..closer_end,
@@ -115,11 +113,7 @@ pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
 /// lists get merged into a single property whose `range` covers
 /// all their `  - item` continuation lines, so an edit replaces
 /// the whole multi-line entry atomically.
-fn parse_frontmatter_body(
-    text: &str,
-    body_start: usize,
-    body_end: usize,
-) -> Vec<Property> {
+fn parse_frontmatter_body(text: &str, body_start: usize, body_end: usize) -> Vec<Property> {
     let mut out = Vec::new();
     let bytes = text.as_bytes();
     let mut i = body_start;
@@ -167,8 +161,10 @@ fn parse_frontmatter_body(
                 }
                 let sub_line = &text[sub_from..j];
                 let sub_nl = if j < body_end { j + 1 } else { j };
-                let sub_indent =
-                    sub_line.bytes().take_while(|&b| b == b' ' || b == b'\t').count();
+                let sub_indent = sub_line
+                    .bytes()
+                    .take_while(|&b| b == b' ' || b == b'\t')
+                    .count();
                 if sub_line.trim().is_empty() {
                     // Blank line: part of the block if any
                     // content follows at the right indent.
@@ -191,7 +187,7 @@ fn parse_frontmatter_body(
             // Drop trailing blank lines so the value isn't padded
             // by whatever blank lines sat between the block and
             // the next key (or the closing `---`).
-            while lines.last().is_some_and(|s| s.is_empty()) {
+            while lines.last().is_some_and(std::string::String::is_empty) {
                 lines.pop();
             }
             PropValue::Text(lines.join("\n"))
@@ -207,9 +203,7 @@ fn parse_frontmatter_body(
                 }
                 let sub_line = &text[sub_from..j];
                 let sub_nl = if j < body_end { j + 1 } else { j };
-                if sub_line.starts_with([' ', '\t'])
-                    && sub_line.trim_start().starts_with("- ")
-                {
+                if sub_line.starts_with([' ', '\t']) && sub_line.trim_start().starts_with("- ") {
                     let item = sub_line.trim_start()[2..]
                         .trim()
                         .trim_matches('"')
@@ -279,7 +273,10 @@ fn classify_scalar(rest: &str) -> PropValue {
     }
     // Number — parses as f64 and the original text contains no
     // letters. Rejects strings like "1.0.0".
-    if !cleaned.is_empty() && cleaned.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
+    if !cleaned.is_empty()
+        && cleaned
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
     {
         if let Ok(n) = cleaned.parse::<f64>() {
             return PropValue::Number(n);
@@ -295,9 +292,7 @@ fn classify_scalar(rest: &str) -> PropValue {
 pub(crate) fn render_properties_html(props: &[Property], active_idx: Option<usize>) -> String {
     let mut html = String::from(r#"<div class="md-properties">"#);
     if props.is_empty() {
-        html.push_str(
-            r#"<div class="md-properties-empty">No properties</div>"#,
-        );
+        html.push_str(r#"<div class="md-properties-empty">No properties</div>"#);
     }
     for (idx, p) in props.iter().enumerate() {
         let key_attr = escape_html(&p.key);
@@ -389,13 +384,14 @@ fn format_number(n: f64) -> String {
     if n.fract() == 0.0 && n.abs() < 1e16 {
         format!("{}", n as i64)
     } else {
-        format!("{}", n)
+        format!("{n}")
     }
 }
 
 /// Re-serialize a property's YAML form. Returns a string that
 /// includes its trailing newline so it can be dropped in for
 /// `text[range]` as-is.
+#[must_use]
 pub fn serialize_property(key: &str, value: &PropValue) -> String {
     match value {
         PropValue::Text(s) if s.contains('\n') => {
@@ -411,7 +407,7 @@ pub fn serialize_property(key: &str, value: &PropValue) -> String {
             out
         }
         PropValue::Text(s) => format!("{key}: {}\n", yaml_quote_if_needed(s)),
-        PropValue::Bool(b) => format!("{key}: {}\n", b),
+        PropValue::Bool(b) => format!("{key}: {b}\n"),
         PropValue::Number(n) => format!("{key}: {}\n", format_number(*n)),
         PropValue::Date(s) => format!("{key}: {s}\n"),
         PropValue::Empty => format!("{key}:\n"),
@@ -447,7 +443,10 @@ fn yaml_quote_if_needed(s: &str) -> String {
         || s.contains('{')
         || s.contains('}')
         || s.contains(',')
-        || matches!(s, "true" | "false" | "True" | "False" | "TRUE" | "FALSE" | "null" | "~")
+        || matches!(
+            s,
+            "true" | "false" | "True" | "False" | "TRUE" | "FALSE" | "null" | "~"
+        )
         || s.starts_with('-')
         || s.starts_with('?')
         || s.starts_with('|')

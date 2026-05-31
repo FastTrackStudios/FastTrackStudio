@@ -7,13 +7,14 @@ use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RegisterKey {
-    Named(char),    // 'a'..'z'
-    Unnamed,        // "
-    SystemPlus,     // +
-    SystemStar,     // *
+    Named(char), // 'a'..'z'
+    Unnamed,     // "
+    SystemPlus,  // +
+    SystemStar,  // *
 }
 
 impl RegisterKey {
+    #[must_use]
     pub fn from_char(ch: char) -> Option<Self> {
         if ch.is_ascii_lowercase() {
             Some(Self::Named(ch))
@@ -76,10 +77,12 @@ impl Clone for Registers {
 }
 
 impl Registers {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn with_clipboard(clipboard: Clipboard) -> Self {
         Self {
             map: HashMap::new(),
@@ -127,6 +130,7 @@ impl Registers {
     }
 
     /// Read from `key`, defaulting to the unnamed register.
+    #[must_use]
     pub fn read(&self, key: Option<RegisterKey>) -> Option<String> {
         let key = key.unwrap_or(RegisterKey::Unnamed);
         match key {

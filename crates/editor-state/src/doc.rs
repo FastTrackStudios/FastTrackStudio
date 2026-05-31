@@ -17,7 +17,13 @@ pub struct Doc {
 }
 
 impl Doc {
-    /// Create a doc from a string slice.
+    /// Create a doc from a string slice. Infallible — the
+    /// trait equivalent ([`std::str::FromStr`]) is also
+    /// implemented for `Doc` (`Err = Infallible`); we keep
+    /// the inherent so callers don't have to import the
+    /// trait or `.unwrap()` for the always-Ok path.
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Self {
         Self {
             rope: Rope::from_str(s),
@@ -25,11 +31,13 @@ impl Doc {
     }
 
     /// Total length in bytes.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.rope.len_bytes()
     }
 
     /// `true` if the doc is empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.rope.len_bytes() == 0
     }
@@ -37,13 +45,18 @@ impl Doc {
     /// Slice the doc as a `String` over a byte range. Panics on
     /// out-of-bounds or non-char-boundary indices — same contract
     /// as `&str[..]`.
+    #[must_use]
     pub fn slice(&self, range: std::ops::Range<usize>) -> String {
         let start = self.rope.byte_to_char(range.start);
         let end = self.rope.byte_to_char(range.end);
         self.rope.slice(start..end).to_string()
     }
 
-    /// Full doc as a `String`.
+    /// Full doc as a `String`. Inherent method (mirrors the
+    /// `from_str` constructor); see `impl Display for Doc`
+    /// below for the trait equivalent.
+    #[allow(clippy::inherent_to_string)]
+    #[must_use]
     pub fn to_string(&self) -> String {
         self.rope.to_string()
     }
@@ -64,6 +77,13 @@ impl Doc {
         let end = new.byte_to_char(range.end);
         new.remove(start..end);
         Self { rope: new }
+    }
+}
+
+impl std::str::FromStr for Doc {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_str(s))
     }
 }
 

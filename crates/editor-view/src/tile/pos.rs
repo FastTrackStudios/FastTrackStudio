@@ -26,6 +26,7 @@ use crate::tile::arena::{Arena, TileId};
 /// Implementation walks rootward: each step adds the offset
 /// of `current` within its parent (= sum of previous siblings'
 /// `length + break_after`).
+#[must_use]
 pub fn pos_at_start(arena: &Arena, tile: TileId) -> usize {
     let mut current = tile;
     let mut acc = 0usize;
@@ -38,6 +39,7 @@ pub fn pos_at_start(arena: &Arena, tile: TileId) -> usize {
 
 /// `pos_at_start(tile) + tile.length`. Mirrors CM6's
 /// `Tile.posAtEnd` (`tile.ts:93-95`).
+#[must_use]
 pub fn pos_at_end(arena: &Arena, tile: TileId) -> usize {
     pos_at_start(arena, tile) + arena[tile].length
 }
@@ -45,13 +47,14 @@ pub fn pos_at_end(arena: &Arena, tile: TileId) -> usize {
 /// Doc offset of `child` within `parent`. Mirrors CM6's
 /// `Tile.posBefore` (`tile.ts:97-104`). Panics if `child`
 /// isn't actually a child of `parent` — caller bug.
+#[must_use]
 pub fn pos_before(arena: &Arena, parent: TileId, child: TileId) -> usize {
     let mut pos = 0;
     for &sib in &arena[parent].children {
         if sib == child {
             return pos;
         }
-        pos += arena[sib].length + (if arena[sib].break_after() { 1 } else { 0 });
+        pos += arena[sib].length + usize::from(arena[sib].break_after());
     }
     panic!("pos_before: {child:?} is not a child of {parent:?}");
 }
@@ -59,6 +62,7 @@ pub fn pos_before(arena: &Arena, parent: TileId, child: TileId) -> usize {
 /// Doc offset of the *character after* `child` within
 /// `parent`'s coordinate space. Mirrors CM6's
 /// `Tile.posAfter` (`tile.ts:106-108`).
+#[must_use]
 pub fn pos_after(arena: &Arena, parent: TileId, child: TileId) -> usize {
     pos_before(arena, parent, child) + arena[child].length
 }
@@ -66,8 +70,8 @@ pub fn pos_after(arena: &Arena, parent: TileId, child: TileId) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tile::{Tile, TileBody, TileKind};
     use crate::tile::flag::{TileFlag, TileFlagSet};
+    use crate::tile::{Tile, TileBody, TileKind};
 
     /// Build a small tree:
     ///   Doc (root, length=11)
@@ -184,8 +188,8 @@ mod tests {
         a[doc].children = vec![line];
         a[line].children = vec![text];
 
-        assert_eq!(pos_at_start(&arena_view(&a), text), 0);
-        assert_eq!(pos_at_end(&arena_view(&a), text), 5);
+        assert_eq!(pos_at_start(arena_view(&a), text), 0);
+        assert_eq!(pos_at_end(arena_view(&a), text), 5);
     }
 
     /// Tiny helper for the nested test — clones the arena

@@ -19,7 +19,7 @@ pub mod transaction;
 
 pub use change::{Change, Changes};
 pub use command::{Command, KeyBinding, KeySpec, Keymap};
-pub use decoration::{Decoration, DecorationKind, DecorationSet, DecoratedRange};
+pub use decoration::{DecoratedRange, Decoration, DecorationKind, DecorationSet};
 pub use doc::Doc;
 pub use selection::{Range, Selection};
 pub use state::EditorState;

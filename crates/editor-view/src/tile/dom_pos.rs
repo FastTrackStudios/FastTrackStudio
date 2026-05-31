@@ -29,10 +29,11 @@ pub enum Side {
 
 /// Doc position given a tile + offset within its content.
 /// `offset` is in the tile's local coordinate space; for a
-/// leaf TextTile that's the character offset in its text.
+/// leaf `TextTile` that's the character offset in its text.
 ///
 /// Mirrors `Tile.posAtStart + offset` from CM6's
 /// `posFromDOM` (`docview.ts:282`).
+#[must_use]
 pub fn pos_from_tile(arena: &Arena, tile: TileId, offset: usize) -> usize {
     pos_at_start(arena, tile) + offset
 }
@@ -49,6 +50,7 @@ pub fn pos_from_tile(arena: &Arena, tile: TileId, offset: usize) -> usize {
 ///
 /// Mirrors CM6's `Tile.children` walk in `domAtPos`
 /// (`docview.ts:320-323`).
+#[must_use]
 pub fn tile_at_pos(arena: &Arena, root: TileId, pos: usize, side: Side) -> (TileId, usize) {
     descend(arena, root, pos, side)
 }
@@ -56,6 +58,7 @@ pub fn tile_at_pos(arena: &Arena, root: TileId, pos: usize, side: Side) -> (Tile
 /// Find the leaf tile owning `pos` and return `(leaf_id,
 /// offset_within_leaf)`. Same as `tile_at_pos` but recurses
 /// until it hits a leaf.
+#[must_use]
 pub fn leaf_at_pos(arena: &Arena, root: TileId, pos: usize, side: Side) -> (TileId, usize) {
     let mut cur = root;
     let mut local = pos.saturating_sub(pos_at_start(arena, root));
@@ -68,12 +71,7 @@ pub fn leaf_at_pos(arena: &Arena, root: TileId, pos: usize, side: Side) -> (Tile
         let mut acc = 0usize;
         let mut chosen: Option<TileId> = None;
         for (idx, &child) in children.iter().enumerate() {
-            let child_len = arena.get(child).length
-                + (if arena.get(child).break_after() {
-                    1
-                } else {
-                    0
-                });
+            let child_len = arena.get(child).length + usize::from(arena.get(child).break_after());
             let next_acc = acc + child_len;
             let inside = if side == Side::Before {
                 local > acc && local <= next_acc
@@ -110,7 +108,7 @@ mod tests {
     use crate::tile::build::build_tiles;
     use editor_state::Decoration;
 
-    /// Helper: the (sole) LineTile under the doc.
+    /// Helper: the (sole) `LineTile` under the doc.
     fn first_line(arena: &Arena, doc: TileId) -> TileId {
         arena.get(doc).children[0]
     }

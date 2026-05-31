@@ -12,7 +12,7 @@ fn dense_flowchart_source(nodes: usize, extra_edges: usize) -> String {
         return out;
     }
     for i in 0..nodes {
-        out.push_str(&format!("  N{}[Node {}]\n", i, i));
+        out.push_str(&format!("  N{i}[Node {i}]\n"));
     }
     for i in 0..nodes.saturating_sub(1) {
         out.push_str(&format!("  N{} --> N{}\n", i, i + 1));
@@ -23,7 +23,7 @@ fn dense_flowchart_source(nodes: usize, extra_edges: usize) -> String {
             if count >= extra_edges {
                 break;
             }
-            out.push_str(&format!("  N{} --> N{}\n", i, j));
+            out.push_str(&format!("  N{i} --> N{j}\n"));
             count += 1;
         }
         if count >= extra_edges {
@@ -409,7 +409,7 @@ fn bench_edge_routing(c: &mut Criterion) {
     let theme = Theme::modern();
     let config = LayoutConfig::default();
     for (nodes, extra_edges) in [(40usize, 80usize), (60, 180), (80, 320)] {
-        let name = format!("dense_{}_{}", nodes, extra_edges);
+        let name = format!("dense_{nodes}_{extra_edges}");
         let input = dense_flowchart_source(nodes, extra_edges);
         let parsed = parse_mermaid(&input).expect("parse failed");
         group.bench_with_input(
@@ -435,7 +435,7 @@ fn bench_edge_routing_grid_modes(c: &mut Criterion) {
     config_heur.flowchart.routing.enable_grid_router = false;
 
     for (nodes, extra_edges) in [(40usize, 80usize), (60, 180), (80, 320)] {
-        let name = format!("dense_{}_{}", nodes, extra_edges);
+        let name = format!("dense_{nodes}_{extra_edges}");
         let input = dense_flowchart_source(nodes, extra_edges);
         let parsed = parse_mermaid(&input).expect("parse failed");
         group.bench_with_input(

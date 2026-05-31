@@ -15,12 +15,25 @@ pub(crate) fn replay_last(state: &EditorState, vim: &mut VimState) -> Option<Tra
     let last = vim.last_change.clone()?;
     let caret = state.selection.primary().head;
     match last {
-        LastChange::OperatorMotion { operator, motion, count } => {
+        LastChange::OperatorMotion {
+            operator,
+            motion,
+            count,
+        } => {
             let to = motions::apply(state, motion, count);
-            let (lo, hi) = if caret <= to { (caret, to) } else { (to, caret) };
+            let (lo, hi) = if caret <= to {
+                (caret, to)
+            } else {
+                (to, caret)
+            };
             Some(operators::apply_range(state, vim, operator, lo, hi))
         }
-        LastChange::OperatorTextObject { operator, object, around, .. } => {
+        LastChange::OperatorTextObject {
+            operator,
+            object,
+            around,
+            ..
+        } => {
             let r = text_objects::apply(state, object, around, caret);
             Some(operators::apply_range(state, vim, operator, r.start, r.end))
         }

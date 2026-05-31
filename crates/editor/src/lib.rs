@@ -2,7 +2,6 @@
 //! the state + view surface from one place.
 
 pub use editor_state::*;
-pub use editor_typst;
 pub use editor_view::{self, Editor};
 pub use editor_vim;
 
@@ -10,3 +9,8 @@ pub use editor_vim;
 pub mod commands {
     pub use editor_state::commands::*;
 }
+
+/// Turnkey [`EditorApp`] Dioxus component — drop into any app
+/// for a working markdown editor with no setup.
+pub mod app;
+pub use app::{EDITOR_STYLE, EditorApp, combined_decorations, standard_markdown_keymap};

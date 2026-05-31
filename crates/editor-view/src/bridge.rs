@@ -36,7 +36,7 @@ use editor_state::{
     Change, Changes, DecoratedRange, EditorState, Range, Selection, TransactionSpec,
 };
 
-use crate::editor::{diff_text, push_selection, DecorationSource};
+use crate::editor::{DecorationSource, diff_text, push_selection};
 use crate::tile::build::build_tiles;
 use crate::tile::visible::VisibleText;
 
@@ -97,7 +97,7 @@ pub(crate) fn handle_bridge_msg(
                     inserted: vis_vec[0].inserted.clone(),
                 });
             } else {
-                for c in vis_vec.iter() {
+                for c in &vis_vec {
                     let doc_from = old_visible.visible_to_doc(c.from);
                     let doc_to = old_visible.visible_to_doc(c.to);
                     doc_changes.push(Change {
@@ -108,24 +108,23 @@ pub(crate) fn handle_bridge_msg(
                 }
             }
             let changes = Changes::from_sorted(doc_changes);
-            let new_doc_len = cur.doc.len() as isize + changes
-                .iter()
-                .map(|c| c.delta())
-                .sum::<isize>();
+            let new_doc_len = cur.doc.len() as isize
+                + changes
+                    .iter()
+                    .map(editor_state::Change::delta)
+                    .sum::<isize>();
             let new_doc_len = new_doc_len.max(0) as usize;
             let intended_caret = changes
                 .iter()
                 .last()
-                .map(|c| {
+                .map_or(s_off, |c| {
                     let prior_delta: isize = changes
                         .iter()
-                        .take_while(|x| (*x).from < c.from)
-                        .map(|x| x.delta())
+                        .take_while(|x| x.from < c.from)
+                        .map(editor_state::Change::delta)
                         .sum();
-                    (c.from as isize + prior_delta + c.inserted.len() as isize)
-                        .max(0) as usize
+                    (c.from as isize + prior_delta + c.inserted.len() as isize).max(0) as usize
                 })
-                .unwrap_or(s_off)
                 .min(new_doc_len);
             tracing::debug!(
                 old_visible_len = old_visible.text.len(),
@@ -137,12 +136,14 @@ pub(crate) fn handle_bridge_msg(
                 "editor.input"
             );
             let new_sel = Selection::caret(intended_caret);
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .changes(changes)
-                    .selection(new_sel)
-                    .annotate("origin", "input"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .changes(changes)
+                        .selection(new_sel)
+                        .annotate("origin", "input"),
+                ),
+            );
         }
         "sel" => {
             let cur = state.read().clone();
@@ -154,16 +155,23 @@ pub(crate) fn handle_bridge_msg(
             let doc_len = cur.doc.len();
             let from = s_off.min(doc_len);
             let to = e_off.min(doc_len).max(from);
-            tracing::debug!(from, to, inserted_len = text.len(), "editor.before_input.insert");
+            tracing::debug!(
+                from,
+                to,
+                inserted_len = text.len(),
+                "editor.before_input.insert"
+            );
             let changes = Changes::replace(from..to, text);
             let caret = from + text.len();
             let new_sel = Selection::single(Range::caret(caret));
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .changes(changes)
-                    .selection(new_sel)
-                    .annotate("origin", "before-input"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .changes(changes)
+                        .selection(new_sel)
+                        .annotate("origin", "before-input"),
+                ),
+            );
         }
         "before-input-delete-backward" => {
             let cur = state.read().clone();
@@ -186,12 +194,14 @@ pub(crate) fn handle_bridge_msg(
             tracing::debug!(del_from, del_to, "editor.before_input.delete_backward");
             let changes = Changes::delete(del_from..del_to);
             let new_sel = Selection::single(Range::caret(del_from));
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .changes(changes)
-                    .selection(new_sel)
-                    .annotate("origin", "before-input"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .changes(changes)
+                        .selection(new_sel)
+                        .annotate("origin", "before-input"),
+                ),
+            );
         }
         "before-input-delete-forward" => {
             let cur = state.read().clone();
@@ -214,12 +224,14 @@ pub(crate) fn handle_bridge_msg(
             tracing::debug!(del_from, del_to, "editor.before_input.delete_forward");
             let changes = Changes::delete(del_from..del_to);
             let new_sel = Selection::single(Range::caret(del_from));
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .changes(changes)
-                    .selection(new_sel)
-                    .annotate("origin", "before-input"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .changes(changes)
+                        .selection(new_sel)
+                        .annotate("origin", "before-input"),
+                ),
+            );
         }
         "composition-start" => {
             tracing::debug!("editor.composition.start");
@@ -245,12 +257,14 @@ pub(crate) fn handle_bridge_msg(
                 let p = cur_clone.selection.primary();
                 let changes = editor_state::Changes::replace(p.from()..p.to(), text);
                 let caret = p.from() + text.len();
-                state.set(cur_clone.update(
-                    editor_state::TransactionSpec::new()
-                        .changes(changes)
-                        .selection(editor_state::Selection::caret(caret))
-                        .annotate("origin", "insert-bracket-plain"),
-                ));
+                state.set(
+                    cur_clone.update(
+                        editor_state::TransactionSpec::new()
+                            .changes(changes)
+                            .selection(editor_state::Selection::caret(caret))
+                            .annotate("origin", "insert-bracket-plain"),
+                    ),
+                );
             }
         }
         "enter-continue-list" => {
@@ -269,41 +283,51 @@ pub(crate) fn handle_bridge_msg(
             }
         }
         "copy-range" => {
-            let from = v.get("from").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
-            let to = v.get("to").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let from = v
+                .get("from")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize;
+            let to = v.get("to").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
             let cur = state.read();
             let doc = cur.doc.to_string();
             let from = from.min(doc.len());
             let to = to.min(doc.len()).max(from);
             let slice = doc[from..to].to_string();
             let escaped = slice.replace('\\', "\\\\").replace('`', "\\`");
-            let script = format!(
-                r#"navigator.clipboard && navigator.clipboard.writeText(`{escaped}`);"#
-            );
+            let script =
+                format!(r"navigator.clipboard && navigator.clipboard.writeText(`{escaped}`);");
             let _ = document::eval(&script);
         }
         "task-toggle" => {
-            let pos = v.get("pos").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let pos = v
+                .get("pos")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize;
             let cur = state.read().clone();
             let doc = cur.doc.to_string();
             let bracket_idx = pos + 3;
             let next_char = doc.as_bytes().get(bracket_idx).copied();
             let new_char = match next_char {
                 Some(b' ') => "x",
-                Some(b'x') | Some(b'X') => " ",
+                Some(b'x' | b'X') => " ",
                 _ => return,
             };
             let changes = Changes::replace(bracket_idx..bracket_idx + 1, new_char);
             let prev_sel = cur.selection.clone();
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .changes(changes)
-                    .selection(prev_sel)
-                    .annotate("origin", "task-toggle"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .changes(changes)
+                        .selection(prev_sel)
+                        .annotate("origin", "task-toggle"),
+                ),
+            );
         }
         "widget-focus" => {
-            let focused = v.get("focused").and_then(|b| b.as_bool()).unwrap_or(false);
+            let focused = v
+                .get("focused")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             widget_focus.set(focused);
         }
         "prop-leave" => {
@@ -313,7 +337,8 @@ pub(crate) fn handle_bridge_msg(
                 next.clear_pending();
                 vs.set(next);
             }
-            let script = r#"(()=>{const el=document.querySelector('.editor-root');if(el)el.focus();})();"#;
+            let script =
+                r"(()=>{const el=document.querySelector('.editor-root');if(el)el.focus();})();";
             let _ = document::eval(script);
         }
         "prop-set" => {
@@ -323,8 +348,7 @@ pub(crate) fn handle_bridge_msg(
                     "text" => PropValue::Text(value.to_string()),
                     "number" => value
                         .parse::<f64>()
-                        .map(PropValue::Number)
-                        .unwrap_or_else(|_| PropValue::Text(value.to_string())),
+                        .map_or_else(|_| PropValue::Text(value.to_string()), PropValue::Number),
                     "date" => PropValue::Date(value.to_string()),
                     "bool" => PropValue::Bool(value == "true"),
                     _ => {
@@ -355,14 +379,18 @@ pub(crate) fn handle_bridge_msg(
             // contenteditable add-row cell (cleared by JS); the
             // next live-preview pass renders the new row and
             // they can click into it to set a value.
-            let Some(key) = v.get("key").and_then(|k| k.as_str()) else { return };
+            let Some(key) = v.get("key").and_then(|k| k.as_str()) else {
+                return;
+            };
             let key = key.trim();
             if key.is_empty() {
                 return;
             }
             let cur = state.read().clone();
             let doc = cur.doc.to_string();
-            let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else { return };
+            let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else {
+                return;
+            };
             // Reject duplicates so we don't end up with two
             // entries the parser would collapse.
             if fm.props.iter().any(|p| p.key == key) {
@@ -375,31 +403,41 @@ pub(crate) fn handle_bridge_msg(
             );
             let changes = Changes::insert(insert_at, &new_text);
             let prev_sel = cur.selection.clone();
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .changes(changes)
-                    .selection(prev_sel)
-                    .annotate("origin", "prop-add"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .changes(changes)
+                        .selection(prev_sel)
+                        .annotate("origin", "prop-add"),
+                ),
+            );
         }
         "prop-remove" => {
             // Delete the entire `prop.range` for the named key.
-            let Some(key) = v.get("key").and_then(|k| k.as_str()) else { return };
+            let Some(key) = v.get("key").and_then(|k| k.as_str()) else {
+                return;
+            };
             let cur = state.read().clone();
             let doc = cur.doc.to_string();
-            let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else { return };
-            let Some(prop) = fm.props.iter().find(|p| p.key == key) else { return };
+            let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else {
+                return;
+            };
+            let Some(prop) = fm.props.iter().find(|p| p.key == key) else {
+                return;
+            };
             let changes = Changes::delete(prop.range.clone());
             // Caret stays put — the deletion is below it in most
             // cases (closer is at the end of the FM range), and
             // map_through handles the rest.
             let prev_sel = cur.selection.clone();
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .changes(changes)
-                    .selection(prev_sel)
-                    .annotate("origin", "prop-remove"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .changes(changes)
+                        .selection(prev_sel)
+                        .annotate("origin", "prop-remove"),
+                ),
+            );
         }
         "prop-list-remove" => {
             apply_property_change(state, v, |old, _ty, value| {
@@ -414,22 +452,29 @@ pub(crate) fn handle_bridge_msg(
             });
         }
         "focus-pos" => {
-            let pos = v.get("pos").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let pos = v
+                .get("pos")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize;
             let cur = state.read().clone();
             let pos = pos.min(cur.doc.len());
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .selection(Selection::caret(pos))
-                    .annotate("origin", "focus-pos"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .selection(Selection::caret(pos))
+                        .annotate("origin", "focus-pos"),
+                ),
+            );
         }
         "link-clicked" => {
             let cur = state.read().clone();
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .selection(Selection::caret(0))
-                    .annotate("origin", "link-clicked"),
-            ));
+            state.set(
+                cur.update(
+                    TransactionSpec::new()
+                        .selection(Selection::caret(0))
+                        .annotate("origin", "link-clicked"),
+                ),
+            );
         }
         _ => {}
     }
@@ -442,15 +487,25 @@ pub(crate) fn handle_bridge_msg(
 fn apply_property_change(
     mut state: Signal<EditorState>,
     v: &serde_json::Value,
-    mutate: impl FnOnce(&editor_state::markdown::PropValue, &str, &str) -> editor_state::markdown::PropValue,
+    mutate: impl FnOnce(
+        &editor_state::markdown::PropValue,
+        &str,
+        &str,
+    ) -> editor_state::markdown::PropValue,
 ) {
-    let Some(key) = v.get("key").and_then(|k| k.as_str()) else { return };
+    let Some(key) = v.get("key").and_then(|k| k.as_str()) else {
+        return;
+    };
     let value = v.get("value").and_then(|x| x.as_str()).unwrap_or("");
     let ty = v.get("ty").and_then(|x| x.as_str()).unwrap_or("text");
     let cur = state.read().clone();
     let doc = cur.doc.to_string();
-    let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else { return };
-    let Some(prop) = fm.props.iter().find(|p| p.key == key) else { return };
+    let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else {
+        return;
+    };
+    let Some(prop) = fm.props.iter().find(|p| p.key == key) else {
+        return;
+    };
     let new_value = mutate(&prop.value, ty, value);
     if values_equal(&prop.value, &new_value) {
         return;
@@ -458,19 +513,25 @@ fn apply_property_change(
     let new_text = editor_state::markdown::serialize_property(key, &new_value);
     let changes = Changes::replace(prop.range.clone(), new_text);
     let prev_sel = cur.selection.clone();
-    state.set(cur.update(
-        TransactionSpec::new()
-            .changes(changes)
-            .selection(prev_sel)
-            .annotate("origin", "prop-edit"),
-    ));
+    state.set(
+        cur.update(
+            TransactionSpec::new()
+                .changes(changes)
+                .selection(prev_sel)
+                .annotate("origin", "prop-edit"),
+        ),
+    );
 }
 
-fn values_equal(a: &editor_state::markdown::PropValue, b: &editor_state::markdown::PropValue) -> bool {
-    use editor_state::markdown::PropValue::*;
+fn values_equal(
+    a: &editor_state::markdown::PropValue,
+    b: &editor_state::markdown::PropValue,
+) -> bool {
+    use editor_state::markdown::PropValue::{Bool, Date, Empty, List, Number, Text};
     match (a, b) {
         (Text(x), Text(y)) | (Date(x), Date(y)) => x == y,
         (Bool(x), Bool(y)) => x == y,
+        #[allow(clippy::float_cmp)]
         (Number(x), Number(y)) => x == y,
         (List(x), List(y)) => x == y,
         (Empty, Empty) => true,

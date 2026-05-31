@@ -41,6 +41,7 @@ impl Compiler {
     /// Build a compiler with the default bundled font set
     /// (`typst-assets`'s `fonts` feature). The Editor only
     /// needs one — keep it as a long-lived singleton.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             world: World::with_bundled_fonts(),
@@ -92,20 +93,17 @@ impl Default for Compiler {
 /// Pretty-print typst's `SourceDiagnostic` list into something
 /// the UI can show in a toast or hover popover. Carries the
 /// span text where available.
-fn format_diagnostics(
-    errs: &ecow::EcoVec<typst::diag::SourceDiagnostic>,
-    world: &World,
-) -> String {
+fn format_diagnostics(errs: &ecow::EcoVec<typst::diag::SourceDiagnostic>, world: &World) -> String {
     use std::fmt::Write;
     let mut out = String::new();
     for diag in errs {
         let _ = write!(out, "{:?}: {}", diag.severity, diag.message);
         if let Some(span) = world.lookup_span(diag.span) {
-            let _ = write!(out, "  @ {}", span);
+            let _ = write!(out, "  @ {span}");
         }
         out.push('\n');
         for hint in &diag.hints {
-            let _ = writeln!(out, "  hint: {}", hint);
+            let _ = writeln!(out, "  hint: {hint}");
         }
     }
     out.trim_end().to_string()

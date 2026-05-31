@@ -11,6 +11,7 @@ rust-version.workspace = true
 editor-syntax = { workspace = true, features = ["default-langs"] }
 editor-typst = { workspace = true }
 editor-mermaid = { workspace = true }
+editor-keyflow = { workspace = true }
 ropey = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
@@ -31,3 +32,6 @@ web-sys = { version = "0.3", features = ["Window", "Performance"] }
 [features]
 default = []
 serde = ["dep:serde"]
+
+[lints]
+workspace = true

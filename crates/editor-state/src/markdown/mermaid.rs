@@ -33,7 +33,7 @@ pub(crate) fn render_mermaid(body: &str) -> Option<String> {
     if let Some(cached) = with_mermaid_cache(|c| c.get(body)) {
         return Some(cached);
     }
-    let budget = COMPILE_BUDGET.with(|c| c.get());
+    let budget = COMPILE_BUDGET.with(std::cell::Cell::get);
     if budget == 0 {
         return None;
     }
@@ -82,10 +82,19 @@ fn themify_svg(svg: &str) -> String {
         // Node fill (slate-50). Subtle overlay.
         .replace("fill=\"#F8FAFC\"", "fill=\"rgba(127, 167, 217, 0.08)\"")
         // Node + edge-label strokes (slate-400).
-        .replace("stroke=\"#94A3B8\"", "stroke=\"currentColor\" stroke-opacity=\"0.35\"")
+        .replace(
+            "stroke=\"#94A3B8\"",
+            "stroke=\"currentColor\" stroke-opacity=\"0.35\"",
+        )
         // Arrow heads, edges (slate-500).
-        .replace("fill=\"#64748B\"", "fill=\"currentColor\" fill-opacity=\"0.55\"")
-        .replace("stroke=\"#64748B\"", "stroke=\"currentColor\" stroke-opacity=\"0.55\"")
+        .replace(
+            "fill=\"#64748B\"",
+            "fill=\"currentColor\" fill-opacity=\"0.55\"",
+        )
+        .replace(
+            "stroke=\"#64748B\"",
+            "stroke=\"currentColor\" stroke-opacity=\"0.55\"",
+        )
 }
 
 struct MermaidCache {
@@ -95,7 +104,10 @@ struct MermaidCache {
 
 impl MermaidCache {
     fn new(cap: usize) -> Self {
-        Self { entries: Vec::with_capacity(cap), cap }
+        Self {
+            entries: Vec::with_capacity(cap),
+            cap,
+        }
     }
     fn get(&mut self, body: &str) -> Option<String> {
         let i = self.entries.iter().position(|(b, _)| b == body)?;
@@ -110,6 +122,14 @@ impl MermaidCache {
         }
         self.entries.push((body, svg));
     }
+}
+
+fn with_mermaid_cache<R>(f: impl FnOnce(&mut MermaidCache) -> R) -> R {
+    thread_local! {
+        static CACHE: std::cell::RefCell<MermaidCache> =
+            std::cell::RefCell::new(MermaidCache::new(CACHE_CAP));
+    }
+    CACHE.with(|c| f(&mut c.borrow_mut()))
 }
 
 #[cfg(test)]
@@ -138,12 +158,4 @@ mod tests {
         let out = themify_svg(svg);
         assert!(out.contains("#abc123"));
     }
-}
-
-fn with_mermaid_cache<R>(f: impl FnOnce(&mut MermaidCache) -> R) -> R {
-    thread_local! {
-        static CACHE: std::cell::RefCell<MermaidCache> =
-            std::cell::RefCell::new(MermaidCache::new(CACHE_CAP));
-    }
-    CACHE.with(|c| f(&mut c.borrow_mut()))
 }
