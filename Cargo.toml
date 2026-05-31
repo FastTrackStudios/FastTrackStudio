@@ -52,12 +52,15 @@ reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs
 # now enable that feature on `daw` instead of depending on reaper-test.
 
 # ── Vox service framework ────────────────────────────────────────────
-# Aligned with daw + architect on bearcove upstream so the FTS workspace
-# resolves a single vox copy across all sibling repos.
-vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-stream = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-websocket = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+# Aligned with daw + architect on the FastTrackStudios fork @ f31f1040 =
+# vox 0.8.2 (latest; carries the vox-jit-abi __rust_alloc-scan fix) so the FTS
+# workspace resolves a single vox copy across all sibling repos. URL is the
+# no-`.git` form architect uses (cargo treats `vox` and `vox.git` as distinct
+# sources, which would re-fragment the graph).
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-types = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-stream = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
 # ── Architect service framework ─────────────────────────────────────
 architect = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
@@ -194,18 +197,18 @@ redundant_locals = "allow"
 # JIT encode worker OOMs/aborts on complex/allocating RPC return types
 # (complex_return_roundtrips). Redirect bearcove/vox → FTS fork.
 [patch."https://github.com/bearcove/vox"]
-facet-cbor = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-ffi = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-jit = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-jit-abi = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-jit-cal = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-macros-core = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-macros-parse = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-postcard = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-schema = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-service-macros = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-stream = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-types = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+facet-cbor = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-ffi = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit-abi = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit-cal = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-macros-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-macros-parse = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-postcard = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-schema = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-service-macros = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-stream = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-types = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
