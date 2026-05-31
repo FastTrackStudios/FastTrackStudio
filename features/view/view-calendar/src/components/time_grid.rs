@@ -538,7 +538,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     rsx! {
                         div {
                             key: "tpl-{tp.id}-{tp.top}",
-                            class: "absolute left-0.5 right-0.5 rounded-md border border-dashed overflow-hidden transition {cursor} {pe} {dim} {tp.pal}",
+                            class: "absolute left-0.5 right-0.5 rounded-[3px] overflow-hidden transition {cursor} {pe} {dim} {tp.pal}",
                             style: "top: {tp.top}px; height: {tp.h}px;",
                             onpointerdown: move |e: Event<PointerData>| {
                                 if !draggable_block {
@@ -604,13 +604,15 @@ fn DayColumn(props: DayColumnProps) -> Element {
                                 }
                             }
                             span {
-                                class: "block px-1.5 py-0.5 text-[10px] font-medium leading-tight truncate",
+                                class: "block px-1.5 py-px text-[10px] font-medium leading-snug truncate",
                                 "{tp.label}"
                             }
                             if let Some(a) = tp.assignment.as_ref() {
-                                span {
-                                    class: "block px-1.5 text-[10px] leading-tight truncate opacity-80 italic",
-                                    "{a}"
+                                if tp.h >= 30 {
+                                    span {
+                                        class: "block px-1.5 text-[10px] leading-snug truncate opacity-75 italic",
+                                        "{a}"
+                                    }
                                 }
                             }
                         }

@@ -52,18 +52,20 @@ pub fn chip_palette(color: ColorTag) -> ChipPalette {
     }
 }
 
-/// Faint dashed-outline class set for a day-plan template "ghost"
-/// block — a dim placement guide that sits behind real events. Same
-/// literal-class requirement as [`chip_palette`]: every variant is
-/// spelled out so Tailwind keeps the rules.
+/// Class set for a day-plan "ghost" block — a faint, transparent
+/// colored panel with a thin left accent bar that sits behind real
+/// events. Same literal-class requirement as [`chip_palette`]: every
+/// variant is spelled out so Tailwind keeps the rules.
 #[must_use]
 pub fn template_palette(color: ColorTag) -> &'static str {
     match color {
-        ColorTag::Neutral => "border-slate-400/40 bg-slate-400/[0.07] text-slate-300/80",
-        ColorTag::Primary => "border-violet-400/40 bg-violet-400/[0.07] text-violet-200/80",
-        ColorTag::Success => "border-emerald-400/40 bg-emerald-400/[0.07] text-emerald-200/80",
-        ColorTag::Warning => "border-amber-400/40 bg-amber-400/[0.08] text-amber-100/80",
-        ColorTag::Danger => "border-rose-400/40 bg-rose-400/[0.07] text-rose-200/80",
-        ColorTag::Info => "border-sky-400/40 bg-sky-400/[0.07] text-sky-200/80",
+        ColorTag::Neutral => "bg-slate-500/10 border-l-2 border-slate-400/60 text-slate-200/90",
+        ColorTag::Primary => "bg-violet-500/10 border-l-2 border-violet-400/60 text-violet-100/90",
+        ColorTag::Success => {
+            "bg-emerald-500/10 border-l-2 border-emerald-400/60 text-emerald-100/90"
+        }
+        ColorTag::Warning => "bg-amber-500/10 border-l-2 border-amber-400/60 text-amber-100/90",
+        ColorTag::Danger => "bg-rose-500/10 border-l-2 border-rose-400/60 text-rose-100/90",
+        ColorTag::Info => "bg-sky-500/10 border-l-2 border-sky-400/60 text-sky-100/90",
     }
 }
