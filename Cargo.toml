@@ -9,25 +9,11 @@ members = [
 # grows native integration tests again.
 #    "features/*/tests/native",
     "xtask",
-    # CodeMirror-style editor — subtree-imported from
-    # github.com/.../Editor. Lives under `features/editor/` so its
-    # internal Cargo.toml + git history stay intact. We re-expose
-    # its crates here so the rest of Task can depend on them.
-    "features/editor/crates/editor-state",
-    "features/editor/crates/editor-syntax",
-    "features/editor/crates/editor-view",
-    "features/editor/crates/editor-vim",
-    "features/editor/crates/editor-typst",
-    "features/editor/crates/editor-mermaid",
-    "features/editor/crates/editor-keyflow",
-    "features/editor/crates/editor",
-    # Vendored fork of `mermaid-rs-renderer` 0.2.2 with web-time
-    # patched in for wasm32 compat. Lives next to the editor it
-    # supports.
-    "features/editor/vendor/mermaid-rs-renderer",
-    # Editor playground — Dioxus app that dogfoods the editor.
-    # Built with `dx serve --package playground`.
-    "features/editor/examples/playground",
+    # CodeMirror-style editor — now its own repo at ../Editor
+    # (github.com/.../Editor). Task depends on its crates via the
+    # `[workspace.dependencies]` path entries below + the
+    # mermaid-rs-renderer patch; nothing editor-related lives under
+    # `features/editor/` anymore.
     # Email feature harness — same pattern as the editor
     # playground: standalone Dioxus binary that exercises the
     # email-* crates without pulling in the full task-ui shell.
@@ -37,18 +23,6 @@ members = [
     # the new editor + vault stack on demand.
 ]
 exclude = [
-    # `features/editor/` keeps its imported `crates/` + `vendor/`
-    # + `examples/` subdirs so the editor's internal layout
-    # stays intact. Each real crate is listed above explicitly;
-    # exclude the intermediate parent dirs from the
-    # `features/*/*` glob so cargo doesn't try to parse them as
-    # manifests.
-    "features/editor/crates",
-    "features/editor/vendor",
-    "features/editor/examples",
-    "features/editor/docs",
-    "features/editor/plans",
-    "features/editor/tests",
     # The `features/*/*` glob would otherwise try to parse
     # `features/email/examples/` and `features/email/plans/`
     # as crate manifests.
@@ -388,16 +362,19 @@ email-sync = { path = "features/email/email-sync" }
 # notes / people via a many-to-many index. Used by other
 # features to record "this email is about this project."
 email-link = { path = "features/email/email-link" }
-# CodeMirror-style editor (subtree). `editor` is the umbrella
-# crate that re-exports the others — apps consume that.
-editor-state = { path = "features/editor/crates/editor-state" }
-editor-syntax = { path = "features/editor/crates/editor-syntax" }
-editor-view = { path = "features/editor/crates/editor-view" }
-editor-vim = { path = "features/editor/crates/editor-vim" }
-editor-typst = { path = "features/editor/crates/editor-typst" }
-editor-mermaid = { path = "features/editor/crates/editor-mermaid" }
-editor-keyflow = { path = "features/editor/crates/editor-keyflow" }
-editor = { path = "features/editor/crates/editor" }
+# CodeMirror-style editor — its own repo at ../Editor. `editor`
+# is the umbrella crate that re-exports the others — apps consume
+# that. These crates are members of the Editor workspace; Cargo
+# builds them as path dependencies and resolves their own
+# `workspace = true` deps against Editor's manifest.
+editor-state = { path = "../Editor/crates/editor-state" }
+editor-syntax = { path = "../Editor/crates/editor-syntax" }
+editor-view = { path = "../Editor/crates/editor-view" }
+editor-vim = { path = "../Editor/crates/editor-vim" }
+editor-typst = { path = "../Editor/crates/editor-typst" }
+editor-mermaid = { path = "../Editor/crates/editor-mermaid" }
+editor-keyflow = { path = "../Editor/crates/editor-keyflow" }
+editor = { path = "../Editor/crates/editor" }
 
 # Keyflow's engraver, CPU-only `svg` tier (no wgpu/vello/PDF) — the
 # editor renders ```kf``` fences to inline SVG client-side. The `svg`
@@ -944,7 +921,9 @@ rev = "d01afa40d79227a4a2de85b50e76849300890766"
 # crate calls `std::time::Instant::now()` unconditionally from
 # its layout pipeline, which panics on `wasm32-unknown-unknown`.
 # Our fork swaps that for `web_time::Instant` so editor-mermaid
-# can render diagrams in the browser. Subtree-imported with the
-# editor, lives at `features/editor/vendor/mermaid-rs-renderer`.
+# can render diagrams in the browser. Lives in the Editor repo at
+# `../Editor/vendor/mermaid-rs-renderer`. `[patch]` only applies
+# from the build-root workspace, so Task carries this itself even
+# though Editor declares the same patch internally.
 [patch.crates-io.mermaid-rs-renderer]
-path = "features/editor/vendor/mermaid-rs-renderer"
+path = "../Editor/vendor/mermaid-rs-renderer"
