@@ -580,6 +580,12 @@ impl ItemBuilder {
         self
     }
 
+    /// Assign this item to a fixed lane index (`LANE`), REAPER 7+ comping.
+    pub fn fixed_lane(mut self, lane: i32) -> Self {
+        self.item.lane = Some(lane);
+        self
+    }
+
     /// Set the item's clip gain (item trim, linear; 1.0 = 0 dB) via VOLPAN.
     pub fn gain(mut self, item_trim: f64) -> Self {
         let vp = self
@@ -889,6 +895,24 @@ impl TrackBuilder {
     /// Set track color as RGB integer.
     pub fn color(mut self, color: u32) -> Self {
         self.track.peak_color = Some(color as i32);
+        self
+    }
+
+    /// Put the track into fixed-lane (comp) mode (`FIXEDLANES`).
+    pub fn fixed_lanes(mut self, settings: crate::types::track::FixedLanesSettings) -> Self {
+        self.track.fixed_lanes = Some(settings);
+        self
+    }
+
+    /// Set the per-lane display names (`LANENAME`).
+    pub fn lane_names(mut self, settings: crate::types::track::LaneNameSettings) -> Self {
+        self.track.lane_names = Some(settings);
+        self
+    }
+
+    /// Set the lane record / comping state (`LANEREC`).
+    pub fn lane_record(mut self, settings: crate::types::track::LaneRecordSettings) -> Self {
+        self.track.lane_record = Some(settings);
         self
     }
 

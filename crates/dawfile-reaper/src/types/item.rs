@@ -308,6 +308,8 @@ pub struct Item {
     pub channel_mode: ChannelMode,          // CHANMODE - Channel mode
     pub take_guid: Option<String>,          // GUID - Take GUID
     pub rec_pass: Option<i32>,              // RECPASS - Recording pass number
+    /// Fixed item lane index (`LANE`), REAPER 7+ comping. `None` for ordinary items.
+    pub lane: Option<i32>,
 
     // Takes
     pub takes: Vec<Take>,
@@ -342,6 +344,7 @@ impl Default for Item {
             channel_mode: ChannelMode::Normal,
             take_guid: None,
             rec_pass: None,
+            lane: None,
             takes: vec![],
             stretch_markers: vec![],
             raw_content: String::new(),
@@ -625,6 +628,7 @@ impl Item {
                 | "CHANMODE"
                 | "GUID"
                 | "RECPASS"
+                | "LANE"
                 | "TAKE"
                 | "TAKEVOLPAN"
                 | "TAKECOLOR"
@@ -897,6 +901,9 @@ impl Item {
                     }
                 }
             }
+            "LANE" if tokens.len() >= 2 => {
+                item.lane = Some(Self::parse_int(&tokens[1])?);
+            }
             "RECPASS" => {
                 if tokens.len() > 1 {
                     let rec_pass = Self::parse_int(&tokens[1])?;
@@ -1013,6 +1020,7 @@ impl Item {
             channel_mode: ChannelMode::Normal,
             take_guid: None,
             rec_pass: None,
+            lane: None,
             takes: Vec::new(),
             stretch_markers: Vec::new(),
             raw_content: String::new(),
@@ -1135,6 +1143,7 @@ impl Item {
             channel_mode: ChannelMode::Normal,
             take_guid: None,
             rec_pass: None,
+            lane: None,
             takes: Vec::new(),
             stretch_markers: Vec::new(),
             raw_content: block_content.to_string(),
