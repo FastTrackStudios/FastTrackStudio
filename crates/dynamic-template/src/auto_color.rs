@@ -9,8 +9,8 @@
 
 use crate::colors;
 use color_palette::Color;
-use daw_proto::track::{Track, TrackRef, Tracks};
 use daw_proto::ProjectContext;
+use daw_proto::track::{Track, TrackRef, Tracks};
 use monarchy::Metadata;
 use std::collections::HashMap;
 
