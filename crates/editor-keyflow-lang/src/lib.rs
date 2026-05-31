@@ -82,28 +82,29 @@ pub fn keyflow_decorations(state: &EditorState) -> Vec<DecoratedRange> {
 
     // Resolved-chord type overlays — IDE-style inline inlay badges. For each
     // chord written in a key-relative system (Nashville number / Roman) that
-    // resolves against the chart's key, drop a dim badge right after the symbol
-    // showing the absolute letter-name chord (e.g. `5` → `G`, `V7` → `G7`).
+    // resolves against the key, drop a dim badge right after the symbol showing
+    // the absolute letter-name chord (e.g. `5` → `G`, `V7` → `G7`).
+    //
+    // The key is resolved PER CHORD via `key_at_position` — keyflow key changes
+    // can happen in any measure (written on a section header like `CH {…} #G`),
+    // so a single chart-level key would mis-resolve every chord after a change.
+    //
     // Gated by `SHOW_OVERLAYS` so the app can toggle it (the `fn` source can't
     // carry the flag itself).
     if overlays_enabled() {
-        if let Some(key) = analysis
-            .chart
-            .current_key
-            .as_ref()
-            .or(analysis.chart.initial_key.as_ref())
-        {
-            for section in &analysis.chart.sections {
-                for measure in section.measures() {
-                    for ci in &measure.chords {
-                        let Some(span) = ci.source_span else { continue };
-                        let at = span.end().min(len);
-                        if let Some(label) = resolved_chord_label(ci, key) {
-                            out.push(Decoration::widget(
-                                at,
-                                format!("<span class=\"kf-inlay\">{}</span>", escape_html(&label)),
-                            ));
-                        }
+        for section in &analysis.chart.sections {
+            for measure in section.measures() {
+                for ci in &measure.chords {
+                    let Some(span) = ci.source_span else { continue };
+                    let Some(key) = analysis.chart.key_at_position(&ci.position) else {
+                        continue;
+                    };
+                    let at = span.end().min(len);
+                    if let Some(label) = resolved_chord_label(ci, key) {
+                        out.push(Decoration::widget(
+                            at,
+                            format!("<span class=\"kf-inlay\">{}</span>", escape_html(&label)),
+                        ));
                     }
                 }
             }
@@ -475,6 +476,28 @@ mod tests {
             widget_count(&keyflow_decorations(&state)),
             0,
             "overlays disabled should emit no widget decorations"
+        );
+
+        // Mid-chart key change: `#G` switches the key inline, so chords before
+        // it resolve in C (1→C, 5→G) and after it in G (1→G, 5→D). The 'C' and
+        // 'D' badges can BOTH appear only when the key is resolved per chord
+        // position (key_at_position) — a single chart-level key can't.
+        set_overlays_enabled(true);
+        let kc = EditorState::new("120bpm 4/4 #C\n\nvs\n1 5 #G 1 5\n".to_string());
+        let badges: Vec<String> = keyflow_decorations(&kc)
+            .iter()
+            .filter_map(|d| match &d.kind {
+                editor_state::DecorationKind::Widget { html } => Some(html.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            badges.iter().any(|h| h.contains("kf-inlay\">C")),
+            "expected a C-rooted badge (degree 1 in C); got {badges:?}"
+        );
+        assert!(
+            badges.iter().any(|h| h.contains("kf-inlay\">D")),
+            "expected a D-rooted badge (degree 5 in G after the inline #G key change); got {badges:?}"
         );
 
         set_overlays_enabled(true); // restore default
