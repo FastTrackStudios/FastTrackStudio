@@ -72,9 +72,16 @@ pub fn ScheduleView() -> Element {
         (tasks, projects)
     });
 
-    // Visible date range (from the calendar) + the per-date plans we've
-    // loaded/materialized for it.
-    let mut range = use_signal(|| None::<(NaiveDate, NaiveDate)>);
+    // Visible date range + the per-date plans we've loaded/materialized
+    // for it. Seeded to the current week so blocks materialize on first
+    // paint; the calendar's `on_range` then keeps it in step as the user
+    // navigates (don't wait on that callback for the initial render).
+    let mut range = use_signal(|| {
+        let today = chrono::Local::now().date_naive();
+        let monday =
+            today - chrono::Duration::days(i64::from(today.weekday().num_days_from_monday()));
+        Some((monday, monday + chrono::Duration::days(6)))
+    });
     let mut plans = use_signal(HashMap::<NaiveDate, DayPlan>::new);
     // Which (date, block_id) is being edited, if any.
     let mut editing = use_signal(|| None::<(NaiveDate, String)>);
@@ -323,11 +330,20 @@ pub fn ScheduleView() -> Element {
 
     rsx! {
         div { class: "h-[calc(100vh-3.5rem)] lg:h-screen p-4 flex flex-col gap-3 overflow-hidden",
-            if matches!(&*templates.read_unchecked(), Some(Ok(t)) if t.is_empty()) {
-                Text {
-                    variant: TextVariant::Muted,
-                    "No day-plan templates under Projects/Scheduling/templates/."
-                }
+            match &*templates.read_unchecked() {
+                Some(Err(e)) => rsx! {
+                    div { class: "shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                        "Couldn't load day-plan templates: {e}"
+                    }
+                },
+                Some(Ok(t)) if t.is_empty() => rsx! {
+                    Text {
+                        variant: TextVariant::Muted,
+                        "No day-plan templates for this org under Projects/Scheduling/templates/ (weekday.md / weekend.md)."
+                    }
+                },
+                None => rsx! { Text { variant: TextVariant::Muted, "Loading schedule…" } },
+                _ => rsx! {},
             }
             // Allocatable usage for the visible range.
             if overview.1 > 0 {
