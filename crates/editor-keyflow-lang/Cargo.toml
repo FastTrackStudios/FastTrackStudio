@@ -10,9 +10,11 @@ rust-version.workspace = true
 [dependencies]
 # Decoration model + EditorState we map keyflow spans/diagnostics onto.
 editor-state = { workspace = true }
-# `text` gives the IDE analyzer (`ide::analyze`); `highlighting` gives the
-# line highlighter + theme→CSS renderer. Both enabled via the workspace dep.
-keyflow = { workspace = true }
+# keyflow-text (NOT the `keyflow` facade — the facade pulls daw-module/tokio
+# and breaks wasm). `ide` gives the analyzer (`ide::analyze`); the
+# `highlighting` feature (set in the workspace dep) exposes the line
+# highlighter + theme→CSS renderer at `keyflow_text::highlighting::*`.
+keyflow-text = { workspace = true }
 
 [lints]
 workspace = true

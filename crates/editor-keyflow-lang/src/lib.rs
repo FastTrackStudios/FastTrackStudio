@@ -19,8 +19,13 @@
 //! [`DecorationSource`]: https://docs.rs/editor-view (editor_view::DecorationSource)
 
 use editor_state::{DecoratedRange, Decoration, EditorState};
-use keyflow::text::highlighting::{Highlighter, Renderer, Theme};
-use keyflow::text::ide::{self, Severity};
+use keyflow_text::highlighting::{Highlighter, Renderer, Theme};
+use keyflow_text::ide::{self, Severity};
+
+/// Re-export so callers can pick a palette for [`highlight_css`] without taking
+/// a direct `keyflow-text` dependency:
+/// `editor_keyflow_lang::HighlightTheme::default_dark()`.
+pub use keyflow_text::highlighting::Theme as HighlightTheme;
 
 /// Build the keyflow decoration set for the current document.
 ///
