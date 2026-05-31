@@ -89,19 +89,25 @@ pub fn keyflow_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     //
     // Gated by `SHOW_OVERLAYS` so the app can toggle it (the `fn` source can't
     // carry the flag itself).
-    // `chord_doc_spans` gives DOC-ABSOLUTE spans (the parser's per-chord
-    // `source_span` is line-relative and would mis-place the badges).
+    // `ChordInstance::source_span` is now document-absolute (assigned in the
+    // keyflow parser's post-process), so the badges land right after each
+    // symbol. Resolve each chord against the key in effect at its position.
     if overlays_enabled() {
-        for (span, ci) in ide::chord_doc_spans(&text, &analysis.chart) {
-            let Some(key) = analysis.chart.key_at_position(&ci.position) else {
-                continue;
-            };
-            if let Some(label) = ci.resolved_symbol(key) {
-                let at = span.end().min(len);
-                out.push(Decoration::widget(
-                    at,
-                    format!("<span class=\"kf-inlay\">{}</span>", escape_html(&label)),
-                ));
+        for section in &analysis.chart.sections {
+            for measure in section.measures() {
+                for ci in &measure.chords {
+                    let Some(span) = ci.source_span else { continue };
+                    let Some(key) = analysis.chart.key_at_position(&ci.position) else {
+                        continue;
+                    };
+                    if let Some(label) = ci.resolved_symbol(key) {
+                        let at = span.end().min(len);
+                        out.push(Decoration::widget(
+                            at,
+                            format!("<span class=\"kf-inlay\">{}</span>", escape_html(&label)),
+                        ));
+                    }
+                }
             }
         }
     }
