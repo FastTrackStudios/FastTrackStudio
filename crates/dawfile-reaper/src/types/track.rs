@@ -674,6 +674,8 @@ impl Track {
                 | "SHOWINMIX"
                 | "FREEMODE"
                 | "FIXEDLANES"
+                | "LANEREC"
+                | "LANENAME"
                 | "REC"
                 | "TRACKHEIGHT"
                 | "INQ"
@@ -829,6 +831,24 @@ impl Track {
                     show_play_only_lane: Self::parse_bool(&tokens[3])?,
                     mask_playback: Self::parse_bool(&tokens[4])?,
                     recording_behavior: Self::parse_int(&tokens[5])?,
+                });
+            }
+            "LANEREC" if tokens.len() >= 4 => {
+                track.lane_record = Some(LaneRecordSettings {
+                    record_enabled_lane: Self::parse_int(&tokens[1])?,
+                    comping_enabled_lane: Self::parse_int(&tokens[2])?,
+                    last_comping_lane: Self::parse_int(&tokens[3])?,
+                });
+            }
+            "LANENAME" if tokens.len() >= 2 => {
+                let lane_count = Self::parse_int(&tokens[1])?;
+                let lane_names = tokens[2..]
+                    .iter()
+                    .map(Self::parse_string)
+                    .collect::<Result<Vec<_>, _>>()?;
+                track.lane_names = Some(LaneNameSettings {
+                    lane_count,
+                    lane_names,
                 });
             }
             "REC" if tokens.len() >= 8 => {

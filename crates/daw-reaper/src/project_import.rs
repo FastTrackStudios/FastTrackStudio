@@ -512,6 +512,306 @@ fn map_builtin_fx(mut t: TrackBuilder, params: &BuiltinParams) -> TrackBuilder {
 // Pro Tools → REAPER conversion
 // ============================================================================
 
+/// REAPER's default `FIXEDLANES` settings for a freshly comp-enabled track.
+///
+/// Grounded in dawfile-reaper's round-trip fixture, which captures a real
+/// REAPER 7 track as `FIXEDLANES 9 0 0 0 0`: bitfield `9` (the value REAPER
+/// writes when fixed lanes are turned on), and the three booleans + recording
+/// behavior left at their defaults (0). See the `test_parse_complex_track`
+/// fixture in `dawfile-reaper/src/types/track.rs`.
+fn default_fixed_lanes() -> dawfile_reaper::types::track::FixedLanesSettings {
+    dawfile_reaper::types::track::FixedLanesSettings {
+        bitfield: 9,
+        allow_editing: false,
+        show_play_only_lane: false,
+        mask_playback: false,
+        recording_behavior: 0,
+    }
+}
+
+/// Apply the track-level fixed-lane metadata (`FIXEDLANES`/`LANENAME`/`LANEREC`)
+/// for a Pro Tools track whose playlists were emitted across fixed lanes.
+///
+/// Shared by the audio and MIDI track paths. Lane 0 is the active playlist
+/// (named after `playlist_name`, falling back to the track name when empty);
+/// lanes 1..N are the alternates in order. Call only when
+/// `track.has_alternate_playlists()`.
+fn apply_fixed_lane_settings(t: TrackBuilder, track: &dawfile_protools::Track) -> TrackBuilder {
+    let lane_count = track.playlist_count() as i32;
+    let mut lane_names: Vec<String> = Vec::with_capacity(lane_count as usize);
+    let active_name = if track.playlist_name.is_empty() {
+        track.name.clone()
+    } else {
+        track.playlist_name.clone()
+    };
+    lane_names.push(active_name);
+    for pl in &track.alternate_playlists {
+        lane_names.push(pl.name.clone());
+    }
+    t.fixed_lanes(default_fixed_lanes())
+        .lane_names(dawfile_reaper::types::track::LaneNameSettings {
+            lane_count,
+            lane_names,
+        })
+        .lane_record(dawfile_reaper::types::track::LaneRecordSettings {
+            record_enabled_lane: 0,
+            comping_enabled_lane: 0,
+            last_comping_lane: 0,
+        })
+}
+
+/// Emit one Pro Tools playlist's region placements as REAPER items on a single
+/// track builder.
+///
+/// Shared by both the active playlist and every alternate (comp) playlist so
+/// alternates get the SAME source/offset/fade treatment as lane 0 — see
+/// [`import_protools`]. `lane` is the REAPER fixed-lane index (`LANE` token):
+/// `None` for ordinary single-playlist tracks (unchanged output), `Some(n)` for
+/// fixed-lane tracks where lane 0 is the active playlist and 1..N the alternates.
+///
+/// `regions` is the playlist's own placement list; per-track fade defs
+/// (`track.fades`) are matched by timeline position, so they only attach to the
+/// active playlist (alternates carry no matching fade entries — acceptable, PT
+/// stores fades against the active playlist only).
+#[allow(clippy::too_many_arguments)]
+fn emit_audio_playlist(
+    mut t: TrackBuilder,
+    regions: &[dawfile_protools::TrackRegion],
+    lane: Option<i32>,
+    track: &dawfile_protools::Track,
+    session: &dawfile_protools::ProToolsSession,
+    sample_rate: f64,
+    resolve_audio_path: &dyn Fn(&str) -> String,
+) -> TrackBuilder {
+    for tr in regions {
+        if tr.region_index as usize >= session.audio_regions.len() {
+            continue;
+        }
+        let region = &session.audio_regions[tr.region_index as usize];
+
+        let position_secs = tr.start_pos as f64 / sample_rate;
+        let length_secs = region.length as f64 / sample_rate;
+        let offset_secs = region.sample_offset as f64 / sample_rate;
+
+        if length_secs <= 0.0 {
+            continue;
+        }
+
+        // Get source filename and resolve to absolute on-disk path. The region's
+        // `audio_file_index` from the parser is currently unreliable, so we match
+        // the region NAME against the audio file stems (PT auto-generates region
+        // names like "02 LORD OF THE FIGHT (Vocals)_1-03.L" where the part before
+        // the trailing "-NN.L/R" is the source filename stem).
+        fn region_to_file_stem(region_name: &str) -> &str {
+            let without_chan = region_name
+                .strip_suffix(".L")
+                .or_else(|| region_name.strip_suffix(".R"))
+                .unwrap_or(region_name);
+            if let Some(idx) = without_chan.rfind('-') {
+                let suffix = &without_chan[idx + 1..];
+                if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                    return &without_chan[..idx];
+                }
+            }
+            without_chan
+        }
+        let stem = region_to_file_stem(&region.name);
+        let filename = session
+            .audio_files
+            .iter()
+            .find(|f| {
+                f.filename
+                    .strip_suffix(".wav")
+                    .or_else(|| f.filename.strip_suffix(".WAV"))
+                    .map(|s| s == stem)
+                    .unwrap_or(false)
+            })
+            .or_else(|| {
+                session.audio_files.iter().find(|f| {
+                    f.filename
+                        .strip_suffix(".wav")
+                        .or_else(|| f.filename.strip_suffix(".WAV"))
+                        .map(|s| stem.starts_with(s) || s.starts_with(stem))
+                        .unwrap_or(false)
+                })
+            })
+            .map(|f| f.filename.as_str())
+            .unwrap_or("");
+        let absolute_path = resolve_audio_path(filename);
+
+        // Match fade entries to this item by timeline position. See
+        // `import_protools` for the full PT 0x262f fade-def encoding notes.
+        let item_start = tr.start_pos;
+        let item_end = item_start.saturating_add(region.length);
+        let mut fade_in_secs: Option<(f64, u8)> = None;
+        let mut fade_out_secs: Option<(f64, u8)> = None;
+        let tolerance: u64 = (sample_rate as u64) / 1000; // ±1 ms
+        let starts_in_crossfade = regions.iter().any(|o| {
+            let os = o.start_pos;
+            let ol = session
+                .audio_regions
+                .get(o.region_index as usize)
+                .map(|r| r.length)
+                .unwrap_or(0);
+            os < item_start && item_start < os.saturating_add(ol)
+        });
+        for f in &track.fades {
+            let crossfade = f.in_length > 0 && f.out_length > 0;
+            let fade_total = f.in_length.max(f.out_length);
+            if fade_total == 0 {
+                continue;
+            }
+            if f.start_pos.abs_diff(item_start) <= tolerance {
+                if f.in_length > 0 {
+                    fade_in_secs = Some((f.in_length as f64 / sample_rate, f.curve));
+                } else if f.out_length > 0 && starts_in_crossfade {
+                    fade_in_secs = Some((f.out_length as f64 / sample_rate, f.curve));
+                }
+            }
+            let f_end = f.start_pos.saturating_add(fade_total);
+            if (crossfade && f.start_pos.abs_diff(item_end) <= tolerance)
+                || (f.out_length > 0 && f_end.abs_diff(item_end) <= tolerance)
+            {
+                let out_len = if f.out_length > 0 {
+                    f.out_length
+                } else {
+                    f.in_length
+                };
+                fade_out_secs = Some((out_len as f64 / sample_rate, f.curve));
+            }
+        }
+
+        // Strip the trailing `.L`/`.R` channel suffix so a stereo clip reads as
+        // one clean stereo item, matching the official converter.
+        let clip_name = region
+            .name
+            .strip_suffix(".L")
+            .or_else(|| region.name.strip_suffix(".R"))
+            .unwrap_or(&region.name);
+
+        t = t.item(position_secs, length_secs, |item| {
+            let mut item = item;
+            if !absolute_path.is_empty() {
+                item = item.source_wave(&absolute_path).take_name(clip_name);
+            } else {
+                item = item.name(clip_name);
+            }
+            if offset_secs > 0.0 {
+                item = item.slip_offset(offset_secs);
+            }
+            if let Some((fi, c)) = fade_in_secs {
+                item = item.fade_in(fi, pt_fade_curve(c));
+            }
+            if let Some((fo, c)) = fade_out_secs {
+                item = item.fade_out(fo, pt_fade_curve(c));
+            }
+            if let Some(l) = lane {
+                item = item.fixed_lane(l);
+            }
+            item
+        });
+    }
+    t
+}
+
+/// Emit one Pro Tools MIDI playlist's region placements as REAPER MIDI items on
+/// a single track builder.
+///
+/// The MIDI counterpart of [`emit_audio_playlist`]: shared by both the active
+/// playlist and every alternate (comp) playlist so alternates get the SAME
+/// comp-flatten / note-window / fallback-duration treatment as lane 0. `lane` is
+/// the REAPER fixed-lane index (`LANE` token): `None` for ordinary
+/// single-playlist tracks (unchanged output), `Some(n)` for fixed-lane tracks
+/// where lane 0 is the active playlist and 1..N the alternates.
+fn emit_midi_playlist(
+    mut t: TrackBuilder,
+    regions: &[dawfile_protools::TrackRegion],
+    lane: Option<i32>,
+    session: &dawfile_protools::ProToolsSession,
+    sample_rate: f64,
+) -> TrackBuilder {
+    for tr in regions {
+        if tr.region_index as usize >= session.midi_regions.len() {
+            continue;
+        }
+        let region = &session.midi_regions[tr.region_index as usize];
+
+        // Comp flatten: keep only this placement's notes — those
+        // within the clip's source window `[clip_lo, note_trim)`
+        // (chunk-tick space). See `TrackRegion`.
+        let clip_lo = tr.clip_lo_ticks;
+        let note_trim = tr.note_trim_ticks;
+
+        let position_secs = tr.start_pos as f64 / sample_rate;
+        let length_secs = region.length as f64 / sample_rate;
+
+        if length_secs <= 0.0 || region.events.is_empty() {
+            continue;
+        }
+
+        t = t.item(position_secs, length_secs, |item| {
+            // `.midi(...)` adds the MIDI take; do NOT also call
+            // `.source_midi()` — that would push an empty MIDI take
+            // first, leaving the real data on take #1 (and REAPER
+            // would render the item as silent take #0).
+            let mut item = item.name(&region.name).midi(|midi| {
+                // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
+                // the REAPER builder to use the same PPQN so positions
+                // and durations don't need numeric rescaling.
+                let mut midi = midi.ticks_per_qn(960_000);
+
+                // Many PT regions store duration=0 for every event
+                // (a paired note-on/note-off encoding the parser
+                // doesn't fully reconstruct yet). For those events,
+                // fall back to "until the next note of the same
+                // pitch" so notes sustain naturally instead of
+                // truncating to silence.
+                const FALLBACK_DUR: u64 = 480_000; // half a quarter
+                let region_end = region.length.max(FALLBACK_DUR);
+
+                for (i, event) in region.events.iter().enumerate() {
+                    if event.velocity == 0
+                        || event.position < clip_lo
+                        || event.position >= note_trim
+                    {
+                        continue;
+                    }
+                    let dur = if event.duration > 0 {
+                        event.duration as u32
+                    } else {
+                        // Find the next note of the SAME pitch and
+                        // end this one just before it. Failing that,
+                        // use the region end, capped at one quarter.
+                        let next = region.events[i + 1..]
+                            .iter()
+                            .find(|e| e.note == event.note)
+                            .map(|e| e.position);
+                        let end = next.unwrap_or(region_end);
+                        let span = end.saturating_sub(event.position);
+                        span.clamp(FALLBACK_DUR, 960_000) as u32
+                    };
+                    // Emit relative to the clip's kept-window
+                    // start so notes sit inside the item, which
+                    // begins `clip_lo` into the take.
+                    midi = midi.at(event.position.saturating_sub(clip_lo)).note(
+                        0,
+                        0,
+                        event.note,
+                        event.velocity,
+                        dur,
+                    );
+                }
+                midi
+            });
+            if let Some(l) = lane {
+                item = item.fixed_lane(l);
+            }
+            item
+        });
+    }
+    t
+}
+
 /// Convert a Pro Tools session at `path` to a REAPER `.rpp` string.
 ///
 /// Public so that command-line tools and tests can run the conversion without
@@ -907,167 +1207,35 @@ fn import_protools(
                             e
                         });
                     }
-                    for tr in &track.regions {
-                        if tr.region_index as usize >= session.audio_regions.len() {
-                            continue;
+                    // Alternate (comp) playlists → REAPER fixed item lanes.
+                    // A PT track with >1 playlist becomes ONE fixed-lane REAPER
+                    // track: lane 0 = active playlist (`track.regions`), lanes
+                    // 1..N = each `track.alternate_playlists[i]`. Single-playlist
+                    // tracks keep their old output (lane = None, no FIXEDLANES).
+                    let has_lanes = track.has_alternate_playlists();
+                    let active_lane = if has_lanes { Some(0) } else { None };
+                    t = emit_audio_playlist(
+                        t,
+                        &track.regions,
+                        active_lane,
+                        track,
+                        &session,
+                        sample_rate,
+                        &resolve_audio_path,
+                    );
+                    if has_lanes {
+                        for (i, pl) in track.alternate_playlists.iter().enumerate() {
+                            t = emit_audio_playlist(
+                                t,
+                                &pl.regions,
+                                Some(i as i32 + 1),
+                                track,
+                                &session,
+                                sample_rate,
+                                &resolve_audio_path,
+                            );
                         }
-                        let region = &session.audio_regions[tr.region_index as usize];
-
-                        let position_secs = tr.start_pos as f64 / sample_rate;
-                        let length_secs = region.length as f64 / sample_rate;
-                        let offset_secs = region.sample_offset as f64 / sample_rate;
-
-                        if length_secs <= 0.0 {
-                            continue;
-                        }
-
-                        // Get source filename and resolve to absolute on-disk path.
-                        //
-                        // The region's `audio_file_index` from the parser is currently
-                        // unreliable (PT12 stores file ↔ region mapping in a block we
-                        // don't decode yet). Fall back to matching the region NAME
-                        // against the audio file stems: PT auto-generates region names
-                        // like "02 LORD OF THE FIGHT (Vocals)_1-03.L" where the part
-                        // before the trailing "-NN.L/R" is the source filename stem.
-                        fn region_to_file_stem(region_name: &str) -> &str {
-                            // Strip optional ".L"/".R" channel suffix.
-                            let without_chan = region_name
-                                .strip_suffix(".L")
-                                .or_else(|| region_name.strip_suffix(".R"))
-                                .unwrap_or(region_name);
-                            // Strip optional "-NN" sub-region suffix.
-                            if let Some(idx) = without_chan.rfind('-') {
-                                let suffix = &without_chan[idx + 1..];
-                                if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
-                                {
-                                    return &without_chan[..idx];
-                                }
-                            }
-                            without_chan
-                        }
-                        let stem = region_to_file_stem(&region.name);
-                        let filename = session
-                            .audio_files
-                            .iter()
-                            // Exact match first.
-                            .find(|f| {
-                                f.filename
-                                    .strip_suffix(".wav")
-                                    .or_else(|| f.filename.strip_suffix(".WAV"))
-                                    .map(|s| s == stem)
-                                    .unwrap_or(false)
-                            })
-                            // Then try a starts-with (handles ".dup1" / ".01" tail).
-                            .or_else(|| {
-                                session.audio_files.iter().find(|f| {
-                                    f.filename
-                                        .strip_suffix(".wav")
-                                        .or_else(|| f.filename.strip_suffix(".WAV"))
-                                        .map(|s| stem.starts_with(s) || s.starts_with(stem))
-                                        .unwrap_or(false)
-                                })
-                            })
-                            .map(|f| f.filename.as_str())
-                            .unwrap_or("");
-                        let absolute_path = resolve_audio_path(filename);
-
-                        // Match fade entries to this item by timeline position.
-                        // PT 0x262f fade defs carry both an in-length and an out-length:
-                        //   - `out_length == 0` ⇒ pure fade-in starting at the item start
-                        //   - `in_length == 0` ⇒ pure fade-out ending at the item end
-                        //   - both non-zero ⇒ crossfade. The fade entry's start_pos is
-                        //     the START of the in-fade (= end of the previous item).
-                        //     For the LEADING item of the crossfade pair, we want the
-                        //     fade-out (= the matching `in_length` of the crossfade
-                        //     "into" the next item). For the TRAILING item, we want
-                        //     the fade-in (= the same in_length).
-                        let item_start = tr.start_pos;
-                        let item_end = item_start.saturating_add(region.length);
-                        // (length_secs, curve_byte) for each fade.
-                        let mut fade_in_secs: Option<(f64, u8)> = None;
-                        let mut fade_out_secs: Option<(f64, u8)> = None;
-                        let tolerance: u64 = (sample_rate as u64) / 1000; // ±1 ms
-                        // Does this item start *inside* another clip on the track? If
-                        // so, a fade entry at its start is the incoming half of a
-                        // crossfade — PT stores that as the outgoing clip's fade-out
-                        // (in_length == 0), so the incoming fade-in must be inferred.
-                        let starts_in_crossfade = track.regions.iter().any(|o| {
-                            let os = o.start_pos;
-                            let ol = session
-                                .audio_regions
-                                .get(o.region_index as usize)
-                                .map(|r| r.length)
-                                .unwrap_or(0);
-                            os < item_start && item_start < os.saturating_add(ol)
-                        });
-                        for f in &track.fades {
-                            let crossfade = f.in_length > 0 && f.out_length > 0;
-                            let fade_total = f.in_length.max(f.out_length);
-                            if fade_total == 0 {
-                                continue;
-                            }
-                            // Fade-IN: the fade's start coincides with this item's start.
-                            if f.start_pos.abs_diff(item_start) <= tolerance {
-                                if f.in_length > 0 {
-                                    fade_in_secs =
-                                        Some((f.in_length as f64 / sample_rate, f.curve));
-                                } else if f.out_length > 0 && starts_in_crossfade {
-                                    // Crossfade incoming half: PT stored only the
-                                    // outgoing fade-out, but this clip fades in over
-                                    // the same overlap.
-                                    fade_in_secs =
-                                        Some((f.out_length as f64 / sample_rate, f.curve));
-                                }
-                            }
-                            // Fade-OUT: the fade ends at this item's end. For pure
-                            // fade-outs (`in == 0`) PT places start_pos = item_end - out_length.
-                            // For crossfades, start_pos sits at the boundary where the
-                            // out-fading item ends, so item_end ≈ start_pos.
-                            let f_end = f.start_pos.saturating_add(fade_total);
-                            if (crossfade && f.start_pos.abs_diff(item_end) <= tolerance)
-                                || (f.out_length > 0 && f_end.abs_diff(item_end) <= tolerance)
-                            {
-                                let out_len = if f.out_length > 0 {
-                                    f.out_length
-                                } else {
-                                    f.in_length
-                                };
-                                fade_out_secs = Some((out_len as f64 / sample_rate, f.curve));
-                            }
-                        }
-
-                        // Strip the trailing `.L`/`.R` channel suffix from the
-                        // region name so a stereo clip reads as one clean stereo
-                        // item (e.g. "…_Bass.L" → "…_Bass") — matching the official
-                        // converter. The item still references the interleaved
-                        // stereo source, so it stays stereo; only the label changes.
-                        let clip_name = region
-                            .name
-                            .strip_suffix(".L")
-                            .or_else(|| region.name.strip_suffix(".R"))
-                            .unwrap_or(&region.name);
-
-                        t = t.item(position_secs, length_secs, |item| {
-                            // Set the TAKE name (not the item name) to the region
-                            // name so REAPER displays a single readable label rather
-                            // than stacking item-level + take-level labels.
-                            let mut item = item;
-                            if !absolute_path.is_empty() {
-                                item = item.source_wave(&absolute_path).take_name(clip_name);
-                            } else {
-                                item = item.name(clip_name);
-                            }
-                            if offset_secs > 0.0 {
-                                item = item.slip_offset(offset_secs);
-                            }
-                            if let Some((fi, c)) = fade_in_secs {
-                                item = item.fade_in(fi, pt_fade_curve(c));
-                            }
-                            if let Some((fo, c)) = fade_out_secs {
-                                item = item.fade_out(fo, pt_fade_curve(c));
-                            }
-                            item
-                        });
+                        t = apply_fixed_lane_settings(t, track);
                     }
                     if end_levels > 0 {
                         t = t.folder_end(end_levels);
@@ -1165,77 +1333,25 @@ fn import_protools(
                             e
                         });
                     }
-                    for tr in &track.regions {
-                        if tr.region_index as usize >= session.midi_regions.len() {
-                            continue;
+                    // Alternate (comp) playlists → REAPER fixed item lanes.
+                    // Mirrors the audio path: a MIDI track with >1 playlist
+                    // becomes ONE fixed-lane REAPER track (lane 0 = active
+                    // playlist, lanes 1..N = each alternate). Single-playlist
+                    // tracks keep their old output (lane = None, no FIXEDLANES).
+                    let has_lanes = track.has_alternate_playlists();
+                    let active_lane = if has_lanes { Some(0) } else { None };
+                    t = emit_midi_playlist(t, &track.regions, active_lane, &session, sample_rate);
+                    if has_lanes {
+                        for (i, pl) in track.alternate_playlists.iter().enumerate() {
+                            t = emit_midi_playlist(
+                                t,
+                                &pl.regions,
+                                Some(i as i32 + 1),
+                                &session,
+                                sample_rate,
+                            );
                         }
-                        let region = &session.midi_regions[tr.region_index as usize];
-
-                        // Comp flatten: keep only this placement's notes — those
-                        // within the clip's source window `[clip_lo, note_trim)`
-                        // (chunk-tick space). See `TrackRegion`.
-                        let clip_lo = tr.clip_lo_ticks;
-                        let note_trim = tr.note_trim_ticks;
-
-                        let position_secs = tr.start_pos as f64 / sample_rate;
-                        let length_secs = region.length as f64 / sample_rate;
-
-                        if length_secs <= 0.0 || region.events.is_empty() {
-                            continue;
-                        }
-
-                        t =
-                            t.item(position_secs, length_secs, |item| {
-                                // `.midi(...)` adds the MIDI take; do NOT also call
-                                // `.source_midi()` — that would push an empty MIDI take
-                                // first, leaving the real data on take #1 (and REAPER
-                                // would render the item as silent take #0).
-                                item.name(&region.name).midi(|midi| {
-                                    // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
-                                    // the REAPER builder to use the same PPQN so positions
-                                    // and durations don't need numeric rescaling.
-                                    let mut midi = midi.ticks_per_qn(960_000);
-
-                                    // Many PT regions store duration=0 for every event
-                                    // (a paired note-on/note-off encoding the parser
-                                    // doesn't fully reconstruct yet). For those events,
-                                    // fall back to "until the next note of the same
-                                    // pitch" so notes sustain naturally instead of
-                                    // truncating to silence.
-                                    const FALLBACK_DUR: u64 = 480_000; // half a quarter
-                                    let region_end = region.length.max(FALLBACK_DUR);
-
-                                    for (i, event) in region.events.iter().enumerate() {
-                                        if event.velocity == 0
-                                            || event.position < clip_lo
-                                            || event.position >= note_trim
-                                        {
-                                            continue;
-                                        }
-                                        let dur = if event.duration > 0 {
-                                            event.duration as u32
-                                        } else {
-                                            // Find the next note of the SAME pitch and
-                                            // end this one just before it. Failing that,
-                                            // use the region end, capped at one quarter.
-                                            let next = region.events[i + 1..]
-                                                .iter()
-                                                .find(|e| e.note == event.note)
-                                                .map(|e| e.position);
-                                            let end = next.unwrap_or(region_end);
-                                            let span = end.saturating_sub(event.position);
-                                            span.clamp(FALLBACK_DUR, 960_000) as u32
-                                        };
-                                        // Emit relative to the clip's kept-window
-                                        // start so notes sit inside the item, which
-                                        // begins `clip_lo` into the take.
-                                        midi = midi
-                                            .at(event.position.saturating_sub(clip_lo))
-                                            .note(0, 0, event.note, event.velocity, dur);
-                                    }
-                                    midi
-                                })
-                            });
+                        t = apply_fixed_lane_settings(t, track);
                     }
                     if end_levels > 0 {
                         t = t.folder_end(end_levels);
@@ -1860,9 +1976,159 @@ fn ableton_color_to_rgb(color_index: i32) -> u32 {
     (r << 16) | (g << 8) | b
 }
 
+/// Build a self-contained, synthetic Pro Tools session with one audio track
+/// that has an active playlist plus two alternate playlists (3 playlists /
+/// takes total), drive it through the same per-track lane wiring the importer
+/// uses (`emit_audio_playlist` + `default_fixed_lanes` + lane name/record
+/// settings), and return the built REAPER project in fixed-lane (comp) mode.
+///
+/// This is the conversion seam shared by the `dump_lanes_rpp` example and the
+/// `alternate_playlists_*` tests: a `ProToolsSession` in, a
+/// `dawfile_reaper::ReaperProject` out. Serialize it with
+/// `ReaperProject::to_rpp_string()` to get loadable .rpp text.
+pub fn build_demo_playlist_project() -> dawfile_reaper::ReaperProject {
+    use dawfile_protools::{
+        AudioFile, AudioRegion, Playlist, ProToolsSession, Track, TrackKind, TrackRegion,
+    };
+
+    let mk_region = |index: u16, name: &str, length: u64| AudioRegion {
+        name: name.to_string(),
+        index,
+        start_pos: 0,
+        sample_offset: 0,
+        length,
+        audio_file_index: 0,
+        source_file_uid: None,
+    };
+    let mk_placement = |region_index: u16, start_pos: u64| TrackRegion {
+        region_index,
+        start_pos,
+        clip_flag_53: false,
+        clip_muted: false,
+        clip_color: None,
+        clip_lo_ticks: 0,
+        note_trim_ticks: u64::MAX,
+    };
+
+    let mut session = ProToolsSession {
+        version: 12,
+        session_sample_rate: 48000,
+        bpm: 120.0,
+        tempo_events: Vec::new(),
+        meter_events: Vec::new(),
+        markers: Vec::new(),
+        audio_files: Vec::new(),
+        audio_regions: Vec::new(),
+        audio_tracks: Vec::new(),
+        midi_regions: Vec::new(),
+        midi_tracks: Vec::new(),
+        plugins: Vec::new(),
+        io_channels: Vec::new(),
+        routing_entries: Vec::new(),
+        edit_groups: Vec::new(),
+        stem_mappings: Vec::new(),
+        internal_tracks: Vec::new(),
+        plugin_states: Vec::new(),
+    };
+    session.audio_files.push(AudioFile {
+        filename: "Take.wav".to_string(),
+        index: 0,
+        length: 96_000,
+        source_uid: None,
+    });
+    // region 0 = active take, region 1/2 = alternate takes.
+    session.audio_regions.push(mk_region(0, "Take-01", 48_000));
+    session.audio_regions.push(mk_region(1, "Take-02", 48_000));
+    session.audio_regions.push(mk_region(2, "Take-03", 48_000));
+
+    let track = Track {
+        name: "Vocal".to_string(),
+        kind: TrackKind::Audio,
+        index: 0,
+        playlist_name: "Vocal".to_string(),
+        regions: vec![mk_placement(0, 0)],
+        fades: Vec::new(),
+        volume_centibel: 0,
+        mute: false,
+        solo: false,
+        solo_defeat: false,
+        inactive: false,
+        pan: 0,
+        alternate_playlists: vec![
+            Playlist {
+                name: "Vocal.01".to_string(),
+                regions: vec![mk_placement(1, 0)],
+            },
+            Playlist {
+                name: "Vocal.02".to_string(),
+                regions: vec![mk_placement(2, 0)],
+            },
+        ],
+        output: String::new(),
+        color_byte: 0,
+        height_px: 0,
+        volume_automation: Vec::new(),
+        mute_automation: Vec::new(),
+        pan_automation: Vec::new(),
+        is_folder: false,
+        folder_depth: 0,
+        display_order: 0,
+        comment: String::new(),
+        is_master: false,
+    };
+
+    let sample_rate = 48_000.0;
+    let resolve = |f: &str| f.to_string();
+
+    // Reproduce the importer's per-track lane wiring (see `import_protools`):
+    // active playlist on lane 0, each alternate on lanes 1..N.
+    let mut builder = ReaperProjectBuilder::new();
+    builder = builder.track("Vocal", |mut t| {
+        t = emit_audio_playlist(
+            t,
+            &track.regions,
+            Some(0),
+            &track,
+            &session,
+            sample_rate,
+            &resolve,
+        );
+        for (i, pl) in track.alternate_playlists.iter().enumerate() {
+            t = emit_audio_playlist(
+                t,
+                &pl.regions,
+                Some(i as i32 + 1),
+                &track,
+                &session,
+                sample_rate,
+                &resolve,
+            );
+        }
+        let lane_count = track.playlist_count() as i32;
+        let mut lane_names = vec![track.playlist_name.clone()];
+        for pl in &track.alternate_playlists {
+            lane_names.push(pl.name.clone());
+        }
+        t.fixed_lanes(default_fixed_lanes())
+            .lane_names(dawfile_reaper::types::track::LaneNameSettings {
+                lane_count,
+                lane_names,
+            })
+            .lane_record(dawfile_reaper::types::track::LaneRecordSettings {
+                record_enabled_lane: 0,
+                comping_enabled_lane: 0,
+                last_comping_lane: 0,
+            })
+    });
+
+    builder.build()
+}
+
 #[cfg(test)]
 mod folder_tests {
-    use super::protools_to_rpp;
+    use super::{default_fixed_lanes, emit_audio_playlist, protools_to_rpp};
+    use dawfile_reaper::RppSerialize;
+    use dawfile_reaper::builder::ReaperProjectBuilder;
 
     fn fixture(name: &str) -> String {
         format!(
@@ -1915,6 +2181,459 @@ mod folder_tests {
 
     /// Authored: two independent sibling folders F1{leafA,leafB} F2{leafC,leafD}
     /// plus a top-level leaf. Each folder closes one level on its last child.
+    // ── Pro Tools alternate playlists → REAPER fixed lanes ──────────────────
+    use dawfile_protools::{
+        AudioFile, AudioRegion, Playlist, ProToolsSession, Track, TrackKind, TrackRegion,
+    };
+
+    /// Build a minimal PT audio region referencing audio-file index 0.
+    fn mk_region(index: u16, name: &str, length: u64) -> AudioRegion {
+        AudioRegion {
+            name: name.to_string(),
+            index,
+            start_pos: 0,
+            sample_offset: 0,
+            length,
+            audio_file_index: 0,
+            source_file_uid: None,
+        }
+    }
+
+    fn mk_placement(region_index: u16, start_pos: u64) -> TrackRegion {
+        TrackRegion {
+            region_index,
+            start_pos,
+            clip_flag_53: false,
+            clip_muted: false,
+            clip_color: None,
+            clip_lo_ticks: 0,
+            note_trim_ticks: u64::MAX,
+        }
+    }
+
+    /// A bare PT audio track with no alternate playlists.
+    fn mk_track(name: &str, regions: Vec<TrackRegion>) -> Track {
+        Track {
+            name: name.to_string(),
+            kind: TrackKind::Audio,
+            index: 0,
+            playlist_name: name.to_string(),
+            regions,
+            fades: Vec::new(),
+            volume_centibel: 0,
+            mute: false,
+            solo: false,
+            solo_defeat: false,
+            inactive: false,
+            pan: 0,
+            alternate_playlists: Vec::new(),
+            output: String::new(),
+            color_byte: 0,
+            height_px: 0,
+            volume_automation: Vec::new(),
+            mute_automation: Vec::new(),
+            pan_automation: Vec::new(),
+            is_folder: false,
+            folder_depth: 0,
+            display_order: 0,
+            comment: String::new(),
+            is_master: false,
+        }
+    }
+
+    fn empty_session() -> ProToolsSession {
+        ProToolsSession {
+            version: 12,
+            session_sample_rate: 48000,
+            bpm: 120.0,
+            tempo_events: Vec::new(),
+            meter_events: Vec::new(),
+            markers: Vec::new(),
+            audio_files: Vec::new(),
+            audio_regions: Vec::new(),
+            audio_tracks: Vec::new(),
+            midi_regions: Vec::new(),
+            midi_tracks: Vec::new(),
+            plugins: Vec::new(),
+            io_channels: Vec::new(),
+            routing_entries: Vec::new(),
+            edit_groups: Vec::new(),
+            stem_mappings: Vec::new(),
+            internal_tracks: Vec::new(),
+            plugin_states: Vec::new(),
+        }
+    }
+
+    // ── PT MIDI comp playlists → REAPER fixed lanes (synthetic, no fixture) ──
+    //
+    // No bundled PT fixture carries MIDI alternate playlists (verified by
+    // scanning every `.ptx`/`.ptf` in `dawfile-protools/tests/fixtures`: zero
+    // MIDI tracks have a non-empty `alternate_playlists`). So the MIDI lane path
+    // is exercised the same in-process way the audio synthetic test uses: build
+    // a fixed-lane REAPER project from an in-memory MIDI `ProToolsSession` by
+    // driving the SAME importer seam (`emit_midi_playlist` +
+    // `apply_fixed_lane_settings`, mirroring the `Src::Midi` arm in
+    // `import_protools`), then assert on the emitted RPP.
+
+    use dawfile_protools::{MidiEvent, MidiRegion};
+
+    /// A single-note MIDI region. `clip_lo_ticks = 0` / `note_trim_ticks =
+    /// u64::MAX` on the referencing placement keep the note (see `mk_placement`).
+    fn mk_midi_region(index: u16, name: &str, note: u8) -> MidiRegion {
+        MidiRegion {
+            name: name.to_string(),
+            index,
+            start_pos: 0,
+            sample_offset: 0,
+            length: 96_000,
+            clip_start_ticks: 0,
+            clip_src_ticks: 0,
+            clip_len_ticks: 0,
+            take_offset_ticks: 0,
+            events: vec![MidiEvent {
+                position: 0,
+                duration: 480,
+                note,
+                velocity: 96,
+            }],
+        }
+    }
+
+    /// Build a MIDI `ProToolsSession` with one MIDI track that has an active
+    /// playlist plus `alternates` alternate playlists (one single-note region
+    /// each). `alternates == 0` → single-playlist track (no lanes expected).
+    fn build_midi_session(alternates: usize) -> ProToolsSession {
+        let midi_regions: Vec<MidiRegion> = (0..=alternates)
+            .map(|i| mk_midi_region(i as u16, &format!("Keys.{i:02}"), 60 + i as u8))
+            .collect();
+
+        let alternate_playlists: Vec<Playlist> = (0..alternates)
+            .map(|i| Playlist {
+                name: format!("Keys.{:02}", i + 1),
+                // Alternate k references MIDI region k+1.
+                regions: vec![mk_placement(i as u16 + 1, 48_000 * (i as u64 + 1))],
+            })
+            .collect();
+
+        let track = Track {
+            name: "Keys".to_string(),
+            kind: TrackKind::Midi,
+            index: 0,
+            playlist_name: "Keys".to_string(),
+            // Active playlist references MIDI region 0.
+            regions: vec![mk_placement(0, 0)],
+            fades: Vec::new(),
+            volume_centibel: 0,
+            mute: false,
+            solo: false,
+            solo_defeat: false,
+            inactive: false,
+            pan: 0,
+            alternate_playlists,
+            output: String::new(),
+            color_byte: 0,
+            height_px: 0,
+            volume_automation: Vec::new(),
+            mute_automation: Vec::new(),
+            pan_automation: Vec::new(),
+            is_folder: false,
+            folder_depth: 0,
+            display_order: 0,
+            comment: String::new(),
+            is_master: false,
+        };
+
+        let mut session = empty_session();
+        session.midi_regions = midi_regions;
+        session.midi_tracks = vec![track];
+        session
+    }
+
+    /// Drive a synthetic MIDI session through the importer's per-track lane
+    /// wiring (the same `emit_midi_playlist` + `apply_fixed_lane_settings`
+    /// sequence the `Src::Midi` arm of `import_protools` uses) and serialize.
+    fn build_midi_lane_rpp(session: &ProToolsSession) -> String {
+        let track = &session.midi_tracks[0];
+        let sample_rate = 48_000.0;
+        let has_lanes = track.has_alternate_playlists();
+        let active_lane = if has_lanes { Some(0) } else { None };
+
+        let mut builder = ReaperProjectBuilder::new();
+        builder = builder.track(&track.name, |mut t| {
+            t = super::emit_midi_playlist(t, &track.regions, active_lane, session, sample_rate);
+            if has_lanes {
+                for (i, pl) in track.alternate_playlists.iter().enumerate() {
+                    t = super::emit_midi_playlist(
+                        t,
+                        &pl.regions,
+                        Some(i as i32 + 1),
+                        session,
+                        sample_rate,
+                    );
+                }
+                t = super::apply_fixed_lane_settings(t, track);
+            }
+            t
+        });
+        builder.build().to_rpp_string()
+    }
+
+    fn count_line(rpp: &str, token: &str) -> usize {
+        rpp.lines()
+            .filter(|l| l.trim_start().starts_with(token))
+            .count()
+    }
+
+    /// A MIDI track with an active playlist + 2 alternates becomes a fixed-lane
+    /// REAPER track: FIXEDLANES/LANENAME present, items on lanes 0/1/2, and the
+    /// item sources are MIDI (`<SOURCE MIDI`), not audio.
+    #[test]
+    fn midi_alternate_playlists_become_fixed_lanes() {
+        let session = build_midi_session(2);
+        let rpp = build_midi_lane_rpp(&session);
+
+        assert!(count_line(&rpp, "FIXEDLANES") > 0, "expected FIXEDLANES");
+        assert!(count_line(&rpp, "LANENAME ") > 0, "expected LANENAME");
+        // Per-item lane assignments: active on lane 0, alternates on 1 and 2.
+        let lane = |n: i32| rpp.lines().any(|l| l.trim_start() == format!("LANE {n}"));
+        assert!(lane(0), "expected active playlist on LANE 0:\n{rpp}");
+        assert!(lane(1), "expected first alternate on LANE 1:\n{rpp}");
+        assert!(lane(2), "expected second alternate on LANE 2:\n{rpp}");
+        // Items must be MIDI, not audio.
+        assert!(
+            rpp.contains("<SOURCE MIDI"),
+            "expected MIDI item sources:\n{rpp}"
+        );
+        assert!(
+            !rpp.contains("<SOURCE WAVE"),
+            "MIDI comp track must not emit audio sources:\n{rpp}"
+        );
+    }
+
+    /// Negative control: a single-playlist MIDI track (no alternates) is NOT
+    /// converted into fixed lanes.
+    #[test]
+    fn midi_single_playlist_has_no_fixed_lanes() {
+        let session = build_midi_session(0);
+        let rpp = build_midi_lane_rpp(&session);
+
+        assert_eq!(
+            count_line(&rpp, "FIXEDLANES"),
+            0,
+            "single-playlist MIDI track must not emit FIXEDLANES:\n{rpp}"
+        );
+        assert_eq!(
+            count_line(&rpp, "LANENAME "),
+            0,
+            "single-playlist MIDI track must not emit LANENAME:\n{rpp}"
+        );
+        // It must still emit its one MIDI item.
+        assert!(
+            rpp.contains("<SOURCE MIDI"),
+            "expected one MIDI item:\n{rpp}"
+        );
+    }
+
+    #[test]
+    fn alternate_playlists_become_fixed_lanes() {
+        // Same 3-playlist synthetic session the example/round-trip test use.
+        let project = super::build_demo_playlist_project();
+
+        // Domain-level assertions on the built track.
+        let rtrack = &project.tracks[0];
+        assert!(
+            rtrack.fixed_lanes.is_some(),
+            "multi-playlist track must enter fixed-lane mode"
+        );
+        let names = rtrack
+            .lane_names
+            .as_ref()
+            .expect("lane names should be populated");
+        assert_eq!(names.lane_count, 3);
+        assert_eq!(
+            names.lane_names,
+            vec![
+                "Vocal".to_string(),
+                "Vocal.01".to_string(),
+                "Vocal.02".to_string()
+            ]
+        );
+        assert_eq!(
+            rtrack.lane_record.as_ref().map(|r| r.comping_enabled_lane),
+            Some(0)
+        );
+
+        // One item per playlist, distributed across lanes 0, 1, 2.
+        let mut lanes: Vec<i32> = rtrack
+            .items
+            .iter()
+            .map(|it| it.lane.expect("each item should carry a LANE index"))
+            .collect();
+        lanes.sort_unstable();
+        assert_eq!(lanes, vec![0, 1, 2]);
+
+        // And it survives serialization (FIXEDLANES + per-item LANE tokens).
+        let rpp = project.to_rpp_string();
+        assert!(
+            rpp.contains("FIXEDLANES"),
+            "RPP must carry FIXEDLANES token"
+        );
+        assert!(rpp.contains("LANE "), "RPP items must carry LANE token");
+    }
+
+    /// Strongest verification short of a real PT fixture: serialize the
+    /// synthetic 3-playlist project to raw .rpp TEXT, assert on the exact
+    /// REAPER tokens, then re-parse that text back into REAPER domain types
+    /// and confirm the fixed-lane structure survives a full round-trip
+    /// (i.e. REAPER would load it).
+    #[test]
+    fn alternate_playlists_serialize_to_valid_rpp() {
+        use dawfile_reaper::io::parse_project_text;
+
+        let project = super::build_demo_playlist_project();
+        let rpp = project.to_rpp_string();
+
+        // ── Raw RPP text assertions ────────────────────────────────────────
+        // Exactly one FIXEDLANES line on the (single) comp track.
+        let fixedlanes: Vec<&str> = rpp
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("FIXEDLANES "))
+            .collect();
+        assert_eq!(
+            fixedlanes.len(),
+            1,
+            "expected exactly one FIXEDLANES line, got {fixedlanes:?}"
+        );
+
+        // Exactly one LANENAME line, listing all three playlist names. REAPER
+        // format: `LANENAME <count> "name0" "name1" "name2"`.
+        let lanename: Vec<&str> = rpp
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("LANENAME "))
+            .collect();
+        assert_eq!(
+            lanename.len(),
+            1,
+            "expected exactly one LANENAME line, got {lanename:?}"
+        );
+        let ln = lanename[0];
+        for name in ["Vocal", "Vocal.01", "Vocal.02"] {
+            assert!(
+                ln.contains(&format!("\"{name}\"")),
+                "LANENAME line must list playlist {name:?}: {ln}"
+            );
+        }
+
+        // Exactly one LANEREC line.
+        let lanerec: Vec<&str> = rpp
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("LANEREC "))
+            .collect();
+        assert_eq!(
+            lanerec.len(),
+            1,
+            "expected exactly one LANEREC line, got {lanerec:?}"
+        );
+
+        // One item per playlist per lane: exactly one `LANE 0`, `LANE 1`,
+        // `LANE 2` token (REAPER's per-item `LANE <n>` line, not LANENAME/REC).
+        let lane_token_count = |n: i32| {
+            rpp.lines()
+                .map(str::trim)
+                .filter(|l| *l == format!("LANE {n}"))
+                .count()
+        };
+        assert_eq!(lane_token_count(0), 1, "expected one item on LANE 0");
+        assert_eq!(lane_token_count(1), 1, "expected one item on LANE 1");
+        assert_eq!(lane_token_count(2), 1, "expected one item on LANE 2");
+
+        // ── Re-parse the emitted RPP back into REAPER domain types ──────────
+        // This proves the .rpp we emit is structurally valid and round-trips.
+        let reparsed = parse_project_text(&rpp)
+            .expect("emitted RPP must re-parse cleanly into REAPER domain types");
+
+        let rtrack = reparsed
+            .tracks
+            .iter()
+            .find(|t| t.fixed_lanes.is_some())
+            .expect("re-parsed project must contain a fixed-lane track");
+
+        assert!(
+            rtrack.fixed_lanes.is_some(),
+            "re-parsed track must still be in fixed-lane mode"
+        );
+        let names = rtrack
+            .lane_names
+            .as_ref()
+            .expect("re-parsed track must carry lane names");
+        assert_eq!(
+            names.lane_names,
+            vec![
+                "Vocal".to_string(),
+                "Vocal.01".to_string(),
+                "Vocal.02".to_string(),
+            ],
+            "re-parsed lane names must match the three playlists"
+        );
+        assert!(
+            rtrack.lane_record.is_some(),
+            "re-parsed track must carry lane-record settings"
+        );
+
+        // Each re-parsed item carries its expected LANE index (0, 1, 2).
+        let mut lanes: Vec<i32> = rtrack
+            .items
+            .iter()
+            .map(|it| it.lane.expect("re-parsed item must carry a LANE index"))
+            .collect();
+        lanes.sort_unstable();
+        assert_eq!(
+            lanes,
+            vec![0, 1, 2],
+            "re-parsed items must land on lanes 0, 1, 2"
+        );
+    }
+
+    #[test]
+    fn single_playlist_track_has_no_lanes() {
+        // A track with no alternate playlists must produce lane=None items and
+        // no FIXEDLANES (no regression for the common case).
+        let mut session = empty_session();
+        session.audio_files.push(AudioFile {
+            filename: "Take.wav".to_string(),
+            index: 0,
+            length: 48_000,
+            source_uid: None,
+        });
+        session.audio_regions.push(mk_region(0, "Take-01", 48_000));
+
+        let track = mk_track("Gtr", vec![mk_placement(0, 0)]);
+        let resolve = |f: &str| f.to_string();
+
+        let mut builder = ReaperProjectBuilder::new();
+        builder = builder.track("Gtr", |t| {
+            // has_lanes == false → active_lane None, no FIXEDLANES setters.
+            emit_audio_playlist(
+                t,
+                &track.regions,
+                None,
+                &track,
+                &session,
+                48_000.0,
+                &resolve,
+            )
+        });
+        let project = builder.build();
+        let rtrack = &project.tracks[0];
+        assert!(rtrack.fixed_lanes.is_none());
+        assert!(rtrack.lane_names.is_none());
+        assert_eq!(rtrack.items.len(), 1);
+        assert_eq!(rtrack.items[0].lane, None);
+    }
+
     #[test]
     fn sibling_folders_round_trip_emits_isbus() {
         let rpp = protools_to_rpp(&fixture("folder-siblings.ptx")).expect("convert");

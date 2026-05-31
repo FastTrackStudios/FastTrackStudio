@@ -494,6 +494,10 @@ impl RppSerialize for Item {
         if let Some(rp) = self.rec_pass {
             out.push_str(&format!("{}RECPASS {}\n", inner, rp));
         }
+        // Fixed item lane index (REAPER 7+ comping). `None` for ordinary items.
+        if let Some(lane) = self.lane {
+            out.push_str(&format!("{}LANE {}\n", inner, lane));
+        }
 
         // Stretch markers
         for sm in &self.stretch_markers {

@@ -69,6 +69,7 @@ pub mod plugin_loader;
 pub mod position_conversion;
 pub mod project;
 pub mod project_context;
+pub mod project_export;
 pub mod project_import;
 pub mod ptr_validation;
 pub mod region;
@@ -101,6 +102,7 @@ pub use control_surface::{DawControlSurface, Mode as CsurfMode};
 pub use action_registry::{register_extension_menu, subscribe_action_broadcasts};
 pub use marker::{Reaper, ReaperMainThreadDispatcher};
 pub use plugin_loader::{eager_load_fx_plugins, set_plugin_context};
+pub use project_export::{reaper_track_to_pt_playlists, reaper_track_to_pt_playlists_at_rate};
 pub use project_import::register_project_importer;
 pub use region::get_regions_on_main_thread;
 pub use tempo_map::{
