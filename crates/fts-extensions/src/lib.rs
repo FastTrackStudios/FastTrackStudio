@@ -122,6 +122,10 @@ mod continuous_action;
 mod error;
 mod item_actions;
 mod menu;
+mod midi_flam;
+mod midi_mode;
+#[cfg(feature = "mod-input")]
+mod midi_mode_input;
 #[cfg(all(feature = "mod-session", feature = "mod-input"))]
 mod mode_input;
 #[cfg(feature = "mod-session")]
@@ -559,6 +563,13 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     {
         mode_input::install();
         info!("Mode → input workflow bridge installed");
+    }
+
+    // Bridge MIDI-editor mode changes to reaper-input workflows.
+    #[cfg(feature = "mod-input")]
+    {
+        midi_mode_input::install();
+        info!("MIDI-editor mode → input workflow bridge installed");
     }
 
     // Collect actions from all modules after init has populated runtime state.

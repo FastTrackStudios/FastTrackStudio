@@ -239,6 +239,22 @@ pub fn build_action_defs() -> ActionDefs {
                 crate::sync_settings::toggle_drift_correction();
             },
         ),
+        // ── MIDI editor modes ─────────────────────────────────────────────
+        menu_action(
+            "FTS_MIDI_MODE_DRUMS",
+            "MIDI mode: Drums (drum-map view + drum keybinds)",
+            || crate::midi_mode::set_midi_mode(crate::midi_mode::MidiMode::Drums),
+        ),
+        menu_action(
+            "FTS_MIDI_MODE_CYCLE",
+            "MIDI mode: Cycle to next",
+            crate::midi_mode::cycle_midi_mode,
+        ),
+        action(
+            "FTS_MIDI_INSERT_FLAM",
+            "MIDI: Insert flam at mouse cursor",
+            crate::midi_flam::insert_flam_at_mouse,
+        ),
         // ── Info ─────────────────────────────────────────────────────────────
         menu_action("FTS_INFO", "FastTrackStudio Info", || {
             let version = env!("CARGO_PKG_VERSION");
