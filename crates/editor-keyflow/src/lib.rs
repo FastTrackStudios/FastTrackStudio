@@ -51,19 +51,57 @@ pub enum RenderError {
 
 /// Render keyflow chart source to an inline SVG string. The
 /// result is safe to drop into `dangerous_inner_html` — it
-/// begins with `<svg …>` and is self-contained (fonts embedded).
+/// begins with `<svg …>` and is **self-contained** (fonts embedded
+/// as base64 `@font-face`), so it renders anywhere with no setup.
+///
+/// That self-containment costs ~4 MB per SVG and ~10 ms to build.
+/// For a one-off embed (a markdown `.kf` fence) that's fine. For a
+/// surface that re-renders on every keystroke, prefer
+/// [`render_svg_live`] + [`font_face_css`], which moves the font
+/// bytes out of the hot path.
 ///
 /// Uses continuous-scroll layout (a single scene-sized image,
 /// no pagination) which is the right shape for an inline
 /// document embed. Returns [`RenderError::Render`] when the
 /// source can't be parsed or laid out.
 pub fn render_svg(source: &str) -> Result<String, RenderError> {
+    render_inner(source, true)
+}
+
+/// Render keyflow chart source to an inline SVG **without** embedded
+/// fonts — glyphs only, ~38 KB instead of ~4 MB, ~6 ms instead of
+/// ~16 ms (native; the gap is wider in wasm and includes the DOM
+/// cost of inserting/parsing 4 MB of base64 each time).
+///
+/// The output references its fonts by family name, so the host must
+/// have those `@font-face` rules in the document — inject
+/// [`font_face_css`] **once** at page level. Inline `<svg>` resolves
+/// document fonts by name, so each live render carries only the
+/// changing glyphs. Use this for live editors / previews that
+/// re-render as the user types.
+pub fn render_svg_live(source: &str) -> Result<String, RenderError> {
+    render_inner(source, false)
+}
+
+/// The `@font-face` CSS for the engraving fonts ([`render_svg_live`]
+/// references these families by name). Inject the returned string
+/// once into the document (e.g. a `<style>` tag); it's ~4 MB of
+/// base64 but the browser parses and caches it a single time, versus
+/// re-embedding it in every keystroke's SVG.
+pub fn font_face_css() -> Result<String, RenderError> {
+    let fonts = ChartFontBundle::new().map_err(RenderError::Render)?;
+    Ok(with_embedded_fonts(&fonts, SvgExportConfig::default()).font_face_css())
+}
+
+/// Shared layout + crop + serialize. `embed_fonts` toggles between
+/// the self-contained [`render_svg`] and the font-less
+/// [`render_svg_live`].
+fn render_inner(source: &str, embed_fonts: bool) -> Result<String, RenderError> {
     let mode = LayoutMode::ContinuousScroll {
         width: LAYOUT_WIDTH,
     };
     let result =
         api::chart::layout_text(source, &mode).map_err(|e| RenderError::Render(e.to_string()))?;
-    let fonts = ChartFontBundle::new().map_err(RenderError::Render)?;
 
     // Shrink-wrap the SVG viewBox to what's actually drawn. The engraver's
     // `total_width`/`total_height` describe a print page box — content plus A4
@@ -81,7 +119,13 @@ pub fn render_svg(source: &str) -> Result<String, RenderError> {
         ),
         None => (0.0, 0.0, result.total_width, result.total_height),
     };
-    let config = with_embedded_fonts(&fonts, SvgExportConfig::for_page(vx, vy, vw, vh));
+    let base = SvgExportConfig::for_page(vx, vy, vw, vh);
+    let config = if embed_fonts {
+        let fonts = ChartFontBundle::new().map_err(RenderError::Render)?;
+        with_embedded_fonts(&fonts, base)
+    } else {
+        base
+    };
     let mut serializer = SvgSerializer::new(config);
     Ok(serializer.serialize(&result.scene))
 }
@@ -135,6 +179,41 @@ mod tests {
     fn embeds_fonts_for_self_contained_output() {
         let svg = render_svg(SIMPLE).expect("render ok");
         assert!(svg.contains("@font-face"), "expected embedded fonts");
+    }
+
+    /// The live render must NOT embed fonts: same drawing, a fraction of the
+    /// bytes (glyphs only). Fonts come from `font_face_css()` injected once. This
+    /// is what keeps the per-keystroke preview cheap.
+    #[test]
+    fn live_render_is_font_less_and_small() {
+        let live = render_svg_live(SIMPLE).expect("render ok");
+        let full = render_svg(SIMPLE).expect("render ok");
+        assert!(live.contains("<svg"), "live render should be an svg");
+        assert!(
+            !live.contains("@font-face"),
+            "live render must not embed fonts"
+        );
+        assert!(
+            live.len() * 10 < full.len(),
+            "live render should be far smaller than the embedded one (live={}KB full={}KB)",
+            live.len() / 1024,
+            full.len() / 1024
+        );
+    }
+
+    /// The page injects this once so font-less live renders resolve their
+    /// families. It must carry the @font-face rules and the families the scene
+    /// references by name.
+    #[test]
+    fn font_face_css_carries_the_engraving_families() {
+        let css = font_face_css().expect("font css");
+        assert!(css.contains("@font-face"), "expected @font-face rules");
+        for family in ["Leland", "MuseJazz Text", "Chicago"] {
+            assert!(
+                css.contains(&format!("font-family: '{family}'")),
+                "missing @font-face for {family}"
+            );
+        }
     }
 
     /// A one-system chart is a few measures of music; its SVG must crop to that,
