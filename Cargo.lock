@@ -7727,6 +7727,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a46645bbd70538861a90d0f26c31537cdf1e44aae99a794fb75a664b70951bc"
 
 [[package]]
+name = "inbox-proto"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8268,7 +8283,7 @@ version = "0.0.1"
 name = "keyflow-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/architect.git?branch=main)",
+ "architect 0.1.0",
  "color-palette",
  "daw-proto",
  "facet",
