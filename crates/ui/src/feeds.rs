@@ -174,6 +174,62 @@ pub async fn delete_inbox_item(slug: &str, id: &str) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete inbox item: {e:?}"))
 }
 
+/// Promote an inbox item into a Task — `title` is the headline, `details`
+/// the markdown body. Returns the created task (its `path` is the
+/// provenance back-link to store in `processed_into`).
+#[cfg(target_arch = "wasm32")]
+pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task::TaskInfo, String> {
+    let client = crate::vox_clients::establish_for::<task::TaskServiceClient>(slug).await?;
+    let t = task::TaskInfo {
+        id: uuid::Uuid::nil(),
+        path: String::new(),
+        title: title.to_owned(),
+        status: "open".into(),
+        priority: "normal".into(),
+        due: None,
+        scheduled: None,
+        tags: task::model::StringList(vec!["task".into()]),
+        contexts: task::model::StringList::default(),
+        projects: task::model::StringList::default(),
+        project_id: None,
+        milestone_id: None,
+        time_estimate: None,
+        time_entries: task::model::TimeEntries::default(),
+        recurrence: None,
+        recurrence_anchor: None,
+        complete_instances: task::model::StringList::default(),
+        completed_date: None,
+        agent_profile: String::new(),
+        dispatched_agent_tasks: task::model::StringList::default(),
+        date_created: None,
+        date_modified: None,
+        details: details.to_owned(),
+        workflow: None,
+    };
+    client
+        .create(t)
+        .await
+        .map_err(|e| format!("{slug}: create task: {e:?}"))
+}
+
+/// Promote an inbox item into an atomic note: write `markdown` to
+/// `path` (vault-relative, e.g. `Wiki/Atomic/<slug>.md`) in the org's
+/// `"default"` vault. `CreateOnly` so a re-promote doesn't clobber.
+#[cfg(target_arch = "wasm32")]
+pub async fn create_wiki_note(slug: &str, path: &str, markdown: &str) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
+    client
+        .put_file(
+            "default".to_owned(),
+            path.to_owned(),
+            markdown.as_bytes().to_vec(),
+            vault_proto::IfMatch::CreateOnly,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("{slug}: write note: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -389,6 +445,20 @@ pub async fn upsert_inbox_item(_slug: &str, _item: inbox_proto::InboxItem) -> Re
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn delete_inbox_item(_slug: &str, _id: &str) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_task(
+    _slug: &str,
+    _title: &str,
+    _details: &str,
+) -> Result<task::TaskInfo, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_wiki_note(_slug: &str, _path: &str, _markdown: &str) -> Result<(), String> {
     Err("native client not wired yet".to_owned())
 }
 

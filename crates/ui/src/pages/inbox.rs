@@ -38,6 +38,9 @@ pub fn InboxView() -> Element {
     let mut show_all = use_signal(|| false);
     // Bumped after every mutation to re-run the fetch.
     let mut refresh = use_signal(|| 0u32);
+    // Focused daily-review ("process") mode + its frozen work queue.
+    let mut processing = use_signal(|| false);
+    let mut queue = use_signal(Vec::<InboxItem>::new);
 
     let items = use_resource(move || {
         let _ = refresh(); // subscribe so mutations re-fetch
@@ -95,11 +98,58 @@ pub fn InboxView() -> Element {
         _ => 0,
     };
 
+    // The daily-review work set: open items whose snooze has elapsed,
+    // oldest first (the fetch already sorts). Frozen into `queue` when
+    // the user enters process mode so mutations don't reshuffle it.
+    let due_open: Vec<InboxItem> = match &*items.read() {
+        Some(Ok(all)) => all
+            .iter()
+            .filter(|it| {
+                it.is_open()
+                    && it
+                        .resurface_on
+                        .as_deref()
+                        .is_none_or(|d| d <= today.as_str())
+            })
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    // Focused review mode takes over the whole page.
+    if processing() {
+        return rsx! {
+            ProcessReview {
+                items: queue(),
+                slug,
+                on_exit: move |()| {
+                    processing.set(false);
+                    refresh += 1;
+                },
+            }
+        };
+    }
+
     rsx! {
         div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-6 lg:p-10",
-            div { class: "flex items-baseline justify-between gap-3",
+            div { class: "flex items-center justify-between gap-3",
                 Heading { level: HeadingLevel::H1, "Inbox" }
-                Text { variant: TextVariant::Muted, class: "text-sm", "{open_count} to review" }
+                if !due_open.is_empty() {
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        size: ButtonSize::Small,
+                        on_click: {
+                            let q = due_open.clone();
+                            move |_| {
+                                queue.set(q.clone());
+                                processing.set(true);
+                            }
+                        },
+                        "Process {due_open.len()} →"
+                    }
+                } else {
+                    Text { variant: TextVariant::Muted, class: "text-sm", "{open_count} open" }
+                }
             }
             Text {
                 variant: TextVariant::Muted,
@@ -267,4 +317,258 @@ fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, mut refresh: Signal<u32
             }
         }
     }
+}
+
+/// Focused daily-review ("process") mode: walk a frozen queue of open
+/// items one at a time and decide what each becomes — a Task, an atomic
+/// note, a snooze, done, or gone. Mirrors the FLAP processing ritual.
+/// Mutations fire optimistically and the cursor advances immediately;
+/// the queue is a snapshot so it never reshuffles under you.
+#[component]
+fn ProcessReview(
+    items: Vec<InboxItem>,
+    slug: Memo<Option<String>>,
+    on_exit: EventHandler<()>,
+) -> Element {
+    let mut cursor = use_signal(|| 0usize);
+    let total = items.len();
+    let idx = cursor();
+
+    if idx >= total {
+        return rsx! {
+            div { class: "mx-auto flex max-w-2xl flex-col items-center gap-4 p-6 pt-[12vh] text-center lg:p-10",
+                div { class: "text-5xl", "🎉" }
+                Heading { level: HeadingLevel::H2, "Inbox clear" }
+                Text { variant: TextVariant::Muted, "You've processed everything in the queue." }
+                Button {
+                    variant: ButtonVariant::Primary,
+                    on_click: move |_| on_exit.call(()),
+                    "Back to inbox"
+                }
+            }
+        };
+    }
+
+    let item = items[idx].clone();
+    let body = item.body.clone();
+    let (title, details) = split_title_body(&body);
+    let kind = item.kind.clone();
+    let source = item.source.clone();
+    let date = item.created.get(..10).unwrap_or(&item.created).to_string();
+    let pct = ((idx as f32) / (total.max(1) as f32) * 100.0).round() as i32;
+
+    // ── action closures (each fires its mutation, then advances) ──
+    let to_task = {
+        let item = item.clone();
+        let title = title.clone();
+        let details = details.clone();
+        move |_| {
+            if let Some(s) = slug() {
+                let (item, title, details) = (item.clone(), title.clone(), details.clone());
+                spawn(async move {
+                    if let Ok(t) = crate::feeds::create_task(&s, &title, &details).await {
+                        let mut done = item;
+                        done.status = InboxItem::STATUS_PROCESSED.to_string();
+                        done.processed_into = Some(t.path);
+                        let _ = crate::feeds::upsert_inbox_item(&s, done).await;
+                    }
+                });
+            }
+            cursor += 1;
+        }
+    };
+
+    let to_note = {
+        let item = item.clone();
+        let title = title.clone();
+        let body = body.clone();
+        move |_| {
+            if let Some(s) = slug() {
+                let (item, title, body) = (item.clone(), title.clone(), body.clone());
+                let path = format!(
+                    "Wiki/Atomic/{}-{}.md",
+                    slugify(&title),
+                    item.id.get(..6).unwrap_or("note")
+                );
+                let md = atomic_markdown(&title, &body, &Utc::now().to_rfc3339());
+                spawn(async move {
+                    if crate::feeds::create_wiki_note(&s, &path, &md).await.is_ok() {
+                        let mut done = item;
+                        done.status = InboxItem::STATUS_PROCESSED.to_string();
+                        done.processed_into = Some(path);
+                        let _ = crate::feeds::upsert_inbox_item(&s, done).await;
+                    }
+                });
+            }
+            cursor += 1;
+        }
+    };
+
+    let mark_done = {
+        let item = item.clone();
+        move |_| {
+            if let Some(s) = slug() {
+                let mut done = item.clone();
+                spawn(async move {
+                    done.status = InboxItem::STATUS_PROCESSED.to_string();
+                    let _ = crate::feeds::upsert_inbox_item(&s, done).await;
+                });
+            }
+            cursor += 1;
+        }
+    };
+
+    let delete = {
+        let id = item.id.clone();
+        move |_| {
+            if let Some(s) = slug() {
+                let id = id.clone();
+                spawn(async move {
+                    let _ = crate::feeds::delete_inbox_item(&s, &id).await;
+                });
+            }
+            cursor += 1;
+        }
+    };
+
+    // Snooze the current item `days` out, then advance. Inlined per
+    // button (each needs its own clone of the item).
+    let snooze_btn =
+        |item: InboxItem, slug: Memo<Option<String>>, mut cursor: Signal<usize>, days: i64| {
+            if let Some(s) = slug() {
+                let mut next = item;
+                let until = (Utc::now().date_naive() + chrono::Duration::days(days)).to_string();
+                spawn(async move {
+                    next.resurface_on = Some(until);
+                    let _ = crate::feeds::upsert_inbox_item(&s, next).await;
+                });
+            }
+            cursor += 1;
+        };
+
+    rsx! {
+        div { class: "mx-auto flex max-w-2xl flex-col gap-4 p-6 lg:p-10",
+            // Progress + exit.
+            div { class: "flex items-center justify-between",
+                Text { variant: TextVariant::Muted, class: "text-sm", "Processing {idx + 1} of {total}" }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: move |_| on_exit.call(()),
+                    "Exit"
+                }
+            }
+            div { class: "h-1 w-full overflow-hidden rounded-full bg-muted",
+                div { class: "h-full rounded-full bg-primary transition-all", style: "width: {pct}%" }
+            }
+
+            // The capture, verbatim.
+            div { class: "flex flex-col gap-2 rounded-xl border border-border bg-card/40 p-5",
+                div { class: "flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground",
+                    span { class: "rounded bg-muted px-1.5 py-px", "{kind}" }
+                    span { "{date}" }
+                    if source != "ui" && source != "cli" {
+                        span { class: "rounded bg-muted px-1.5 py-px", "via {source}" }
+                    }
+                }
+                Text { class: "whitespace-pre-wrap break-words text-base", "{body}" }
+            }
+
+            // Decisions.
+            Text { variant: TextVariant::Muted, class: "text-xs", "What should this become?" }
+            div { class: "flex flex-wrap gap-2",
+                Button { variant: ButtonVariant::Primary, on_click: to_task, "→ Task" }
+                Button { variant: ButtonVariant::Secondary, on_click: to_note, "→ Note" }
+                Button { variant: ButtonVariant::Outline, on_click: mark_done, "Done" }
+            }
+            div { class: "flex flex-wrap items-center gap-2",
+                Text { variant: TextVariant::Muted, class: "text-xs", "Snooze:" }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: {
+                        let item = item.clone();
+                        move |_| snooze_btn(item.clone(), slug, cursor, 1)
+                    },
+                    "Tomorrow"
+                }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: {
+                        let item = item.clone();
+                        move |_| snooze_btn(item.clone(), slug, cursor, 3)
+                    },
+                    "3 days"
+                }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: {
+                        let item = item.clone();
+                        move |_| snooze_btn(item.clone(), slug, cursor, 7)
+                    },
+                    "1 week"
+                }
+                div { class: "flex-1" }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: move |_| cursor += 1,
+                    "Skip"
+                }
+                Button {
+                    variant: ButtonVariant::Destructive,
+                    size: ButtonSize::Small,
+                    on_click: delete,
+                    "Delete"
+                }
+            }
+        }
+    }
+}
+
+/// First non-empty line (capped) as the title; the remainder as the
+/// body. Used to seed a promoted Task's title + details.
+fn split_title_body(body: &str) -> (String, String) {
+    let trimmed = body.trim();
+    let (first, rest) = trimmed.split_once('\n').unwrap_or((trimmed, ""));
+    let title: String = first.trim().chars().take(120).collect();
+    let title = if title.is_empty() {
+        "Untitled".to_string()
+    } else {
+        title
+    };
+    (title, rest.trim().to_string())
+}
+
+/// Kebab-case a title into a vault-safe filename stem.
+fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !out.is_empty() {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let capped: String = out.trim_matches('-').chars().take(60).collect();
+    let capped = capped.trim_matches('-').to_string();
+    if capped.is_empty() {
+        "note".to_string()
+    } else {
+        capped
+    }
+}
+
+/// Markdown for a promoted atomic note: frontmatter (title / `atomic`
+/// type + tag / created) over the verbatim capture as the body.
+fn atomic_markdown(title: &str, body: &str, created: &str) -> String {
+    let esc = title.replace('"', "'");
+    format!(
+        "---\ntitle: \"{esc}\"\ntype: atomic\ntags:\n  - atomic\ncreated: {created}\n---\n\n{body}\n"
+    )
 }
