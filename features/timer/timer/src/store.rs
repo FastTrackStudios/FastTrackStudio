@@ -116,6 +116,44 @@ impl Store {
         &self.conn
     }
 
+    /// Upsert an org-level member rate (cascade level 3). Sets the
+    /// hourly rate (cents) + currency for `(org_id, user_id)`,
+    /// updating the existing row if one exists. New sessions logged
+    /// for that member snapshot this rate at close time.
+    pub async fn set_org_member_rate(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+        hourly_cents: i64,
+        currency: &str,
+    ) -> Result<(), TimerDbError> {
+        let existing = OrgMemberRateEntity::find()
+            .filter(OrgMemberRateColumn::OrgId.eq(org_id))
+            .filter(OrgMemberRateColumn::UserId.eq(user_id))
+            .one(&self.conn)
+            .await?;
+        if let Some(row) = existing {
+            let mut active: crate::entity::OrgMemberRateActive = row.into();
+            active.hourly_cents = Set(hourly_cents);
+            active.currency = Set(currency.to_string());
+            active.updated_at = Set(Utc::now());
+            active.update(&self.conn).await?;
+        } else {
+            OrgMemberRateEntity::insert(crate::entity::OrgMemberRateActive {
+                id: Set(Uuid::new_v4()),
+                org_id: Set(org_id),
+                user_id: Set(user_id),
+                hourly_cents: Set(hourly_cents),
+                currency: Set(currency.to_string()),
+                created_at: Set(Utc::now()),
+                updated_at: Set(Utc::now()),
+            })
+            .exec(&self.conn)
+            .await?;
+        }
+        Ok(())
+    }
+
     // ── Active timer helpers ────────────────────────────────
 
     async fn read_active(&self, user_id: Uuid) -> Result<Option<WorkSession>, TimerDbError> {

@@ -3519,6 +3519,19 @@ enum TimerCmd {
         #[arg(long = "tag")]
         tags: Vec<String>,
     },
+    /// Set an org-level member hourly rate (cascade level 3) for a
+    /// user. New sessions logged for that user snapshot this rate at
+    /// close. Upserts. Use `--org` to target the org's timer DB.
+    SetRate {
+        /// The member's user id (uuid).
+        #[arg(long)]
+        user_id: uuid::Uuid,
+        /// Hourly rate in cents (e.g. 3000 = $30/hr).
+        #[arg(long)]
+        cents: i64,
+        #[arg(long, default_value = "USD")]
+        currency: String,
+    },
     /// List sessions. Defaults to the last 7 days.
     List {
         /// Only sessions on this project (frontmatter uuid).
@@ -5757,6 +5770,20 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .map_err(|e| eyre::eyre!("log: {e}"))?;
             attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
             println!("Logged {} ({})", session.id, fmt_duration(to - from));
+        }
+        TimerCmd::SetRate {
+            user_id,
+            cents,
+            currency,
+        } => {
+            store
+                .set_org_member_rate(org_id, user_id, cents, &currency)
+                .await
+                .map_err(|e| eyre::eyre!("set rate: {e}"))?;
+            println!(
+                "Set org rate for {user_id}: {} {currency}/hr",
+                fmt_money(cents)
+            );
         }
         TimerCmd::List {
             project,
