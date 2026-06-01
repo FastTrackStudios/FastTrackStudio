@@ -36,12 +36,12 @@ pub fn TimerView() -> Element {
             None => Ok(None),
         }
     });
+    // The Recent list shows every member's logged time (not just the
+    // owner's), so the operator sees contractors' hours too.
     let sessions = use_resource(move || async move {
         let _ = reload();
         match target() {
-            Some((slug, org_id)) => {
-                crate::feeds::fetch_recent_sessions(&slug, owner_id(org_id)).await
-            }
+            Some((slug, _)) => crate::feeds::fetch_org_sessions(&slug).await,
             None => Ok(Vec::new()),
         }
     });

@@ -5616,6 +5616,14 @@ fn render_invoice_markdown(
     out
 }
 
+/// Deterministic local-owner user id for an org. MUST stay identical to
+/// the web UI's `task_ui::chrome::owner_id` (`v5(org_id,
+/// "task-local-owner")`) so the CLI and the `/timer` page resolve the
+/// same user and therefore see the same sessions.
+fn timer_owner_id(org_id: uuid::Uuid) -> uuid::Uuid {
+    uuid::Uuid::new_v5(&org_id, b"task-local-owner")
+}
+
 async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()> {
     use sea_orm::Database;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -5635,26 +5643,23 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
         .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
     let vault_root = std::env::var("TASK_VAULT_ROOT")
         .map_or_else(|_| ctx.root.vault_dir(), std::path::PathBuf::from);
-    let stored_session = session_store::load().ok().flatten();
-    let session_user_id = stored_session
-        .as_ref()
-        .and_then(|s| s.active_server().map(|e| e.user_id));
-    let user_id = session_user_id
-        .or_else(|| {
-            std::env::var("TASK_USER_ID")
-                .ok()
-                .and_then(|s| s.parse::<uuid::Uuid>().ok())
-        })
-        .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap());
-    // `org_id` here is the architect-auth org membership id
-    // (different from the on-disk org slug). Not currently
-    // surfaced in the multi-server session shape; only an
-    // env-var override is honored. Phase 3 federation can
-    // promote this onto `ServerEntry`.
+    // Unified identity. The org id is the org's *manifest* id (the
+    // same value the web UI gets from `.well-known` → `OrgMeta.id`),
+    // and the default user is the deterministic "local owner" derived
+    // from it — matching `task_ui::chrome::owner_id`. This is what makes
+    // CLI- and UI-logged sessions land in the same `(org_id, user_id)`
+    // keyspace so both surfaces see the same data. `TASK_ORG_ID` /
+    // `TASK_USER_ID` still override (e.g. logging a contractor's time
+    // under a distinct user id).
     let org_id = std::env::var("TASK_ORG_ID")
         .ok()
         .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        .or_else(|| ctx.root.manifest().ok().map(|m| m.id))
         .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap());
+    let user_id = std::env::var("TASK_USER_ID")
+        .ok()
+        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        .unwrap_or_else(|| timer_owner_id(org_id));
 
     let conn = Database::connect(&db_url)
         .await

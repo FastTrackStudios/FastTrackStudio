@@ -264,6 +264,20 @@ pub async fn fetch_recent_sessions(
     Ok(sessions)
 }
 
+/// Every session in the org (all members), newest first — the time-log
+/// view. Lets the operator see contractors' logged time too, not just
+/// their own.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_org_sessions(slug: &str) -> Result<Vec<timer_proto::WorkSession>, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    let mut sessions = client
+        .list_sessions(timer_proto::WorkSessionFilter::default())
+        .await
+        .map_err(|e| format!("{slug}: list sessions: {e:?}"))?;
+    sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+    Ok(sessions)
+}
+
 /// Start a timer; returns the new open session.
 #[cfg(target_arch = "wasm32")]
 pub async fn start_timer(
@@ -499,6 +513,11 @@ pub async fn fetch_recent_sessions(
     _slug: &str,
     _user_id: uuid::Uuid,
 ) -> Result<Vec<timer_proto::WorkSession>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_org_sessions(_slug: &str) -> Result<Vec<timer_proto::WorkSession>, String> {
     Err("native client not wired yet".to_owned())
 }
 
