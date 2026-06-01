@@ -290,6 +290,30 @@ pub async fn stop_timer(
         .map_err(|e| format!("{slug}: stop timer: {e:?}"))
 }
 
+/// Edit an existing session — only the `Some(_)` fields change. The
+/// backend re-snapshots the rate afterward.
+#[cfg(target_arch = "wasm32")]
+pub async fn update_session(
+    slug: &str,
+    req: timer_proto::service::UpdateSessionRequest,
+) -> Result<timer_proto::WorkSession, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .update_session(req)
+        .await
+        .map_err(|e| format!("{slug}: update session: {e:?}"))
+}
+
+/// Permanently delete a session.
+#[cfg(target_arch = "wasm32")]
+pub async fn delete_session(slug: &str, id: uuid::Uuid) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .delete_session(id)
+        .await
+        .map_err(|e| format!("{slug}: delete session: {e:?}"))
+}
+
 /// Fetch one org's vault markdown as `WikiFile`s for the knowledge
 /// graph: pull the manifest, then read every `.md` file concurrently
 /// over the one socket. Pure graph-building happens caller-side.
@@ -491,6 +515,19 @@ pub async fn stop_timer(
     _slug: &str,
     _user_id: uuid::Uuid,
 ) -> Result<timer_proto::WorkSession, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn update_session(
+    _slug: &str,
+    _req: timer_proto::service::UpdateSessionRequest,
+) -> Result<timer_proto::WorkSession, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn delete_session(_slug: &str, _id: uuid::Uuid) -> Result<(), String> {
     Err("native client not wired yet".to_owned())
 }
 
