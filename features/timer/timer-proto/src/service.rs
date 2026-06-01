@@ -82,6 +82,39 @@ pub trait TimerService {
         &self,
         filter: WorkSessionFilter,
     ) -> Result<Vec<WorkSession>, TimerError>;
+
+    /// Edit an existing session. Only the `Some(_)` fields in `req` are
+    /// applied; the rest are left as-is. After applying, the rate is
+    /// re-snapshotted from the cascade against the (possibly changed)
+    /// user / project / billable so the stored `rate_cents` stays
+    /// consistent — editing a session re-resolves its rate. Returns the
+    /// updated row. Fails with [`TimerError::NotFound`] for an unknown id.
+    async fn update_session(&self, req: UpdateSessionRequest) -> Result<WorkSession, TimerError>;
+
+    /// Permanently delete a session by id. Idempotent — deleting an
+    /// already-gone id is `Ok(())`.
+    async fn delete_session(&self, id: Uuid) -> Result<(), TimerError>;
+}
+
+/// Args for [`TimerService::update_session`]. `id` selects the row;
+/// every other field is `Option` — `Some` overwrites, `None` leaves the
+/// current value. `org_id` is intentionally not editable.
+#[derive(
+    ::facet::Facet, serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Default,
+)]
+#[repr(C)]
+pub struct UpdateSessionRequest {
+    pub id: Uuid,
+    /// Reassign to a different member (also re-resolves the rate).
+    pub user_id: Option<Uuid>,
+    /// Set the project link (re-resolves the rate).
+    pub project_id: Option<Uuid>,
+    pub project_path: Option<String>,
+    pub task_note_path: Option<String>,
+    pub description: Option<String>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub billable: Option<bool>,
 }
 
 /// Args for [`TimerService::start_timer`].

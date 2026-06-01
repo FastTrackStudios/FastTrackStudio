@@ -3532,6 +3532,34 @@ enum TimerCmd {
         #[arg(long, default_value = "USD")]
         currency: String,
     },
+    /// Edit an existing session. Only the flags you pass change; the
+    /// billable rate is re-snapshotted from the cascade afterward
+    /// (so reassigning `--user-id` or `--project` re-rates it).
+    Edit {
+        /// Session id (uuid).
+        id: uuid::Uuid,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        from: Option<chrono::DateTime<chrono::Utc>>,
+        #[arg(long)]
+        to: Option<chrono::DateTime<chrono::Utc>>,
+        /// Reassign to a project (frontmatter uuid).
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Reassign to a different member.
+        #[arg(long)]
+        user_id: Option<uuid::Uuid>,
+        #[arg(long)]
+        billable: Option<bool>,
+        #[arg(long)]
+        task_note: Option<String>,
+    },
+    /// Delete a session by id. Permanent.
+    Delete {
+        /// Session id (uuid).
+        id: uuid::Uuid,
+    },
     /// List sessions. Defaults to the last 7 days.
     List {
         /// Only sessions on this project (frontmatter uuid).
@@ -5784,6 +5812,49 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 "Set org rate for {user_id}: {} {currency}/hr",
                 fmt_money(cents)
             );
+        }
+        TimerCmd::Edit {
+            id,
+            description,
+            from,
+            to,
+            project,
+            user_id: edit_user,
+            billable,
+            task_note,
+        } => {
+            let session = store
+                .update_session(timer_proto::service::UpdateSessionRequest {
+                    id,
+                    user_id: edit_user,
+                    project_id: project,
+                    project_path: None,
+                    task_note_path: task_note,
+                    description,
+                    start_time: from,
+                    end_time: to,
+                    billable,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("edit: {e}"))?;
+            println!(
+                "Updated {} — \"{}\" [{}] {}/hr",
+                session.id,
+                session.description,
+                if session.billable {
+                    "billable"
+                } else {
+                    "non-billable"
+                },
+                fmt_money(session.rate_cents),
+            );
+        }
+        TimerCmd::Delete { id } => {
+            store
+                .delete_session(id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e}"))?;
+            println!("Deleted {id}");
         }
         TimerCmd::List {
             project,
