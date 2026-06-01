@@ -116,6 +116,16 @@ pub fn InboxView() -> Element {
         _ => Vec::new(),
     };
 
+    // Agent-proposed captures awaiting one-tap accept/dismiss.
+    let suggested: Vec<InboxItem> = match &*items.read() {
+        Some(Ok(all)) => all
+            .iter()
+            .filter(|it| it.status == InboxItem::STATUS_SUGGESTED)
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
+
     // Focused review mode takes over the whole page.
     if processing() {
         return rsx! {
@@ -193,6 +203,21 @@ pub fn InboxView() -> Element {
             if let Some(err) = load_err {
                 div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
                     "Couldn't load the inbox: {err}"
+                }
+            }
+
+            // ── Suggested (agent-proposed) — one-tap accept/dismiss ──
+            if !suggested.is_empty() {
+                div { class: "flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3",
+                    div { class: "flex items-baseline gap-2",
+                        span { class: "text-sm font-medium text-foreground", "Suggested for you" }
+                        span { class: "text-xs text-muted-foreground",
+                            "{suggested.len()} from your sources — accept to add to the queue"
+                        }
+                    }
+                    for item in suggested {
+                        SuggestedRow { key: "{item.id}", item, slug, refresh }
+                    }
                 }
             }
 
@@ -313,6 +338,60 @@ fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, mut refresh: Signal<u32
                         on_click: move |_| delete(),
                         "Delete"
                     }
+                }
+            }
+        }
+    }
+}
+
+/// One agent-suggested capture: the proposed text + a one-tap Accept
+/// (→ enters the open review queue) or Dismiss (→ deleted).
+#[component]
+fn SuggestedRow(item: InboxItem, slug: Memo<Option<String>>, refresh: Signal<u32>) -> Element {
+    let item = use_signal(|| item);
+    let snap = item.read();
+    let body = snap.body.clone();
+    let source = snap.source.clone();
+    drop(snap);
+
+    let accept = move |_| {
+        let Some(s) = slug() else { return };
+        let mut next = item();
+        let mut refresh = refresh;
+        next.status = InboxItem::STATUS_OPEN.to_string();
+        spawn(async move {
+            let _ = crate::feeds::upsert_inbox_item(&s, next).await;
+            refresh += 1;
+        });
+    };
+    let dismiss = move |_| {
+        let Some(s) = slug() else { return };
+        let id = item().id;
+        let mut refresh = refresh;
+        spawn(async move {
+            let _ = crate::feeds::delete_inbox_item(&s, &id).await;
+            refresh += 1;
+        });
+    };
+
+    rsx! {
+        div { class: "flex items-start gap-3 rounded-lg border border-border bg-card/60 px-3 py-2",
+            div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
+                Text { class: "whitespace-pre-wrap break-words text-sm", "{body}" }
+                span { class: "text-[11px] text-muted-foreground", "via {source}" }
+            }
+            div { class: "flex shrink-0 items-center gap-1",
+                Button {
+                    variant: ButtonVariant::Primary,
+                    size: ButtonSize::Small,
+                    on_click: accept,
+                    "Accept"
+                }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: dismiss,
+                    "Dismiss"
                 }
             }
         }

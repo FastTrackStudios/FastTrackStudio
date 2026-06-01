@@ -504,6 +504,26 @@ enum InboxCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Stage an agent-proposed capture for one-tap review (status
+    /// `suggested`). Producers (email ingestion, …) use this so
+    /// suggestions don't flood the open queue until you accept them.
+    Suggest {
+        /// The summary text. Quote multi-word input.
+        text: Vec<String>,
+        /// Capture source label, e.g. `email`. Defaults to `agent`.
+        #[arg(long)]
+        source: Option<String>,
+        /// Optional link back to the original (appended to the body).
+        #[arg(long)]
+        link: Option<String>,
+        /// Note kind: `fleeting` (default), `literature`, `lecture`.
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     /// List the inbox. By default shows only `open` items, oldest
     /// first; `--all` includes processed + archived.
     List {
@@ -12543,6 +12563,42 @@ async fn run_inbox(cmd: InboxCmd) -> eyre::Result<()> {
                 .await
                 .map_err(|e| eyre::eyre!("capture: {e:?}"))?;
             println!("captured {id}");
+        }
+        InboxCmd::Suggest {
+            text,
+            source,
+            link,
+            kind,
+            org,
+            server,
+        } => {
+            let mut body = text.join(" ");
+            if body.trim().is_empty() {
+                eyre::bail!("nothing to suggest — pass some text");
+            }
+            if let Some(l) = link {
+                body.push_str(&format!("\n\n[open original]({l})"));
+            }
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let id = uuid::Uuid::new_v4().to_string();
+            let created = chrono::Utc::now().to_rfc3339();
+            let mut item = inbox_proto::InboxItem::capture(
+                id.clone(),
+                body,
+                source.unwrap_or_else(|| "agent".into()),
+                created,
+            );
+            item.status = inbox_proto::InboxItem::STATUS_SUGGESTED.to_string();
+            if let Some(k) = kind {
+                item.kind = k;
+            }
+            client
+                .upsert_inbox_item(item)
+                .await
+                .map_err(|e| eyre::eyre!("suggest: {e:?}"))?;
+            println!("suggested {id}");
         }
         InboxCmd::List {
             all,

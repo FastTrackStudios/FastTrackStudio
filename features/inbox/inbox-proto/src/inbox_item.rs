@@ -64,12 +64,17 @@ pub struct InboxItem {
 }
 
 impl InboxItem {
-    /// Status string for an unprocessed item.
+    /// Status string for an unprocessed item in the review queue.
     pub const STATUS_OPEN: &'static str = "open";
     /// Status string for an item turned into a durable artifact.
     pub const STATUS_PROCESSED: &'static str = "processed";
     /// Status string for an item consciously let go.
     pub const STATUS_ARCHIVED: &'static str = "archived";
+    /// Agent-proposed capture awaiting a one-tap accept/dismiss. Kept
+    /// out of the open review queue until the user accepts it (→ open).
+    /// Used by ingestion producers (email, …) so suggestions don't
+    /// flood the trusted queue unreviewed.
+    pub const STATUS_SUGGESTED: &'static str = "suggested";
 
     /// Default note kind — your own passing thought.
     pub const KIND_FLEETING: &'static str = "fleeting";
