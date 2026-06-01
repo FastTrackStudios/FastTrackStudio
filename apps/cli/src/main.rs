@@ -159,6 +159,9 @@ enum Commands {
     /// Pantry + inventory reference these by id.
     #[command(subcommand)]
     Location(LocationCmd),
+    /// Inbox — capture fleeting notes and triage the daily queue.
+    #[command(subcommand)]
+    Inbox(InboxCmd),
     /// Cookbook recipes (cooklang `.cook` files under
     /// `Wiki/Cookbook/`).
     #[command(subcommand)]
@@ -481,6 +484,72 @@ enum IntakeCmd {
 }
 
 #[derive(Subcommand)]
+/// Capture + triage the inbox — the FLAP "capture" loop. Capture a
+/// fleeting note with `add`, read the queue with `list` (open items,
+/// oldest first), then `mark` / `snooze` / `rm` during the daily
+/// review.
+enum InboxCmd {
+    /// Capture a note into the inbox (default kind `fleeting`).
+    Add {
+        /// The note text. Quote multi-word captures.
+        text: Vec<String>,
+        /// Note kind: `fleeting` (default), `literature`, `lecture`.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Capture source label. Defaults to `cli`.
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// List the inbox. By default shows only `open` items, oldest
+    /// first; `--all` includes processed + archived.
+    List {
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set an item's triage status: `open` / `processed` / `archived`.
+    Mark {
+        id: String,
+        /// `open` | `processed` | `archived`.
+        status: String,
+        /// For `processed`: id of the task / note it became.
+        #[arg(long)]
+        into: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Snooze an item until a date (`YYYY-MM-DD`); it's hidden from
+    /// the daily queue until then.
+    Snooze {
+        id: String,
+        until: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Permanently delete an item.
+    Rm {
+        id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(clap::Subcommand)]
 enum LocationCmd {
     /// List every location in the active org's vault.
     List {
@@ -3621,6 +3690,9 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Location(cmd) => {
             return Box::pin(run_location(cmd)).await;
+        }
+        Commands::Inbox(cmd) => {
+            return Box::pin(run_inbox(cmd)).await;
         }
         Commands::Recipe(cmd) => {
             return Box::pin(run_recipe(cmd)).await;
@@ -12433,6 +12505,153 @@ where
 }
 
 // ── Location (locations::Store) ──────────────────────────────────────
+
+async fn connect_inbox_client(url: &str) -> eyre::Result<inbox_proto::InboxClient> {
+    establish_for_url(url).await
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_inbox(cmd: InboxCmd) -> eyre::Result<()> {
+    match cmd {
+        InboxCmd::Add {
+            text,
+            kind,
+            source,
+            org,
+            server,
+        } => {
+            let body = text.join(" ");
+            if body.trim().is_empty() {
+                eyre::bail!("nothing to capture — pass some note text");
+            }
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let id = uuid::Uuid::new_v4().to_string();
+            let created = chrono::Utc::now().to_rfc3339();
+            let mut item = inbox_proto::InboxItem::capture(
+                id.clone(),
+                body,
+                source.unwrap_or_else(|| "cli".into()),
+                created,
+            );
+            if let Some(k) = kind {
+                item.kind = k;
+            }
+            client
+                .upsert_inbox_item(item)
+                .await
+                .map_err(|e| eyre::eyre!("capture: {e:?}"))?;
+            println!("captured {id}");
+        }
+        InboxCmd::List {
+            all,
+            json,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let rows: Vec<_> = client
+                .list_inbox()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|it| all || it.is_open())
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if rows.is_empty() {
+                println!("inbox empty — nothing to review 🎉");
+                return Ok(());
+            }
+            for it in &rows {
+                let first_line = it.body.lines().next().unwrap_or("").trim();
+                let date = it.created.get(..10).unwrap_or(&it.created);
+                let snooze = it
+                    .resurface_on
+                    .as_deref()
+                    .map(|d| format!("  💤 {d}"))
+                    .unwrap_or_default();
+                println!(
+                    "{:<8}  {date}  {:<10}  {:<9}  {first_line}{snooze}",
+                    it.id.get(..8).unwrap_or(&it.id),
+                    it.kind,
+                    it.status,
+                );
+            }
+        }
+        InboxCmd::Mark {
+            id,
+            status,
+            into,
+            org,
+            server,
+        } => {
+            let allowed = [
+                inbox_proto::InboxItem::STATUS_OPEN,
+                inbox_proto::InboxItem::STATUS_PROCESSED,
+                inbox_proto::InboxItem::STATUS_ARCHIVED,
+            ];
+            if !allowed.contains(&status.as_str()) {
+                eyre::bail!("status must be one of: open, processed, archived");
+            }
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let mut item = client
+                .get_inbox_item(id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("get `{id}`: {e:?}"))?;
+            item.status = status.clone();
+            if into.is_some() {
+                item.processed_into = into;
+            }
+            client
+                .upsert_inbox_item(item)
+                .await
+                .map_err(|e| eyre::eyre!("mark: {e:?}"))?;
+            println!("{id} → {status}");
+        }
+        InboxCmd::Snooze {
+            id,
+            until,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let mut item = client
+                .get_inbox_item(id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("get `{id}`: {e:?}"))?;
+            item.resurface_on = Some(until.clone());
+            client
+                .upsert_inbox_item(item)
+                .await
+                .map_err(|e| eyre::eyre!("snooze: {e:?}"))?;
+            println!("{id} snoozed until {until}");
+        }
+        InboxCmd::Rm { id, org, server } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            client
+                .delete_inbox_item(id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {id}");
+        }
+    }
+    Ok(())
+}
 
 async fn connect_locations_client(url: &str) -> eyre::Result<locations::LocationsServiceClient> {
     establish_for_url(url).await

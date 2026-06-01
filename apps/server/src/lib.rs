@@ -118,6 +118,10 @@ pub struct OrgAppState {
     /// `vault/Projects/Scheduling/`. Mounted for `DayTemplates` so
     /// the app can overlay the daily plan on the calendar.
     pub scheduling: scheduling::VaultScheduler,
+    /// Inbox backend — captured items under `vault/Records/inbox/`.
+    /// Mounted for `Inbox` so the capture UIs + daily review can
+    /// round-trip fleeting notes.
+    pub inbox: inbox::VaultInbox,
     pub finance_conn: sea_orm::DatabaseConnection,
 }
 
@@ -467,6 +471,11 @@ pub(crate) async fn build_org_state(
         )
         .map_err(|e| eyre::eyre!("scheduling backend: {e}"))?;
 
+        // Inbox backend rooted at the same vault — captured items
+        // live under `Records/inbox/`.
+        let inbox = inbox::VaultInbox::new(vault_root.clone())
+            .map_err(|e| eyre::eyre!("inbox backend: {e}"))?;
+
         // Finance store. SQLite at
         // `<data_root>/orgs/<slug>/finance.sqlite`
         // (override via `TASK_SERVER_FINANCE_URL`). Services
@@ -568,6 +577,7 @@ pub(crate) async fn build_org_state(
             agent_dispatch_vault_root: vault_root,
             timer,
             scheduling,
+            inbox,
             finance_conn,
         })
     }
@@ -846,6 +856,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
             scheduling_proto::service::calendar_events::serve(org.scheduling.clone()),
+        )
+        .with(
+            inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
+            inbox_proto::service::inbox::serve(org.inbox.clone()),
         );
 
     // Wiki feature — 11 per-capability traits, one descriptor each.

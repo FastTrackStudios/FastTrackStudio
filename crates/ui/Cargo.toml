@@ -32,6 +32,7 @@ task-ui.workspace = true
 # `vox` for the `DayTemplatesClient` the schedule page calls to load
 # the day-plan overlay. Wasm-clean (serde-only client side).
 scheduling-proto = { workspace = true, features = ["vox"] }
+inbox-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
 # Cyclic life-calendar — Goals view uses the pure-function
 # generator to resolve `cycle_id` references to displayable

@@ -7727,6 +7727,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a46645bbd70538861a90d0f26c31537cdf1e44aae99a794fb75a664b70951bc"
 
 [[package]]
+name = "inbox"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0",
+ "chrono",
+ "inbox-proto",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "inbox-proto"
 version = "0.1.0"
 dependencies = [
@@ -14814,6 +14829,7 @@ dependencies = [
  "git-github",
  "git-proto",
  "goal",
+ "inbox-proto",
  "intake",
  "label-proto",
  "locations",
@@ -14879,6 +14895,8 @@ dependencies = [
  "goal",
  "hex",
  "hmac",
+ "inbox",
+ "inbox-proto",
  "intake",
  "locations",
  "mealplan",
@@ -16018,6 +16036,7 @@ dependencies = [
  "futures-util",
  "gloo-timers",
  "goal",
+ "inbox-proto",
  "js-sys",
  "project",
  "scheduling-proto",

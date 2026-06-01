@@ -142,6 +142,38 @@ pub async fn delete_event(slug: &str, id: &str) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete event: {e:?}"))
 }
 
+/// Every inbox item (open + processed + archived), oldest first.
+/// Consumers filter by `status` / `resurface_on` for the daily queue.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_inbox(slug: &str) -> Result<Vec<inbox_proto::InboxItem>, String> {
+    let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
+    client
+        .list_inbox()
+        .await
+        .map_err(|e| format!("{slug}: list inbox: {e:?}"))
+}
+
+/// Capture or update one inbox item (keyed by id). Capture, snooze,
+/// process, and archive all flow through here.
+#[cfg(target_arch = "wasm32")]
+pub async fn upsert_inbox_item(slug: &str, item: inbox_proto::InboxItem) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
+    client
+        .upsert_inbox_item(item)
+        .await
+        .map_err(|e| format!("{slug}: save inbox item: {e:?}"))
+}
+
+/// Delete one inbox item.
+#[cfg(target_arch = "wasm32")]
+pub async fn delete_inbox_item(slug: &str, id: &str) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
+    client
+        .delete_inbox_item(id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: delete inbox item: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -342,6 +374,21 @@ pub async fn upsert_event(_slug: &str, _event: scheduling_proto::CalEvent) -> Re
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn delete_event(_slug: &str, _id: &str) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_inbox(_slug: &str) -> Result<Vec<inbox_proto::InboxItem>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn upsert_inbox_item(_slug: &str, _item: inbox_proto::InboxItem) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn delete_inbox_item(_slug: &str, _id: &str) -> Result<(), String> {
     Err("native client not wired yet".to_owned())
 }
 

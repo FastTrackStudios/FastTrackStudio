@@ -54,6 +54,7 @@ milestone = { workspace = true, features = ["vox"] }
 # mounted by the server alongside project / goal / task /
 # milestone. Each provides a `task <verb> …` surface.
 locations = { workspace = true, features = ["vox"] }
+inbox-proto = { workspace = true, features = ["vox"] }
 cookbook = { workspace = true, features = ["vox"] }
 mealplan = { workspace = true, features = ["vox"] }
 pantry = { workspace = true, features = ["vox"] }

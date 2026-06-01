@@ -76,6 +76,8 @@ timer = { workspace = true }
 # use in-memory stores until they're surfaced.
 scheduling-proto = { workspace = true, features = ["vox"] }
 scheduling = { workspace = true }
+inbox-proto = { workspace = true, features = ["vox"] }
+inbox = { workspace = true }
 store-proto = { workspace = true }
 # Finance: SQLite + migrations only at this slice; service
 # traits (Invoicing / Ledger) get mounted in a follow-up

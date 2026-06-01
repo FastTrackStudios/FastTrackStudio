@@ -442,6 +442,10 @@ view-knowledge-graph = { path = "features/view/view-knowledge-graph" }
 scheduling = { path = "features/scheduling/scheduling" }
 scheduling-proto = { path = "features/scheduling/scheduling-proto", default-features = false }
 scheduling-ui = { path = "features/scheduling/scheduling-ui" }
+# Inbox — the FLAP capture queue. Trio follows the vault pattern;
+# `inbox-proto` is wasm-clean (the UI binds to it directly).
+inbox = { path = "features/inbox/inbox" }
+inbox-proto = { path = "features/inbox/inbox-proto", default-features = false }
 # General app-state persistence. Capability sub-traits
 # (`KvStore` / `LogStore`) so any feature can mount any backend.
 store-proto = { path = "crates/store-proto", default-features = false }
