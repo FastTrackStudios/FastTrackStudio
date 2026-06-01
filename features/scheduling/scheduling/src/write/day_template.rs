@@ -6,7 +6,7 @@ use super::{WriteError, yaml_to_page};
 
 pub fn serialize_day_template(dt: &DayTemplate) -> Result<String, WriteError> {
     let mut blocks = Vec::with_capacity(dt.blocks.len());
-    for b in &dt.blocks {
+    for b in dt.blocks.iter() {
         blocks.push(serialize_block(b));
     }
 
@@ -63,6 +63,7 @@ mod tests {
     #[test]
     fn round_trip_preserves_blocks() {
         let dt = DayTemplate {
+            path: "Projects/Scheduling/templates/weekday.md".into(),
             id: DayTemplateId("weekday".into()),
             name: "Weekday".into(),
             description: Some("Default".into()),
@@ -73,7 +74,8 @@ mod tests {
                 label: "Morning Reset".into(),
                 category: BlockCategory::Reset,
                 note: None,
-            }],
+            }]
+            .into(),
         };
         let md = serialize_day_template(&dt).unwrap();
         let inner = md

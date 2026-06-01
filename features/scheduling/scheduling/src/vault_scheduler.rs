@@ -456,6 +456,7 @@ mod tests {
 
     fn weekday_template() -> DayTemplate {
         DayTemplate {
+            path: "Projects/Scheduling/templates/weekday.md".into(),
             id: DayTemplateId("weekday".into()),
             name: "Weekday".into(),
             description: None,
@@ -466,7 +467,8 @@ mod tests {
                 label: "Morning Reset".into(),
                 category: BlockCategory::Reset,
                 note: None,
-            }],
+            }]
+            .into(),
         }
     }
 

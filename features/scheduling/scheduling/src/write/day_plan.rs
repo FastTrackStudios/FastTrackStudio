@@ -78,7 +78,8 @@ mod tests {
                     note: Some("long run".into()),
                     assignment: None,
                 },
-            ],
+            ]
+            .into(),
         };
         let page = serialize_day_plan(&plan).unwrap();
         let (fm, _) = crate::scan::frontmatter_split(&page).expect("frontmatter");

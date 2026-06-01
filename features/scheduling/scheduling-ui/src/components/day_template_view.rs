@@ -161,7 +161,7 @@ fn category_stem(c: BlockCategory) -> &'static str {
 /// that the brief's daily totals match.
 fn totals(dt: &DayTemplate) -> Vec<(&'static str, String)> {
     let mut by_cat: Vec<(BlockCategory, i32)> = Vec::new();
-    for b in &dt.blocks {
+    for b in dt.blocks.iter() {
         let mins =
             i32::from(b.end.minutes_since_midnight) - i32::from(b.start.minutes_since_midnight);
         if let Some(entry) = by_cat

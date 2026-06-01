@@ -314,7 +314,7 @@ pub fn ScheduleView() -> Element {
             if !r.is_some_and(|(s, e)| *date >= s && *date <= e) {
                 continue;
             }
-            for b in &plan.blocks {
+            for b in plan.blocks.iter() {
                 if matches!(b.category, BlockCategory::Allocatable) {
                     blocks += 1;
                     alloc_min += i64::from(b.end.minutes_since_midnight)
@@ -603,7 +603,7 @@ fn materialize(date: NaiveDate, templates: &[DayTemplate]) -> DayPlan {
     DayPlan {
         date: date.to_string(),
         from_template: tpl.map(|t| t.id.clone()),
-        blocks,
+        blocks: blocks.into(),
     }
 }
 
@@ -612,7 +612,7 @@ fn materialize(date: NaiveDate, templates: &[DayTemplate]) -> DayPlan {
 fn build_blocks(plans: &HashMap<NaiveDate, DayPlan>) -> Vec<TemplateBlock> {
     let mut out = Vec::new();
     for (date, plan) in plans {
-        for b in &plan.blocks {
+        for b in plan.blocks.iter() {
             let start = b.start.minutes_since_midnight;
             let end = b.end.minutes_since_midnight;
             let color = category_color(b.category);

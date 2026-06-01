@@ -30,7 +30,7 @@ pub fn parse_day_plan(path: &str, frontmatter_yaml: &str) -> Result<DayPlan, Par
     Ok(DayPlan {
         date,
         from_template,
-        blocks,
+        blocks: blocks.into(),
     })
 }
 

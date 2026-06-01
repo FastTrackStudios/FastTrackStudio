@@ -24,10 +24,11 @@ pub fn parse_day_template(path: &str, frontmatter_yaml: &str) -> Result<DayTempl
     }
 
     Ok(DayTemplate {
+        path: path.to_string(),
         id: DayTemplateId(id),
         name,
         description,
-        blocks,
+        blocks: blocks.into(),
     })
 }
 

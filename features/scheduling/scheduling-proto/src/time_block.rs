@@ -107,7 +107,8 @@ pub enum BlockCategory {
 }
 
 /// One row in the day template.
-#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 pub struct TimeBlock {
     pub id: TimeBlockId,
     pub start: TimeOfDay,
@@ -119,16 +120,72 @@ pub struct TimeBlock {
     pub note: Option<String>,
 }
 
+/// `Vec<TimeBlock>` newtype — a JSON column on [`DayTemplate`].
+/// Transparent so it round-trips as a plain array in JSON / on the
+/// wire; `Deref` lets callers treat it like the underlying `Vec`.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct TimeBlocks(pub Vec<TimeBlock>);
+
+impl TimeBlocks {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<TimeBlock>> for TimeBlocks {
+    fn from(v: Vec<TimeBlock>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<TimeBlock> for TimeBlocks {
+    fn from_iter<I: IntoIterator<Item = TimeBlock>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for TimeBlocks {
+    type Target = Vec<TimeBlock>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for TimeBlocks {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// Personal day template — an ordered list of blocks that should
 /// cover the whole 24-hour day. The UI surfaces gaps + overlaps;
 /// the proto leaves validation to the consumer so storing
 /// partially-filled drafts works.
-#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+#[architect(table_name = "scheduling_day_templates", repo)]
 pub struct DayTemplate {
+    /// Vault-relative path of the markdown file backing this
+    /// template (populated by the scanner; not part of the wire
+    /// write). PK — mirrors [`crate::EventType`].
+    #[architect(primary_key, auto_increment = false)]
+    pub path: String,
+    /// Stable id (uuid string). The vault file is
+    /// `Projects/Scheduling/templates/<id>.md`.
+    #[architect(json, filterable)]
     pub id: DayTemplateId,
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
     /// Optional description (e.g. "Weekday routine" /
     /// "Saturday — long-form work").
+    #[architect(fulltext)]
     pub description: Option<String>,
-    pub blocks: Vec<TimeBlock>,
+    #[architect(json)]
+    pub blocks: TimeBlocks,
 }
