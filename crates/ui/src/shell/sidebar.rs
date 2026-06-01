@@ -42,7 +42,10 @@ pub fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
             SidebarSeparator {}
             div { class: "flex-1 min-h-0 overflow-y-auto" }
             SidebarFooter {
-                div { class: "px-1 pb-1 pt-2",
+                div { class: "px-1 pb-2",
+                    crate::chrome::FleetingButton {}
+                }
+                div { class: "px-1 pb-1 pt-1",
                     SectionHeader { label: "Organization", size: SectionHeaderSize::Small }
                 }
                 OrgSwitcher { orgs, compact: false }

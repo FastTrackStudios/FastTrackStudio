@@ -4,6 +4,7 @@
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 
+use crate::chrome::{FleetingFab, FleetingModal, TopBar, provide_chrome_contexts};
 use crate::data::organizations;
 use crate::routes::Route;
 use crate::shell::mobile::{BottomTabBar, MobileHeader};
@@ -13,6 +14,9 @@ use crate::shell::sidebar::DesktopSidebar;
 pub fn AppShell() -> Element {
     let orgs = organizations();
     let current = use_route::<Route>();
+
+    // Quick-capture + data-refresh signals for the persistent chrome.
+    provide_chrome_contexts();
 
     rsx! {
         div { class: "min-h-screen bg-background text-foreground lg:grid lg:h-screen lg:grid-cols-[18rem_1fr] lg:overflow-hidden",
@@ -24,6 +28,7 @@ pub fn AppShell() -> Element {
 
             div { class: "flex min-h-screen flex-col lg:h-screen lg:min-h-0 lg:overflow-y-auto",
                 MobileHeader {}
+                TopBar {}
                 main { class: "flex-1 pb-24 lg:pb-0",
                     SuspenseBoundary {
                         fallback: |_| rsx! { RouteFallback {} },
@@ -31,8 +36,11 @@ pub fn AppShell() -> Element {
                     }
                 }
                 BottomTabBar { current }
+                FleetingFab {}
             }
         }
+        // Single global capture modal, toggled from any fleeting button.
+        FleetingModal {}
     }
 }
 

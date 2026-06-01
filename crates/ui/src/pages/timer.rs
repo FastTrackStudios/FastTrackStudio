@@ -14,8 +14,8 @@ use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use timer_proto::{StartTimerRequest, WorkSession};
-use uuid::Uuid;
 
+use crate::chrome::{fmt_hms, owner_id, resolve_org, use_second_tick};
 use crate::orgs::{OrgMeta, OrgSelection};
 
 #[component]
@@ -47,7 +47,7 @@ pub fn TimerView() -> Element {
 
     // Live elapsed clock — re-render once a second while mounted.
     let tick = use_signal(|| 0u64);
-    use_elapsed_tick(tick);
+    use_second_tick(tick);
     let _ = tick(); // subscribe so the running card's clock ticks.
 
     let mut description = use_signal(String::new);
@@ -233,49 +233,6 @@ fn session_list(rows: &[WorkSession]) -> Element {
     }
 }
 
-// ── helpers ─────────────────────────────────────────────────────────
-
-/// Resolve the selection to `(slug, org_id)` for the timer (org-scoped,
-/// single-target): the chosen org in `One` mode, else the home org.
-/// `None` until the org list (with ids) has loaded.
-fn resolve_org(sel: &OrgSelection, orgs: &[OrgMeta]) -> Option<(String, Uuid)> {
-    let meta = match sel {
-        OrgSelection::One(slug) => orgs.iter().find(|o| &o.slug == slug),
-        OrgSelection::All => orgs.iter().find(|o| o.is_home).or_else(|| orgs.first()),
-    }?;
-    Some((meta.slug.clone(), meta.id?))
-}
-
-/// Stable per-org "local owner" user id — a single-user stand-in until
-/// auth threads a real signed-in user id to the page. Deterministic so
-/// start/stop/list all key on the same user.
-fn owner_id(org_id: Uuid) -> Uuid {
-    Uuid::new_v5(&org_id, b"task-local-owner")
-}
-
-fn fmt_hms(secs: i64) -> String {
-    let s = secs.max(0);
-    format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
-}
-
-/// Re-render once a second so the running clock advances. Wasm sleeps
-/// via `gloo-timers`; native parks (the page is offline there anyway).
-fn use_elapsed_tick(mut tick: Signal<u64>) {
-    use_future(move || async move {
-        loop {
-            sleep_one_second().await;
-            tick += 1;
-        }
-    });
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn sleep_one_second() {
-    gloo_timers::future::TimeoutFuture::new(1000).await;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn sleep_one_second() {
-    // No periodic tick off-browser; the timer page is web-only today.
-    futures_util::future::pending::<()>().await;
-}
+// Shared chrome helpers (`resolve_org`, `owner_id`, `fmt_hms`,
+// `use_second_tick`) live in `crate::chrome` so the top-bar timer
+// widget and this page agree on the same org / owner identity.
