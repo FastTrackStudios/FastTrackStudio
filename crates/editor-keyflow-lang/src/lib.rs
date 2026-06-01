@@ -43,6 +43,25 @@ pub use keyflow_text::highlighting::Theme as HighlightTheme;
 pub fn keyflow_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     let text = state.doc.to_string();
     let len = text.len();
+
+    // The whole output is a pure function of (text, phase, overlay toggle):
+    // syntax highlighting depends on the text, and the analysis-derived
+    // diagnostics + overlays depend on the text and the overlay flag. So a
+    // single-entry memo keyed on those three turns the common "nothing
+    // changed but the view re-rendered" pass — every caret move, every
+    // selection update — into a clone instead of a fresh whole-document
+    // `parse_chart`. Editing busts the key (text changed); the debounced
+    // `Full` pass recomputes once, then caret motion rides the cache.
+    let full = matches!(editor_state::deco_phase(), editor_state::DecoPhase::Full);
+    let overlays = overlays_enabled();
+    if let Some(cached) = DECO_MEMO.with_borrow(|m| {
+        m.as_ref()
+            .filter(|c| c.full == full && c.overlays == overlays && c.text == text)
+            .map(|c| c.out.clone())
+    }) {
+        return cached;
+    }
+
     let mut out: Vec<DecoratedRange> = Vec::new();
 
     // Syntax highlighting — one pass per line, offsets shifted to absolute.
@@ -62,50 +81,80 @@ pub fn keyflow_decorations(state: &EditorState) -> Vec<DecoratedRange> {
         line_start += line.len();
     }
 
-    // One analysis pass feeds both diagnostics and the resolved-chord overlays.
-    let analysis = ide::analyze(&text);
+    // Whole-document analysis is the expensive part of this pass, and it only
+    // drives visual extras (diagnostic squiggles + resolved-chord overlays) —
+    // nothing the editor's layout or visible text depends on. So we skip it on
+    // `Structural` passes (active typing) and let the view recompute the full
+    // set once typing settles. Syntax highlighting above is cheap and always
+    // runs, so colors never lag.
+    if full {
+        // One analysis pass feeds both diagnostics and the resolved-chord
+        // overlays.
+        let analysis = ide::analyze(&text);
 
-    // Live diagnostics — wavy underline + the message as a `title` tooltip.
-    for d in &analysis.diagnostics {
-        let start = d.range.start;
-        let end = d.range.end();
-        if start < end && end <= len {
-            out.push(Decoration::mark_with_attrs(
-                start..end,
-                diagnostic_class(d.severity),
-                vec![("title".to_string(), d.message.clone())],
-            ));
+        // Live diagnostics — wavy underline + the message as a `title` tooltip.
+        for d in &analysis.diagnostics {
+            let start = d.range.start;
+            let end = d.range.end();
+            if start < end && end <= len {
+                out.push(Decoration::mark_with_attrs(
+                    start..end,
+                    diagnostic_class(d.severity),
+                    vec![("title".to_string(), d.message.clone())],
+                ));
+            }
         }
-    }
 
-    // Resolved-chord type overlays — IDE-style inline inlay badges. For each
-    // chord written in a key-relative system (Nashville number / Roman) that
-    // resolves against the key, drop a dim badge right after the symbol showing
-    // the absolute letter-name chord (e.g. `5` → `G`, `V7` → `G7`).
-    //
-    // The key is resolved PER CHORD via `key_at_position` — keyflow key changes
-    // can happen in any measure (written on a section header like `CH {…} #G`),
-    // so a single chart-level key would mis-resolve every chord after a change.
-    //
-    // Gated by `SHOW_OVERLAYS` so the app can toggle it (the `fn` source can't
-    // carry the flag itself).
-    // `ChordInstance::source_span` is now document-absolute (assigned in the
-    // keyflow parser's post-process), so the badges land right after each
-    // symbol. Resolve each chord against the key in effect at its position.
-    if overlays_enabled() {
-        for section in &analysis.chart.sections {
-            for measure in section.measures() {
-                for ci in &measure.chords {
-                    let Some(span) = ci.source_span else { continue };
-                    let Some(key) = analysis.chart.key_at_position(&ci.position) else {
-                        continue;
-                    };
-                    if let Some(label) = ci.resolved_symbol(key) {
-                        let at = span.end().min(len);
-                        out.push(Decoration::widget(
-                            at,
-                            format!("<span class=\"kf-inlay\">{}</span>", escape_html(&label)),
-                        ));
+        // Resolved-chord type overlays — IDE-style inline inlay badges. For
+        // each chord written in a key-relative system (Nashville number /
+        // Roman) that resolves against the key, drop a dim badge right after
+        // the symbol showing the absolute letter-name chord (e.g. `5` → `G`,
+        // `V7` → `G7`).
+        //
+        // The key is resolved PER CHORD via `key_at_position` — keyflow key
+        // changes can happen in any measure (written on a section header like
+        // `CH {…} #G`), so a single chart-level key would mis-resolve every
+        // chord after a change.
+        //
+        // Gated by `SHOW_OVERLAYS` so the app can toggle it (the `fn` source
+        // can't carry the flag itself). `ChordInstance::source_span` is
+        // document-absolute (assigned in the keyflow parser's post-process),
+        // so the badges land right after each symbol.
+        if overlays {
+            for section in &analysis.chart.sections {
+                // Section-name badge — the written header is a terse, dynamic
+                // marker (`VS`, `CH`) whose resolved name carries a number and
+                // split letter assigned across the whole chart (`Verse 1a`,
+                // `Verse 2b`). Show that resolution after the header. Implicit
+                // sections (bare chord content, no header) have no span, so they
+                // get no badge.
+                if let Some(span) = section.source_span {
+                    let label = section.section.display_name();
+                    let at = span.end().min(len);
+                    out.push(Decoration::widget(
+                        at,
+                        format!(
+                            "<span class=\"kf-inlay kf-section-inlay\">{}</span>",
+                            escape_html(&label)
+                        ),
+                    ));
+                }
+                for measure in section.measures() {
+                    for ci in &measure.chords {
+                        let Some(span) = ci.source_span else { continue };
+                        let Some(key) = analysis.chart.key_at_position(&ci.position) else {
+                            continue;
+                        };
+                        if let Some(label) = ci.resolved_symbol(key) {
+                            let at = span.end().min(len);
+                            out.push(Decoration::widget(
+                                at,
+                                format!(
+                                    "<span class=\"kf-inlay\">{}</span>",
+                                    escape_html(&label)
+                                ),
+                            ));
+                        }
                     }
                 }
             }
@@ -113,7 +162,29 @@ pub fn keyflow_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     }
 
     out.sort_by_key(|d| d.from);
+    DECO_MEMO.with_borrow_mut(|m| {
+        *m = Some(DecoMemo {
+            text,
+            full,
+            overlays,
+            out: out.clone(),
+        });
+    });
     out
+}
+
+/// Single-entry memo for [`keyflow_decorations`] — see the cache note
+/// there. Thread-local because the editor runs the decoration source on
+/// one (UI) thread; no synchronization needed.
+struct DecoMemo {
+    text: String,
+    full: bool,
+    overlays: bool,
+    out: Vec<DecoratedRange>,
+}
+
+thread_local! {
+    static DECO_MEMO: std::cell::RefCell<Option<DecoMemo>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Process-global toggle for the resolved-chord overlays. Default on.
@@ -332,6 +403,12 @@ const OVERLAY_CSS: &str = "\
   background: color-mix(in srgb, var(--muted-foreground, #9a9aa2) 14%, transparent);
   user-select: none;
 }
+.kf-section-inlay {
+  font-weight: 600;
+  text-transform: none;
+  color: var(--accent-foreground, #7aa2f7);
+  background: color-mix(in srgb, var(--accent-foreground, #7aa2f7) 16%, transparent);
+}
 .kf-hover-info { white-space: normal; }
 .kf-hover-info code { font-family: ui-monospace, Menlo, monospace; }
 .kf-hover-code {
@@ -497,5 +574,45 @@ mod tests {
         );
 
         set_overlays_enabled(true); // restore default
+    }
+
+    #[test]
+    fn section_headers_get_resolved_name_badges() {
+        set_overlays_enabled(true);
+        // Two verses + a chorus: the terse `VS`/`CH` markers should be badged
+        // with their resolved, chart-numbered names. Two consecutive verses
+        // split into `Verse 1a` / `Verse 1b`.
+        let src = "VS\n1 | 5\n\nVS\n4 | 1\n\nCH\n1 | 4\n";
+        let badges: Vec<String> = keyflow_decorations(&EditorState::new(src.to_string()))
+            .iter()
+            .filter_map(|d| match &d.kind {
+                editor_state::DecorationKind::Widget { html } if html.contains("kf-section-inlay") => {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            badges.iter().any(|h| h.contains("Verse 1a")),
+            "first verse should badge as 'Verse 1a'; got {badges:?}"
+        );
+        assert!(
+            badges.iter().any(|h| h.contains("Verse 1b")),
+            "second verse should badge as 'Verse 1b'; got {badges:?}"
+        );
+        assert!(
+            badges.iter().any(|h| h.contains("Chorus")),
+            "chorus should badge as 'Chorus'; got {badges:?}"
+        );
+
+        // Bare chord content has no written header → implicit section → no badge.
+        let bare = keyflow_decorations(&EditorState::new("1 4 6 5\n".to_string()));
+        assert!(
+            !bare.iter().any(|d| matches!(
+                &d.kind,
+                editor_state::DecorationKind::Widget { html } if html.contains("kf-section-inlay")
+            )),
+            "bare chart (no section header) must not get a section badge"
+        );
     }
 }
