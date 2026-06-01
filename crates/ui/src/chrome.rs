@@ -234,7 +234,13 @@ pub fn FleetingModal() -> Element {
                 textarea {
                     class: "min-h-[7rem] w-full resize-none rounded-lg border border-input bg-input/30 px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 placeholder:text-muted-foreground",
                     placeholder: "Get it out of your head…",
-                    autofocus: true,
+                    // `autofocus` only fires on initial page load, not when
+                    // the modal is inserted dynamically — focus on mount.
+                    onmounted: move |e: Event<MountedData>| {
+                        spawn(async move {
+                            let _ = e.data().set_focus(true).await;
+                        });
+                    },
                     value: "{draft}",
                     oninput: move |e| draft.set(e.value()),
                     onkeydown: move |e| {
