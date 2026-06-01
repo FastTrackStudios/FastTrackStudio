@@ -12553,12 +12553,21 @@ async fn run_inbox(cmd: InboxCmd) -> eyre::Result<()> {
             let slug = resolve_active_org(org)?;
             let u = resolve_org_vox_url(server, &slug);
             let client = connect_inbox_client(&u).await?;
+            // The daily-review queue: open items whose snooze (if any)
+            // has elapsed. `--all` bypasses both filters.
+            let today = chrono::Utc::now().date_naive().to_string();
             let rows: Vec<_> = client
                 .list_inbox()
                 .await
                 .map_err(|e| eyre::eyre!("list: {e:?}"))?
                 .into_iter()
-                .filter(|it| all || it.is_open())
+                .filter(|it| {
+                    all || (it.is_open()
+                        && it
+                            .resurface_on
+                            .as_deref()
+                            .is_none_or(|d| d <= today.as_str()))
+                })
                 .collect();
             if json {
                 println!(
