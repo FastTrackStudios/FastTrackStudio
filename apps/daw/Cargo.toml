@@ -25,7 +25,7 @@ serde_json.workspace = true
 facet.workspace = true
 facet-json.workspace = true
 libc = "0.2"
-dawfile-reaper = { path = "../../crates/dawfile-reaper" }
+dawfile-reaper = { path = "../../features/backends/reaper/dawfile-reaper" }
 
 [features]
 default = []

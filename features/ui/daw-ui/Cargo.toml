@@ -1,0 +1,44 @@
+[package]
+name = "daw-ui"
+description = "DAW UI — Dioxus components for DAW integration (mixer, TCP, arrangement, FX browser)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+daw-control = { path = "../../../crates/daw-control" }
+daw-proto = { path = "../../../crates/daw-proto" }
+dock-dioxus = { workspace = true, default-features = false }
+dock-proto = { workspace = true }
+eyre = { workspace = true }
+
+# UI framework (conditional on feature)
+dioxus = { workspace = true, optional = true }
+dioxus-native = { workspace = true, optional = true }
+
+# Logging
+tracing = { workspace = true, optional = true }
+
+tokio = { version = "1", features = ["time"] }
+
+# Optional deps for the `reaper-test-panels` feature — the FTS UI demo
+# panels (Native + Desktop renderer toggles) shipped from this crate so any
+# extension can mount them without reimplementing the wiring.
+daw-module = { path = "../../../crates/daw-module", optional = true }
+daw-reaper-dioxus = { path = "../../backends/reaper/daw-reaper-dioxus", optional = true }
+fts-ui = { workspace = true, optional = true }
+
+[features]
+default = ["web"]
+web = ["dep:dioxus", "dep:tracing", "dock-dioxus/web"]
+native = ["dep:dioxus-native"]
+# Ships the `FTS_UI_NATIVE` and `FTS_UI_DESKTOP` panel + action defs that
+# render `fts_ui::showcase::Showcase` through the daw-reaper-dioxus host.
+reaper-test-panels = [
+    "web",
+    "dep:daw-module",
+    "dep:daw-reaper-dioxus",
+    "dep:fts-ui",
+]
+
+[lints]
+workspace = true
