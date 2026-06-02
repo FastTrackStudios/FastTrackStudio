@@ -11,15 +11,18 @@ fn fixtures_dir() -> PathBuf {
 }
 
 fn round_trip_binary() -> PathBuf {
-    // Built by `cargo test` automatically via the `required-features` /
-    // example dependency. Falls back to `cargo run --example` if not present.
-
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("target/debug/examples/round_trip")
+    // The example is a sibling of this test binary under the workspace target
+    // dir: the test runs from `<target>/debug/deps/<name>-<hash>`, and the
+    // example lands at `<target>/debug/examples/round_trip`. Deriving it from
+    // `current_exe()` is independent of where this crate sits in the source
+    // tree (it moved under features/backends/protools/), unlike walking a fixed
+    // number of parents up from CARGO_MANIFEST_DIR.
+    let exe = std::env::current_exe().expect("current_exe");
+    let debug = exe
+        .parent() // .../debug/deps
+        .and_then(|p| p.parent()) // .../debug
+        .expect("test binary path");
+    debug.join("examples/round_trip")
 }
 
 #[test]
