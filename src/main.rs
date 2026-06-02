@@ -5,18 +5,14 @@
 
 mod components;
 mod renderer;
-mod state;
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{
-    ChevronRight, Circle, FileCode, Github, ListMusic, Music, Play, SkipBack, SkipForward, Square,
-};
+use fts_ui::lucide_dioxus::{FileCode, Github, Music};
 use fts_ui::prelude::*;
 
 use audio_controls::widgets::{
-    CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, CompressorWidget,
-    DbRange, EqBand, EqBandShape, EqGraph, GateDbRange, GateGraph, GateMetering, GateMode,
-    GateParams,
+    CompressorMetering, CompressorParams, CompressorWidget, DbRange, EqBand, EqBandShape, EqGraph,
+    GateDbRange, GateGraph, GateMetering, GateParams,
 };
 
 // Static assets
@@ -83,12 +79,29 @@ fn App() -> Element {
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
+
+        // Site-wide SEO / social metadata. Per-page <title> is set via
+        // `document::Title` in each route component.
+        document::Meta { name: "description", content: SITE_DESCRIPTION }
+        document::Meta { name: "theme-color", content: "#0d0a14" }
+        document::Meta { property: "og:type", content: "website" }
+        document::Meta { property: "og:site_name", content: "FastTrackStudio" }
+        document::Meta { property: "og:title", content: "FastTrackStudio" }
+        document::Meta { property: "og:description", content: SITE_DESCRIPTION }
+        document::Meta { name: "twitter:card", content: "summary_large_image" }
+        document::Meta { name: "twitter:title", content: "FastTrackStudio" }
+        document::Meta { name: "twitter:description", content: SITE_DESCRIPTION }
+
         ThemeProvider {
             state: theme_state,
             Router::<Route> {}
         }
     }
 }
+
+/// Shared description used across SEO/social meta tags.
+const SITE_DESCRIPTION: &str = "Open-source, cross-platform, cross-DAW music production tools — built around Reaper, \
+     with an open chart format (Keyflow) and documented protocols.";
 
 /// Main layout with navigation
 #[component]
@@ -147,10 +160,12 @@ fn Layout() -> Element {
 
                         // GitHub link
                         a {
-                            href: "https://github.com/codywright/FastTrackStudio",
+                            href: "https://codeberg.org/FastTrackStudios",
                             target: "_blank",
+                            rel: "noopener noreferrer",
+                            aria_label: "FastTrackStudio on Codeberg",
                             class: "p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all",
-                            title: "View on GitHub",
+                            title: "View on Codeberg",
                             Github { class: "w-5 h-5" }
                         }
 
@@ -164,26 +179,6 @@ fn Layout() -> Element {
                 class: if is_home { "flex-1" } else { "flex-1" },
                 Outlet::<Route> {}
             }
-        }
-    }
-}
-
-/// Navigation link component with active state
-#[component]
-fn NavLink(to: Route, icon: Element, label: &'static str) -> Element {
-    let current_route = use_route::<Route>();
-    let is_active = std::mem::discriminant(&current_route) == std::mem::discriminant(&to);
-
-    rsx! {
-        Link {
-            to: to,
-            class: if is_active {
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-foreground bg-background shadow-sm text-sm font-medium transition-all"
-            } else {
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background/50 text-sm transition-all"
-            },
-            {icon}
-            span { "{label}" }
         }
     }
 }
@@ -277,6 +272,7 @@ const HOME_KEYFRAMES: &str = "
 #[component]
 fn Home() -> Element {
     rsx! {
+        document::Title { "FastTrackStudio — Workflow-driven tools for professionals" }
         document::Style { {HOME_KEYFRAMES} }
 
         div {
@@ -363,12 +359,54 @@ fn DecorativeBeams() -> Element {
     // (width, height, position-css, transform-css, opacity_main, opacity_mid)
     // position-css is the corner anchor (e.g. "left-0 top-0" or arbitrary).
     let beams: &[(&str, &str, &str, &str, &str, &str)] = &[
-        ("35rem", "80rem", "left: 0; top: 0;", "translateY(-87.5%) rotate(-45deg)", ".04", ".01"),
-        ("14rem", "80rem", "left: 0; top: 0;", "translate(5%, -50%) rotate(-45deg)", ".03", ".01"),
-        ("14rem", "80rem", "left: 0; top: 0;", "translateY(-87.5%) rotate(-45deg)", ".02", ".01"),
-        ("20rem", "60rem", "left: 30%; top: 0;", "translateY(-60%) rotate(-45deg)", ".025", ".008"),
-        ("18rem", "50rem", "right: 10%; top: 0;", "translateY(-40%) rotate(-45deg)", ".02", ".006"),
-        ("12rem", "40rem", "left: 50%; top: 30%;", "rotate(-45deg)", ".015", "0"),
+        (
+            "35rem",
+            "80rem",
+            "left: 0; top: 0;",
+            "translateY(-87.5%) rotate(-45deg)",
+            ".04",
+            ".01",
+        ),
+        (
+            "14rem",
+            "80rem",
+            "left: 0; top: 0;",
+            "translate(5%, -50%) rotate(-45deg)",
+            ".03",
+            ".01",
+        ),
+        (
+            "14rem",
+            "80rem",
+            "left: 0; top: 0;",
+            "translateY(-87.5%) rotate(-45deg)",
+            ".02",
+            ".01",
+        ),
+        (
+            "20rem",
+            "60rem",
+            "left: 30%; top: 0;",
+            "translateY(-60%) rotate(-45deg)",
+            ".025",
+            ".008",
+        ),
+        (
+            "18rem",
+            "50rem",
+            "right: 10%; top: 0;",
+            "translateY(-40%) rotate(-45deg)",
+            ".02",
+            ".006",
+        ),
+        (
+            "12rem",
+            "40rem",
+            "left: 50%; top: 30%;",
+            "rotate(-45deg)",
+            ".015",
+            "0",
+        ),
     ];
 
     rsx! {
@@ -381,69 +419,6 @@ fn DecorativeBeams() -> Element {
                     style: "width: {w}; height: {h}; {pos} transform: {transform}; background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,{op_main}) 0, hsla(0,0%,45%,{op_mid}) 80%, transparent 100%);"
                 }
             }
-        }
-    }
-}
-
-/// Preview card for the setlist control feature on the landing page
-#[component]
-fn SetlistPreviewCard() -> Element {
-    rsx! {
-        div {
-            class: "relative rounded-2xl border border-border/50 bg-card overflow-hidden",
-
-            // Mock window chrome
-            div {
-                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
-
-                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-
-                span {
-                    class: "ml-4 text-sm text-muted-foreground",
-                    "Setlist Control"
-                }
-            }
-
-            // Preview of the setlist view (constrained height)
-            div {
-                class: "h-96 overflow-hidden flex items-center justify-center bg-muted/30 rounded-lg",
-                div { class: "text-center text-muted-foreground",
-                    p { "Performance View Preview" }
-                    p { class: "text-sm mt-2 opacity-50", "(Coming soon)" }
-                }
-            }
-
-            // Overlay with CTA
-            div {
-                class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-card via-card/95 to-transparent pt-16 pb-6 px-6 text-center",
-
-                Link {
-                    to: Route::Home {},
-                    class: "inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 rounded-md font-medium transition-colors",
-                    ListMusic { class: "w-5 h-5" }
-                    "Learn More"
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn HomeFeature(title: &'static str, description: &'static str, icon: Element) -> Element {
-    rsx! {
-        Card {
-            class: "group relative border-border/50 bg-card/30 p-8 transition-all hover:border-primary/30 hover:bg-card/50",
-
-            div {
-                class: "mb-4 inline-flex rounded-lg bg-primary/10 p-3 text-primary",
-                {icon}
-            }
-
-            Heading { level: HeadingLevel::H5, class: "text-foreground mb-2", "{title}" }
-
-            Text { variant: TextVariant::Muted, class: "leading-relaxed", "{description}" }
         }
     }
 }
@@ -515,43 +490,6 @@ fn PillarCard(
     }
 }
 
-/// Landing page docs section card with colored accent
-#[component]
-fn LandingDocsCard(
-    to: Route,
-    title: &'static str,
-    description: &'static str,
-    icon: Element,
-) -> Element {
-    rsx! {
-        Link {
-            to: to,
-            class: "group flex items-center gap-4 p-5 rounded-xl border border-border/50 bg-card/30 transition-all hover:border-primary/40 hover:shadow-lg hover:bg-card/50",
-
-            div {
-                class: "shrink-0 rounded-lg p-2.5 bg-primary/10 text-primary",
-                {icon}
-            }
-
-            div {
-                class: "min-w-0",
-                h3 {
-                    class: "font-semibold text-foreground group-hover:text-primary transition-colors",
-                    "{title}"
-                }
-                p {
-                    class: "text-sm text-muted-foreground truncate",
-                    "{description}"
-                }
-            }
-
-            ChevronRight {
-                class: "w-5 h-5 text-muted-foreground/50 group-hover:text-muted-foreground ml-auto shrink-0 transition-colors"
-            }
-        }
-    }
-}
-
 // =============================================================================
 // Project Tiles — six animated tiles, one per project, themed individually.
 // Ported from the rockstars-expansion deck (slides/decks/_project-themes.tsx)
@@ -579,38 +517,82 @@ struct ProjectTheme {
     bg: &'static str,
     version: &'static str,
     bg_kind: BgKind,
+    /// Codeberg repository URL the tile links to.
+    repo: &'static str,
 }
 
 const PROJECT_THEMES: &[ProjectTheme] = &[
     ProjectTheme {
-        num: "01", name: "Keyflow", tagline: "Charts as code",
+        num: "01",
+        name: "Keyflow",
+        tagline: "Charts as code",
         desc: "Plain-text music format that compiles into real lead sheets.",
-        glyph: ".kf", accent: "#a78bfa", bg: "#0d0a14", version: "alpha v.0.0.1", bg_kind: BgKind::Keyflow,
+        glyph: ".kf",
+        accent: "#a78bfa",
+        bg: "#0d0a14",
+        version: "alpha v.0.0.1",
+        bg_kind: BgKind::Keyflow,
+        repo: "https://codeberg.org/FastTrackStudios/keyflow",
     },
     ProjectTheme {
-        num: "02", name: "Session", tagline: "Performance brain",
+        num: "02",
+        name: "Session",
+        tagline: "Performance brain",
         desc: "Setlist \u{00B7} song \u{00B7} section navigation across the network.",
-        glyph: "\u{2192}\u{2192}", accent: "#86efac", bg: "#0a1310", version: "alpha v.0.0.1", bg_kind: BgKind::Session,
+        glyph: "\u{2192}\u{2192}",
+        accent: "#86efac",
+        bg: "#0a1310",
+        version: "alpha v.0.0.1",
+        bg_kind: BgKind::Session,
+        repo: "https://codeberg.org/FastTrackStudios/session",
     },
     ProjectTheme {
-        num: "03", name: "Signal", tagline: "The audio rig",
+        num: "03",
+        name: "Signal",
+        tagline: "The audio rig",
         desc: "Plugin chains, profiles, snapshots, live morphing.",
-        glyph: "\u{224B}", accent: "#60a5fa", bg: "#0a1018", version: "alpha v.0.0.1", bg_kind: BgKind::Signal,
+        glyph: "\u{224B}",
+        accent: "#60a5fa",
+        bg: "#0a1018",
+        version: "alpha v.0.0.1",
+        bg_kind: BgKind::Signal,
+        repo: "https://codeberg.org/FastTrackStudios/signal",
     },
     ProjectTheme {
-        num: "04", name: "Input", tagline: "Wiring closet",
+        num: "04",
+        name: "Input",
+        tagline: "Wiring closet",
         desc: "MIDI, keys, hardware controllers \u{2014} into the action system.",
-        glyph: "I/O", accent: "#a1a1aa", bg: "#0f0f12", version: "alpha v.0.0.1", bg_kind: BgKind::Input,
+        glyph: "I/O",
+        accent: "#a1a1aa",
+        bg: "#0f0f12",
+        version: "alpha v.0.0.1",
+        bg_kind: BgKind::Input,
+        repo: "https://codeberg.org/FastTrackStudios/input",
     },
     ProjectTheme {
-        num: "05", name: "DAW", tagline: "REAPER layer",
+        num: "05",
+        name: "DAW",
+        tagline: "REAPER layer",
         desc: "Unified API. Transport, tracks, FX, project files.",
-        glyph: "\u{23F5}", accent: "#52525b", bg: "#050507", version: "alpha v.0.0.1", bg_kind: BgKind::Daw,
+        glyph: "\u{23F5}",
+        accent: "#52525b",
+        bg: "#050507",
+        version: "alpha v.0.0.1",
+        bg_kind: BgKind::Daw,
+        repo: "https://codeberg.org/FastTrackStudios/daw",
     },
     ProjectTheme {
-        num: "06", name: "Plugins", tagline: "DSP suite",
+        num: "06",
+        name: "Plugins",
+        tagline: "DSP suite",
         desc: "In-house CLAP/VST3 plugins with detachable GUI.",
-        glyph: "FX", accent: "#b54234", bg: "#140a08", version: "alpha v.0.0.1", bg_kind: BgKind::Plugins,
+        glyph: "FX",
+        accent: "#b54234",
+        bg: "#140a08",
+        version: "alpha v.0.0.1",
+        bg_kind: BgKind::Plugins,
+        repo: "https://codeberg.org/FastTrackStudios/FTS-Plugins",
     },
 ];
 
@@ -668,11 +650,16 @@ fn ProjectTilesGrid() -> Element {
 fn ProjectTile(theme: ProjectTheme) -> Element {
     let style = format!(
         "background-color: {bg}; --pt-accent: {accent}; border-color: rgba(255,255,255,0.06);",
-        bg = theme.bg, accent = theme.accent
+        bg = theme.bg,
+        accent = theme.accent
     );
     rsx! {
-        div {
-            class: "group relative overflow-hidden rounded-md border p-7 md:p-8 lg:min-h-[20rem] h-full transition-all duration-300 hover:-translate-y-0.5 hover:[border-color:var(--pt-accent)]",
+        a {
+            href: theme.repo,
+            target: "_blank",
+            rel: "noopener noreferrer",
+            aria_label: "{theme.name} on Codeberg",
+            class: "group relative block overflow-hidden rounded-md border p-7 md:p-8 lg:min-h-[20rem] h-full transition-all duration-300 hover:-translate-y-0.5 hover:[border-color:var(--pt-accent)]",
             style: "{style}",
 
             // Animated motif painted behind the content
@@ -831,11 +818,69 @@ fn BgSignal(color: String) -> Element {
 #[component]
 fn BgInput(color: String) -> Element {
     let rows: &[&[(f32, &str)]] = &[
-        &[(1.5, "esc"), (1.0, "1"), (1.0, "2"), (1.0, "3"), (1.0, "4"), (1.0, "5"), (1.0, "6"), (1.0, "7"), (1.0, "8"), (1.0, "9"), (1.0, "0"), (1.5, "\u{232B}")],
-        &[(1.5, "\u{21E5}"), (1.0, "Q"), (1.0, "W"), (1.0, "E"), (1.0, "R"), (1.0, "T"), (1.0, "Y"), (1.0, "U"), (1.0, "I"), (1.0, "O"), (1.0, "P"), (1.5, "\\")],
-        &[(1.75, "\u{21EA}"), (1.0, "A"), (1.0, "S"), (1.0, "D"), (1.0, "F"), (1.0, "G"), (1.0, "H"), (1.0, "J"), (1.0, "K"), (1.0, "L"), (2.25, "\u{21B5}")],
-        &[(1.5, "\u{21E7}"), (1.0, "Z"), (1.0, "X"), (1.0, "C"), (1.0, "V"), (1.0, "B"), (1.0, "N"), (1.0, "M"), (1.0, ","), (1.0, "."), (1.0, "/"), (1.5, "\u{21E7}")],
-        &[(1.25, "ctrl"), (1.25, "\u{2325}"), (1.5, "\u{2318}"), (6.25, ""), (1.5, "\u{2318}"), (1.25, "\u{2325}")],
+        &[
+            (1.5, "esc"),
+            (1.0, "1"),
+            (1.0, "2"),
+            (1.0, "3"),
+            (1.0, "4"),
+            (1.0, "5"),
+            (1.0, "6"),
+            (1.0, "7"),
+            (1.0, "8"),
+            (1.0, "9"),
+            (1.0, "0"),
+            (1.5, "\u{232B}"),
+        ],
+        &[
+            (1.5, "\u{21E5}"),
+            (1.0, "Q"),
+            (1.0, "W"),
+            (1.0, "E"),
+            (1.0, "R"),
+            (1.0, "T"),
+            (1.0, "Y"),
+            (1.0, "U"),
+            (1.0, "I"),
+            (1.0, "O"),
+            (1.0, "P"),
+            (1.5, "\\"),
+        ],
+        &[
+            (1.75, "\u{21EA}"),
+            (1.0, "A"),
+            (1.0, "S"),
+            (1.0, "D"),
+            (1.0, "F"),
+            (1.0, "G"),
+            (1.0, "H"),
+            (1.0, "J"),
+            (1.0, "K"),
+            (1.0, "L"),
+            (2.25, "\u{21B5}"),
+        ],
+        &[
+            (1.5, "\u{21E7}"),
+            (1.0, "Z"),
+            (1.0, "X"),
+            (1.0, "C"),
+            (1.0, "V"),
+            (1.0, "B"),
+            (1.0, "N"),
+            (1.0, "M"),
+            (1.0, ","),
+            (1.0, "."),
+            (1.0, "/"),
+            (1.5, "\u{21E7}"),
+        ],
+        &[
+            (1.25, "ctrl"),
+            (1.25, "\u{2325}"),
+            (1.5, "\u{2318}"),
+            (6.25, ""),
+            (1.5, "\u{2318}"),
+            (1.25, "\u{2325}"),
+        ],
     ];
     let unit = 14.0_f32;
     let gap = 2.0_f32;
@@ -970,340 +1015,20 @@ fn BgPlugins(color: String) -> Element {
     }
 }
 
-// =============================================================================
-// Horizontal Showcase Strip with Perspective
-// =============================================================================
-
-/// Number of cards in the showcase
-const SHOWCASE_CARD_COUNT: usize = 4;
-
-/// Individual card widths in pixels
-const CARD_WIDTHS: [i32; 4] = [724, 480, 480, 480];
-
-/// Gap between cards in pixels
-const CARD_GAP: i32 = 24;
-
-/// Horizontal showcase strip. Native horizontal scroll — does not hijack page scroll.
-#[component]
-fn ShowcaseCarousel(
-    source: Signal<String>,
-    preview_mode: Signal<components::PreviewMode>,
-    charts: Vec<String>,
-) -> Element {
-    let n = SHOWCASE_CARD_COUNT;
-
-    rsx! {
-        // Outer wrapper hosts native horizontal scroll. No height runway, no sticky,
-        // no scroll hijack — user controls vertical scroll, can pan horizontally if curious.
-        // 3D perspective + skew only kick in at md+ — mobile gets a flat horizontal strip
-        // with viewport-capped card widths.
-        div {
-            class: "relative w-full overflow-x-auto overflow-y-hidden",
-            style: "-webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%); mask-image: linear-gradient(to bottom, black 40%, transparent 100%);",
-
-            div {
-                class: "md:[perspective:1200px]",
-
-                div {
-                    class: "pl-4 md:pl-16 lg:pl-32 pr-4 md:pr-8 md:[transform:rotateX(20deg)_skewX(0.36rad)]",
-
-                    div {
-                        class: "h-[28rem] md:h-[44rem] lg:h-[52rem]",
-
-                        div {
-                            class: "flex",
-                            style: "gap: {CARD_GAP}px;",
-
-                            for i in 0..n {
-                                {
-                                    let card_width = CARD_WIDTHS[i];
-                                    rsx! {
-                                        div {
-                                            key: "{i}",
-                                            class: "shrink-0",
-                                            style: "width: min({card_width}px, 88vw);",
-
-                                            match i {
-                                                0 => rsx! {
-                                                    KeyflowShowcaseCard {
-                                                        source: source,
-                                                        preview_mode: preview_mode,
-                                                        charts: charts.clone()
-                                                    }
-                                                },
-                                                1 => rsx! { DesktopShowcaseCard {} },
-                                                2 => rsx! { ReaperShowcaseCard {} },
-                                                _ => rsx! { PluginsShowcaseCard {} },
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Keyflow Editor showcase card
-#[component]
-fn KeyflowShowcaseCard(
-    source: Signal<String>,
-    preview_mode: Signal<components::PreviewMode>,
-    charts: Vec<String>,
-) -> Element {
-    rsx! {
-        div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full h-full",
-
-            // Window header
-            div {
-                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
-
-                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-
-                span {
-                    class: "ml-4 text-sm text-muted-foreground",
-                    "song_title.kf"
-                }
-
-                span {
-                    class: "ml-auto text-xs text-emerald-500 font-medium px-2 py-0.5 rounded bg-emerald-500/10",
-                    "Keyflow"
-                }
-            }
-
-            // Typewriter animation (hidden, drives source signal)
-            components::ChartTypewriter {
-                output: source,
-                charts: charts,
-                speed_ms: 35,
-                delay_between_charts_ms: 4000
-            }
-
-            // Split view content
-            div {
-                class: "flex h-[calc(100%-3rem)]",
-
-                // Editor side
-                div {
-                    class: "w-56 border-r border-border overflow-hidden shrink-0",
-
-                    components::HighlightedEditor {
-                        value: source(),
-                        on_change: move |_: String| {},
-                        placeholder: "",
-                        textarea_id: Some("carousel-editor".to_string())
-                    }
-                }
-
-                // Preview side
-                div {
-                    class: "overflow-hidden flex-1",
-
-                    components::StaticChartRenderer {
-                        source: source,
-                        mode: preview_mode,
-                        canvas_id: Some("carousel-chart-canvas".to_string()),
-                        fixed_layout_width: Some(180.0)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Desktop App showcase card with tempo UI
-#[component]
-fn DesktopShowcaseCard() -> Element {
-    let tempo = 120;
-
-    rsx! {
-        div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full h-full",
-
-            div {
-                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
-                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-                span { class: "ml-4 text-sm text-muted-foreground", "Session" }
-                span { class: "ml-auto text-xs text-blue-500 font-medium px-2 py-0.5 rounded bg-blue-500/10", "Session" }
-            }
-
-            div {
-                class: "relative h-[calc(100%-3rem)] bg-zinc-900 flex flex-col items-center justify-center",
-                span { class: "text-xs uppercase tracking-wider text-muted-foreground mb-3", "Tempo" }
-                div {
-                    class: "flex items-baseline",
-                    span { class: "text-9xl font-bold tabular-nums text-foreground", "{tempo}" }
-                    span { class: "text-3xl font-medium text-muted-foreground ml-3", "BPM" }
-                }
-                div {
-                    class: "flex items-center gap-4 mt-10",
-                    for i in 0..4 {
-                        div {
-                            key: "{i}",
-                            class: if i == 0 { "w-5 h-5 rounded-full bg-primary animate-pulse" } else { "w-4 h-4 rounded-full bg-muted-foreground/30" }
-                        }
-                    }
-                }
-                div {
-                    class: "absolute bottom-8 flex items-center gap-10 text-muted-foreground/50",
-                    SkipBack { class: "w-7 h-7" }
-                    div {
-                        class: "p-4 rounded-full bg-primary/20 text-primary",
-                        Play { class: "w-10 h-10" }
-                    }
-                    SkipForward { class: "w-7 h-7" }
-                }
-            }
-        }
-    }
-}
-
-/// REAPER Extension showcase card
-#[component]
-fn ReaperShowcaseCard() -> Element {
-    rsx! {
-        div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full h-full",
-
-            div {
-                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
-                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-                span { class: "ml-4 text-sm text-muted-foreground", "Reaper" }
-                span { class: "ml-auto text-xs text-violet-500 font-medium px-2 py-0.5 rounded bg-violet-500/10", "Extension" }
-            }
-
-            div {
-                class: "relative h-[calc(100%-3rem)] bg-zinc-900 p-5",
-
-                div {
-                    class: "flex items-center gap-4 mb-5 p-4 rounded-lg bg-zinc-800/50 border border-border/50",
-                    div {
-                        class: "flex items-center gap-2",
-                        div { class: "w-10 h-10 rounded bg-red-500/20 flex items-center justify-center text-red-500",
-                            Circle { class: "w-5 h-5 fill-current" }
-                        }
-                        div { class: "w-10 h-10 rounded bg-primary/20 flex items-center justify-center text-primary",
-                            Play { class: "w-5 h-5" }
-                        }
-                        div { class: "w-10 h-10 rounded bg-zinc-700 flex items-center justify-center text-muted-foreground",
-                            Square { class: "w-5 h-5" }
-                        }
-                    }
-                    div { class: "ml-4 font-mono text-xl text-foreground tabular-nums", "00:01:24.15" }
-                    div { class: "ml-auto text-sm text-muted-foreground", "4/4 • 120 BPM" }
-                }
-
-                div {
-                    class: "space-y-3 flex-1",
-                    for i in 0..6 {
-                        div {
-                            key: "{i}",
-                            class: "flex items-center gap-3 p-3 rounded bg-zinc-800/30 border border-border/30",
-                            div {
-                                class: "w-20 text-xs text-muted-foreground truncate",
-                                { match i {
-                                    0 => "Drums",
-                                    1 => "Bass",
-                                    2 => "Keys",
-                                    3 => "Guitar",
-                                    4 => "Synth",
-                                    _ => "Vocals"
-                                }}
-                            }
-                            div {
-                                class: "flex-1 h-10 rounded bg-zinc-700/50 overflow-hidden flex items-center gap-px px-1",
-                                for j in 0..50 {
-                                    div {
-                                        key: "{j}",
-                                        class: "w-1 bg-violet-500/40 rounded-full",
-                                        style: "height: {((j * 7 + i * 13) % 24 + 6)}px;"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Audio Plugins showcase card
-#[component]
-fn PluginsShowcaseCard() -> Element {
-    rsx! {
-        div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full h-full",
-
-            div {
-                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
-                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-                span { class: "ml-4 text-sm text-muted-foreground", "FTS-EQ" }
-                span { class: "ml-auto text-xs text-amber-500 font-medium px-2 py-0.5 rounded bg-amber-500/10", "VST3 / CLAP" }
-            }
-
-            div {
-                class: "relative h-[calc(100%-3rem)] bg-gradient-to-b from-zinc-900 to-zinc-950 flex flex-col items-center justify-center p-6",
-                div {
-                    class: "relative w-32 h-32 rounded-full border-4 border-zinc-700 bg-zinc-800 flex items-center justify-center",
-                    div {
-                        class: "absolute w-2 h-8 bg-amber-500 rounded-full",
-                        style: "top: 8px; transform-origin: bottom center; transform: rotate(-45deg);"
-                    }
-                    div {
-                        class: "text-center",
-                        div { class: "text-2xl font-bold text-foreground", "+3.2" }
-                        div { class: "text-xs text-muted-foreground", "dB" }
-                    }
-                }
-                div { class: "mt-4 text-sm font-medium text-muted-foreground uppercase tracking-wider", "Gain" }
-                div {
-                    class: "absolute right-8 top-1/2 -translate-y-1/2 flex gap-2",
-                    for channel in ["L", "R"] {
-                        div {
-                            key: "{channel}",
-                            class: "flex flex-col items-center gap-1",
-                            div {
-                                class: "w-4 h-48 bg-zinc-800 rounded overflow-hidden flex flex-col-reverse",
-                                div {
-                                    class: "w-full bg-gradient-to-t from-green-500 via-yellow-500 to-red-500",
-                                    style: "height: 65%;"
-                                }
-                            }
-                            span { class: "text-xs text-muted-foreground", "{channel}" }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-
 #[component]
 fn TestRender() -> Element {
     let mut source = use_signal(|| DEMO_CHARTS[0].to_string());
     let preview_mode = use_signal(|| components::PreviewMode::Page);
 
     rsx! {
+        document::Title { "Chart Renderer — FastTrackStudio" }
         div {
             class: "flex h-[calc(100vh-8rem)]",
             div {
                 class: "w-96 border-r border-border overflow-hidden",
-                div { class: "px-4 py-3 border-b border-border bg-card",
+                div { class: "px-4 py-3 border-b border-border bg-card flex items-center justify-between gap-2",
                     h3 { class: "text-sm font-semibold", "Source Code" }
+                    components::ExportButton { source: source }
                 }
                 div { class: "h-[calc(100%-3rem)]",
                     components::HighlightedEditor { value: source(), on_change: move |new_value: String| source.set(new_value), placeholder: "Enter keyflow chart notation...", textarea_id: Some("test-render-editor".to_string()) }
@@ -1311,7 +1036,7 @@ fn TestRender() -> Element {
             }
             div {
                 class: "flex-1 bg-zinc-800 overflow-auto p-8",
-                div { class: "inline-block", style: "border: 1px solid red;",
+                div { class: "inline-block",
                     components::StaticChartRenderer { source: source, mode: preview_mode, canvas_id: Some("test-render-canvas".to_string()) }
                 }
             }
@@ -1381,10 +1106,10 @@ fn TestFxUi() -> Element {
     let mut eq_db_range = use_signal(|| 24.0_f64);
 
     // === Compressor State ===
-    let mut params = use_signal(CompressorParams::default);
+    let params = use_signal(CompressorParams::default);
     let mut metering = use_signal(CompressorMetering::default);
     let mut sim_time = use_signal(|| 0.0_f64);
-    let mut comp_db_range = use_signal(|| DbRange::Range48);
+    let comp_db_range = use_signal(|| DbRange::Range48);
 
     // Animation effect for simulated compressor levels
     use_effect(move || {
@@ -1457,6 +1182,7 @@ fn TestFxUi() -> Element {
     });
 
     rsx! {
+        document::Title { "Audio FX Controls — FastTrackStudio" }
         div {
             class: "min-h-screen bg-background p-6",
             div { class: "max-w-7xl mx-auto mb-6",
