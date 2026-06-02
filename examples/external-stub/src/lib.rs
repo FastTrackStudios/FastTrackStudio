@@ -1,7 +1,7 @@
 //! External `ExampleRepo` implementation — runnable demonstration of
 //! the [Extensibility] pattern.
 //!
-//! [Extensibility]: https://git.starcommand.live/codywright/architect/wiki/Architecture/Extensibility
+//! [Extensibility]: https://codeberg.org/FastTrackStudios/architect/wiki/Architecture/Extensibility
 //!
 //! What this crate does:
 //!

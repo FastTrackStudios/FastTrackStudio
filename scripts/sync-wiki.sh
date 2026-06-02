@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-WIKI_URL="${WIKI_URL:-https://git.starcommand.live/codywright/architect.wiki.git}"
+WIKI_URL="${WIKI_URL:-https://codeberg.org/FastTrackStudios/architect.wiki.git}"
 WIKI_USER="${WIKI_USER:-architect}"
 SRC_DIR="${SRC_DIR:-docs/content}"
 DRY_RUN=0
