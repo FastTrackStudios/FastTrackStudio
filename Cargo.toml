@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Safe Rust bindings to NeuralAmpModelerCore — neural network guitar amp/pedal modeling"
-repository = "https://git.starcommand.live/FastTrackStudios/neural-amp-modeler-rs"
+repository = "https://codeberg.org/FastTrackStudios/neural-amp-modeler-rs"
 keywords = ["audio", "dsp", "guitar", "amp-modeling", "neural-network"]
 categories = ["multimedia::audio", "external-ffi-bindings"]
 
