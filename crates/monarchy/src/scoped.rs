@@ -43,8 +43,8 @@
 
 use crate::metadata::FieldName;
 use crate::{
-    config::FallbackStrategy, CollapseHierarchy, Config, Group, Item, Metadata, MonarchyError,
-    Organizer, Parser, Result, Structure,
+    CollapseHierarchy, Config, Group, Item, Metadata, MonarchyError, Organizer, Parser, Result,
+    Structure, config::FallbackStrategy,
 };
 use facet::Facet;
 

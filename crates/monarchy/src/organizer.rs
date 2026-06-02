@@ -397,12 +397,12 @@ impl<'a, M: Metadata> Organizer<'a, M> {
                 descriptors.iter().map(|d| d.value.clone()).collect();
             field_groups.sort_by(|a, b| {
                 // Check if either is the default value - default comes first
-                let a_is_default = default_value.as_ref().is_some_and(|d| {
-                    a.0 == *d || a.0.to_lowercase() == d.to_lowercase()
-                });
-                let b_is_default = default_value.as_ref().is_some_and(|d| {
-                    b.0 == *d || b.0.to_lowercase() == d.to_lowercase()
-                });
+                let a_is_default = default_value
+                    .as_ref()
+                    .is_some_and(|d| a.0 == *d || a.0.to_lowercase() == d.to_lowercase());
+                let b_is_default = default_value
+                    .as_ref()
+                    .is_some_and(|d| b.0 == *d || b.0.to_lowercase() == d.to_lowercase());
                 match (a_is_default, b_is_default) {
                     (true, false) => std::cmp::Ordering::Less,
                     (false, true) => std::cmp::Ordering::Greater,
@@ -435,12 +435,12 @@ impl<'a, M: Metadata> Organizer<'a, M> {
                 let pattern_order: Vec<String> = nested_group.patterns.clone();
                 field_groups.sort_by(|a, b| {
                     // Check if either is the default value - default comes first
-                    let a_is_default = default_value.as_ref().is_some_and(|d| {
-                        a.0 == *d || a.0.to_lowercase() == d.to_lowercase()
-                    });
-                    let b_is_default = default_value.as_ref().is_some_and(|d| {
-                        b.0 == *d || b.0.to_lowercase() == d.to_lowercase()
-                    });
+                    let a_is_default = default_value
+                        .as_ref()
+                        .is_some_and(|d| a.0 == *d || a.0.to_lowercase() == d.to_lowercase());
+                    let b_is_default = default_value
+                        .as_ref()
+                        .is_some_and(|d| b.0 == *d || b.0.to_lowercase() == d.to_lowercase());
                     match (a_is_default, b_is_default) {
                         (true, false) => std::cmp::Ordering::Less,
                         (false, true) => std::cmp::Ordering::Greater,

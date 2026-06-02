@@ -809,7 +809,9 @@ mod tests {
     fn map_items_on_empty_structure() {
         let mut s = Structure::<TestMeta>::new("empty");
         let counter = std::cell::Cell::new(0u32);
-        s.map_items(&|_| { counter.set(counter.get() + 1); });
+        s.map_items(&|_| {
+            counter.set(counter.get() + 1);
+        });
         assert_eq!(counter.get(), 0);
     }
 
@@ -825,7 +827,10 @@ mod tests {
 
         let names = visited.into_inner();
         // Depth-first: root first, then first child, then second child
-        assert_eq!(names, vec!["SongName_Drums", "SongName_Kick", "SongName_Snare"]);
+        assert_eq!(
+            names,
+            vec!["SongName_Drums", "SongName_Kick", "SongName_Snare"]
+        );
     }
 
     #[test]
@@ -844,7 +849,9 @@ mod tests {
     fn for_each_node_on_empty_structure() {
         let mut s = Structure::<TestMeta>::new("lonely");
         let counter = std::cell::Cell::new(0u32);
-        s.for_each_node(&|_| { counter.set(counter.get() + 1); });
+        s.for_each_node(&|_| {
+            counter.set(counter.get() + 1);
+        });
         assert_eq!(counter.get(), 1); // visits the node itself
     }
 
@@ -886,11 +893,14 @@ mod tests {
         });
 
         let result = visited.into_inner();
-        assert_eq!(result, vec![
-            ("SongName_Drums".to_string(), 0),
-            ("SongName_Kick".to_string(), 1),
-            ("SongName_Snare".to_string(), 1),
-        ]);
+        assert_eq!(
+            result,
+            vec![
+                ("SongName_Drums".to_string(), 0),
+                ("SongName_Kick".to_string(), 1),
+                ("SongName_Snare".to_string(), 1),
+            ]
+        );
     }
 
     #[test]
@@ -907,11 +917,14 @@ mod tests {
         });
 
         let result = visited.into_inner();
-        assert_eq!(result, vec![
-            ("root".to_string(), 0),
-            ("child".to_string(), 1),
-            ("grandchild".to_string(), 2),
-        ]);
+        assert_eq!(
+            result,
+            vec![
+                ("root".to_string(), 0),
+                ("child".to_string(), 1),
+                ("grandchild".to_string(), 2),
+            ]
+        );
     }
 
     #[test]
@@ -1030,7 +1043,11 @@ mod tests {
         root.sort_children_by(&|a, b| a.name.cmp(&b.name));
 
         // Nested children are also sorted
-        let nested_names: Vec<&str> = root.children[0].children.iter().map(|c| c.name.as_str()).collect();
+        let nested_names: Vec<&str> = root.children[0]
+            .children
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
         assert_eq!(nested_names, vec!["A", "Z"]);
     }
 
@@ -1065,11 +1082,14 @@ mod tests {
         });
 
         let result = visited.into_inner();
-        assert_eq!(result, vec![
-            vec!["SongName_Drums"],
-            vec!["SongName_Drums", "SongName_Kick"],
-            vec!["SongName_Drums", "SongName_Snare"],
-        ]);
+        assert_eq!(
+            result,
+            vec![
+                vec!["SongName_Drums"],
+                vec!["SongName_Drums", "SongName_Kick"],
+                vec!["SongName_Drums", "SongName_Snare"],
+            ]
+        );
     }
 
     #[test]
@@ -1087,11 +1107,10 @@ mod tests {
         });
 
         let result = visited.into_inner();
-        assert_eq!(result, vec![
-            vec!["root"],
-            vec!["root", "A"],
-            vec!["root", "A", "B"],
-        ]);
+        assert_eq!(
+            result,
+            vec![vec!["root"], vec!["root", "A"], vec!["root", "A", "B"],]
+        );
     }
 
     #[test]

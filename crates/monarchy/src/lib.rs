@@ -666,9 +666,10 @@ pub fn move_unsorted_to_group<M: Metadata>(
 
     // Step 5: Clean up empty Unsorted folder if needed
     if let Some(unsorted) = root.find_child("Unsorted")
-        && unsorted.is_empty() {
-            root.remove_child("Unsorted");
-        }
+        && unsorted.is_empty()
+    {
+        root.remove_child("Unsorted");
+    }
 
     Ok(sorted_count)
 }
@@ -855,7 +856,6 @@ pub fn move_items_matching_any_to_group<M: Metadata>(
     Ok(sorted_count)
 }
 
-
 /// Helper: Extract items matching ANY of multiple patterns from a structure (recursively)
 fn extract_items_matching_any<M: Metadata>(
     node: &mut Structure<M>,
@@ -1017,17 +1017,19 @@ fn cleanup_empty_nodes<M: Metadata>(root: &mut Structure<M>, path: &[&str]) {
     // Check if the source is empty and remove it
     if path.len() == 1 {
         if let Some(source) = root.find_child(path[0])
-            && source.is_empty() {
-                root.remove_child(path[0]);
-            }
+            && source.is_empty()
+        {
+            root.remove_child(path[0]);
+        }
     } else {
         // Navigate to parent and check child
         if let Some(parent) = root.find_at_path_mut(&path[..path.len() - 1]) {
             let child_name = path[path.len() - 1];
             if let Some(child) = parent.find_child(child_name)
-                && child.is_empty() {
-                    parent.remove_child(child_name);
-                }
+                && child.is_empty()
+            {
+                parent.remove_child(child_name);
+            }
         }
     }
 }
@@ -1208,42 +1210,42 @@ where
     }
 }
 
-
 /// Format a metadata value as a string for display
 pub fn format_metadata_value<M: Metadata>(value: &M::Value) -> String {
     let value_str = format!("{:?}", value);
     // Remove enum variant wrapper if present (e.g., "MultiMic([\"In\"])" -> "In")
     // This is a simple heuristic - we might need a better way
     if let Some(start) = value_str.find('(')
-        && let Some(end) = value_str.rfind(')') {
-            let inner = &value_str[start + 1..end];
-            // If it's a Vec format like ["In", "Out"], extract values
-            if inner.starts_with('[') && inner.ends_with(']') {
-                let content = &inner[1..inner.len() - 1];
-                // Split by comma and clean up quotes
-                // Note: We use strip_prefix/strip_suffix to only remove the outer
-                // Debug formatting quotes, not quotes that are part of the actual value
-                // (e.g., "Rack 10\"" should become "Rack 10\"", not "Rack 10")
-                let values: Vec<String> = content
-                    .split(',')
-                    .map(|s| {
-                        let trimmed = s.trim();
-                        // Only strip one quote from each end (the Debug formatting quotes)
-                        let without_leading = trimmed.strip_prefix('"').unwrap_or(trimmed);
-                        let without_trailing =
-                            without_leading.strip_suffix('"').unwrap_or(without_leading);
-                        // Unescape any escaped quotes in the value
-                        without_trailing.replace("\\\"", "\"")
-                    })
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                return values.join(" ");
-            }
-            // Otherwise, just return the inner content without quotes
-            // Strip one quote from each end, not all quotes
-            let without_leading = inner.strip_prefix('"').unwrap_or(inner);
-            let without_trailing = without_leading.strip_suffix('"').unwrap_or(without_leading);
-            return without_trailing.replace("\\\"", "\"");
+        && let Some(end) = value_str.rfind(')')
+    {
+        let inner = &value_str[start + 1..end];
+        // If it's a Vec format like ["In", "Out"], extract values
+        if inner.starts_with('[') && inner.ends_with(']') {
+            let content = &inner[1..inner.len() - 1];
+            // Split by comma and clean up quotes
+            // Note: We use strip_prefix/strip_suffix to only remove the outer
+            // Debug formatting quotes, not quotes that are part of the actual value
+            // (e.g., "Rack 10\"" should become "Rack 10\"", not "Rack 10")
+            let values: Vec<String> = content
+                .split(',')
+                .map(|s| {
+                    let trimmed = s.trim();
+                    // Only strip one quote from each end (the Debug formatting quotes)
+                    let without_leading = trimmed.strip_prefix('"').unwrap_or(trimmed);
+                    let without_trailing =
+                        without_leading.strip_suffix('"').unwrap_or(without_leading);
+                    // Unescape any escaped quotes in the value
+                    without_trailing.replace("\\\"", "\"")
+                })
+                .filter(|s| !s.is_empty())
+                .collect();
+            return values.join(" ");
         }
+        // Otherwise, just return the inner content without quotes
+        // Strip one quote from each end, not all quotes
+        let without_leading = inner.strip_prefix('"').unwrap_or(inner);
+        let without_trailing = without_leading.strip_suffix('"').unwrap_or(without_leading);
+        return without_trailing.replace("\\\"", "\"");
+    }
     value_str
 }

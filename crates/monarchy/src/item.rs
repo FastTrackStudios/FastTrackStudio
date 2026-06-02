@@ -4,7 +4,7 @@
 //! a parsed input string with its associated metadata and matched groups.
 
 use crate::{Group, Metadata, ToDisplayName};
-use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 use std::rc::Rc;
 
 // region:    --- Item

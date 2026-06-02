@@ -137,9 +137,10 @@ impl<'a, M: Metadata> Parser<'a, M> {
                 for field in &path_group.metadata_fields {
                     // Only set if not already set (deepest group takes precedence for conflicts)
                     if metadata.get(field).is_none()
-                        && let Some(value) = self.extract_field_value(&input, field, path_group) {
-                            metadata.set(field.clone(), value);
-                        }
+                        && let Some(value) = self.extract_field_value(&input, field, path_group)
+                    {
+                        metadata.set(field.clone(), value);
+                    }
                 }
 
                 // Check if item matches any tagged collections in this group
@@ -153,9 +154,10 @@ impl<'a, M: Metadata> Parser<'a, M> {
             // Also extract from the deepest group (in case it wasn't in the path for some reason)
             for field in &group.metadata_fields {
                 if metadata.get(field).is_none()
-                    && let Some(value) = self.extract_field_value(&input, field, group) {
-                        metadata.set(field.clone(), value);
-                    }
+                    && let Some(value) = self.extract_field_value(&input, field, group)
+                {
+                    metadata.set(field.clone(), value);
+                }
             }
 
             // Check tagged collection on deepest group too
@@ -171,9 +173,10 @@ impl<'a, M: Metadata> Parser<'a, M> {
 
         // Handle unmatched items based on fallback strategy
         if matched_groups.is_empty()
-            && let crate::config::FallbackStrategy::Reject = self.config.fallback_strategy {
-                return Err(MonarchyError::NoMatch(input));
-            }
+            && let crate::config::FallbackStrategy::Reject = self.config.fallback_strategy
+        {
+            return Err(MonarchyError::NoMatch(input));
+        }
 
         Ok(Item {
             id: generate_id(),

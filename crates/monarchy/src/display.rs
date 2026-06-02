@@ -66,7 +66,8 @@ pub fn format_metadata_value<M: Metadata>(value: &M::Value) -> String {
                     let trimmed = s.trim();
                     // Only strip one quote from each end (the Debug formatting quotes)
                     let without_leading = trimmed.strip_prefix('"').unwrap_or(trimmed);
-                    let without_trailing = without_leading.strip_suffix('"').unwrap_or(without_leading);
+                    let without_trailing =
+                        without_leading.strip_suffix('"').unwrap_or(without_leading);
                     // Unescape any escaped quotes in the value
                     without_trailing.replace("\\\"", "\"")
                 })

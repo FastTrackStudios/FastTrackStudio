@@ -1156,36 +1156,37 @@ impl CleanupDisplayNames {
 
         // If we found digits, check for separator
         if num_end > 0
-            && let Some(&sep) = chars.peek() {
-                match sep {
-                    '.' | '-' | '_' => {
+            && let Some(&sep) = chars.peek()
+        {
+            match sep {
+                '.' | '-' | '_' => {
+                    chars.next();
+                    let sep_end = num_end + sep.len_utf8();
+                    // Also skip a space after the separator if present
+                    if let Some(&' ') = chars.peek() {
                         chars.next();
-                        let sep_end = num_end + sep.len_utf8();
-                        // Also skip a space after the separator if present
-                        if let Some(&' ') = chars.peek() {
-                            chars.next();
-                            let rest = &trimmed[sep_end + 1..];
-                            if !rest.is_empty() {
-                                return rest.to_string();
-                            }
-                        } else {
-                            let rest = &trimmed[sep_end..];
-                            if !rest.is_empty() {
-                                return rest.to_string();
-                            }
+                        let rest = &trimmed[sep_end + 1..];
+                        if !rest.is_empty() {
+                            return rest.to_string();
                         }
-                    }
-                    ' ' => {
-                        // "49 Organ" format
-                        chars.next();
-                        let rest = &trimmed[num_end + 1..];
+                    } else {
+                        let rest = &trimmed[sep_end..];
                         if !rest.is_empty() {
                             return rest.to_string();
                         }
                     }
-                    _ => {}
                 }
+                ' ' => {
+                    // "49 Organ" format
+                    chars.next();
+                    let rest = &trimmed[num_end + 1..];
+                    if !rest.is_empty() {
+                        return rest.to_string();
+                    }
+                }
+                _ => {}
             }
+        }
 
         trimmed.to_string()
     }
@@ -1311,10 +1312,11 @@ impl CleanupDisplayNames {
 
         // Check for %
         if num_end > 0
-            && let Some(&'%') = chars.peek() {
-                let rest = &trimmed[num_end + 1..].trim_start();
-                return rest;
-            }
+            && let Some(&'%') = chars.peek()
+        {
+            let rest = &trimmed[num_end + 1..].trim_start();
+            return rest;
+        }
 
         s
     }
@@ -1450,8 +1452,8 @@ pub fn cleanup_display_names_with_fallback<M: Metadata>(root: &mut Structure<M>,
 mod tests {
     use super::*;
     use crate::metadata::FieldName;
-    use serde::{Deserialize, Serialize};
     use facet::Facet;
+    use serde::{Deserialize, Serialize};
 
     // region:    --- Test Fixtures
 
