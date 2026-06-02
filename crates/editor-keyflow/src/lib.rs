@@ -97,6 +97,14 @@ pub fn font_face_css() -> Result<String, RenderError> {
 /// the self-contained [`render_svg`] and the font-less
 /// [`render_svg_live`].
 fn render_inner(source: &str, embed_fonts: bool) -> Result<String, RenderError> {
+    // Empty (or whitespace-only) input isn't an error here — it's a chart that
+    // hasn't been written yet. `parse_chart` rejects it with "Empty input", but
+    // for a live editor that should read as "nothing yet", not a red error box.
+    // Render to an empty string so the preview pane is simply blank.
+    if source.trim().is_empty() {
+        return Ok(String::new());
+    }
+
     let mode = LayoutMode::ContinuousScroll {
         width: LAYOUT_WIDTH,
     };
@@ -199,6 +207,27 @@ mod tests {
             live.len() / 1024,
             full.len() / 1024
         );
+    }
+
+    /// Empty / whitespace-only input is "nothing yet", not an error: both
+    /// render entry points return an empty string so a live preview is blank
+    /// instead of showing keyflow's "Empty input" parse error.
+    #[test]
+    fn empty_input_renders_nothing_not_an_error() {
+        for src in ["", "   ", "\n\n", "\t \n  "] {
+            assert_eq!(
+                render_svg_live(src).expect("empty input should not error"),
+                "",
+                "live render of {src:?} should be empty"
+            );
+            assert_eq!(
+                render_svg(src).expect("empty input should not error"),
+                "",
+                "render of {src:?} should be empty"
+            );
+        }
+        // A real chart still renders.
+        assert!(render_svg_live("1 4 6 5").expect("ok").contains("<svg"));
     }
 
     /// The page injects this once so font-less live renders resolve their
