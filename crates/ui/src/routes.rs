@@ -45,6 +45,12 @@ pub enum Route {
         #[route("/timer")]
         TimerRoute {},
 
+        #[route("/finances")]
+        FinancesRoute {},
+
+        #[route("/invoices")]
+        InvoicesRoute {},
+
         #[route("/wiki")]
         WikiRoute {},
 
@@ -100,6 +106,16 @@ fn GanttRoute() -> Element {
 #[component]
 fn TimerRoute() -> Element {
     rsx! { pages::timer::TimerView {} }
+}
+
+#[component]
+fn FinancesRoute() -> Element {
+    rsx! { pages::finances::FinancesView {} }
+}
+
+#[component]
+fn InvoicesRoute() -> Element {
+    rsx! { pages::invoices::InvoicesView {} }
 }
 
 #[component]

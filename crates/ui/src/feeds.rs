@@ -264,6 +264,20 @@ pub async fn fetch_recent_sessions(
     Ok(sessions)
 }
 
+/// Sessions across several orgs, each tagged with its org slug, newest
+/// first. Powers the multi-org timer / finances / invoices views.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_sessions_multi(slugs: &[String]) -> Vec<(String, timer_proto::WorkSession)> {
+    let mut out = Vec::new();
+    for slug in slugs {
+        if let Ok(sessions) = fetch_org_sessions(slug).await {
+            out.extend(sessions.into_iter().map(|s| (slug.clone(), s)));
+        }
+    }
+    out.sort_by(|a, b| b.1.start_time.cmp(&a.1.start_time));
+    out
+}
+
 /// Every session in the org (all members), newest first — the time-log
 /// view. Lets the operator see contractors' logged time too, not just
 /// their own.
@@ -519,6 +533,11 @@ pub async fn fetch_recent_sessions(
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch_org_sessions(_slug: &str) -> Result<Vec<timer_proto::WorkSession>, String> {
     Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_sessions_multi(_slugs: &[String]) -> Vec<(String, timer_proto::WorkSession)> {
+    Vec::new()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

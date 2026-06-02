@@ -4,10 +4,12 @@
 //! (sidebar + headers + bottom bar) is provided by the route
 //! layout; pages only render the content area.
 
+pub mod finances;
 pub mod gantt;
 pub mod goals;
 pub mod home;
 pub mod inbox;
+pub mod invoices;
 pub mod project_detail;
 pub mod projects;
 pub mod schedule;

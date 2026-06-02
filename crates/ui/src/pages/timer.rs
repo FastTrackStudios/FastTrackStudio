@@ -14,7 +14,6 @@ use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use timer_proto::{StartTimerRequest, WorkSession};
-use uuid::Uuid;
 
 use crate::chrome::{fmt_hms, owner_id, resolve_org, use_second_tick};
 use crate::orgs::{OrgMeta, OrgSelection};
@@ -36,14 +35,12 @@ pub fn TimerView() -> Element {
             None => Ok(None),
         }
     });
-    // The Recent list shows every member's logged time (not just the
-    // owner's), so the operator sees contractors' hours too.
+    // The Recent list spans every selected org (so `All` shows all your
+    // timer entries everywhere) and every member (contractors too).
     let sessions = use_resource(move || async move {
         let _ = reload();
-        match target() {
-            Some((slug, _)) => crate::feeds::fetch_org_sessions(&slug).await,
-            None => Ok(Vec::new()),
-        }
+        let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
+        crate::feeds::fetch_sessions_multi(&slugs).await
     });
 
     // Live elapsed clock — re-render once a second while mounted.
@@ -105,9 +102,9 @@ pub fn TimerView() -> Element {
                 },
                 None => rsx! { Text { variant: TextVariant::Muted, "Loading timer…" } },
             }
-            // Recent sessions.
+            // Recent sessions (all selected orgs).
             match &*sessions.read_unchecked() {
-                Some(Ok(rows)) if !rows.is_empty() => session_list(rows, target, reload),
+                Some(rows) if !rows.is_empty() => session_list(rows, reload),
                 _ => rsx! {},
             }
         }
@@ -182,18 +179,14 @@ fn start_form(
     }
 }
 
-/// Recent sessions, newest first, with a today total. Each row edits /
-/// deletes in place.
-fn session_list(
-    rows: &[WorkSession],
-    target: Memo<Option<(String, Uuid)>>,
-    reload: Signal<u32>,
-) -> Element {
+/// Recent sessions, newest first, with a today total. Each row (tagged
+/// with its org) edits / deletes in place.
+fn session_list(rows: &[(String, WorkSession)], reload: Signal<u32>) -> Element {
     let today = Utc::now().date_naive();
     let today_secs: i64 = rows
         .iter()
-        .filter(|s| s.start_time.date_naive() == today)
-        .filter_map(|s| s.end_time.map(|e| (e - s.start_time).num_seconds()))
+        .filter(|(_, s)| s.start_time.date_naive() == today)
+        .filter_map(|(_, s)| s.end_time.map(|e| (e - s.start_time).num_seconds()))
         .sum();
 
     rsx! {
@@ -203,23 +196,20 @@ fn session_list(
                 Text { variant: TextVariant::Muted, "Today: {fmt_hms(today_secs)}" }
             }
             div { class: "flex flex-col divide-y divide-border/50 rounded-xl border border-border/60 bg-card/40",
-                for s in rows.iter().take(20) {
-                    SessionRow { key: "{s.id}", session: s.clone(), target, reload }
+                for (slug , s) in rows.iter().take(50) {
+                    SessionRow { key: "{s.id}", session: s.clone(), slug: slug.clone(), reload }
                 }
             }
         }
     }
 }
 
-/// One recent-session row — display with an Edit affordance that swaps
-/// to an inline editor (description + billable + Save / Cancel / Delete).
-/// Editing re-snapshots the rate server-side.
+/// One recent-session row — its org badge + an Edit affordance that
+/// swaps to an inline editor (description + billable + Save / Cancel /
+/// Delete). Editing re-snapshots the rate server-side.
 #[component]
-fn SessionRow(
-    session: WorkSession,
-    target: Memo<Option<(String, Uuid)>>,
-    reload: Signal<u32>,
-) -> Element {
+fn SessionRow(session: WorkSession, slug: String, reload: Signal<u32>) -> Element {
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let sess = use_signal(|| session);
     let mut editing = use_signal(|| false);
     let mut desc = use_signal(|| sess.peek().description.clone());
@@ -240,28 +230,40 @@ fn SessionRow(
     let id = snap.id;
     drop(snap);
 
-    let save = move |_| {
-        let Some((slug, _)) = target() else { return };
-        let mut reload = reload;
-        let req = timer_proto::service::UpdateSessionRequest {
-            id,
-            description: Some(desc.peek().clone()),
-            billable: Some(billable()),
-            ..Default::default()
-        };
-        spawn(async move {
-            let _ = crate::feeds::update_session(&slug, req).await;
-            reload += 1;
-            editing.set(false);
-        });
+    let org_name = org_list
+        .read()
+        .iter()
+        .find(|o| o.slug == slug)
+        .map_or_else(|| slug.clone(), |o| o.name.clone());
+
+    let save = {
+        let slug = slug.clone();
+        move |_| {
+            let slug = slug.clone();
+            let mut reload = reload;
+            let req = timer_proto::service::UpdateSessionRequest {
+                id,
+                description: Some(desc.peek().clone()),
+                billable: Some(billable()),
+                ..Default::default()
+            };
+            spawn(async move {
+                let _ = crate::feeds::update_session(&slug, req).await;
+                reload += 1;
+                editing.set(false);
+            });
+        }
     };
-    let delete = move |_| {
-        let Some((slug, _)) = target() else { return };
-        let mut reload = reload;
-        spawn(async move {
-            let _ = crate::feeds::delete_session(&slug, id).await;
-            reload += 1;
-        });
+    let delete = {
+        let slug = slug.clone();
+        move |_| {
+            let slug = slug.clone();
+            let mut reload = reload;
+            spawn(async move {
+                let _ = crate::feeds::delete_session(&slug, id).await;
+                reload += 1;
+            });
+        }
     };
 
     if editing() {
@@ -291,7 +293,10 @@ fn SessionRow(
             div { class: "group flex items-center justify-between gap-3 px-3 py-2.5",
                 div { class: "flex min-w-0 flex-col",
                     span { class: "truncate text-sm text-foreground", "{title}" }
-                    span { class: "text-xs text-muted-foreground", "{when}" }
+                    span { class: "flex items-center gap-1.5 text-xs text-muted-foreground",
+                        span { class: "rounded bg-muted px-1.5 py-px text-[10px]", "{org_name}" }
+                        span { "{when}" }
+                    }
                 }
                 span {
                     class: if running {
