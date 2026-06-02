@@ -19,7 +19,7 @@ use dawfile_reaper::types::track::TrackSoloState;
 
 const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../dawfile-protools/tests/fixtures/"
+    "/../../protools/dawfile-protools/tests/fixtures/"
 );
 
 const SESSIONS: &[&str] = &[
