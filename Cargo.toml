@@ -16,7 +16,7 @@ version = "0.1.0"
 # manifests. The local-development patch sections below redirect these packages
 # back to sibling checkouts while iterating across repos.
 fts-launcher = { git = "https://git.starcommand.live/FastTrackStudios/fts-launcher.git", branch = "main", features = ["native"] }
-session = { git = "https://git.starcommand.live/FastTrackStudios/session.git", branch = "main" }
+session = { git = "https://git.starcommand.live/FastTrackStudios/session.git", branch = "dev" }
 reaper-input = { git = "https://git.starcommand.live/FastTrackStudios/input.git", branch = "main" }
 crossbeam-channel = "0.5"
 once_cell = "1"

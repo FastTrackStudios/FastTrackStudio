@@ -107,9 +107,27 @@ impl App {
                 "Failed to late-register action with REAPER"
             );
         }
+
+        let command_id = def.command_id.clone();
+        let handler = def.handler;
+        // Toggleable actions (e.g. a workflow's on/off toggle) own their state
+        // via `def.toggle_state`, but REAPER reads the displayed state from the
+        // daw-reaper registry. Bridge the two: seed it now, and refresh it after
+        // every invocation so the action list / toolbar reflect the real state.
+        let wrapped: Arc<dyn Fn() + Send + Sync> = match def.toggle_state {
+            Some(toggle_state) => {
+                daw_reaper::Reaper.set_toggle_state(&command_id, toggle_state());
+                let cid = command_id.clone();
+                Arc::new(move || {
+                    handler();
+                    daw_reaper::Reaper.set_toggle_state(&cid, toggle_state());
+                })
+            }
+            None => handler,
+        };
         self.action_handlers
             .borrow_mut()
-            .insert(def.command_id.clone(), def.handler);
+            .insert(command_id, wrapped);
     }
 }
 
