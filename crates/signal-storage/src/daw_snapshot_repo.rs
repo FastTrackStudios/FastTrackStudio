@@ -39,7 +39,7 @@ pub struct StoredChunkSnapshot {
 // region: --- Trait
 
 #[async_trait::async_trait]
-pub trait DawSnapshotRepo: Send + Sync {
+pub trait DawSnapshotRepo: Send + Sync + 'static {
     // Parameter snapshots
     async fn list_param_snapshots(&self, owner_id: &str)
     -> StorageResult<Vec<StoredParamSnapshot>>;

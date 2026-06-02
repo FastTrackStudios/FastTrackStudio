@@ -154,21 +154,12 @@ fn ChannelDetail(
     let color = state.kind.color();
     let label = state.kind.label().to_string();
 
-    // Compressor params — synced to the shared ProcessingChain.
-    let mut threshold = use_signal(|| {
-        chain
-            .comp
-            .lock()
-            .map(|c| c.comp.threshold_db as f32)
-            .unwrap_or(-18.0)
-    });
-    let mut ratio = use_signal(|| {
-        chain
-            .comp
-            .lock()
-            .map(|c| c.comp.ratio as f32)
-            .unwrap_or(4.0)
-    });
+    // Compressor knobs — display-only. Dynamics processing is disabled in
+    // `ProcessingChain` (it now exposes only `gr_db`), so these are local UI
+    // state with no audio binding until a compressor is reintroduced.
+    let _ = &chain;
+    let mut threshold = use_signal(|| -18.0f32);
+    let mut ratio = use_signal(|| 4.0f32);
 
     rsx! {
         div {
@@ -206,42 +197,26 @@ fn ChannelDetail(
                 QuickKnob { label: "LO MID",   value: 0.0 }
                 QuickKnob { label: "LO SHELF", value: 0.0 }
 
-                // Threshold — wired to ProcessingChain
-                {
-                    let chain_t = chain.clone();
-                    rsx! {
-                        CompKnob {
-                            label: "THRESH",
-                            value: *threshold.read(),
-                            min: -60.0,
-                            max: 0.0,
-                            on_change: move |v: f32| {
-                                threshold.set(v);
-                                if let Ok(mut c) = chain_t.comp.try_lock() {
-                                    c.comp.threshold_db = v as f64;
-                                }
-                            },
-                        }
-                    }
+                // Threshold — display-only (no compressor backing).
+                CompKnob {
+                    label: "THRESH",
+                    value: *threshold.read(),
+                    min: -60.0,
+                    max: 0.0,
+                    on_change: move |v: f32| {
+                        threshold.set(v);
+                    },
                 }
 
-                // Ratio — wired to ProcessingChain
-                {
-                    let chain_r = chain.clone();
-                    rsx! {
-                        CompKnob {
-                            label: "RATIO",
-                            value: *ratio.read(),
-                            min: 1.0,
-                            max: 20.0,
-                            on_change: move |v: f32| {
-                                ratio.set(v);
-                                if let Ok(mut c) = chain_r.comp.try_lock() {
-                                    c.comp.ratio = v as f64;
-                                }
-                            },
-                        }
-                    }
+                // Ratio — display-only (no compressor backing).
+                CompKnob {
+                    label: "RATIO",
+                    value: *ratio.read(),
+                    min: 1.0,
+                    max: 20.0,
+                    on_change: move |v: f32| {
+                        ratio.set(v);
+                    },
                 }
             }
         }

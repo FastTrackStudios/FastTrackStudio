@@ -3,7 +3,7 @@
 //! Converts [`RigTemplate`] and [`RackTemplate`] into live REAPER tracks
 //! with proper folder hierarchy, naming prefixes, and send routing.
 
-use daw::{Project, TrackHandle};
+use daw::rpc::{Project, TrackHandle};
 use signal_proto::plugin_block::TrackRole;
 use signal_proto::rig_template::{EngineTemplate, RackTemplate, RigTemplate};
 

@@ -15,7 +15,7 @@ use crate::{Database, DatabaseConnection, StorageError, StorageResult};
 // region: --- Trait
 
 #[async_trait::async_trait]
-pub trait ModuleRepo: Send + Sync {
+pub trait ModuleRepo: Send + Sync + 'static {
     async fn list_module_collections(&self) -> StorageResult<Vec<ModulePreset>>;
     async fn load_module_default_variant(
         &self,

@@ -12,7 +12,7 @@
 //! 2. **Execute** — call [`instantiate_rig`] to create the REAPER track
 //!    hierarchy, then call [`load_module_to_track`] for each module ref.
 
-use daw::Project;
+use daw::rpc::Project;
 use signal_proto::{
     ALL_BLOCK_TYPES, BlockType, ModulePresetId, ModuleSnapshotId, PresetId, SnapshotId,
     rig::{Rig, RigSceneId},

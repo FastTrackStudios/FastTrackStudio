@@ -13,7 +13,7 @@ use crate::{DatabaseConnection, StorageError, StorageResult};
 // region: --- Trait
 
 #[async_trait::async_trait]
-pub trait SceneTemplateRepo: Send + Sync {
+pub trait SceneTemplateRepo: Send + Sync + 'static {
     async fn list_scene_templates(&self) -> StorageResult<Vec<SceneTemplate>>;
     async fn load_scene_template(
         &self,

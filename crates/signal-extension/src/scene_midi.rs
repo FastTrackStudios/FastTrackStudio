@@ -12,7 +12,8 @@
 //!
 //! Items are placed sequentially, one bar each, starting at bar 1.
 
-use daw::Daw;
+use crate::daw_compat::TrackHandleCompat;
+use daw::rpc::Daw;
 use eyre::{Result, WrapErr};
 use tracing::info;
 

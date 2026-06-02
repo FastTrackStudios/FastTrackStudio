@@ -133,6 +133,11 @@ struct PreparedEntry {
 #[derive(Debug, Clone)]
 pub struct SignalPcmPack {
     path: PathBuf,
+    /// The whole pack file, memory-mapped once at open. Sample decode slices
+    /// straight out of this — no per-sample `File::open`/seek/read syscalls
+    /// (those were the preload bottleneck on multi-GB packs / external drives).
+    /// `Arc` so clones share one mapping.
+    mmap: Arc<memmap2::Mmap>,
     entries: HashMap<PathBuf, PackEntry>,
     /// Embedded styx/toml spec text recovered from the pack index.
     embedded_spec: Option<String>,
@@ -247,7 +252,13 @@ impl SampleCache {
     /// shared map. Safe to call concurrently from any thread; the audio
     /// thread sees the new entry as soon as the write lock is released.
     pub fn preload_one(&self, path: &Path) -> Result<(), SamplerError> {
-        if self.inner.loaded.read().unwrap().contains_key(path) {
+        if self
+            .inner
+            .loaded
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(path)
+        {
             return Ok(());
         }
         let data = decode_path(&self.inner, path)?;
@@ -259,7 +270,13 @@ impl SampleCache {
     /// that genuinely need a synchronous load. **Never call this from the
     /// audio thread** — use [`get_loaded`](Self::get_loaded) there.
     pub fn get(&self, path: &Path) -> Result<Arc<SampleData>, SamplerError> {
-        if let Some(entry) = self.inner.loaded.read().unwrap().get(path) {
+        if let Some(entry) = self
+            .inner
+            .loaded
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(path)
+        {
             return Ok(Arc::clone(entry));
         }
         let start = Instant::now();
@@ -285,9 +302,9 @@ impl SampleCache {
             PathBuf,
             Option<PreparedEntry>,
             Option<PathBuf>,
-            Option<(PathBuf, PackEntry)>,
+            Option<(Arc<memmap2::Mmap>, PackEntry)>,
         )> = {
-            let loaded = self.inner.loaded.read().unwrap();
+            let loaded = self.inner.loaded.read().unwrap_or_else(|e| e.into_inner());
             paths
                 .filter(|p| !loaded.contains_key(*p))
                 .map(|p| {
@@ -296,7 +313,7 @@ impl SampleCache {
                     let packed = self.inner.pcm_pack.as_ref().and_then(|pack| {
                         pack.entry_for_path(p)
                             .cloned()
-                            .map(|entry| (pack.path.clone(), entry))
+                            .map(|entry| (pack.mmap.clone(), entry))
                     });
                     (p.to_owned(), prepared, prepared_dir, packed)
                 })
@@ -313,7 +330,7 @@ impl SampleCache {
             .par_iter()
             .for_each(|(path, prepared, prepared_dir, packed)| {
                 let result = match packed {
-                    Some((pack_path, entry)) => load_pack_sample(pack_path, entry),
+                    Some((pack_mmap, entry)) => load_pack_sample(&pack_mmap, entry),
                     None => match prepared {
                         Some(entry) => {
                             load_prepared_sample(&Some(prepared_dir.clone().unwrap()), entry)
@@ -356,49 +373,68 @@ impl SampleCache {
     pub fn preload_cancelable<'a>(
         &self,
         paths: impl Iterator<Item = &'a Path>,
-        mut should_cancel: impl FnMut() -> bool,
+        should_cancel: impl Fn() -> bool + Sync,
     ) -> PreloadStats {
-        let mut stats = PreloadStats::default();
-        let mut inserted_since_publish = 0usize;
-        for path in paths {
+        // Decode in PARALLEL across the rayon pool (FLAC decode is CPU-bound;
+        // a sequential per-engine thread left most cores idle and the largest
+        // engine — e.g. hats, ~2.8k samples — dominated wall time). The bank's
+        // per-engine preload threads all feed the shared pool, so work from
+        // every engine interleaves across all cores with no tail imbalance.
+        // `should_cancel` (a new preset loaded) short-circuits remaining work.
+        let work: Vec<(PathBuf, Option<(Arc<memmap2::Mmap>, PackEntry)>)> = {
+            let loaded = self.inner.loaded.read().unwrap_or_else(|e| e.into_inner());
+            paths
+                .filter(|p| !loaded.contains_key(*p))
+                .map(|p| {
+                    let packed = self.inner.pcm_pack.as_ref().and_then(|pack| {
+                        pack.entry_for_path(p)
+                            .cloned()
+                            .map(|entry| (pack.mmap.clone(), entry))
+                    });
+                    (p.to_owned(), packed)
+                })
+                .collect()
+        };
+
+        let total = work.len();
+        let completed = AtomicUsize::new(0);
+        let loaded_n = AtomicUsize::new(0);
+        let failed_n = AtomicUsize::new(0);
+        let bytes_n = AtomicUsize::new(0);
+
+        work.par_iter().for_each(|(path, packed)| {
             if should_cancel() {
-                break;
+                return;
             }
-            let already_loaded = self
-                .inner
-                .loaded
-                .read()
-                .map(|loaded| loaded.contains_key(path))
-                .unwrap_or(false);
-            if already_loaded {
-                continue;
-            }
-            // Decode + insert without publishing the audio-thread snapshot
-            // on every insert — publishing clones the whole `loaded` map,
-            // so per-insert publishing is O(n²) and crawls on large packs.
-            // We batch publishes (every 256 inserts) and do one final
-            // publish at the end so the audio thread sees the full set.
-            let data = match decode_path(&self.inner, path) {
-                Ok(d) => d,
-                Err(e) => {
-                    stats.failed += 1;
-                    tracing::warn!("cache: failed to preload {}: {e}", path.display());
-                    continue;
-                }
+            let result = match packed {
+                Some((pack_mmap, entry)) => load_pack_sample(pack_mmap, entry),
+                None => decode_path(&self.inner, path),
             };
-            let bytes = data.decoded_bytes();
-            self.insert_loaded(path.to_owned(), Arc::new(data), false);
-            stats.loaded += 1;
-            stats.bytes += bytes;
-            inserted_since_publish += 1;
-            if inserted_since_publish >= 256 {
-                self.publish_loaded_snapshot();
-                inserted_since_publish = 0;
+            match result {
+                Ok(data) => {
+                    let bytes = data.decoded_bytes();
+                    self.insert_loaded(path.clone(), Arc::new(data), false);
+                    loaded_n.fetch_add(1, Ordering::Relaxed);
+                    bytes_n.fetch_add(bytes, Ordering::Relaxed);
+                }
+                Err(e) => {
+                    failed_n.fetch_add(1, Ordering::Relaxed);
+                    tracing::warn!("cache: failed to preload {}: {e}", path.display());
+                }
             }
-        }
-        // Final publish so the audio thread sees every preloaded sample.
+            // Publish the audio-thread snapshot incrementally so voices come
+            // online during preload (publish clones the map — batch it).
+            let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+            if done <= 8 || done == total || done % 64 == 0 {
+                self.publish_loaded_snapshot();
+            }
+        });
         self.publish_loaded_snapshot();
-        stats
+        PreloadStats {
+            loaded: loaded_n.load(Ordering::Relaxed),
+            failed: failed_n.load(Ordering::Relaxed),
+            bytes: bytes_n.load(Ordering::Relaxed),
+        }
     }
 
     /// Number of samples currently in cache.
@@ -423,7 +459,7 @@ impl SampleCache {
     /// voices finish.
     pub fn evict_until_under_budget(&self, budget_bytes: usize) -> EvictStats {
         let (stats, changed) = {
-            let mut loaded = self.inner.loaded.write().unwrap();
+            let mut loaded = self.inner.loaded.write().unwrap_or_else(|e| e.into_inner());
             let bytes_before = loaded
                 .values()
                 .map(|data| data.decoded_bytes())
@@ -489,7 +525,7 @@ impl SampleCache {
 
     fn insert_loaded(&self, path: PathBuf, data: Arc<SampleData>, publish: bool) {
         {
-            let mut loaded = self.inner.loaded.write().unwrap();
+            let mut loaded = self.inner.loaded.write().unwrap_or_else(|e| e.into_inner());
             loaded.insert(path, data);
         }
         if publish {
@@ -507,7 +543,7 @@ impl SampleCache {
 fn decode_path(inner: &CacheInner, path: &Path) -> Result<SampleData, SamplerError> {
     if let Some(pack) = inner.pcm_pack.as_ref() {
         if let Some(entry) = pack.entry_for_path(path) {
-            return load_pack_sample(&pack.path, entry);
+            return load_pack_sample(&pack.mmap, entry);
         }
     }
     if let Some(entry) = inner.prepared.get(path) {
@@ -861,8 +897,14 @@ impl SignalPcmPack {
             Some(spec_buf)
         };
 
+        // Memory-map the whole pack once; sample decode slices from this.
+        // Safety: the pack file is read-only for the cache's lifetime; we never
+        // write it, and external truncation would be a deployment error.
+        let mmap = Arc::new(unsafe { memmap2::Mmap::map(&file)? });
+
         Ok(Self {
             path: path.to_owned(),
+            mmap,
             entries,
             embedded_spec,
             embedded_spec_format: spec_format,
@@ -934,12 +976,14 @@ fn path_suffixes(path: &Path) -> Vec<PathBuf> {
     suffixes
 }
 
-fn load_pack_sample(path: impl AsRef<Path>, entry: &PackEntry) -> Result<SampleData, SamplerError> {
-    let mut file = File::open(path)?;
-    file.seek(SeekFrom::Start(entry.offset))?;
-    let mut bytes = vec![0u8; entry.bytes as usize];
-    file.read_exact(&mut bytes)?;
-    let data = load_flac_bytes(&bytes)?;
+fn load_pack_sample(pack_data: &[u8], entry: &PackEntry) -> Result<SampleData, SamplerError> {
+    let start = entry.offset as usize;
+    let end = start
+        .checked_add(entry.bytes as usize)
+        .filter(|&e| e <= pack_data.len())
+        .ok_or_else(|| invalid_data("signal pack entry out of bounds"))?;
+    let bytes = &pack_data[start..end];
+    let data = load_flac_bytes(bytes)?;
     if data.channels != entry.channels
         || data.sample_rate != entry.sample_rate
         || data.num_frames != entry.num_frames
@@ -1472,15 +1516,118 @@ fn encode_flac_i24(
     Ok(sink.as_slice().to_vec())
 }
 
+/// Decode an in-pack FLAC sample. Tries **symphonia** first (faster on 24-bit
+/// content) and falls back to **claxon** if symphonia errors, so we never
+/// silently drop a sample on an unexpected stream.
 fn load_flac_bytes(bytes: &[u8]) -> Result<SampleData, SamplerError> {
+    match decode_flac_symphonia(bytes) {
+        Ok(data) => Ok(data),
+        Err(e) => {
+            tracing::debug!("symphonia FLAC decode failed ({e}); falling back to claxon");
+            decode_flac_claxon(bytes)
+        }
+    }
+}
+
+/// claxon FLAC decode (correctness fallback / loose-file path).
+fn decode_flac_claxon(bytes: &[u8]) -> Result<SampleData, SamplerError> {
     let cursor = std::io::Cursor::new(bytes);
-    let mut reader = claxon::FlacReader::new(cursor).map_err(|e| {
-        SamplerError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
-    })?;
+    let mut reader = claxon::FlacReader::new(cursor)
+        .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))?;
     load_flac_reader(&mut reader)
+}
+
+/// symphonia FLAC decode. Produces interleaved f32 in [-1, 1], matching the
+/// claxon path.
+///
+/// Our packs are encoded with a FIXED blocking strategy, but when the final
+/// block is short (the `flac` CLI path doesn't pad) libFLAC writes STREAMINFO
+/// with `min_block_size < max_block_size`. symphonia reads that as a
+/// VARIABLE-blocksize stream, so its `strict_frame_header_check` rejects every
+/// fixed-strategy frame and `try_new` reads to EOF. We work around it by
+/// normalizing `min_block_size := max_block_size` in the copy we hand
+/// symphonia — frame data is untouched (the decoder uses each frame's own
+/// block size), so the decoded audio is identical.
+fn decode_flac_symphonia(bytes: &[u8]) -> Result<SampleData, SamplerError> {
+    use symphonia_bundle_flac::{FlacDecoder, FlacReader};
+    use symphonia_core::audio::SampleBuffer;
+    use symphonia_core::codecs::{Decoder, DecoderOptions};
+    use symphonia_core::errors::Error as SymErr;
+    use symphonia_core::formats::{FormatOptions, FormatReader};
+    use symphonia_core::io::MediaSourceStream;
+
+    let sym_io = |e: SymErr| SamplerError::Io(std::io::Error::other(e.to_string()));
+
+    // Own + (if needed) normalize the STREAMINFO block-size bounds. Layout:
+    // bytes 0..4 = "fLaC", 4 = metadata block header (is_last|type), with the
+    // first block being STREAMINFO (type 0). STREAMINFO body starts at byte 8:
+    // [min_block u16 BE][max_block u16 BE]…
+    let mut owned = bytes.to_vec();
+    if owned.len() >= 12 && &owned[0..4] == b"fLaC" && (owned[4] & 0x7f) == 0 {
+        let max_block = [owned[10], owned[11]];
+        owned[8] = max_block[0];
+        owned[9] = max_block[1];
+    }
+
+    let mss = MediaSourceStream::new(Box::new(std::io::Cursor::new(owned)), Default::default());
+    let mut format = FlacReader::try_new(mss, &FormatOptions::default()).map_err(sym_io)?;
+    let track = format
+        .default_track()
+        .ok_or_else(|| invalid_data("flac: no default track"))?;
+    let track_id = track.id;
+    let mut decoder =
+        FlacDecoder::try_new(&track.codec_params, &DecoderOptions::default()).map_err(sym_io)?;
+
+    let mut frames: Vec<f32> = Vec::new();
+    let mut channels = 0u16;
+    let mut sample_rate = 0u32;
+    let mut sbuf: Option<SampleBuffer<f32>> = None;
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            // symphonia signals normal end-of-stream as an IoError — either a
+            // real UnexpectedEof or its own "end of stream" sentinel (Other).
+            Err(SymErr::IoError(e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof
+                    || e.to_string() == "end of stream" =>
+            {
+                break;
+            }
+            Err(SymErr::ResetRequired) => break,
+            Err(e) => return Err(sym_io(e)),
+        };
+        if packet.track_id() != track_id {
+            continue;
+        }
+        match decoder.decode(&packet) {
+            Ok(decoded) => {
+                if sbuf.is_none() {
+                    let spec = *decoded.spec();
+                    channels = spec.channels.count() as u16;
+                    sample_rate = spec.rate;
+                    sbuf = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
+                }
+                let sb = sbuf.as_mut().unwrap();
+                sb.copy_interleaved_ref(decoded); // → interleaved f32, normalized
+                frames.extend_from_slice(sb.samples());
+            }
+            // A corrupt frame is skippable; anything else is fatal.
+            Err(SymErr::DecodeError(_)) => continue,
+            Err(e) => return Err(sym_io(e)),
+        }
+    }
+
+    if frames.is_empty() {
+        return Err(invalid_data("flac: symphonia decoded no samples"));
+    }
+    let channels = channels.max(1);
+    let num_frames = frames.len() / channels as usize;
+    Ok(SampleData {
+        frames: Arc::new(frames),
+        channels,
+        sample_rate,
+        num_frames,
+    })
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, SamplerError> {
@@ -1562,6 +1709,41 @@ mod tests {
             sample_rate: 48_000,
             num_frames: frames,
         })
+    }
+
+    #[test]
+    fn decodes_one_pack_sample() {
+        let p = std::path::Path::new(
+            "/run/media/AudioHaven/Signal/Libraries/Drum Kits/GGD Modern and Massive 2/Packs/Kick/22x18'' Tama Starclassic Bubinga Kick.signalpack",
+        );
+        if !p.exists() {
+            eprintln!("skip (pack missing)");
+            return;
+        }
+        let pack = SignalPcmPack::open(p).expect("open pack");
+        let (_path, entry) = pack.entries.iter().next().expect("at least one entry");
+        let start = entry.offset as usize;
+        let bytes = &pack.mmap[start..start + entry.bytes as usize];
+
+        // symphonia (primary path) must succeed on its own — not silently fall
+        // back to claxon — and agree with claxon bit-for-bit on the result.
+        let sym = decode_flac_symphonia(bytes).expect("symphonia decode");
+        let cla = decode_flac_claxon(bytes).expect("claxon decode");
+        assert!(sym.num_frames > 0);
+        assert_eq!(sym.channels, cla.channels, "channel mismatch");
+        assert_eq!(sym.sample_rate, cla.sample_rate, "sample-rate mismatch");
+        assert_eq!(sym.num_frames, cla.num_frames, "frame-count mismatch");
+        assert_eq!(sym.frames.len(), cla.frames.len(), "sample-count mismatch");
+        let max_diff = sym
+            .frames
+            .iter()
+            .zip(cla.frames.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_diff < 1e-6,
+            "sample value mismatch: max_diff={max_diff}"
+        );
     }
 
     #[test]

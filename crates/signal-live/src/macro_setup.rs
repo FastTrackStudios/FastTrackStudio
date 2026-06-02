@@ -42,7 +42,7 @@
 //! - **Fail gracefully**: Missing parameters are skipped (logged as warnings)
 //! - **Recursive**: Supports nested sub-macros (children in knob tree)
 
-use daw::{FxHandle, TrackHandle};
+use daw::rpc::{FxHandle, TrackHandle};
 use macromod::{MacroBank, MacroBinding, MacroKnob};
 use signal_proto::Block;
 

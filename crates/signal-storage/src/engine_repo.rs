@@ -13,7 +13,7 @@ use crate::{DatabaseConnection, StorageError, StorageResult};
 // region: --- Trait
 
 #[async_trait::async_trait]
-pub trait EngineRepo: Send + Sync {
+pub trait EngineRepo: Send + Sync + 'static {
     async fn list_engines(&self) -> StorageResult<Vec<Engine>>;
     async fn load_engine(&self, id: &EngineId) -> StorageResult<Option<Engine>>;
     async fn save_engine(&self, engine: &Engine) -> StorageResult<()>;

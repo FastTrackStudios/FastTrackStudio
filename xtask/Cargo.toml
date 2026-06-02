@@ -7,4 +7,6 @@ publish = false
 [dependencies]
 fts-devtools = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 nih_plug_xtask = { git = "https://git.starcommand.live/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
-reaper-test = { workspace = true, features = ["runner"] }
+# `reaper-test` folded into the daw facade behind `test-harness`; the runner
+# lives at `daw::test::runner`.
+daw = { workspace = true, features = ["test-harness"] }

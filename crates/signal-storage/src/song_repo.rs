@@ -11,7 +11,7 @@ use crate::{DatabaseConnection, StorageError, StorageResult};
 // region: --- Trait
 
 #[async_trait::async_trait]
-pub trait SongRepo: Send + Sync {
+pub trait SongRepo: Send + Sync + 'static {
     async fn list_songs(&self) -> StorageResult<Vec<Song>>;
     async fn load_song(&self, id: &SongId) -> StorageResult<Option<Song>>;
     async fn save_song(&self, song: &Song) -> StorageResult<()>;

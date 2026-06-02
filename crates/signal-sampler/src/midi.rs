@@ -29,29 +29,37 @@ const NOTE_NAMES: &[(&str, u8)] = &[
 /// Parse a note name like "G2", "C#4", "A#-1" to a MIDI note number.
 /// Middle C (C4) = 60.
 pub fn note_name_to_midi(name: &str) -> Result<u8, SamplerError> {
-    // Split into pitch class + octave:  e.g. "C#" + "4"
-    let (pc, oct_str) =
-        if name.len() >= 2 && (name.as_bytes()[1] == b'#' || name.as_bytes()[1] == b'b') {
-            (&name[..2], &name[2..])
-        } else {
-            (&name[..1], &name[1..])
-        };
+    let bad = || SamplerError::BadNoteName(name.to_string());
+
+    // Split into pitch class + octave (e.g. "C#" + "4", "C" + "-1"). The
+    // octave begins at the first ASCII digit, or a leading '-' for negative
+    // octaves like "C-1". Using `char_indices` (not byte slicing) keeps this
+    // panic-free for empty and non-ASCII input — callers rely on `Err`, not a
+    // panic, for malformed note tokens (e.g. an empty token from a `__` in a
+    // sample filename, or a stray unicode character).
+    let split = name
+        .char_indices()
+        .find(|&(i, c)| c.is_ascii_digit() || (c == '-' && i > 0))
+        .map(|(i, _)| i)
+        .ok_or_else(bad)?;
+    let (pc, oct_str) = name.split_at(split);
+    if pc.is_empty() || oct_str.is_empty() {
+        return Err(bad());
+    }
 
     let semitone = NOTE_NAMES
         .iter()
         .find(|(n, _)| n.eq_ignore_ascii_case(pc))
         .map(|(_, s)| *s)
-        .ok_or_else(|| SamplerError::BadNoteName(name.to_string()))?;
+        .ok_or_else(bad)?;
 
-    let octave: i32 = oct_str
-        .parse()
-        .map_err(|_| SamplerError::BadNoteName(name.to_string()))?;
+    let octave: i32 = oct_str.parse().map_err(|_| bad())?;
 
     let midi = (octave + 1) * 12 + semitone as i32;
     if (0..=127).contains(&midi) {
         Ok(midi as u8)
     } else {
-        Err(SamplerError::BadNoteName(name.to_string()))
+        Err(bad())
     }
 }
 
@@ -108,6 +116,22 @@ mod tests {
         assert_eq!(note_name_to_midi("A#1").unwrap(), 34);
         assert_eq!(note_name_to_midi("C#4").unwrap(), 61);
         assert_eq!(note_name_to_midi("C1").unwrap(), 24);
+        // Flats and the lowest negative octave.
+        assert_eq!(note_name_to_midi("Db4").unwrap(), 61);
+        assert_eq!(note_name_to_midi("C-1").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_note_parsing_rejects_malformed_without_panicking() {
+        // Previously these panicked (byte-slicing `&name[..1]`); now they must
+        // return Err. Empty, non-ASCII-leading, digit-leading, and out-of-range.
+        assert!(note_name_to_midi("").is_err());
+        assert!(note_name_to_midi("é4").is_err());
+        assert!(note_name_to_midi("♯4").is_err());
+        assert!(note_name_to_midi("4").is_err());
+        assert!(note_name_to_midi("C").is_err());
+        assert!(note_name_to_midi("Z9").is_err());
+        assert!(note_name_to_midi("C99").is_err());
     }
 
     #[test]

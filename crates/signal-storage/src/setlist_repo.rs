@@ -9,7 +9,7 @@ use crate::entity;
 use crate::{DatabaseConnection, StorageError, StorageResult};
 
 #[async_trait::async_trait]
-pub trait SetlistRepo: Send + Sync {
+pub trait SetlistRepo: Send + Sync + 'static {
     async fn list_setlists(&self) -> StorageResult<Vec<Setlist>>;
     async fn load_setlist(&self, id: &SetlistId) -> StorageResult<Option<Setlist>>;
     async fn save_setlist(&self, setlist: &Setlist) -> StorageResult<()>;

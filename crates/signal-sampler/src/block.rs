@@ -211,6 +211,13 @@ impl SamplerBlock {
 
     // ── MIDI / playback ────────────────────────────────────────────────────
 
+    /// Note-on with a per-trigger articulation override (percussion routing).
+    /// See [`SampleEngine::note_on_articulated`].
+    pub fn note_on_articulated(&mut self, note: u8, velocity: u8, articulation: Option<&str>) {
+        let n = transposed(note, self.params.transpose);
+        self.engine.note_on_articulated(n, velocity, articulation);
+    }
+
     pub fn note_on(&mut self, note: u8, velocity: u8) {
         let n = transposed(note, self.params.transpose);
         self.engine.note_on(n, velocity);
@@ -325,6 +332,19 @@ impl SamplerBlock {
 
     pub fn set_tune_cents(&mut self, cents: i16) {
         self.params.tune_cents = cents;
+    }
+
+    /// Pin this block's engine to a single articulation (percussion kits) —
+    /// only zones with the matching `articulation` fire, on any routed note.
+    /// `None`/empty clears the pin. See [`SampleEngine::pin_articulation`].
+    pub fn pin_articulation(&mut self, artic: Option<String>) {
+        self.engine.pin_articulation(artic);
+    }
+
+    /// Set an engine-wide choke group + the articulations that trigger it.
+    /// See [`SampleEngine::set_choke_group`].
+    pub fn set_choke_group(&mut self, group: Option<&str>, choke_on: &[String]) {
+        self.engine.set_choke_group(group, choke_on);
     }
 
     pub fn apply_voice_config(&mut self, config: &VoiceConfig) {

@@ -9,6 +9,7 @@
 //! exists; we now use the in-process `ExtensionRuntime::new(context)`
 //! pattern shared with session-extension and sync-extension.
 
+mod daw_compat;
 pub mod demo_profile;
 pub mod demo_rig;
 pub mod demo_setlist;
@@ -19,8 +20,8 @@ pub mod scene_midi;
 use std::cell::OnceCell;
 use std::error::Error;
 
-use daw::Daw;
 use daw::RxExt;
+use daw::rpc::Daw;
 use daw::service::ActionEvent;
 use daw_extension_runtime::ExtensionRuntime;
 use fragile::Fragile;
@@ -75,26 +76,17 @@ impl SignalExtension {
             }
             info!("signal-extension registered {registered}/{total} actions");
 
-            let mut events = match registry.subscribe_actions().await {
-                Ok(rx) => rx,
-                Err(e) => {
-                    error!("signal-extension subscribe_actions failed: {e:#}");
-                    return;
-                }
-            };
-
-            loop {
-                match events.next_owned().await {
-                    Ok(Some(ActionEvent::Triggered { command_name })) => {
-                        handle_action(&daw, &command_name).await;
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        error!("signal action stream error: {e}");
-                        break;
-                    }
-                }
-            }
+            // TODO(daw-track-api): `ActionRegistry::subscribe_actions` was removed
+            // from daw main; there is no action-event stream to drive the trigger
+            // loop. Actions are still registered above, but their triggers are not
+            // handled until daw restores a subscription API. `handle_action` and
+            // the `ActionEvent` import are retained for when it returns.
+            let _ = &daw;
+            error!(
+                "signal-extension: action event subscription unavailable on daw main \
+                 (subscribe_actions removed) — {registered}/{total} actions registered, \
+                 but trigger handling is DISABLED (TODO daw-track-api)"
+            );
         });
 
         Ok(Self { runtime })

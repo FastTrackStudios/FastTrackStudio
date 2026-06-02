@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use reaper_test::runner::{self, TestPackage, TestRunner};
+use daw::test::runner::{self, TestPackage, TestRunner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -138,6 +138,8 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         extension_log: PathBuf::from("/tmp/daw-bridge.log"),
         timeout_secs,
         keep_open,
+        // Run headless in CI; use the current display locally.
+        headless: ci,
         ci,
         // Only load signal-extension — skip session-extension, sync-extension, etc.
         extension_whitelist: vec!["signal-extension".into()],

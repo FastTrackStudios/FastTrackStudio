@@ -20,7 +20,16 @@ cpal        = { workspace = true }
 crossbeam-channel = { workspace = true }
 arc-swap    = "1.7"
 hound       = "3.5"
+# FLAC decode for .signalpack samples. Primary path is symphonia (faster on
+# 24-bit); claxon is kept as a correctness fallback. See `load_flac_bytes`:
+# symphonia rejects our streams' short final block (STREAMINFO min<max read as
+# variable-blocksize), so we normalize STREAMINFO min:=max in the copy we feed
+# it. claxon decodes the raw bytes regardless and backstops any oddball pack.
 claxon      = "0.4"
+symphonia   = { version = "0.5", default-features = false, features = ["flac"] }
+symphonia-bundle-flac = "0.5"
+symphonia-core = "0.5"
+memmap2     = "0.9"
 zstd        = "0.13"
 flacenc     = "0.5.1"
 

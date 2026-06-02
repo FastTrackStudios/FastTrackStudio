@@ -17,7 +17,8 @@
 //! Each scene uses a different subset of stock REAPER FX to simulate
 //! the module types: input, drive, amp, modulation, time, dynamics, master.
 
-use daw::{Daw, TrackHandle};
+use crate::daw_compat::TrackHandleCompat;
+use daw::rpc::{Daw, TrackHandle};
 use eyre::{Result, WrapErr};
 use tracing::info;
 

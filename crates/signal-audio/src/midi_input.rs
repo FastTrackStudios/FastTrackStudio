@@ -31,6 +31,20 @@ impl MidiEvent {
     pub fn is_note_off(self) -> bool {
         (self.status & 0xF0) == 0x80 || ((self.status & 0xF0) == 0x90 && self.velocity == 0)
     }
+    /// Control Change (status 0xB0). For CC, data byte 1 (`note`) is the
+    /// controller number and data byte 2 (`velocity`) is its value — e.g.
+    /// CC64 is the sustain (damper) pedal.
+    pub fn is_cc(self) -> bool {
+        (self.status & 0xF0) == 0xB0
+    }
+    /// Controller number for a CC message (data byte 1).
+    pub fn controller(self) -> u8 {
+        self.note
+    }
+    /// Controller value for a CC message (data byte 2).
+    pub fn cc_value(self) -> u8 {
+        self.velocity
+    }
 }
 
 /// Holds open MIDI input connections and exposes a receiver channel.

@@ -364,7 +364,10 @@ impl Voice {
             }
         }
 
-        (l * amp * self.pan_l, r * amp * self.pan_r)
+        (
+            flush_denormal(l * amp * self.pan_l),
+            flush_denormal(r * amp * self.pan_r),
+        )
     }
 
     /// Render a block of stereo frames into `output` (interleaved L/R).
@@ -383,6 +386,14 @@ impl Voice {
         }
         rendered
     }
+}
+
+/// Flush denormals to zero. On `no_std`/embedded and WASM targets the host may
+/// not set hardware FTZ/DAZ, so a denormal on a quiet release tail can spike
+/// CPU. The branch is predictable (almost always false) and cheap.
+#[inline(always)]
+fn flush_denormal(x: f32) -> f32 {
+    if x.abs() < 1.0e-30 { 0.0 } else { x }
 }
 
 // ── Voice pool ────────────────────────────────────────────────────────────────

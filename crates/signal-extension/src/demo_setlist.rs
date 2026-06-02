@@ -23,7 +23,8 @@
 //! songs laid out back-to-back. Song-level items go on the Guitar Rig folder,
 //! section-level items go on each song's folder.
 
-use daw::Daw;
+use crate::daw_compat::TrackHandleCompat;
+use daw::rpc::Daw;
 use eyre::{Result, WrapErr};
 use tracing::info;
 
@@ -180,7 +181,7 @@ pub async fn load_demo_setlist(daw: &Daw) -> Result<()> {
     rig_input.set_color(0x6B7280).await?;
 
     // Collect all section tracks so we can create sends after building the hierarchy
-    let mut all_section_tracks: Vec<daw::TrackHandle> = Vec::new();
+    let mut all_section_tracks: Vec<daw::rpc::TrackHandle> = Vec::new();
 
     let mut current_bar: usize = 0;
 

@@ -1,18 +1,27 @@
 //! Round-robin counters — cycles through RR slots for each (section, articulation, dynamic).
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
-/// Key identifying a unique (section, articulation, dynamic layer) group.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RrKey {
-    section: String,
-    articulation: String,
-    dynamic: String,
+/// Hash the (section, articulation, dynamic) triple into a single `u64` key.
+///
+/// Keyed by hash rather than owned `String`s so [`RrCounters::next`] allocates
+/// nothing on the audio thread (it runs per note-on). A 64-bit collision would
+/// only make two groups share a round-robin counter — harmless. The `0xff`
+/// separators prevent `("ab","c",…)` and `("a","bc",…)` from colliding.
+fn rr_key(section: &str, articulation: &str, dynamic: &str) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    section.hash(&mut h);
+    0xffu8.hash(&mut h);
+    articulation.hash(&mut h);
+    0xffu8.hash(&mut h);
+    dynamic.hash(&mut h);
+    h.finish()
 }
 
 /// Per-group RR state.
 pub struct RrCounters {
-    counters: HashMap<RrKey, usize>,
+    counters: HashMap<u64, usize>,
     /// Starting index applied to new groups (set by CC59 reset).
     rr_start: usize,
 }
@@ -37,11 +46,7 @@ impl RrCounters {
         if max_rr == 0 {
             return 0;
         }
-        let key = RrKey {
-            section: section.to_string(),
-            articulation: articulation.to_string(),
-            dynamic: dynamic.to_string(),
-        };
+        let key = rr_key(section, articulation, dynamic);
         let start = self.rr_start;
         let counter = self.counters.entry(key).or_insert(start);
         let idx = *counter % max_rr;

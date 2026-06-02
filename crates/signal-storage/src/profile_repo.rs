@@ -11,7 +11,7 @@ use crate::{DatabaseConnection, StorageError, StorageResult};
 // region: --- Trait
 
 #[async_trait::async_trait]
-pub trait ProfileRepo: Send + Sync {
+pub trait ProfileRepo: Send + Sync + 'static {
     async fn list_profiles(&self) -> StorageResult<Vec<Profile>>;
     async fn load_profile(&self, id: &ProfileId) -> StorageResult<Option<Profile>>;
     async fn save_profile(&self, profile: &Profile) -> StorageResult<()>;
