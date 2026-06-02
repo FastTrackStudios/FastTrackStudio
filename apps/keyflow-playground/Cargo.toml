@@ -1,0 +1,28 @@
+[package]
+name = "keyflow-playground"
+version = "0.1.0"
+authors = ["Cody Wright <acodywright@gmail.com>"]
+edition.workspace = true
+
+# Standalone live keyflow chart editor — isolated from the desktop app's
+# gateway/REAPER/session machinery so it starts instantly and is a clean
+# surface for iterating on the editor + WGPU preview overlay.
+
+[dependencies]
+dioxus = { workspace = true, features = ["desktop"] }
+
+# Keyflow chart parsing/engraver + the live editor UI (split editor + WGPU
+# preview, PDF export). `web` pulls dioxus/desktop + desktop-panels.
+keyflow = { workspace = true, features = ["text", "engraver"] }
+keyflow-ui = { workspace = true, features = ["web"] }
+
+# Native save dialog for PDF export
+rfd = "0.17"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "keyflow-playground"
+path = "src/main.rs"

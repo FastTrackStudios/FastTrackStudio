@@ -4,6 +4,7 @@
 /* Scan app source and UI crate dependencies for Tailwind class usage */
 @source "./src/**/*.rs";
 @source "../../../session/crates/session-ui/src/**/*.rs";
+@source "../../../keyflow/crates/keyflow-ui/src/**/*.rs";
 @source "../../../../../.cargo/git/checkouts/fts-ui-*/*/crates/*/src/**/*.rs";
 @source "../../../../../.cargo/git/checkouts/lumen-blocks-*/*/blocks/src/**/*.rs";
 @source "../../../../../.cargo/git/checkouts/dock-dioxus-*/*/crates/*/src/**/*.rs";

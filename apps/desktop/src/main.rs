@@ -15,6 +15,7 @@ enum Tab {
     Session,
     Daw,
     Tools,
+    Chart,
 }
 
 /// Path of the desktop log file. Override with `FTS_DESKTOP_LOG`.
@@ -72,11 +73,21 @@ fn main() {
 
     tracing::info!("Starting FastTrackStudio");
 
-    let cfg = Config::new().with_window(
-        WindowBuilder::new()
-            .with_title("FastTrackStudio")
-            .with_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(1400.0, 900.0)),
-    );
+    let cfg = Config::new()
+        .with_window(
+            WindowBuilder::new()
+                .with_title("FastTrackStudio")
+                .with_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(1400.0, 900.0))
+                // Transparent window so the keyflow chart editor can render its
+                // chart to the window's WGPU surface, composited *behind* the
+                // WebView. See `transparent-mode` CSS + ChartGraphics wiring in
+                // `DesktopShell`. The app chrome supplies its own opaque
+                // backgrounds, so non-chart tabs still look normal.
+                .with_transparent(true),
+        )
+        // Make the WebView background transparent (alpha 0) so the WGPU layer
+        // beneath shows through wherever the DOM is transparent.
+        .with_background_color((0, 0, 0, 0));
 
     LaunchBuilder::desktop().with_cfg(cfg).launch(App);
 }
@@ -90,6 +101,22 @@ fn App() -> Element {
 fn DesktopShell() -> Element {
     let mut connection_state = use_signal(|| ConnectionState::Disconnected);
     let mut gateway_info: Signal<Option<gateway::GatewayInfo>> = use_signal(|| None);
+
+    // Build the keyflow chart renderer once, bound to the desktop window's WGPU
+    // surface, and publish it via context. `keyflow_ui::ChartView` consumes
+    // `Arc<Mutex<ChartGraphics>>` and drives its own render loop, drawing the
+    // chart behind the (transparent) WebView. Created at startup so the surface
+    // is ready when the Chart tab is first opened.
+    use_hook(|| {
+        let win = dioxus::desktop::window();
+        let size = win.window.inner_size();
+        let graphics = keyflow_ui::ChartGraphics::new(
+            win.window.clone(),
+            size.width.max(1),
+            size.height.max(1),
+        );
+        provide_context(std::sync::Arc::new(std::sync::Mutex::new(graphics)));
+    });
 
     // Start the gateway immediately (serves web app even without REAPER)
     let _gateway = use_future(move || async move {
@@ -243,8 +270,29 @@ fn DesktopShell() -> Element {
 
     rsx! {
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
+        // The window + WebView are transparent (for the chart editor's WGPU
+        // overlay). Normally `body` carries the themed (dark) `bg-background`
+        // from the base layer, so every tab is opaque. Only when
+        // `keyflow_ui::ChartView` adds `transparent-mode` to <html> do we drop
+        // the body background to transparent, letting the WGPU chart layer show
+        // through the editor's transparent preview panel. Opaque chrome (nav,
+        // editor sidebar) keeps its own `bg-*` and stays solid.
+        style { {r#"
+            html.transparent-mode body { background: transparent !important; }
+            /* The WGPU chart layer sits BEHIND the WebView; it only shows where
+               every ancestor up to <html> is transparent. ThemeProvider paints
+               an inline `background-color: var(--background)` on .fts-theme-root,
+               which would hide it — force that (and the chart areas) transparent
+               in chart mode. !important in a stylesheet overrides inline styles. */
+            html.transparent-mode .fts-theme-root,
+            html.transparent-mode .chart-transparent-area,
+            html.transparent-mode #chart-editor-preview {
+                background: transparent !important;
+                background-color: transparent !important;
+            }
+        "#} }
         div { class: "flex flex-col h-screen",
-            nav { class: "flex gap-1 px-3 py-2 border-b border-neutral-200 shrink-0",
+            nav { class: "flex gap-1 px-3 py-2 border-b border-border shrink-0 bg-background",
                 button {
                     class: tab_class(tab() == Tab::Session),
                     onclick: move |_| tab.set(Tab::Session),
@@ -260,18 +308,32 @@ fn DesktopShell() -> Element {
                     onclick: move |_| tab.set(Tab::Tools),
                     "Tools"
                 }
+                button {
+                    class: tab_class(tab() == Tab::Chart),
+                    onclick: move |_| tab.set(Tab::Chart),
+                    "Chart"
+                }
             }
-            div { class: "flex-1 min-h-0 overflow-auto",
+            // Flex column so each tab pane gets a definite full height via
+            // `flex-1` (rather than a fragile `h-full` percentage chain — the
+            // chart editor needs a real height for its WGPU preview to fill).
+            div { class: "flex-1 min-h-0 flex flex-col",
                 // SessionShell stays mounted across tab switches so its
                 // connection/event state isn't torn down; other tabs render on top.
-                div { class: if tab() == Tab::Session { "h-full" } else { "hidden" },
+                div {
+                    class: if tab() == Tab::Session { "flex-1 min-h-0 overflow-auto" } else { "hidden" },
                     SessionShell { connection_state }
                 }
                 if tab() == Tab::Daw {
-                    daw_status::DawStatusPanel {}
+                    div { class: "flex-1 min-h-0 overflow-auto", daw_status::DawStatusPanel {} }
                 }
                 if tab() == Tab::Tools {
-                    tools::ToolsPage {}
+                    div { class: "flex-1 min-h-0 overflow-auto", tools::ToolsPage {} }
+                }
+                if tab() == Tab::Chart {
+                    // No overflow wrapper — the editor manages its own layout and
+                    // the preview panel must fill this pane for the WGPU overlay.
+                    div { class: "flex-1 min-h-0", keyflow_ui::ChartView {} }
                 }
             }
         }

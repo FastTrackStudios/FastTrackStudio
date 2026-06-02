@@ -9,6 +9,7 @@ members = [
     "crates/shared/vox-discover",
     # Apps
     "apps/desktop",
+    "apps/keyflow-playground",
     "apps/web",
     "apps/mobile",
     "apps/fts-cli",
@@ -153,8 +154,9 @@ reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs
 reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
-reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-reaper-test-macro = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+# NOTE: the former `reaper-test` / `reaper-test-macro` crates were folded into
+# the `daw` facade's `test-harness` feature (daw 9b04180). xtask now depends on
+# `daw = { features = ["test-harness"] }` for the `daw::test::runner` harness.
 reaper-launcher = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
@@ -240,8 +242,6 @@ daw-standalone = { git = "https://git.starcommand.live/FastTrackStudios/daw.git"
 daw-synchronization = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 dawfile-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-reaper-test-macro = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 reaper-launcher = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 
 [patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git"]
@@ -262,6 +262,17 @@ reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/rea
 # signal-ui = { path = "../signal/crates/signal-ui" }
 # signal-cli = { path = "../signal/apps/cli" }
 # macromod = { path = "../signal/crates/macromod" }
+
+# LOCAL DEV (do not commit): redirect the keyflow facade crates to the sibling
+# checkout. The published keyflow main (aa9fe949) declares `fts-ui` as a path
+# dep, which can't resolve when keyflow-ui is consumed as a git dependency; the
+# local keyflow HEAD declares it as a git dep. Drop this block once that fix is
+# pushed to keyflow main. The facade crates pull their internal keyflow-* deps
+# via relative paths inside the sibling workspace, so those resolve locally too.
+[patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
+keyflow = { path = "../keyflow/crates/keyflow" }
+engraver = { path = "../keyflow/crates/engraver" }
+keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
 
 
 # Pin every transitive vox reference to the same bearcove rev that the

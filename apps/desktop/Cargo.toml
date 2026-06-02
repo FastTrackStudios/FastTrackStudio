@@ -26,6 +26,10 @@ daw = { workspace = true, features = ["reaper", "convert"] }
 # Keyflow chart rendering (.kf → SVG) for the Tools page's chart card.
 # `text` parses .kf source; `engraver` lays out + serializes SVG.
 keyflow = { workspace = true, features = ["text", "engraver"] }
+# Keyflow live chart editor (split editor + WGPU preview, PDF export).
+# `web` pulls dioxus/desktop + `desktop-panels` (ChartView/ChartEditorLayout,
+# ChartGraphics WGPU-behind-transparent-WebView overlay).
+keyflow-ui = { workspace = true, features = ["web"] }
 
 # Native file dialogs for the Tools page
 rfd = "0.17"
