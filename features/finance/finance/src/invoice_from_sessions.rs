@@ -104,6 +104,33 @@ pub async fn build_invoice_from_sessions(
         .filter(WorkSessionColumn::StartTime.lt(args.until))
         .all(timer_conn)
         .await?;
+    build_from_models(
+        args.book,
+        args.party,
+        sessions,
+        args.net_days,
+        args.number,
+        args.notes_public,
+        args.notes_private,
+        args.terms,
+    )
+}
+
+/// Build a draft invoice from an already-selected set of work-session
+/// models (the caller decides the filter — by project, by tag, or all
+/// general/project-less time). Same grouping + money logic as
+/// [`build_invoice_from_sessions`].
+#[allow(clippy::too_many_arguments)]
+pub fn build_from_models(
+    book: Book,
+    party: Party,
+    sessions: Vec<WorkSessionModel>,
+    net_days: i64,
+    number: String,
+    notes_public: String,
+    notes_private: String,
+    terms: String,
+) -> Result<InvoiceBuild, InvoicePipelineError> {
     if sessions.is_empty() {
         return Err(InvoicePipelineError::NothingToBill);
     }
@@ -225,16 +252,16 @@ pub async fn build_invoice_from_sessions(
     let total = subtotal; // no tax pass yet — caller can add
     let now = Utc::now();
     let today = now.date_naive();
-    let due = (today + Duration::days(args.net_days))
+    let due = (today + Duration::days(net_days))
         .format("%Y-%m-%d")
         .to_string();
 
     let invoice = Invoice {
         id: Uuid::new_v4(),
-        book_id: args.book.id,
-        party_id: args.party.id,
+        book_id: book.id,
+        party_id: party.id,
         kind: InvoiceKind::Invoice,
-        number: args.number,
+        number,
         status: InvoiceStatus::Draft,
         issue_date: today.format("%Y-%m-%d").to_string(),
         due_date: due,
@@ -248,9 +275,9 @@ pub async fn build_invoice_from_sessions(
         total_minor: total,
         amount_paid_minor: 0,
         balance_minor: total,
-        notes_public: args.notes_public,
-        notes_private: args.notes_private,
-        terms: args.terms,
+        notes_public,
+        notes_private,
+        terms,
         footer: String::new(),
         locked: false,
         posted_at: now,

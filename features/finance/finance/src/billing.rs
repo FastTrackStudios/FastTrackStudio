@@ -33,9 +33,16 @@ use finance_proto::party::{Party, PartyKind};
 use finance_proto::service::invoicing::{
     GenerateInvoice, Invoicing, RecordPayment, UninvoicedGroup,
 };
-use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+use std::collections::HashMap;
 
-use crate::invoice_from_sessions::{BuildInvoiceArgs, build_invoice_from_sessions};
+use timer::entity::{
+    TagColumn, TagEntity, WorkSessionColumn, WorkSessionEntity, WorkSessionTagColumn,
+    WorkSessionTagEntity,
+};
+
+use crate::invoice_from_sessions::{
+    BuildInvoiceArgs, build_from_models, build_invoice_from_sessions,
+};
 
 /// Disk-backed invoicing service for one org.
 #[derive(Clone)]
@@ -141,6 +148,44 @@ impl FinanceBackend {
 
     // ── operations ─────────────────────────────────────────────────
 
+    /// The alphabetically-first tag name per session (deterministic
+    /// bucket key). Sessions with no tags map to `""`.
+    async fn session_first_tag(&self, ids: &[Uuid]) -> Result<HashMap<Uuid, String>, FinanceError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let joins = WorkSessionTagEntity::find()
+            .filter(WorkSessionTagColumn::WorkSessionId.is_in(ids.to_vec()))
+            .all(&self.timer)
+            .await
+            .map_err(Self::err)?;
+        let tag_ids: Vec<Uuid> = joins.iter().map(|j| j.tag_id).collect();
+        let names: HashMap<Uuid, String> = TagEntity::find()
+            .filter(TagColumn::Id.is_in(tag_ids))
+            .all(&self.timer)
+            .await
+            .map_err(Self::err)?
+            .into_iter()
+            .map(|t| (t.id, t.name))
+            .collect();
+        let mut by_session: HashMap<Uuid, Vec<String>> = HashMap::new();
+        for j in joins {
+            if let Some(n) = names.get(&j.tag_id) {
+                by_session
+                    .entry(j.work_session_id)
+                    .or_default()
+                    .push(n.clone());
+            }
+        }
+        Ok(by_session
+            .into_iter()
+            .map(|(sid, mut ns)| {
+                ns.sort();
+                (sid, ns.into_iter().next().unwrap_or_default())
+            })
+            .collect())
+    }
+
     async fn generate_inner(&self, req: GenerateInvoice) -> Result<Invoice, FinanceError> {
         let book = self.ensure_book().await?;
         let party = self.ensure_party(book.id, req.client_name.trim()).await?;
@@ -149,24 +194,66 @@ impl FinanceBackend {
         let until = parse_day(&req.until)
             .map(|d| d + Duration::days(1))
             .unwrap_or_else(|| Utc::now() + Duration::days(1));
+        let net_days = req.net_days;
+        let terms = format!("Net {net_days} days from issue date.");
 
-        let build = build_invoice_from_sessions(
-            &self.timer,
-            BuildInvoiceArgs {
+        let build = if let Some(pid) = req.project_id {
+            build_invoice_from_sessions(
+                &self.timer,
+                BuildInvoiceArgs {
+                    book,
+                    party,
+                    project_id: pid,
+                    since,
+                    until,
+                    net_days,
+                    number: String::new(),
+                    notes_public: String::new(),
+                    notes_private: String::new(),
+                    terms,
+                },
+            )
+            .await
+            .map_err(|e| Self::backend(e.to_string()))?
+        } else {
+            // Tag / general: project-less billable, un-invoiced sessions
+            // in range, bucketed by their first tag (`tag` empty =
+            // untagged "General").
+            let sessions = WorkSessionEntity::find()
+                .filter(WorkSessionColumn::Billable.eq(true))
+                .filter(WorkSessionColumn::EndTime.is_not_null())
+                .filter(WorkSessionColumn::InvoiceId.is_null())
+                .filter(WorkSessionColumn::ProjectId.is_null())
+                .filter(WorkSessionColumn::StartTime.gte(since))
+                .filter(WorkSessionColumn::StartTime.lt(until))
+                .all(&self.timer)
+                .await
+                .map_err(Self::err)?;
+            let ids: Vec<Uuid> = sessions.iter().map(|s| s.id).collect();
+            let tag_map = self.session_first_tag(&ids).await?;
+            let filtered: Vec<_> = sessions
+                .into_iter()
+                .filter(|s| {
+                    let t = tag_map.get(&s.id).cloned().unwrap_or_default();
+                    if req.tag.is_empty() {
+                        t.is_empty()
+                    } else {
+                        t == req.tag
+                    }
+                })
+                .collect();
+            build_from_models(
                 book,
                 party,
-                project_id: req.project_id,
-                since,
-                until,
-                net_days: req.net_days,
-                number: String::new(),
-                notes_public: String::new(),
-                notes_private: String::new(),
-                terms: format!("Net {} days from issue date.", req.net_days),
-            },
-        )
-        .await
-        .map_err(|e| Self::backend(e.to_string()))?;
+                filtered,
+                net_days,
+                String::new(),
+                String::new(),
+                String::new(),
+                terms,
+            )
+            .map_err(|e| Self::backend(e.to_string()))?
+        };
 
         let invoice = build.invoice;
         InvoiceEntity::insert(invoice_to_active(&invoice))
@@ -279,19 +366,32 @@ impl FinanceBackend {
             .all(&self.timer)
             .await
             .map_err(Self::err)?;
-        let mut groups: std::collections::BTreeMap<Uuid, UninvoicedGroup> =
+        let pl_ids: Vec<Uuid> = rows
+            .iter()
+            .filter(|s| s.project_id.is_none())
+            .map(|s| s.id)
+            .collect();
+        let tag_map = self.session_first_tag(&pl_ids).await?;
+
+        let mut groups: std::collections::BTreeMap<(Option<Uuid>, String), UninvoicedGroup> =
             std::collections::BTreeMap::new();
         for s in rows {
-            let Some(pid) = s.project_id else { continue };
             let Some(end) = s.end_time else { continue };
+            let (pid_key, tag_key) = match s.project_id {
+                Some(pid) => (Some(pid), String::new()),
+                None => (None, tag_map.get(&s.id).cloned().unwrap_or_default()),
+            };
             let secs = (end - s.start_time).num_seconds().max(0);
-            let g = groups.entry(pid).or_insert_with(|| UninvoicedGroup {
-                project_id: pid,
-                session_count: 0,
-                seconds: 0,
-                amount_minor: 0,
-                currency: s.currency.clone(),
-            });
+            let g = groups
+                .entry((pid_key, tag_key.clone()))
+                .or_insert_with(|| UninvoicedGroup {
+                    project_id: pid_key,
+                    tag: tag_key.clone(),
+                    session_count: 0,
+                    seconds: 0,
+                    amount_minor: 0,
+                    currency: s.currency.clone(),
+                });
             g.session_count += 1;
             g.seconds += secs;
             g.amount_minor += secs * s.rate_cents / 3600;

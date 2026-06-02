@@ -38,7 +38,12 @@ pub struct RecordPayment {
 /// from a project's billable, not-yet-invoiced timer sessions.
 #[derive(Debug, Clone, PartialEq, facet::Facet)]
 pub struct GenerateInvoice {
-    pub project_id: Uuid,
+    /// Project bucket → `Some(id)`. Tag / general bucket → `None`.
+    pub project_id: Option<Uuid>,
+    /// Tag bucket → the tag name (bills project-less time with that
+    /// tag). General bucket → empty (bills project-less, untagged time).
+    /// Ignored when `project_id` is set.
+    pub tag: String,
     /// Bill-to display name. Find-or-creates a party in the org's book.
     pub client_name: String,
     /// Inclusive ISO `YYYY-MM-DD` lower bound, or empty for no bound.
@@ -49,10 +54,14 @@ pub struct GenerateInvoice {
     pub net_days: i64,
 }
 
-/// One project's billable time that hasn't been put on an invoice yet.
+/// A bucket of billable time not yet invoiced. Either a **project**
+/// (`project_id = Some`), a **tag** of project-less time
+/// (`tag` non-empty), or **general** project-less, untagged time
+/// (`project_id = None`, `tag` empty).
 #[derive(Debug, Clone, PartialEq, facet::Facet)]
 pub struct UninvoicedGroup {
-    pub project_id: Uuid,
+    pub project_id: Option<Uuid>,
+    pub tag: String,
     pub session_count: i64,
     /// Total seconds.
     pub seconds: i64,

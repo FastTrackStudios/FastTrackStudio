@@ -93,10 +93,10 @@ pub fn InvoicesView() -> Element {
                     div { class: "flex flex-col gap-2",
                         for (slug , g) in un_rows {
                             UninvoicedRow {
-                                key: "{slug}-{g.project_id}",
+                                key: "{slug}:{g.tag}:{g.project_id:?}",
                                 slug: slug.clone(),
                                 group: g.clone(),
-                                project_name: proj_names.get(&g.project_id).cloned().unwrap_or_else(|| "Untitled project".into()),
+                                label: g.project_id.and_then(|p| proj_names.get(&p).cloned()).unwrap_or_else(|| if g.tag.is_empty() { "General".into() } else { g.tag.clone() }),
                                 reload,
                             }
                         }
@@ -138,25 +138,36 @@ pub fn InvoicesView() -> Element {
 fn UninvoicedRow(
     slug: String,
     group: finance_proto::UninvoicedGroup,
-    project_name: String,
+    label: String,
     reload: Signal<u32>,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let mut client = use_signal(|| project_name.clone());
+    let mut client = use_signal(|| label.clone());
     let mut net_days = use_signal(|| "30".to_string());
     let mut busy = use_signal(|| false);
 
     let hrs = group.seconds as f64 / 3600.0;
-    let pid = group.project_id;
+    let project_id = group.project_id;
+    let tag = group.tag.clone();
+    // Sub-label distinguishes a project bucket from a tag / general one.
+    let kind = if group.project_id.is_some() {
+        "project"
+    } else if group.tag.is_empty() {
+        "general"
+    } else {
+        "tag"
+    };
 
     let generate = move |_| {
         if client.read().trim().is_empty() {
             return;
         }
         let slug = slug.clone();
+        let tag = tag.clone();
         let mut reload = reload;
         let req = GenerateInvoice {
-            project_id: pid,
+            project_id,
+            tag,
             client_name: client.read().clone(),
             since: String::new(),
             until: String::new(),
@@ -175,7 +186,12 @@ fn UninvoicedRow(
         div { class: "flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5",
             div { class: "flex items-center justify-between gap-3",
                 div { class: "flex min-w-0 flex-col",
-                    span { class: "truncate text-sm font-medium text-foreground", "{project_name}" }
+                    div { class: "flex items-center gap-1.5",
+                        span { class: "truncate text-sm font-medium text-foreground", "{label}" }
+                        if kind != "project" {
+                            span { class: "rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground", "{kind}" }
+                        }
+                    }
                     span { class: "text-xs text-muted-foreground",
                         "{group.session_count} sessions · {hrs:.1}h · {money(group.amount_minor)}"
                     }
