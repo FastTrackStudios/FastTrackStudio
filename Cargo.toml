@@ -71,7 +71,7 @@ facet-toml = { version = "0.46" }
 # MUST match the exact vox rev daw pins so the graph contains a single
 # vox/facet source. Migrated bearcove 0.5 → starcommand/vox f31f104 (0.8)
 # to match the local daw/architect/input_actions path deps below.
-vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # ── DAW facade crate (sibling repo — single public API surface) ──────
@@ -82,7 +82,7 @@ daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git",
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
 # ── Shared infrastructure ────────────────────────────────────────────
-audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+audio-controls = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
 # NOTE: the standalone `reaper-test` crate was removed from daw main and folded
 # into the `daw` facade behind the `test-harness` feature, re-exported as
 # `daw::test` (alias `ReaperTestContext`, `#[reaper_test]` macro). Test crates
@@ -145,7 +145,7 @@ clap = { version = "4", features = ["derive"] }
 # signal pulls the full daw crate so external consumers can script it via daw's
 # vox RPC services. The git@main daw is on the old vox; use the local checkout
 # (already vox-0.8 / f31f104) + its transitive architect/input_actions checkouts.
-[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
+[patch."https://codeberg.org/FastTrackStudios/daw.git"]
 audio-controls = { path = "../daw/crates/audio-controls" }
 daw = { path = "../daw/crates/daw" }
 daw-audio-sync = { path = "../daw/crates/daw-audio-sync" }
@@ -165,12 +165,12 @@ dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
 fts-devtools = { path = "../daw/crates/fts-devtools" }
 reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 
-[patch."https://git.starcommand.live/FastTrackStudios/architect.git"]
+[patch."https://codeberg.org/FastTrackStudios/architect.git"]
 architect = { path = "../../architect/macros/architect" }
 architect-derive = { path = "../../architect/macros/architect-derive" }
 architect-rpc-derive = { path = "../../architect/macros/architect-rpc-derive" }
 
-[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
+[patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../input_actions/crates/actions-proto" }
 #
 # [patch."https://codeberg.org/FastTrackStudios/dock-dioxus.git"]
@@ -207,7 +207,7 @@ fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }
 # nih_plug_dioxus to current DioxusLabs/blitz. Both the starcommand origin and
 # the github mirror (pulled by FTS-Audiocore plugin crates) redirect here, so
 # the whole graph shares one editable nih_plug / nih_plug_dioxus.
-[patch."https://git.starcommand.live/FastTrackStudios/nih-plug.git"]
+[patch."https://codeberg.org/FastTrackStudios/nih-plug.git"]
 nih_plug = { path = "../forks/nih-plug-port" }
 nih_plug_dioxus = { path = "../forks/nih-plug-port/nih_plug_dioxus" }
 
@@ -225,15 +225,15 @@ nih_plug_dioxus = { path = "../forks/nih-plug-port/nih_plug_dioxus" }
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid type mismatches.
 [patch."https://github.com/bearcove/moire"]
-moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
 # Blitz crates — upstream DioxusLabs/blitz, pinned to one rev so nih_plug_dioxus,
@@ -250,15 +250,15 @@ blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab
 stylo_taffy = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
 # moire: unify crates.io moire with the FTS fork (includes NixOS frame-pointer fix)
 # All crates must be listed to prevent duplicate moire-runtime #[ctor] crash.
-moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [workspace.lints.rust]
 dead_code = "allow"
