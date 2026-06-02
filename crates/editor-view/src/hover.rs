@@ -30,7 +30,7 @@ pub fn HoverTooltipView(popup: HoverPopup) -> Element {
 
     use_effect(move || {
         let script = format!(
-            r#"(()=>{{
+            r"(()=>{{
                 const t = document.querySelector('.editor-hover-tooltip');
                 if (!t) return;
                 const w = t.offsetWidth, h = t.offsetHeight;
@@ -42,7 +42,7 @@ pub fn HoverTooltipView(popup: HoverPopup) -> Element {
                 if (top < 8) top = 8;
                 t.style.left = left + 'px';
                 t.style.top = top + 'px';
-            }})();"#
+            }})();"
         );
         let _ = document::eval(&script);
     });

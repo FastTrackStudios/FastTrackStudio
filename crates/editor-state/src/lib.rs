@@ -20,7 +20,10 @@ pub mod transaction;
 
 pub use change::{Change, Changes};
 pub use command::{Command, KeyBinding, KeySpec, Keymap};
-pub use decoration::{DecoratedRange, Decoration, DecorationKind, DecorationSet};
+pub use decoration::{
+    DecoPhase, DecoRangeSet, DecoratedRange, Decoration, DecorationKind, DecorationSet, deco_phase,
+    set_deco_phase,
+};
 pub use doc::Doc;
 pub use hover::{HoverSource, HoverTooltip};
 pub use selection::{Range, Selection};

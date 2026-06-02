@@ -48,7 +48,7 @@ use crate::tile::flag::{TileFlag, TileFlagSet};
 use crate::tile::line::{new_line_tile, push_line_class};
 use crate::tile::mark::{MarkSpec, new_mark_tile};
 use crate::tile::text::new_text_tile;
-use crate::tile::widget::new_widget_tile;
+use crate::tile::widget::{is_point_widget, new_widget_buffer_tile, new_widget_tile};
 use crate::tile::{Tile, TileBody, TileKind};
 
 /// Build the tile tree for `text` + `decorations`. Returns the
@@ -181,7 +181,12 @@ impl<'a> TileBuilder<'a> {
                         active_replace_until = None;
                     }
                     EventKind::Widget { length, ref html } => {
-                        self.emit_widget(html, length, &active_marks);
+                        // Decoration widgets carry no side bits today, so
+                        // point widgets default to side 0 → buffered on
+                        // both sides (CM6's behavior for a neutral inline
+                        // widget). The `flags` arg is the wiring point for
+                        // a future `side` option on `Decoration::widget`.
+                        self.emit_widget(html, length, TileFlagSet::empty(), &active_marks);
                     }
                     EventKind::Line(ref class) => {
                         let line_id = self.ensure_line();
@@ -273,12 +278,67 @@ impl<'a> TileBuilder<'a> {
     }
 
     /// Emit a widget under the current mark stack.
-    fn emit_widget(&mut self, html: &str, length: usize, marks: &[MarkSpec]) {
-        let widget_tile = self.insert_under_marks(marks, |arena| {
-            arena.insert(new_widget_tile(html, length, TileFlagSet::empty()))
-        });
-        self.bump_lengths_up(widget_tile, length);
-        self.pos += length;
+    ///
+    /// Replace widgets (`length > 0`) cover doc bytes and render as a
+    /// single span — no buffers, the cursor never sits directly beside
+    /// the uneditable node the way it does next to a zero-width point
+    /// widget.
+    ///
+    /// Point widgets (`length == 0`) get bracketed with
+    /// [`WidgetBufferTile`]s — zero-width `<img>` anchors that give the
+    /// browser an editable-side stop on each side of the uneditable
+    /// node, working around the family of caret bugs that show up when
+    /// the cursor is directly next to `contenteditable=false` inline
+    /// content. 1:1 with CM6's `addInlineWidget` + `flushBuffer`
+    /// (`buildtile.ts:100-126, 232-237`): a leading buffer unless the
+    /// widget faces `Before`, a trailing buffer unless it faces `After`,
+    /// and the leading buffer is skipped when the previous sibling is
+    /// already a buffer or another point widget (`noSpace`).
+    ///
+    /// [`WidgetBufferTile`]: crate::tile::widget::new_widget_buffer_tile
+    fn emit_widget(&mut self, html: &str, length: usize, flags: TileFlagSet, marks: &[MarkSpec]) {
+        if length > 0 {
+            let widget_tile = self.insert_under_marks(marks, |arena| {
+                arena.insert(new_widget_tile(html, length, flags))
+            });
+            self.bump_lengths_up(widget_tile, length);
+            self.pos += length;
+            return;
+        }
+
+        let parent = self.ensure_marks(marks);
+        // Leading buffer: skip when the widget explicitly faces the
+        // position before it, or when we'd be stacking it against an
+        // adjacent buffer / point widget.
+        if !flags.contains(TileFlag::Before) && !self.last_child_is_buffer_zone(parent) {
+            let buf = self
+                .arena
+                .insert(new_widget_buffer_tile(flag(TileFlag::After)));
+            self.append_to(parent, buf);
+        }
+        let widget = self.arena.insert(new_widget_tile(html, 0, flags));
+        self.append_to(parent, widget);
+        // Trailing buffer: skip when the widget faces the position after
+        // it (a following editable char already provides the anchor).
+        if !flags.contains(TileFlag::After) {
+            let buf = self
+                .arena
+                .insert(new_widget_buffer_tile(flag(TileFlag::Before)));
+            self.append_to(parent, buf);
+        }
+        // Zero length: nothing to bump, pos unchanged.
+    }
+
+    /// `true` when `parent`'s last child is a widget buffer or another
+    /// point widget — i.e. we're already in a buffered zone and a fresh
+    /// leading buffer would just be redundant DOM. Mirrors CM6's
+    /// `noSpace` check in `addInlineWidget` (`buildtile.ts:101-103`).
+    fn last_child_is_buffer_zone(&self, parent: TileId) -> bool {
+        self.arena.get(parent).children.last().is_some_and(|&id| {
+            let t = self.arena.get(id);
+            matches!(t.kind, TileKind::WidgetBuffer)
+                || (matches!(t.kind, TileKind::Widget) && is_point_widget(t))
+        })
     }
 
     /// Emit a hidden replacement. Length covers the replaced
@@ -297,16 +357,17 @@ impl<'a> TileBuilder<'a> {
         self.pos += length;
     }
 
-    /// Walk the mark stack and ensure the chain of `MarkTiles`
-    /// exists under the current `LineTile`, without inserting a
-    /// leaf. Empty `MarkTiles` are valid — `render_dx` emits
-    /// `<span><br></span>` for them so the DOM has a cursor
-    /// anchor and the shape stays stable when the user later
-    /// types content into the mark.
-    #[allow(dead_code)]
-    fn ensure_mark_chain(&mut self, marks: &[MarkSpec]) {
+    /// Walk the mark stack from outermost to innermost, finding (or
+    /// creating) a `MarkTile` of each spec under the previous one.
+    /// Returns the inner-most parent into which a caller should insert
+    /// their text/widget tile(s). Always rooted in the current
+    /// `LineTile`. Mirrors CM6's `ensureMarks` open-stack logic
+    /// (`buildtile.ts:160-170`), reduced to a same-mark lookback.
+    fn ensure_marks(&mut self, marks: &[MarkSpec]) -> TileId {
         let mut parent = self.ensure_line();
         for spec in marks {
+            // Try to reuse the parent's last child if it's the same
+            // mark; otherwise open a fresh wrapper.
             let reuse = self
                 .arena
                 .get(parent)
@@ -325,42 +386,17 @@ impl<'a> TileBuilder<'a> {
                 mark_id
             };
         }
+        parent
     }
 
-    /// Walk the mark stack from outermost to innermost,
-    /// finding (or creating) a `MarkTile` of each spec under the
-    /// previous one. Returns the inner-most parent into which
-    /// the caller should insert their text/widget tile. Always
-    /// rooted in the current `LineTile`.
+    /// Ensure the mark chain, then insert a single leaf under the
+    /// inner-most `MarkTile`. Returns the leaf's id.
     fn insert_under_marks(
         &mut self,
         marks: &[MarkSpec],
         emit_leaf: impl FnOnce(&mut Arena) -> TileId,
     ) -> TileId {
-        let mut parent = self.ensure_line();
-        for spec in marks {
-            // Try to reuse the parent's last child if it's the
-            // same mark (CM6's `ensureMarks` open-stack logic
-            // boils down to this lookback).
-            let reuse = self
-                .arena
-                .get(parent)
-                .children
-                .last()
-                .copied()
-                .filter(|&id| match &self.arena.get(id).body {
-                    TileBody::Mark { spec: existing } => existing == spec,
-                    _ => false,
-                });
-            let next_parent = if let Some(id) = reuse {
-                id
-            } else {
-                let mark_id = self.arena.insert(new_mark_tile(spec.clone()));
-                self.append_to(parent, mark_id);
-                mark_id
-            };
-            parent = next_parent;
-        }
+        let parent = self.ensure_marks(marks);
         let leaf = emit_leaf(self.arena);
         self.append_to(parent, leaf);
         leaf
@@ -389,6 +425,14 @@ impl<'a> TileBuilder<'a> {
             cur = self.arena.get(p).parent;
         }
     }
+}
+
+/// Build a single-flag [`TileFlagSet`]. Convenience for the buffer
+/// constructors, which take a set but only ever carry one side bit.
+fn flag(f: TileFlag) -> TileFlagSet {
+    let mut s = TileFlagSet::empty();
+    s.insert(f);
+    s
 }
 
 /// One thing that happens at a doc offset. The builder walks
@@ -580,6 +624,68 @@ mod tests {
         assert_eq!(
             crate::tile::line::line_extra_classes(arena.get(l2)),
             &["md-h1".to_string(), "active".to_string()]
+        );
+    }
+
+    #[test]
+    fn point_widget_gets_buffers_on_both_sides() {
+        // A zero-width inline widget is bracketed by WidgetBuffer
+        // tiles so the caret has an editable-side anchor next to the
+        // uneditable node (CM6's `addInlineWidget` + `flushBuffer`).
+        let decs = vec![Decoration::widget(2, "<span>x</span>")];
+        let (arena, doc) = build_tiles("abcd", &decs);
+        let line = arena.get(doc).children[0];
+        assert_eq!(
+            children_kinds(&arena, line),
+            vec![
+                TileKind::Text,         // "ab"
+                TileKind::WidgetBuffer, // leading buffer
+                TileKind::Widget,       // the point widget
+                TileKind::WidgetBuffer, // trailing buffer
+                TileKind::Text,         // "cd"
+            ]
+        );
+        // Buffers and the widget are all zero doc-length: the line is
+        // still just "abcd".
+        assert_eq!(arena.get(line).length, 4);
+    }
+
+    #[test]
+    fn adjacent_point_widgets_dedupe_inner_buffer() {
+        // Two widgets at the same offset: buffer, w1, buffer, w2,
+        // buffer — the second widget's leading buffer is skipped
+        // because it'd stack against the first's trailing buffer
+        // (CM6's `noSpace`).
+        let decs = vec![
+            Decoration::widget(2, "<span>1</span>"),
+            Decoration::widget(2, "<span>2</span>"),
+        ];
+        let (arena, doc) = build_tiles("abcd", &decs);
+        let line = arena.get(doc).children[0];
+        assert_eq!(
+            children_kinds(&arena, line),
+            vec![
+                TileKind::Text,
+                TileKind::WidgetBuffer,
+                TileKind::Widget,
+                TileKind::WidgetBuffer,
+                TileKind::Widget,
+                TileKind::WidgetBuffer,
+                TileKind::Text,
+            ]
+        );
+    }
+
+    #[test]
+    fn replace_widget_gets_no_buffers() {
+        // Length-bearing (replace) widgets cover doc bytes and render
+        // as a lone span — no buffers.
+        let decs = vec![Decoration::replace(0..2)];
+        let (arena, doc) = build_tiles("abcd", &decs);
+        let line = arena.get(doc).children[0];
+        assert_eq!(
+            children_kinds(&arena, line),
+            vec![TileKind::Widget, TileKind::Text]
         );
     }
 

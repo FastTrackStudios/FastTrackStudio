@@ -88,7 +88,22 @@ pub fn render_tile(arena: &Arena, tile: TileId) -> Element {
                 }
             }
         }
-        TileKind::Widget | TileKind::WidgetBuffer => {
+        TileKind::WidgetBuffer => {
+            // Zero-width `<img>` anchor bracketing an inline point
+            // widget (CM6's `.cm-widgetBuffer`). Mirrors the patch-path
+            // render in `patch.rs`.
+            let pos = crate::tile::pos::pos_at_start(arena, tile);
+            rsx! {
+                img {
+                    class: "cm-widgetBuffer",
+                    "aria-hidden": "true",
+                    "data-tile-id": "{tid}",
+                    "data-tile-pos": "{pos}",
+                    "data-tile-len": "0",
+                }
+            }
+        }
+        TileKind::Widget => {
             let html = match &t.body {
                 TileBody::Widget { html } => html.clone(),
                 _ => String::new(),

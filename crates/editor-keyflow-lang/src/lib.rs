@@ -81,85 +81,47 @@ pub fn keyflow_decorations(state: &EditorState) -> Vec<DecoratedRange> {
         line_start += line.len();
     }
 
-    // Whole-document analysis is the expensive part of this pass, and it only
-    // drives visual extras (diagnostic squiggles + resolved-chord overlays) —
-    // nothing the editor's layout or visible text depends on. So we skip it on
-    // `Structural` passes (active typing) and let the view recompute the full
-    // set once typing settles. Syntax highlighting above is cheap and always
-    // runs, so colors never lag.
-    if full {
-        // One analysis pass feeds both diagnostics and the resolved-chord
-        // overlays.
-        let analysis = ide::analyze(&text);
-
-        // Live diagnostics — wavy underline + the message as a `title` tooltip.
-        for d in &analysis.diagnostics {
-            let start = d.range.start;
-            let end = d.range.end();
-            if start < end && end <= len {
-                out.push(Decoration::mark_with_attrs(
-                    start..end,
-                    diagnostic_class(d.severity),
-                    vec![("title".to_string(), d.message.clone())],
-                ));
+    // Whole-document analysis (diagnostic squiggles + resolved-chord /
+    // section overlays) is the expensive part of this pass. We still skip
+    // re-running it while the user types (`Structural`), but instead of
+    // *dropping* the badges until the debounced `Full` pass catches up —
+    // which made them flash off and back on every keystroke — we re-emit
+    // the LAST analysis's decorations, mapped through the text edits since.
+    // The badges stay on screen and slide with the text; their content
+    // updates in place once the `Full` pass recomputes (the patcher only
+    // rewrites a widget's inner HTML when it actually changes, so there's
+    // no flicker). Syntax highlighting above is cheap and always fresh.
+    let analyze_decos: Vec<DecoratedRange> = if full {
+        let computed = analyze_decorations(&text, len, overlays);
+        ANALYZE_CACHE.with_borrow_mut(|c| {
+            *c = Some(AnalyzeCache {
+                text: text.clone(),
+                decos: computed.clone(),
+            });
+        });
+        computed
+    } else {
+        ANALYZE_CACHE.with_borrow(|c| {
+            let Some(cache) = c.as_ref() else {
+                return Vec::new();
+            };
+            if cache.text == text {
+                return cache.decos.clone();
             }
-        }
-
-        // Resolved-chord type overlays — IDE-style inline inlay badges. For
-        // each chord written in a key-relative system (Nashville number /
-        // Roman) that resolves against the key, drop a dim badge right after
-        // the symbol showing the absolute letter-name chord (e.g. `5` → `G`,
-        // `V7` → `G7`).
-        //
-        // The key is resolved PER CHORD via `key_at_position` — keyflow key
-        // changes can happen in any measure (written on a section header like
-        // `CH {…} #G`), so a single chart-level key would mis-resolve every
-        // chord after a change.
-        //
-        // Gated by `SHOW_OVERLAYS` so the app can toggle it (the `fn` source
-        // can't carry the flag itself). `ChordInstance::source_span` is
-        // document-absolute (assigned in the keyflow parser's post-process),
-        // so the badges land right after each symbol.
-        if overlays {
-            for section in &analysis.chart.sections {
-                // Section-name badge — the written header is a terse, dynamic
-                // marker (`VS`, `CH`) whose resolved name carries a number and
-                // split letter assigned across the whole chart (`Verse 1a`,
-                // `Verse 2b`). Show that resolution after the header. Implicit
-                // sections (bare chord content, no header) have no span, so they
-                // get no badge.
-                if let Some(span) = section.source_span {
-                    let label = section.section.display_name();
-                    let at = span.end().min(len);
-                    out.push(Decoration::widget(
-                        at,
-                        format!(
-                            "<span class=\"kf-inlay kf-section-inlay\">{}</span>",
-                            escape_html(&label)
-                        ),
-                    ));
-                }
-                for measure in section.measures() {
-                    for ci in &measure.chords {
-                        let Some(span) = ci.source_span else { continue };
-                        let Some(key) = analysis.chart.key_at_position(&ci.position) else {
-                            continue;
-                        };
-                        if let Some(label) = ci.resolved_symbol(key) {
-                            let at = span.end().min(len);
-                            out.push(Decoration::widget(
-                                at,
-                                format!(
-                                    "<span class=\"kf-inlay\">{}</span>",
-                                    escape_html(&label)
-                                ),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
+            // Map the cached decorations from the text they were computed
+            // against onto the current text, then clamp anything the edit
+            // pushed out of range.
+            let changes = diff_to_changes(&cache.text, &text);
+            editor_state::DecoRangeSet::new(cache.decos.clone())
+                .map_through(&changes)
+                .as_slice()
+                .iter()
+                .filter(|d| d.to <= len && d.from <= len)
+                .cloned()
+                .collect()
+        })
+    };
+    out.extend(analyze_decos);
 
     out.sort_by_key(|d| d.from);
     DECO_MEMO.with_borrow_mut(|m| {
@@ -173,6 +135,107 @@ pub fn keyflow_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     out
 }
 
+/// Run `ide::analyze` and turn it into the diagnostic + overlay
+/// decorations. Split out of [`keyflow_decorations`] so the `Full` pass
+/// can compute-and-cache it while the `Structural` pass replays the
+/// cached set mapped through edits.
+fn analyze_decorations(text: &str, len: usize, overlays: bool) -> Vec<DecoratedRange> {
+    let analysis = ide::analyze(text);
+    let mut out = Vec::new();
+
+    // Live diagnostics — wavy underline + the message as a `title` tooltip.
+    for d in &analysis.diagnostics {
+        let start = d.range.start;
+        let end = d.range.end();
+        if start < end && end <= len {
+            out.push(Decoration::mark_with_attrs(
+                start..end,
+                diagnostic_class(d.severity),
+                vec![("title".to_string(), d.message.clone())],
+            ));
+        }
+    }
+
+    // Resolved-chord type overlays — IDE-style inline inlay badges. For each
+    // chord written in a key-relative system (Nashville number / Roman) that
+    // resolves against the key, drop a dim badge right after the symbol
+    // showing the absolute letter-name chord (e.g. `5` → `G`, `V7` → `G7`).
+    //
+    // The key is resolved PER CHORD via `key_at_position` — keyflow key
+    // changes can happen in any measure (written on a section header like
+    // `CH {…} #G`), so a single chart-level key would mis-resolve every chord
+    // after a change. Gated by `SHOW_OVERLAYS`. `ChordInstance::source_span`
+    // is document-absolute, so the badges land right after each symbol.
+    if overlays {
+        for section in &analysis.chart.sections {
+            // Section-name badge — the written header is a terse, dynamic
+            // marker (`VS`, `CH`) whose resolved name carries a number and
+            // split letter assigned across the whole chart (`Verse 1a`).
+            // Implicit sections (no header) have no span, so no badge.
+            if let Some(span) = section.source_span {
+                let label = section.section.display_name();
+                let at = span.end().min(len);
+                out.push(Decoration::widget(
+                    at,
+                    format!(
+                        "<span class=\"kf-inlay kf-section-inlay\">{}</span>",
+                        escape_html(&label)
+                    ),
+                ));
+            }
+            for measure in section.measures() {
+                for ci in &measure.chords {
+                    let Some(span) = ci.source_span else { continue };
+                    let Some(key) = analysis.chart.key_at_position(&ci.position) else {
+                        continue;
+                    };
+                    if let Some(label) = ci.resolved_symbol(key) {
+                        let at = span.end().min(len);
+                        out.push(Decoration::widget(
+                            at,
+                            format!("<span class=\"kf-inlay\">{}</span>", escape_html(&label)),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Minimal single-region diff of `old` → `new` as a one-`Change` set:
+/// trim the common prefix and suffix (on char boundaries), the rest is
+/// one replacement. Used to map the cached analysis decorations forward
+/// through a burst of edits while analysis is debounced. A multi-region
+/// burst collapses to one wide replacement — overlays in that span just
+/// re-settle on the next `Full` pass.
+fn diff_to_changes(old: &str, new: &str) -> editor_state::Changes {
+    if old == new {
+        return editor_state::Changes::empty();
+    }
+    let (ob, nb) = (old.as_bytes(), new.as_bytes());
+    let mut p = 0;
+    let max_p = ob.len().min(nb.len());
+    while p < max_p && ob[p] == nb[p] {
+        p += 1;
+    }
+    while p > 0 && !(old.is_char_boundary(p) && new.is_char_boundary(p)) {
+        p -= 1;
+    }
+    let mut s = 0;
+    let max_s = (ob.len() - p).min(nb.len() - p);
+    while s < max_s && ob[ob.len() - 1 - s] == nb[nb.len() - 1 - s] {
+        s += 1;
+    }
+    while s > 0 && !(old.is_char_boundary(old.len() - s) && new.is_char_boundary(new.len() - s)) {
+        s -= 1;
+    }
+    let from = p;
+    let old_to = old.len() - s;
+    let inserted = &new[p..new.len() - s];
+    editor_state::Changes::single(editor_state::Change::replace(from..old_to, inserted))
+}
+
 /// Single-entry memo for [`keyflow_decorations`] — see the cache note
 /// there. Thread-local because the editor runs the decoration source on
 /// one (UI) thread; no synchronization needed.
@@ -183,8 +246,17 @@ struct DecoMemo {
     out: Vec<DecoratedRange>,
 }
 
+/// Last `Full`-pass analysis decorations + the text they were computed
+/// against. The `Structural` pass replays these (mapped through edits) so
+/// badges persist while analysis is debounced.
+struct AnalyzeCache {
+    text: String,
+    decos: Vec<DecoratedRange>,
+}
+
 thread_local! {
     static DECO_MEMO: std::cell::RefCell<Option<DecoMemo>> = const { std::cell::RefCell::new(None) };
+    static ANALYZE_CACHE: std::cell::RefCell<Option<AnalyzeCache>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Process-global toggle for the resolved-chord overlays. Default on.
@@ -502,6 +574,34 @@ mod tests {
         decs.iter()
             .filter(|d| matches!(d.kind, editor_state::DecorationKind::Widget { .. }))
             .count()
+    }
+
+    #[test]
+    fn diff_to_changes_single_insert() {
+        // Insert "2" at the end → one replacement of the empty tail.
+        let cs = diff_to_changes("5 | 1", "5 | 12");
+        let v: Vec<_> = cs.iter().cloned().collect();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].from, 5);
+        assert_eq!(v[0].to, 5);
+        assert_eq!(v[0].inserted, "2");
+    }
+
+    #[test]
+    fn diff_to_changes_mid_edit_trims_prefix_and_suffix() {
+        // "5 | 1" → "5 X | 1": common prefix "5 ", common suffix "| 1",
+        // so the change is inserting "X " at offset 2.
+        let cs = diff_to_changes("5 | 1", "5 X | 1");
+        let v: Vec<_> = cs.iter().cloned().collect();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].from, 2);
+        assert_eq!(v[0].to, 2);
+        assert_eq!(v[0].inserted, "X ");
+    }
+
+    #[test]
+    fn diff_to_changes_identity_is_empty() {
+        assert!(diff_to_changes("abc", "abc").is_empty());
     }
 
     // One self-contained test owns the process-global overlay toggle so parallel

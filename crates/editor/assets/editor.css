@@ -110,6 +110,20 @@
     counter-increment: cm-line;
     position: relative;
 }
+/* Zero-width <img> buffers the tile builder inserts on each side of
+   an inline uneditable point widget (resolved-chord badges, task
+   checkboxes, bullet markers, …) so the browser caret has an
+   editable-side anchor and doesn't park inside / skip past the
+   widget. 1:1 with CM6's .cm-widgetBuffer (view/src/theme.ts:274). */
+.editor-root .cm-widgetBuffer {
+    vertical-align: text-top;
+    height: 1em;
+    width: 0;
+    display: inline;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
 /* Line number rendered into the gutter column. Reserved width
    matches the editor-root's left padding. */
 .editor-root .cm-line::before {

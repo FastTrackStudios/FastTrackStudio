@@ -59,6 +59,43 @@ pub type DecorationSource = fn(&EditorState) -> Vec<DecoratedRange>;
 /// unique `data-editor-id` for the JS bridge to find it.
 static EDITOR_INSTANCE: AtomicU64 = AtomicU64::new(0);
 
+/// `true` for bridge message kinds that mutate the document. Used to
+/// drop the decoration pass to [`DecoPhase::Structural`] while the user
+/// is actively editing (so expensive analysis debounces). Pure caret
+/// moves (`sel`), hover, and widget/UI messages are *not* edits — they
+/// leave the phase alone so overlays stay put during navigation.
+///
+/// [`DecoPhase::Structural`]: editor_state::DecoPhase::Structural
+/// Cheap structural hash of one line patch, used by the incremental
+/// patcher to find the first changed line. Position-inclusive (the
+/// patch embeds `data-tile-pos`), so an edit busts the hash of the
+/// edited line and every line after it (their offsets shifted).
+fn hash_patch(p: &crate::tile::patch::Patch) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    p.hash(&mut h);
+    h.finish()
+}
+
+fn is_edit_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "input"
+            | "before-input-insert"
+            | "before-input-delete-backward"
+            | "before-input-delete-forward"
+            | "insert-bracket"
+            | "enter-continue-list"
+            | "composition-end"
+            | "task-toggle"
+            | "prop-set"
+            | "prop-add"
+            | "prop-remove"
+            | "prop-list-add"
+            | "prop-list-remove"
+    )
+}
+
 /// Wall-clock milliseconds. wasm-safe: `Instant::now()` traps on
 /// `wasm32-unknown-unknown`, so we hop through `performance.now()`
 /// there. Used by perf-trace spans.
@@ -155,6 +192,26 @@ pub fn Editor(
     // Hover-tooltip popup (resolved content + anchor coords). Driven by the
     // `hover`/`hover-end` bridge messages below; rendered as a floating panel.
     let hover_state = use_signal(|| None::<crate::hover::HoverPopup>);
+    // Whether editing has settled. `false` from the first text mutation
+    // until the JS-side `idle` ping fires (~220ms after the last input);
+    // the patch effect reads it to ask decoration sources for the cheap
+    // `Structural` pass while typing and the `Full` pass once idle, so
+    // expensive language analysis (diagnostics, overlays) debounces
+    // instead of running on every keystroke. Starts `true` so the first
+    // render shows the full set.
+    let idle = use_signal(|| true);
+    // Incremental patching: per-line content hashes from the last patch
+    // shipped to JS. Each render diffs the new line hashes against these
+    // to find the first changed line, then ships only the suffix from
+    // there — the unchanged prefix stays untouched in the DOM. (The hash
+    // is position-inclusive, so an edit on line K busts K and every line
+    // after it, whose absolute positions shifted.)
+    let prev_line_hashes = use_signal(Vec::<u64>::new);
+    // Force the next patch to be a full (prefix=0) reconcile. Set on the
+    // first render and after IME composition — the one path where
+    // `applyPatch` skips applying (so the JS DOM can drift from our cached
+    // hashes and must be resynced with a complete patch).
+    let force_full_patch = use_signal(|| true);
     // Tile-tree build moved into the imperative-patch
     // `use_effect` below. The component body itself no longer
     // computes a render — it just allocates the editor id and
@@ -191,6 +248,12 @@ pub fn Editor(
         // Hover source + popup signal captured for the recv loop below.
         let hover_source = hover;
         let mut hover_sig = hover_state;
+        // Editing-settled flag, flipped by the recv loop on edits / `idle`.
+        let mut idle_sig = idle;
+        // Forces the next patch to a full reconcile — set on composition
+        // boundaries so the incremental prefix-skip resyncs with the DOM
+        // (the patcher skips applying while an IME composition is active).
+        let mut force_full_sig = force_full_patch;
         use_hook(move || {
             spawn(async move {
                 let script = format!(
@@ -409,7 +472,9 @@ pub fn Editor(
                                 if (!node) return '';
                                 if (node.nodeType === 3) return node.nodeValue;
                                 if (node.nodeType !== 1) return '';
-                                if (node.classList && node.classList.contains('editor-widget')) {{
+                                if (node.classList && (
+                                    node.classList.contains('editor-widget')
+                                    || node.classList.contains('cm-widgetBuffer'))) {{
                                     return '';
                                 }}
                                 let s = '';
@@ -875,14 +940,23 @@ pub fn Editor(
                                 }}
                             }}
 
-                            function patchChildren(parent, descs) {{
+                            function patchChildren(parent, descs, i0) {{
                                 // Two-pass: collect existing
                                 // children, then walk desired
                                 // descs and either reuse-by-key,
                                 // reuse-by-tag-at-position, or
                                 // create-new. Trailing extras
                                 // get removed.
-                                let i = 0;
+                                //
+                                // `i0` lets the top-level (line) call
+                                // start at the first changed line —
+                                // the incremental patch ships only
+                                // `descs` from that index on, so we
+                                // walk/reconcile from there and leave
+                                // the unchanged prefix lines untouched.
+                                // Nested calls (line content) pass no
+                                // `i0` and reconcile from 0.
+                                let i = i0 || 0;
                                 for (const d of descs) {{
                                     if (d.text !== undefined) {{
                                         const at = parent.childNodes[i];
@@ -1003,6 +1077,20 @@ pub fn Editor(
                                 const textRanges = [];
                                 const emptyTiles = [];
                                 tiles.forEach(node => {{
+                                    // Never resolve the caret ONTO an inline
+                                    // uneditable point — the buffer `<img>`s
+                                    // and zero-width widget badges. They share
+                                    // a doc offset with the adjacent text; we
+                                    // want the caret to land in that text, not
+                                    // on the un-caretable node. (Length-bearing
+                                    // widgets — checkboxes etc. — still resolve,
+                                    // so list/task lines keep their anchor.)
+                                    if (node.classList && (
+                                        node.classList.contains('cm-widgetBuffer')
+                                        || (node.classList.contains('editor-widget')
+                                            && node.dataset.tileLen === '0'))) {{
+                                        return;
+                                    }}
                                     const pos = parseInt(node.dataset.tilePos, 10);
                                     const text = node.firstChild;
                                     if (text && text.nodeType === 3) {{
@@ -1062,6 +1150,81 @@ pub fn Editor(
                                     // break shift+arrow-left.
                                     sel.setBaseAndExtent(aNode, aOff, hNode, hOff);
                                 }}
+                                // Keep the caret on screen — but ONLY when the
+                                // selection actually moved (typing, vim motion,
+                                // click). A decoration-only re-render (e.g. the
+                                // debounced overlay pass) re-places the *same*
+                                // selection; scrolling then would yank the view
+                                // back while the user is scrolled away reading.
+                                const selKey = anchor + ':' + head;
+                                if (selKey !== lastScrolledKey) {{
+                                    lastScrolledKey = selKey;
+                                    scrollCaretIntoView(hNode, hOff);
+                                }}
+                            }}
+
+                            // Nearest scrollable ancestor of the editor —
+                            // resolved at call time because the editor mounts
+                            // inside different host shells (playground,
+                            // app, …) whose scroll container we don't own.
+                            // Mirrors CM6's `scrollableParents`
+                            // (`view/src/dom.ts`).
+                            function scrollableAncestor() {{
+                                let n = el.parentElement;
+                                while (n) {{
+                                    const s = getComputedStyle(n);
+                                    const oy = s.overflowY;
+                                    if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay')
+                                        && n.scrollHeight > n.clientHeight + 1) {{
+                                        return n;
+                                    }}
+                                    n = n.parentElement;
+                                }}
+                                return document.scrollingElement || document.documentElement;
+                            }}
+
+                            // Scroll the nearest scrollable ancestor the
+                            // minimum amount needed to bring the caret rect
+                            // inside its viewport, with a small margin so the
+                            // caret never sits flush against an edge. CM6's
+                            // `scrollRectIntoView` reduced to the vertical +
+                            // horizontal nudge we need.
+                            let lastScrolledKey = null;
+                            const SCROLL_MARGIN = 24;
+                            function scrollCaretIntoView(node, off) {{
+                                if (!node) return;
+                                let rect = null;
+                                try {{
+                                    const r = document.createRange();
+                                    r.setStart(node, Math.min(off, (node.nodeType === 3
+                                        ? node.nodeValue.length
+                                        : node.childNodes.length)));
+                                    r.collapse(true);
+                                    const rects = r.getClientRects();
+                                    rect = rects.length ? rects[0] : r.getBoundingClientRect();
+                                }} catch (e) {{ return; }}
+                                if (!rect || (rect.top === 0 && rect.bottom === 0
+                                    && rect.left === 0)) return;
+                                const sc = scrollableAncestor();
+                                const cont = (sc === document.scrollingElement
+                                    || sc === document.documentElement)
+                                    ? {{ top: 0, bottom: window.innerHeight,
+                                         left: 0, right: window.innerWidth }}
+                                    : sc.getBoundingClientRect();
+                                let dy = 0, dx = 0;
+                                if (rect.top < cont.top + SCROLL_MARGIN) {{
+                                    dy = rect.top - cont.top - SCROLL_MARGIN;
+                                }} else if (rect.bottom > cont.bottom - SCROLL_MARGIN) {{
+                                    dy = rect.bottom - cont.bottom + SCROLL_MARGIN;
+                                }}
+                                if (rect.left < cont.left + SCROLL_MARGIN) {{
+                                    dx = rect.left - cont.left - SCROLL_MARGIN;
+                                }} else if (rect.right > cont.right - SCROLL_MARGIN) {{
+                                    dx = rect.right - cont.right + SCROLL_MARGIN;
+                                }}
+                                if (dy !== 0 || dx !== 0) {{
+                                    sc.scrollBy({{ top: dy, left: dx, behavior: 'auto' }});
+                                }}
                             }}
 
                             // ── perf logging ──
@@ -1093,6 +1256,11 @@ pub fn Editor(
                                 catch (_) {{ return; }}
                                 const descs = payload.patches || payload;
                                 const sel = payload.selection || null;
+                                // Incremental: the patch carries only the
+                                // line patches from `firstChanged` on; the
+                                // unchanged prefix lines stay as-is. 0 (or
+                                // absent) means a full reconcile.
+                                const firstChanged = payload.firstChanged || 0;
                                 if (typeof payload.doc === 'string') {{
                                     window['__cm_doc_{id}'] = payload.doc;
                                 }}
@@ -1100,7 +1268,7 @@ pub fn Editor(
                                 el.dataset.writing = '1';
                                 el.dataset.muting = '1';
                                 try {{
-                                    patchChildren(el, descs);
+                                    patchChildren(el, descs, firstChanged);
                                     if (sel) placeSelection(sel.anchor, sel.head);
                                 }} finally {{
                                     mo.takeRecords();
@@ -1571,6 +1739,31 @@ pub fn Editor(
                                     n = n.parentNode;
                                 }}
                             }});
+                            // ── Typing / idle tracking ──────────
+                            // `lastTypeTs` powers hover suppression
+                            // (don't pop a tooltip while the user is
+                            // typing or keyboard-navigating). The
+                            // `idleTimer` fires ~220ms after the last
+                            // text input and pings Rust so it can flip
+                            // back to the full decoration pass
+                            // (diagnostics + overlays) once editing
+                            // settles. `beforeinput` covers every doc
+                            // mutation (typing, IME, bracket, delete);
+                            // `keydown` additionally captures caret
+                            // navigation for hover suppression only.
+                            let lastTypeTs = 0;
+                            let idleTimer = null;
+                            el.addEventListener('beforeinput', () => {{
+                                lastTypeTs = Date.now();
+                                if (idleTimer) clearTimeout(idleTimer);
+                                idleTimer = setTimeout(() => {{
+                                    idleTimer = null;
+                                    dioxus.send({{ kind: 'idle' }});
+                                }}, 220);
+                            }}, true);
+                            el.addEventListener('keydown', () => {{
+                                lastTypeTs = Date.now();
+                            }}, true);
                             // ── Hover tooltips ──────────────────
                             // Debounced pointer → doc position →
                             // `hover` message. Rust runs the hover
@@ -1585,6 +1778,14 @@ pub fn Editor(
                                 if (hoverTimer) clearTimeout(hoverTimer);
                                 hoverTimer = setTimeout(() => {{
                                     hoverTimer = null;
+                                    // Suppress while actively typing /
+                                    // navigating: a tooltip popping up
+                                    // under the cursor mid-edit is the
+                                    // exact jank we're killing.
+                                    if (Date.now() - lastTypeTs < 700) {{
+                                        dioxus.send({{ kind: 'hover-end' }});
+                                        return;
+                                    }}
                                     let node = null, off = 0;
                                     if (document.caretPositionFromPoint) {{
                                         const cp = document.caretPositionFromPoint(x, y);
@@ -1628,20 +1829,43 @@ pub fn Editor(
                                 let x = v.get("x").and_then(|n| n.as_f64()).unwrap_or(0.0);
                                 let y = v.get("y").and_then(|n| n.as_f64()).unwrap_or(0.0);
                                 let cur = state.read().clone();
-                                hover_sig.set(
-                                    src(&cur, pos)
-                                        .map(|tip| crate::hover::HoverPopup { tip, x, y }),
-                                );
+                                hover_sig.set(src(&cur, pos).map(|tip| crate::hover::HoverPopup {
+                                    tip,
+                                    x,
+                                    y,
+                                }));
                             }
                         }
                         "hover-end" => hover_sig.set(None),
-                        _ => crate::bridge::handle_bridge_msg(
-                            state,
-                            deco_source,
-                            vim,
-                            widget_focus,
-                            &v,
-                        ),
+                        // Typing has settled (JS debounce fired) — flip to
+                        // the `Full` decoration pass so the patch effect
+                        // recomputes diagnostics + overlays.
+                        "idle" => idle_sig.set(true),
+                        other => {
+                            // Any doc-mutating message means the user is
+                            // actively editing: drop to the `Structural`
+                            // pass until the next `idle` ping so expensive
+                            // analysis doesn't run on each keystroke. Pure
+                            // caret moves (`sel`) and widget/UI messages
+                            // leave the phase alone.
+                            if is_edit_kind(other) {
+                                idle_sig.set(false);
+                            }
+                            // IME composition is the one window where the
+                            // patcher skips applying, so force the next
+                            // patch to a full reconcile to resync the
+                            // incremental prefix-skip with the live DOM.
+                            if other == "composition-start" || other == "composition-end" {
+                                force_full_sig.set(true);
+                            }
+                            crate::bridge::handle_bridge_msg(
+                                state,
+                                deco_source,
+                                vim,
+                                widget_focus,
+                                &v,
+                            );
+                        }
                     }
                 }
             });
@@ -1966,10 +2190,23 @@ pub fn Editor(
     {
         let id = editor_id.clone();
         let deco_source_patch = decorations;
+        // Mut copies of the incremental-patch signals for the move closure
+        // (Signal is Copy; `.set()` needs a mutable binding).
+        let mut prev_line_hashes = prev_line_hashes;
+        let mut force_full_patch = force_full_patch;
         use_effect(move || {
             let _span = tracing::debug_span!("editor.patch_effect").entered();
             let s = state.read();
             let doc_len = s.doc.len();
+            // Ask sources for the full set once editing settles, and only
+            // the cheap structural set while typing. Reading `idle()` here
+            // subscribes the effect, so the flip back to idle re-runs this
+            // pass and the overlays/diagnostics reappear.
+            editor_state::set_deco_phase(if idle() {
+                editor_state::DecoPhase::Full
+            } else {
+                editor_state::DecoPhase::Structural
+            });
             let t_decos = now_ms();
             let decorations: Vec<DecoratedRange> = match deco_source_patch {
                 Some(src) => {
@@ -1987,9 +2224,40 @@ pub fn Editor(
             let t_patch = now_ms();
             let patch = build_patch(&arena, root);
             let patch_ms = now_ms() - t_patch;
+
+            // Incremental diff: hash each line patch and compare against
+            // the previous render's hashes to find the first changed
+            // line. We ship only `patch[first_changed..]`; the JS patcher
+            // leaves the unchanged prefix lines alone. A `force_full`
+            // flag (first render / post-IME-composition resync) sends the
+            // whole thing. `prev_line_hashes` is updated unconditionally:
+            // the only time JS skips applying is during composition, and
+            // `force_full` covers the resync after it.
+            let new_hashes: Vec<u64> = patch.iter().map(hash_patch).collect();
+            // `peek()` so the effect doesn't subscribe to a signal it also
+            // writes (that would loop). The recv loop sets it true on
+            // composition; this pass reads the current value at run time.
+            let first_changed = if *force_full_patch.peek() {
+                force_full_patch.set(false);
+                0
+            } else {
+                let prev = prev_line_hashes.peek();
+                new_hashes
+                    .iter()
+                    .zip(prev.iter())
+                    .take_while(|(a, b)| a == b)
+                    .count()
+            };
+            prev_line_hashes.set(new_hashes);
+            let shipped: &[crate::tile::patch::Patch] =
+                patch.get(first_changed..).unwrap_or(&[]);
+
             tracing::debug!(
                 doc_len,
                 deco_count,
+                line_count = patch.len(),
+                first_changed,
+                shipped = shipped.len(),
                 decos_ms = %format!("{:.2}", decos_ms),
                 build_ms = %format!("{:.2}", build_ms),
                 patch_ms = %format!("{:.2}", patch_ms),
@@ -2008,7 +2276,8 @@ pub fn Editor(
             // hidden, etc.), and copying the rendered view would
             // be uneditable on paste.
             let payload = serde_json::json!({
-                "patches": patch,
+                "patches": shipped,
+                "firstChanged": first_changed,
                 "doc": s.doc.to_string(),
                 "selection": {
                     "anchor": primary.anchor,
@@ -2092,7 +2361,10 @@ pub(crate) fn push_selection(
     // Atomic-range snap: if either endpoint lands strictly
     // inside an atomic decoration, jump it to the nearer edge.
     // Mirrors CM6's `skipAtomicRanges` (`view/src/cursor.ts`).
+    // Atomic ranges are structural (behavior-only, cheap), so this
+    // never needs the expensive analysis pass — pin Structural.
     if let Some(src) = deco_source {
+        editor_state::set_deco_phase(editor_state::DecoPhase::Structural);
         let decs = src(cur);
         s = editor_state::decoration::skip_atomic(&decs, s);
         e = editor_state::decoration::skip_atomic(&decs, e);

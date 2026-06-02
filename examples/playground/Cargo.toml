@@ -20,10 +20,16 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 
 # Switch platforms with --no-default-features --features web|desktop.
+#
+# Each renderer feature also pulls `dioxus/launch`: the workspace
+# depends on `dioxus` with `default-features = false, features =
+# ["lib"]`, and `lib` doesn't include `launch` (only the crate's
+# `default` set does). Without this, `dioxus::launch(App)` in `main`
+# fails to resolve (E0425) on every target.
 [features]
 default = ["desktop"]
-desktop = ["dioxus/desktop"]
-web = ["dioxus/web"]
+desktop = ["dioxus/desktop", "dioxus/launch"]
+web = ["dioxus/web", "dioxus/launch"]
 
 # wasm-only: web_sys for URL query reading + tracing-wasm so
 # the browser console gets the same structured log stream as the

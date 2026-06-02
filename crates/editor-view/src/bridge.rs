@@ -61,6 +61,12 @@ pub(crate) fn handle_bridge_msg(
         "input" => {
             let new_visible = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
             let cur = state.read().clone();
+            // This pass only reconstructs the visible-text mirror to diff
+            // against the DOM — it needs the structural (marker-hiding)
+            // decorations, never the expensive analysis-derived ones. Pin
+            // the phase so a source's heavy work is skipped on every
+            // keystroke here regardless of the view's idle state.
+            editor_state::set_deco_phase(editor_state::DecoPhase::Structural);
             let decorations: Vec<DecoratedRange> = match deco_source {
                 Some(src) => {
                     let mut v = src(&cur);

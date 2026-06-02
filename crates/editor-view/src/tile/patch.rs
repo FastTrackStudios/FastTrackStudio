@@ -34,7 +34,7 @@ use crate::tile::{TileBody, TileKind};
 ///
 /// Serialized as `{tag, attrs, kids}` / `{text}` for the JS
 /// patcher.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(untagged)]
 pub enum Patch {
     Element {
@@ -184,7 +184,26 @@ fn render_node(arena: &Arena, tile: TileId) -> Option<Patch> {
             attrs.extend(spec.attrs);
             Some(Patch::element("span", attrs, kids))
         }
-        TileKind::Widget | TileKind::WidgetBuffer => {
+        TileKind::WidgetBuffer => {
+            // Zero-width `<img>` anchor bracketing an inline point
+            // widget — gives the browser caret an editable-side stop
+            // next to `contenteditable=false` content. Carries
+            // `data-tile-len="0"` so the JS bridge's offset math counts
+            // it as zero doc bytes. CM6's `.cm-widgetBuffer`
+            // (`tile.ts:488-505`).
+            Some(Patch::element(
+                "img",
+                vec![
+                    ("class".into(), "cm-widgetBuffer".into()),
+                    ("aria-hidden".into(), "true".into()),
+                    ("data-tile-id".into(), tid.to_string()),
+                    ("data-tile-pos".into(), pos.to_string()),
+                    ("data-tile-len".into(), "0".into()),
+                ],
+                Vec::new(),
+            ))
+        }
+        TileKind::Widget => {
             let html = match &t.body {
                 TileBody::Widget { html } => html.clone(),
                 _ => String::new(),
@@ -261,6 +280,41 @@ mod tests {
                 }
             }
             _ => panic!("expected div"),
+        }
+    }
+
+    #[test]
+    fn point_widget_renders_buffer_imgs_around_span() {
+        // A zero-width widget renders as
+        // `<img cm-widgetBuffer><span editor-widget><img cm-widgetBuffer>`
+        // so the caret has an editable-side anchor on each side.
+        let decs = vec![Decoration::widget(2, "<span class=\"kf-inlay\">G</span>")];
+        let (arena, root) = build_tiles("abcd", &decs);
+        let patch = build_patch(&arena, root);
+        let kids = match &patch[0] {
+            Patch::Element { tag, kids, .. } if tag == "div" => kids,
+            _ => panic!("expected line div"),
+        };
+        let tags: Vec<&str> = kids
+            .iter()
+            .map(|k| match k {
+                Patch::Element { tag, .. } => tag.as_str(),
+                Patch::Text { .. } => "#text",
+            })
+            .collect();
+        assert_eq!(tags, vec!["span", "img", "span", "img", "span"]);
+        // The buffers carry the CM6 class + zero doc-length so the JS
+        // bridge counts them as no bytes.
+        for i in [1usize, 3] {
+            match &kids[i] {
+                Patch::Element { attrs, .. } => {
+                    assert!(attrs
+                        .iter()
+                        .any(|(k, v)| k == "class" && v == "cm-widgetBuffer"));
+                    assert!(attrs.iter().any(|(k, v)| k == "data-tile-len" && v == "0"));
+                }
+                _ => panic!("expected buffer img"),
+            }
         }
     }
 

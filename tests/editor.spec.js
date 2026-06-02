@@ -215,6 +215,15 @@ test.describe("editor", () => {
   });
 
   test("arrow key updates the caret position", async ({ page }) => {
+    // The default seed opens with a ~329-byte YAML frontmatter block
+    // that renders as the properties widget, so doc offset 5 falls
+    // inside that replaced/hidden region with no text node to anchor a
+    // caret — `setCaret(5)` can't land there. Use a plain-text seed
+    // (same pattern as the other caret tests) so offset 5 is real,
+    // editable text.
+    await page.goto("/?seed=hello%20world%20text&novim=1");
+    await editor(page).waitFor();
+    await expect(page.locator("#dbg-len")).not.toHaveText("");
     await editor(page).focus();
     await setCaret(page, 5);
     // Give Phase-9 MutationObserver / selection bridge a tick
