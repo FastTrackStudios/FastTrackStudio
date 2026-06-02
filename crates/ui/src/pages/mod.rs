@@ -4,6 +4,7 @@
 //! (sidebar + headers + bottom bar) is provided by the route
 //! layout; pages only render the content area.
 
+pub mod bookings;
 pub mod finances;
 pub mod gantt;
 pub mod goals;

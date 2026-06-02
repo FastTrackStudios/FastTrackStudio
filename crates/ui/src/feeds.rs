@@ -142,6 +142,87 @@ pub async fn delete_event(slug: &str, id: &str) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete event: {e:?}"))
 }
 
+// ── Bookings (Cal.com-style booking half) ───────────────────────────
+
+/// All bookable event types for the org (30-min consults, etc.).
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_event_types(slug: &str) -> Result<Vec<scheduling_proto::EventType>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::EventTypesClient>(slug).await?;
+    client
+        .list_event_types()
+        .await
+        .map_err(|e| format!("{slug}: list event types: {e:?}"))
+}
+
+/// Create (upsert) a bookable event type. The backend derives the
+/// vault `path` from the slug/id, so we leave it empty here.
+#[cfg(target_arch = "wasm32")]
+pub async fn create_event_type(slug: &str, title: &str, duration_min: u16) -> Result<(), String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::EventTypesClient>(slug).await?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let url_slug = slugify(title);
+    let event_type = scheduling_proto::EventType {
+        path: String::new(),
+        id: scheduling_proto::EventTypeId(id),
+        title: title.to_owned(),
+        slug: url_slug,
+        description: None,
+        duration_min,
+        buffer_min: 0,
+        location: scheduling_proto::EventTypeLocation::Tbd,
+        schedule_id: None,
+        published: true,
+    };
+    client
+        .upsert_event_type(event_type)
+        .await
+        .map_err(|e| format!("{slug}: create event type: {e:?}"))
+}
+
+/// All bookings for the org (every status), oldest start first.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_bookings(slug: &str) -> Result<Vec<scheduling_proto::Booking>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::BookingsClient>(slug).await?;
+    client
+        .list_bookings()
+        .await
+        .map_err(|e| format!("{slug}: list bookings: {e:?}"))
+}
+
+/// Cancel a booking by id (sets status to `Cancelled`).
+#[cfg(target_arch = "wasm32")]
+pub async fn cancel_booking(slug: &str, id: &str) -> Result<(), String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::BookingsClient>(slug).await?;
+    client
+        .update_booking_status(
+            scheduling_proto::BookingId(id.to_owned()),
+            scheduling_proto::BookingStatus::Cancelled,
+        )
+        .await
+        .map_err(|e| format!("{slug}: cancel booking: {e:?}"))
+}
+
+/// Lowercase, hyphenate, strip non-url-safe chars for an event-type slug.
+#[cfg(target_arch = "wasm32")]
+fn slugify(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_dash = false;
+    for ch in s.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !out.is_empty() {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.trim_matches('-').to_owned()
+}
+
 /// Every inbox item (open + processed + archived), oldest first.
 /// Consumers filter by `status` / `resurface_on` for the daily queue.
 #[cfg(target_arch = "wasm32")]
@@ -680,6 +761,30 @@ pub async fn upsert_event(_slug: &str, _event: scheduling_proto::CalEvent) -> Re
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn delete_event(_slug: &str, _id: &str) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_event_types(_slug: &str) -> Result<Vec<scheduling_proto::EventType>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_event_type(
+    _slug: &str,
+    _title: &str,
+    _duration_min: u16,
+) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_bookings(_slug: &str) -> Result<Vec<scheduling_proto::Booking>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn cancel_booking(_slug: &str, _id: &str) -> Result<(), String> {
     Err("native client not wired yet".to_owned())
 }
 

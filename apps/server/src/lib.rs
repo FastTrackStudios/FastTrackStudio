@@ -873,6 +873,25 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
             scheduling_proto::service::calendar_events::serve(org.scheduling.clone()),
         )
+        // Scheduling — booking half (Cal.com-style): event types,
+        // availability schedules, open-slot listing, and bookings.
+        // All four are served by the same `VaultScheduler`.
+        .with(
+            scheduling_proto::service::event_types::event_types_rpc_service_descriptor(),
+            scheduling_proto::service::event_types::serve(org.scheduling.clone()),
+        )
+        .with(
+            scheduling_proto::service::schedules::schedules_rpc_service_descriptor(),
+            scheduling_proto::service::schedules::serve(org.scheduling.clone()),
+        )
+        .with(
+            scheduling_proto::service::slots::slots_rpc_service_descriptor(),
+            scheduling_proto::service::slots::serve(org.scheduling.clone()),
+        )
+        .with(
+            scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
+            scheduling_proto::service::bookings::serve(org.scheduling.clone()),
+        )
         .with(
             inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
             inbox_proto::service::inbox::serve(org.inbox.clone()),

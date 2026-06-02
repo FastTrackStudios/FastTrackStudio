@@ -45,6 +45,9 @@ pub enum Route {
         #[route("/schedule")]
         ScheduleRoute {},
 
+        #[route("/bookings")]
+        BookingsRoute {},
+
         #[route("/gantt")]
         GanttRoute {},
 
@@ -112,6 +115,11 @@ fn MilestonesRoute() -> Element {
 #[component]
 fn ScheduleRoute() -> Element {
     rsx! { pages::schedule::ScheduleView {} }
+}
+
+#[component]
+fn BookingsRoute() -> Element {
+    rsx! { pages::bookings::BookingsView {} }
 }
 
 #[component]
