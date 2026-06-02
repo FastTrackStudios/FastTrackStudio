@@ -3,14 +3,15 @@
 //! `milestone` — project-scoped, GitHub-Projects-style
 //! checkpoint entity.
 //!
-//! Surface:
-//! - [`Milestone`] / [`Status`] — model + canonical states
+//! The wasm-clean wire surface ([`Milestone`] / [`Status`] +
+//! the [`MilestoneService`] RPC trait) lives in the sibling
+//! [`milestone_proto`] crate; this crate sits on top of it and
+//! owns the vault-backed side:
 //! - [`parse_page`] / [`looks_like_milestone`] — vault page →
 //!   `Milestone`
 //! - [`serialize_milestone`] / [`write_milestone`] /
 //!   [`default_milestone_path`] — writer + path helper
-//! - [`MilestoneService`] (RPC trait) +
-//!   [`MilestoneBackend`] (server impl)
+//! - [`MilestoneBackend`] — server impl of [`MilestoneService`]
 //!
 //! See `Milestone` doc-comments for the project / goal /
 //! Forgejo-sync rollup design.
@@ -25,16 +26,16 @@ pub mod service;
 
 pub use model::{Milestone, Status, Tags};
 pub use parse::{ParseError, looks_like_milestone, parse_milestone, parse_page};
-pub use service::{MilestoneError, MilestoneService, MilestoneServiceRpc};
+pub use service::{MilestoneError, MilestoneService};
 pub use write::{WriteError, default_milestone_path, serialize_milestone, write_milestone};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::MilestoneBackend;
 
 #[cfg(feature = "vox")]
-pub use service::{
-    MilestoneServiceClient, MilestoneServiceRpcDispatcher as MilestoneDispatcher,
-    Service as MilestoneServiceBridge, layer as milestone_service_layer,
-    milestone_service_rpc_service_descriptor as milestone_service_descriptor,
-    serve as serve_milestone_service,
+pub use milestone_proto::{
+    MilestoneServiceBridge, MilestoneServiceClient, milestone_service_descriptor,
+    milestone_service_layer, serve_milestone_service,
 };
+#[cfg(feature = "vox")]
+pub use service::{MilestoneServiceRpc, MilestoneServiceRpcDispatcher as MilestoneDispatcher};

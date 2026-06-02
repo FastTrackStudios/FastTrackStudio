@@ -11,6 +11,7 @@ pub mod home;
 pub mod inbox;
 pub mod invoices;
 pub mod locations;
+pub mod milestones;
 pub mod project_detail;
 pub mod projects;
 pub mod schedule;

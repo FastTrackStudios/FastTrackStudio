@@ -39,6 +39,9 @@ pub enum Route {
         #[route("/locations")]
         LocationsRoute {},
 
+        #[route("/milestones")]
+        MilestonesRoute {},
+
         #[route("/schedule")]
         ScheduleRoute {},
 
@@ -99,6 +102,11 @@ fn VaultRoute() -> Element {
 #[component]
 fn LocationsRoute() -> Element {
     rsx! { pages::locations::LocationsView {} }
+}
+
+#[component]
+fn MilestonesRoute() -> Element {
+    rsx! { pages::milestones::MilestonesView {} }
 }
 
 #[component]

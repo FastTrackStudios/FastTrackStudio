@@ -275,6 +275,54 @@ pub async fn create_location(
         .map_err(|e| format!("{slug}: create location: {e:?}"))
 }
 
+// ── Milestones ──────────────────────────────────────────────────────
+
+/// Every milestone in the org's vault (project-scoped checkpoints),
+/// in the order the backend lists them. Filter client-side by
+/// `project_id` / `status` as needed.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_milestones(slug: &str) -> Result<Vec<milestone_proto::Milestone>, String> {
+    let client =
+        crate::vox_clients::establish_for::<milestone_proto::MilestoneServiceClient>(slug).await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list milestones: {e:?}"))
+}
+
+/// Create one milestone. `project_id` is required (a milestone
+/// always lives inside a project); the backend derives the vault
+/// `path` (empty here) and assigns the `id` (nil here). Returns
+/// the persisted milestone.
+#[cfg(target_arch = "wasm32")]
+pub async fn create_milestone(
+    slug: &str,
+    title: &str,
+    project_id: uuid::Uuid,
+    due_date: Option<chrono::NaiveDate>,
+) -> Result<milestone_proto::Milestone, String> {
+    let client =
+        crate::vox_clients::establish_for::<milestone_proto::MilestoneServiceClient>(slug).await?;
+    let ms = milestone_proto::Milestone {
+        path: String::new(),
+        id: uuid::Uuid::nil(),
+        title: title.to_owned(),
+        project_id,
+        goal_id: None,
+        status: "open".to_owned(),
+        due_date,
+        tags: milestone_proto::Tags::default(),
+        forge_ref: None,
+        date_created: None,
+        date_modified: None,
+        details: String::new(),
+    };
+    client
+        .create(ms)
+        .await
+        .map_err(|e| format!("{slug}: create milestone: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -676,6 +724,21 @@ pub async fn create_location(
     _kind: &str,
     _address: Option<String>,
 ) -> Result<locations_proto::Location, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_milestones(_slug: &str) -> Result<Vec<milestone_proto::Milestone>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_milestone(
+    _slug: &str,
+    _title: &str,
+    _project_id: uuid::Uuid,
+    _due_date: Option<chrono::NaiveDate>,
+) -> Result<milestone_proto::Milestone, String> {
     Err("native client not wired yet".to_owned())
 }
 

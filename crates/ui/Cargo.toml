@@ -34,6 +34,7 @@ task-ui.workspace = true
 scheduling-proto = { workspace = true, features = ["vox"] }
 inbox-proto = { workspace = true, features = ["vox"] }
 locations-proto = { workspace = true, features = ["vox"] }
+milestone-proto = { workspace = true, features = ["vox"] }
 finance-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
 # Cyclic life-calendar — Goals view uses the pure-function

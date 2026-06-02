@@ -335,6 +335,10 @@ goal = { path = "features/goal/goal" }
 # tasks roll up to. Maps cleanly to Forgejo / GitHub milestone
 # API for the future sync.
 milestone = { path = "features/milestone/milestone" }
+# `milestone-proto` is wasm-clean (the web UI binds to it
+# directly); the `milestone` crate owns the vault-backed
+# parse / write / backend side.
+milestone-proto = { path = "features/milestone/milestone-proto", default-features = false }
 # Cyclic life-calendar primitives — Cycle + Quarter entities
 # + pure-function date generator. See
 # `plans/cyclic-life-calendar.md`.
