@@ -91,6 +91,26 @@ pub struct PresetEngineRef {
     /// Engine-level mute (overridable live).
     #[facet(default)]
     pub mute: bool,
+    /// When set, this engine instance fires only zones whose `articulation`
+    /// matches (case-insensitive), ignoring the incoming key. Lets one drum
+    /// pack be addressed as several performance pieces — e.g. a hats pack
+    /// pinned to "Closed Tip" on one note and "Open 1" on another. Only
+    /// meaningful for percussion (drum-kit) engines, which always play at
+    /// natural pitch, so the routed note is a trigger selector, not a pitch.
+    #[facet(default)]
+    pub articulation: String,
+    /// Engine-wide choke group. When set, this engine's voices join the group
+    /// so they can be silenced by a choking hit. Empty = polyphonic
+    /// (kick/snare/toms ring freely).
+    #[facet(default)]
+    pub choke_group: String,
+    /// Articulations that actually trigger the choke (silence the group).
+    /// Empty (with a group set) = monophonic — every hit chokes (hi-hats, so
+    /// open/closed/tight/pedal all cut each other). Non-empty = only these
+    /// choke (cymbals: `( "Choke" )` so crashes ring/overlap but the choke
+    /// articulation stops the ringing cymbal).
+    #[facet(default)]
+    pub choke_on: Vec<String>,
     /// Engine-level overrides applied after the engine loads — same
     /// name-keyed dispatch as block params.
     #[facet(default)]
@@ -104,6 +124,13 @@ pub struct NoteRoute {
     /// Engine ids that should receive this note. Multiple targets =
     /// layered notes (e.g. layered kicks).
     pub targets: Vec<String>,
+    /// Optional articulation fired on the target engine(s) for this note,
+    /// ignoring key (percussion). Lets one shared drum pack be addressed as
+    /// several performance notes — e.g. a hats engine routed as "Closed Tip"
+    /// on one note and "Open 1" on another, without duplicating the engine.
+    /// Empty = key-based selection (pitched samplers, native drum layouts).
+    #[facet(default)]
+    pub articulation: String,
 }
 
 /// Reference to a `.signalmodule` instance in the Preset's routing graph.

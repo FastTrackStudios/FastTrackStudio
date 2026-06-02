@@ -236,7 +236,12 @@ impl CanvasPainter for WaterfallPainter {
         let scale = key_w_px / WW;
 
         // ── Clip layer — prevents glow bleed beyond canvas edges ───────
-        scene.push_clip_layer(transform, &Rect::new(0.0, 0.0, width, height));
+        // vello 0.9: push_clip_layer gained a leading clip-style arg.
+        scene.push_clip_layer(
+            Fill::NonZero,
+            transform,
+            &Rect::new(0.0, 0.0, width, height),
+        );
 
         // ── Note blocks ───────────────────────────────────────────────
         let [ar, ag, ab] = self.accent_rgb;

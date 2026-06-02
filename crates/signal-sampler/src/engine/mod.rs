@@ -32,6 +32,7 @@ pub mod filter;
 pub mod rr;
 pub mod voice;
 
+use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -50,7 +51,14 @@ use voice::{Voice, VoiceKind, VoicePool, VoiceStealPolicy};
 const CC1_RAMP_MS: u32 = 20;
 
 /// Default release fade on note-off for sustain voices (ms).
-const RELEASE_MS: u32 = 500;
+///
+/// This is the damper-down time: on key-up (sustain pedal NOT held) the note
+/// must stop, not ring out. A short linear fade reads as an immediate cutoff
+/// while avoiding a click. Sustain itself comes only from holding CC64, which
+/// defers the note-off entirely (see `note_off_with_velocity`); the half-pedal
+/// curve still scales this up for partial-pedal positions. Was 500 ms, which
+/// made every key-up sound like a half-second sustain even with the pedal up.
+const RELEASE_MS: u32 = 60;
 /// Extra damping time at the top of the half-pedal range.
 const HALF_PEDAL_MAX_RELEASE_MULTIPLIER: f32 = 4.0;
 
@@ -113,7 +121,11 @@ pub struct SampleEngine {
     patch: PlayerPatch,
     cache: SampleCache,
     voices: VoicePool,
-    rr: RrCounters,
+    /// Round-robin counters. Interior-mutable so voice resolution
+    /// (`make_voice`) can run as `&self` — it only advances RR and records
+    /// miss telemetry, letting note-on pass `&self.articulation`/`section`/`mic`
+    /// without cloning.
+    rr: RefCell<RrCounters>,
 
     /// Audio sample rate (Hz).
     pub sample_rate: u32,
@@ -124,6 +136,35 @@ pub struct SampleEngine {
     articulation: String,
     /// Active microphone position ID (e.g. `"Mix"`, `"Main"`).
     mic: String,
+
+    /// True when the source pack is a percussion / drum-kit library
+    /// (`category` ~ "drum-kit", or a percussion `instrument`). Percussion
+    /// engines always play zones at natural pitch — the incoming note is a
+    /// trigger selector, never a transpose.
+    percussion: bool,
+    /// True when every zone shares a single `key_min` (single-articulation
+    /// drum: kick, tom). Such an engine fires on *any* routed note, so the
+    /// preset's `note_routing` is the sole authority for which note plays it.
+    single_attack_key: bool,
+    /// When set, this engine fires only zones whose `articulation` matches
+    /// (case-insensitive), ignoring the incoming key. Lets one drum pack be
+    /// addressed as several performance pieces (hats Closed vs Open, …).
+    pinned_articulation: Option<String>,
+    /// Per-trigger articulation override, set for the duration of a single
+    /// `note_on_articulated` call so one shared engine can serve many routed
+    /// notes (each route picks the articulation). Takes precedence over
+    /// `pinned_articulation`; always cleared after the trigger.
+    trigger_articulation: Option<String>,
+    /// Engine-wide choke group (pre-hashed). When set, voices join this group
+    /// so they can be silenced by a later choking hit. `None` = polyphonic
+    /// (kick/snare/toms ring freely).
+    engine_choke_group: Option<u64>,
+    /// Which articulations actually *trigger* the choke (silence the group).
+    /// Empty + a set group = monophonic: every hit chokes (hi-hats — any hit,
+    /// incl. pedal, cuts the ringing hat). Non-empty = only these articulations
+    /// choke (cymbals: only "Choke" stops the ringing crash; crashes overlap).
+    /// Lowercased for case-insensitive matching.
+    engine_choke_on: Vec<String>,
 
     /// Current CC1 value [0–127], drives dynamic layer crossfade.
     cc1: u8,
@@ -182,17 +223,26 @@ pub struct SampleEngine {
     /// behaves as expected when the same key is repeatedly struck.
     zone_rr_counter: usize,
     zone_rr_random_state: u64,
-    zone_rr_last_slots: HashMap<String, u32>,
+    /// Last-used RR slot per (trigger, note, velocity), keyed by a packed
+    /// integer so note-on allocates nothing (was a `format!`-built String key).
+    zone_rr_last_slots: HashMap<u64, u32>,
+
+    /// Reusable scratch for the zoned trigger path so note-on doesn't allocate.
+    /// Drained/refilled each note-on via `mem::take` + restore.
+    zone_indices_scratch: Vec<usize>,
+    zone_choked_scratch: Vec<u64>,
+    zone_capped_scratch: Vec<(u64, usize)>,
 
     /// Mic ids in spec declaration order. Empty when the library has no
     /// `mics` array. Used to map a zone's `mic` string to a stable index
     /// the renderer can splay across per-mic buffers.
     mic_ids: Vec<String>,
 
-    cache_misses: usize,
-    sample_misses: usize,
-    recent_cache_misses: VecDeque<String>,
-    recent_sample_misses: VecDeque<String>,
+    // Miss telemetry — interior-mutable so `make_voice`/`record_*` are `&self`.
+    cache_misses: Cell<usize>,
+    sample_misses: Cell<usize>,
+    recent_cache_misses: RefCell<VecDeque<String>>,
+    recent_sample_misses: RefCell<VecDeque<String>>,
 }
 
 impl SampleEngine {
@@ -255,15 +305,32 @@ impl SampleEngine {
 
         let mic_ids: Vec<String> = patch.spec.mics.iter().map(|m| m.id.clone()).collect();
 
+        let percussion = spec_is_percussion(&patch.spec);
+        // Single-articulation drum: every zone sits on one key (kick, tom).
+        // Such a pack should fire on whatever note the preset routes to it.
+        let single_attack_key = {
+            let mut iter = patch.spec.zones.iter().map(|z| z.key_min);
+            match iter.next() {
+                Some(first) => iter.all(|k| k == first),
+                None => false,
+            }
+        };
+
         Self {
             patch,
             cache,
             voices: VoicePool::new(),
-            rr: RrCounters::new(),
+            rr: RefCell::new(RrCounters::new()),
             sample_rate,
             section,
             articulation,
             mic,
+            percussion,
+            single_attack_key,
+            pinned_articulation: None,
+            trigger_articulation: None,
+            engine_choke_group: None,
+            engine_choke_on: Vec::new(),
             cc1: 64,
             cc2: 0,
             cc58: 0,
@@ -277,21 +344,26 @@ impl SampleEngine {
             legato_enabled: true,
             legato_expressive: false, // default: low-latency mode
             sord_filter: BiquadFilter::lowpass(filter::SORD_FC, filter::SORD_Q, sample_rate),
-            held_notes: HashMap::new(),
-            body_voiced: std::collections::HashSet::new(),
-            deferred_note_off_velocities: HashMap::new(),
+            // Pre-size note-keyed maps to the full MIDI range so note-on never
+            // reallocates them on the audio thread.
+            held_notes: HashMap::with_capacity(128),
+            body_voiced: std::collections::HashSet::with_capacity(128),
+            deferred_note_off_velocities: HashMap::with_capacity(128),
             legato_state: LegatoState::Idle,
             legato_fade_frames,
             cc1_ramp_frames,
             release_frames,
             zone_rr_counter: 0,
             zone_rr_random_state: 0x9e37_79b9_7f4a_7c15,
-            zone_rr_last_slots: HashMap::new(),
+            zone_rr_last_slots: HashMap::with_capacity(128),
+            zone_indices_scratch: Vec::with_capacity(32),
+            zone_choked_scratch: Vec::with_capacity(16),
+            zone_capped_scratch: Vec::with_capacity(16),
             mic_ids,
-            cache_misses: 0,
-            sample_misses: 0,
-            recent_cache_misses: VecDeque::with_capacity(RECENT_MISS_LIMIT),
-            recent_sample_misses: VecDeque::with_capacity(RECENT_MISS_LIMIT),
+            cache_misses: Cell::new(0),
+            sample_misses: Cell::new(0),
+            recent_cache_misses: RefCell::new(VecDeque::with_capacity(RECENT_MISS_LIMIT)),
+            recent_sample_misses: RefCell::new(VecDeque::with_capacity(RECENT_MISS_LIMIT)),
         }
     }
 
@@ -426,7 +498,7 @@ impl SampleEngine {
     /// Switch to a different section. Resets RR counters.
     pub fn set_section(&mut self, section_id: impl Into<String>) {
         self.section = section_id.into();
-        self.rr.reset();
+        self.rr.borrow_mut().reset();
         self.zone_rr_counter = 0;
         self.zone_rr_last_slots.clear();
     }
@@ -447,6 +519,85 @@ impl SampleEngine {
         self.articulation = artic_id.into();
     }
 
+    /// Pin this engine to a single articulation (percussion kits). When set,
+    /// only zones whose `articulation` matches fire, regardless of the
+    /// incoming key — so one drum pack can be split across several
+    /// performance notes (hats Closed vs Open, snare Hit vs Cross Stick).
+    /// `None` (or an empty string) clears the pin.
+    pub fn pin_articulation(&mut self, artic: Option<String>) {
+        self.pinned_articulation = artic.filter(|s| !s.is_empty());
+    }
+
+    /// Set an engine-wide choke group. Voices join it so they can be silenced.
+    /// `choke_on` lists the articulations that actually trigger the choke:
+    /// empty = monophonic (every hit chokes — hi-hats); non-empty = only those
+    /// articulations choke (cymbals: `["Choke"]` so crashes ring but the choke
+    /// stops them). `None`/empty group clears it (engine stays polyphonic).
+    pub fn set_choke_group(&mut self, group: Option<&str>, choke_on: &[String]) {
+        self.engine_choke_group = group.filter(|s| !s.is_empty()).map(stable_group_hash);
+        self.engine_choke_on = choke_on
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_ascii_lowercase())
+            .collect();
+    }
+
+    /// Whether this note-on should silence the engine choke group: true when a
+    /// group is set and either it's monophonic (`choke_on` empty) or the active
+    /// articulation is one of the configured choke triggers.
+    fn should_engine_choke(&self) -> bool {
+        if self.engine_choke_group.is_none() {
+            return false;
+        }
+        if self.engine_choke_on.is_empty() {
+            return true;
+        }
+        match self
+            .trigger_articulation
+            .as_deref()
+            .or(self.pinned_articulation.as_deref())
+        {
+            Some(a) => self
+                .engine_choke_on
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(a)),
+            None => false,
+        }
+    }
+
+    /// Whether a zone should fire for this `(note, velocity, trigger)`,
+    /// honoring percussion mode and any pinned articulation.
+    ///
+    /// - Pinned articulation: match by articulation only, key ignored.
+    /// - Single-key percussion (kick, tom): match any note.
+    /// - Otherwise: the zone's key range gates as usual (pitched samplers,
+    ///   multi-articulation drum packs addressed by their native keys).
+    fn zone_selected(
+        &self,
+        zone: &crate::spec::ZoneSpec,
+        note: u8,
+        velocity: u8,
+        trigger: ZoneTrigger,
+    ) -> bool {
+        if !zone_trigger_matches(zone, trigger) {
+            return false;
+        }
+        if velocity < zone.vel_min || velocity > zone.vel_max {
+            return false;
+        }
+        if let Some(pin) = self
+            .trigger_articulation
+            .as_ref()
+            .or(self.pinned_articulation.as_ref())
+        {
+            return zone.articulation.eq_ignore_ascii_case(pin);
+        }
+        if self.percussion && self.single_attack_key {
+            return true;
+        }
+        note >= zone.key_min && note <= zone.key_max
+    }
+
     /// Toggle Con Sordino mode.
     ///
     /// When enabled the engine remaps the current articulation to its sordino
@@ -458,7 +609,7 @@ impl SampleEngine {
             return;
         }
         self.con_sordino = active;
-        self.articulation = self.remap_sordino(&self.articulation.clone(), active);
+        self.articulation = self.remap_sordino(&self.articulation, active);
         if !active {
             // Clear filter state so stale tail doesn't bleed into dry output.
             self.sord_filter.reset();
@@ -504,24 +655,37 @@ impl SampleEngine {
     }
 
     pub fn cache_misses(&self) -> usize {
-        self.cache_misses
+        self.cache_misses.get()
     }
 
     pub fn sample_misses(&self) -> usize {
-        self.sample_misses
+        self.sample_misses.get()
     }
 
     pub fn recent_cache_misses(&self) -> Vec<String> {
-        self.recent_cache_misses.iter().cloned().collect()
+        self.recent_cache_misses.borrow().iter().cloned().collect()
     }
 
     pub fn recent_sample_misses(&self) -> Vec<String> {
-        self.recent_sample_misses.iter().cloned().collect()
+        self.recent_sample_misses.borrow().iter().cloned().collect()
     }
 
     // ── MIDI input ────────────────────────────────────────────────────────────
 
     /// Process a MIDI note-on event.
+    /// Note-on with a per-trigger articulation override (percussion routing).
+    /// `articulation` fires only the matching articulation's zones for this
+    /// hit, ignoring key — letting one shared drum pack serve many routed
+    /// notes. `None` behaves like [`note_on`](Self::note_on).
+    pub fn note_on_articulated(&mut self, note: u8, velocity: u8, articulation: Option<&str>) {
+        let prev = self.trigger_articulation.take();
+        self.trigger_articulation = articulation
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        self.note_on(note, velocity);
+        self.trigger_articulation = prev;
+    }
+
     pub fn note_on(&mut self, note: u8, velocity: u8) {
         if velocity == 0 {
             self.note_off(note);
@@ -542,11 +706,10 @@ impl SampleEngine {
         self.held_notes.insert(note, velocity);
         self.deferred_note_off_velocities.remove(&note);
 
-        let artic_id = self.articulation.clone();
         let artic_kind = self
             .patch
             .spec
-            .articulation(&artic_id)
+            .articulation(&self.articulation)
             .map(|a| a.kind.clone());
 
         match artic_kind {
@@ -571,7 +734,7 @@ impl SampleEngine {
             }
             None => {
                 tracing::warn!(
-                    artic = %artic_id,
+                    artic = %self.articulation,
                     "note_on: unknown articulation — skipping"
                 );
             }
@@ -645,7 +808,7 @@ impl SampleEngine {
         let mut by_mic: std::collections::BTreeMap<String, Vec<usize>> =
             std::collections::BTreeMap::new();
         for (i, z) in self.patch.spec.zones.iter().enumerate() {
-            if z.contains(note, velocity) && zone_trigger_matches(z, trigger) {
+            if self.zone_selected(z, note, velocity, trigger) {
                 by_mic.entry(z.mic.clone()).or_default().push(i);
             }
         }
@@ -695,7 +858,8 @@ impl SampleEngine {
     ) {
         if by_mic.is_empty() {
             if record_empty_miss {
-                self.sample_misses = self.sample_misses.saturating_add(1);
+                self.sample_misses
+                    .set(self.sample_misses.get().saturating_add(1));
                 self.record_sample_miss(format!(
                     "zone note={} velocity={velocity}",
                     event_note
@@ -709,8 +873,16 @@ impl SampleEngine {
 
         let rr_idx = self.zone_rr_counter;
         self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
-        let all_indices = by_mic.values().flatten().copied().collect::<Vec<_>>();
-        let rr_key = format!("{trigger:?}:{event_note:?}:{velocity}");
+        // Reuse scratch buffers across note-ons: `mem::take` swaps in an empty
+        // Vec (no allocation) and we restore the grown buffer afterwards, so
+        // these allocate only on the first few note-ons, never steady-state.
+        let mut all_indices = std::mem::take(&mut self.zone_indices_scratch);
+        all_indices.clear();
+        all_indices.extend(by_mic.values().flatten().copied());
+        // Packed key: trigger discriminant | note (+1, 0 = None) | velocity.
+        let rr_key = ((trigger as u8 as u64) << 16)
+            | ((event_note.map(|n| n as u64 + 1).unwrap_or(0)) << 8)
+            | velocity as u64;
         let last_slot = self.zone_rr_last_slots.get(&rr_key).copied();
         let selected_rr_slot = select_zone_rr_slot(
             &self.patch.spec.zones,
@@ -720,8 +892,10 @@ impl SampleEngine {
             &mut self.zone_rr_random_state,
         );
         self.zone_rr_last_slots.insert(rr_key, selected_rr_slot);
+        self.zone_indices_scratch = all_indices;
 
-        let mut choked_groups: Vec<u64> = Vec::new();
+        let mut choked_groups = std::mem::take(&mut self.zone_choked_scratch);
+        choked_groups.clear();
         for indices in by_mic.values() {
             let z = &self.patch.spec.zones
                 [select_zone_rr_index_by_slot(&self.patch.spec.zones, indices, selected_rr_slot)];
@@ -732,12 +906,21 @@ impl SampleEngine {
                 push_unique_u64(&mut choked_groups, stable_group_hash(&z.choke_group));
             }
         }
-        for group in choked_groups {
+        // Engine-wide choke: silence the group when this hit is a choking one
+        // (mono for hi-hats; only the "Choke" articulation for cymbals).
+        if let Some(group) = self.engine_choke_group {
+            if self.should_engine_choke() {
+                push_unique_u64(&mut choked_groups, group);
+            }
+        }
+        for &group in &choked_groups {
             self.voices
                 .silence_choke_group(group, self.legato_fade_frames);
         }
+        self.zone_choked_scratch = choked_groups;
 
-        let mut capped_groups: Vec<(u64, usize)> = Vec::new();
+        let mut capped_groups = std::mem::take(&mut self.zone_capped_scratch);
+        capped_groups.clear();
         for indices in by_mic.values() {
             let z = &self.patch.spec.zones
                 [select_zone_rr_index_by_slot(&self.patch.spec.zones, indices, selected_rr_slot)];
@@ -747,36 +930,51 @@ impl SampleEngine {
                 }
             }
         }
-        for (group, max_voices) in capped_groups {
+        for &(group, max_voices) in &capped_groups {
             if self.voices.active_choke_group_count(group) >= max_voices {
                 self.voices
                     .silence_choke_group(group, self.legato_fade_frames);
             }
         }
+        self.zone_capped_scratch = capped_groups;
 
         for (mic_id, indices) in by_mic {
             let pick =
                 select_zone_rr_index_by_slot(&self.patch.spec.zones, &indices, selected_rr_slot);
             let z = &self.patch.spec.zones[pick];
-            let choke_group = zone_choke_group(z);
+            // Tag the new voice into the engine-wide choke group (if any) so
+            // the next hit can silence it; an explicit zone choke wins.
+            let choke_group = zone_choke_group(z).or(self.engine_choke_group);
             let path = self.patch.zone_paths[pick].clone();
             let Some(data) = self.cache.get_loaded(&path) else {
-                self.cache_misses = self.cache_misses.saturating_add(1);
+                self.cache_misses
+                    .set(self.cache_misses.get().saturating_add(1));
                 self.record_cache_miss(&path);
                 tracing::trace!("zone sample not yet loaded: {}", path.display());
                 continue;
             };
 
             let note = event_note.unwrap_or(z.root_key);
-            let semitones = note as f64 - z.root_key as f64;
+            // Percussion (and articulation-pinned) engines play at natural
+            // pitch — the routed note is a trigger selector, not a transpose.
+            // Without this a drum routed to any note other than its zone key
+            // would detune (e.g. a tom on note 45 vs root 50 = -5 semitones).
+            let semitones = if self.percussion || self.pinned_articulation.is_some() {
+                0.0
+            } else {
+                note as f64 - z.root_key as f64
+            };
             let total_cents = semitones * 100.0 + z.tune_cents as f64;
             let rate = 2.0f64.powf(total_cents / 1200.0);
             let gain = 10.0f32.powf(z.gain_db / 20.0);
             let mic_index = self.mic_index_for(&mic_id);
 
+            // Percussion plays one-shot: the sample rings to its natural end
+            // and note-off never cuts it (a drum is struck, not held). Pitched
+            // samplers keep held/zoned semantics unless the zone says one-shot.
             let voice_kind = if trigger == ZoneTrigger::Release {
                 VoiceKind::Release
-            } else if zone_is_one_shot(z) {
+            } else if zone_is_one_shot(z) || self.percussion {
                 VoiceKind::Short
             } else {
                 VoiceKind::Zoned
@@ -843,7 +1041,7 @@ impl SampleEngine {
                 // CC59: round-robin reset (v1.7). Value is the 0-based starting
                 // index. Resets all RR counters so the next short-note passage
                 // plays back the same RR sequence every time.
-                self.rr.reset_to(value as usize);
+                self.rr.borrow_mut().reset_to(value as usize);
                 self.zone_rr_counter = value as usize;
                 self.zone_rr_last_slots.clear();
             }
@@ -864,7 +1062,7 @@ impl SampleEngine {
                     if self.patch.is_zoned() {
                         self.trigger_event_zones(ZoneTrigger::PedalDown, value);
                     }
-                    if let Some(pedal_id) = self.find_pedal_pair(&self.articulation.clone()) {
+                    if let Some(pedal_id) = self.find_pedal_pair(&self.articulation) {
                         self.no_pedal_articulation = Some(self.articulation.clone());
                         self.articulation = pedal_id;
                         // Mechanical pedal-down click — one-shot ambience layer
@@ -1034,24 +1232,24 @@ impl SampleEngine {
         let nv_scale = 1.0 - vib_blend;
         let vb_scale = vib_blend;
 
-        let artic = self.articulation.clone();
-        let vib_artic = self.find_vibrato_pair_id(&artic);
-        let section = self.section.clone();
-        let mic = self.mic.clone();
+        // `make_voice` and the layer/vibrato helpers are `&self`, so the
+        // current selection (`articulation`/`section`/`mic`) is passed by
+        // reference directly — no per-note `String` clones.
+        let vib_artic = self.find_vibrato_pair_id(&self.articulation);
         let release_frames = self.release_frames;
 
         // Compute CC1 layers separately for each articulation so that
         // Vibsus (4 dyns: ppp/p/mf/ff) and Nonvib (3 dyns: p/mf/ff) each
         // use their own crossfade map. Without this, Nonvib gets asked for
         // "ppp" samples that don't exist at very low CC1 values.
-        let (nv_lo, nv_hi, nv_cc1_blend) = self.layers_for_artic(&artic);
+        let (nv_lo, nv_hi, nv_cc1_blend) = self.layers_for_artic(&self.articulation);
         let nv_lo_gain = nv_scale * (1.0 - nv_cc1_blend);
         let nv_hi_gain = nv_scale * nv_cc1_blend;
 
         if let Some(v) = self.make_voice(
-            &artic,
-            &section,
-            &mic,
+            &self.articulation,
+            &self.section,
+            &self.mic,
             &nv_lo,
             note,
             "",
@@ -1063,9 +1261,9 @@ impl SampleEngine {
         }
         if nv_hi != nv_lo {
             if let Some(v) = self.make_voice(
-                &artic,
-                &section,
-                &mic,
+                &self.articulation,
+                &self.section,
+                &self.mic,
                 &nv_hi,
                 note,
                 "",
@@ -1079,14 +1277,14 @@ impl SampleEngine {
 
         // Vibrato voices — only if a vibrato-pair articulation exists.
         if let Some(vib_id) = vib_artic {
-            let (vb_lo, vb_hi, vb_cc1_blend) = self.layers_for_artic(&vib_id.clone());
+            let (vb_lo, vb_hi, vb_cc1_blend) = self.layers_for_artic(&vib_id);
             let vb_lo_gain = vb_scale * (1.0 - vb_cc1_blend);
             let vb_hi_gain = vb_scale * vb_cc1_blend;
 
             if let Some(v) = self.make_voice(
                 &vib_id,
-                &section,
-                &mic,
+                &self.section,
+                &self.mic,
                 &vb_lo,
                 note,
                 "",
@@ -1099,8 +1297,8 @@ impl SampleEngine {
             if vb_hi != vb_lo {
                 if let Some(v) = self.make_voice(
                     &vib_id,
-                    &section,
-                    &mic,
+                    &self.section,
+                    &self.mic,
                     &vb_hi,
                     note,
                     "",
@@ -1117,14 +1315,15 @@ impl SampleEngine {
     fn trigger_short(&mut self, note: u8, velocity: u8) {
         // Pick dynamic layer based on velocity and spec short_note_cc1_map.
         let dynamic = self.short_note_dynamic(velocity);
-        let artic = self.articulation.clone();
-        let section = self.section.clone();
-        let mic = self.mic.clone();
-        let artic_kind = self.patch.spec.articulation(&artic).map(|a| a.kind.clone());
+        let artic_kind = self
+            .patch
+            .spec
+            .articulation(&self.articulation)
+            .map(|a| a.kind.clone());
         let has_release_artic = self
             .patch
             .spec
-            .articulation(&artic)
+            .articulation(&self.articulation)
             .and_then(|a| a.release_artic.as_ref())
             .is_some();
         // Voice kind + release length:
@@ -1152,7 +1351,7 @@ impl SampleEngine {
         let n_dyn = self
             .patch
             .spec
-            .articulation(&artic)
+            .articulation(&self.articulation)
             .map(|a| a.dynamics.len())
             .unwrap_or(0);
         let gain = if n_dyn > 1 {
@@ -1161,9 +1360,9 @@ impl SampleEngine {
             velocity_gain(velocity)
         };
         if let Some(v) = self.make_voice(
-            &artic,
-            &section,
-            &mic,
+            &self.articulation,
+            &self.section,
+            &self.mic,
             &dynamic,
             note,
             "",
@@ -1180,7 +1379,7 @@ impl SampleEngine {
             // non-Release OneShot articulation in the spec and use the
             // first that resolves a sample for this note. Without this
             // the user hears only the release-tail click on those notes.
-            let primary = artic.clone();
+            let primary = self.articulation.clone();
             let alt_ids: Vec<String> = self
                 .patch
                 .spec
@@ -1198,8 +1397,8 @@ impl SampleEngine {
                 let alt_dyn = self.dynamic_for_artic(&alt_id, velocity);
                 if let Some(v) = self.make_voice(
                     &alt_id,
-                    &section,
-                    &mic,
+                    &self.section,
+                    &self.mic,
                     &alt_dyn,
                     note,
                     "",
@@ -1220,15 +1419,13 @@ impl SampleEngine {
         let Some(rz_id) = self.find_legato_artic_id(true) else {
             return;
         };
-        let section = self.section.clone();
-        let mic = self.mic.clone();
         let (lo_dyn, _, _) = self.current_layers_owned();
         let release_frames = self.release_frames;
 
         if let Some(v) = self.make_voice(
             &rz_id,
-            &section,
-            &mic,
+            &self.section,
+            &self.mic,
             &lo_dyn,
             note,
             "",
@@ -1296,8 +1493,6 @@ impl SampleEngine {
             return;
         };
 
-        let section = self.section.clone();
-        let mic = self.mic.clone();
         let (lo_dyn, _, _) = self.current_layers_owned();
         let release_frames = self.release_frames;
 
@@ -1305,8 +1500,8 @@ impl SampleEngine {
         let v = self
             .make_voice(
                 &leg_id,
-                &section,
-                &mic,
+                &self.section,
+                &self.mic,
                 &lo_dyn,
                 to_note,
                 direction,
@@ -1317,8 +1512,8 @@ impl SampleEngine {
             .or_else(|| {
                 self.make_voice(
                     &leg_id,
-                    &section,
-                    &mic,
+                    &self.section,
+                    &self.mic,
                     &lo_dyn,
                     to_note,
                     "",
@@ -1406,16 +1601,14 @@ impl SampleEngine {
         let Some(mech_id) = id else {
             return;
         };
-        let section = self.section.clone();
-        let mic = self.mic.clone();
         let dyn_id = self.dynamic_for_artic(&mech_id, 100);
         let release_frames = self.release_frames;
         // Note doesn't matter — these patches map a fixed sample to any
         // input note, so we pick a stable middle-C anchor.
         if let Some(v) = self.make_voice(
             &mech_id,
-            &section,
-            &mic,
+            &self.section,
+            &self.mic,
             &dyn_id,
             60,
             "",
@@ -1432,15 +1625,13 @@ impl SampleEngine {
         let release_artic = self
             .patch
             .spec
-            .articulation(&self.articulation.clone())
+            .articulation(&self.articulation)
             .and_then(|a| a.release_artic.clone());
 
         if let Some(rel_id) = release_artic
             .as_ref()
             .filter(|_| velocity >= RELEASE_SAMPLE_VELOCITY_MIN)
         {
-            let section = self.section.clone();
-            let mic = self.mic.clone();
             // For release-trail dynamics, MIDI controllers commonly send
             // release-velocity 64 as a "no info" default. If we got that
             // exact value, fall through to the body's note-on velocity
@@ -1465,8 +1656,8 @@ impl SampleEngine {
             if self.body_voiced.remove(&note) {
                 if let Some(v) = self.make_voice(
                     &rel_id,
-                    &section,
-                    &mic,
+                    &self.section,
+                    &self.mic,
                     &rel_dyn,
                     note,
                     "",
@@ -1517,10 +1708,9 @@ impl SampleEngine {
 
         // Use per-articulation layer sets so NV and Vib voices each use
         // their own dynamics count (see trigger_sustain for full rationale).
-        let artic = self.articulation.clone();
-        let vib_artic = self.find_vibrato_pair_id(&artic);
+        let vib_artic = self.find_vibrato_pair_id(&self.articulation);
 
-        let (_, _, nv_blend) = self.layers_for_artic(&artic);
+        let (_, _, nv_blend) = self.layers_for_artic(&self.articulation);
         let (_, _, vb_blend) = vib_artic
             .as_deref()
             .map(|id| self.layers_for_artic(id))
@@ -1657,7 +1847,7 @@ impl SampleEngine {
     /// be found or loaded.
     #[allow(clippy::too_many_arguments)]
     fn make_voice(
-        &mut self,
+        &self,
         artic_id: &str,
         section: &str,
         mic: &str,
@@ -1675,7 +1865,10 @@ impl SampleEngine {
             .map(|a| a.rr)
             .unwrap_or(1);
 
-        let rr_idx = self.rr.next(section, artic_id, dynamic, max_rr);
+        let rr_idx = self
+            .rr
+            .borrow_mut()
+            .next(section, artic_id, dynamic, max_rr);
 
         let (path, sampled_note) = match self
             .patch
@@ -1683,7 +1876,8 @@ impl SampleEngine {
         {
             Some(resolved) => resolved,
             None => {
-                self.sample_misses = self.sample_misses.saturating_add(1);
+                self.sample_misses
+                    .set(self.sample_misses.get().saturating_add(1));
                 self.record_sample_miss(format!(
                     "section={section} artic={artic_id} mic={mic} dynamic={dynamic} note={note} direction={direction:?} rr={rr_idx}"
                 ));
@@ -1703,7 +1897,8 @@ impl SampleEngine {
 
         // Audio-thread fast path: skip silently when not yet preloaded.
         let Some(data) = self.cache.get_loaded(&path) else {
-            self.cache_misses = self.cache_misses.saturating_add(1);
+            self.cache_misses
+                .set(self.cache_misses.get().saturating_add(1));
             self.record_cache_miss(&path);
             tracing::trace!("sample not yet loaded: {}", path.display());
             return None;
@@ -1758,16 +1953,20 @@ impl SampleEngine {
         Self::cc1_blend(layers, self.cc1)
     }
 
-    fn record_cache_miss(&mut self, path: &Path) {
+    fn record_cache_miss(&self, path: &Path) {
         push_recent(
-            &mut self.recent_cache_misses,
+            &mut self.recent_cache_misses.borrow_mut(),
             path.display().to_string(),
             RECENT_MISS_LIMIT,
         );
     }
 
-    fn record_sample_miss(&mut self, label: String) {
-        push_recent(&mut self.recent_sample_misses, label, RECENT_MISS_LIMIT);
+    fn record_sample_miss(&self, label: String) {
+        push_recent(
+            &mut self.recent_sample_misses.borrow_mut(),
+            label,
+            RECENT_MISS_LIMIT,
+        );
     }
 
     /// Returns `(lo_label, hi_label, hi_blend)` for the current CC1 value,
@@ -2131,6 +2330,22 @@ fn zone_aftertouch_trigger_crossed(
     }
     let range = trigger_value_range(zone);
     !range.contains(&old_value) && range.contains(&value)
+}
+
+/// Whether a library is a percussion / drum-kit (plays at natural pitch).
+/// Driven by the retag-derived `category` / `instrument` so no per-pack flag
+/// is needed; sampled instruments (default empty/melodic) stay pitched.
+fn spec_is_percussion(spec: &crate::spec::LibrarySpec) -> bool {
+    let cat = spec.category.to_ascii_lowercase();
+    if cat.contains("drum") || cat.contains("percussion") {
+        return true;
+    }
+    let inst = spec.instrument.to_ascii_lowercase();
+    const PERC: &[&str] = &[
+        "kick", "snare", "tom", "hat", "ride", "crash", "china", "splash", "cymbal", "clap",
+        "cowbell", "perc", "drum",
+    ];
+    PERC.iter().any(|p| inst.contains(p))
 }
 
 fn zone_trigger_matches(zone: &crate::spec::ZoneSpec, trigger: ZoneTrigger) -> bool {
@@ -2601,5 +2816,165 @@ mod tests {
         assert_eq!(engine.articulation(), "SordNonvib");
         engine.set_con_sordino(false);
         assert_eq!(engine.articulation(), "Nonvib");
+    }
+
+    fn engine_from_styx(styx: &str) -> SampleEngine {
+        let spec = crate::LibrarySpec::from_styx(styx).expect("parse styx");
+        let patch = crate::PlayerPatch::from_spec(spec);
+        SampleEngine::new(patch, 48_000, "", "")
+    }
+
+    #[test]
+    fn percussion_single_key_fires_on_any_note() {
+        // Kick-style pack: drum-kit, one articulation on a single key.
+        let eng = engine_from_styx(
+            "name \"k\"\n\
+             category \"drum-kit\"\n\
+             zones (\n\
+               {\n\
+                 file \"a.wav\"\n\
+                 key_min 36\n\
+                 key_max 36\n\
+                 root_key 36\n\
+                 vel_min 0\n\
+                 vel_max 127\n\
+                 articulation \"Hit\"\n\
+               }\n\
+             )\n",
+        );
+        assert!(eng.percussion && eng.single_attack_key);
+        let z = &eng.patch().spec.zones[0];
+        // Plays on the routed note even though it's off the zone's key.
+        assert!(eng.zone_selected(z, 35, 100, ZoneTrigger::Attack));
+        assert!(eng.zone_selected(z, 48, 100, ZoneTrigger::Attack));
+        // Velocity still gates.
+        assert!(!eng.zone_selected(
+            &crate::spec::ZoneSpec {
+                vel_min: 64,
+                vel_max: 127,
+                ..z.clone()
+            },
+            35,
+            10,
+            ZoneTrigger::Attack
+        ));
+    }
+
+    #[test]
+    fn pinned_articulation_selects_by_artic_ignoring_key() {
+        // Hats-style pack: multiple articulations on different keys.
+        let mut eng = engine_from_styx(
+            "name \"h\"\n\
+             category \"drum-kit\"\n\
+             zones (\n\
+               {\n\
+                 file \"c.wav\"\n\
+                 key_min 42\n\
+                 key_max 42\n\
+                 root_key 42\n\
+                 vel_min 0\n\
+                 vel_max 127\n\
+                 articulation \"Closed Tip\"\n\
+               }\n\
+               {\n\
+                 file \"o.wav\"\n\
+                 key_min 46\n\
+                 key_max 46\n\
+                 root_key 46\n\
+                 vel_min 0\n\
+                 vel_max 127\n\
+                 articulation \"Open 1\"\n\
+               }\n\
+             )\n",
+        );
+        assert!(eng.percussion && !eng.single_attack_key);
+        let closed = eng.patch().spec.zones[0].clone();
+        let open = eng.patch().spec.zones[1].clone();
+
+        // No pin: multi-key drum is addressed by its native keys.
+        assert!(eng.zone_selected(&closed, 42, 100, ZoneTrigger::Attack));
+        assert!(!eng.zone_selected(&closed, 49, 100, ZoneTrigger::Attack));
+
+        // Pin "Open 1": fires Open on any note, never Closed.
+        eng.pin_articulation(Some("open 1".to_string())); // case-insensitive
+        assert!(eng.zone_selected(&open, 53, 100, ZoneTrigger::Attack));
+        assert!(eng.zone_selected(&open, 99, 100, ZoneTrigger::Attack));
+        assert!(!eng.zone_selected(&closed, 53, 100, ZoneTrigger::Attack));
+
+        // Per-trigger (per-route) articulation takes precedence over the pin,
+        // so one shared engine can serve many routed notes; cleared after.
+        eng.trigger_articulation = Some("Closed Tip".to_string());
+        assert!(eng.zone_selected(&closed, 49, 100, ZoneTrigger::Attack));
+        assert!(!eng.zone_selected(&open, 49, 100, ZoneTrigger::Attack));
+        eng.trigger_articulation = None;
+        // Falls back to the pin once the transient clears.
+        assert!(eng.zone_selected(&open, 49, 100, ZoneTrigger::Attack));
+
+        // note_on_articulated must leave no residual state.
+        eng.note_on_articulated(49, 100, Some("Closed Tip"));
+        assert!(eng.trigger_articulation.is_none());
+    }
+
+    #[test]
+    fn choke_group_setter_and_percussion_one_shot() {
+        let mut eng = engine_from_styx(
+            "name \"h\"\n\
+             category \"drum-kit\"\n\
+             zones (\n\
+               {\n\
+                 file \"c.wav\"\n\
+                 key_min 42\n\
+                 key_max 42\n\
+                 root_key 42\n\
+                 vel_min 0\n\
+                 vel_max 127\n\
+                 articulation \"Closed Tip\"\n\
+               }\n\
+             )\n",
+        );
+        // Percussion → voices spawn one-shot (Short) and ignore note-off.
+        assert!(eng.percussion);
+        // Mono choke (hats): group set, no choke_on → every hit chokes.
+        assert!(eng.engine_choke_group.is_none());
+        eng.set_choke_group(Some("hats"), &[]);
+        assert_eq!(eng.engine_choke_group, Some(stable_group_hash("hats")));
+        assert!(eng.should_engine_choke(), "mono: any hit chokes");
+        eng.set_choke_group(Some(""), &[]); // empty clears
+        assert!(eng.engine_choke_group.is_none());
+        assert!(!eng.should_engine_choke());
+
+        // Selective choke (cymbals): only the "Choke" articulation chokes;
+        // crashes ring and overlap.
+        eng.set_choke_group(Some("ride"), &["Choke".to_string()]);
+        eng.trigger_articulation = Some("Crash".to_string());
+        assert!(!eng.should_engine_choke(), "crash must not choke the ring");
+        eng.trigger_articulation = Some("choke".to_string()); // case-insensitive
+        assert!(
+            eng.should_engine_choke(),
+            "choke articulation stops the ring"
+        );
+    }
+
+    #[test]
+    fn pitched_sampler_still_gates_on_key() {
+        // No drum category → pitched: key range gates, no collapse.
+        let eng = engine_from_styx(
+            "name \"p\"\n\
+             instrument \"piano\"\n\
+             zones (\n\
+               {\n\
+                 file \"p.wav\"\n\
+                 key_min 60\n\
+                 key_max 72\n\
+                 root_key 60\n\
+                 vel_min 0\n\
+                 vel_max 127\n\
+               }\n\
+             )\n",
+        );
+        assert!(!eng.percussion);
+        let z = &eng.patch().spec.zones[0];
+        assert!(eng.zone_selected(z, 65, 100, ZoneTrigger::Attack));
+        assert!(!eng.zone_selected(z, 40, 100, ZoneTrigger::Attack));
     }
 }

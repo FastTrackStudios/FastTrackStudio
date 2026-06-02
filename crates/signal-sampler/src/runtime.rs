@@ -225,6 +225,40 @@ impl EngineInstance {
         }
     }
 
+    /// Mic ids in `mic_scratches` order (pack mic positions). A single
+    /// implicit `"default"` mic when the pack declares none.
+    pub fn mic_ids(&self) -> Vec<String> {
+        let mics = self.block.mics();
+        if mics.is_empty() {
+            vec!["default".to_string()]
+        } else {
+            mics.to_vec()
+        }
+    }
+
+    /// Accumulate this engine's raw per-mic scratch buffers (interleaved
+    /// stereo) into `buses`, keyed by mic id. Call after [`render`](Self::render).
+    /// Same mic id across engines (e.g. "Overhead", "Room Close") sums into one
+    /// shared bus — the drum mic taxonomy. Pre-layer gain (the bus applies its
+    /// own); skips a muted engine (its scratches are already zero).
+    pub fn accumulate_mic_buses(
+        &self,
+        buses: &mut std::collections::BTreeMap<String, Vec<f32>>,
+        block_frames: usize,
+    ) {
+        let ids = self.mic_ids();
+        for (i, scratch) in self.mic_scratches.iter().enumerate() {
+            let id = ids.get(i).cloned().unwrap_or_else(|| format!("mic{i}"));
+            let buf = buses
+                .entry(id)
+                .or_insert_with(|| vec![0.0; block_frames * 2]);
+            let n = buf.len().min(scratch.len());
+            for k in 0..n {
+                buf[k] += scratch[k];
+            }
+        }
+    }
+
     /// Get the buffer of a port by id. Returns None if the port doesn't
     /// exist on this engine.
     pub fn port_buffer(&self, port_id: &str) -> Option<&[f32]> {
@@ -436,8 +470,10 @@ pub struct PresetRuntime {
     /// Topological order of modules (indices into `modules`).
     pub module_order: Vec<usize>,
     pub edges: Vec<ResolvedEdge>,
-    /// Per-MIDI-note → engine indices to dispatch to.
-    pub note_routing: HashMap<u8, Vec<usize>>,
+    /// Per-MIDI-note → `(engine index, optional articulation)` to dispatch to.
+    /// The articulation, when present, fires that articulation on the target
+    /// engine ignoring key (percussion routing); `None` = key-based selection.
+    pub note_routing: HashMap<u8, Vec<(usize, Option<String>)>>,
 }
 
 impl PresetRuntime {
@@ -463,6 +499,16 @@ impl PresetRuntime {
         for er in &preset.engines {
             if let Some(idx) = engine_id_to_idx.get(&er.id) {
                 engine_instances[*idx].muted = er.mute;
+                if !er.articulation.is_empty() {
+                    engine_instances[*idx]
+                        .block
+                        .pin_articulation(Some(er.articulation.clone()));
+                }
+                if !er.choke_group.is_empty() {
+                    engine_instances[*idx]
+                        .block
+                        .set_choke_group(Some(&er.choke_group), &er.choke_on);
+                }
             }
         }
 
@@ -524,12 +570,17 @@ impl PresetRuntime {
         let module_order = topo_sort_modules(&edges, module_instances.len())?;
 
         // Note routing — resolve target ids to engine indices.
-        let mut note_routing: HashMap<u8, Vec<usize>> = HashMap::new();
+        let mut note_routing: HashMap<u8, Vec<(usize, Option<String>)>> = HashMap::new();
         for nr in &preset.note_routing {
-            let mut targets: Vec<usize> = Vec::new();
+            let artic = if nr.articulation.is_empty() {
+                None
+            } else {
+                Some(nr.articulation.clone())
+            };
+            let mut targets: Vec<(usize, Option<String>)> = Vec::new();
             for t in &nr.targets {
                 if let Some(idx) = engine_id_to_idx.get(t) {
-                    targets.push(*idx);
+                    targets.push((*idx, artic.clone()));
                 }
             }
             if !targets.is_empty() {
@@ -547,6 +598,27 @@ impl PresetRuntime {
             edges,
             note_routing,
         })
+    }
+
+    /// Render the preset into per-mic **buses** (interleaved stereo each),
+    /// keyed by mic id. Every engine is rendered, then its per-mic scratch
+    /// buffers are summed into the matching bus — so all pieces' "Overhead"
+    /// land on one Overhead bus, all "Room Close" on one Room Close bus, etc.
+    /// (piece-specific close-mic ids stay separate). The host (e.g. the daw
+    /// Sampler Block) maps these buses onto track channels. `block_frames` =
+    /// frames per channel.
+    pub fn render_buses(
+        &mut self,
+        block_frames: usize,
+    ) -> std::collections::BTreeMap<String, Vec<f32>> {
+        for eng in &mut self.engines {
+            eng.render(block_frames);
+        }
+        let mut buses = std::collections::BTreeMap::new();
+        for eng in &self.engines {
+            eng.accumulate_mic_buses(&mut buses, block_frames);
+        }
+        buses
     }
 
     /// Render the entire preset graph into `master` (interleaved stereo,

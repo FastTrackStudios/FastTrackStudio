@@ -8,7 +8,7 @@
 //! The fts-macros plugin reads mapping config from its own track's P_EXT on each
 //! timer tick — no global ExtState IPC or acknowledgment polling needed.
 
-use daw::{FxHandle, TrackHandle};
+use daw::rpc::{FxHandle, TrackHandle};
 
 use crate::daw_block_ops::LoadBlockResult;
 
@@ -132,14 +132,18 @@ pub async fn bridge_macros(
             .map_err(|e| format!("Could not add FTS Macros plugin: {e}"))?,
     };
 
-    // Store mapping config in track P_EXT — the plugin reads this on its timer tick.
-    track
-        .set_ext_state(EXT_STATE_SECTION, "mapping_config", &mapping_json)
-        .await
-        .map_err(|e| format!("Failed to set track P_EXT mapping config: {e}"))?;
-
+    // TODO(daw-track-pext): daw main removed `TrackHandle::set_ext_state` and
+    // exposes no per-track P_EXT *write* (only global `Project::ext_state()`,
+    // which is REAPER-wide and breaks the per-track contract the fts-macros
+    // plugin relies on). The low-level read helper still exists
+    // (`daw-reaper sync_api::track_get_ext_state`). Until daw re-exposes a
+    // per-track P_EXT write, the mapping config is NOT delivered to the plugin,
+    // so live macro mapping is a no-op at runtime.
+    let _ = (track, EXT_STATE_SECTION);
     eprintln!(
-        "[signal] macro bridge: stored mapping config in track P_EXT ({} chars)",
+        "[signal] macro bridge: WARNING — track P_EXT write unavailable on daw \
+         main; mapping config ({} chars) NOT stored. Live macro mapping disabled \
+         until daw restores per-track P_EXT write (see TODO daw-track-pext).",
         mapping_json.len()
     );
 

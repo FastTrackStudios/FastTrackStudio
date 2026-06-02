@@ -300,9 +300,6 @@ impl Plugin for FtsSignalController {
             tracing::info!("{PLUGIN_NAME}: DAW API initialized, timer registered");
         }
 
-        // Spawn background SHM bridge
-        crate::shm_bridge::spawn_bridge(self.ui_state.clone());
-
         tracing::info!("{PLUGIN_NAME}: initialized");
         true
     }

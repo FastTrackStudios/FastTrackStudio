@@ -15,7 +15,7 @@ use crate::{Database, DatabaseConnection, StorageError, StorageResult};
 // region: --- Trait
 
 #[async_trait::async_trait]
-pub trait BlockRepo: Send + Sync {
+pub trait BlockRepo: Send + Sync + 'static {
     async fn load_block_state(&self, block_type: BlockType) -> StorageResult<Option<Block>>;
     async fn save_block_state(&self, block_type: BlockType, block: Block) -> StorageResult<()>;
     async fn list_block_collections(&self, block_type: BlockType) -> StorageResult<Vec<Preset>>;

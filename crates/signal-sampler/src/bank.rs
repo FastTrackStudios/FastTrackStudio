@@ -905,7 +905,7 @@ impl SamplerBank {
         if let Some(preset) = self.presets.get_mut(id) {
             if let Some(targets) = preset.note_routing.get(&note).cloned() {
                 let mut out = PreloadStats::default();
-                for ti in targets {
+                for (ti, _artic) in targets {
                     let s = preset.engines[ti].block.warm_note_samples(note, velocity);
                     out.loaded += s.loaded;
                     out.failed += s.failed;
@@ -968,8 +968,10 @@ impl SamplerBank {
         // id may itself be a preset prefix.
         if let Some(preset) = self.presets.get_mut(id) {
             if let Some(targets) = preset.note_routing.get(&note).cloned() {
-                for ti in targets {
-                    preset.engines[ti].block.note_on(note, velocity);
+                for (ti, artic) in targets {
+                    preset.engines[ti]
+                        .block
+                        .note_on_articulated(note, velocity, artic.as_deref());
                 }
                 return;
             }
@@ -993,7 +995,7 @@ impl SamplerBank {
         }
         if let Some(preset) = self.presets.get_mut(id) {
             if let Some(targets) = preset.note_routing.get(&note).cloned() {
-                for ti in targets {
+                for (ti, _artic) in targets {
                     preset.engines[ti].block.note_off(note);
                 }
                 return;
@@ -1017,7 +1019,7 @@ impl SamplerBank {
         }
         if let Some(preset) = self.presets.get_mut(id) {
             if let Some(targets) = preset.note_routing.get(&note).cloned() {
-                for ti in targets {
+                for (ti, _artic) in targets {
                     preset.engines[ti]
                         .block
                         .note_off_with_velocity(note, velocity);
@@ -1122,6 +1124,18 @@ impl SamplerBank {
         for preset in self.presets.values_mut() {
             preset.render(output);
         }
+    }
+
+    /// Render a loaded preset into per-mic buses (keyed by mic id). See
+    /// [`PresetRuntime::render_buses`]. `None` if no preset under `prefix`.
+    pub fn render_preset_buses(
+        &mut self,
+        prefix: &str,
+        block_frames: usize,
+    ) -> Option<std::collections::BTreeMap<String, Vec<f32>>> {
+        self.presets
+            .get_mut(prefix)
+            .map(|p| p.render_buses(block_frames))
     }
 
     pub fn len(&self) -> usize {

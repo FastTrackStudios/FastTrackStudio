@@ -15,7 +15,7 @@ use crate::{DatabaseConnection, StorageError, StorageResult};
 
 /// Data-access trait for Layer collections.
 #[async_trait::async_trait]
-pub trait LayerRepo: Send + Sync {
+pub trait LayerRepo: Send + Sync + 'static {
     async fn list_layers(&self) -> StorageResult<Vec<Layer>>;
     async fn load_layer(&self, id: &LayerId) -> StorageResult<Option<Layer>>;
     async fn save_layer(&self, layer: &Layer) -> StorageResult<()>;

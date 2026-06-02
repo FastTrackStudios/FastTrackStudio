@@ -12,7 +12,8 @@
 //! persists the binding to the track's `P_EXT:FTS_MACROS:mapping_config`.
 //! The signal-controller's macro_timer picks it up and starts driving the param.
 
-use daw::Daw;
+use crate::daw_compat::TrackHandleCompat;
+use daw::rpc::Daw;
 use eyre::{Result, WrapErr};
 use tracing::info;
 
@@ -50,7 +51,7 @@ struct TouchedParam {
     fx_name: String,
     param_name: String,
     param_value: f64,
-    track: daw::TrackHandle,
+    track: daw::rpc::TrackHandle,
 }
 
 async fn poll_last_touched(daw: &Daw) -> Result<TouchedParam> {
@@ -95,7 +96,7 @@ async fn poll_last_touched(daw: &Daw) -> Result<TouchedParam> {
 /// Finds or creates a mapping for (source_param, target_fx, target_param),
 /// then sets the given curve point (macro_value, param_value).
 async fn update_mapping(
-    track: &daw::TrackHandle,
+    track: &daw::rpc::TrackHandle,
     source_param: u8,
     fx_index: u32,
     param_index: u32,

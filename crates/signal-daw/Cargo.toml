@@ -1,0 +1,20 @@
+[package]
+name = "signal-daw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# daw host: the PluginInstance trait + Block registry. Direct path dep (same
+# local source the workspace [patch] points daw.git at, so it unifies). Once
+# vox-0.8 is pushed everywhere this becomes the git dep like the other daw crates.
+daw-standalone = { path = "../../../daw/crates/daw-standalone" }
+daw-proto = { path = "../../../daw/crates/daw-proto" }
+# The sampler DSP we wrap as a Block.
+signal-sampler = { workspace = true }
+eyre.workspace = true
+tracing.workspace = true

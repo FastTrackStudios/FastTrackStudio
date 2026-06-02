@@ -12,7 +12,7 @@ use crate::{DatabaseConnection, StorageError, StorageResult};
 // region: --- Trait
 
 #[async_trait::async_trait]
-pub trait RigRepo: Send + Sync {
+pub trait RigRepo: Send + Sync + 'static {
     async fn list_rigs(&self) -> StorageResult<Vec<Rig>>;
     async fn load_rig(&self, id: &RigId) -> StorageResult<Option<Rig>>;
     async fn save_rig(&self, rig: &Rig) -> StorageResult<()>;

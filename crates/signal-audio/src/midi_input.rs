@@ -31,6 +31,20 @@ impl MidiEvent {
     pub fn is_note_off(self) -> bool {
         (self.status & 0xF0) == 0x80 || ((self.status & 0xF0) == 0x90 && self.velocity == 0)
     }
+    /// Control Change (status 0xB0). For CC, data byte 1 (`note`) is the
+    /// controller number and data byte 2 (`velocity`) is its value — e.g.
+    /// CC64 is the sustain (damper) pedal.
+    pub fn is_cc(self) -> bool {
+        (self.status & 0xF0) == 0xB0
+    }
+    /// Controller number for a CC message (data byte 1).
+    pub fn controller(self) -> u8 {
+        self.note
+    }
+    /// Controller value for a CC message (data byte 2).
+    pub fn cc_value(self) -> u8 {
+        self.velocity
+    }
 }
 
 /// Holds open MIDI input connections and exposes a receiver channel.
@@ -103,5 +117,43 @@ impl MidiInput {
     /// Non-blocking drain of all pending MIDI events.
     pub fn drain(&self) -> impl Iterator<Item = MidiEvent> + '_ {
         self.rx.try_iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MidiEvent;
+
+    #[test]
+    fn classifies_sustain_pedal_cc() {
+        // CC64 (sustain pedal) down: status 0xB0, controller 64, value 127.
+        let pedal_down = MidiEvent {
+            status: 0xB0,
+            note: 64,
+            velocity: 127,
+        };
+        assert!(pedal_down.is_cc());
+        assert!(!pedal_down.is_note_on());
+        assert!(!pedal_down.is_note_off());
+        assert_eq!(pedal_down.controller(), 64);
+        assert_eq!(pedal_down.cc_value(), 127);
+
+        // CC on channel 3 is still a CC.
+        let on_ch3 = MidiEvent {
+            status: 0xB2,
+            note: 64,
+            velocity: 0,
+        };
+        assert!(on_ch3.is_cc());
+        assert_eq!(on_ch3.cc_value(), 0);
+
+        // A note-on must not be misread as a CC.
+        let note = MidiEvent {
+            status: 0x90,
+            note: 60,
+            velocity: 100,
+        };
+        assert!(!note.is_cc());
+        assert!(note.is_note_on());
     }
 }

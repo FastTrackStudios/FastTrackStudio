@@ -632,6 +632,32 @@ impl SamplerPlayer {
         Ok(())
     }
 
+    /// Offline render of a loaded **preset** into per-mic buses, keyed by mic
+    /// id (interleaved stereo each, `block_frames` frames). Sums each piece's
+    /// mics onto shared buses ("Overhead", "Room Close", …) per the drum mic
+    /// taxonomy — the daw Sampler Block maps these onto track channels for
+    /// per-mic routing. `prefix` is the preset id used at `load_preset`.
+    pub fn render_offline_buses(
+        &self,
+        prefix: &str,
+        block_frames: usize,
+    ) -> eyre::Result<std::collections::BTreeMap<String, Vec<f32>>> {
+        if self._stream.is_some() {
+            return Err(eyre::eyre!(
+                "render_offline_buses is only available on SamplerPlayer::new_offline"
+            ));
+        }
+        let mut bank = self
+            .bank
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?;
+        for event in self.events_rx.try_iter() {
+            apply_audio_event(&mut bank, event);
+        }
+        bank.render_preset_buses(prefix, block_frames)
+            .ok_or_else(|| eyre::eyre!("no preset loaded under '{prefix}'"))
+    }
+
     /// `(loaded, total)` background-preload progress for an instrument, or
     /// `(0, 0)` if not loaded. Cheap; meant for per-frame UI updates.
     pub fn preload_progress(&self, id: &str) -> (usize, usize) {

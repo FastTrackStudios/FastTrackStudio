@@ -12,7 +12,6 @@ pub mod macro_timer;
 pub mod param_queue;
 pub mod plugin;
 pub mod scene_timer;
-pub mod shm_bridge;
 
 use fts_plugin_core::prelude::*;
 

@@ -3,6 +3,7 @@ members = [
     "apps/cli",
     "apps/desktop",
     "apps/mobile",
+    "apps/native",
     "apps/tui",
     "crates/macromod",
     "crates/nam-manager",
@@ -11,6 +12,7 @@ members = [
     "crates/signal-browser",
     "crates/signal-controller",
     "crates/signal-daw-bridge",
+    "crates/signal-daw",
     "crates/signal-extension",
     "crates/fts-signal-controller",
     "crates/signal-import",
@@ -59,13 +61,18 @@ fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
 cpal = "0.17"
 
 # ── Facet reflection ─────────────────────────────────────────────────
-facet = { version = "0.44" }
-facet-styx = { version = "2.0" }
-facet-toml = { version = "0.44" }
+# Pinned to 0.46 to match the daw + vox (bearcove) stack. facet-styx 4.0
+# resolves against facet ^0.46.
+facet = { version = "0.46" }
+facet-styx = { version = "4.0" }
+facet-toml = { version = "0.46" }
 
-# ── ROAM service framework (latest main) ─────────────────────────────
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+# ── ROAM service framework (upstream bearcove) ───────────────────────
+# MUST match the exact vox rev daw pins so the graph contains a single
+# vox/facet source. Migrated bearcove 0.5 → starcommand/vox f31f104 (0.8)
+# to match the local daw/architect/input_actions path deps below.
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # ── DAW facade crate (sibling repo — single public API surface) ──────
 daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
@@ -75,8 +82,11 @@ daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git",
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
 # ── Shared infrastructure ────────────────────────────────────────────
-audio-controls = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-reaper-test = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+# NOTE: the standalone `reaper-test` crate was removed from daw main and folded
+# into the `daw` facade behind the `test-harness` feature, re-exported as
+# `daw::test` (alias `ReaperTestContext`, `#[reaper_test]` macro). Test crates
+# now enable `daw[test-harness]` and `use daw::test::*` instead.
 
 # ── Sibling repos ────────────────────────────────────────────────────
 actions-proto = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
@@ -116,7 +126,11 @@ thiserror = "2.0"
 # ── Observability ────────────────────────────────────────────────────
 tracing = { version = "0.1", features = ["std"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-moire = { version = "1.0", features = ["diagnostics"] }
+# NOTE: the `diagnostics` feature is intentionally OFF. At moire rev 7a2f1dc its
+# trace-capture ctor validates the frame-pointer chain at startup and aborts on
+# NixOS glibc ("frame pointer chain too shallow") — SIGABRT before main. daw
+# main disables it for the same reason. signal doesn't use moire diagnostics.
+moire = { version = "1.0" }
 
 # ── Utilities ────────────────────────────────────────────────────────
 eyre = "0.6"
@@ -127,16 +141,37 @@ clap = { version = "4", features = ["derive"] }
 # Uncomment the sections below to use local checkouts instead of GitHub.
 # This gives you instant rebuilds when iterating across repos.
 #
-# [patch."https://codeberg.org/FastTrackStudios/daw.git"]
-# daw = { path = "../daw/crates/daw" }
-# daw-cli = { path = "../daw/apps/daw" }
-# daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
-# audio-controls = { path = "../daw/crates/audio-controls" }
-# reaper-test = { path = "../daw/crates/reaper-test" }
-# fts-devtools = { path = "../daw/crates/fts-devtools" }
-#
-# [patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
-# actions-proto = { path = "../input_actions/crates/actions-proto" }
+# ── Local daw + deps (DEV path deps; revert once vox-0.8 is pushed everywhere) ──
+# signal pulls the full daw crate so external consumers can script it via daw's
+# vox RPC services. The git@main daw is on the old vox; use the local checkout
+# (already vox-0.8 / f31f104) + its transitive architect/input_actions checkouts.
+[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
+audio-controls = { path = "../daw/crates/audio-controls" }
+daw = { path = "../daw/crates/daw" }
+daw-audio-sync = { path = "../daw/crates/daw-audio-sync" }
+daw-cli = { path = "../daw/apps/daw" }
+daw-control = { path = "../daw/crates/daw-control" }
+daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
+daw-module = { path = "../daw/crates/daw-module" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-reaper = { path = "../daw/crates/daw-reaper" }
+daw-standalone = { path = "../daw/crates/daw-standalone" }
+daw-test-macro = { path = "../daw/crates/daw-test-macro" }
+dawfile-aaf = { path = "../daw/crates/dawfile-aaf" }
+dawfile-ableton = { path = "../daw/crates/dawfile-ableton" }
+dawfile-dawproject = { path = "../daw/crates/dawfile-dawproject" }
+dawfile-protools = { path = "../daw/crates/dawfile-protools" }
+dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
+fts-devtools = { path = "../daw/crates/fts-devtools" }
+reaper-launcher = { path = "../daw/crates/reaper-launcher" }
+
+[patch."https://git.starcommand.live/FastTrackStudios/architect.git"]
+architect = { path = "../../architect/macros/architect" }
+architect-derive = { path = "../../architect/macros/architect-derive" }
+architect-rpc-derive = { path = "../../architect/macros/architect-rpc-derive" }
+
+[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../input_actions/crates/actions-proto" }
 #
 # [patch."https://codeberg.org/FastTrackStudios/dock-dioxus.git"]
 # dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
@@ -156,66 +191,89 @@ audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
 fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }
 
 # ── nih-plug unification ────────────────────────────────────────────────
-[patch."https://codeberg.org/FastTrackStudios/nih-plug.git"]
-nih_plug = { path = "../forks/nih-plug" }
+# NOTE: the local-path patch (`nih_plug = { path = "../forks/nih-plug" }`) was
+# removed. That checkout sits on `master`, which lacks `nih_plug_dioxus` and the
+# reaper-embed-ui API additions (`rescan_param_info`, `set_normalized_value`,
+# the `reaper-embed-ui` `ParamPtr`), so it diverged from the `nih_plug` that
+# `nih_plug_dioxus` (reaper-embed-ui) links against — producing two nih_plug
+# versions in the graph. Both now resolve from the `reaper-embed-ui` branch.
+#
+# The FTS-Audiocore plugin crates (fts-plugin-core, audio-gui — path deps) pull
+# nih-plug from the github.com mirror via their own workspace, while signal uses
+# the starcommand.live origin. Same commit, different URL = two sources. Redirect
+# the github mirror onto the starcommand origin so the whole graph shares one
+# nih_plug / nih_plug_dioxus.
+# Local editable checkout of the reaper-embed-ui branch while porting
+# nih_plug_dioxus to current DioxusLabs/blitz. Both the starcommand origin and
+# the github mirror (pulled by FTS-Audiocore plugin crates) redirect here, so
+# the whole graph shares one editable nih_plug / nih_plug_dioxus.
+[patch."https://git.starcommand.live/FastTrackStudios/nih-plug.git"]
+nih_plug = { path = "../forks/nih-plug-port" }
+nih_plug_dioxus = { path = "../forks/nih-plug-port/nih_plug_dioxus" }
 
-# Redirect bearcove/vox.git transitive deps to the FTS fork (fixes noisy eprintln! debug logs).
-[patch."https://github.com/bearcove/vox.git"]
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-shm = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-macros-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-macros-parse = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-facet-cbor = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+[patch."https://github.com/FastTrackStudios/nih-plug.git"]
+nih_plug = { path = "../forks/nih-plug-port" }
+nih_plug_dioxus = { path = "../forks/nih-plug-port/nih_plug_dioxus" }
+
+# NOTE: the bearcove/vox → Codys-Wright-fork [patch] block was removed.
+# It was forcing daw's clean upstream-bearcove vox deps onto the old fork,
+# pulling facet 0.44/0.45 alongside the 0.46 stack and breaking the build.
+# All vox deps now point at upstream bearcove directly (see above), matching
+# daw main. The fork's eprintln! debug-log fix is no longer applied here.
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid type mismatches.
 [patch."https://github.com/bearcove/moire"]
-moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
-# Blitz crates — FTS fork with post-processing support
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git" }
-dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-net = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git" }
-stylo_taffy = { git = "https://github.com/DioxusLabs/blitz.git" }
+# Blitz crates — upstream DioxusLabs/blitz, pinned to one rev so nih_plug_dioxus,
+# fts-ui, and signal all share a single blitz/dioxus-native. Bump in lockstep
+# with nih_plug_dioxus (it tracks this rev's API).
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+blitz-net = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+stylo_taffy = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
 # moire: unify crates.io moire with the FTS fork (includes NixOS frame-pointer fix)
 # All crates must be listed to prevent duplicate moire-runtime #[ctor] crash.
-moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [workspace.lints.rust]
 dead_code = "allow"
 unused = "allow"
 
 [workspace.lints.clippy]
+
+# ── Dev profile: release-like runtime for `dx serve` (no --release needed) ──
+# `dx serve` builds the dev profile. Optimize all dependencies — including the
+# audio DSP crates (signal-sampler/signal-audio/daw) and wgpu/blitz/vello — to
+# release opt-level so the player shows real performance by default, while the
+# thin app/UI crates stay at light opt for fast hot-reload rebuilds.
+# For exact release numbers, run `dx serve --release`.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

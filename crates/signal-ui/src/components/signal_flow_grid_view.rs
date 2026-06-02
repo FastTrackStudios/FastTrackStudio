@@ -12,9 +12,9 @@ use signal::BlockType;
 
 use super::grid_model::{BlockWidget, GRID_COLS, GRID_ROWS, GridBlock, GridJack, SignalFlowGrid};
 
-use audio_controls::widgets::{
-    CompressorGraph, CompressorParams, EqBand, EqBandShape, EqGraph, GateGraph, GateParams, Knob,
-};
+use audio_controls::widgets::{CompressorGraph, CompressorParams, GateGraph, GateParams, Knob};
+// EqBand/EqBandShape/EqGraph moved to audio-gui in the newer daw stack.
+use audio_gui::prelude::{EqBand, EqBandShape, EqGraph};
 
 /// Cell size in pixels for the grid.
 const CELL_SIZE: u32 = 64;

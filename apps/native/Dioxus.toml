@@ -1,0 +1,3 @@
+[application]
+name = "signal-native"
+default_platform = "native"

@@ -15,7 +15,8 @@
 //!   inside a rig folder → places item on the rig folder
 //! - **Place Scene Switch**: same as section switch
 
-use daw::Daw;
+use crate::daw_compat::TrackHandleCompat;
+use daw::rpc::Daw;
 use eyre::{Result, WrapErr};
 use tracing::info;
 
@@ -172,7 +173,7 @@ async fn place_switch(daw: &Daw, level: SwitchLevel) -> Result<()> {
 async fn find_section_and_controller(
     selected: &daw::service::Track,
     track_map: &std::collections::HashMap<&str, &daw::service::Track>,
-    tracks: &daw::Tracks,
+    tracks: &daw::rpc::Tracks,
     all_tracks: &[daw::service::Track],
 ) -> Result<(usize, String, String)> {
     let mut current = selected;
@@ -212,7 +213,7 @@ async fn find_section_and_controller(
 async fn find_song_and_rig(
     selected: &daw::service::Track,
     track_map: &std::collections::HashMap<&str, &daw::service::Track>,
-    tracks: &daw::Tracks,
+    tracks: &daw::rpc::Tracks,
     all_tracks: &[daw::service::Track],
 ) -> Result<(usize, String, String)> {
     // Walk up the parent chain. We're looking for a folder track whose parent
@@ -309,7 +310,7 @@ fn find_track_color(all_tracks: &[daw::service::Track], name: &str) -> u32 {
 
 /// Place a one-bar MIDI item at the given position on the controller track.
 async fn place_midi_item(
-    controller: &daw::TrackHandle,
+    controller: &daw::rpc::TrackHandle,
     start_time: f64,
     bar_duration: f64,
     beats_per_bar: f64,
@@ -329,7 +330,7 @@ async fn place_midi_item(
 }
 
 async fn place_midi_item_with_color(
-    controller: &daw::TrackHandle,
+    controller: &daw::rpc::TrackHandle,
     start_time: f64,
     bar_duration: f64,
     beats_per_bar: f64,

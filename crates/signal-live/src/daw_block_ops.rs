@@ -11,7 +11,8 @@
 //! 2. **Execute** — add the FX to a DAW track, apply state, and rename. Requires a
 //!    running DAW instance.
 
-use daw::{FxNodeId, FxRoutingMode, TrackHandle};
+use daw::rpc::TrackHandle;
+use daw::service::{FxNodeId, FxRoutingMode};
 use signal_proto::plugin_block::FxRole;
 use signal_proto::traits::HasMetadata;
 use signal_proto::{
@@ -595,7 +596,7 @@ where
         let resolved: Vec<ResolvedFxLoad> = futures::future::try_join_all(resolve_futures).await?;
 
         // Phase 2: Add all FX sequentially (index tracking requires ordering).
-        let mut fx_pairs: Vec<(ResolvedFxLoad, daw::FxHandle, u32)> =
+        let mut fx_pairs: Vec<(ResolvedFxLoad, daw::rpc::FxHandle, u32)> =
             Vec::with_capacity(resolved.len());
         for r in resolved {
             let fx_index = track
@@ -645,7 +646,7 @@ async fn execute_fx_load_free(
 async fn configure_fx_free(
     resolved: &ResolvedFxLoad,
     track: &TrackHandle,
-    mut fx: daw::FxHandle,
+    mut fx: daw::rpc::FxHandle,
     fx_index: u32,
 ) -> Result<LoadBlockResult, String> {
     if let Some(data) = &resolved.state_data {
@@ -853,7 +854,7 @@ fn execute_chain_nodes<'a>(
 /// 3. Decode it as a `NamVstChunk`
 /// 4. Rewrite the model path
 /// 5. Re-encode and set back via the rebuilt REAPER chunk
-async fn inject_nam_model_state(fx: &daw::FxHandle, model_path: &str) -> Result<(), String> {
+async fn inject_nam_model_state(fx: &daw::rpc::FxHandle, model_path: &str) -> Result<(), String> {
     use nam_manager::{
         decode_chunk, encode_chunk, extract_state_base64, first_base64_segment,
         rebuild_chunk_with_state, rewrite_paths,
@@ -890,7 +891,7 @@ async fn inject_nam_model_state(fx: &daw::FxHandle, model_path: &str) -> Result<
 ///
 /// Replaces the base64 state segment in the FX's existing REAPER chunk
 /// with the provided binary data (base64-encoded).
-async fn inject_binary_state(fx: &daw::FxHandle, binary_state: &[u8]) -> Result<(), String> {
+async fn inject_binary_state(fx: &daw::rpc::FxHandle, binary_state: &[u8]) -> Result<(), String> {
     use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 
     let existing = fx

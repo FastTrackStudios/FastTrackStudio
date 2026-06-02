@@ -12,7 +12,8 @@
 //!   ReaGate → ReaComp → ReaEQ(drive) → ReaEQ(amp) → ReaDelay(mod)
 //!   → ReaDelay(delay) → ReaDelay(reverb) → ReaComp(output) → ReaEQ(output)
 
-use daw::Daw;
+use crate::daw_compat::TrackHandleCompat;
+use daw::rpc::Daw;
 use eyre::{Result, WrapErr};
 use tracing::info;
 

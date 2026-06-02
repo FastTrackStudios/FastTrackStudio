@@ -4,12 +4,15 @@
 //! for querying and manipulating the Signal library (presets, rigs, profiles,
 //! macros, songs, setlists).
 
+mod daw_compat;
+
 use std::path::{Path, PathBuf};
 
+use crate::daw_compat::TrackHandleCompat;
 use clap::Subcommand;
 use crossbeam_channel::{Receiver, bounded};
-use daw::Daw;
 use daw::file::RppSerialize;
+use daw::rpc::Daw;
 use eyre::Result;
 use midir::{MidiInput as MidirInput, MidiInputConnection};
 use serde_json::json;
@@ -3753,7 +3756,7 @@ async fn cmd_nam_packs(vendor: Option<&str>, category: Option<&str>) -> Result<(
 /// Loads the NAM plugin, injects the model path into its state, then reads
 /// back the complete REAPER chunk. This produces a portable, host-validated
 /// state representation rather than storing raw file paths.
-async fn nam_capture_state(fx: &daw::FxHandle, model_path: &str) -> Result<String> {
+async fn nam_capture_state(fx: &daw::rpc::FxHandle, model_path: &str) -> Result<String> {
     let reaper_chunk = fx
         .state_chunk_encoded()
         .await?
@@ -4030,7 +4033,9 @@ async fn cmd_nam_import(
     // Clean up scratch track
     project
         .tracks()
-        .remove(daw::TrackRef::Guid(scratch_track.guid().to_string()))
+        .remove(daw::service::TrackRef::Guid(
+            scratch_track.guid().to_string(),
+        ))
         .await?;
 
     println!(
@@ -4849,11 +4854,11 @@ async fn cmd_daw_import(
 /// Recursively collect plugin parameters from the FX tree by querying each
 /// plugin's parameter list via the DAW API. Results are keyed by GUID.
 async fn collect_fx_params(
-    track: &daw::TrackHandle,
-    node: &daw::FxNode,
+    track: &daw::rpc::TrackHandle,
+    node: &daw::service::FxNode,
     out: &mut std::collections::HashMap<String, Vec<(String, String, f64)>>,
 ) {
-    use daw::FxNodeKind;
+    use daw::service::FxNodeKind;
     match &node.kind {
         FxNodeKind::Plugin(fx) => {
             let guid = &fx.guid;
