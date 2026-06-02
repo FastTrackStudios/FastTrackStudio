@@ -256,6 +256,7 @@ impl Store {
             rate_cents: Set(rate_cents),
             currency: Set(currency),
             task_note_path: Set(req.task_note_path.clone()),
+            invoice_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -543,6 +544,7 @@ fn model_to_session(m: WorkSessionModel) -> WorkSession {
         rate_cents: m.rate_cents,
         currency: m.currency,
         task_note_path: m.task_note_path,
+        invoice_id: m.invoice_id,
         created_at: m.created_at,
         updated_at: m.updated_at,
     }

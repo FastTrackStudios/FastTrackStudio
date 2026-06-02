@@ -84,6 +84,7 @@ store-proto = { workspace = true }
 # once their SeaORM-backed impls land.
 finance-proto = { workspace = true, features = ["server"] }
 finance-db = { workspace = true }
+finance = { workspace = true }
 vox = { workspace = true }
 chrono.workspace = true
 architect = { workspace = true, features = ["server-axum", "dispatch-tokio", "local"] }

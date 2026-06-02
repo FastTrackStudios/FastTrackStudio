@@ -89,6 +89,13 @@ pub struct WorkSession {
     #[architect(filterable)]
     pub task_note_path: String,
 
+    /// The invoice this session was billed on, if any. `None` =
+    /// not yet invoiced (the finance backend sets this when an
+    /// invoice is generated, and clears it when one is voided /
+    /// deleted). Drives the "uninvoiced billable time" view.
+    #[architect(filterable)]
+    pub invoice_id: Option<Uuid>,
+
     #[architect(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
     #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]

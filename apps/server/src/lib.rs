@@ -123,6 +123,9 @@ pub struct OrgAppState {
     /// round-trip fleeting notes.
     pub inbox: inbox::VaultInbox,
     pub finance_conn: sea_orm::DatabaseConnection,
+    /// Invoicing backend — persists invoices in `finance.sqlite` and
+    /// links billed sessions in the timer DB. Mounted for `Invoicing`.
+    pub finance_backend: finance::FinanceBackend,
 }
 
 /// Top-level server state. Scans `<data_root>/orgs/` at
@@ -490,6 +493,18 @@ pub(crate) async fn build_org_state(
         })
         .await?;
 
+        // Invoicing service — persists invoices in finance.sqlite and
+        // marks billed sessions in the timer DB, so it needs both.
+        let finance_backend = finance::FinanceBackend::new(
+            finance_conn.clone(),
+            timer.conn().clone(),
+            org_root
+                .manifest()
+                .map(|m| m.display_name)
+                .unwrap_or_else(|_| "Business".into()),
+        )
+        .map_err(|e| eyre::eyre!("finance backend: {e}"))?;
+
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
         // failures here shouldn't block startup.
@@ -579,6 +594,7 @@ pub(crate) async fn build_org_state(
             scheduling,
             inbox,
             finance_conn,
+            finance_backend,
         })
     }
 }
@@ -860,6 +876,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
             inbox_proto::service::inbox::serve(org.inbox.clone()),
+        )
+        .with(
+            finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
+            finance_proto::service::invoicing::serve(org.finance_backend.clone()),
         );
 
     // Wiki feature — 11 per-capability traits, one descriptor each.

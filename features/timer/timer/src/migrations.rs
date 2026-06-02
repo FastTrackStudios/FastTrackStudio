@@ -7,7 +7,53 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20260524_000001_create_timer::Migration)]
+        vec![
+            Box::new(m20260524_000001_create_timer::Migration),
+            Box::new(m20260601_000002_add_invoice_id::Migration),
+        ]
+    }
+}
+
+/// Adds the nullable `invoice_id` link to `timer_work_sessions` so the
+/// finance backend can mark which sessions have been billed.
+mod m20260601_000002_add_invoice_id {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    // Manual (not derived): the derive keys off the struct name, which
+    // is `Migration` for every nested module here — two of them would
+    // collide on `seaql_migrations.version`. Give this one an explicit
+    // unique version.
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260601_000002_add_invoice_id"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(Alias::new("timer_work_sessions"))
+                        .add_column(ColumnDef::new(Alias::new("invoice_id")).uuid().null())
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(Alias::new("timer_work_sessions"))
+                        .drop_column(Alias::new("invoice_id"))
+                        .to_owned(),
+                )
+                .await
+        }
     }
 }
 

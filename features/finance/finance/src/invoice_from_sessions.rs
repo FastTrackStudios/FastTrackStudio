@@ -98,6 +98,8 @@ pub async fn build_invoice_from_sessions(
         .filter(WorkSessionColumn::ProjectId.eq(args.project_id))
         .filter(WorkSessionColumn::Billable.eq(true))
         .filter(WorkSessionColumn::EndTime.is_not_null())
+        // Only bill sessions not already on an invoice.
+        .filter(WorkSessionColumn::InvoiceId.is_null())
         .filter(WorkSessionColumn::StartTime.gte(args.since))
         .filter(WorkSessionColumn::StartTime.lt(args.until))
         .all(timer_conn)

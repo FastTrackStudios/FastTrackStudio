@@ -44,6 +44,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod billing;
 pub mod firefly;
 pub mod invoice_from_sessions;
 pub mod ledger;
@@ -59,6 +60,7 @@ pub use finance_db::entity as finance_db_entity;
 // the shape; the facade wires them together. `LedgerService` is
 // the first — the `finance-db`-backed impl of the `Ledger`
 // capability trait (post_transaction + balances + history).
+pub use billing::FinanceBackend;
 pub use ledger::LedgerService;
 
 pub use finance_proto::*;

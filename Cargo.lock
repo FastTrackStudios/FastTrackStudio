@@ -14888,6 +14888,7 @@ dependencies = [
  "ed25519-dalek",
  "exercises",
  "eyre",
+ "finance",
  "finance-db",
  "finance-proto",
  "futures",
