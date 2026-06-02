@@ -11,7 +11,9 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::sync::OnceLock;
 
+#[cfg(feature = "ableton")]
 use dawfile_ableton::devices::BuiltinParams;
+#[cfg(feature = "ableton")]
 use dawfile_ableton::{Device, DeviceFormat};
 use dawfile_reaper::RppSerialize;
 use dawfile_reaper::builder::{ItemBuilder, ReaperProjectBuilder, TrackBuilder};
@@ -21,22 +23,33 @@ use reaper_medium::{OwnedProjectImportRegister, ReaperFunctionError, ReaperSessi
 // Extension registry
 // ============================================================================
 
-/// File extensions we handle, with human-readable descriptions for the file dialog.
-static EXTENSIONS: &[(&str, &str)] = &[
-    ("als", "Ableton Live Set (*.als)"),
-    ("ptx", "Pro Tools Session (*.ptx)"),
-    ("ptf", "Pro Tools Session (*.ptf)"),
-    ("pts", "Pro Tools Session (*.pts)"),
-    ("aaf", "Advanced Authoring Format (*.aaf)"),
-    ("dawproject", "DAWproject (*.dawproject)"),
-];
+/// File extensions we handle, with human-readable descriptions for the file
+/// dialog. Built per-build so only the formats compiled in (via the
+/// `protools`/`ableton`/`aaf`/`dawproject` features) are advertised to REAPER —
+/// a format whose feature is off is neither offered in the dialog nor accepted.
+fn supported_extensions() -> Vec<(&'static str, &'static str)> {
+    let mut v: Vec<(&'static str, &'static str)> = Vec::new();
+    #[cfg(feature = "ableton")]
+    v.push(("als", "Ableton Live Set (*.als)"));
+    #[cfg(feature = "protools")]
+    {
+        v.push(("ptx", "Pro Tools Session (*.ptx)"));
+        v.push(("ptf", "Pro Tools Session (*.ptf)"));
+        v.push(("pts", "Pro Tools Session (*.pts)"));
+    }
+    #[cfg(feature = "aaf")]
+    v.push(("aaf", "Advanced Authoring Format (*.aaf)"));
+    #[cfg(feature = "dawproject")]
+    v.push(("dawproject", "DAWproject (*.dawproject)"));
+    v
+}
 
 /// Pre-computed CString pairs (extension, description), leaked for stable pointers.
 static CACHED_EXTENSIONS: OnceLock<Vec<(CString, CString)>> = OnceLock::new();
 
 fn cached_extensions() -> &'static Vec<(CString, CString)> {
     CACHED_EXTENSIONS.get_or_init(|| {
-        EXTENSIONS
+        supported_extensions()
             .iter()
             .map(|(ext, desc)| (CString::new(*ext).unwrap(), CString::new(*desc).unwrap()))
             .collect()
@@ -49,7 +62,7 @@ pub fn register_project_importer(session: &mut ReaperSession) -> Result<(), Reap
         OwnedProjectImportRegister::new(want_project_file, enum_file_extensions, load_project);
     session.plugin_register_add_project_import(import_register)?;
     tracing::info!(
-        extensions = EXTENSIONS
+        extensions = supported_extensions()
             .iter()
             .map(|(ext, _)| *ext)
             .collect::<Vec<_>>()
@@ -71,7 +84,7 @@ pub fn register_project_importer(session: &mut ReaperSession) -> Result<(), Reap
 pub unsafe extern "C" fn want_project_file(fn_: *const c_char) -> bool {
     let path = unsafe { CStr::from_ptr(fn_) }.to_string_lossy();
     let lower = path.to_lowercase();
-    let want = EXTENSIONS
+    let want = supported_extensions()
         .iter()
         .any(|(ext, _)| lower.ends_with(&format!(".{ext}")));
     tracing::info!(path = %path, want, "project_import.want_project_file");
@@ -144,17 +157,47 @@ pub unsafe extern "C" fn load_project(
 /// public [`crate::project_import::convert_to_rpp`]-based file API.
 pub fn convert_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let lower = path.to_lowercase();
+    // Each arm dispatches to its importer when that format's feature is
+    // compiled in, and otherwise returns a clear "not compiled in" error
+    // (REAPER won't offer the extension at all — see `supported_extensions` —
+    // but the public conversion API can still be called with any path).
     if lower.ends_with(".als") {
-        import_ableton(path)
-    } else if lower.ends_with(".ptx") || lower.ends_with(".ptf") || lower.ends_with(".pts") {
-        import_protools(path, None)
-    } else if lower.ends_with(".aaf") {
-        import_aaf(path)
-    } else if lower.ends_with(".dawproject") {
-        import_dawproject(path)
-    } else {
-        Err(format!("Unsupported input format: {path}").into())
+        #[cfg(feature = "ableton")]
+        return import_ableton(path);
+        #[cfg(not(feature = "ableton"))]
+        return Err(format!(
+            "Ableton (.als) support not compiled in (enable the `ableton` feature): {path}"
+        )
+        .into());
     }
+    if lower.ends_with(".ptx") || lower.ends_with(".ptf") || lower.ends_with(".pts") {
+        #[cfg(feature = "protools")]
+        return import_protools(path, None);
+        #[cfg(not(feature = "protools"))]
+        return Err(format!(
+            "Pro Tools (.ptx/.ptf/.pts) support not compiled in (enable the `protools` feature): {path}"
+        )
+        .into());
+    }
+    if lower.ends_with(".aaf") {
+        #[cfg(feature = "aaf")]
+        return import_aaf(path);
+        #[cfg(not(feature = "aaf"))]
+        return Err(format!(
+            "AAF (.aaf) support not compiled in (enable the `aaf` feature): {path}"
+        )
+        .into());
+    }
+    if lower.ends_with(".dawproject") {
+        #[cfg(feature = "dawproject")]
+        return import_dawproject(path);
+        #[cfg(not(feature = "dawproject"))]
+        return Err(format!(
+            "DAWproject (.dawproject) support not compiled in (enable the `dawproject` feature): {path}"
+        )
+        .into());
+    }
+    Err(format!("Unsupported input format: {path}").into())
 }
 
 fn import_file(
@@ -225,6 +268,7 @@ fn emit_rpp_to_context(
 // Ableton → REAPER conversion
 // ============================================================================
 
+#[cfg(feature = "ableton")]
 fn import_ableton(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let set = dawfile_ableton::read_live_set(path)?;
 
@@ -328,6 +372,7 @@ fn deterministic_guid(seed: &str) -> String {
     )
 }
 
+#[cfg(feature = "ableton")]
 fn apply_common_track_props(
     t: TrackBuilder,
     common: &dawfile_ableton::TrackCommon,
@@ -345,6 +390,7 @@ fn apply_common_track_props(
     t
 }
 
+#[cfg(feature = "ableton")]
 fn build_audio_track(t: TrackBuilder, track: &dawfile_ableton::AudioTrack) -> TrackBuilder {
     let mut t = apply_common_track_props(t, &track.common);
 
@@ -368,6 +414,7 @@ fn build_audio_track(t: TrackBuilder, track: &dawfile_ableton::AudioTrack) -> Tr
     t
 }
 
+#[cfg(feature = "ableton")]
 fn build_audio_item(item: ItemBuilder, clip: &dawfile_ableton::AudioClip) -> ItemBuilder {
     let mut item = item.name(&clip.common.name);
 
@@ -402,6 +449,7 @@ fn build_audio_item(item: ItemBuilder, clip: &dawfile_ableton::AudioClip) -> Ite
     item
 }
 
+#[cfg(feature = "ableton")]
 fn build_midi_track(t: TrackBuilder, track: &dawfile_ableton::MidiTrack) -> TrackBuilder {
     let mut t = apply_common_track_props(t, &track.common);
 
@@ -425,6 +473,7 @@ fn build_midi_track(t: TrackBuilder, track: &dawfile_ableton::MidiTrack) -> Trac
     t
 }
 
+#[cfg(feature = "ableton")]
 fn build_midi_item(item: ItemBuilder, clip: &dawfile_ableton::MidiClip) -> ItemBuilder {
     let item = item.name(&clip.common.name);
 
@@ -450,6 +499,7 @@ fn build_midi_item(item: ItemBuilder, clip: &dawfile_ableton::MidiClip) -> ItemB
 
 // ── Device / FX mapping ────────────────────────────────────────────────────
 
+#[cfg(feature = "ableton")]
 fn add_device_to_track(mut t: TrackBuilder, device: &Device) -> TrackBuilder {
     if !device.is_on {
         return t; // Skip disabled devices
@@ -476,6 +526,7 @@ fn add_device_to_track(mut t: TrackBuilder, device: &Device) -> TrackBuilder {
     t
 }
 
+#[cfg(feature = "ableton")]
 fn map_builtin_fx(mut t: TrackBuilder, params: &BuiltinParams) -> TrackBuilder {
     match params {
         BuiltinParams::Eq8(_) => {
@@ -536,6 +587,7 @@ fn default_fixed_lanes() -> dawfile_reaper::types::track::FixedLanesSettings {
 /// (named after `playlist_name`, falling back to the track name when empty);
 /// lanes 1..N are the alternates in order. Call only when
 /// `track.has_alternate_playlists()`.
+#[cfg(feature = "protools")]
 fn apply_fixed_lane_settings(t: TrackBuilder, track: &dawfile_protools::Track) -> TrackBuilder {
     let lane_count = track.playlist_count() as i32;
     let mut lane_names: Vec<String> = Vec::with_capacity(lane_count as usize);
@@ -573,6 +625,7 @@ fn apply_fixed_lane_settings(t: TrackBuilder, track: &dawfile_protools::Track) -
 /// (`track.fades`) are matched by timeline position, so they only attach to the
 /// active playlist (alternates carry no matching fade entries — acceptable, PT
 /// stores fades against the active playlist only).
+#[cfg(feature = "protools")]
 #[allow(clippy::too_many_arguments)]
 fn emit_audio_playlist(
     mut t: TrackBuilder,
@@ -723,6 +776,7 @@ fn emit_audio_playlist(
 /// the REAPER fixed-lane index (`LANE` token): `None` for ordinary
 /// single-playlist tracks (unchanged output), `Some(n)` for fixed-lane tracks
 /// where lane 0 is the active playlist and 1..N the alternates.
+#[cfg(feature = "protools")]
 fn emit_midi_playlist(
     mut t: TrackBuilder,
     regions: &[dawfile_protools::TrackRegion],
@@ -816,6 +870,7 @@ fn emit_midi_playlist(
 ///
 /// Public so that command-line tools and tests can run the conversion without
 /// going through the REAPER plugin entry point.
+#[cfg(feature = "protools")]
 pub fn protools_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     import_protools(path, None)
 }
@@ -825,6 +880,7 @@ pub fn protools_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>>
 /// `.ptx` is read from one location but the resulting `.rpp` will be opened
 /// somewhere else (e.g. converting locally for a session that lives on another
 /// machine): pass the session folder as it exists on the target machine.
+#[cfg(feature = "protools")]
 pub fn protools_to_rpp_with_audio_base(
     path: &str,
     audio_base: &str,
@@ -832,6 +888,7 @@ pub fn protools_to_rpp_with_audio_base(
     import_protools(path, Some(audio_base))
 }
 
+#[cfg(feature = "protools")]
 fn import_protools(
     path: &str,
     audio_base: Option<&str>,
@@ -1402,6 +1459,7 @@ fn import_protools(
 // AAF → REAPER conversion
 // ============================================================================
 
+#[cfg(feature = "aaf")]
 fn import_aaf(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let session = dawfile_aaf::read_session(path)?;
 
@@ -1479,6 +1537,7 @@ fn import_aaf(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 // DAWproject → REAPER conversion
 // ============================================================================
 
+#[cfg(feature = "dawproject")]
 fn import_dawproject(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let project = dawfile_dawproject::read_project(path)?;
 
@@ -1514,6 +1573,7 @@ fn import_dawproject(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     Ok(rpp_project.to_rpp_string())
 }
 
+#[cfg(feature = "dawproject")]
 fn add_dawproject_tracks(
     builder: &mut ReaperProjectBuilder,
     tracks: &[dawfile_dawproject::Track],
@@ -1986,6 +2046,7 @@ fn ableton_color_to_rgb(color_index: i32) -> u32 {
 /// `alternate_playlists_*` tests: a `ProToolsSession` in, a
 /// `dawfile_reaper::ReaperProject` out. Serialize it with
 /// `ReaperProject::to_rpp_string()` to get loadable .rpp text.
+#[cfg(feature = "protools")]
 pub fn build_demo_playlist_project() -> dawfile_reaper::ReaperProject {
     use dawfile_protools::{
         AudioFile, AudioRegion, Playlist, ProToolsSession, Track, TrackKind, TrackRegion,
@@ -2124,7 +2185,7 @@ pub fn build_demo_playlist_project() -> dawfile_reaper::ReaperProject {
     builder.build()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "protools"))]
 mod folder_tests {
     use super::{default_fixed_lanes, emit_audio_playlist, protools_to_rpp};
     use dawfile_reaper::RppSerialize;

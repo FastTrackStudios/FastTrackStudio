@@ -20,13 +20,19 @@ tracing.workspace = true
 tokio = { workspace = true, features = ["net"] }
 moire.workspace = true
 
-# RPP chunk parsing/serialization for chunk-based FX manipulation
+# RPP chunk parsing/serialization for chunk-based FX manipulation. This is
+# the RPP *output* serializer — mandatory, used by every importer.
 dawfile-reaper = { path = "../dawfile-reaper" }
-dawfile-ableton = { path = "../../ableton/dawfile-ableton" }
-dawfile-protools = { path = "../../protools/dawfile-protools" }
-dawfile-aaf = { path = "../../aaf/dawfile-aaf" }
 base64 = "0.22.1"
-dawfile-dawproject = { path = "../../dawproject/dawfile-dawproject" }
+
+# Source-format importers (format → RPP). Each is optional and gated by an
+# `import-<format>` feature so a specialized build (e.g. a Pro-Tools-only
+# converter) compiles only the parsers it needs. `default = import-all`
+# preserves the historical "all formats" behaviour for the facade + tests.
+dawfile-ableton = { path = "../../ableton/dawfile-ableton", optional = true }
+dawfile-protools = { path = "../../protools/dawfile-protools", optional = true }
+dawfile-aaf = { path = "../../aaf/dawfile-aaf", optional = true }
+dawfile-dawproject = { path = "../../dawproject/dawfile-dawproject", optional = true }
 
 # REAPER bindings for actual DAW control
 reaper-high.workspace = true
@@ -59,6 +65,19 @@ eyre.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 vox.workspace = true
 moire.workspace = true
+
+[features]
+default = ["all-formats"]
+# Every source-format importer (historical behaviour; what the facade's
+# `convert` feature and the test suite expect).
+all-formats = ["protools", "ableton", "aaf", "dawproject"]
+# Each flag gates that format's conversion support. `protools` covers both
+# directions (import + the RPP→PT `project_export` path + the PT plugin-state
+# bridge); the others are import-only today.
+protools = ["dep:dawfile-protools"]
+ableton = ["dep:dawfile-ableton"]
+aaf = ["dep:dawfile-aaf"]
+dawproject = ["dep:dawfile-dawproject"]
 
 [lints]
 workspace = true
