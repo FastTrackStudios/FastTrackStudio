@@ -147,11 +147,7 @@ impl NamModel {
     /// Get the sample rate the model was trained at, or `None` if unknown.
     pub fn expected_sample_rate(&self) -> Option<f64> {
         let sr = unsafe { ffi::nam_get_expected_sample_rate(self.ptr) };
-        if sr < 0.0 {
-            None
-        } else {
-            Some(sr)
-        }
+        if sr < 0.0 { None } else { Some(sr) }
     }
 
     /// Get the model's loudness in dB, if available.
