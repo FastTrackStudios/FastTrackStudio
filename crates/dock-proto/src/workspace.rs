@@ -5,12 +5,12 @@ use std::collections::HashSet;
 
 use facet::Facet;
 
+use crate::ActionContext;
 use crate::drop_zone::DropZone;
 use crate::id::{NodeId, WindowId};
 use crate::layout::DockLayout;
 use crate::panel::PanelId;
 use crate::registry::{DockPosition, PanelRegistry};
-use crate::ActionContext;
 
 /// Bounds for an OS window.
 #[derive(Debug, Clone, PartialEq, Facet)]
@@ -405,18 +405,20 @@ mod tests {
 
         assert_ne!(new_id, source);
         assert!(ws.windows.contains_key(&new_id));
-        assert!(!ws
-            .windows
-            .get(&source)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Navigator));
-        assert!(ws
-            .windows
-            .get(&new_id)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Navigator));
+        assert!(
+            !ws.windows
+                .get(&source)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Navigator)
+        );
+        assert!(
+            ws.windows
+                .get(&new_id)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Navigator)
+        );
     }
 
     #[test]
@@ -444,12 +446,13 @@ mod tests {
             DropZone::Center
         ));
         assert!(!ws.windows.contains_key(&floating));
-        assert!(ws
-            .windows
-            .get(&source)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Navigator));
+        assert!(
+            ws.windows
+                .get(&source)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Navigator)
+        );
     }
 
     #[test]
@@ -478,34 +481,37 @@ mod tests {
 
         assert!(ws.close_window(floating));
         assert!(!ws.windows.contains_key(&floating));
-        assert!(ws
-            .windows
-            .get(&source)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Navigator));
+        assert!(
+            ws.windows
+                .get(&source)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Navigator)
+        );
     }
 
     #[test]
     fn context_change_shows_panel() {
         let mut ws = make_contextual_workspace();
-        assert!(!ws
-            .windows
-            .get(&ws.main_window)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Transport));
+        assert!(
+            !ws.windows
+                .get(&ws.main_window)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Transport)
+        );
 
         let mut ctx = ActionContext::new();
         ctx.set_tab("performance");
         ws.apply_context_visibility(&ctx);
 
-        assert!(ws
-            .windows
-            .get(&ws.main_window)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Transport));
+        assert!(
+            ws.windows
+                .get(&ws.main_window)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Transport)
+        );
     }
 
     #[test]
@@ -514,21 +520,23 @@ mod tests {
         let mut ctx = ActionContext::new();
         ctx.set_tab("performance");
         ws.apply_context_visibility(&ctx);
-        assert!(ws
-            .windows
-            .get(&ws.main_window)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Transport));
+        assert!(
+            ws.windows
+                .get(&ws.main_window)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Transport)
+        );
 
         ctx.set_tab("chart");
         ws.apply_context_visibility(&ctx);
-        assert!(!ws
-            .windows
-            .get(&ws.main_window)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Transport));
+        assert!(
+            !ws.windows
+                .get(&ws.main_window)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Transport)
+        );
     }
 
     #[test]
@@ -537,12 +545,13 @@ mod tests {
         let mut ctx = ActionContext::new();
         ctx.set_tab("performance");
         ws.apply_context_visibility(&ctx);
-        assert!(ws
-            .windows
-            .get(&ws.main_window)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Transport));
+        assert!(
+            ws.windows
+                .get(&ws.main_window)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Transport)
+        );
 
         ws.windows
             .get_mut(&ws.main_window)
@@ -552,22 +561,24 @@ mod tests {
         ws.mark_user_closed(PanelId::Transport.as_str());
 
         ws.apply_context_visibility(&ctx);
-        assert!(!ws
-            .windows
-            .get(&ws.main_window)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Transport));
+        assert!(
+            !ws.windows
+                .get(&ws.main_window)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Transport)
+        );
 
         ctx.set_tab("chart");
         ws.apply_context_visibility(&ctx);
         ctx.set_tab("performance");
         ws.apply_context_visibility(&ctx);
-        assert!(ws
-            .windows
-            .get(&ws.main_window)
-            .unwrap()
-            .layout
-            .contains_panel(PanelId::Transport));
+        assert!(
+            ws.windows
+                .get(&ws.main_window)
+                .unwrap()
+                .layout
+                .contains_panel(PanelId::Transport)
+        );
     }
 }

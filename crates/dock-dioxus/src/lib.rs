@@ -15,9 +15,9 @@ pub mod transition;
 // Re-export public API
 pub use components::{DockRoot, DockTabBar, PanelHeader, PresetBar, SplitPane, TilePane};
 pub use context::{DockContext, DockProvider, PanelRenderer};
-pub use hooks::{init_dock_presets, init_rig_dock, load_rig_preset, use_dock_actions, DockActions};
+pub use hooks::{DockActions, init_dock_presets, init_rig_dock, load_rig_preset, use_dock_actions};
 pub use panel_registry::PanelRendererRegistry;
 pub use signals::*;
 pub use transition::{
-    compute_transition, LayoutTransition, PanelTransition, TransitionKind, TransitionRect,
+    LayoutTransition, PanelTransition, TransitionKind, TransitionRect, compute_transition,
 };
