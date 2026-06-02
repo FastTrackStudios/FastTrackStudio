@@ -24,7 +24,7 @@ input-dioxus = { path = "crates/input-dioxus" }
 
 # Roam RPC framework — FTS fork (carries the vox-jit-abi __rust_alloc-scan fix;
 # without it the encode worker hangs on complex/allocating RPC returns).
-vox = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", branch = "main" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", branch = "main" }
 
 # Facet reflection — align the whole stack to the current 0.46 line.
 facet = { version = "0.46" }
@@ -37,8 +37,8 @@ facet-value = { version = "0.46" }
 facet-yaml = { version = "0.46" }
 
 # REAPER bindings (FTS fork with v7.63 ruler lane APIs)
-reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # Dioxus UI framework (for input-dioxus)
 dioxus = "0.7.2"
