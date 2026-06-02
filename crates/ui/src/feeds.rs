@@ -342,6 +342,111 @@ pub async fn delete_session(slug: &str, id: uuid::Uuid) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete session: {e:?}"))
 }
 
+// ── finance / invoicing ─────────────────────────────────────────────
+
+#[cfg(target_arch = "wasm32")]
+async fn invoicing(slug: &str) -> Result<finance_proto::InvoicingClient, String> {
+    crate::vox_clients::establish_for::<finance_proto::InvoicingClient>(slug).await
+}
+
+/// All invoices in an org, newest first.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_invoices(slug: &str) -> Result<Vec<finance_proto::Invoice>, String> {
+    invoicing(slug)
+        .await?
+        .list_invoices()
+        .await
+        .map_err(|e| format!("{slug}: list invoices: {e:?}"))
+}
+
+/// Per-project billable time not yet invoiced, in an org.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_uninvoiced(slug: &str) -> Result<Vec<finance_proto::UninvoicedGroup>, String> {
+    invoicing(slug)
+        .await?
+        .uninvoiced()
+        .await
+        .map_err(|e| format!("{slug}: uninvoiced: {e:?}"))
+}
+
+/// Generate + persist a draft invoice from a project's billable time.
+#[cfg(target_arch = "wasm32")]
+pub async fn generate_invoice(
+    slug: &str,
+    req: finance_proto::GenerateInvoice,
+) -> Result<finance_proto::Invoice, String> {
+    invoicing(slug)
+        .await?
+        .generate_invoice(req)
+        .await
+        .map_err(|e| format!("{slug}: generate invoice: {e:?}"))
+}
+
+/// Issue an invoice (assign number, lock).
+#[cfg(target_arch = "wasm32")]
+pub async fn invoice_mark_sent(
+    slug: &str,
+    id: uuid::Uuid,
+) -> Result<finance_proto::Invoice, String> {
+    invoicing(slug)
+        .await?
+        .mark_sent(id)
+        .await
+        .map_err(|e| format!("{slug}: mark sent: {e:?}"))
+}
+
+/// Record a payment against an invoice.
+#[cfg(target_arch = "wasm32")]
+pub async fn invoice_record_payment(
+    slug: &str,
+    id: uuid::Uuid,
+    amount_minor: i64,
+    date: String,
+) -> Result<finance_proto::Invoice, String> {
+    invoicing(slug)
+        .await?
+        .record_invoice_payment(id, amount_minor, date)
+        .await
+        .map_err(|e| format!("{slug}: record payment: {e:?}"))
+}
+
+/// Delete a draft invoice (un-bills its sessions).
+#[cfg(target_arch = "wasm32")]
+pub async fn invoice_delete(slug: &str, id: uuid::Uuid) -> Result<(), String> {
+    invoicing(slug)
+        .await?
+        .delete_invoice(id)
+        .await
+        .map_err(|e| format!("{slug}: delete invoice: {e:?}"))
+}
+
+/// Invoices across several orgs, slug-tagged, newest first.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_invoices_multi(slugs: &[String]) -> Vec<(String, finance_proto::Invoice)> {
+    let mut out = Vec::new();
+    for slug in slugs {
+        if let Ok(rows) = fetch_invoices(slug).await {
+            out.extend(rows.into_iter().map(|i| (slug.clone(), i)));
+        }
+    }
+    out.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
+    out
+}
+
+/// Uninvoiced groups across several orgs, slug-tagged.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_uninvoiced_multi(
+    slugs: &[String],
+) -> Vec<(String, finance_proto::UninvoicedGroup)> {
+    let mut out = Vec::new();
+    for slug in slugs {
+        if let Ok(rows) = fetch_uninvoiced(slug).await {
+            out.extend(rows.into_iter().map(|g| (slug.clone(), g)));
+        }
+    }
+    out
+}
+
 /// Fetch one org's vault markdown as `WikiFile`s for the knowledge
 /// graph: pull the manifest, then read every `.md` file concurrently
 /// over the one socket. Pure graph-building happens caller-side.
@@ -567,6 +672,52 @@ pub async fn update_session(
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn delete_session(_slug: &str, _id: uuid::Uuid) -> Result<(), String> {
     Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_invoices(_slug: &str) -> Result<Vec<finance_proto::Invoice>, String> {
+    Err("native client not wired yet".to_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_uninvoiced(_slug: &str) -> Result<Vec<finance_proto::UninvoicedGroup>, String> {
+    Err("native client not wired yet".to_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn generate_invoice(
+    _slug: &str,
+    _req: finance_proto::GenerateInvoice,
+) -> Result<finance_proto::Invoice, String> {
+    Err("native client not wired yet".to_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn invoice_mark_sent(
+    _slug: &str,
+    _id: uuid::Uuid,
+) -> Result<finance_proto::Invoice, String> {
+    Err("native client not wired yet".to_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn invoice_record_payment(
+    _slug: &str,
+    _id: uuid::Uuid,
+    _amount_minor: i64,
+    _date: String,
+) -> Result<finance_proto::Invoice, String> {
+    Err("native client not wired yet".to_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn invoice_delete(_slug: &str, _id: uuid::Uuid) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_invoices_multi(_slugs: &[String]) -> Vec<(String, finance_proto::Invoice)> {
+    Vec::new()
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_uninvoiced_multi(
+    _slugs: &[String],
+) -> Vec<(String, finance_proto::UninvoicedGroup)> {
+    Vec::new()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

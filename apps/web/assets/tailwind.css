@@ -1950,6 +1950,12 @@
       background-color: color-mix(in oklab, var(--color-emerald-500) 10%, transparent);
     }
   }
+  .bg-emerald-500\/15 {
+    background-color: color-mix(in srgb, oklch(69.6% 0.17 162.48) 15%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-emerald-500) 15%, transparent);
+    }
+  }
   .bg-emerald-600\/90 {
     background-color: color-mix(in srgb, oklch(59.6% 0.145 163.225) 90%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -2400,6 +2406,9 @@
   .py-6 {
     padding-block: calc(var(--spacing) * 6);
   }
+  .py-8 {
+    padding-block: calc(var(--spacing) * 8);
+  }
   .py-10 {
     padding-block: calc(var(--spacing) * 10);
   }
@@ -2701,6 +2710,9 @@
   }
   .text-emerald-400 {
     color: var(--color-emerald-400);
+  }
+  .text-emerald-700 {
+    color: var(--color-emerald-700);
   }
   .text-foreground {
     color: var(--foreground);
