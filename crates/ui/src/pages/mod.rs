@@ -6,6 +6,7 @@
 
 pub mod bookings;
 pub mod finances;
+pub mod fitness;
 pub mod gantt;
 pub mod goals;
 pub mod home;

@@ -33,13 +33,14 @@ pub mod write;
 pub use model::{BodyEntry, BodyMetric, MetricKind};
 pub use parse::{ParseError, looks_like_body_metric, parse_page};
 pub use scan::{by_kind, scan_vault};
-pub use service::{BodyError, BodyService, BodyServiceRpc};
+pub use service::{BodyError, BodyService};
 
 #[cfg(feature = "vox")]
-pub use service::{
-    BodyServiceClient, BodyServiceRpcDispatcher as BodyDispatcher, Service as BodyServiceBridge,
-    body_service_rpc_service_descriptor as body_service_descriptor, layer as body_service_layer,
-    serve as serve_body_service,
+pub use fitness_proto::body::{
+    BodyDispatcher, BodyServiceBridge, BodyServiceClient, body_service_descriptor,
+    body_service_layer, serve_body_service,
 };
+#[cfg(feature = "vox")]
+pub use service::{BodyServiceRpc, BodyServiceRpcDispatcher};
 pub use store::Store;
 pub use write::{WriteError, default_metric_path, serialize_metric, write_metric};

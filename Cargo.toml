@@ -420,6 +420,12 @@ inventory = { path = "features/inventory/inventory" }
 # `fitness` feature depends on `mealplan` for nutrition data.
 # See `plans/cooklang-migration.md`.
 cookbook = { path = "features/mealplan/cookbook" }
+# `cookbook-proto` is wasm-clean — holds the `Nutrition` macro
+# shape so `fitness-proto` (and the web UI) can bind to it
+# without pulling the vault-backed `cookbook` crate. The
+# `cookbook` crate re-exports it so `cookbook::Nutrition` keeps
+# working.
+cookbook-proto = { path = "features/mealplan/cookbook/cookbook-proto", default-features = false }
 pantry = { path = "features/mealplan/pantry" }
 mealplan = { path = "features/mealplan/mealplan" }
 
@@ -437,6 +443,12 @@ workouts = { path = "features/fitness/workouts" }
 body = { path = "features/fitness/body" }
 intake = { path = "features/fitness/intake" }
 fitness = { path = "features/fitness/fitness" }
+# `fitness-proto` is wasm-clean (the web UI binds to the four
+# fitness service clients directly); the native `body` /
+# `exercises` / `workouts` / `intake` crates own the
+# vault-backed parse / write / store side and re-export this
+# proto. Mirrors the `locations-proto` split.
+fitness-proto = { path = "features/fitness/fitness-proto", default-features = false }
 view = { path = "features/view/view" }
 view-gantt = { path = "features/view/view-gantt" }
 view-kanban = { path = "features/view/view-kanban" }

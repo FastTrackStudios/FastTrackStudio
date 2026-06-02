@@ -36,6 +36,10 @@ inbox-proto = { workspace = true, features = ["vox"] }
 locations-proto = { workspace = true, features = ["vox"] }
 milestone-proto = { workspace = true, features = ["vox"] }
 finance-proto = { workspace = true, features = ["vox"] }
+# Fitness suite wire surface — body / exercises / workouts /
+# intake service clients for the `/fitness` route. Wasm-clean
+# (serde-only client side), `vox` feature only.
+fitness-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
 # Cyclic life-calendar — Goals view uses the pure-function
 # generator to resolve `cycle_id` references to displayable

@@ -5,9 +5,9 @@
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    BookOpen, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Flag, FolderKanban, House,
-    Inbox as InboxIcon, MapPin, Notebook, ReceiptText, Settings as SettingsIcon, Target, Timer,
-    Wallet,
+    BookOpen, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag, FolderKanban,
+    House, Inbox as InboxIcon, MapPin, Notebook, ReceiptText, Settings as SettingsIcon, Target,
+    Timer, Wallet,
 };
 
 use crate::routes::Route;
@@ -40,6 +40,9 @@ fn icon_locations() -> Element {
 }
 fn icon_milestones() -> Element {
     rsx! { Flag { size: 16 } }
+}
+fn icon_fitness() -> Element {
+    rsx! { Dumbbell { size: 16 } }
 }
 fn icon_schedule() -> Element {
     rsx! { CalendarDays { size: 16 } }
@@ -110,6 +113,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Milestones",
             icon: icon_milestones,
             route: Route::MilestonesRoute {},
+        },
+        NavTab {
+            label: "Fitness",
+            icon: icon_fitness,
+            route: Route::FitnessRoute {},
         },
         NavTab {
             label: "Schedule",
@@ -199,6 +207,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::VaultRoute {} => "Vault",
         Route::LocationsRoute {} => "Locations",
         Route::MilestonesRoute {} => "Milestones",
+        Route::FitnessRoute {} => "Fitness",
         Route::ScheduleRoute {} => "Schedule",
         Route::BookingsRoute {} => "Bookings",
         Route::GanttRoute {} => "Gantt",

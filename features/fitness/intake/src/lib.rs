@@ -31,14 +31,14 @@ pub mod write;
 pub use model::{IntakeEntry, IntakeLog, IntakeSource, scale_nutrition};
 pub use parse::{ParseError, looks_like_intake, parse_page};
 pub use scan::{between, for_day, scan_vault};
-pub use service::{IntakeError, IntakeService, IntakeServiceRpc};
+pub use service::{IntakeError, IntakeService};
 
 #[cfg(feature = "vox")]
-pub use service::{
-    IntakeServiceClient, IntakeServiceRpcDispatcher as IntakeDispatcher,
-    Service as IntakeServiceBridge,
-    intake_service_rpc_service_descriptor as intake_service_descriptor,
-    layer as intake_service_layer, serve as serve_intake_service,
+pub use fitness_proto::intake::{
+    IntakeDispatcher, IntakeServiceBridge, IntakeServiceClient, intake_service_descriptor,
+    intake_service_layer, serve_intake_service,
 };
+#[cfg(feature = "vox")]
+pub use service::{IntakeServiceRpc, IntakeServiceRpcDispatcher};
 pub use store::Store;
 pub use write::{WriteError, default_intake_path, serialize_intake, write_intake};

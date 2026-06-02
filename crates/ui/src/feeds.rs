@@ -404,6 +404,160 @@ pub async fn create_milestone(
         .map_err(|e| format!("{slug}: create milestone: {e:?}"))
 }
 
+// ── Fitness ─────────────────────────────────────────────────────────
+
+/// Every tracked body metric (weight / body-fat / measurements)
+/// in the org's vault, in the order the backend lists them. Each
+/// carries its full entry time series inline.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_body_metrics(
+    slug: &str,
+) -> Result<Vec<fitness_proto::body::BodyMetric>, String> {
+    let client =
+        crate::vox_clients::establish_for::<fitness_proto::body::BodyServiceClient>(slug).await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list body metrics: {e:?}"))
+}
+
+/// Create one body metric (e.g. a "Weight" series tracked in
+/// kg). The backend assigns the `id` (nil here) and the vault
+/// `path` (empty here). Returns the persisted metric.
+#[cfg(target_arch = "wasm32")]
+pub async fn create_body_metric(
+    slug: &str,
+    name: &str,
+    kind: &str,
+    unit: &str,
+) -> Result<fitness_proto::body::BodyMetric, String> {
+    let client =
+        crate::vox_clients::establish_for::<fitness_proto::body::BodyServiceClient>(slug).await?;
+    let metric = fitness_proto::body::BodyMetric {
+        path: String::new(),
+        id: uuid::Uuid::nil(),
+        name: name.to_owned(),
+        kind: kind.to_owned(),
+        unit: unit.to_owned(),
+        goal: None,
+        tags: fitness_proto::body::Tags::default(),
+        entries: fitness_proto::body::Entries::default(),
+        date_created: None,
+        date_modified: None,
+        details: String::new(),
+    };
+    client
+        .create(metric)
+        .await
+        .map_err(|e| format!("{slug}: create body metric: {e:?}"))
+}
+
+/// Log a single reading against an existing metric. `value` is
+/// in the metric's default unit; `date` is the calendar day of
+/// the reading. Returns the updated metric.
+#[cfg(target_arch = "wasm32")]
+pub async fn log_body_entry(
+    slug: &str,
+    metric_id: uuid::Uuid,
+    value: f64,
+    date: chrono::NaiveDate,
+) -> Result<fitness_proto::body::BodyMetric, String> {
+    let client =
+        crate::vox_clients::establish_for::<fitness_proto::body::BodyServiceClient>(slug).await?;
+    let entry = fitness_proto::body::BodyEntry {
+        id: uuid::Uuid::nil(),
+        date,
+        value,
+        unit: None,
+        note: None,
+    };
+    client
+        .log_entry(metric_id.to_string(), entry)
+        .await
+        .map_err(|e| format!("{slug}: log body entry: {e:?}"))
+}
+
+/// Every exercise in the org's catalog, in the order the
+/// backend lists them.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_exercises(
+    slug: &str,
+) -> Result<Vec<fitness_proto::exercises::Exercise>, String> {
+    let client =
+        crate::vox_clients::establish_for::<fitness_proto::exercises::ExercisesServiceClient>(slug)
+            .await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list exercises: {e:?}"))
+}
+
+/// Add one exercise to the catalog (name + movement category).
+/// The backend assigns the `id` (nil here) and the vault `path`
+/// (empty here). Returns the persisted exercise.
+#[cfg(target_arch = "wasm32")]
+pub async fn create_exercise(
+    slug: &str,
+    name: &str,
+    category: &str,
+) -> Result<fitness_proto::exercises::Exercise, String> {
+    let client =
+        crate::vox_clients::establish_for::<fitness_proto::exercises::ExercisesServiceClient>(slug)
+            .await?;
+    let exercise = fitness_proto::exercises::Exercise {
+        path: String::new(),
+        id: uuid::Uuid::nil(),
+        name: name.to_owned(),
+        aliases: fitness_proto::exercises::StringList::default(),
+        description: None,
+        category: category.to_owned(),
+        primary_muscles: fitness_proto::exercises::StringList::default(),
+        secondary_muscles: fitness_proto::exercises::StringList::default(),
+        equipment: fitness_proto::exercises::StringList::default(),
+        mechanics: None,
+        force: None,
+        instructions: fitness_proto::exercises::StringList::default(),
+        video_url: None,
+        image_url: None,
+        tags: fitness_proto::exercises::StringList::default(),
+        date_created: None,
+        date_modified: None,
+        details: String::new(),
+    };
+    client
+        .create(exercise)
+        .await
+        .map_err(|e| format!("{slug}: create exercise: {e:?}"))
+}
+
+/// Every logged workout session in the org's vault, in the order
+/// the backend lists them.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_workouts(
+    slug: &str,
+) -> Result<Vec<fitness_proto::workouts::WorkoutSession>, String> {
+    let client =
+        crate::vox_clients::establish_for::<fitness_proto::workouts::WorkoutsServiceClient>(slug)
+            .await?;
+    client
+        .list_sessions()
+        .await
+        .map_err(|e| format!("{slug}: list workout sessions: {e:?}"))
+}
+
+/// Every daily intake log in the org's vault, in the order the
+/// backend lists them. Each carries its consumed entries inline.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_intake(slug: &str) -> Result<Vec<fitness_proto::intake::IntakeLog>, String> {
+    let client =
+        crate::vox_clients::establish_for::<fitness_proto::intake::IntakeServiceClient>(slug)
+            .await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list intake logs: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -844,6 +998,63 @@ pub async fn create_milestone(
     _project_id: uuid::Uuid,
     _due_date: Option<chrono::NaiveDate>,
 ) -> Result<milestone_proto::Milestone, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+// ── Fitness (native stubs) ──────────────────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_body_metrics(
+    _slug: &str,
+) -> Result<Vec<fitness_proto::body::BodyMetric>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_body_metric(
+    _slug: &str,
+    _name: &str,
+    _kind: &str,
+    _unit: &str,
+) -> Result<fitness_proto::body::BodyMetric, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn log_body_entry(
+    _slug: &str,
+    _metric_id: uuid::Uuid,
+    _value: f64,
+    _date: chrono::NaiveDate,
+) -> Result<fitness_proto::body::BodyMetric, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_exercises(
+    _slug: &str,
+) -> Result<Vec<fitness_proto::exercises::Exercise>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_exercise(
+    _slug: &str,
+    _name: &str,
+    _category: &str,
+) -> Result<fitness_proto::exercises::Exercise, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_workouts(
+    _slug: &str,
+) -> Result<Vec<fitness_proto::workouts::WorkoutSession>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_intake(_slug: &str) -> Result<Vec<fitness_proto::intake::IntakeLog>, String> {
     Err("native client not wired yet".to_owned())
 }
 
