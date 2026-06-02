@@ -37,7 +37,7 @@ dioxus = { version = "0.7.9", features = ["router"] }
 lucide-dioxus = { workspace = true }
 
 # Chart parsing and layout
-keyflow = { workspace = true, features = ["engraver", "highlighting"] }
+keyflow = { workspace = true, features = ["engraver", "text", "highlighting"] }
 
 # FTS design system (components, layout, typography, theme tokens)
 fts-ui = { workspace = true }
@@ -45,13 +45,8 @@ fts-ui = { workspace = true }
 # Audio FX controls
 audio-controls = { workspace = true }
 
-# Geometry (match engraver version)
-kurbo = "0.13"
-
-# Graphics rendering (cross-platform)
-vello = { workspace = true }
+# Color type used by the engraver's SVG export config
 peniko = { workspace = true }
-anyrender_vello = { workspace = true }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -114,9 +109,6 @@ web-sys = { version = "0.3", features = [
     # SVG fallback rendering
     "HtmlImageElement",
 ] }
-
-# Graphics rendering (WASM) - version must match vello 0.7's wgpu dependency
-wgpu = { version = "29", features = ["webgpu", "webgl"] }
 
 # Async runtime for WASM
 tokio = { version = "1.0", default-features = false, features = ["sync"] }

@@ -177,24 +177,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyrender_vello"
-version = "0.10.1"
-source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#89a3ac4e574d9b7b07ec86cb6bc70a06531fd369"
-dependencies = [
- "anyrender",
- "debug_timer",
- "futures-channel",
- "kurbo 0.13.1",
- "peniko 0.6.1",
- "pollster",
- "rustc-hash 2.1.2",
- "vello",
- "wasm-bindgen-futures",
- "wgpu",
- "wgpu_context",
-]
-
-[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -215,21 +197,21 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/architect.git?branch=main#3adf922be306c8b3fb9ee9ac1903adc5aa8a6eca"
 dependencies = [
  "architect-derive",
  "architect-rpc-derive",
  "chrono",
+ "eyre",
  "facet",
  "facet-core",
  "thiserror 2.0.18",
+ "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/architect.git?branch=main#3adf922be306c8b3fb9ee9ac1903adc5aa8a6eca"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -240,7 +222,6 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/architect.git?branch=main#3adf922be306c8b3fb9ee9ac1903adc5aa8a6eca"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -945,7 +926,7 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#bfd7a151b9240074982250f29467d695c7bda28d"
 dependencies = [
  "facet",
  "thiserror 2.0.18",
@@ -975,7 +956,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1416,12 +1397,6 @@ dependencies = [
  "facet",
  "serde",
 ]
-
-[[package]]
-name = "debug_timer"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 
 [[package]]
 name = "deranged"
@@ -2106,7 +2081,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2138,7 +2113,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -2239,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "engraver-proto"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyrender",
  "bitflags 2.11.1",
@@ -2259,6 +2234,7 @@ dependencies = [
  "macro_rules_attribute",
  "parley",
  "pdf-writer",
+ "peniko 0.6.1",
  "printpdf",
  "regex",
  "serde",
@@ -2328,7 +2304,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2476,7 +2452,6 @@ name = "fasttrackstudio-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "anyrender_vello",
  "audio-controls",
  "console_error_panic_hook",
  "dioxus",
@@ -2487,7 +2462,6 @@ dependencies = [
  "gloo-timers",
  "js-sys",
  "keyflow",
- "kurbo 0.13.1",
  "lucide-dioxus",
  "parley",
  "peniko 0.6.1",
@@ -2498,11 +2472,9 @@ dependencies = [
  "tracing-subscriber",
  "tracing-wasm",
  "uuid",
- "vello",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu",
  "zip",
 ]
 
@@ -3285,7 +3257,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -3624,7 +3596,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -3955,7 +3927,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4093,7 +4065,7 @@ dependencies = [
 
 [[package]]
 name = "keyflow"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "color-eyre",
  "colored",
@@ -4113,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "keyflow-chordpro"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "keyflow-proto"
@@ -4134,7 +4106,7 @@ dependencies = [
 
 [[package]]
 name = "keyflow-syntax"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "facet",
  "serde",
@@ -4143,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "keyflow-text"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "keyflow-chordpro",
  "keyflow-proto",
@@ -4860,7 +4832,7 @@ dependencies = [
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#bfd7a151b9240074982250f29467d695c7bda28d"
 dependencies = [
  "color-palette",
 ]
@@ -5018,7 +4990,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6583,7 +6555,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7104,7 +7076,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7423,7 +7395,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8728,15 +8700,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wgpu_context"
-version = "0.6.0"
-source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#89a3ac4e574d9b7b07ec86cb6bc70a06531fd369"
-dependencies = [
- "futures-intrusive",
- "wgpu",
-]
-
-[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8758,7 +8721,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
