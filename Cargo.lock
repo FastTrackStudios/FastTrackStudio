@@ -2134,7 +2134,11 @@ dependencies = [
  "daw-reaper-dioxus",
  "daw-standalone",
  "daw-test-macro",
+ "dawfile-aaf",
  "dawfile-ableton",
+ "dawfile-dawproject",
+ "dawfile-logic",
+ "dawfile-protools",
  "dawfile-reaper",
  "eyre",
  "facet",
@@ -6721,6 +6725,15 @@ version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
 dependencies = [
  "nutype",
+ "serde",
+]
+
+[[package]]
+name = "reaper-common-types"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+dependencies = [
+ "nutype",
  "palette",
  "serde",
 ]
@@ -6802,7 +6815,7 @@ dependencies = [
  "enumflags2",
  "helgoboss-midi",
  "libc",
- "reaper-common-types",
+ "reaper-common-types 0.1.0 (git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "reaper-low",
  "ref-cast",
  "tracing",
@@ -7882,7 +7895,7 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "palette",
  "raw-window-handle 0.4.3",
- "reaper-common-types",
+ "reaper-common-types 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "reaper-low",
  "reaper-medium",
  "rxrust",
