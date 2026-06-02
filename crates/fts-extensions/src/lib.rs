@@ -455,6 +455,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         .init();
 
     info!("FTS Extensions starting…");
+    info!(
+        "=== FTS BUILD MARKER: slip-drag-v3 — quick-edit drives its own split+slip drag (FTS slip, no native pass-through) ==="
+    );
 
     // Kick off the wgpu Instance/Adapter/Device build on a worker thread
     // so the heavy GPU init runs in parallel with the rest of plugin_main
