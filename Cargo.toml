@@ -397,6 +397,10 @@ attachments-proto = { path = "features/attachments/attachments-proto" }
 # carry a stable `id` so other features reference them by
 # uuid through renames.
 locations = { path = "features/locations/locations" }
+# `locations-proto` is wasm-clean (the web UI binds to it
+# directly); the `locations` crate owns the vault-backed
+# parse / write / store side.
+locations-proto = { path = "features/locations/locations-proto", default-features = false }
 # `inventory` — typed view of gear/equipment pages
 # (`type: item`). References locations by `location_id`;
 # rides on top of `vault` like `task` does.

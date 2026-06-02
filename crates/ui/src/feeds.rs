@@ -230,6 +230,51 @@ pub async fn create_wiki_note(slug: &str, path: &str, markdown: &str) -> Result<
         .map_err(|e| format!("{slug}: write note: {e:?}"))
 }
 
+// ── Locations ───────────────────────────────────────────────────────
+
+/// Every location in the org's vault (studios / rooms / storage /
+/// venues / homes), in the order the backend lists them.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_locations(slug: &str) -> Result<Vec<locations_proto::Location>, String> {
+    let client =
+        crate::vox_clients::establish_for::<locations_proto::LocationsServiceClient>(slug).await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list locations: {e:?}"))
+}
+
+/// Create one location. The backend assigns the `id` (nil here) and
+/// the vault `path` (empty here, defaulting to `locations/<slug>.md`).
+/// Returns the persisted location.
+#[cfg(target_arch = "wasm32")]
+pub async fn create_location(
+    slug: &str,
+    name: &str,
+    kind: &str,
+    address: Option<String>,
+) -> Result<locations_proto::Location, String> {
+    let client =
+        crate::vox_clients::establish_for::<locations_proto::LocationsServiceClient>(slug).await?;
+    let loc = locations_proto::Location {
+        path: String::new(),
+        id: uuid::Uuid::nil(),
+        name: name.to_owned(),
+        kind: kind.to_owned(),
+        parent_id: None,
+        address,
+        tags: locations_proto::model::Tags::default(),
+        same_as: None,
+        date_created: None,
+        date_modified: None,
+        details: String::new(),
+    };
+    client
+        .create(loc)
+        .await
+        .map_err(|e| format!("{slug}: create location: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -616,6 +661,21 @@ pub async fn create_task(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn create_wiki_note(_slug: &str, _path: &str, _markdown: &str) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_locations(_slug: &str) -> Result<Vec<locations_proto::Location>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_location(
+    _slug: &str,
+    _name: &str,
+    _kind: &str,
+    _address: Option<String>,
+) -> Result<locations_proto::Location, String> {
     Err("native client not wired yet".to_owned())
 }
 

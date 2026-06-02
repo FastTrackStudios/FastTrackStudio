@@ -33,6 +33,7 @@ task-ui.workspace = true
 # the day-plan overlay. Wasm-clean (serde-only client side).
 scheduling-proto = { workspace = true, features = ["vox"] }
 inbox-proto = { workspace = true, features = ["vox"] }
+locations-proto = { workspace = true, features = ["vox"] }
 finance-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
 # Cyclic life-calendar — Goals view uses the pure-function

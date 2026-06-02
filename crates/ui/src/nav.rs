@@ -6,7 +6,7 @@
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     BookOpen, CalendarDays, ChartGantt, CircleCheck, FolderKanban, House, Inbox as InboxIcon,
-    Notebook, ReceiptText, Settings as SettingsIcon, Target, Timer, Wallet,
+    MapPin, Notebook, ReceiptText, Settings as SettingsIcon, Target, Timer, Wallet,
 };
 
 use crate::routes::Route;
@@ -33,6 +33,9 @@ fn icon_tasks() -> Element {
 }
 fn icon_vault() -> Element {
     rsx! { Notebook { size: 16 } }
+}
+fn icon_locations() -> Element {
+    rsx! { MapPin { size: 16 } }
 }
 fn icon_schedule() -> Element {
     rsx! { CalendarDays { size: 16 } }
@@ -90,6 +93,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Vault",
             icon: icon_vault,
             route: Route::VaultRoute {},
+        },
+        NavTab {
+            label: "Locations",
+            icon: icon_locations,
+            route: Route::LocationsRoute {},
         },
         NavTab {
             label: "Schedule",
@@ -172,6 +180,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::GoalsRoute {} => "Goals",
         Route::TasksRoute {} => "Tasks",
         Route::VaultRoute {} => "Vault",
+        Route::LocationsRoute {} => "Locations",
         Route::ScheduleRoute {} => "Schedule",
         Route::GanttRoute {} => "Gantt",
         Route::TimerRoute {} => "Timer",

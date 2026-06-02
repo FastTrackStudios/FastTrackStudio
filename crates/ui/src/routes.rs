@@ -36,6 +36,9 @@ pub enum Route {
         #[route("/vault")]
         VaultRoute {},
 
+        #[route("/locations")]
+        LocationsRoute {},
+
         #[route("/schedule")]
         ScheduleRoute {},
 
@@ -91,6 +94,11 @@ fn TasksRoute() -> Element {
 #[component]
 fn VaultRoute() -> Element {
     rsx! { pages::vault::VaultView {} }
+}
+
+#[component]
+fn LocationsRoute() -> Element {
+    rsx! { pages::locations::LocationsView {} }
 }
 
 #[component]
