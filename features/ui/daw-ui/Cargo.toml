@@ -31,6 +31,9 @@ fts-ui = { workspace = true, optional = true }
 default = ["web"]
 web = ["dep:dioxus", "dep:tracing", "dock-dioxus/web"]
 native = ["dep:dioxus-native"]
+# Folder-hierarchy mixer (`widgets::mixer::Mixer`, driven by
+# `daw_proto::track::FolderDepthChange`). daw-proto is already a hard dep.
+hierarchy = ["web"]
 # Ships the `FTS_UI_NATIVE` and `FTS_UI_DESKTOP` panel + action defs that
 # render `fts_ui::showcase::Showcase` through the daw-reaper-dioxus host.
 reaper-test-panels = [
@@ -39,6 +42,11 @@ reaper-test-panels = [
     "dep:daw-reaper-dioxus",
     "dep:fts-ui",
 ]
+
+# Web-build helpers for the widgets (e.g. knob pointer-lock / coords).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Document", "MouseEvent", "EventTarget"] }
 
 [lints]
 workspace = true

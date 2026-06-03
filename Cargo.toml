@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "apps/daw",
-    "features/audio/audio-controls",
     "crates/daw",
     "crates/daw-control",
     "crates/daw-proto",

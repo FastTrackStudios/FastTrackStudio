@@ -8,8 +8,8 @@
 //! # or, with hot-reload:  dx serve -p ui-showcase
 //! ```
 
-use audio_controls::panels::model::ClipView;
-use audio_controls::panels::{DawWorkspace, TrackView};
+use daw_ui::panels::model::ClipView;
+use daw_ui::panels::{DawWorkspace, TrackView};
 use dioxus::prelude::*;
 
 fn main() {

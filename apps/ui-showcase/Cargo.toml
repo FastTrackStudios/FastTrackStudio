@@ -10,8 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 # Reusable DAW panels under test (TrackControlPanel / MixerControlPanel /
-# ArrangeView / DawWorkspace) + their widgets.
-audio-controls = { path = "../../features/audio/audio-controls" }
+# ArrangeView / DawWorkspace) + their widgets — now part of daw-ui.
+daw-ui = { path = "../../features/ui/daw-ui" }
 dioxus = { workspace = true }
 # Native (Blitz/GPU) renderer — `dioxus_native::launch`.
 dioxus-native = { workspace = true }
