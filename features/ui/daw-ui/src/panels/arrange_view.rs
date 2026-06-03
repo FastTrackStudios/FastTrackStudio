@@ -7,14 +7,7 @@
 use crate::panels::model::TrackView;
 use crate::panels::track_control_panel::TrackControlPanel;
 use crate::prelude::*;
-
-const TIMELINE_BG: &str = "#0a0a0c";
-const RULER_BG: &str = "#141417";
-const BORDER: &str = "#1f1f23";
-const LANE_BORDER: &str = "#16161a";
-const GRID_LINE: &str = "#1c1c20";
-const TICK_FG: &str = "#71717a";
-const CLIP_BORDER: &str = "#0a0a0c";
+use crate::theming::use_theme;
 
 /// The arrange view. `pps` = pixels per second (horizontal zoom); `tcp_width`
 /// is the control-sidebar width; `seconds` is the visible timeline length.
@@ -31,18 +24,26 @@ pub fn ArrangeView(
     let tick_step = 5.0f64;
     let tick_count = (seconds / tick_step).ceil() as i64;
 
+    let tk = use_theme().theme.tokens;
+    let timeline_bg = tk.surface_sunken.css();
+    let ruler_bg = tk.surface_raised.css();
+    let border = tk.border.css();
+    let grid_line = tk.border.css();
+    let tick_fg = tk.text_faint.css();
+
     rsx! {
         div {
-            style: "display:flex; flex-direction:column; height:100%; min-height:0; \
-                    background:#0a0a0c;",
+            style: format!(
+                "display:flex; flex-direction:column; height:100%; min-height:0; background:{timeline_bg};"
+            ),
 
             // ── Ruler row: spacer over the TCP, ticks over the timeline ──
             div {
                 style: format!(
                     "flex:0 0 {ruler_h}px; height:{ruler_h}px; display:flex; \
-                     border-bottom:1px solid {BORDER}; background:{RULER_BG};"
+                     border-bottom:1px solid {border}; background:{ruler_bg};"
                 ),
-                div { style: format!("flex:0 0 {tcp_width}px; border-right:1px solid {BORDER};") }
+                div { style: format!("flex:0 0 {tcp_width}px; border-right:1px solid {border};") }
                 div {
                     style: "flex:1 1 0; position:relative; overflow:hidden;",
                     div {
@@ -52,8 +53,8 @@ pub fn ArrangeView(
                                 key: "{i}",
                                 style: format!(
                                     "position:absolute; top:0; bottom:0; left:{x}px; \
-                                     border-left:1px solid {BORDER}; padding-left:4px; \
-                                     font-size:9px; color:{TICK_FG}; font-variant-numeric:tabular-nums;",
+                                     border-left:1px solid {border}; padding-left:4px; \
+                                     font-size:9px; color:{tick_fg}; font-variant-numeric:tabular-nums;",
                                     x = (i as f64 * tick_step * pps) as u32,
                                 ),
                                 "{(i as f64 * tick_step) as u32}s"
@@ -71,7 +72,7 @@ pub fn ArrangeView(
 
                 // Timeline lanes (own horizontal scroll).
                 div {
-                    style: format!("flex:1 1 0; min-width:0; overflow-x:auto; background:{TIMELINE_BG};"),
+                    style: format!("flex:1 1 0; min-width:0; overflow-x:auto; background:{timeline_bg};"),
                     div {
                         style: format!("position:relative; width:{content_w}px;"),
                         // Vertical grid lines across the whole lane stack.
@@ -80,7 +81,7 @@ pub fn ArrangeView(
                                 key: "g{i}",
                                 style: format!(
                                     "position:absolute; top:0; bottom:0; left:{x}px; \
-                                     width:1px; background:{GRID_LINE}; pointer-events:none;",
+                                     width:1px; background:{grid_line}; pointer-events:none;",
                                     x = (i as f64 * tick_step * pps) as u32,
                                 ),
                             }
@@ -99,10 +100,13 @@ pub fn ArrangeView(
 #[component]
 fn Lane(track: TrackView, pps: f64) -> Element {
     let accent = track.hex();
+    let tk = use_theme().theme.tokens;
+    let lane_border = tk.border.css();
+    let clip_border = tk.surface_sunken.css();
     rsx! {
         div {
             style: format!(
-                "position:relative; height:{h}px; border-bottom:1px solid {LANE_BORDER}; \
+                "position:relative; height:{h}px; border-bottom:1px solid {lane_border}; \
                  box-sizing:border-box;",
                 h = track.height,
             ),
@@ -116,7 +120,7 @@ fn Lane(track: TrackView, pps: f64) -> Element {
                             style: format!(
                                 "position:absolute; top:3px; bottom:3px; left:{x}px; width:{w}px; \
                                  background:linear-gradient(180deg,{col}cc,{col}88); \
-                                 border:1px solid {CLIP_BORDER}; border-radius:3px; overflow:hidden; \
+                                 border:1px solid {clip_border}; border-radius:3px; overflow:hidden; \
                                  box-shadow:inset 0 1px 0 rgba(255,255,255,0.15); \
                                  font-size:10px; color:#0c0c0f; font-weight:700; padding:2px 5px; \
                                  white-space:nowrap; text-overflow:ellipsis;",

@@ -10,6 +10,7 @@
 
 use daw_ui::panels::model::ClipView;
 use daw_ui::panels::{DawWorkspace, TrackView};
+use daw_ui::theming::use_theme;
 use dioxus::prelude::*;
 
 fn main() {
@@ -22,19 +23,32 @@ fn App() -> Element {
     // per-track signals live here and survive re-renders).
     let tracks = use_signal(sample_tracks);
 
+    // Everything (shell + workspace) reads this one theme.
+    let tk = use_theme().theme.tokens;
+    let bg = tk.surface.css();
+    let header_bg = tk.surface_raised.css();
+    let border = tk.border.css();
+    let text = tk.text.css();
+    let text_strong = tk.text.lighten(0.2).css();
+    let text_dim = tk.text_faint.css();
+
     rsx! {
         div {
-            style: "position:fixed; inset:0; display:flex; flex-direction:column; \
-                    background:#09090b; color:#e4e4e7; \
-                    font-family:'Inter','SF Pro Display',system-ui,sans-serif; overflow:hidden;",
+            style: format!(
+                "position:fixed; inset:0; display:flex; flex-direction:column; \
+                 background:{bg}; color:{text}; \
+                 font-family:'Inter','SF Pro Display',system-ui,sans-serif; overflow:hidden;"
+            ),
 
             // Title bar.
             div {
-                style: "flex:0 0 auto; display:flex; align-items:center; gap:10px; \
-                        padding:6px 12px; background:#101013; border-bottom:1px solid #27272a; \
-                        font-size:12px; font-weight:700; letter-spacing:0.04em;",
-                span { style: "color:#f4f4f5;", "FastTrackStudio" }
-                span { style: "color:#71717a; font-weight:500;", "UI Showcase — DawWorkspace" }
+                style: format!(
+                    "flex:0 0 auto; display:flex; align-items:center; gap:10px; \
+                     padding:6px 12px; background:{header_bg}; border-bottom:1px solid {border}; \
+                     font-size:12px; font-weight:700; letter-spacing:0.04em;"
+                ),
+                span { style: format!("color:{text_strong};"), "FastTrackStudio" }
+                span { style: format!("color:{text_dim}; font-weight:500;"), "UI Showcase — DawWorkspace" }
             }
 
             // The workspace fills the rest.

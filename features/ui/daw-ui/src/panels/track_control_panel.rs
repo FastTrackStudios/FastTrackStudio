@@ -7,16 +7,10 @@
 
 use crate::panels::model::TrackView;
 use crate::prelude::*;
+use crate::theming::{Color, ThemeState, use_theme};
 use crate::widgets::hslider::{HSlider, SliderVariant};
 use crate::widgets::knob::{Knob, KnobVariant};
 use crate::widgets::mixer::{MuteButton, SoloButton};
-
-const PANEL_BG: &str = "#0e0e11";
-const ROW_BG: &str = "#141417";
-const ROW_BORDER: &str = "#1f1f23";
-const ARM_OFF: &str = "#3f3f46";
-const ARM_ON: &str = "#ef4444";
-const NAME_FG: &str = "#e4e4e7";
 
 /// Per-track indent (px) applied per folder-depth level.
 const INDENT: u32 = 12;
@@ -34,11 +28,12 @@ pub fn TrackControlPanel(
     scroll: bool,
 ) -> Element {
     let overflow = if scroll { "auto" } else { "visible" };
+    let surface = use_theme().theme.panel().surface.css();
     rsx! {
         div {
             style: format!(
                 "flex:0 0 {width}px; width:{width}px; display:flex; flex-direction:column; \
-                 background:{PANEL_BG}; overflow-y:{overflow}; user-select:none;"
+                 background:{surface}; overflow-y:{overflow}; user-select:none;"
             ),
             for track in tracks.iter() {
                 TcpRow { key: "{track.id}", track: track.clone() }
@@ -50,23 +45,37 @@ pub fn TrackControlPanel(
 /// One TCP control row for a track.
 #[component]
 fn TcpRow(track: TrackView) -> Element {
+    let theme = use_theme().theme;
+    let tk = theme.tokens;
     let accent = track.hex();
+    let st = ThemeState::new().track(track.color.as_deref().and_then(Color::hex));
     let indent = track.depth * INDENT;
     let mut record_arm = track.record_arm;
     let arm_on = record_arm();
-    let arm_bg = if arm_on { ARM_ON } else { ARM_OFF };
-    let name_weight = if track.is_folder { 800 } else { 600 };
-    let row_tint = if track.is_folder {
-        format!("{accent}1f")
+    let arm_bg = if arm_on {
+        tk.rec.css()
     } else {
-        ROW_BG.to_string()
+        tk.border.css()
+    };
+    let arm_fill = if arm_on {
+        tk.rec.css()
+    } else {
+        "transparent".to_string()
+    };
+    let name_fg = tk.text.css();
+    let name_weight = if track.is_folder { 800 } else { 600 };
+    let border = tk.border.css();
+    let row_bg = if track.is_folder {
+        theme.track_tint(tk.surface_raised, &st).css()
+    } else {
+        tk.surface_raised.css()
     };
 
     rsx! {
         div {
             style: format!(
                 "flex:0 0 {h}px; height:{h}px; display:flex; align-items:center; gap:6px; \
-                 padding:0 8px 0 0; background:{row_tint}; border-bottom:1px solid {ROW_BORDER};",
+                 padding:0 8px 0 0; background:{row_bg}; border-bottom:1px solid {border};",
                 h = track.height,
             ),
 
@@ -80,8 +89,7 @@ fn TcpRow(track: TrackView) -> Element {
                 title: "Record arm",
                 style: format!(
                     "flex:0 0 auto; width:18px; height:18px; border-radius:50%; \
-                     border:1px solid {arm_bg}; background:{fill}; cursor:pointer; padding:0;",
-                    fill = if arm_on { ARM_ON } else { "transparent" },
+                     border:1px solid {arm_bg}; background:{arm_fill}; cursor:pointer; padding:0;"
                 ),
                 onclick: move |_| { let n = !record_arm(); record_arm.set(n); },
             }
@@ -91,7 +99,7 @@ fn TcpRow(track: TrackView) -> Element {
                 style: "flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:2px;",
                 span {
                     style: format!(
-                        "font-size:12px; font-weight:{name_weight}; color:{NAME_FG}; \
+                        "font-size:12px; font-weight:{name_weight}; color:{name_fg}; \
                          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
                     ),
                     if track.is_folder { span { style: "opacity:0.7; margin-right:4px;", "▼" } }

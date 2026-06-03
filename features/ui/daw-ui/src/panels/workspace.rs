@@ -21,10 +21,17 @@ pub fn DawWorkspace(
 ) -> Element {
     let arrange_grow = ((1.0 - mixer_fraction) * 100.0).round() as u32;
     let mixer_grow = (mixer_fraction * 100.0).round() as u32;
+    let bg = crate::theming::use_theme()
+        .theme
+        .tokens
+        .surface_sunken
+        .css();
     rsx! {
         div {
-            style: "display:flex; flex-direction:column; width:100%; height:100%; \
-                    min-height:0; background:#0a0a0c;",
+            style: format!(
+                "display:flex; flex-direction:column; width:100%; height:100%; \
+                 min-height:0; background:{bg};"
+            ),
             // Arrange (top).
             div {
                 style: format!("flex:{arrange_grow} 1 0; min-height:0;"),
