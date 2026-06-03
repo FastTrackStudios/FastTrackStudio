@@ -78,9 +78,9 @@ facet-json = { version = "0.46" }
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
 # VOX service framework (pinned to FastTrackStudios fork)
-vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-stream = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-types = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-stream = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -202,7 +202,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # [patch."https://codeberg.org/FastTrackStudios/monarchy.git"]
 # monarchy = { path = "../monarchy/crates/monarchy" }
 
-# (vox patch block removed — all pins now point at bearcove/vox directly)
+# (no vox patch needed — daw, architect, and input_actions all pin the same
+# Codeberg vox fork @ f31f1040 = vox 0.8.2, so the graph shares one vox.)
 
 # reaper-rs source unification: daw pins reaper-low/medium to Codeberg, but
 # swell-ui (from Codeberg reaper-lib) still pulls them from the legacy

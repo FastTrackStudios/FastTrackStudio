@@ -90,11 +90,11 @@ dependencies = [
 [[package]]
 name = "actions-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/input_actions.git?branch=main#1a647fb218c9a9364f7e25384f91fc1194581c63"
+source = "git+https://codeberg.org/FastTrackStudios/input_actions.git?branch=main#517e2a8e997899897c2543842ca9a35819737b5f"
 dependencies = [
  "convert_case 0.6.0",
  "facet",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -259,7 +259,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -270,7 +270,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -421,22 +421,21 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#3adf922be306c8b3fb9ee9ac1903adc5aa8a6eca"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#afbb663bde815554f92ff21afe8368997d8fd15e"
 dependencies = [
  "architect-derive",
  "architect-rpc-derive",
- "chrono",
+ "eyre",
  "facet",
- "facet-core",
  "thiserror 2.0.18",
- "uuid",
- "vox 0.5.0",
+ "tokio",
+ "vox",
 ]
 
 [[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#3adf922be306c8b3fb9ee9ac1903adc5aa8a6eca"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#afbb663bde815554f92ff21afe8368997d8fd15e"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -447,7 +446,7 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#3adf922be306c8b3fb9ee9ac1903adc5aa8a6eca"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#afbb663bde815554f92ff21afe8368997d8fd15e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -675,6 +674,7 @@ dependencies = [
 name = "audio-controls"
 version = "0.1.0"
 dependencies = [
+ "daw-proto",
  "dioxus",
  "wasm-bindgen",
  "web-sys",
@@ -2145,8 +2145,8 @@ dependencies = [
  "moire",
  "reaper-launcher",
  "tokio",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -2200,8 +2200,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -2220,8 +2220,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -2234,7 +2234,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "vox 0.5.0",
+ "vox",
 ]
 
 [[package]]
@@ -2252,7 +2252,7 @@ dependencies = [
  "reaper-medium",
  "tokio",
  "tracing",
- "vox 0.5.0",
+ "vox",
 ]
 
 [[package]]
@@ -2301,8 +2301,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -2313,8 +2313,8 @@ dependencies = [
  "architect",
  "facet",
  "futures",
- "vox 0.5.0",
- "vox-types 0.5.0",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -2347,8 +2347,8 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -2400,7 +2400,7 @@ dependencies = [
  "reaper-macros",
  "tracing",
  "tracing-subscriber",
- "vox 0.5.0",
+ "vox",
 ]
 
 [[package]]
@@ -2455,7 +2455,7 @@ dependencies = [
  "tracing",
  "ureq",
  "uuid",
- "vox 0.5.0",
+ "vox",
  "vst3",
  "wasm-bindgen",
  "web-time",
@@ -3232,7 +3232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3345,18 +3345,8 @@ dependencies = [
 
 [[package]]
 name = "facet-cbor"
-version = "0.3.3"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
-dependencies = [
- "facet",
- "facet-core",
- "facet-reflect",
-]
-
-[[package]]
-name = "facet-cbor"
 version = "0.3.4"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-core",
@@ -4305,7 +4295,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4598,7 +4588,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5424,7 +5414,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6117,6 +6107,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19ab9ace3fad1b9ed603ddac5b595e69931fc50263d7e04e4055015b77b02da5"
 dependencies = [
  "icu_properties",
+]
+
+[[package]]
+name = "passfd"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b332c50e4d07c0011fff51ea305374408319908908bc1dbed7a0ffaaf63a8151"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -7049,7 +7048,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7572,7 +7571,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8132,7 +8131,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8929,8 +8928,8 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "vox"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-pretty",
@@ -8938,40 +8937,21 @@ dependencies = [
  "moire",
  "tokio",
  "tracing",
- "vox-core 0.4.0",
- "vox-jit 0.4.0",
- "vox-postcard 0.4.0",
- "vox-service-macros 0.4.0",
- "vox-stream 0.4.0",
- "vox-types 0.4.0",
-]
-
-[[package]]
-name = "vox"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "facet",
- "facet-pretty",
- "facet-reflect",
- "moire",
- "tokio",
- "tracing",
- "vox-core 0.5.0",
- "vox-jit 0.5.0",
- "vox-postcard 0.5.0",
- "vox-service-macros 0.5.0",
- "vox-stream 0.5.0",
- "vox-types 0.5.0",
+ "vox-core",
+ "vox-jit",
+ "vox-postcard",
+ "vox-service-macros",
+ "vox-stream",
+ "vox-types",
 ]
 
 [[package]]
 name = "vox-core"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
- "facet-cbor 0.3.3",
+ "facet-cbor",
  "facet-core",
  "facet-error",
  "facet-reflect",
@@ -8981,40 +8961,28 @@ dependencies = [
  "smallvec 1.15.1",
  "tokio",
  "tracing",
- "vox-jit 0.4.0",
- "vox-postcard 0.4.0",
- "vox-types 0.4.0",
+ "vox-jit",
+ "vox-postcard",
+ "vox-types",
  "wasm-bindgen-futures",
  "zerocopy",
 ]
 
 [[package]]
-name = "vox-core"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+name = "vox-fdpass"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
- "facet",
- "facet-cbor 0.3.4",
- "facet-core",
- "facet-error",
- "facet-reflect",
- "futures-util",
- "getrandom 0.4.2",
- "moire",
- "smallvec 1.15.1",
+ "libc",
+ "passfd",
  "tokio",
- "tracing",
- "vox-jit 0.5.0",
- "vox-postcard 0.5.0",
- "vox-types 0.5.0",
- "wasm-bindgen-futures",
- "zerocopy",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "vox-jit"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -9026,68 +8994,28 @@ dependencies = [
  "facet-core",
  "libc",
  "museair",
- "vox-jit-abi 0.4.0",
- "vox-jit-cal 0.4.0",
- "vox-postcard 0.4.0",
- "vox-schema 0.4.0",
-]
-
-[[package]]
-name = "vox-jit"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "arc-swap",
- "cranelift-codegen",
- "cranelift-frontend",
- "cranelift-jit",
- "cranelift-module",
- "cranelift-native",
- "facet",
- "facet-core",
- "libc",
- "museair",
- "vox-jit-abi 0.5.0",
- "vox-jit-cal 0.5.0",
- "vox-postcard 0.5.0",
- "vox-schema 0.5.0",
+ "tracing",
+ "vox-jit-abi",
+ "vox-jit-cal",
+ "vox-postcard",
+ "vox-schema",
 ]
 
 [[package]]
 name = "vox-jit-abi"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "arc-swap",
  "facet-core",
  "museair",
- "vox-jit-cal 0.4.0",
-]
-
-[[package]]
-name = "vox-jit-abi"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "arc-swap",
- "facet-core",
- "museair",
- "vox-jit-cal 0.5.0",
+ "vox-jit-cal",
 ]
 
 [[package]]
 name = "vox-jit-cal"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
-dependencies = [
- "facet",
- "facet-core",
-]
-
-[[package]]
-name = "vox-jit-cal"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-core",
@@ -9095,41 +9023,20 @@ dependencies = [
 
 [[package]]
 name = "vox-macros-core"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet-cargo-toml",
  "heck",
  "proc-macro2",
  "quote",
- "vox-macros-parse 0.4.0",
-]
-
-[[package]]
-name = "vox-macros-core"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "facet-cargo-toml",
- "heck",
- "proc-macro2",
- "quote",
- "vox-macros-parse 0.5.0",
+ "vox-macros-parse",
 ]
 
 [[package]]
 name = "vox-macros-parse"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
-dependencies = [
- "proc-macro2",
- "unsynn",
-]
-
-[[package]]
-name = "vox-macros-parse"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -9137,106 +9044,63 @@ dependencies = [
 
 [[package]]
 name = "vox-postcard"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-core",
  "facet-reflect",
- "vox-jit-abi 0.4.0",
- "vox-jit-cal 0.4.0",
- "vox-schema 0.4.0",
-]
-
-[[package]]
-name = "vox-postcard"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "facet",
- "facet-core",
- "facet-reflect",
- "vox-jit-abi 0.5.0",
- "vox-jit-cal 0.5.0",
- "vox-schema 0.5.0",
+ "facet-value",
+ "vox-jit-abi",
+ "vox-jit-cal",
+ "vox-schema",
 ]
 
 [[package]]
 name = "vox-schema"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "blake3",
  "facet",
- "facet-cbor 0.3.3",
- "facet-core",
- "indexmap",
-]
-
-[[package]]
-name = "vox-schema"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "blake3",
- "facet",
- "facet-cbor 0.3.4",
+ "facet-cbor",
  "facet-core",
  "indexmap",
 ]
 
 [[package]]
 name = "vox-service-macros"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "proc-macro2",
- "vox-macros-core 0.4.0",
-]
-
-[[package]]
-name = "vox-service-macros"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "proc-macro2",
- "vox-macros-core 0.5.0",
+ "vox-macros-core",
 ]
 
 [[package]]
 name = "vox-stream"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "libc",
  "moire",
  "tokio",
- "vox-core 0.4.0",
- "vox-types 0.4.0",
-]
-
-[[package]]
-name = "vox-stream"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "libc",
- "moire",
- "tokio",
- "vox-core 0.5.0",
- "vox-types 0.5.0",
+ "tracing",
+ "vox-core",
+ "vox-fdpass",
+ "vox-types",
 ]
 
 [[package]]
 name = "vox-types"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.8.2"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
  "bytes",
  "facet",
- "facet-cbor 0.3.3",
+ "facet-cbor",
  "facet-core",
  "facet-path",
  "facet-reflect",
@@ -9247,34 +9111,9 @@ dependencies = [
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
- "vox-jit 0.4.0",
- "vox-postcard 0.4.0",
- "vox-schema 0.4.0",
-]
-
-[[package]]
-name = "vox-types"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-dependencies = [
- "bitflags 2.11.1",
- "blake3",
- "bytes",
- "facet",
- "facet-cbor 0.3.4",
- "facet-core",
- "facet-path",
- "facet-reflect",
- "futures-channel",
- "heck",
- "indexmap",
- "moire",
- "smallvec 1.15.1",
- "structstruck",
- "tokio",
- "vox-jit 0.5.0",
- "vox-postcard 0.5.0",
- "vox-schema 0.5.0",
+ "vox-jit",
+ "vox-postcard",
+ "vox-schema",
  "wasmtimer",
 ]
 
@@ -9973,7 +9812,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
