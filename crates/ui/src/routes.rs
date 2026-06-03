@@ -69,6 +69,9 @@ pub enum Route {
         #[route("/invoices")]
         InvoicesRoute {},
 
+        #[route("/ledger")]
+        LedgerRoute {},
+
         #[route("/wiki")]
         WikiRoute {},
 
@@ -164,6 +167,11 @@ fn FinancesRoute() -> Element {
 #[component]
 fn InvoicesRoute() -> Element {
     rsx! { pages::invoices::InvoicesView {} }
+}
+
+#[component]
+fn LedgerRoute() -> Element {
+    rsx! { pages::ledger::LedgerView {} }
 }
 
 #[component]

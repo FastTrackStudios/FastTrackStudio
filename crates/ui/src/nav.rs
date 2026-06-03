@@ -6,8 +6,8 @@
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     BookOpen, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag, FolderKanban,
-    House, Inbox as InboxIcon, MapPin, Notebook, Package, ReceiptText, Settings as SettingsIcon,
-    Target, Timer, Utensils, Wallet,
+    House, Inbox as InboxIcon, MapPin, Notebook, Package, ReceiptText, Scale,
+    Settings as SettingsIcon, Target, Timer, Utensils, Wallet,
 };
 
 use crate::routes::Route;
@@ -67,6 +67,9 @@ fn icon_finances() -> Element {
 }
 fn icon_invoices() -> Element {
     rsx! { ReceiptText { size: 16 } }
+}
+fn icon_ledger() -> Element {
+    rsx! { Scale { size: 16 } }
 }
 fn icon_wiki() -> Element {
     rsx! { BookOpen { size: 16 } }
@@ -166,6 +169,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             route: Route::InvoicesRoute {},
         },
         NavTab {
+            label: "Ledger",
+            icon: icon_ledger,
+            route: Route::LedgerRoute {},
+        },
+        NavTab {
             label: "Wiki",
             icon: icon_wiki,
             route: Route::WikiRoute {},
@@ -232,6 +240,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::TimerRoute {} => "Timer",
         Route::FinancesRoute {} => "Finances",
         Route::InvoicesRoute {} => "Invoices",
+        Route::LedgerRoute {} => "Ledger",
         Route::WikiRoute {} => "Wiki",
         Route::SettingsRoute {} => "Settings",
     }

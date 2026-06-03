@@ -128,6 +128,11 @@ pub struct OrgAppState {
     /// Invoicing backend — persists invoices in `finance.sqlite` and
     /// links billed sessions in the timer DB. Mounted for `Invoicing`.
     pub finance_backend: finance::FinanceBackend,
+    /// Ledger backend — double-entry journal over the same
+    /// `finance.sqlite`. Mounted for `Ledger` (post / balances /
+    /// account history). The invoicing flow posts into it on
+    /// mark-sent + payment.
+    pub ledger_backend: finance::LedgerService,
 }
 
 /// Top-level server state. Scans `<data_root>/orgs/` at
@@ -495,8 +500,16 @@ pub(crate) async fn build_org_state(
         })
         .await?;
 
+        // Ledger service — double-entry journal over the same
+        // finance.sqlite connection. Shared with the invoicing
+        // backend so mark-sent / payment post into it.
+        let ledger_backend = finance::LedgerService::new(finance_conn.clone())
+            .map_err(|e| eyre::eyre!("ledger backend: {e}"))?;
+
         // Invoicing service — persists invoices in finance.sqlite and
         // marks billed sessions in the timer DB, so it needs both.
+        // It also posts double-entry journal entries to the ledger on
+        // mark-sent + payment, so it gets a clone of the ledger.
         let finance_backend = finance::FinanceBackend::new(
             finance_conn.clone(),
             timer.conn().clone(),
@@ -504,6 +517,7 @@ pub(crate) async fn build_org_state(
                 .manifest()
                 .map(|m| m.display_name)
                 .unwrap_or_else(|_| "Business".into()),
+            ledger_backend.clone(),
         )
         .map_err(|e| eyre::eyre!("finance backend: {e}"))?;
 
@@ -604,6 +618,7 @@ pub(crate) async fn build_org_state(
             inbox,
             finance_conn,
             finance_backend,
+            ledger_backend,
         })
     }
 }
@@ -908,6 +923,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
             finance_proto::service::invoicing::serve(org.finance_backend.clone()),
+        )
+        .with(
+            finance_proto::service::ledger::ledger_rpc_service_descriptor(),
+            finance_proto::service::ledger::serve(org.ledger_backend.clone()),
         );
 
     // Wiki feature — 11 per-capability traits, one descriptor each.

@@ -8,8 +8,9 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::book::Book;
 use crate::error::FinanceError;
-use crate::ledger::{Transaction, TransactionSource, TransactionSplits};
+use crate::ledger::{Account, Transaction, TransactionSource, TransactionSplits};
 
 /// Balance returned by [`Ledger::balances`].
 #[derive(Debug, Clone, PartialEq, facet::Facet)]
@@ -58,4 +59,13 @@ pub trait Ledger {
         book_id: Uuid,
         as_of: Option<DateTime<Utc>>,
     ) -> Result<Vec<AccountBalance>, FinanceError>;
+
+    /// Every book in the org's finance DB. A read surface so clients
+    /// (the ledger UI) can resolve a `book_id` without a separate
+    /// `BookRepo` mount.
+    fn books(&self) -> Result<Vec<Book>, FinanceError>;
+
+    /// Every (non-archived-or-not) account in a book, with names +
+    /// kinds. Pairs with [`Ledger::balances`] for the ledger view.
+    fn accounts(&self, book_id: Uuid) -> Result<Vec<Account>, FinanceError>;
 }

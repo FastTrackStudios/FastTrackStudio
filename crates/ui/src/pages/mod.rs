@@ -13,6 +13,7 @@ pub mod home;
 pub mod inbox;
 pub mod inventory;
 pub mod invoices;
+pub mod ledger;
 pub mod locations;
 pub mod mealplan;
 pub mod milestones;

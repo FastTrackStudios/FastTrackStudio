@@ -936,6 +936,95 @@ pub async fn invoice_delete(slug: &str, id: uuid::Uuid) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete invoice: {e:?}"))
 }
 
+// ── finance / ledger ────────────────────────────────────────────────
+
+#[cfg(target_arch = "wasm32")]
+async fn ledger(slug: &str) -> Result<finance_proto::LedgerClient, String> {
+    crate::vox_clients::establish_for::<finance_proto::LedgerClient>(slug).await
+}
+
+/// Resolve the org's (single) finance book id, if one exists yet.
+#[cfg(target_arch = "wasm32")]
+async fn ledger_book_id(
+    client: &finance_proto::LedgerClient,
+    slug: &str,
+) -> Result<Option<uuid::Uuid>, String> {
+    let books = client
+        .books()
+        .await
+        .map_err(|e| format!("{slug}: books: {e:?}"))?;
+    Ok(books.first().map(|b| b.id))
+}
+
+/// Every account in an org's (single) book, paired with its current
+/// balance. Returns `(account, balance)` rows. Empty when the org has
+/// no book / accounts yet.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_ledger_accounts(
+    slug: &str,
+) -> Result<Vec<(finance_proto::Account, finance_proto::AccountBalance)>, String> {
+    let client = ledger(slug).await?;
+    let Some(book_id) = ledger_book_id(&client, slug).await? else {
+        return Ok(Vec::new());
+    };
+    let accounts = client
+        .accounts(book_id)
+        .await
+        .map_err(|e| format!("{slug}: accounts: {e:?}"))?;
+    let balances = client
+        .balances(book_id, None)
+        .await
+        .map_err(|e| format!("{slug}: balances: {e:?}"))?;
+    let out = accounts
+        .into_iter()
+        .map(|a| {
+            let bal = balances
+                .iter()
+                .find(|b| b.account_id == a.id)
+                .cloned()
+                .unwrap_or_else(|| finance_proto::AccountBalance {
+                    account_id: a.id,
+                    balance_minor: a.opening_balance_minor,
+                    currency: a.currency.clone(),
+                });
+            (a, bal)
+        })
+        .collect();
+    Ok(out)
+}
+
+/// Recent ledger transactions across every account in an org's book,
+/// newest first. Pulls each account's history and de-dupes by
+/// transaction id (a double-entry txn touches ≥2 accounts).
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_ledger_transactions(
+    slug: &str,
+) -> Result<Vec<finance_proto::Transaction>, String> {
+    let client = ledger(slug).await?;
+    let Some(book_id) = ledger_book_id(&client, slug).await? else {
+        return Ok(Vec::new());
+    };
+    let accounts = client
+        .accounts(book_id)
+        .await
+        .map_err(|e| format!("{slug}: accounts: {e:?}"))?;
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<finance_proto::Transaction> = Vec::new();
+    for a in accounts {
+        let txns = client
+            .account_transactions(a.id, None, None, 100)
+            .await
+            .map_err(|e| format!("{slug}: account transactions: {e:?}"))?;
+        for t in txns {
+            if seen.insert(t.id) {
+                out.push(t);
+            }
+        }
+    }
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(out)
+}
+
 /// Invoices across several orgs, slug-tagged, newest first.
 #[cfg(target_arch = "wasm32")]
 pub async fn fetch_invoices_multi(slugs: &[String]) -> Vec<(String, finance_proto::Invoice)> {
@@ -1390,6 +1479,18 @@ pub async fn invoice_record_payment(
 }
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn invoice_delete(_slug: &str, _id: uuid::Uuid) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_ledger_accounts(
+    _slug: &str,
+) -> Result<Vec<(finance_proto::Account, finance_proto::AccountBalance)>, String> {
+    Err("native client not wired yet".to_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_ledger_transactions(
+    _slug: &str,
+) -> Result<Vec<finance_proto::Transaction>, String> {
     Err("native client not wired yet".to_owned())
 }
 #[cfg(not(target_arch = "wasm32"))]

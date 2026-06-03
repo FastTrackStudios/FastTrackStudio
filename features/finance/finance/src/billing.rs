@@ -29,11 +29,15 @@ use finance_db::entity::{
 use finance_proto::book::{Book, BookKind};
 use finance_proto::error::FinanceError;
 use finance_proto::invoice::{Invoice, InvoiceStatus};
+use finance_proto::ledger::{AccountKind, TransactionSource, TransactionSplit, TransactionSplits};
 use finance_proto::party::{Party, PartyKind};
 use finance_proto::service::invoicing::{
     GenerateInvoice, Invoicing, RecordPayment, UninvoicedGroup,
 };
+use finance_proto::service::ledger::PostTransaction;
 use std::collections::HashMap;
+
+use crate::ledger::LedgerService;
 
 use timer::entity::{
     TagColumn, TagEntity, WorkSessionColumn, WorkSessionEntity, WorkSessionTagColumn,
@@ -51,15 +55,21 @@ pub struct FinanceBackend {
     timer: DatabaseConnection,
     runtime: tokio::runtime::Handle,
     org_name: String,
+    /// Double-entry ledger over the same `finance` connection. The
+    /// invoicing flow posts journal entries here on mark-sent +
+    /// payment so the ledger carries the real money movements.
+    ledger: LedgerService,
 }
 
 impl FinanceBackend {
-    /// Build over the org's finance + timer connections. Must be called
-    /// from inside a tokio runtime.
+    /// Build over the org's finance + timer connections plus the
+    /// ledger service (which wraps the same `finance` connection).
+    /// Must be called from inside a tokio runtime.
     pub fn new(
         finance: DatabaseConnection,
         timer: DatabaseConnection,
         org_name: impl Into<String>,
+        ledger: LedgerService,
     ) -> Result<Self, &'static str> {
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|_| "FinanceBackend::new must be called from a tokio runtime")?;
@@ -68,6 +78,7 @@ impl FinanceBackend {
             timer,
             runtime,
             org_name: org_name.into(),
+            ledger,
         })
     }
 
@@ -144,6 +155,95 @@ impl FinanceBackend {
             .await
             .map_err(Self::err)?;
         Ok(party)
+    }
+
+    // ── ledger postings (double-entry) ─────────────────────────────
+    //
+    // Account model is the canonical `finance_proto::ledger::Account`
+    // with `AccountKind`. Sign convention (per `TransactionSplit`):
+    // positive `amount_minor` = debit, negative = credit; splits net
+    // to zero in base currency. We use same-currency splits
+    // (`fx_amount == amount`, `fx_rate_micro == 1_000_000`) — the
+    // invoice total is already in the book's base currency.
+
+    /// Build a same-currency split (debit when `amount_minor > 0`).
+    fn split(account_id: Uuid, amount_minor: i64, memo: &str) -> TransactionSplit {
+        TransactionSplit {
+            account_id,
+            amount_minor,
+            fx_amount_minor: amount_minor,
+            fx_rate_micro: 1_000_000,
+            memo: memo.to_string(),
+        }
+    }
+
+    /// On **mark-sent**: recognize revenue. Debit Accounts Receivable,
+    /// credit Income for the invoice total. No-op for a zero total.
+    async fn post_invoice_sent(&self, inv: &Invoice) -> Result<(), FinanceError> {
+        if inv.total_minor == 0 {
+            return Ok(());
+        }
+        let ar = self
+            .ledger
+            .ensure_account(inv.book_id, "Accounts Receivable", AccountKind::Asset)
+            .await?;
+        let income = self
+            .ledger
+            .ensure_account(inv.book_id, "Income", AccountKind::Income)
+            .await?;
+        let memo = format!("Invoice {}", inv.number);
+        self.ledger
+            .post(PostTransaction {
+                book_id: inv.book_id,
+                date: inv.issue_date.clone(),
+                description: format!("Invoice {} issued", inv.number),
+                reference: inv.number.clone(),
+                source_kind: TransactionSource::Invoice,
+                source_id: inv.id,
+                splits: TransactionSplits(vec![
+                    Self::split(ar, inv.total_minor, &memo),
+                    Self::split(income, -inv.total_minor, &memo),
+                ]),
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// On **record-payment**: settle receivable. Debit Cash, credit
+    /// Accounts Receivable for the payment amount. No-op for zero.
+    async fn post_invoice_payment(
+        &self,
+        inv: &Invoice,
+        amount_minor: i64,
+        date: &str,
+    ) -> Result<(), FinanceError> {
+        if amount_minor == 0 {
+            return Ok(());
+        }
+        let cash = self
+            .ledger
+            .ensure_account(inv.book_id, "Cash", AccountKind::Asset)
+            .await?;
+        let ar = self
+            .ledger
+            .ensure_account(inv.book_id, "Accounts Receivable", AccountKind::Asset)
+            .await?;
+        let memo = format!("Payment on invoice {}", inv.number);
+        self.ledger
+            .post(PostTransaction {
+                book_id: inv.book_id,
+                date: date.to_string(),
+                description: format!("Payment received on invoice {}", inv.number),
+                reference: inv.number.clone(),
+                source_kind: TransactionSource::Payment,
+                source_id: inv.id,
+                splits: TransactionSplits(vec![
+                    Self::split(cash, amount_minor, &memo),
+                    Self::split(ar, -amount_minor, &memo),
+                ]),
+            })
+            .await?;
+        Ok(())
     }
 
     // ── operations ─────────────────────────────────────────────────
@@ -319,7 +419,7 @@ impl FinanceBackend {
         &self,
         id: Uuid,
         amount_minor: i64,
-        _date: String,
+        date: String,
     ) -> Result<Invoice, FinanceError> {
         let mut inv = self.get_inner(id).await?;
         inv.amount_paid_minor += amount_minor;
@@ -333,6 +433,13 @@ impl FinanceBackend {
         let mut active = invoice_to_active(&inv);
         active.id = sea_orm::ActiveValue::Unchanged(inv.id);
         active.update(&self.finance).await.map_err(Self::err)?;
+        // Settle the receivable: debit Cash, credit AR for the payment.
+        let date = if date.trim().is_empty() {
+            Utc::now().date_naive().to_string()
+        } else {
+            date
+        };
+        self.post_invoice_payment(&inv, amount_minor, &date).await?;
         Ok(inv)
     }
 
@@ -354,6 +461,8 @@ impl FinanceBackend {
             let mut active = invoice_to_active(&inv);
             active.id = sea_orm::ActiveValue::Unchanged(inv.id);
             active.update(&self.finance).await.map_err(Self::err)?;
+            // Recognize revenue: debit AR, credit Income for the total.
+            self.post_invoice_sent(&inv).await?;
         }
         Ok(inv)
     }
