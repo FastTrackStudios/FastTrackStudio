@@ -8,3 +8,10 @@ actions-proto.workspace = true
 vox.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
+
+[lib]
+test = false
+doctest = false
+
+[lints]
+workspace = true

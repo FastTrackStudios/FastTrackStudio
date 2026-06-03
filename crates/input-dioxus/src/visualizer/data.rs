@@ -309,10 +309,10 @@ pub fn format_chord(chord: &KeyChord) -> String {
         KeyCode::Tab => s.push_str("Tab"),
         KeyCode::Backspace => s.push_str("BS"),
         KeyCode::Delete => s.push_str("Del"),
-        KeyCode::ArrowUp => s.push_str("↑"),
-        KeyCode::ArrowDown => s.push_str("↓"),
-        KeyCode::ArrowLeft => s.push_str("←"),
-        KeyCode::ArrowRight => s.push_str("→"),
+        KeyCode::ArrowUp => s.push('↑'),
+        KeyCode::ArrowDown => s.push('↓'),
+        KeyCode::ArrowLeft => s.push('←'),
+        KeyCode::ArrowRight => s.push('→'),
         KeyCode::F(n) => {
             s.push('F');
             s.push_str(&n.to_string());

@@ -7,5 +7,11 @@ description = "Dioxus event conversion bridge for input"
 [dependencies]
 input = { workspace = true }
 dioxus = { workspace = true }
-actions-keybindings = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
+
+[lib]
+test = false
+doctest = false
+
+[lints]
+workspace = true

@@ -58,7 +58,7 @@ enum ContextFilter {
 #[component]
 pub fn InputVisualizer(handle: InputHandle) -> Element {
     let mut active_tab = use_signal(|| Tab::Keyboard);
-    let active_sections = use_signal(|| HashSet::<ActionSection>::new());
+    let active_sections = use_signal(HashSet::<ActionSection>::new);
     let context_filter = use_signal(|| ContextFilter::All);
 
     // Extract binding data from the processor.

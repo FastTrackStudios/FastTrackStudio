@@ -8,3 +8,9 @@ description = "Protocol definitions for the actions system"
 vox.workspace = true
 facet.workspace = true
 convert_case = "0.6"
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

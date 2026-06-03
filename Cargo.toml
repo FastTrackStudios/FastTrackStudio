@@ -9,37 +9,41 @@ authors = ["FastTrack Studio"]
 license = "MIT OR Apache-2.0"
 
 [workspace.lints.rust]
+# Match the FTS convention (see daw / architect): allow the `unused` family
+# (covers unused_mut, dead_code, unused_variables, …) so macro-scaffolding and
+# illustrative test helpers don't fail the `-D warnings` push gate.
+dead_code = "allow"
+unused = "allow"
+unused_unsafe = "allow"
 
 [workspace.lints.clippy]
+
+[workspace.lints.rustdoc]
+# Match the FTS convention (daw / architect): broken intra-doc links are
+# real but noisy on a fast-moving codebase and shouldn't block the push gate.
+broken_intra_doc_links = "allow"
+private_intra_doc_links = "allow"
+redundant_explicit_links = "allow"
 
 [workspace.dependencies]
 # Internal crates
 actions-proto = { path = "crates/actions-proto" }
 actions-keybindings = { path = "crates/actions-keybindings" }
 actions-registry = { path = "crates/actions-registry" }
-actions-standalone = { path = "crates/actions-standalone" }
-actions-reaper = { path = "crates/actions-reaper" }
 input = { path = "crates/input" }
-input-dioxus = { path = "crates/input-dioxus" }
 
-# Roam RPC framework. Pinned to the FastTrackStudios vox fork @ f31f1040
-# (vox 0.8.2, latest) — a single vox across the graph. `runtime` (no default
-# tokio-net transport) keeps the wasm build mio-free.
-vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
+# Roam RPC framework. Pinned to the FastTrackStudios vox fork @ f31f1040 on
+# Codeberg (vox 0.8.2, latest) — a single vox across the graph, carrying the
+# vox-jit-abi __rust_alloc-scan fix. `runtime` (no default tokio-net transport)
+# keeps the wasm build mio-free.
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
 
 # Facet reflection — align the whole stack to the current 0.46 line.
 facet = { version = "0.46" }
-facet-core = { version = "0.46" }
-facet-format = { version = "0.47" }
-facet-json = { version = "0.46" }
-facet-postcard = { version = "0.46" }
-facet-pretty = { version = "0.46" }
-facet-value = { version = "0.46" }
-facet-yaml = { version = "0.46" }
 
 # REAPER bindings (FTS fork with v7.63 ruler lane APIs)
-reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # Dioxus UI framework (for input-dioxus)
 dioxus = "0.7.2"

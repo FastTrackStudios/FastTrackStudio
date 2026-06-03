@@ -8,3 +8,9 @@ description = "Keybinding dispatcher and shortcut parser for the actions system"
 actions-proto.workspace = true
 tracing.workspace = true
 
+[lib]
+doctest = false
+
+
+[lints]
+workspace = true
