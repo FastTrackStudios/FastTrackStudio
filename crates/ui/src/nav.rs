@@ -5,8 +5,8 @@
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    BookOpen, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag, FolderKanban,
-    House, Inbox as InboxIcon, MapPin, Notebook, Package, ReceiptText, Scale,
+    BookOpen, Bot, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
+    FolderKanban, House, Inbox as InboxIcon, MapPin, Notebook, Package, ReceiptText, Scale,
     Settings as SettingsIcon, Target, Timer, Utensils, Wallet,
 };
 
@@ -70,6 +70,9 @@ fn icon_invoices() -> Element {
 }
 fn icon_ledger() -> Element {
     rsx! { Scale { size: 16 } }
+}
+fn icon_agents() -> Element {
+    rsx! { Bot { size: 16 } }
 }
 fn icon_wiki() -> Element {
     rsx! { BookOpen { size: 16 } }
@@ -179,6 +182,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             route: Route::WikiRoute {},
         },
         NavTab {
+            label: "Agents",
+            icon: icon_agents,
+            route: Route::AgentsRoute {},
+        },
+        NavTab {
             label: "Settings",
             icon: icon_settings,
             route: Route::SettingsRoute {},
@@ -242,6 +250,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::InvoicesRoute {} => "Invoices",
         Route::LedgerRoute {} => "Ledger",
         Route::WikiRoute {} => "Wiki",
+        Route::AgentsRoute {} => "Agents",
         Route::SettingsRoute {} => "Settings",
     }
 }

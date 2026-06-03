@@ -75,6 +75,9 @@ pub enum Route {
         #[route("/wiki")]
         WikiRoute {},
 
+        #[route("/agents")]
+        AgentsRoute {},
+
         #[route("/settings")]
         SettingsRoute {},
 }
@@ -177,6 +180,11 @@ fn LedgerRoute() -> Element {
 #[component]
 fn WikiRoute() -> Element {
     rsx! { pages::wiki::WikiView {} }
+}
+
+#[component]
+fn AgentsRoute() -> Element {
+    rsx! { pages::agents::AgentsView {} }
 }
 
 #[component]

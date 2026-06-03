@@ -45,6 +45,9 @@ wiki-live = { workspace = true }
 agent-proto = { workspace = true, features = ["server", "vox"] }
 agent-tasks = { workspace = true }
 agent-dispatch = { workspace = true }
+# Codex backend — in-process agent session/turn host. Mounted for
+# the `Sessions` + `TurnDispatch` vox services (the /agents surface).
+agent-codex = { workspace = true }
 task = { workspace = true, features = ["vox"] }
 # Forge webhook receiver — IssueLink lookup maps an inbound
 # forge issue/PR event back to the local TaskInfo to mutate.

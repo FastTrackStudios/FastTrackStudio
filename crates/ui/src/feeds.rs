@@ -1511,3 +1511,49 @@ pub async fn find_project(
 ) -> Result<(project::ProjectInfo, String), String> {
     Err("native client not wired yet".to_owned())
 }
+
+// ── Agents ────────────────────────────────────────────────────────
+
+/// Agent sessions across the selected orgs (concurrent fan-out).
+///
+/// Each session carries its owning org slug so the `/agents` page can
+/// show provenance in multi-org "All" mode. Archived sessions are
+/// included so the listing is a faithful mirror of the backend.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_agent_sessions(
+    slugs: &[String],
+) -> Result<Vec<(String, agent_proto::session::Session)>, String> {
+    let futs = slugs.iter().cloned().map(|slug| async move {
+        let client = crate::vox_clients::establish_for::<
+            agent_proto::service::sessions::SessionsClient,
+        >(&slug)
+        .await?;
+        let filter = agent_proto::service::sessions::SessionFilter {
+            project_id: String::new(),
+            backend_id: String::new(),
+            profile_id: String::new(),
+            include_archived: true,
+            only_pinned: false,
+            limit: 0,
+            cursor: String::new(),
+        };
+        let page = client
+            .list_sessions(filter)
+            .await
+            .map_err(|e| format!("{slug}: list agent sessions: {e:?}"))?;
+        Ok::<_, String>(
+            page.sessions
+                .into_iter()
+                .map(|s| (slug.clone(), s))
+                .collect::<Vec<_>>(),
+        )
+    });
+    collect(futures_util::future::join_all(futs).await)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_agent_sessions(
+    _slugs: &[String],
+) -> Result<Vec<(String, agent_proto::session::Session)>, String> {
+    Err("native client not wired yet".to_owned())
+}

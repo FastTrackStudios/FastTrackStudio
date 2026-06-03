@@ -114,6 +114,10 @@ pub struct OrgAppState {
     /// Food intake — per-day calorie + macro log.
     pub intake: intake::Store,
     pub agent_tasks: agent_tasks::Store,
+    /// Codex agent backend — in-process session registry + turn
+    /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
+    /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
+    pub agent_codex: agent_codex::CodexBackend,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
     /// Scheduling backend — day templates / availability under
@@ -452,6 +456,11 @@ pub(crate) async fn build_org_state(
         .await?;
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
 
+        // Codex agent backend. In-process, in-memory session
+        // registry + turn dispatch — hosts the `Sessions` +
+        // `TurnDispatch` vox services behind the `/agents` UI.
+        let agent_codex = agent_codex::CodexBackend::new();
+
         // Timer store. SQLite at
         // `<data_root>/orgs/<slug>/timer.sqlite`
         // (override via `TASK_SERVER_TIMER_URL`). Project
@@ -612,6 +621,7 @@ pub(crate) async fn build_org_state(
             workouts,
             intake,
             agent_tasks,
+            agent_codex,
             agent_dispatch_vault_root: vault_root,
             timer,
             scheduling,
@@ -877,6 +887,19 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
             agent_proto::service::tasks::serve(org.agent_tasks.clone()),
+        )
+        // Agent sessions — conversation lifecycle (list / read /
+        // create / rename / pin / archive). Backs the `/agents`
+        // sidebar listing. Served by the in-process Codex backend.
+        .with(
+            agent_proto::service::sessions::sessions_rpc_service_descriptor(),
+            agent_proto::service::sessions::serve(org.agent_codex.clone()),
+        )
+        // Agent turn dispatch — kick off / cancel / resume a turn
+        // on a session. Served by the same Codex backend.
+        .with(
+            agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
+            agent_proto::service::turn_dispatch::serve(org.agent_codex.clone()),
         )
         // Timer — billable time tracking.
         .with(

@@ -65,6 +65,10 @@ goal = { workspace = true, features = ["vox"] }
 task = { workspace = true, features = ["vox"] }
 # Timer service client for the `/timer` time-tracking page.
 timer-proto = { workspace = true, features = ["vox"] }
+# Agent service clients for the `/agents` page — `SessionsClient`
+# lists agent sessions, `TurnDispatchClient` kicks off turns. `vox`
+# feature only (no `server`), so it stays wasm-clean.
+agent-proto = { workspace = true, features = ["vox"] }
 # Vault file-replication wire surface — manifest / get_file /
 # put_file. The `/vault` route drives `editor::Editor` over the
 # auto-emitted `VaultSyncClient`. `vox` feature only (no
