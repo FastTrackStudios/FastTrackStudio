@@ -542,8 +542,8 @@ git = "https://github.com/Leaf-Computer/lumen-blocks.git"
 tag = "v0.2.0"
 
 [workspace.dependencies.moire]
-git = "https://git.starcommand.live/codywright/moire"
-rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624"
+git = "https://codeberg.org/FastTrackStudios/moire"
+rev = "7a2f1dc"
 
 # Loro — CRDT engine, source of truth for every feature's data.
 # SeaORM stores the doc's snapshot + update log as opaque bytes.
@@ -855,34 +855,41 @@ debug = false
 strip = "debuginfo"
 
 # Use the local FastTrackStudio input_actions checkout during development so
-# dependent crates share the same updated vox/facet stack.
+# dependent crates share the same updated vox/facet stack. The codeberg
+# variant is the live source (daw-proto → keyflow → editor reach
+# actions-proto through it on `branch=main`); without folding it to the
+# local checkout, that branch drags in the old vox 0.5.0 which collides
+# with the 0.8.2 the rest of the graph uses.
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
+[patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
+
 # Unify vox onto a single source. `architect` (../architect) pins vox at
-# the starcommand fork (rev f31f1040 — the uuid-opaque-scalar tip, which
+# the codeberg fork (rev f31f1040 — the uuid-opaque-scalar tip, which
 # carries the Uuid/chrono opaque-scalar serialization fix), while the
 # workspace deps point at bearcove/vox. Two identical-content vox copies
 # means architect's generated `Handler` impls don't unify across them and
 # every proto's dispatcher fails the trait bound. Redirect bearcove/vox
-# at the published starcommand rev so the graph carries exactly one
+# at the published codeberg rev so the graph carries exactly one
 # `vox-types` — the same source+rev architect already uses (no local path
 # dep, so this is portable to fresh clones / CI).
 [patch."https://github.com/bearcove/vox"]
-vox                = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-core           = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-codegen        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit            = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit-abi        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit-cal        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-macros-core    = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-macros-parse   = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-postcard       = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-schema         = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-service-macros = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-types          = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-websocket      = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-facet-cbor         = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox                = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-core           = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-codegen        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit            = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit-abi        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit-cal        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-macros-core    = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-macros-parse   = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-postcard       = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-schema         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-service-macros = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-types          = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket      = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+facet-cbor         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
 # daw-proto reaches actions-proto through the starcommand host (not the
 # github mirror above), so redirect that source to the same local checkout.
@@ -899,22 +906,31 @@ actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto"
 [patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
 daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
 
+# keyflow still declares color-palette / music-catalog from the starcommand
+# dynamic-template host (branch = main). Redirect that source to the codeberg
+# mirror — the canonical migrated repo (its main is vox-fork-aligned) — so the
+# graph carries no starcommand sources. (The clean fix is keyflow's own
+# Cargo.toml lines 102-103; this patch migrates Task's view in the meantime.)
+[patch."https://git.starcommand.live/FastTrackStudios/dynamic-template.git"]
+color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+
 # Redirect every transitive bearcove/moire reference (vox's
 # moire-runtime / moire-tokio / moire-types, etc.) to the codywright
 # fork at the same rev as the workspace dep above. Without this,
 # vox + architect end up with two parallel moire compilations.
 
 [patch."https://github.com/bearcove/moire"]
-moire             = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-macros      = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-macros-noop = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-runtime     = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-tokio       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-trace-capture = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-trace-types = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-types       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-wasm        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-wire        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire             = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-macros      = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-runtime     = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-tokio       = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-types       = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-wasm        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-wire        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
 
 [workspace.dependencies.architect]
 path = "../architect/macros/architect"
