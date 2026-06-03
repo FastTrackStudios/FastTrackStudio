@@ -96,6 +96,8 @@ pub struct OrgAppState {
     pub tasks: task::TaskBackend,
     /// Locations backend — `type: location` pages.
     pub locations: locations::Store,
+    /// Inventory backend — `type: item` gear/equipment pages.
+    pub inventory: inventory::Store,
     /// Cookbook (cooklang recipes under `Wiki/Cookbook/`).
     pub cookbook: cookbook::Store,
     /// Mealplan — scheduled meals + their fulfillment math.
@@ -546,6 +548,12 @@ pub(crate) async fn build_org_state(
         let locations_vault = vault::Vault::open(&vault_root)
             .map_err(|e| eyre::eyre!("open locations vault: {e}"))?;
         let locations = locations::Store::new(locations_vault);
+        // Inventory — `type: item` gear/equipment pages. Its own
+        // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`, like
+        // locations.
+        let inventory_vault = vault::Vault::open(&vault_root)
+            .map_err(|e| eyre::eyre!("open inventory vault: {e}"))?;
+        let inventory = inventory::Store::new(inventory_vault);
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.
@@ -581,6 +589,7 @@ pub(crate) async fn build_org_state(
             milestones,
             tasks,
             locations,
+            inventory,
             cookbook,
             mealplan,
             pantry,
@@ -969,6 +978,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             locations::locations_service_descriptor(),
             locations::serve_locations_service(org.locations.clone()),
+        )
+        .with(
+            inventory::inventory_service_descriptor(),
+            inventory::serve_inventory_service(org.inventory.clone()),
         )
         .with(
             cookbook::cookbook_service_descriptor(),

@@ -41,3 +41,11 @@ pub use scan::{items_at, items_needing_attention, scan_vault};
 pub use service::{InventoryError, InventoryService};
 pub use store::Store;
 pub use write::{WriteError, default_item_path, serialize_item, write_item};
+
+#[cfg(feature = "vox")]
+pub use inventory_proto::{
+    InventoryServiceBridge, InventoryServiceClient, inventory_service_descriptor,
+    inventory_service_layer, serve_inventory_service,
+};
+#[cfg(feature = "vox")]
+pub use service::{InventoryServiceRpc, InventoryServiceRpcDispatcher as InventoryDispatcher};

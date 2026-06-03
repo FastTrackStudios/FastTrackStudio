@@ -34,6 +34,10 @@ task-ui.workspace = true
 scheduling-proto = { workspace = true, features = ["vox"] }
 inbox-proto = { workspace = true, features = ["vox"] }
 locations-proto = { workspace = true, features = ["vox"] }
+# Inventory wire surface — `Item` model + `InventoryService`
+# client for the `/inventory` route. Wasm-clean (serde-only
+# client side), `vox` feature only.
+inventory-proto = { workspace = true, features = ["vox"] }
 milestone-proto = { workspace = true, features = ["vox"] }
 finance-proto = { workspace = true, features = ["vox"] }
 # Fitness suite wire surface — body / exercises / workouts /

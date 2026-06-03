@@ -7,6 +7,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
 use uuid::Uuid;
 use vault::Vault;
 
@@ -41,6 +43,13 @@ impl Store {
     #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()
+    }
+}
+
+impl HasDispatcher for Store {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
     }
 }
 

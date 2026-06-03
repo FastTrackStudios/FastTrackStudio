@@ -409,6 +409,11 @@ locations-proto = { path = "features/locations/locations-proto", default-feature
 # (`type: item`). References locations by `location_id`;
 # rides on top of `vault` like `task` does.
 inventory = { path = "features/inventory/inventory" }
+# `inventory-proto` is wasm-clean (the web UI binds the
+# `InventoryService` client + `Item` model directly); the native
+# `inventory` crate owns the vault-backed parse / write / scan /
+# store side and re-exports it. Mirrors the `locations-proto` split.
+inventory-proto = { path = "features/inventory/inventory-proto", default-features = false }
 # `mealplan` slice — vault-superset trio for food/cooking.
 # `cookbook` owns cooklang `.cook` files under `<vault>/Cookbook/`
 # (single file per recipe, no sidecar; ingredient names ARE

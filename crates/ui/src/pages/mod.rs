@@ -11,6 +11,7 @@ pub mod gantt;
 pub mod goals;
 pub mod home;
 pub mod inbox;
+pub mod inventory;
 pub mod invoices;
 pub mod locations;
 pub mod mealplan;

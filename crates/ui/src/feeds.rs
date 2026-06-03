@@ -356,6 +356,73 @@ pub async fn create_location(
         .map_err(|e| format!("{slug}: create location: {e:?}"))
 }
 
+// ── Inventory ───────────────────────────────────────────────────────
+
+/// Every inventory item in the org's vault (`type: item` gear /
+/// equipment pages), in the order the backend lists them.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_inventory(slug: &str) -> Result<Vec<inventory_proto::Item>, String> {
+    let client =
+        crate::vox_clients::establish_for::<inventory_proto::InventoryServiceClient>(slug).await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list inventory: {e:?}"))
+}
+
+/// Create one inventory item. The backend assigns the `id` (nil here)
+/// and the vault `path` (empty here, defaulting to `inventory/<slug>.md`).
+/// Returns the persisted item.
+#[cfg(target_arch = "wasm32")]
+pub async fn create_item(
+    slug: &str,
+    name: &str,
+    category: &str,
+    location_id: Option<uuid::Uuid>,
+) -> Result<inventory_proto::Item, String> {
+    let client =
+        crate::vox_clients::establish_for::<inventory_proto::InventoryServiceClient>(slug).await?;
+    let item = inventory_proto::Item {
+        path: String::new(),
+        id: uuid::Uuid::nil(),
+        name: name.to_owned(),
+        category: category.to_owned(),
+        location_id,
+        condition: inventory_proto::Condition::Good.as_str().to_owned(),
+        status: inventory_proto::Status::Stored.as_str().to_owned(),
+        manufacturer: None,
+        model: None,
+        serial: None,
+        purchase_date: None,
+        value: None,
+        tasks: inventory_proto::StringList::default(),
+        tags: inventory_proto::StringList::default(),
+        date_created: None,
+        date_modified: None,
+        details: String::new(),
+    };
+    client
+        .create(item)
+        .await
+        .map_err(|e| format!("{slug}: create item: {e:?}"))
+}
+
+/// Move an item along its lifecycle (in-use / stored / loaned /
+/// in-repair / missing / retired). Returns the updated item.
+#[cfg(target_arch = "wasm32")]
+pub async fn set_item_status(
+    slug: &str,
+    id: &str,
+    status: &str,
+) -> Result<inventory_proto::Item, String> {
+    let client =
+        crate::vox_clients::establish_for::<inventory_proto::InventoryServiceClient>(slug).await?;
+    client
+        .set_status(id.to_owned(), status.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: set item status: {e:?}"))
+}
+
 // ── Milestones ──────────────────────────────────────────────────────
 
 /// Every milestone in the org's vault (project-scoped checkpoints),
@@ -1104,6 +1171,30 @@ pub async fn create_location(
     _kind: &str,
     _address: Option<String>,
 ) -> Result<locations_proto::Location, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_inventory(_slug: &str) -> Result<Vec<inventory_proto::Item>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_item(
+    _slug: &str,
+    _name: &str,
+    _category: &str,
+    _location_id: Option<uuid::Uuid>,
+) -> Result<inventory_proto::Item, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn set_item_status(
+    _slug: &str,
+    _id: &str,
+    _status: &str,
+) -> Result<inventory_proto::Item, String> {
     Err("native client not wired yet".to_owned())
 }
 
