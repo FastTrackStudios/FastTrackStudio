@@ -64,7 +64,7 @@ edition = "2024"
 rust-version = "1.90"
 authors = ["Cody Wright"]
 license = "MIT OR Apache-2.0"
-repository = "https://git.starcommand.live/codywright/architect"
+repository = "https://codeberg.org/FastTrackStudios/architect"
 
 [workspace.dependencies]
 # Shared async runtime
@@ -114,10 +114,10 @@ facet-core = "0.46"
 # describes them as `String` in the schema so plan-based/wasm decode
 # agrees. The client crates (examples/app/{ui,desktop,tests/web}) pin the
 # SAME rev so server + clients share one coherent wire schema.
-vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-types = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-types = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
 # Loro — CRDT engine. Local-first state lives inside a LoroDoc;
 # SeaORM stores the doc's snapshot + update log as opaque bytes.
@@ -130,7 +130,7 @@ loro = { version = "1.12", default-features = false }
 # its frontend bundled. The `[patch."..."]` block at the bottom
 # redirects every transitive bearcove/moire reference (incl. vox's)
 # to this same fork so the runtime graph stays coherent.
-moire = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
 
 # Database — SeaORM with SQLite for the reference. Real projects pick
 # their own backend without changing the crudcrate-generated traits.
@@ -185,13 +185,13 @@ async-trait = "0.1"
 # end up with two parallel moire compilations, two parallel entity
 # graphs, and the dashboard would see only half the picture.
 [patch."https://github.com/bearcove/moire"]
-moire             = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-macros      = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-macros-noop = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-runtime     = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-tokio       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-trace-capture = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-trace-types = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-types       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-wasm        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-wire        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire             = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-macros      = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-runtime     = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-tokio       = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-types       = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-wasm        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-wire        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }

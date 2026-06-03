@@ -126,7 +126,7 @@ impl EntityCrdt for ExampleEntity {
         match field {
             "name" => items.sort_by(|a, b| a.name.cmp(&b.name)),
             "description" => items.sort_by(|a, b| a.description.cmp(&b.description)),
-            "created_at" => items.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
+            "created_at" => items.sort_by_key(|a| a.created_at),
             other => {
                 return Err(RepoError::InvalidInput(format!(
                     "unsortable field: {other}"

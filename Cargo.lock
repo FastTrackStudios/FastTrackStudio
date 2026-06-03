@@ -1910,7 +1910,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "0.3.4"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-core",
@@ -3412,8 +3412,8 @@ dependencies = [
 
 [[package]]
 name = "moire"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "moire-macros",
  "moire-macros-noop",
@@ -3423,8 +3423,8 @@ dependencies = [
 
 [[package]]
 name = "moire-macros"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3433,13 +3433,13 @@ dependencies = [
 
 [[package]]
 name = "moire-macros-noop"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 
 [[package]]
 name = "moire-runtime"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "ctor",
  "facet",
@@ -3454,8 +3454,8 @@ dependencies = [
 
 [[package]]
 name = "moire-tokio"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "moire-runtime",
  "moire-types",
@@ -3465,8 +3465,8 @@ dependencies = [
 
 [[package]]
 name = "moire-trace-capture"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "libc",
  "moire-trace-types",
@@ -3474,16 +3474,16 @@ dependencies = [
 
 [[package]]
 name = "moire-trace-types"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "facet",
 ]
 
 [[package]]
 name = "moire-types"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "facet",
  "facet-value",
@@ -3492,8 +3492,8 @@ dependencies = [
 
 [[package]]
 name = "moire-wasm"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "async-channel",
  "async-lock",
@@ -3507,8 +3507,8 @@ dependencies = [
 
 [[package]]
 name = "moire-wire"
-version = "1.0.1"
-source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+version = "1.0.0"
+source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "facet",
  "facet-json",
@@ -5772,7 +5772,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vox"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-pretty",
@@ -5790,7 +5790,7 @@ dependencies = [
 [[package]]
 name = "vox-core"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-cbor",
@@ -5813,7 +5813,7 @@ dependencies = [
 [[package]]
 name = "vox-jit"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -5835,7 +5835,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-abi"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "arc-swap",
  "facet-core",
@@ -5846,7 +5846,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-cal"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-core",
@@ -5855,7 +5855,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-core"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -5867,7 +5867,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-parse"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -5876,7 +5876,7 @@ dependencies = [
 [[package]]
 name = "vox-postcard"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "facet",
  "facet-core",
@@ -5890,7 +5890,7 @@ dependencies = [
 [[package]]
 name = "vox-schema"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "blake3",
  "facet",
@@ -5902,7 +5902,7 @@ dependencies = [
 [[package]]
 name = "vox-service-macros"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "proc-macro2",
  "vox-macros-core",
@@ -5911,7 +5911,7 @@ dependencies = [
 [[package]]
 name = "vox-types"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -5937,7 +5937,7 @@ dependencies = [
 [[package]]
 name = "vox-websocket"
 version = "0.8.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
 dependencies = [
  "futures-channel",
  "futures-util",
