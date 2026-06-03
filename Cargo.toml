@@ -34,6 +34,7 @@ members = [
     "features/sync/daw-link",
     "apps/example-extension",
     "apps/example-plugin",
+    "apps/ui-showcase",
     "xtask",
 ]
 resolver = "2"

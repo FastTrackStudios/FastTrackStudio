@@ -8597,6 +8597,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
 
 [[package]]
+name = "ui-showcase"
+version = "0.1.0"
+dependencies = [
+ "audio-controls",
+ "dioxus",
+ "dioxus-native",
+]
+
+[[package]]
 name = "ultraviolet"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
