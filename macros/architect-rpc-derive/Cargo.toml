@@ -24,6 +24,8 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [lib]
 proc-macro = true
+test = false
+doctest = false
 
 [features]
 # Mirrors the consumer-crate convention: enabling `vox` in the
@@ -48,5 +50,4 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 # the `::vox::service` paths the macro emits — workspace feature
 # unification turns vox on transitively under that flag.
 architect = { path = "../architect", features = ["vox"] }
-vox.workspace = true
 futures-lite = "2"

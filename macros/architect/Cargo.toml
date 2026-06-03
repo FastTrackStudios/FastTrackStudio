@@ -106,9 +106,6 @@ dispatch-tokio = ["tokio/rt-multi-thread"]
 architect-derive = { path = "../architect-derive" }
 architect-rpc-derive = { path = "../architect-rpc-derive" }
 facet.workspace = true
-facet-core.workspace = true
-uuid.workspace = true
-chrono.workspace = true
 thiserror.workspace = true
 
 # Construction layer (`architect::resource`): the default error type for

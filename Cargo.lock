@@ -125,8 +125,6 @@ dependencies = [
  "figue",
  "owo-colors",
  "tokio",
- "tracing",
- "tracing-subscriber",
  "uuid",
  "vox-core",
  "vox-websocket",
@@ -138,10 +136,8 @@ version = "0.1.0"
 dependencies = [
  "example-db",
  "eyre",
- "sea-orm",
  "sea-orm-migration",
  "tokio",
- "tracing",
  "tracing-subscriber",
 ]
 
@@ -208,10 +204,8 @@ dependencies = [
  "async-channel",
  "async-trait",
  "axum",
- "chrono",
  "eyre",
  "facet",
- "facet-core",
  "fake",
  "futures",
  "futures-lite",
@@ -221,7 +215,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid",
  "vox",
  "vox-core",
  "vox-types",
@@ -260,7 +253,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
- "vox",
 ]
 
 [[package]]
@@ -1055,7 +1047,6 @@ dependencies = [
  "crdt",
  "sea-orm",
  "sea-orm-migration",
- "tracing",
  "uuid",
 ]
 
@@ -1787,11 +1778,8 @@ dependencies = [
 name = "example-db"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "example-proto",
- "sea-orm",
  "sea-orm-migration",
- "uuid",
 ]
 
 [[package]]
@@ -1802,7 +1790,6 @@ dependencies = [
  "example-memory",
  "example-proto",
  "example-stub-backend",
- "facet",
  "tracing",
  "tracing-subscriber",
  "vox",
@@ -6643,10 +6630,8 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "camino",
  "eyre",
  "facet",
- "facet-pretty",
  "figue",
  "owo-colors",
 ]

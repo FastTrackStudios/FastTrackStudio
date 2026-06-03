@@ -63,3 +63,7 @@ full = [
     "fake",
     "diagnostics",
 ]
+
+[lib]
+test = false
+doctest = false

@@ -18,9 +18,13 @@ license.workspace = true
 [dependencies]
 example = { path = "../example", features = ["vox"] }
 dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
-uuid = { version = "1", features = ["v4", "js"] }
 
 [dev-dependencies]
 # Render components to a static string and assert on the markup.
 dioxus-ssr = "0.7"
 chrono = { workspace = true }
+uuid = { version = "1", features = ["v4", "js"] }
+
+[lib]
+test = false
+doctest = false

@@ -35,7 +35,6 @@ vox = []
 [dependencies]
 architect = { workspace = true, features = ["vox"] }
 vox.workspace = true
-facet.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

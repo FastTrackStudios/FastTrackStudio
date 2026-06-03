@@ -13,6 +13,8 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [lib]
 proc-macro = true
+test = false
+doctest = false
 
 [dependencies]
 syn = { version = "2", features = ["full", "extra-traits"] }

@@ -24,3 +24,7 @@ architect.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+
+[lib]
+test = false
+doctest = false

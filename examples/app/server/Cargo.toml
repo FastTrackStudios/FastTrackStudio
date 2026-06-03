@@ -11,6 +11,8 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 [lib]
 name = "app_server"
 path = "src/lib.rs"
+test = false
+doctest = false
 
 [[bin]]
 name = "app-server"

@@ -95,9 +95,7 @@ fake = { version = "4", features = ["derive", "uuid", "chrono"] }
 # work consistently.
 figue = "4"
 owo-colors = "4"
-camino = "1"
 heck = "0.5"
-facet-core = "0.46"
 
 # vox — Rust-native RPC. Service traits define the schema; the macro
 # emits typed client + dispatcher for every transport.
@@ -137,20 +135,9 @@ moire = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
 sea-orm = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
 sea-orm-migration = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
 
-# crudcrate — derives the wasm-clean DTO struct + auto-generated
-# ExampleRepo vox trait from a single Model definition. Server picks
-# up the SeaORM bits via the `server` feature; wasm clients see only
-# the DTO + trait.
-crudcrate = { git = "https://github.com/FastTrackStudios/crudcrate", rev = "f666e52018cfa3b2c58518a01645735cddf774f9", features = ["derive"] }
-
 # HTTP
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Wasm
-wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 
 # The architect derive crate — owns the macro that emits the wire
@@ -172,7 +159,6 @@ example-stub-backend = { path = "examples/external-stub" }
 # server, with crdt-indexeddb (future) in the browser, or run with the
 # bundled in-memory persistence for tests.
 crdt = { path = "libs/crdt" }
-crdt-seaorm = { path = "libs/crdt-seaorm" }
 
 # Object-safe async traits (Persistence). Hot-path traits in this
 # workspace use Rust 2024 async-fn-in-trait via #[vox::service]; we

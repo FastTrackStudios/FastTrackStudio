@@ -20,7 +20,5 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 [dependencies]
 figue.workspace = true
 facet.workspace = true
-facet-pretty.workspace = true
 owo-colors.workspace = true
-camino.workspace = true
 eyre.workspace = true

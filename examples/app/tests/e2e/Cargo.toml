@@ -34,3 +34,6 @@ vox-websocket.workspace = true
 
 # In-process transport — for the local round-trip test (no server).
 architect = { workspace = true, features = ["local"] }
+
+[lib]
+doctest = false

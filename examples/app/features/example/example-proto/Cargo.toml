@@ -49,3 +49,7 @@ fake = ["dep:fake", "architect/fake"]
 # Convenience bundle — vox + SeaORM emission + fake-rs together.
 # Matches tokio's `full` convention.
 full = ["vox", "server", "fake"]
+
+[lib]
+test = false
+doctest = false
