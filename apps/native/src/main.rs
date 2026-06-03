@@ -6,6 +6,15 @@ use fts_ui::showcase::Showcase;
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
 fn main() {
+    // Logs to stderr. Defaults to `info`; override with RUST_LOG, e.g.
+    // `RUST_LOG=fts_story_shell=debug,blitz_dom=warn just showcase`.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     // Touch the stories module so the linkme registrations survive LTO
     // dead-code elimination.
     fts_ui::stories::force_link();
@@ -41,6 +50,10 @@ fn LookbookApp() -> Element {
         document::Stylesheet { href: TAILWIND_CSS }
         ThemeProvider { state: theme_state,
             Lookbook {
+                // Categories with no `" · "` prefix (the core component set)
+                // collapse under a "Core" group; audio stories use
+                // "Audio · …" so they group under "Audio".
+                default_group: "Core".to_string(),
                 header_extras: rsx! {
                     LookbookThemeControls { state: theme_state }
                 },

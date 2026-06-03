@@ -4,10 +4,10 @@
 //!
 //! ```sh
 //! cargo build --release -p fts-ui-showcase-desktop
-//! cargo test  --release -p fts-ui --test parity
+//! cargo test  --release -p fts-ui-core --test parity
 //! ```
 //!
-//! Outputs land in `crates/fts-ui/parity_output/` — one PNG per
+//! Outputs land in `features/core/parity_output/` — one PNG per
 //! renderer plus a side-by-side composite for human review.
 //!
 //! Headless: spawns its own `Xvfb` instance (display `:99` by
@@ -17,8 +17,8 @@
 
 use dioxus::prelude::*;
 use fts_story_parity::{ParityConfig, ParityRunner, WryCaptureConfig};
-use fts_ui::prelude::*;
-use fts_ui::stories;
+use fts_ui_core::prelude::*;
+use fts_ui_core::stories;
 use std::path::PathBuf;
 
 /// Wrap every Blitz-rendered story in a `ThemeProvider` AND inject the
@@ -42,10 +42,10 @@ fn theme_wrap(child: Element) -> Element {
 }
 
 fn binary_path() -> PathBuf {
-    // CARGO_MANIFEST_DIR points at crates/fts-ui; walk up to the
+    // CARGO_MANIFEST_DIR points at features/core; walk up to the
     // workspace root, then into target/release.
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.pop(); // crates
+    p.pop(); // features
     p.pop(); // workspace root
     p.join("target/release/fts-ui-showcase-desktop")
 }

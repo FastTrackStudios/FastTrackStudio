@@ -1,31 +1,20 @@
-//! FastTrack Studio design system.
+//! FastTrack Studio design system — facade crate.
 //!
-//! Standalone UI component library for all FTS apps. Provides shadcn v4 maia
-//! styled components, layout/typography primitives, and the canonical FTS
-//! theme tokens.
+//! `fts-ui` itself contains no components. It re-exports the capability crates
+//! under `features/`, each behind a Cargo feature. The default `core` feature
+//! is re-exported flat so existing imports keep working:
 //!
-//! # Quick start
 //! ```rust,ignore
-//! use fts_ui::prelude::*;
+//! use fts_ui::prelude::*;        // core (standard) components, layout, theme
 //! ```
+//!
+//! # Features
+//! * `core` (default) — the standard shadcn-style design system ([`fts_ui_core`]).
+//!   Re-exported flat at the crate root.
+//! * `router` — forwards `fts-ui-core`'s router feature.
 
-pub mod cn;
-pub mod components;
-pub mod layout;
-pub mod theme;
-pub mod typography;
-
-pub mod prelude;
-pub mod showcase;
-
-pub mod stories;
-
-// Re-export lucide icons for consumers.
-pub use lucide_dioxus;
-
-/// Accessible, unstyled primitives used as the behavior layer for FTS UI.
-///
-/// These are re-exported so applications and future FTS components can share
-/// the same ARIA, focus, keyboard, and data-state behavior instead of each
-/// component reimplementing it.
-pub use dioxus_primitives as primitives;
+// Core is the always-on baseline: re-export it flat so `fts_ui::prelude`,
+// `fts_ui::components`, `fts_ui::theme`, … resolve exactly as before the split.
+#[cfg(feature = "core")]
+#[doc(inline)]
+pub use fts_ui_core::*;

@@ -1,17 +1,17 @@
 //! Snapshot regression tests for fts-ui stories.
 //!
-//! Run with `cargo test --release -p fts-ui`.
+//! Run with `cargo test --release -p fts-ui-core`.
 //! In debug mode `render_story` panics — Stylo/Parley produce
 //! incorrect output under `debug_assertions`.
 //!
-//! On first run, baselines are written to `crates/fts-ui/snapshots/`.
+//! On first run, baselines are written to `features/core/snapshots/`.
 //! On mismatch, a candidate PNG is written to
-//! `crates/fts-ui/diff_output/` and the test panics with both paths.
+//! `features/core/diff_output/` and the test panics with both paths.
 //! To accept current renders as new baselines:
-//! `FTS_STORY_UPDATE_SNAPSHOTS=1 cargo test --release -p fts-ui`.
+//! `FTS_STORY_UPDATE_SNAPSHOTS=1 cargo test --release -p fts-ui-core`.
 
-use fts_story_snapshots::{assert_snapshot, SnapshotConfig};
-use fts_ui::stories;
+use fts_story_snapshots::{SnapshotConfig, assert_snapshot};
+use fts_ui_core::stories;
 
 fn cfg() -> SnapshotConfig {
     SnapshotConfig::for_crate(env!("CARGO_MANIFEST_DIR"))
@@ -20,7 +20,7 @@ fn cfg() -> SnapshotConfig {
 #[test]
 #[cfg_attr(
     debug_assertions,
-    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui`"
+    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui-core`"
 )]
 fn button_primary_default() {
     // Touch force_link so other registrations also pull in cleanly when
@@ -32,7 +32,7 @@ fn button_primary_default() {
 #[test]
 #[cfg_attr(
     debug_assertions,
-    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui`"
+    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui-core`"
 )]
 fn button_variants_default() {
     assert_snapshot(&stories::BUTTON_VARIANTS_STORY, &cfg());
@@ -41,16 +41,16 @@ fn button_variants_default() {
 #[test]
 #[cfg_attr(
     debug_assertions,
-    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui`"
+    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui-core`"
 )]
 fn badge_variants_default() {
-    assert_snapshot(&fts_ui::components::BADGE_VARIANTS_STORY, &cfg());
+    assert_snapshot(&fts_ui_core::components::BADGE_VARIANTS_STORY, &cfg());
 }
 
 #[test]
 #[cfg_attr(
     debug_assertions,
-    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui`"
+    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui-core`"
 )]
 fn card_basic_default() {
     assert_snapshot(&stories::CARD_BASIC_STORY, &cfg());

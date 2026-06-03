@@ -1,6 +1,6 @@
 #[test]
 fn cn_macro_is_public() {
-    assert_eq!(fts_ui::cn!("px-2 py-1", "py-3"), "px-2 py-3");
+    assert_eq!(fts_ui_core::cn!("px-2 py-1", "py-3"), "px-2 py-3");
 }
 
 #[test]
@@ -9,7 +9,7 @@ fn cn_macro_accepts_conditionals() {
     let disabled = false;
 
     assert_eq!(
-        fts_ui::cn!(
+        fts_ui_core::cn!(
             "inline-flex px-2",
             (selected, "bg-primary"),
             (disabled, "opacity-50"),

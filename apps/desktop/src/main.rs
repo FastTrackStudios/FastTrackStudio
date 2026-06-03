@@ -1,4 +1,4 @@
-use dioxus::desktop::{tao::window::WindowBuilder, Config};
+use dioxus::desktop::{Config, tao::window::WindowBuilder};
 use dioxus::prelude::*;
 use fts_story_shell::Lookbook;
 use fts_ui::prelude::*;

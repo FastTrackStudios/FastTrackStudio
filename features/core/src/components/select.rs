@@ -32,11 +32,7 @@ pub fn Select(props: SelectProps) -> Element {
     let mut value = props.value;
     let selected: ReadSignal<Option<String>> = use_memo(move || {
         let value = value();
-        if value.is_empty() {
-            None
-        } else {
-            Some(value)
-        }
+        if value.is_empty() { None } else { Some(value) }
     })
     .into();
 

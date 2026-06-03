@@ -11,6 +11,8 @@ edition.workspace = true
 dioxus = { package = "dioxus-native", git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude", "system-fonts"] }
 fts-ui = { workspace = true }
 fts-story-shell.workspace = true
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [lints]
 workspace = true

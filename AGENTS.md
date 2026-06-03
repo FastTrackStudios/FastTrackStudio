@@ -20,7 +20,12 @@ dependencies.
 
 ## Repository Shape
 
-- `crates/fts-ui`: reusable component library.
+- `crates/fts-ui`: facade crate — re-exports the feature crates behind Cargo
+  features (`core` default, `audio`). Contains no components of its own.
+- `features/core`: `fts-ui-core` — the standard shadcn-style design system
+  (components, layout, typography, theme). Re-exported flat as `fts_ui::*`.
+- `features/audio`: `fts-ui-audio` — audio widget kit (knobs, sliders, meters).
+  Behind the `audio` feature; re-exported as `fts_ui::audio`.
 - `crates/showcase`: older showcase crate kept for compatibility.
 - `apps/web`: web showcase app.
 - `apps/desktop`: desktop/webview showcase app.
@@ -70,7 +75,7 @@ For most component changes, run:
 ```sh
 cargo fmt --check
 cargo check -p fts-ui-showcase-web
-cargo test -p fts-ui
+cargo test -p fts-ui-core
 cargo clippy --workspace -- -D warnings
 git diff --check
 ```
@@ -178,6 +183,7 @@ In `Cargo.toml`, depend on fts-ui by path during local development:
 ```toml
 [dependencies]
 dioxus = { version = "0.7.6", default-features = false, features = ["web"] }
+# `core` is on by default; add `features = ["audio"]` for the audio widget kit.
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
 ```
 

@@ -1,38 +1,27 @@
 [package]
 name = "fts-ui"
-description = "FastTrack Studio design system"
+description = "FastTrack Studio design system — facade crate that re-exports feature crates"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
-[dependencies]
-chrono = "0.4"
-time = "0.3"
-clsx = { workspace = true }
-dioxus = { workspace = true }
-dioxus-primitives = { workspace = true }
-lucide-dioxus = { workspace = true }
-tracing = { workspace = true }
-tw_merge = { workspace = true }
-nucleo-matcher = { workspace = true }
-palette = { workspace = true }
-
-# Story registration. Always on — every component declares its stories
-# inline next to its implementation, and the `#[story]` macro auto-
-# registers them via `linkme`. `linkme` MUST be a direct consumer dep:
-# attribute-macro paths cannot resolve through `pub use` re-exports, so
-# the `#[story]` macro emits `#[linkme::distributed_slice(...)]` directly.
-fts-story-runtime = { workspace = true }
-linkme = { workspace = true }
+# This crate intentionally contains no logic of its own. It is a thin facade
+# that re-exports the capability crates under `features/`, each gated behind a
+# Cargo feature:
+#   * `core`  (default) -> fts-ui-core,  re-exported flat (`fts_ui::prelude`, …)
+# Add new capabilities by adding a crate under features/ and a matching feature
+# + optional dependency here.
 
 [features]
-default = []
-router = ["dioxus/router", "dioxus-primitives/router"]
+default = ["core"]
+core = ["dep:fts-ui-core"]
+# Forward the core router feature. `?` so enabling `router` doesn't force-enable
+# core; it only applies if core is already on (which it is by default).
+router = ["fts-ui-core?/router"]
 
-[dev-dependencies]
-# Always available to tests/ — heavy (pulls Blitz CPU rasteriser) but
-# `cargo build` never compiles dev-deps so the lib build stays light.
-fts-story-snapshots = { workspace = true }
-fts-story-parity    = { workspace = true }
+[dependencies]
+fts-ui-core = { workspace = true, optional = true }
 
 [lints]
 workspace = true
