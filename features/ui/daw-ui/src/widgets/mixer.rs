@@ -12,31 +12,11 @@
 
 use crate::core::sensitivity::{DragSensitivity, ModifierKeys};
 use crate::prelude::*;
-use crate::theming::{Color, ThemeState, use_theme};
+use crate::theming::{Color, ThemeState, ToggleKind, use_theme};
 use crate::widgets::knob::{Knob, KnobVariant};
 
-// ── Palette ──────────────────────────────────────────────────────────────────
-const ZONE_SAFE: &str = "#22c55e";
-const ZONE_WARN: &str = "#f59e0b";
-const ZONE_DANGER: &str = "#ef4444";
-const CAP_TOP: &str = "#6b6b76";
-const CAP_BOTTOM: &str = "#3a3a42";
-const ROUTE_OFF: &str = "#3f3f46";
-const SOLO_COLOR: &str = "#eab308";
-const MUTE_COLOR: &str = "#ef4444";
-const ROUTE_PARENT: &str = "#22c55e";
-const ROUTE_SEND: &str = "#eab308";
-const ROUTE_RECV: &str = "#38bdf8";
-
-fn zone_color(level: f32) -> &'static str {
-    if level > 0.9 {
-        ZONE_DANGER
-    } else if level > 0.75 {
-        ZONE_WARN
-    } else {
-        ZONE_SAFE
-    }
-}
+// Colours are theme-driven (see `crate::theming`); these helpers remain for
+// `MixerFolder`'s track-colour handling.
 
 fn parse_rgb(hex: &str) -> Option<(u8, u8, u8)> {
     let h = hex.strip_prefix('#')?;
@@ -81,34 +61,41 @@ fn track_hex(color: &Option<String>) -> String {
 
 // ── Toggle buttons (Solo / Mute) ──────────────────────────────────────────────
 
-/// Shared square toggle behind [`SoloButton`] / [`MuteButton`].
+/// Shared square toggle behind [`SoloButton`] / [`MuteButton`]. Colours come
+/// from `theme.toggle(kind)`.
 #[component]
 fn MixerToggleButton(
     active: Signal<bool>,
-    glyph: String,
-    title: String,
-    /// Fill/letter colour (a `#rrggbb`).
-    color: String,
+    kind: ToggleKind,
     #[props(default)] disabled: bool,
     #[props(default)] on_toggle: Option<Callback<bool>>,
 ) -> Element {
+    let t = use_theme().theme.toggle(kind);
+    let (glyph, title) = match kind {
+        ToggleKind::Solo => ("S", "Solo"),
+        ToggleKind::Mute => ("M", "Mute"),
+        ToggleKind::RecArm => ("\u{25cf}", "Record arm"),
+    };
     let on = active();
     let cursor = if disabled { "not-allowed" } else { "pointer" };
     let style = if on {
         format!(
             "flex:1; height:22px; display:flex; align-items:center; justify-content:center; \
              font-size:12px; font-weight:800; line-height:1; border-radius:5px; cursor:{cursor}; \
-             background:{color}; color:{fg}; border:1px solid {color}; \
+             background:{fill}; color:{fg}; border:1px solid {fill}; \
              box-shadow:0 0 8px {glow}, inset 0 1px 0 rgba(255,255,255,0.3);",
-            fg = readable_on(&color),
-            glow = with_alpha(&color, "99"),
+            fill = t.on_fill.css(),
+            fg = t.on_text.css(),
+            glow = t.on_fill.with_alpha(0x99).css(),
         )
     } else {
         format!(
             "flex:1; height:22px; display:flex; align-items:center; justify-content:center; \
              font-size:12px; font-weight:800; line-height:1; border-radius:5px; cursor:{cursor}; \
-             background:#0c0c0f; color:{color}; border:1px solid {border};",
-            border = with_alpha(&color, "55"),
+             background:{bg}; color:{txt}; border:1px solid {border};",
+            bg = t.off_bg.css(),
+            txt = t.off_text.css(),
+            border = t.off_border.css(),
         )
     };
     rsx! {
@@ -135,14 +122,7 @@ pub fn SoloButton(
     #[props(default)] on_toggle: Option<Callback<bool>>,
 ) -> Element {
     rsx! {
-        MixerToggleButton {
-            active,
-            glyph: "S".to_string(),
-            title: "Solo".to_string(),
-            color: SOLO_COLOR.to_string(),
-            disabled,
-            on_toggle,
-        }
+        MixerToggleButton { active, kind: ToggleKind::Solo, disabled, on_toggle }
     }
 }
 
@@ -154,14 +134,7 @@ pub fn MuteButton(
     #[props(default)] on_toggle: Option<Callback<bool>>,
 ) -> Element {
     rsx! {
-        MixerToggleButton {
-            active,
-            glyph: "M".to_string(),
-            title: "Mute".to_string(),
-            color: MUTE_COLOR.to_string(),
-            disabled,
-            on_toggle,
-        }
+        MixerToggleButton { active, kind: ToggleKind::Mute, disabled, on_toggle }
     }
 }
 
@@ -176,10 +149,14 @@ pub fn RoutingButton(
     #[props(default)] disabled: bool,
     #[props(default)] on_click: Option<Callback<()>>,
 ) -> Element {
+    let tk = use_theme().theme.tokens;
+    let off = tk.border;
     let cursor = if disabled { "not-allowed" } else { "pointer" };
-    let c_parent = if parent_send { ROUTE_PARENT } else { ROUTE_OFF };
-    let c_send = if sends { ROUTE_SEND } else { ROUTE_OFF };
-    let c_recv = if receives { ROUTE_RECV } else { ROUTE_OFF };
+    let c_parent = if parent_send { tk.route_parent } else { off }.css();
+    let c_send = if sends { tk.route_send } else { off }.css();
+    let c_recv = if receives { tk.route_recv } else { off }.css();
+    let bg = tk.surface_sunken.css();
+    let border = tk.border.css();
     rsx! {
         button {
             r#type: "button",
@@ -187,7 +164,7 @@ pub fn RoutingButton(
             style: format!(
                 "width:26px; height:26px; padding:0; display:flex; align-items:center; \
                  justify-content:center; border-radius:5px; cursor:{cursor}; \
-                 background:#0c0c0f; border:1px solid #3f3f46;"
+                 background:{bg}; border:1px solid {border};"
             ),
             onclick: move |_| {
                 if disabled { return; }
@@ -231,7 +208,16 @@ pub fn ChannelFader(
     let fill_pct = v * 100.0;
     let cursor = if disabled { "not-allowed" } else { "ns-resize" };
 
-    // Meter columns: stereo (two) or mono (one).
+    let theme = use_theme().theme;
+    let m = theme.meter();
+    let f = theme.fader(&ThemeState::new());
+    let well = m.well.css();
+    let well_border = m.border.css();
+    let peak_col = m.peak.css();
+    let cap_top = f.cap_top.css();
+    let cap_bottom = f.cap_bottom.css();
+
+    // Meter columns: stereo (two) or mono (one). Zone colour comes from the theme.
     let meter = |lvl: f32, left: f32, w: f32| {
         let lvl = lvl.clamp(0.0, 1.0);
         rsx! {
@@ -240,7 +226,7 @@ pub fn ChannelFader(
                     "position:absolute; bottom:0; left:{left}%; width:{w}%; height:{h}%; \
                      background:{c}; opacity:0.9; pointer-events:none; border-radius:1px;",
                     h = lvl * 100.0,
-                    c = zone_color(lvl),
+                    c = theme.meter_zone(lvl).css(),
                 ),
             }
         }
@@ -249,8 +235,8 @@ pub fn ChannelFader(
     rsx! {
         div {
             style: format!(
-                "position:relative; width:30px; height:{height}px; background:#18181b; \
-                 border-radius:5px; overflow:hidden; border:1px solid #3f3f46; cursor:{cursor}; \
+                "position:relative; width:30px; height:{height}px; background:{well}; \
+                 border-radius:5px; overflow:hidden; border:1px solid {well_border}; cursor:{cursor}; \
                  box-shadow:inset 0 1px 3px rgba(0,0,0,0.5);"
             ),
 
@@ -265,7 +251,7 @@ pub fn ChannelFader(
                 div {
                     style: format!(
                         "position:absolute; left:0; right:0; bottom:{p}%; height:2px; \
-                         background:rgba(244,244,245,0.7); pointer-events:none;",
+                         background:{peak_col}; pointer-events:none;",
                         p = peak.clamp(0.0, 1.0) * 100.0,
                     ),
                 }
@@ -276,7 +262,7 @@ pub fn ChannelFader(
                 style: format!(
                     "position:absolute; left:-3px; right:-3px; bottom:calc({fill_pct}% - 6px); \
                      height:12px; border-radius:3px; \
-                     background:linear-gradient(180deg,{CAP_TOP},{CAP_BOTTOM}); \
+                     background:linear-gradient(180deg,{cap_top},{cap_bottom}); \
                      border:1px solid #15151a; pointer-events:none; \
                      box-shadow:0 1px 2px rgba(0,0,0,0.6);"
                 ),
