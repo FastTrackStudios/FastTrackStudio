@@ -22,64 +22,18 @@
 //! or registry rules.
 
 use cookbook::Recipe;
-use facet::Facet;
 use pantry::PantryItem;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct Fulfillment {
-    pub can_cook: bool,
-    pub missing: Vec<Shortage>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct Shortage {
-    /// Recipe ingredient name (cooklang `@name`).
-    pub name: String,
-
-    #[serde(rename = "ingredientIdx")]
-    pub ingredient_idx: u32,
-
-    pub need: f64,
-    pub have: f64,
-    pub unit: String,
-    pub reason: ShortageReason,
-
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub suggestions: Vec<SubstitutionSuggestion>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct SubstitutionSuggestion {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none", default, rename = "toItemId")]
-    pub to_item_id: Option<uuid::Uuid>,
-    pub ratio: f64,
-    pub need: f64,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub have: Option<f64>,
-    #[serde(default)]
-    pub reasons: Vec<pantry::SubReason>,
-    pub source: SubstitutionSource,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub note: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
-#[repr(u8)]
-pub enum SubstitutionSource {
-    PantryItem,
-    Registry,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-#[repr(u8)]
-pub enum ShortageReason {
-    NotInPantry,
-    InsufficientQty,
-    UnitMismatch,
-    OptionalNoQty,
-}
+// The fulfillment **wire types** now live in the wasm-clean
+// `mealplan-proto` crate (so `MealplanService::can_cook` can
+// return `Fulfillment` from a wasm client). The pure matching
+// logic below stays here — it needs the native `pantry`
+// unit-conversion layer. Re-exported so existing
+// `mealplan::fulfillment::*` / `mealplan::Fulfillment` paths keep
+// working.
+pub use mealplan_proto::fulfillment::{
+    Fulfillment, Shortage, ShortageReason, SubstitutionSource, SubstitutionSuggestion,
+};
 
 const MAX_NEST_DEPTH: u32 = 8;
 

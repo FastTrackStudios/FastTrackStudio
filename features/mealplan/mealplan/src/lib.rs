@@ -49,7 +49,7 @@ pub use fulfillment::{
     Fulfillment, Shortage, ShortageReason, SubstitutionSource, SubstitutionSuggestion,
     check_nested, check_with_subs,
 };
-pub use model::{Meal, PantryDeduction, Slot, Status};
+pub use model::{Meal, MealNutrition, PantryDeduction, Slot, Status};
 pub use parse::{ParseError, looks_like_meal, parse_page};
 pub use scan::{meals_between, meals_on, scan_vault};
 pub use service::{MealplanError, MealplanService, MealplanServiceRpc};

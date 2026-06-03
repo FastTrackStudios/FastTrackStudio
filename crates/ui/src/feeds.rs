@@ -558,6 +558,127 @@ pub async fn fetch_intake(slug: &str) -> Result<Vec<fitness_proto::intake::Intak
         .map_err(|e| format!("{slug}: list intake logs: {e:?}"))
 }
 
+// ── Mealplan ────────────────────────────────────────────────────────
+
+/// Every recipe in the org's cookbook (`<wiki>/Cookbook/*.cook`),
+/// in the order the backend lists them.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_recipes(slug: &str) -> Result<Vec<cookbook_proto::Recipe>, String> {
+    let client =
+        crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list recipes: {e:?}"))
+}
+
+/// Create one recipe from a name. Identity is the vault-relative
+/// `path`; the backend fills `path` from the name + parses the
+/// `source`. We seed a minimal cooklang source (`>> title:`).
+#[cfg(target_arch = "wasm32")]
+pub async fn create_recipe(slug: &str, name: &str) -> Result<cookbook_proto::Recipe, String> {
+    let client =
+        crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
+    let recipe = cookbook_proto::Recipe {
+        path: format!("Cookbook/{name}.cook"),
+        name: name.to_owned(),
+        description: None,
+        course: None,
+        cuisine: None,
+        prep_minutes: None,
+        cook_minutes: None,
+        servings: None,
+        ingredients: cookbook_proto::Ingredients::default(),
+        steps: cookbook_proto::StringList::default(),
+        cookware: cookbook_proto::StringList::default(),
+        nested_recipes: cookbook_proto::StringList::default(),
+        tags: cookbook_proto::StringList::default(),
+        source_url: None,
+        date_modified: None,
+        source: format!(">> title: {name}\n"),
+    };
+    client
+        .create(recipe)
+        .await
+        .map_err(|e| format!("{slug}: create recipe: {e:?}"))
+}
+
+/// Every pantry item in the org's vault (food-on-hand pages), in
+/// the order the backend lists them.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_pantry(slug: &str) -> Result<Vec<pantry_proto::PantryItem>, String> {
+    let client =
+        crate::vox_clients::establish_for::<pantry_proto::PantryServiceClient>(slug).await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list pantry: {e:?}"))
+}
+
+/// Create one pantry item (name + qty + unit). The backend
+/// assigns the `id` (nil here) and the vault `path` (empty here).
+/// Returns the persisted item.
+#[cfg(target_arch = "wasm32")]
+pub async fn create_pantry_item(
+    slug: &str,
+    name: &str,
+    qty: Option<f64>,
+    unit: &str,
+) -> Result<pantry_proto::PantryItem, String> {
+    let client =
+        crate::vox_clients::establish_for::<pantry_proto::PantryServiceClient>(slug).await?;
+    let item = pantry_proto::PantryItem {
+        path: String::new(),
+        id: uuid::Uuid::nil(),
+        name: name.to_owned(),
+        category: "food".to_owned(),
+        location_id: None,
+        condition: "good".to_owned(),
+        status: "stored".to_owned(),
+        tags: pantry_proto::StringList(vec!["item".into(), "pantry".into()]),
+        date_created: None,
+        date_modified: None,
+        food_category: String::new(),
+        qty,
+        unit: unit.to_owned(),
+        purchase_unit: None,
+        purchase_to_stock_factor: None,
+        expiry: None,
+        opened: false,
+        opened_date: None,
+        brand: None,
+        nutrition_per_unit: None,
+        nutrition_unit: None,
+        minimum: None,
+        default_best_before_days: None,
+        default_best_before_days_after_open: None,
+        default_best_before_days_after_freezing: None,
+        default_best_before_days_after_thawing: None,
+        due_type: "best-before".to_owned(),
+        stock_entries: pantry_proto::StockEntries::default(),
+        substitutes: pantry_proto::Substitutions::default(),
+        barcodes: pantry_proto::StringList::default(),
+        image_url: None,
+        details: String::new(),
+    };
+    client
+        .create(item)
+        .await
+        .map_err(|e| format!("{slug}: create pantry item: {e:?}"))
+}
+
+/// Every planned meal in the org's vault, in the order the
+/// backend lists them.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_meal_plans(slug: &str) -> Result<Vec<mealplan_proto::Meal>, String> {
+    let client =
+        crate::vox_clients::establish_for::<mealplan_proto::MealplanServiceClient>(slug).await?;
+    client
+        .list()
+        .await
+        .map_err(|e| format!("{slug}: list meal plans: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -1055,6 +1176,38 @@ pub async fn fetch_workouts(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch_intake(_slug: &str) -> Result<Vec<fitness_proto::intake::IntakeLog>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+// ── Mealplan (native stubs) ─────────────────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_recipes(_slug: &str) -> Result<Vec<cookbook_proto::Recipe>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_recipe(_slug: &str, _name: &str) -> Result<cookbook_proto::Recipe, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_pantry(_slug: &str) -> Result<Vec<pantry_proto::PantryItem>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_pantry_item(
+    _slug: &str,
+    _name: &str,
+    _qty: Option<f64>,
+    _unit: &str,
+) -> Result<pantry_proto::PantryItem, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_meal_plans(_slug: &str) -> Result<Vec<mealplan_proto::Meal>, String> {
     Err("native client not wired yet".to_owned())
 }
 

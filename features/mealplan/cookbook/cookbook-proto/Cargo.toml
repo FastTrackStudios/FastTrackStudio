@@ -17,6 +17,7 @@ chrono = { workspace = true, features = ["clock", "serde"] }
 facet = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 architect = { workspace = true }
 
 vox = { workspace = true, optional = true }

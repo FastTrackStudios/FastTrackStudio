@@ -20,6 +20,9 @@ architect = { workspace = true }
 vault = { workspace = true }
 inventory = { workspace = true }
 cookbook = { workspace = true }
+# Wire model + `PantryService` trait live here; this native crate
+# enables the `native` feature for the `inventory::Item` interop.
+pantry-proto = { workspace = true, features = ["native"] }
 
 # OpenFoodFacts external barcode lookup. Blocking client keeps
 # the sync `architect::rpc` trait surface uniform — barcode
@@ -34,9 +37,9 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 
 [features]
 default = ["vox"]
-vox = ["dep:vox", "dep:vox-types", "architect/vox"]
-server = ["architect/server-seaorm", "dep:sea-orm", "cookbook/server", "inventory/server"]
-fake = ["dep:fake", "architect/fake", "cookbook/fake", "inventory/fake"]
+vox = ["dep:vox", "dep:vox-types", "architect/vox", "architect/dispatch-tokio", "pantry-proto/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm", "cookbook/server", "inventory/server", "pantry-proto/server"]
+fake = ["dep:fake", "architect/fake", "cookbook/fake", "inventory/fake", "pantry-proto/fake"]
 full = ["vox", "server", "fake"]
 
 [dev-dependencies]

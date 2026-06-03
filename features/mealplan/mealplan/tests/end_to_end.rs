@@ -17,8 +17,8 @@
 use chrono::NaiveDate;
 use cookbook::{CookbookService, Nutrition, Recipe};
 use mealplan::{
-    MealplanService, ShoppingService, ShoppingStore, ShortageReason, Slot, SubstitutionService,
-    SubstitutionStore, fulfillment,
+    MealNutrition, MealplanService, ShoppingService, ShoppingStore, ShortageReason, Slot,
+    SubstitutionService, SubstitutionStore, fulfillment,
 };
 use pantry::{PantryService, StockEntry, SubReason};
 use std::path::Path;

@@ -45,6 +45,9 @@ pub enum Route {
         #[route("/fitness")]
         FitnessRoute {},
 
+        #[route("/mealplan")]
+        MealplanRoute {},
+
         #[route("/schedule")]
         ScheduleRoute {},
 
@@ -118,6 +121,11 @@ fn MilestonesRoute() -> Element {
 #[component]
 fn FitnessRoute() -> Element {
     rsx! { pages::fitness::FitnessView {} }
+}
+
+#[component]
+fn MealplanRoute() -> Element {
+    rsx! { pages::mealplan::MealplanView {} }
 }
 
 #[component]

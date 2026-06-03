@@ -40,6 +40,13 @@ finance-proto = { workspace = true, features = ["vox"] }
 # intake service clients for the `/fitness` route. Wasm-clean
 # (serde-only client side), `vox` feature only.
 fitness-proto = { workspace = true, features = ["vox"] }
+# Mealplan suite wire surface — cookbook (recipes) / pantry
+# (ingredient stock) / mealplan (planned meals) service clients
+# for the `/mealplan` route. Wasm-clean (serde-only client side),
+# `vox` feature only (no `native` → never pulls `inventory`).
+cookbook-proto = { workspace = true, features = ["vox"] }
+pantry-proto = { workspace = true, features = ["vox"] }
+mealplan-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
 # Cyclic life-calendar — Goals view uses the pure-function
 # generator to resolve `cycle_id` references to displayable

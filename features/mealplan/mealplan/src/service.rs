@@ -1,57 +1,14 @@
-//! `MealplanService` — wire surface that ties recipes,
-//! pantry stock, and the calendar together.
+//! The `MealplanService` wire surface now lives in the wasm-clean
+//! [`mealplan_proto`] crate. Re-exported here so the existing
+//! `mealplan::service::*` paths (and the `Store` impl in
+//! [`crate::store`]) keep working. The architect-emitted vox bits
+//! (client / dispatcher / descriptor / serve) are surfaced at the
+//! crate root via [`crate`]'s re-exports.
 
-use facet::Facet;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
+pub use mealplan_proto::service::{MealplanError, MealplanService, MealplanServiceRpc};
 
-use crate::fulfillment::Fulfillment;
-use crate::model::{Meal, PantryDeduction};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
-#[repr(u8)]
-pub enum MealplanError {
-    #[error("not found: {0}")]
-    NotFound(String),
-    #[error("already exists: {0}")]
-    AlreadyExists(String),
-    #[error("bad request: {0}")]
-    BadRequest(String),
-    #[error("pantry: {0}")]
-    Pantry(String),
-    #[error("io: {0}")]
-    Io(String),
-}
-
-#[architect::rpc]
-pub trait MealplanService {
-    fn list(&self) -> Result<Vec<Meal>, MealplanError>;
-
-    fn get(&self, id: &str) -> Result<Meal, MealplanError>;
-
-    fn create(&self, meal: Meal) -> Result<Meal, MealplanError>;
-
-    fn update(&self, meal: Meal) -> Result<Meal, MealplanError>;
-
-    fn rename(&self, id: &str, new_path: &str) -> Result<Meal, MealplanError>;
-
-    fn delete(&self, id: &str) -> Result<(), MealplanError>;
-
-    /// Mark the meal as `cooked`, stamp today's deductions
-    /// onto its `pantry_deductions`, and consume each row
-    /// from the pantry. Atomic at the meal-row level only —
-    /// pantry consumes are sequential, so on partial failure
-    /// some stock may already be debited. (Future:
-    /// transactional consume across rows.)
-    fn cook(&self, id: &str, deductions: Vec<PantryDeduction>) -> Result<Meal, MealplanError>;
-
-    /// Mark a meal as `skipped` without touching the pantry.
-    fn skip(&self, id: &str) -> Result<Meal, MealplanError>;
-
-    /// "Can I make this recipe right now from what's in the
-    /// pantry?" Pulls the recipe + current pantry snapshot
-    /// and runs [`crate::fulfillment::check`]. Returns the
-    /// fulfillment result including per-ingredient
-    /// shortages.
-    fn can_cook(&self, recipe_path: &str, servings: u32) -> Result<Fulfillment, MealplanError>;
-}
+#[cfg(feature = "vox")]
+pub use mealplan_proto::service::{
+    MealplanServiceClient, MealplanServiceRpcDispatcher, Service, layer,
+    mealplan_service_rpc_service_descriptor, serve,
+};

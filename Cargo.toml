@@ -427,7 +427,18 @@ cookbook = { path = "features/mealplan/cookbook" }
 # working.
 cookbook-proto = { path = "features/mealplan/cookbook/cookbook-proto", default-features = false }
 pantry = { path = "features/mealplan/pantry" }
+# `pantry-proto` is wasm-clean (the web UI binds the `PantryService`
+# client directly); the native `pantry` crate re-exports it. The
+# `native` feature (off by default) adds the `inventory::Item`
+# interop so wasm builds never pull the vault-backed `inventory`
+# crate. Mirrors the `cookbook-proto` split.
+pantry-proto = { path = "features/mealplan/pantry/pantry-proto", default-features = false }
 mealplan = { path = "features/mealplan/mealplan" }
+# `mealplan-proto` is wasm-clean — holds the `Meal` model +
+# `MealplanService` trait (and the `Fulfillment` wire types) so the
+# web UI binds the client directly. The native `mealplan` crate
+# re-exports it + keeps the cook/fulfillment domain logic.
+mealplan-proto = { path = "features/mealplan/mealplan/mealplan-proto", default-features = false }
 
 # Cooklang recipe format parser (https://cooklang.org).
 # Native parser + scaling + unit conversion + aisle.conf.

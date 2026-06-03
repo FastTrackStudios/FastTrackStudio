@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     BookOpen, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag, FolderKanban,
     House, Inbox as InboxIcon, MapPin, Notebook, ReceiptText, Settings as SettingsIcon, Target,
-    Timer, Wallet,
+    Timer, Utensils, Wallet,
 };
 
 use crate::routes::Route;
@@ -43,6 +43,9 @@ fn icon_milestones() -> Element {
 }
 fn icon_fitness() -> Element {
     rsx! { Dumbbell { size: 16 } }
+}
+fn icon_mealplan() -> Element {
+    rsx! { Utensils { size: 16 } }
 }
 fn icon_schedule() -> Element {
     rsx! { CalendarDays { size: 16 } }
@@ -118,6 +121,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Fitness",
             icon: icon_fitness,
             route: Route::FitnessRoute {},
+        },
+        NavTab {
+            label: "Mealplan",
+            icon: icon_mealplan,
+            route: Route::MealplanRoute {},
         },
         NavTab {
             label: "Schedule",
@@ -208,6 +216,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::LocationsRoute {} => "Locations",
         Route::MilestonesRoute {} => "Milestones",
         Route::FitnessRoute {} => "Fitness",
+        Route::MealplanRoute {} => "Mealplan",
         Route::ScheduleRoute {} => "Schedule",
         Route::BookingsRoute {} => "Bookings",
         Route::GanttRoute {} => "Gantt",

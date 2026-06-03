@@ -14,7 +14,7 @@ use uuid::Uuid;
 use vault::Vault;
 
 use crate::fulfillment::{self, Fulfillment};
-use crate::model::{Meal, PantryDeduction};
+use crate::model::{Meal, MealNutrition, PantryDeduction};
 use crate::parse::{looks_like_meal, parse_page};
 use crate::scan::scan_vault;
 use crate::service::{MealplanError, MealplanService};

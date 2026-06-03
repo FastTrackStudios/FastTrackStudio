@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{NaiveDate, Utc};
+use mealplan::MealNutrition;
 use mealplan::cookbook::{CookbookService, Nutrition};
 use mealplan::pantry::PantryService;
 use uuid::Uuid;

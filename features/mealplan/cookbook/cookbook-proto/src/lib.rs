@@ -16,5 +16,15 @@
 //! existing `cookbook::Nutrition` paths keep working.
 
 pub mod model;
+pub mod service;
 
-pub use model::Nutrition;
+pub use model::{Course, Ingredient, Ingredients, Nutrition, Recipe, StringList};
+pub use service::{CookbookError, CookbookService, CookbookServiceRpc};
+
+#[cfg(feature = "vox")]
+pub use service::{
+    CookbookServiceClient, CookbookServiceRpcDispatcher as CookbookDispatcher,
+    Service as CookbookServiceBridge,
+    cookbook_service_rpc_service_descriptor as cookbook_service_descriptor,
+    layer as cookbook_service_layer, serve as serve_cookbook_service,
+};
