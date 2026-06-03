@@ -499,7 +499,11 @@ rayon = "1"
 # helix and other rust TUIs — fast prefix-friendly bonuses + Unicode
 # normalization. Wasm-clean.
 nucleo-matcher = "0.3"
-fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui", default-features = false }
+# `core` (default in fts-ui) is now feature-gated — it backs `fts_ui::prelude`
+# + `lucide_dioxus`. The `crates/* -> features/*` refactor moved fts-ui-core
+# behind this flag, so `default-features = false` alone strips the whole
+# design system. Opt `core` back in explicitly.
+fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui", default-features = false, features = ["core"] }
 
 # Ordered-map for round-trippable frontmatter key preservation
 # (needed by knowledge-proto's obsidian helpers).
