@@ -50,4 +50,11 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 # the `::vox::service` paths the macro emits — workspace feature
 # unification turns vox on transitively under that flag.
 architect = { path = "../architect", features = ["vox"] }
+# Direct `vox` dep: the `#[rpc]` macro emits `::vox::service` paths, so
+# the smoke test needs `vox` in its crate root. cargo-shear can't see
+# this (it's macro-generated), hence the ignore below.
+vox.workspace = true
 futures-lite = "2"
+
+[package.metadata.cargo-shear]
+ignored = ["vox"]
