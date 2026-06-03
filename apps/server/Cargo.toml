@@ -52,6 +52,12 @@ task = { workspace = true, features = ["vox"] }
 # Forge webhook receiver — IssueLink lookup maps an inbound
 # forge issue/PR event back to the local TaskInfo to mutate.
 git-config = { workspace = true }
+# Forge services mounted on `/org/<slug>/vox`: RepoCatalog +
+# IssueTracker + ReviewSurface, served by the Forgejo backend
+# (the org's primary forge). `git-proto` carries the wire
+# contract; `git-forgejo` the REST-backed impl.
+git-proto = { workspace = true }
+git-forgejo = { workspace = true }
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
 milestone = { workspace = true, features = ["vox"] }

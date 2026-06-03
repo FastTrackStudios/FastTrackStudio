@@ -1611,3 +1611,48 @@ pub async fn fetch_email_envelopes(
 ) -> Result<Vec<email_proto::Envelope>, String> {
     Err("native client not wired yet".to_owned())
 }
+
+// ── Git / forge ─────────────────────────────────────────────────────
+
+/// Every repo the org's forge backend can address, in the order the
+/// catalog lists them. Backed by `RepoCatalog::list_repos`; when the
+/// forge is unconfigured (no token) the backend returns an
+/// auth/forge error the caller renders as an empty list.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_repos(slug: &str) -> Result<Vec<git_proto::Repo>, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::repo::RepoCatalogClient>(slug).await?;
+    client
+        .list_repos()
+        .await
+        .map_err(|e| format!("{slug}: list repos: {e:?}"))
+}
+
+/// Issues for one repo (all states), via `IssueTracker::list_issues`
+/// with a default (unfiltered) filter. The `/repos` page calls this
+/// per repo to show each repo's open work inline.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_issues(
+    slug: &str,
+    repo: git_proto::RepoId,
+) -> Result<Vec<git_proto::issues::Issue>, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::issues::IssueTrackerClient>(slug).await?;
+    client
+        .list_issues(repo, git_proto::issues::IssueFilter::default())
+        .await
+        .map_err(|e| format!("{slug}: list issues: {e:?}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_repos(_slug: &str) -> Result<Vec<git_proto::Repo>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_issues(
+    _slug: &str,
+    _repo: git_proto::RepoId,
+) -> Result<Vec<git_proto::issues::Issue>, String> {
+    Err("native client not wired yet".to_owned())
+}

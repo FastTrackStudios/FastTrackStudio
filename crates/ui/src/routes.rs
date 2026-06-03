@@ -75,6 +75,9 @@ pub enum Route {
         #[route("/ledger")]
         LedgerRoute {},
 
+        #[route("/repos")]
+        ReposRoute {},
+
         #[route("/wiki")]
         WikiRoute {},
 
@@ -183,6 +186,11 @@ fn InvoicesRoute() -> Element {
 #[component]
 fn LedgerRoute() -> Element {
     rsx! { pages::ledger::LedgerView {} }
+}
+
+#[component]
+fn ReposRoute() -> Element {
+    rsx! { pages::repos::ReposView {} }
 }
 
 #[component]

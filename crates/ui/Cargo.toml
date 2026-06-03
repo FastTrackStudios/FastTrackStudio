@@ -78,6 +78,10 @@ vault-proto = { workspace = true, features = ["vox"] }
 # page (account list + recent envelopes). `vox` feature only, so
 # it stays wasm-clean like the other proto clients above.
 email-proto = { workspace = true, features = ["vox"] }
+# Forge wire surface — `RepoCatalog` / `IssueTracker` clients the
+# `/repos` page binds to list repos + their issues for the
+# selected org. `vox` feature only, wasm-clean like the others.
+git-proto = { workspace = true, features = ["vox"] }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

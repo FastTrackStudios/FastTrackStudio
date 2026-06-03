@@ -145,6 +145,13 @@ pub struct OrgAppState {
     /// for the `EmailSync` RPC surface (accounts / folders /
     /// envelopes).
     pub email: email_maildir::Backend,
+    /// Forge backend (Forgejo) serving `RepoCatalog` +
+    /// `IssueTracker` + `ReviewSurface`. Built from
+    /// `TASK_FORGEJO_BASE_URL` + `TASK_FORGEJO_TOKEN`; when either
+    /// is absent it's constructed with empty credentials and the
+    /// forge calls degrade to auth/forge errors the UI tolerates
+    /// (empty list) rather than blocking server startup.
+    pub forge: git_forgejo::Backend,
 }
 
 /// Top-level server state. Scans `<data_root>/orgs/` at
@@ -551,6 +558,24 @@ pub(crate) async fn build_org_state(
             .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
         let email = email_maildir::Backend::with_accounts(discover_mail_accounts(&mail_root));
 
+        // Forge backend — Forgejo, the org's primary forge. Base
+        // URL + token come from the same env vars the CLI's forge
+        // sync uses (`TASK_FORGEJO_BASE_URL` / `TASK_FORGEJO_TOKEN`,
+        // falling back to `FORGEJO_TOKEN`). Both are optional: when
+        // unset we build with empty strings so startup never fails on
+        // a missing credential — the forge methods then return an
+        // auth/forge `GitError` the /repos UI renders as an empty
+        // list. `from_token` only errors when called outside a tokio
+        // runtime, which `build_org_state` always is.
+        let forgejo_base = std::env::var("TASK_FORGEJO_BASE_URL").unwrap_or_default();
+        let forgejo_token = std::env::var("TASK_FORGEJO_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty())
+            .or_else(|| std::env::var("FORGEJO_TOKEN").ok())
+            .unwrap_or_default();
+        let forge = git_forgejo::Backend::from_token(forgejo_base, forgejo_token)
+            .map_err(|e| eyre::eyre!("forge backend: {e}"))?;
+
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
         // failures here shouldn't block startup.
@@ -651,6 +676,7 @@ pub(crate) async fn build_org_state(
             finance_backend,
             ledger_backend,
             email,
+            forge,
         })
     }
 }
@@ -1117,10 +1143,28 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     // Email — `EmailSync` (accounts / folders / envelopes /
     // fetch / send / flag / subscribe), served by the per-org
     // Maildir backend.
-    router.with(
-        email_proto::descriptor(),
-        email_proto::serve(org.email.clone()),
-    )
+    // Forge — RepoCatalog + IssueTracker + ReviewSurface, all
+    // served by the org's single Forgejo `Backend`. The /repos UI
+    // binds RepoCatalog (list repos) + IssueTracker (list issues
+    // per repo); ReviewSurface rounds out the surface so PR views
+    // can bind without another mount pass.
+    router
+        .with(
+            email_proto::descriptor(),
+            email_proto::serve(org.email.clone()),
+        )
+        .with(
+            git_proto::repo::repo_catalog_rpc_service_descriptor(),
+            git_proto::repo::serve(org.forge.clone()),
+        )
+        .with(
+            git_proto::issues::issue_tracker_rpc_service_descriptor(),
+            git_proto::issues::serve(org.forge.clone()),
+        )
+        .with(
+            git_proto::reviews::review_surface_rpc_service_descriptor(),
+            git_proto::reviews::serve(org.forge.clone()),
+        )
 }
 
 fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Response {

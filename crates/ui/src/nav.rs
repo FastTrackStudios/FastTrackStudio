@@ -6,8 +6,8 @@
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     BookOpen, Bot, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
-    FolderKanban, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package, ReceiptText, Scale,
-    Settings as SettingsIcon, Target, Timer, Utensils, Wallet,
+    FolderKanban, GitBranch, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package,
+    ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Utensils, Wallet,
 };
 
 use crate::routes::Route;
@@ -76,6 +76,9 @@ fn icon_ledger() -> Element {
 }
 fn icon_agents() -> Element {
     rsx! { Bot { size: 16 } }
+}
+fn icon_repos() -> Element {
+    rsx! { GitBranch { size: 16 } }
 }
 fn icon_wiki() -> Element {
     rsx! { BookOpen { size: 16 } }
@@ -195,6 +198,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             route: Route::AgentsRoute {},
         },
         NavTab {
+            label: "Repos",
+            icon: icon_repos,
+            route: Route::ReposRoute {},
+        },
+        NavTab {
             label: "Settings",
             icon: icon_settings,
             route: Route::SettingsRoute {},
@@ -260,6 +268,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::LedgerRoute {} => "Ledger",
         Route::WikiRoute {} => "Wiki",
         Route::AgentsRoute {} => "Agents",
+        Route::ReposRoute {} => "Repos",
         Route::SettingsRoute {} => "Settings",
     }
 }
