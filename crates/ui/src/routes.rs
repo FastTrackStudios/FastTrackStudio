@@ -21,6 +21,9 @@ pub enum Route {
         #[route("/inbox")]
         InboxRoute {},
 
+        #[route("/email")]
+        EmailRoute {},
+
         #[route("/projects")]
         ProjectsRoute {},
 
@@ -90,6 +93,11 @@ fn HomeRoute() -> Element {
 #[component]
 fn InboxRoute() -> Element {
     rsx! { pages::inbox::InboxView {} }
+}
+
+#[component]
+fn EmailRoute() -> Element {
+    rsx! { pages::email::EmailView {} }
 }
 
 #[component]

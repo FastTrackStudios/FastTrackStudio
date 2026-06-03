@@ -6,7 +6,7 @@
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     BookOpen, Bot, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
-    FolderKanban, House, Inbox as InboxIcon, MapPin, Notebook, Package, ReceiptText, Scale,
+    FolderKanban, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package, ReceiptText, Scale,
     Settings as SettingsIcon, Target, Timer, Utensils, Wallet,
 };
 
@@ -25,6 +25,9 @@ fn icon_house() -> Element {
 }
 fn icon_inbox() -> Element {
     rsx! { InboxIcon { size: 16 } }
+}
+fn icon_email() -> Element {
+    rsx! { Mail { size: 16 } }
 }
 fn icon_projects() -> Element {
     rsx! { FolderKanban { size: 16 } }
@@ -95,6 +98,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Inbox",
             icon: icon_inbox,
             route: Route::InboxRoute {},
+        },
+        NavTab {
+            label: "Email",
+            icon: icon_email,
+            route: Route::EmailRoute {},
         },
         NavTab {
             label: "Projects",
@@ -232,6 +240,7 @@ pub fn route_title(route: &Route) -> &'static str {
     match route {
         Route::HomeRoute {} => "Home",
         Route::InboxRoute {} => "Inbox",
+        Route::EmailRoute {} => "Email",
         Route::ProjectsRoute {} => "Projects",
         Route::ProjectDetailRoute { .. } => "Project",
         Route::GoalsRoute {} => "Goals",

@@ -1557,3 +1557,57 @@ pub async fn fetch_agent_sessions(
 ) -> Result<Vec<(String, agent_proto::session::Session)>, String> {
     Err("native client not wired yet".to_owned())
 }
+
+// ── Email ───────────────────────────────────────────────────────────
+
+/// Every mail account the org's `EmailSync` backend serves. An org
+/// with no configured mailbox returns an empty list (operational but
+/// unconfigured) — the `/email` page renders that as an empty state
+/// rather than an error.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_email_accounts(slug: &str) -> Result<Vec<email_proto::Account>, String> {
+    let client = crate::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+    client
+        .accounts()
+        .await
+        .map_err(|e| format!("{slug}: list accounts: {e:?}"))
+}
+
+/// Recent envelopes (header summaries) for one account's `INBOX`,
+/// newest first. `count` caps the slice. Returns an empty list for an
+/// empty mailbox; surfaces backend errors verbatim so the page can show
+/// them inline.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_email_envelopes(
+    slug: &str,
+    account: &str,
+    count: u32,
+) -> Result<Vec<email_proto::Envelope>, String> {
+    let client = crate::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+    let mut envelopes = client
+        .fetch_envelopes(
+            account.to_owned(),
+            "INBOX".to_owned(),
+            email_proto::SeqRange::Recent(count),
+        )
+        .await
+        .map_err(|e| format!("{slug}: fetch envelopes: {e:?}"))?;
+    // Newest first — the backend's `Recent` ordering isn't guaranteed
+    // across implementations, so sort defensively on the date.
+    envelopes.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
+    Ok(envelopes)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_email_accounts(_slug: &str) -> Result<Vec<email_proto::Account>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_email_envelopes(
+    _slug: &str,
+    _account: &str,
+    _count: u32,
+) -> Result<Vec<email_proto::Envelope>, String> {
+    Err("native client not wired yet".to_owned())
+}

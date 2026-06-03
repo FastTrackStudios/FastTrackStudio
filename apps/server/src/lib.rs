@@ -137,6 +137,14 @@ pub struct OrgAppState {
     /// account history). The invoicing flow posts into it on
     /// mark-sent + payment.
     pub ledger_backend: finance::LedgerService,
+    /// Email backend — a Maildir-backed `email_proto::EmailSync`
+    /// impl rooted at `<org>/vault/Mail/`. Serves whatever
+    /// accounts that tree contains (one per top-level mailbox
+    /// dir); an org with no mail yet serves an empty account
+    /// list, which the `/email` UI renders gracefully. Mounted
+    /// for the `EmailSync` RPC surface (accounts / folders /
+    /// envelopes).
+    pub email: email_maildir::Backend,
 }
 
 /// Top-level server state. Scans `<data_root>/orgs/` at
@@ -530,6 +538,19 @@ pub(crate) async fn build_org_state(
         )
         .map_err(|e| eyre::eyre!("finance backend: {e}"))?;
 
+        // Email backend — Maildir-backed `EmailSync`. The mail
+        // root lives at `<org>/vault/Mail/` (override via
+        // `TASK_SERVER_MAIL_ROOT`); each top-level subdir there
+        // is one account (its dir name is the account id). No
+        // IMAP creds are wired in this slice, so an org with no
+        // `Mail/` tree just serves an empty account list — the
+        // `/email` UI tolerates that. Each discovered account
+        // maps to a Maildir++ root; `Backend::with_accounts`
+        // creates the `cur/new/tmp` dirs on demand.
+        let mail_root = std::env::var("TASK_SERVER_MAIL_ROOT")
+            .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
+        let email = email_maildir::Backend::with_accounts(discover_mail_accounts(&mail_root));
+
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
         // failures here shouldn't block startup.
@@ -629,8 +650,44 @@ pub(crate) async fn build_org_state(
             finance_conn,
             finance_backend,
             ledger_backend,
+            email,
         })
     }
+}
+
+/// Discover Maildir accounts under `mail_root`. Each immediate
+/// subdirectory is one account: its dir name is the account id +
+/// display name, and the address defaults to the same (the
+/// IMAP/JMAP config that would carry a real address isn't wired
+/// in this slice). Returns the `(Account, root, aliases)` tuples
+/// `email_maildir::Backend::with_accounts` consumes. An absent
+/// or empty `mail_root` yields an empty vec — the backend then
+/// serves no accounts, which is a valid "operational but
+/// unconfigured" state.
+fn discover_mail_accounts(
+    mail_root: &std::path::Path,
+) -> Vec<(email_proto::Account, PathBuf, email_config::FolderAliases)> {
+    let Ok(entries) = std::fs::read_dir(mail_root) else {
+        return Vec::new();
+    };
+    let mut accounts = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let account = email_proto::Account {
+            id: email_proto::AccountId(name.to_owned()),
+            name: name.to_owned(),
+            address: name.to_owned(),
+            display_name: None,
+        };
+        accounts.push((account, path, email_config::FolderAliases::new()));
+    }
+    accounts
 }
 
 /// Dev default — replace via config in a later phase. Length-checked
@@ -1039,7 +1096,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         );
 
     // Fitness suite — body / exercises / workouts / intake.
-    router
+    router = router
         .with(
             body::body_service_descriptor(),
             body::serve_body_service(org.body.clone()),
@@ -1055,7 +1112,15 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             intake::intake_service_descriptor(),
             intake::serve_intake_service(org.intake.clone()),
-        )
+        );
+
+    // Email — `EmailSync` (accounts / folders / envelopes /
+    // fetch / send / flag / subscribe), served by the per-org
+    // Maildir backend.
+    router.with(
+        email_proto::descriptor(),
+        email_proto::serve(org.email.clone()),
+    )
 }
 
 fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Response {

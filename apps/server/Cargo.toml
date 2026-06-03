@@ -89,6 +89,15 @@ store-proto = { workspace = true }
 finance-proto = { workspace = true, features = ["server"] }
 finance-db = { workspace = true }
 finance = { workspace = true }
+# Email: the canonical `EmailSync` wire trait + a Maildir-backed
+# backend impl. Mounted per-org so the app can list synced
+# accounts + envelopes. The Maildir root lives under the org's
+# vault (`Mail/`); an unconfigured org just serves an empty
+# account set.
+email-proto = { workspace = true, features = ["vox"] }
+email-maildir = { workspace = true }
+# `FolderAliases` for the per-account Maildir registration.
+email-config = { workspace = true }
 vox = { workspace = true }
 chrono.workspace = true
 architect = { workspace = true, features = ["server-axum", "dispatch-tokio", "local"] }

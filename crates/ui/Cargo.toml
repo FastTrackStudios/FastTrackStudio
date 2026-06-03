@@ -74,6 +74,10 @@ agent-proto = { workspace = true, features = ["vox"] }
 # auto-emitted `VaultSyncClient`. `vox` feature only (no
 # `server`/`full`), so it stays wasm-clean like the others.
 vault-proto = { workspace = true, features = ["vox"] }
+# Email wire surface — the `EmailSync` client for the `/email`
+# page (account list + recent envelopes). `vox` feature only, so
+# it stays wasm-clean like the other proto clients above.
+email-proto = { workspace = true, features = ["vox"] }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
