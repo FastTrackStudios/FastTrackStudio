@@ -419,6 +419,13 @@ fn push_or_merge(list: &mut ShoppingList, entry: ShoppingEntry) {
     list.entries.push(entry);
 }
 
+impl architect::HasDispatcher for Store {
+    type Dispatcher = architect::dispatch::TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        architect::dispatch::TokioBlockingDispatcher
+    }
+}
+
 impl ShoppingService for Store {
     fn list(&self) -> Result<Vec<ShoppingList>, ShoppingError> {
         let guard = self.inner.lock().expect("shopping store poisoned");

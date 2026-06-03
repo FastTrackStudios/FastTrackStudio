@@ -102,6 +102,10 @@ pub struct OrgAppState {
     pub cookbook: cookbook::Store,
     /// Mealplan — scheduled meals + their fulfillment math.
     pub mealplan: mealplan::Store,
+    /// Shopping-list service — generated/curated shopping lists.
+    pub shopping: mealplan::shopping::Store,
+    /// Substitution-rule service — ingredient alternatives.
+    pub substitutions: mealplan::substitutions::Store,
     /// Pantry — stocked ingredients + barcode lookup.
     pub pantry: pantry::Store,
     /// Body metrics — weight / body-fat / measurements log.
@@ -630,6 +634,14 @@ pub(crate) async fn build_org_state(
         let mealplan_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open mealplan vault: {e}"))?;
         let mealplan = mealplan::Store::new(mealplan_vault);
+        // Shopping list + substitution-rule services — sibling
+        // mealplan stores, each its own vault snapshot.
+        let shopping_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open shopping vault: {e}"))?;
+        let shopping = mealplan::shopping::Store::new(shopping_vault);
+        let substitutions_vault = vault::Vault::open(&vault_root)
+            .map_err(|e| eyre::eyre!("open substitutions vault: {e}"))?;
+        let substitutions = mealplan::substitutions::Store::new(substitutions_vault);
         let pantry_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open pantry vault: {e}"))?;
         let pantry = pantry::Store::new(pantry_vault);
@@ -661,6 +673,8 @@ pub(crate) async fn build_org_state(
             inventory,
             cookbook,
             mealplan,
+            shopping,
+            substitutions,
             pantry,
             body,
             exercises,
@@ -984,6 +998,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
             agent_proto::service::turn_dispatch::serve(org.agent_codex.clone()),
         )
+        // Agent threads — conversation threading within a session.
+        // Served by the same Codex backend (impls Threads).
+        .with(
+            agent_proto::service::threads::threads_rpc_service_descriptor(),
+            agent_proto::service::threads::serve(org.agent_codex.clone()),
+        )
         // Timer — billable time tracking.
         .with(
             timer_proto::service::timer_service_rpc_service_descriptor(),
@@ -1119,6 +1139,14 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             pantry::pantry_service_descriptor(),
             pantry::serve_pantry_service(org.pantry.clone()),
+        )
+        .with(
+            mealplan::shopping::shopping_service_rpc_service_descriptor(),
+            mealplan::shopping::serve(org.shopping.clone()),
+        )
+        .with(
+            mealplan::substitutions::substitution_service_rpc_service_descriptor(),
+            mealplan::substitutions::serve(org.substitutions.clone()),
         );
 
     // Fitness suite — body / exercises / workouts / intake.
