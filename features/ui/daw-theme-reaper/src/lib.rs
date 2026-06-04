@@ -23,6 +23,10 @@ pub use images::{ImageCatalog, Slice3};
 pub use palette::{Palette, Rgba};
 pub use rtconfig::{RtConfig, ThemeParamDef};
 
+/// Re-export of the image crate (consumers compose slices without adding the
+/// dependency themselves).
+pub use image;
+
 use std::path::{Path, PathBuf};
 
 /// Importer errors.

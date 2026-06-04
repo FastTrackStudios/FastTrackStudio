@@ -17,7 +17,7 @@ pub mod theme;
 pub mod walter;
 
 pub use context::{ControlConfig, ThemeContext, ThemeProvider, use_theme};
-pub use mcp::{ButtonSkin, McpColors, McpLayout, McpSkin, McpTheme, SkinImage};
+pub use mcp::{ButtonSkin, ButtonStateSkin, McpColors, McpLayout, McpSkin, McpTheme, SkinImage};
 pub use style::{ControlState, ControlVariant, KnobStyle, SliderStyle, StyleSheet, XYPadStyle};
 pub use svg_texture::SvgTexture;
 pub use theme::{

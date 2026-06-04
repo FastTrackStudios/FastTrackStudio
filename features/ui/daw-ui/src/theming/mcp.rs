@@ -196,11 +196,20 @@ pub struct SkinImage {
     pub h: u32,
 }
 
-/// A two-state (off/on) image-skinned button.
+/// The three interaction states of one 3-slice button image.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ButtonStateSkin {
+    pub normal: SkinImage,
+    pub hover: SkinImage,
+    pub pressed: SkinImage,
+}
+
+/// A two-state (off/on) image-skinned button, each with its 3-slice
+/// interaction states.
 #[derive(Clone, PartialEq, Debug)]
 pub struct ButtonSkin {
-    pub off: SkinImage,
-    pub on: SkinImage,
+    pub off: ButtonStateSkin,
+    pub on: ButtonStateSkin,
 }
 
 /// The optional image skin for the MCP strip — REAPER's atlas vocabulary
@@ -208,18 +217,27 @@ pub struct ButtonSkin {
 /// chain). Elements without an entry render vector styles.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct McpSkin {
-    /// `*_mute_off/on` (normal state of the 3-slice).
+    /// `*_mute_off/on`.
     pub mute: Option<ButtonSkin>,
     /// `*_solo_off/on`.
     pub solo: Option<ButtonSkin>,
     /// `*_recarm_off/on`.
     pub recarm: Option<ButtonSkin>,
-    /// `mcp_io` / `track_io` (normal state).
-    pub io: Option<SkinImage>,
+    /// `mcp_io` / `track_io`.
+    pub io: Option<ButtonStateSkin>,
     /// `mcp_volbg` — the fader well.
     pub volbg: Option<SkinImage>,
     /// `mcp_volthumb` — the fader cap.
     pub volthumb: Option<SkinImage>,
+    /// `mcp_panbg` — the pan slider groove (REAPER's MCP pan is horizontal:
+    /// `mcp.pan.fadermode` = 1 in the default theme's WALTER).
+    pub panbg: Option<SkinImage>,
+    /// `mcp_panthumb` — the pan slider cap.
+    pub panthumb: Option<SkinImage>,
+    /// `meter_strip_v` — the lit meter column (stretched over the fill).
+    pub meter_strip: Option<SkinImage>,
+    /// `meter_bg_v` — the meter well.
+    pub meter_bg: Option<SkinImage>,
 }
 
 /// The MCP theme context: named layouts + colour overrides + author params.

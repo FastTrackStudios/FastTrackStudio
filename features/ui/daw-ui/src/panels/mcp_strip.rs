@@ -98,21 +98,34 @@ pub fn McpStrip(
                 }
             }
 
-            // mcp.pan
+            // mcp.pan — horizontal slider per `mcp.pan.fadermode` (REAPER's
+            // MCP default), knob otherwise.
             if !l.pan.is_hidden() && show_pan {
-                div {
-                    style: format!(
-                        "{pos} display:flex; align-items:center; justify-content:center;",
-                        pos = l.pan.css_position(nat),
-                    ),
-                    Knob {
+                if l.pan_fadermode == FaderMode::Horizontal {
+                    McpFader {
+                        pos: l.pan.css_position(nat),
                         value: track.pan,
-                        min: 0.0,
-                        max: 1.0,
-                        default: 0.5,
-                        variant: KnobVariant::ArcBipolar,
-                        size: l.pan.w.min(l.pan.h) as u32,
+                        mode: FaderMode::Horizontal,
+                        accent: mcp.colors.pan.unwrap_or(accent),
+                        skin_bg: skin.panbg.clone(),
+                        skin_thumb: skin.panthumb.clone(),
                         disabled,
+                    }
+                } else {
+                    div {
+                        style: format!(
+                            "{pos} display:flex; align-items:center; justify-content:center;",
+                            pos = l.pan.css_position(nat),
+                        ),
+                        Knob {
+                            value: track.pan,
+                            min: 0.0,
+                            max: 1.0,
+                            default: 0.5,
+                            variant: KnobVariant::ArcBipolar,
+                            size: l.pan.w.min(l.pan.h) as u32,
+                            disabled,
+                        }
                     }
                 }
             }
@@ -148,6 +161,8 @@ pub fn McpStrip(
                     level: (track.level)(),
                     level_right: track.stereo.then(|| (track.level_right)()),
                     peak: (track.peak)(),
+                    skin_strip: skin.meter_strip.clone(),
+                    skin_bg: skin.meter_bg.clone(),
                 }
             }
 
@@ -180,7 +195,7 @@ pub fn McpStrip(
                              background-size:contain; background-repeat:no-repeat; \
                              background-position:center;",
                             pos = l.io.css_position(nat),
-                            url = io.url,
+                            url = io.normal.url,
                         ),
                     }
                 } else {
@@ -272,9 +287,19 @@ fn McpToggle(
     };
     let on = active();
     let cursor = if disabled { "not-allowed" } else { "pointer" };
+    // Hook order: created unconditionally (hooks can't live in branches).
+    let mut hovered = use_signal(|| false);
+    let mut pressed = use_signal(|| false);
 
     if let Some(skin) = skin {
-        let img = if on { &skin.on } else { &skin.off };
+        let states = if on { &skin.on } else { &skin.off };
+        let img = if pressed() {
+            &states.pressed
+        } else if hovered() {
+            &states.hover
+        } else {
+            &states.normal
+        };
         // div, not button: blitz's UA button background paints over
         // background-image.
         return rsx! {
@@ -285,6 +310,10 @@ fn McpToggle(
                      background-size:100% 100%; background-repeat:no-repeat;",
                     url = img.url,
                 ),
+                onmouseenter: move |_| hovered.set(true),
+                onmouseleave: move |_| { hovered.set(false); pressed.set(false); },
+                onmousedown: move |_| pressed.set(true),
+                onmouseup: move |_| pressed.set(false),
                 onclick: move |_| {
                     if disabled { return; }
                     let next = !active();
@@ -398,10 +427,10 @@ fn McpFader(
             "position:absolute; top:calc(50% - {hh}px); width:{w}px; height:{h}px; \
              left:calc({fill_pct}% - {hw}px); pointer-events:none; \
              background-image:url({url}); background-size:100% 100%;",
-            w = thumb.h,
-            h = thumb.w,
-            hw = thumb.h as f32 / 2.0,
-            hh = thumb.w as f32 / 2.0,
+            w = thumb.w,
+            h = thumb.h,
+            hw = thumb.w as f32 / 2.0,
+            hh = thumb.h as f32 / 2.0,
             url = thumb.url,
         ),
         (None, FaderMode::Vertical) => format!(
@@ -497,20 +526,33 @@ fn McpFader(
     }
 }
 
-/// The level meter. Fill colour: `mcp.meter.scale.color.lit.*` gradient when
-/// the theme pins it, else the token zone colours; well from `…unlit.*` or the
-/// meter style.
+/// The level meter. Fill: the theme's `meter_strip_v` image when skinned,
+/// else the `mcp.meter.scale.color.lit.*` gradient, else token zone colours;
+/// well from `meter_bg_v` / `…unlit.*` / the meter style.
 #[component]
-fn McpMeter(pos: String, level: f32, level_right: Option<f32>, peak: f32) -> Element {
+fn McpMeter(
+    pos: String,
+    level: f32,
+    level_right: Option<f32>,
+    peak: f32,
+    #[props(default)] skin_strip: Option<crate::theming::SkinImage>,
+    #[props(default)] skin_bg: Option<crate::theming::SkinImage>,
+) -> Element {
     let theme = use_theme().theme;
     let m = theme.meter();
     let c = theme.mcp.colors;
 
-    let well = match (c.meter_unlit_top, c.meter_unlit_bottom) {
-        (Some(top), Some(bottom)) => {
-            format!("linear-gradient(180deg,{},{})", top.css(), bottom.css())
-        }
-        _ => m.well.css(),
+    let well = match (&skin_bg, c.meter_unlit_top, c.meter_unlit_bottom) {
+        (Some(bg), _, _) => format!(
+            "background-image:url({}); background-size:100% 100%;",
+            bg.url
+        ),
+        (None, Some(top), Some(bottom)) => format!(
+            "background:linear-gradient(180deg,{},{});",
+            top.css(),
+            bottom.css()
+        ),
+        _ => format!("background:{};", m.well.css()),
     };
 
     // One meter column. Zero/non-finite renders nothing (vello NaN guard).
@@ -520,8 +562,12 @@ fn McpMeter(pos: String, level: f32, level_right: Option<f32>, peak: f32) -> Ele
         } else {
             0.0
         };
-        let fill = match (c.meter_lit_top, c.meter_lit_bottom) {
-            (Some(top), Some(bottom)) => format!(
+        let fill = match (&skin_strip, c.meter_lit_top, c.meter_lit_bottom) {
+            (Some(strip), _, _) => format!(
+                "background-image:url({}); background-size:100% 100%;",
+                strip.url
+            ),
+            (None, Some(top), Some(bottom)) => format!(
                 "background:linear-gradient(180deg,{},{});",
                 top.css(),
                 bottom.css()
@@ -550,7 +596,7 @@ fn McpMeter(pos: String, level: f32, level_right: Option<f32>, peak: f32) -> Ele
     rsx! {
         div {
             style: format!(
-                "{pos} background:{well}; border-radius:3px; overflow:hidden; \
+                "{pos} {well} border-radius:3px; overflow:hidden; \
                  border:1px solid {border};",
                 border = m.border.css(),
             ),

@@ -18,7 +18,7 @@
 use daw_theme_reaper::{ImageCatalog, Rgba};
 pub use daw_theme_reaper::{ReaperTheme, ThemeError};
 
-use super::mcp::{ButtonSkin, McpSkin, SkinImage};
+use super::mcp::{ButtonSkin, ButtonStateSkin, McpSkin, SkinImage};
 use super::theme::{Color, Theme};
 use super::walter::ThemeParam;
 
@@ -86,6 +86,18 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
     // ── image skin ──
     mcp.skin = extract_skin(rt);
 
+    // REAPER's MCP pan is a horizontal slider (`mcp.pan.fadermode` resolves
+    // to 1 in the default theme's WALTER, knob only for dual-pan). When the
+    // theme ships pan slider art, switch visible pan elements over.
+    if mcp.skin.as_ref().is_some_and(|s| s.panbg.is_some()) {
+        for layout in &mut mcp.layouts {
+            if !layout.pan.is_hidden() {
+                layout.pan = super::walter::Coord::new(6.0, 9.0, 52.0, 19.0, 0.0, 0.0, 1.0, 0.0);
+                layout.pan_fadermode = super::walter::FaderMode::Horizontal;
+            }
+        }
+    }
+
     // ── define_parameter knobs ──
     // Imported knobs are appended after the FTS ones; same-name knobs from
     // the theme replace ours.
@@ -124,20 +136,30 @@ fn extract_skin(rt: &ReaperTheme) -> Option<McpSkin> {
             .find(|n| imgs.has(n))
     };
 
-    // Normal (unhovered) state of a 3-slice button, with the `*_ol` overlay
-    // composited on top — `use_overlays 1` themes (incl. the default) keep
-    // the base states transparent and ship the visible art in the overlay.
-    let button = |base: &str| -> Option<SkinImage> {
+    // All three interaction states of a 3-slice button, with the `*_ol`
+    // overlay composited per state — `use_overlays 1` themes (incl. the
+    // default) keep the base states transparent and ship the visible art in
+    // the overlay.
+    let button = |base: &str| -> Option<ButtonStateSkin> {
         let name = find(base)?;
         let s = imgs.button3(&name).ok()?;
-        let img = match imgs.button3(&format!("{name}_ol")) {
-            Ok(ol) => daw_theme_reaper::images::alpha_over(&s.normal, &ol.normal),
-            Err(_) => s.normal,
+        let ol = imgs.button3(&format!("{name}_ol")).ok();
+        let state = |b: &daw_theme_reaper::image::RgbaImage,
+                     o: Option<&daw_theme_reaper::image::RgbaImage>| {
+            let img = match o {
+                Some(o) => daw_theme_reaper::images::alpha_over(b, o),
+                None => b.clone(),
+            };
+            SkinImage {
+                url: ImageCatalog::data_uri(&img),
+                w: img.width(),
+                h: img.height(),
+            }
         };
-        Some(SkinImage {
-            url: ImageCatalog::data_uri(&img),
-            w: img.width(),
-            h: img.height(),
+        Some(ButtonStateSkin {
+            normal: state(&s.normal, ol.as_ref().map(|o| &o.normal)),
+            hover: state(&s.hover, ol.as_ref().map(|o| &o.hover)),
+            pressed: state(&s.pressed, ol.as_ref().map(|o| &o.pressed)),
         })
     };
     let toggle = |base_off: &str, base_on: &str| -> Option<ButtonSkin> {
@@ -163,6 +185,10 @@ fn extract_skin(rt: &ReaperTheme) -> Option<McpSkin> {
         io: button("io"),
         volbg: plain("mcp_volbg"),
         volthumb: plain("mcp_volthumb"),
+        panbg: plain("mcp_panbg"),
+        panthumb: plain("mcp_panthumb"),
+        meter_strip: plain("meter_strip_v"),
+        meter_bg: plain("meter_bg_v"),
     };
 
     // No images at all → stay vector.
@@ -216,14 +242,22 @@ mod tests {
         // bg/thumb from mcp_volbg/mcp_volthumb — all as data URIs.
         let skin = theme.mcp.skin.as_ref().expect("anti-theme yields a skin");
         let mute = skin.mute.as_ref().expect("mute skin");
-        assert!(mute.off.url.starts_with("data:image/png;base64,"));
+        assert!(mute.off.normal.url.starts_with("data:image/png;base64,"));
         // 20 wide from the base 3-slice; height includes the _ol overlay's
         // shadow rows (the visible art — the base off-state is transparent).
-        assert_eq!(mute.off.w, 20);
-        assert!(mute.off.h >= 20);
+        assert_eq!(mute.off.normal.w, 20);
+        assert!(mute.off.normal.h >= 20);
+        assert!(mute.off.hover.w > 0 && mute.off.pressed.w > 0);
         assert!(skin.solo.is_some());
         assert!(skin.io.is_some());
         let thumb = skin.volthumb.as_ref().expect("volthumb");
         assert_eq!((thumb.w, thumb.h), (23, 53));
+
+        // Pan slider art + meter strips extracted; pan switched horizontal.
+        assert!(skin.panbg.is_some() && skin.panthumb.is_some());
+        assert!(skin.meter_strip.is_some() && skin.meter_bg.is_some());
+        use crate::theming::FaderMode;
+        let vertical = theme.mcp.layout(Some("vertical"));
+        assert_eq!(vertical.pan_fadermode, FaderMode::Horizontal);
     }
 }
