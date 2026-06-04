@@ -43,12 +43,15 @@ pub struct Sliced {
     pub markers: Markers,
 }
 
-/// A 3-slice button: normal / mouseover / pressed.
+/// A 3-slice button: normal / mouseover / pressed, plus the pink-line
+/// stretch margins (shared by all three states — the marker corners sit at
+/// the normal state's top-left and the pressed state's bottom-right).
 #[derive(Clone, Debug)]
 pub struct Slice3 {
     pub normal: RgbaImage,
     pub hover: RgbaImage,
     pub pressed: RgbaImage,
+    pub markers: Markers,
 }
 
 /// A knob filmstrip: `frames` square-ish frames stacked along the long axis.
@@ -170,6 +173,7 @@ impl ImageCatalog {
             normal: crop(0),
             hover: crop(1),
             pressed: crop(2),
+            markers: sliced.markers,
         })
     }
 

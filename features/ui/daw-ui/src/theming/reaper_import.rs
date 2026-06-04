@@ -493,10 +493,41 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
             .find(|n| imgs.has(n))
     };
 
+    // Build a SkinImage, pre-slicing vertical stretch bands when the art
+    // carries pink fixed margins (the "Pink Line Crush" technique: fixed
+    // caps render 1:1, only the middle band stretches/crushes).
+    let skin_image = |img: &daw_theme_reaper::image::RgbaImage,
+                      fixed_top: u32,
+                      fixed_bottom: u32| {
+        use daw_theme_reaper::image::GenericImageView;
+        let (w, h) = img.dimensions();
+        let plain_img = |i: daw_theme_reaper::image::RgbaImage| SkinImage {
+            url: ImageCatalog::data_uri(&i),
+            w: i.width(),
+            h: i.height(),
+            vbands: None,
+        };
+        let vbands = (fixed_top + fixed_bottom > 0 && fixed_top + fixed_bottom < h).then(|| {
+            let band = |y: u32, bh: u32| plain_img(img.view(0, y, w, bh).to_image());
+            Box::new(super::mcp::VBands {
+                top: band(0, fixed_top.max(1)),
+                mid: band(fixed_top, h - fixed_top - fixed_bottom),
+                bottom: band(h - fixed_bottom.max(1), fixed_bottom.max(1)),
+            })
+        });
+        SkinImage {
+            url: ImageCatalog::data_uri(img),
+            w,
+            h,
+            vbands,
+        }
+    };
+
     // All three interaction states of a 3-slice button, with the `*_ol`
     // overlay composited per state — `use_overlays 1` themes (incl. the
     // default) keep the base states transparent and ship the visible art in
-    // the overlay.
+    // the overlay. Stretch margins come from the *parent* image (the guide:
+    // overlays belong to a parent).
     let button = |base: &str| -> Option<ButtonStateSkin> {
         let name = find(base)?;
         let s = imgs.button3(&name).ok()?;
@@ -507,11 +538,7 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
                 Some(o) => daw_theme_reaper::images::alpha_over(b, o),
                 None => b.clone(),
             };
-            SkinImage {
-                url: ImageCatalog::data_uri(&img),
-                w: img.width(),
-                h: img.height(),
-            }
+            skin_image(&img, s.markers.fixed_top, s.markers.fixed_bottom)
         };
         Some(ButtonStateSkin {
             normal: state(&s.normal, ol.as_ref().map(|o| &o.normal)),
@@ -525,14 +552,14 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
             on: button(base_on)?,
         })
     };
-    // A plain (marker-stripped) image.
+    // A plain (marker-stripped) image, banded when pink-marked.
     let plain = |name: &str| -> Option<SkinImage> {
         let s = imgs.load(name).ok()?;
-        Some(SkinImage {
-            url: ImageCatalog::data_uri(&s.image),
-            w: s.image.width(),
-            h: s.image.height(),
-        })
+        Some(skin_image(
+            &s.image,
+            s.markers.fixed_top,
+            s.markers.fixed_bottom,
+        ))
     };
     // A knob filmstrip along the fallback chain (`mcp_X` → `tcp_X` → `gen_X`
     // — knob stacks commonly ship as `tcp_*` and are shared).

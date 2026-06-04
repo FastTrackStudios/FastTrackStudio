@@ -250,6 +250,21 @@ pub struct SkinImage {
     pub url: String,
     pub w: u32,
     pub h: u32,
+    /// Vertical stretch bands from the art's pink marker lines (the "Pink
+    /// Line Crush" technique): fixed top/bottom render 1:1, only the middle
+    /// band absorbs box-height differences. `None` = uniform stretch.
+    pub vbands: Option<Box<VBands>>,
+}
+
+/// Pre-sliced vertical bands of a pink-marked image.
+#[derive(Clone, PartialEq, Debug)]
+pub struct VBands {
+    /// Fixed top cap (native height `top.h`).
+    pub top: SkinImage,
+    /// The stretchable middle band.
+    pub mid: SkinImage,
+    /// Fixed bottom cap (native height `bottom.h`).
+    pub bottom: SkinImage,
 }
 
 /// The three interaction states of one 3-slice button image.

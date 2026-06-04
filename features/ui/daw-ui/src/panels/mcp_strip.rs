@@ -282,12 +282,10 @@ pub fn McpStrip(
                     div {
                         title: "Routing",
                         style: format!(
-                            "{pos} cursor:pointer; background-image:url({url}); \
-                             background-size:contain; background-repeat:no-repeat; \
-                             background-position:center;",
+                            "{pos} cursor:pointer;",
                             pos = l.io.css_position(nat),
-                            url = io.normal.url,
                         ),
+                        {skin_fill(&io.normal)}
                     }
                 } else {
                     div {
@@ -441,6 +439,55 @@ fn McpKnob(
     }
 }
 
+/// Fill the parent box with a skin image. Pink-banded images render as
+/// three stacked bands — fixed top/bottom caps at native height, the middle
+/// band absorbing the size difference (REAPER's "Pink Line Crush") — instead
+/// of a uniform (squishing) stretch.
+fn skin_fill(img: &crate::theming::SkinImage) -> Element {
+    match &img.vbands {
+        Some(b) => rsx! {
+            div {
+                style: "position:absolute; inset:0; pointer-events:none; overflow:hidden;",
+                div {
+                    style: format!(
+                        "position:absolute; left:0; right:0; top:0; height:{h}px; \
+                         background-image:url({url}); background-size:100% 100%;",
+                        h = b.top.h,
+                        url = b.top.url,
+                    ),
+                }
+                div {
+                    style: format!(
+                        "position:absolute; left:0; right:0; top:{t}px; bottom:{bo}px; \
+                         background-image:url({url}); background-size:100% 100%;",
+                        t = b.top.h,
+                        bo = b.bottom.h,
+                        url = b.mid.url,
+                    ),
+                }
+                div {
+                    style: format!(
+                        "position:absolute; left:0; right:0; bottom:0; height:{h}px; \
+                         background-image:url({url}); background-size:100% 100%;",
+                        h = b.bottom.h,
+                        url = b.bottom.url,
+                    ),
+                }
+            }
+        },
+        None => rsx! {
+            div {
+                style: format!(
+                    "position:absolute; inset:0; pointer-events:none; \
+                     background-image:url({url}); background-size:100% 100%; \
+                     background-repeat:no-repeat;",
+                    url = img.url,
+                ),
+            }
+        },
+    }
+}
+
 /// Map a WALTER margin justification to flex `justify-content`.
 fn flex_justify(m: &crate::theming::Margin) -> &'static str {
     match m.text_align() {
@@ -486,14 +533,11 @@ fn McpToggle(
         };
         // div, not button: blitz's UA button background paints over
         // background-image.
+        let fill = skin_fill(img);
         return rsx! {
             div {
                 title,
-                style: format!(
-                    "{pos} cursor:{cursor}; background-image:url({url}); \
-                     background-size:100% 100%; background-repeat:no-repeat;",
-                    url = img.url,
-                ),
+                style: format!("{pos} cursor:{cursor};"),
                 onmouseenter: move |_| hovered.set(true),
                 onmouseleave: move |_| { hovered.set(false); pressed.set(false); },
                 onmousedown: move |_| pressed.set(true),
@@ -503,6 +547,7 @@ fn McpToggle(
                     let next = !active();
                     active.set(next);
                 },
+                {fill}
             }
         };
     }
@@ -554,14 +599,12 @@ fn McpFlag(
 ) -> Element {
     let tk = use_theme().theme.tokens;
     if let Some(img) = skin {
+        let fill = skin_fill(&img);
         return rsx! {
             div {
                 title,
-                style: format!(
-                    "{pos} background-image:url({url}); background-size:100% 100%; \
-                     background-repeat:no-repeat;",
-                    url = img.url,
-                ),
+                style: format!("{pos}"),
+                {fill}
             }
         };
     }
