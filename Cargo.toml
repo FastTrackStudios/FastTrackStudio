@@ -27,7 +27,7 @@ facet-value = "0.46"
 
 # ROAM service framework — FTS fork (carries the vox-jit-abi __rust_alloc-scan
 # fix; without it the encode worker hangs on complex/allocating RPC returns).
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", branch = "main" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
 # Sibling repos
 daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main", features = ["reaper"] }
