@@ -18,7 +18,7 @@
 use daw_theme_reaper::{ImageCatalog, Rgba};
 pub use daw_theme_reaper::{ReaperTheme, ThemeError};
 
-use super::mcp::{ButtonSkin, ButtonStateSkin, McpSkin, SkinImage};
+use super::mcp::{ButtonSkin, ButtonStateSkin, LayoutEngine, McpSkin, SkinImage};
 use super::theme::{Color, Theme};
 use super::walter::ThemeParam;
 
@@ -119,7 +119,7 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
     if let Some(folder) = &dpi_folder {
         let _ = imgs.overlay_subdir(folder);
     }
-    mcp.skin = extract_skin(&imgs);
+    mcp.skin = extract_skin(&imgs, "mcp");
 
     // REAPER's MCP pan is a horizontal slider (`mcp.pan.fadermode` resolves
     // to 1 in the default theme's WALTER, knob only for dual-pan). When the
@@ -139,11 +139,36 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
     // Run the theme's own rtconfig program per named layout and convert the
     // resolved `mcp.*` geometry into McpLayouts. These take precedence (the
     // first layout is the default); the FTS fallbacks stay reachable by name.
-    let walter_layouts = walter_mcp_layouts(rt, scale, dpi_folder.as_deref());
-    if !walter_layouts.is_empty() {
+    let walter_layouts = walter_strip_layouts(rt, scale, dpi_folder.as_deref(), "mcp");
+    let has_walter_mcp = !walter_layouts.is_empty();
+    if has_walter_mcp {
         let fallbacks = std::mem::take(&mut mcp.layouts);
         mcp.layouts = walter_layouts;
         mcp.layouts.extend(fallbacks);
+    }
+
+    // ── TCP context ── (same vocabulary, laid out as a track-control row)
+    let tcp = &mut theme.tcp;
+    tcp.colors.meter_lit_top = pal("col_vutop");
+    tcp.colors.meter_lit_bottom = pal("col_vubot");
+    if let Some(zl) = rt.rtconfig.global_color("tcp_vol_zeroline") {
+        tcp.colors.volume = Some(color(zl));
+    }
+    tcp.skin = extract_skin(&imgs, "tcp");
+    let tcp_layouts = walter_strip_layouts(rt, scale, dpi_folder.as_deref(), "tcp");
+    let has_walter_tcp = !tcp_layouts.is_empty();
+    if has_walter_tcp {
+        let fallbacks = std::mem::take(&mut tcp.layouts);
+        tcp.layouts = tcp_layouts;
+        tcp.layouts.extend(fallbacks);
+    }
+
+    // ── runtime layout engine ──
+    // Renderers that know their actual px box (TCP rows) re-evaluate the
+    // theme at that size — REAPER's resize model — instead of springing the
+    // baked anchors. Only worth installing when the theme has WALTER layouts.
+    if has_walter_tcp || has_walter_mcp {
+        theme.engine = Some(make_layout_engine(rt, scale, dpi_folder.clone()));
     }
 
     // ── define_parameter knobs ──
@@ -167,18 +192,95 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
     theme
 }
 
+/// Build the runtime [`LayoutEngine`]: re-evaluates the theme's WALTER at an
+/// **exact panel size**, the way REAPER does on every resize. Flow-based
+/// themes (Reapertips' `then`-macro chain) wrap elements to the next row,
+/// shrink label/volume toward minimums and cull what doesn't fit — all
+/// functions of the actual `(w, h)` that a one-shot anchor bake cannot
+/// reproduce. Evaluated at the real size, the anchors collapse to zero and
+/// the geometry is exact; results are memoized per `(ctx, layout, w, h,
+/// armed)`.
+fn make_layout_engine(rt: &ReaperTheme, scale: f32, dpi_folder: Option<String>) -> LayoutEngine {
+    use daw_theme_reaper::walter::{Env, evaluate};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    let src = rt.rtconfig_src.clone();
+    let rtc = rt.rtconfig.clone();
+    // Layout names, probed once (DPI variants resolve per `dpi_folder`).
+    let probe = evaluate(&src, None, &Env::reaper_defaults(100.0, 100.0));
+    let layout_names = probe.layouts;
+
+    type Key = (String, String, u32, u32, bool);
+    let cache: Mutex<HashMap<Key, Option<super::mcp::McpLayout>>> = Mutex::new(HashMap::new());
+
+    LayoutEngine(std::sync::Arc::new(move |ctx, name, w, h, armed| {
+        let key = (ctx.to_string(), name.to_string(), w as u32, h as u32, armed);
+        if let Some(hit) = cache.lock().unwrap().get(&key) {
+            return hit.clone();
+        }
+
+        // Unknown layout name (an FTS fallback layout's) → no WALTER run.
+        if !layout_names.iter().any(|l| l == name) {
+            cache.lock().unwrap().insert(key, None);
+            return None;
+        }
+
+        // `Layout "150%_A" "150"` is layout A at another Scale.
+        let eval_name = match &dpi_folder {
+            Some(folder) => {
+                let v = format!("{folder}%_{name}");
+                if layout_names.iter().any(|l| l == &v) {
+                    v
+                } else {
+                    name.to_string()
+                }
+            }
+            None => name.to_string(),
+        };
+
+        let mut env = Env::reaper_defaults(w, h);
+        env.set("Scale", scale);
+        env.set("trackcolor_valid", 1.0);
+        env.set("trackcolor_r", Color::TRACK.r as f32);
+        env.set("trackcolor_g", Color::TRACK.g as f32);
+        env.set("trackcolor_b", Color::TRACK.b as f32);
+        for p in &rtc.params {
+            env.set(&p.name, p.default);
+        }
+        if armed {
+            env.set("recarm", 1.0);
+        }
+
+        let out = evaluate(&src, Some(&eval_name), &env);
+        // A context the theme doesn't program (no `{ctx}.` attrs) → None.
+        let prefix = format!("{ctx}.");
+        let layout = out.attrs.keys().any(|k| k.starts_with(&prefix)).then(|| {
+            // Same output for all three passes → zero attach scales:
+            // positions are already exact for this size (re-evaluation
+            // replaces springing).
+            layout_from_walter(name, w, h, scale, &out, &out, &out, &rtc, ctx)
+        });
+        cache.lock().unwrap().insert(key, layout.clone());
+        layout
+    }))
+}
+
 /// Evaluate the theme's WALTER program per named layout and convert the
-/// resolved `mcp.*` attributes into [`McpLayout`]s.
+/// resolved `{ctx}.*` attributes into [`McpLayout`]s (`ctx` = `"mcp"` for
+/// mixer strips, `"tcp"` for track-control rows — the same vocabulary).
 ///
 /// The 8-value anchor model is recovered by **finite differences**: WALTER
 /// output is piecewise-linear in the panel size within a form, so evaluating
 /// at the natural size and at `+Δw`/`+Δh` yields each element's edge-attach
-/// scales exactly. Natural width comes from the theme's own `mcpWidth`
-/// (two-pass: probe, then evaluate at that width).
-fn walter_mcp_layouts(
+/// scales exactly. Natural size comes from `{ctx}.size` (two-pass: probe,
+/// then evaluate at that size); the Anti-Theme's `mcpWidth` variable is the
+/// MCP fallback.
+fn walter_strip_layouts(
     rt: &ReaperTheme,
     scale: f32,
     dpi_folder: Option<&str>,
+    ctx: &str,
 ) -> Vec<super::mcp::McpLayout> {
     use daw_theme_reaper::walter::{Env, Output, evaluate};
 
@@ -198,7 +300,8 @@ fn walter_mcp_layouts(
         env
     };
 
-    let h0 = 600.0 * scale;
+    // Probe panel height: a mixer strip is tall, a track row is short.
+    let h0 = if ctx == "tcp" { 100.0 } else { 600.0 } * scale;
     const DW: f32 = 16.0;
     const DH: f32 = 32.0;
     let (h0, dw, dh) = (h0, DW, DH);
@@ -232,23 +335,25 @@ fn walter_mcp_layouts(
     let mut layouts = Vec::new();
     for name in names {
         let eval_name = variant_of(&name);
-        // Pass 1: the layout's natural size. `mcp.size` ([default w,
+        // Pass 1: the layout's natural size. `{ctx}.size` ([default w,
         // default h, min w, min h]) is REAPER's mechanism and holds across
         // themes (Anti/Reapertips/Neptune/Imperial); the Anti-Theme's
-        // `mcpWidth` variable is the fallback.
+        // `mcpWidth` variable is the MCP fallback.
         let pass1 = evaluate(src, Some(&eval_name), &make_env(100.0, h0));
-        let size = pass1.coord("mcp.size");
-        let w0 = match size
-            .map(|s| s[0])
-            .filter(|w| *w >= 24.0)
-            .or_else(|| pass1.get("mcpWidth").and_then(|v| v.first().copied()))
-        {
+        let size = pass1.coord(&format!("{ctx}.size"));
+        let w0 = match size.map(|s| s[0]).filter(|w| *w >= 24.0).or_else(|| {
+            (ctx == "mcp")
+                .then(|| pass1.get("mcpWidth").and_then(|v| v.first().copied()))
+                .flatten()
+        }) {
             Some(w) if w >= 24.0 => w,
             _ => continue,
         };
-        let h0 = size.map(|s| s[1]).filter(|h| *h >= 100.0).unwrap_or(h0);
+        // A strip is at least ~100px tall; a track row can be much shorter.
+        let min_nat_h = if ctx == "tcp" { 16.0 } else { 100.0 };
+        let h0 = size.map(|s| s[1]).filter(|h| *h >= min_nat_h).unwrap_or(h0);
 
-        // Pass 2: natural + finite-difference evaluations. Strip width is
+        // Pass 2: natural + finite-difference evaluations. MCP strip width is
         // theme-driven (`mcpWidth` reads the layout's width knob, not env
         // `w`), so the +Δw pass bumps the matching `define_parameter` too.
         // Track-state variants re-run the program with the state scalar set
@@ -261,23 +366,35 @@ fn walter_mcp_layouts(
                 env
             };
             let pass1 = evaluate(src, Some(&eval_name), &with_state(make_env(100.0, h0)));
-            let w0s = pass1
-                .get("mcpWidth")
-                .and_then(|v| v.first().copied())
+            let w0s = (ctx == "mcp")
+                .then(|| pass1.get("mcpWidth").and_then(|v| v.first().copied()))
+                .flatten()
                 .filter(|w| *w >= 24.0)
                 .unwrap_or(w0);
             let out0 = evaluate(src, Some(&eval_name), &with_state(make_env(w0s, h0)));
             let mut env_w = with_state(make_env(w0s + dw, h0));
             // Bump every width knob this state can select.
-            for suffix in ["", "Sel", "Recarm"] {
-                let knob = format!("Layout{name}-mcpWidth{suffix}");
-                if let Some(p) = rt.rtconfig.params.iter().find(|p| p.name == knob) {
-                    env_w.set(&p.name, p.default + dw);
+            if ctx == "mcp" {
+                for suffix in ["", "Sel", "Recarm"] {
+                    let knob = format!("Layout{name}-mcpWidth{suffix}");
+                    if let Some(p) = rt.rtconfig.params.iter().find(|p| p.name == knob) {
+                        env_w.set(&p.name, p.default + dw);
+                    }
                 }
             }
             let out_w = evaluate(src, Some(&eval_name), &env_w);
             let out_h = evaluate(src, Some(&eval_name), &with_state(make_env(w0s, h0 + dh)));
-            layout_from_walter(label, w0s, h0, scale, &out0, &out_w, &out_h, rt)
+            layout_from_walter(
+                label,
+                w0s,
+                h0,
+                scale,
+                &out0,
+                &out_w,
+                &out_h,
+                &rt.rtconfig,
+                ctx,
+            )
         };
 
         let base = bake(&[], &name);
@@ -302,13 +419,17 @@ fn layout_from_walter(
     out0: &daw_theme_reaper::walter::Output,
     out_w: &daw_theme_reaper::walter::Output,
     out_h: &daw_theme_reaper::walter::Output,
-    rt: &ReaperTheme,
+    rtc: &daw_theme_reaper::RtConfig,
+    ctx: &str,
 ) -> super::mcp::McpLayout {
     use super::mcp::McpLayout;
     use super::walter::{Coord, FaderMode, Margin};
 
     const DW: f32 = 16.0;
     const DH: f32 = 32.0;
+
+    // Context-qualified attribute name (`mcp.volume` / `tcp.volume`).
+    let at = |el: &str| format!("{ctx}.{el}");
 
     // An element's anchor coord from the three evaluations.
     let coord = |attr: &str| -> Coord {
@@ -344,10 +465,17 @@ fn layout_from_walter(
         }
     };
 
-    // Sliders read their orientation from the resolved geometry (REAPER's
-    // `.fadermode` values are theme-convention; the box shape is ground truth).
-    let fadermode = |c: &Coord| -> FaderMode {
-        if c.w > c.h {
+    // `*.fadermode` (SDK): first coordinate `1` forces a knob, `-1` prevents
+    // one, `0` is REAPER's default. Slider orientation comes from the
+    // resolved box shape (ground truth).
+    let fadermode = |c: &Coord, attr: &str| -> FaderMode {
+        let mode = out0
+            .get(attr)
+            .and_then(|v| v.first().copied())
+            .unwrap_or(0.0);
+        if mode > 0.5 {
+            FaderMode::Knob
+        } else if c.w > c.h {
             FaderMode::Horizontal
         } else {
             FaderMode::Vertical
@@ -380,17 +508,37 @@ fn layout_from_walter(
     // colour come back as the sentinel (the bake env paints the track with
     // `Color::TRACK`) and resolve to the live accent at render time.
     let mut colors = super::mcp::McpColors::default();
-    colors.label = color_pair("mcp.label.color");
-    colors.trackidx = color_pair("mcp.trackidx.color");
-    colors.volume_label = color_pair("mcp.volume.label.color");
-    colors.pan_label = color_pair("mcp.pan.label.color");
-    colors.meter_readout = color_pair("mcp.meter.readout.color");
+    colors.label = color_pair(&at("label.color"));
+    colors.trackidx = color_pair(&at("trackidx.color"));
+    colors.volume_label = color_pair(&at("volume.label.color"));
+    colors.pan_label = color_pair(&at("pan.label.color"));
+    colors.meter_readout = color_pair(&at("meter.readout.color"));
 
-    // Theme-drawn chrome: every `mcp.custom.*` box, in WALTER z-order.
-    let customs: Vec<super::mcp::McpCustom> = out0
-        .set_order
-        .iter()
-        .filter(|n| n.starts_with("mcp.custom.") && !n.ends_with(".color"))
+    // Theme-drawn chrome: every `{ctx}.custom.*` box.
+    //
+    // Z-order (verified against the Anti-Theme in REAPER 7): custom elements
+    // stack in **reverse declaration order** — the last-declared custom
+    // (`tcp.custom.tcpBgBox`, the full-panel background) draws at the
+    // bottom, the first-declared (`tcpDiv`, the hairline divider) on top.
+    // `front` statements then lift named elements above everything (we apply
+    // the ones naming customs; standard elements render above customs
+    // anyway). First occurrence dedupes `clear` + re-set repeats.
+    let custom_prefix = at("custom.");
+    let mut names: Vec<&String> = Vec::new();
+    for n in &out0.set_order {
+        if n.starts_with(&custom_prefix) && !n.ends_with(".color") && !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    names.reverse();
+    for f in &out0.fronts {
+        if let Some(pos) = names.iter().position(|n| *n == f) {
+            let n = names.remove(pos);
+            names.push(n);
+        }
+    }
+    let customs: Vec<super::mcp::McpCustom> = names
+        .into_iter()
         .filter_map(|n| {
             let c = coord(n);
             if c.is_hidden() {
@@ -409,14 +557,19 @@ fn layout_from_walter(
         })
         .collect();
 
-    // `mcp.size` = [default w, default h, min w, min h].
-    let size_attr = out0.coord("mcp.size");
+    // `{ctx}.size` = [default w, default h, min w, min h].
+    let size_attr = out0.coord(&at("size"));
+    let min_w = size_attr.map(|s| s[2]).filter(|w| *w > 0.0).unwrap_or(24.0);
     let min_h = size_attr
         .map(|s| s[3])
         .filter(|h| *h > 0.0)
-        .or_else(|| rt.rtconfig.global_f32("mcp_min_height"))
-        .unwrap_or(180.0);
-    let mut base = McpLayout::vertical();
+        .or_else(|| rtc.global_f32(&format!("{ctx}_min_height")))
+        .unwrap_or(if ctx == "tcp" { 24.0 } else { 180.0 });
+    let mut base = if ctx == "tcp" {
+        McpLayout::tcp_row()
+    } else {
+        McpLayout::vertical()
+    };
     // Fonts scale with the DPI variant (geometry already comes scaled from
     // the evaluation).
     for f in [
@@ -428,55 +581,55 @@ fn layout_from_walter(
         f.size *= scale;
     }
 
-    let volume = coord("mcp.volume");
-    let pan = coord("mcp.pan");
-    let width = coord("mcp.width");
+    let volume = coord(&at("volume"));
+    let pan = coord(&at("pan"));
+    let width = coord(&at("width"));
     McpLayout {
         name: name.to_string(),
         size: (w0, h0),
-        min_size: (24.0, min_h),
-        margin: margin("mcp.margin", base.margin),
+        min_size: (min_w, min_h),
+        margin: margin(&at("margin"), base.margin),
 
-        trackidx: coord("mcp.trackidx"),
+        trackidx: coord(&at("trackidx")),
         trackidx_font: base.trackidx_font,
-        trackidx_margin: margin("mcp.trackidx.margin", base.trackidx_margin),
-        label: coord("mcp.label"),
+        trackidx_margin: margin(&at("trackidx.margin"), base.trackidx_margin),
+        label: coord(&at("label")),
         label_font: base.label_font,
-        label_margin: margin("mcp.label.margin", base.label_margin),
+        label_margin: margin(&at("label.margin"), base.label_margin),
 
-        volume_fadermode: fadermode(&volume),
+        volume_fadermode: fadermode(&volume, &at("volume.fadermode")),
         volume,
-        volume_label: coord("mcp.volume.label"),
+        volume_label: coord(&at("volume.label")),
         volume_label_font: base.volume_label_font,
-        volume_label_margin: margin("mcp.volume.label.margin", base.volume_label_margin),
-        pan_fadermode: fadermode(&pan),
+        volume_label_margin: margin(&at("volume.label.margin"), base.volume_label_margin),
+        pan_fadermode: fadermode(&pan, &at("pan.fadermode")),
         pan,
-        pan_label: coord("mcp.pan.label"),
+        pan_label: coord(&at("pan.label")),
         pan_label_font: base.pan_label_font,
-        pan_label_margin: margin("mcp.pan.label.margin", base.pan_label_margin),
-        width_fadermode: fadermode(&width),
+        pan_label_margin: margin(&at("pan.label.margin"), base.pan_label_margin),
+        width_fadermode: fadermode(&width, &at("width.fadermode")),
         width,
 
-        meter: coord("mcp.meter"),
+        meter: coord(&at("meter")),
 
-        width_label: coord("mcp.width.label"),
-        width_label_margin: margin("mcp.width.label.margin", base.width_label_margin),
+        width_label: coord(&at("width.label")),
+        width_label_margin: margin(&at("width.label.margin"), base.width_label_margin),
 
-        mute: coord("mcp.mute"),
-        solo: coord("mcp.solo"),
-        recarm: coord("mcp.recarm"),
-        phase: coord("mcp.phase"),
-        fx: coord("mcp.fx"),
-        fxbyp: coord("mcp.fxbyp"),
-        io: coord("mcp.io"),
-        env: coord("mcp.env"),
-        folder: coord("mcp.folder"),
+        mute: coord(&at("mute")),
+        solo: coord(&at("solo")),
+        recarm: coord(&at("recarm")),
+        phase: coord(&at("phase")),
+        fx: coord(&at("fx")),
+        fxbyp: coord(&at("fxbyp")),
+        io: coord(&at("io")),
+        env: coord(&at("env")),
+        folder: coord(&at("folder")),
 
-        recinput: coord("mcp.recinput"),
-        recinput_margin: margin("mcp.recinput.margin", base.recinput_margin),
-        recmode: coord("mcp.recmode"),
-        recmon: coord("mcp.recmon"),
-        fxin: coord("mcp.fxin"),
+        recinput: coord(&at("recinput")),
+        recinput_margin: margin(&at("recinput.margin"), base.recinput_margin),
+        recmode: coord(&at("recmode")),
+        recmon: coord(&at("recmon")),
+        fxin: coord(&at("fxin")),
 
         customs,
         colors,
@@ -485,14 +638,15 @@ fn layout_from_walter(
 
 /// Slice the theme's button/fader atlases into an [`McpSkin`] (data-URI PNGs).
 ///
-/// Image lookup walks REAPER's fallback chain: a context image (`mcp_X`),
-/// then the shared track vocabulary (`track_X`), then the general fallback
-/// (`gen_X`) — the Anti-Theme, like the stock default, ships most strip
-/// buttons as `track_*`/`gen_*`.
-fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
+/// Image lookup walks REAPER's fallback chain: a context image (`{ctx}_X` —
+/// `mcp_X`/`tcp_X`), then the shared track vocabulary (`track_X`), then the
+/// general fallback (`gen_X`) — the Anti-Theme, like the stock default, ships
+/// most strip buttons as `track_*`/`gen_*`.
+fn extract_skin(imgs: &ImageCatalog, ctx: &str) -> Option<McpSkin> {
+    let ctx_prefix = format!("{ctx}_");
     // First catalog name present along the fallback chain.
     let find = |base: &str| -> Option<String> {
-        ["mcp_", "track_", "gen_"]
+        [ctx_prefix.as_str(), "track_", "gen_"]
             .iter()
             .map(|p| format!("{p}{base}"))
             .find(|n| imgs.has(n))
@@ -588,10 +742,11 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
         let s = imgs.load(name).ok()?;
         Some(skin_image(&s.image, &s.markers))
     };
-    // A knob filmstrip along the fallback chain (`mcp_X` → `tcp_X` → `gen_X`
-    // — knob stacks commonly ship as `tcp_*` and are shared).
+    // A knob filmstrip along the fallback chain (context first, then the
+    // other strip context, then general — knob stacks commonly ship as
+    // `tcp_*` and are shared).
     let knob = |base: &str| -> Option<super::mcp::KnobSkin> {
-        let name = ["mcp_", "tcp_", "gen_", ""]
+        let name = [ctx_prefix.as_str(), "tcp_", "mcp_", "gen_", ""]
             .iter()
             .map(|p| format!("{p}{base}"))
             .find(|n| imgs.has(n))?;
@@ -603,6 +758,8 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
             frame_h: stack.frame_h,
         })
     };
+    // Context-owned (non-falling-back) images: `mcp_volbg`, `tcp_panbg`, …
+    let ctx_plain = |base: &str| plain(&format!("{ctx_prefix}{base}"));
 
     let skin = McpSkin {
         mute: toggle("mute_off", "mute_on"),
@@ -616,12 +773,13 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
         recmode: toggle("recmode_off", "recmode_in"),
         folder: toggle("folder_off", "folder_on"),
         fxin: toggle("fx_in_empty", "fx_in_norm"),
-        recinput_bg: plain("mcp_recinput"),
+        recinput_bg: ctx_plain("recinput"),
         pan_knob: knob("pan_knob_stack"),
-        volbg: plain("mcp_volbg"),
-        volthumb: plain("mcp_volthumb"),
-        panbg: plain("mcp_panbg"),
-        panthumb: plain("mcp_panthumb"),
+        vol_knob: knob("vol_knob_stack"),
+        volbg: ctx_plain("volbg"),
+        volthumb: ctx_plain("volthumb"),
+        panbg: ctx_plain("panbg"),
+        panthumb: ctx_plain("panthumb"),
         meter_strip: plain("meter_strip_v"),
         meter_bg: plain("meter_bg_v"),
     };
@@ -734,6 +892,118 @@ mod tests {
         // Name bar pinned to the bottom, spanning the strip.
         assert!((a.label.ts - 1.0).abs() < 0.01 && (a.label.bs - 1.0).abs() < 0.01);
         assert_eq!(a.label.w, 88.0);
+    }
+}
+
+#[cfg(test)]
+mod tcp_tests {
+    use super::*;
+    use crate::theming::FaderMode;
+
+    fn antitheme() -> Option<ReaperTheme> {
+        let dir = std::env::var("REAPER_ANTITHEME_DIR").unwrap_or_else(|_| {
+            "/home/cody/Development/FastTrackStudio/reaper-theme/extracted/antitheme".to_string()
+        });
+        ReaperTheme::load_dir(&dir).ok()
+    }
+
+    #[test]
+    fn tcp_context_imports_from_walter() {
+        let Some(rt) = antitheme() else {
+            eprintln!("anti-theme not found — skipping");
+            return;
+        };
+        let theme = theme_from_reaper(&rt);
+
+        // The theme's TCP layouts lead; natural size from `tcp.size`.
+        let a = theme.tcp.layout(None);
+        assert_eq!(a.name, "A");
+        assert_eq!(a.size, (300.0, 100.0));
+        assert_eq!(a.min_size.0, 212.0);
+
+        // REAPER 7 default TCP: volume is a knob (`tcp.volume.fadermode 1`).
+        assert_eq!(a.volume_fadermode, FaderMode::Knob);
+        assert!(!a.volume.is_hidden());
+        assert!(!a.label.is_hidden());
+        assert!(!a.mute.is_hidden());
+        assert!(!a.meter.is_hidden());
+
+        // TCP skin: volume knob stack + the tcp fader art.
+        let skin = theme.tcp.skin.as_ref().expect("tcp skin");
+        assert!(skin.vol_knob.is_some());
+        assert!(skin.pan_knob.is_some());
+    }
+
+    #[test]
+    fn engine_reevaluates_at_exact_size() {
+        let Some(rt) = antitheme() else {
+            eprintln!("anti-theme not found — skipping");
+            return;
+        };
+        let theme = theme_from_reaper(&rt);
+        let engine = theme.engine.as_ref().expect("walter engine installed");
+
+        // Evaluated at the actual row box: geometry is exact px (no anchor
+        // springing — attach scales are zero) and stays inside the box.
+        let l = engine
+            .layout_at("tcp", "A", 260.0, 64.0, false)
+            .expect("tcp layout");
+        assert_eq!(l.size, (260.0, 64.0));
+        for (name, c) in [("label", &l.label), ("mute", &l.mute), ("meter", &l.meter)] {
+            assert!(!c.is_hidden(), "{name} hidden at 260x64");
+            assert!(
+                c.x >= -1.0 && c.x + c.w <= 261.0,
+                "{name} out of bounds: x={} w={}",
+                c.x,
+                c.w
+            );
+            assert_eq!((c.ls, c.ts, c.rs, c.bs), (0.0, 0.0, 0.0, 0.0));
+        }
+
+        // Unknown layout name → None (callers fall back to bakes).
+        assert!(engine.layout_at("tcp", "row", 260.0, 64.0, false).is_none());
+    }
+
+    /// Reapertips' TCP is a WALTER flow engine (`then`-macro chain): elements
+    /// wrap/shrink/cull per the actual width. Re-evaluating at two widths
+    /// must yield different geometry — the behavior anchors can't reproduce.
+    #[test]
+    fn reapertips_flow_responds_to_width() {
+        let dir = "/home/cody/Development/FastTrackStudio/reaper-theme/extracted/reapertips/_reapertips_theme";
+        let Ok(rt) = ReaperTheme::load_dir(dir) else {
+            eprintln!("reapertips not found — skipping");
+            return;
+        };
+        let theme = theme_from_reaper(&rt);
+        let engine = theme.engine.as_ref().expect("walter engine installed");
+
+        let wide = engine
+            .layout_at("tcp", "A", 420.0, 60.0, false)
+            .expect("wide tcp layout");
+        let narrow = engine
+            .layout_at("tcp", "A", 150.0, 60.0, false)
+            .expect("narrow tcp layout");
+
+        // The label survives at both widths but the flow repacks the row.
+        assert!(!wide.label.is_hidden());
+        assert!(!narrow.label.is_hidden());
+        assert!(
+            wide.label.w != narrow.label.w || wide.volume != narrow.volume,
+            "flow theme should repack elements with width"
+        );
+        // Wide rows fit more flow elements than narrow ones.
+        let visible = |l: &crate::theming::McpLayout| {
+            [&l.recarm, &l.label, &l.volume, &l.pan, &l.io, &l.fx, &l.env]
+                .iter()
+                .filter(|c| !c.is_hidden())
+                .count()
+        };
+        assert!(
+            visible(&wide) >= visible(&narrow),
+            "wide {} < narrow {}",
+            visible(&wide),
+            visible(&narrow)
+        );
     }
 }
 

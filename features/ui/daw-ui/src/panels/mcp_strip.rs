@@ -18,7 +18,10 @@ use crate::prelude::*;
 use crate::theming::{Color, FaderMode, McpLayout, ThemeState, ToggleKind, use_theme};
 use crate::widgets::mixer::RoutingButton;
 
-/// One mixer strip, laid out by the theme's MCP context.
+/// One mixer strip, laid out by the theme's MCP context. With `tcp: true`
+/// the strip renders the theme's **TCP context** instead (same element
+/// vocabulary, laid out as a track-control row) and fills its parent box —
+/// the row owns the size so rows align with the arrange lanes.
 #[component]
 pub fn McpStrip(
     track: TrackView,
@@ -26,24 +29,50 @@ pub fn McpStrip(
     #[props(default)]
     layout: Option<String>,
     #[props(default)] disabled: bool,
+    /// Render the theme's `tcp.*` context (track-control row).
+    #[props(default)]
+    tcp: bool,
+    /// The actual px box this strip fills, when the parent knows it (TCP
+    /// rows: sidebar width × track height). With an imported REAPER theme
+    /// this re-runs WALTER at that exact size — REAPER's resize model — so
+    /// flow themes (Reapertips) rewrap/shrink/cull elements per the real
+    /// width instead of springing the natural-size bake.
+    #[props(default)]
+    size: Option<(f32, f32)>,
 ) -> Element {
     let theme = use_theme().theme;
-    let mcp = theme.mcp.clone();
-    // Track-state layout variants: themes resize/show elements per state, so
-    // armed tracks switch to the `@armed` bake when the theme provides one.
-    let l = {
+    let ctx_name = if tcp { "tcp" } else { "mcp" };
+    let mcp = if tcp {
+        theme.tcp.clone()
+    } else {
+        theme.mcp.clone()
+    };
+    let armed = (track.record_arm)();
+    // Layout resolution: with a runtime engine + a known px box, re-evaluate
+    // the theme at this exact size (state scalars included). Otherwise fall
+    // back to the baked layouts (`@armed` variant when the theme has one).
+    let runtime = match (&theme.engine, size) {
+        (Some(engine), Some((w, h))) if w > 0.0 && h > 0.0 => {
+            // Engine layouts are named without the `@state` suffix.
+            let base = mcp.layout(layout.as_deref()).name.clone();
+            let base = base.split('@').next().unwrap_or(&base).to_string();
+            engine.layout_at(ctx_name, &base, w, h, armed)
+        }
+        _ => None,
+    };
+    let l = runtime.unwrap_or_else(|| {
         let base = mcp.layout(layout.as_deref()).clone();
-        if (track.record_arm)() {
-            let armed = format!("{}@armed", base.name);
+        if armed {
+            let name = format!("{}@armed", base.name);
             mcp.layouts
                 .iter()
-                .find(|x| x.name == armed)
+                .find(|x| x.name == name)
                 .cloned()
                 .unwrap_or(base)
         } else {
             base
         }
-    };
+    });
     let nat = l.size;
 
     let st = ThemeState::new().track(track.color.as_deref().and_then(Color::hex));
@@ -115,18 +144,33 @@ pub fn McpStrip(
         (theme.tokens.surface, theme.tokens.border)
     };
 
+    // MCP strips size themselves (the mixer is a horizontal stack of natural-
+    // width strips); TCP rows fill the parent row box, which owns the height
+    // so rows stay aligned with the arrange lanes.
+    let container = if tcp {
+        format!(
+            "position:relative; width:100%; height:100%; overflow:hidden; \
+             opacity:{opacity}; user-select:none; \
+             background:{body}; border-bottom:1px solid {border};",
+            body = body.css(),
+            border = border.css(),
+        )
+    } else {
+        format!(
+            "position:relative; flex:0 0 auto; width:{strip_w}px; height:100%; \
+             min-width:{minw}px; min-height:{minh}px; overflow:hidden; \
+             margin-right:-1px; opacity:{opacity}; user-select:none; \
+             background:{body}; border:1px solid {border};",
+            minw = l.min_size.0,
+            minh = l.min_size.1,
+            body = body.css(),
+            border = border.css(),
+        )
+    };
+
     rsx! {
         div {
-            style: format!(
-                "position:relative; flex:0 0 auto; width:{strip_w}px; height:100%; \
-                 min-width:{minw}px; min-height:{minh}px; overflow:hidden; \
-                 margin-right:-1px; opacity:{opacity}; user-select:none; \
-                 background:{body}; border:1px solid {border};",
-                minw = l.min_size.0,
-                minh = l.min_size.1,
-                body = body.css(),
-                border = border.css(),
-            ),
+            style: container,
 
             // Theme-drawn chrome: `mcp.custom.*` boxes, painted first in
             // WALTER z-order (track-colour sentinels resolve to the accent).
@@ -259,16 +303,29 @@ pub fn McpStrip(
                 McpToggle { pos: l.recarm.css_position(nat), box_w: l.recarm.w, box_h: l.recarm.h, active: track.record_arm, kind: ToggleKind::RecArm, skin: skin.recarm.clone(), disabled }
             }
 
-            // mcp.volume
+            // mcp.volume — knob when `.fadermode` forces one (the REAPER 7
+            // default TCP volume), fader otherwise.
             if !l.volume.is_hidden() {
-                McpFader {
-                    pos: l.volume.css_position(nat),
-                    value: track.fader,
-                    mode: l.volume_fadermode,
-                    accent: fader_accent,
-                    skin_bg: skin.volbg.clone(),
-                    skin_thumb: skin.volthumb.clone(),
-                    disabled,
+                if l.volume_fadermode == FaderMode::Knob {
+                    McpKnob {
+                        pos: l.volume.css_position(nat),
+                        box_w: l.volume.w,
+                        box_h: l.volume.h,
+                        value: track.fader,
+                        skin: skin.vol_knob.clone(),
+                        accent: fader_accent.resolve_track(accent),
+                        disabled,
+                    }
+                } else {
+                    McpFader {
+                        pos: l.volume.css_position(nat),
+                        value: track.fader,
+                        mode: l.volume_fadermode,
+                        accent: fader_accent,
+                        skin_bg: skin.volbg.clone(),
+                        skin_thumb: skin.volthumb.clone(),
+                        disabled,
+                    }
                 }
             }
 
@@ -703,8 +760,10 @@ fn McpFader(
 
     // Cap: image thumb at native aspect (centered on the value position), or
     // the vector cap + accent line.
+    // `Knob` never reaches the fader (callers route it to [`McpKnob`]);
+    // treat it as vertical defensively.
     let cap = match (&skin_thumb, mode) {
-        (Some(thumb), FaderMode::Vertical) => format!(
+        (Some(thumb), FaderMode::Vertical | FaderMode::Knob) => format!(
             "position:absolute; left:calc(50% - {hw}px); width:{w}px; height:{h}px; \
              bottom:calc({fill_pct}% - {hh}px); pointer-events:none; \
              background-image:url({url}); background-size:100% 100%;",
@@ -724,7 +783,7 @@ fn McpFader(
             hh = thumb.h as f32 / 2.0,
             url = thumb.url,
         ),
-        (None, FaderMode::Vertical) => format!(
+        (None, FaderMode::Vertical | FaderMode::Knob) => format!(
             "position:absolute; left:-3px; right:-3px; bottom:calc({fill_pct}% - 6px); \
              height:12px; border-radius:3px; \
              background:linear-gradient(180deg,{top},{bottom}); \
@@ -745,7 +804,7 @@ fn McpFader(
     };
     let skinned = skin_thumb.is_some();
     let cap_line = match mode {
-        FaderMode::Vertical => format!(
+        FaderMode::Vertical | FaderMode::Knob => format!(
             "position:absolute; left:3px; right:3px; top:5px; height:2px; \
              background:{}; border-radius:1px;",
             accent.css()
@@ -800,7 +859,7 @@ fn McpFader(
                     // positive input = down = decrease), so pass raw deltas.
                     let delta_px = match mode {
                         // Up = increase.
-                        FaderMode::Vertical => p.y as f32 - drag_start(),
+                        FaderMode::Vertical | FaderMode::Knob => p.y as f32 - drag_start(),
                         // Right = increase.
                         FaderMode::Horizontal => drag_start() - p.x as f32,
                     };

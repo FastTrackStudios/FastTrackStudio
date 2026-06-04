@@ -310,6 +310,13 @@ pub struct Theme {
     /// The MCP strip context — named layouts, per-element colour overrides,
     /// and `define_parameter`-style knobs (`super::mcp`).
     pub mcp: McpTheme,
+    /// The TCP row context — the same element vocabulary laid out as a
+    /// track-control row (REAPER's `tcp.*`).
+    pub tcp: McpTheme,
+    /// Runtime WALTER engine (imported REAPER themes): re-evaluates a
+    /// context's layout at the renderer's *actual* px size, the way REAPER
+    /// re-runs WALTER on resize. `None` = anchor-resolved baked layouts only.
+    pub engine: Option<super::mcp::LayoutEngine>,
 }
 
 impl Default for Theme {
@@ -345,6 +352,8 @@ impl Theme {
             },
             metrics: Metrics::default(),
             mcp: McpTheme::fts_default(),
+            tcp: McpTheme::fts_default_tcp(),
+            engine: None,
         }
     }
 

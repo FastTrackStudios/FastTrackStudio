@@ -215,11 +215,15 @@ impl ColorPair {
 }
 
 /// Fader orientation — WALTER `*.fadermode` (`mcp.volume.fadermode` etc.).
+/// The SDK form is a scalar: `1` forces a knob, `-1` prevents one, `0` is
+/// REAPER's default (we then read the orientation off the box shape).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum FaderMode {
     #[default]
     Vertical,
     Horizontal,
+    /// `*.fadermode 1` — render a rotary knob (filmstrip when skinned).
+    Knob,
 }
 
 /// A theme-author-exposed knob — WALTER `define_parameter`

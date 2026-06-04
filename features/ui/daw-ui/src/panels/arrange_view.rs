@@ -15,7 +15,7 @@ use crate::theming::use_theme;
 pub fn ArrangeView(
     tracks: Vec<TrackView>,
     #[props(default = 12.0)] pps: f64,
-    #[props(default = 260)] tcp_width: u32,
+    #[props(default = 380)] tcp_width: u32,
     #[props(default = 120.0)] seconds: f64,
 ) -> Element {
     let ruler_h = 26u32;

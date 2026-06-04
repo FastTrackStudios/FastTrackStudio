@@ -146,6 +146,6 @@ impl TrackView {
 }
 
 /// Default lane / TCP-row height in px.
-pub const DEFAULT_LANE_HEIGHT: u32 = 54;
+pub const DEFAULT_LANE_HEIGHT: u32 = 72;
 /// Neutral accent when a track has no colour.
 pub const NEUTRAL: &str = "#a1a1aa";

@@ -188,6 +188,48 @@ impl McpLayout {
         }
     }
 
+    /// The FTS default TCP row (natural 260×56) — a horizontal track-control
+    /// row: recarm | name, volume slider under it | mute/solo | pan knob,
+    /// with a slim meter on the right edge. The TCP analog of
+    /// [`McpLayout::vertical`]; an imported REAPER theme replaces it with the
+    /// theme's own `tcp.*` layouts.
+    pub fn tcp_row() -> Self {
+        Self {
+            name: "row".to_string(),
+            size: (260.0, 56.0),
+            min_size: (120.0, 24.0),
+
+            // Track number in the left gutter.
+            trackidx: Coord::new(0.0, 0.0, 18.0, 56.0, 0.0, 0.0, 0.0, 1.0),
+
+            // Name in the top row; right edge tracks the panel.
+            label: Coord::new(26.0, 4.0, 138.0, 18.0, 0.0, 0.0, 1.0, 0.0),
+            label_font: FontSpec::new(12.0, 600),
+            label_margin: Margin::new(4.0, 0.0, 4.0, 0.0, 0.0),
+
+            // Horizontal volume slider under the name.
+            volume: Coord::new(26.0, 28.0, 130.0, 14.0, 0.0, 0.0, 1.0, 0.0),
+            volume_fadermode: FaderMode::Horizontal,
+            volume_label: Coord::hidden(),
+
+            // Pan knob right of the mute/solo cluster.
+            pan: Coord::new(214.0, 14.0, 28.0, 28.0, 1.0, 0.0, 1.0, 0.0),
+            pan_fadermode: FaderMode::Knob,
+
+            // Slim vertical meter on the right edge.
+            meter: Coord::new(248.0, 2.0, 10.0, 52.0, 1.0, 0.0, 1.0, 1.0),
+
+            // Mute/solo cluster right of the name.
+            mute: Coord::new(166.0, 6.0, 22.0, 18.0, 1.0, 0.0, 1.0, 0.0),
+            solo: Coord::new(190.0, 6.0, 22.0, 18.0, 1.0, 0.0, 1.0, 0.0),
+            recarm: Coord::new(4.0, 18.0, 18.0, 18.0, 0.0, 0.0, 0.0, 0.0),
+
+            io: Coord::hidden(),
+
+            ..Self::vertical()
+        }
+    }
+
     /// A narrow 40px variant — pan/io hidden, stacked solo/mute (the
     /// `w<N` conditional branch a WALTER theme would express inline).
     pub fn narrow() -> Self {
@@ -318,6 +360,9 @@ pub struct McpSkin {
     /// `*_pan_knob_stack` — the pan knob filmstrip (square frames stacked
     /// vertically; the frame index maps the knob position).
     pub pan_knob: Option<KnobSkin>,
+    /// `*_vol_knob_stack` — the volume knob filmstrip (TCP volume renders as
+    /// a knob when `*.volume.fadermode` is 1).
+    pub vol_knob: Option<KnobSkin>,
     /// `mcp_volbg` — the fader well.
     pub volbg: Option<SkinImage>,
     /// `mcp_volthumb` — the fader cap.
@@ -331,6 +376,50 @@ pub struct McpSkin {
     pub meter_strip: Option<SkinImage>,
     /// `meter_bg_v` — the meter well.
     pub meter_bg: Option<SkinImage>,
+}
+
+/// A runtime WALTER layout engine: `(ctx, layout, w, h, armed) → McpLayout`.
+///
+/// REAPER re-runs WALTER on every panel resize — flow-based themes
+/// (Reapertips' `then`-macro chain) reorder, wrap, shrink and cull elements
+/// per the *actual* panel size, which a one-shot anchor bake cannot
+/// reproduce. Importers that can re-evaluate (the REAPER importer) install
+/// one of these; renderers that know their px size call it instead of the
+/// baked layouts. Results must be internally cached (renderers call this
+/// per frame).
+#[derive(Clone)]
+pub struct LayoutEngine(
+    #[allow(clippy::type_complexity)]
+    pub  std::sync::Arc<dyn Fn(&str, &str, f32, f32, bool) -> Option<McpLayout> + Send + Sync>,
+);
+
+impl LayoutEngine {
+    /// Evaluate `ctx.{…}` (`"mcp"`/`"tcp"`) layout `name` at an exact panel
+    /// size. `armed` re-evaluates with `recarm 1` (themes reflow per state).
+    /// `None` = the theme has no WALTER program for this context/layout
+    /// (callers fall back to the baked layouts).
+    pub fn layout_at(
+        &self,
+        ctx: &str,
+        name: &str,
+        w: f32,
+        h: f32,
+        armed: bool,
+    ) -> Option<McpLayout> {
+        (self.0)(ctx, name, w, h, armed)
+    }
+}
+
+impl PartialEq for LayoutEngine {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for LayoutEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LayoutEngine(..)")
+    }
 }
 
 /// The MCP theme context: named layouts + colour overrides + author params.
@@ -362,6 +451,16 @@ impl McpTheme {
                     128.0,
                 ),
             ],
+            skin: None,
+        }
+    }
+
+    /// FTS defaults for the TCP context — the [`McpLayout::tcp_row`] layout.
+    pub fn fts_default_tcp() -> Self {
+        Self {
+            layouts: vec![McpLayout::tcp_row()],
+            colors: McpColors::default(),
+            params: Vec::new(),
             skin: None,
         }
     }
