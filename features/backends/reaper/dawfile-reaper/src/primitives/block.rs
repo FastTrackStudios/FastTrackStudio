@@ -6,15 +6,15 @@
 //! - Content lines: NAME "Track 1" or VOL 1.0 0.0
 
 use nom::{
-    IResult, Parser,
     bytes::complete::tag,
     character::complete::{multispace0, space0},
     combinator::map,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::token::{Token, parse_token_line};
+use super::token::{parse_token_line, Token};
 
 /// Types of RPP blocks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

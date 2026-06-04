@@ -536,22 +536,24 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                     let w = (clip.length * pps).max(2.0);
                     let fade_in_w = (clip.fade_in * pps).min(w);
                     let fade_out_w = (clip.fade_out * pps).min(w);
-                    // Waveform peaks: a polygon mirrored around the item's
-                    // vertical centre, filled with the parity peaks colour.
+                    // Waveform peaks: REAPER's asymmetric model — the top
+                    // boundary follows each column's max, the bottom its min,
+                    // around the zero line at the item's vertical centre.
                     let peaks_path = (!clip.peaks.is_empty()).then(|| {
                         let mid = item_h / 2.0;
                         let half = mid - 1.0;
                         let n = clip.peaks.len().max(2) as f64;
                         let step = w / (n - 1.0);
-                        let mut up = String::new();
-                        let mut down = String::new();
-                        for (pi, amp) in clip.peaks.iter().enumerate() {
+                        let mut top = String::new();
+                        let mut bottom = String::new();
+                        for (pi, (pmax, pmin)) in clip.peaks.iter().enumerate() {
                             let px = pi as f64 * step;
-                            let a = (*amp as f64).clamp(0.0, 1.0) * half;
-                            up.push_str(&format!("{px:.1},{:.1} ", mid - a));
-                            down.insert_str(0, &format!("{px:.1},{:.1} ", mid + a));
+                            let up = (*pmax as f64).clamp(-1.0, 1.0) * half;
+                            let dn = (*pmin as f64).clamp(-1.0, 1.0) * half;
+                            top.push_str(&format!("{px:.1},{:.1} ", mid - up));
+                            bottom.insert_str(0, &format!("{px:.1},{:.1} ", mid - dn));
                         }
-                        format!("{up}{down}")
+                        format!("{top}{bottom}")
                     });
                     rsx! {
                         div {

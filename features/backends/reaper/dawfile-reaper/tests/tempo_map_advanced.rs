@@ -1,4 +1,4 @@
-use dawfile_reaper::{ReaperProject, parse_rpp_file};
+use dawfile_reaper::{parse_rpp_file, ReaperProject};
 use std::collections::BTreeMap;
 
 fn parse_marker_position_label(label: &str) -> Option<(i32, i32, f64)> {

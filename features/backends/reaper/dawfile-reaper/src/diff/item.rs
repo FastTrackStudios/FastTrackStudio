@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use super::f64_eq;
 use super::midi;
 use super::types::*;
-use crate::types::Item;
 use crate::types::item::Take;
+use crate::types::Item;
 
 /// Diff two lists of items, matched by `item_guid` (IGUID).
 ///

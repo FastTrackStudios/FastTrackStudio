@@ -331,30 +331,75 @@ fn track_to_view(id: usize, track: &Track, depth: u32) -> TrackView {
 
 /// Demo arrangement clips for an audible track: a couple of bars with fades,
 /// staggered per track so the lanes read like a song (one muted clip on the
-/// later tracks shows the mute overlay).
+/// later tracks shows the mute overlay). Waveforms come from real REAPER
+/// `.reapeaks` caches when a corpus is available (`FTS_REAPEAKS_DIR`),
+/// synthetic peaks otherwise.
 fn demo_clips(id: usize) -> Vec<ClipView> {
     let off = (id % 4) as f64 * 4.0;
     let mut a = ClipView::new(off, 16.0 - off, "Verse", None);
     a.fade_in = 0.8;
     a.fade_out = 1.5;
-    a.peaks = demo_peaks(id, 96);
+    a.peaks = demo_peaks(id, (a.length * 12.0) as usize);
     let mut b = ClipView::new(24.0, 16.0, "Chorus", None);
     b.fade_in = 0.4;
     b.fade_out = 2.0;
     b.selected = id == 2;
     b.muted = id == 7;
-    b.peaks = demo_peaks(id + 3, 96);
+    b.peaks = demo_peaks(id + 3, (b.length * 12.0) as usize);
     vec![a, b]
 }
 
+/// Waveform peaks for the demo clips: REAPER `.reapeaks` files when present
+/// (drawn exactly as REAPER would — mipmap pick + per-column min/max),
+/// synthetic otherwise.
+fn demo_peaks(seed: usize, columns: usize) -> Vec<(f32, f32)> {
+    real_peaks(seed, columns).unwrap_or_else(|| synth_peaks(seed, columns))
+}
+
+/// Pull columns out of the n-th `.reapeaks` file in the corpus dir.
+fn real_peaks(seed: usize, columns: usize) -> Option<Vec<(f32, f32)>> {
+    use daw_standalone::reapeaks::ReaPeaks;
+    let dir = match std::env::var("FTS_REAPEAKS_DIR") {
+        Ok(d) => d,
+        Err(_) => format!(
+            "{}/Documents/REAPER Media/peaks",
+            std::env::var("HOME").ok()?
+        ),
+    };
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "reapeaks"))
+        .collect();
+    if files.is_empty() {
+        return None;
+    }
+    files.sort();
+    // Prefer longer sources (they have interesting waveforms) by probing a
+    // few candidates around the seed.
+    let pick = files[seed % files.len()].clone();
+    let peaks = ReaPeaks::read(&pick).ok()?;
+    let len = peaks.length_seconds().min(20.0);
+    if len < 0.5 {
+        return None;
+    }
+    let cols = peaks.columns(0, 0.0, len, columns.max(2));
+    // All-silent caches are boring — fall back to synth.
+    cols.iter()
+        .any(|(max, min)| (max - min).abs() > 0.01)
+        .then_some(cols)
+}
+
 /// Deterministic fake waveform peaks (per-track phase so lanes differ).
-fn demo_peaks(seed: usize, n: usize) -> Vec<f32> {
-    (0..n)
+fn synth_peaks(seed: usize, n: usize) -> Vec<(f32, f32)> {
+    (0..n.max(2))
         .map(|i| {
-            let t = i as f32 / n as f32;
+            let t = i as f32 / n.max(2) as f32;
             let ph = seed as f32 * 1.7;
             let env = 0.55 + 0.35 * ((t * 6.3 + ph).sin() * (t * 23.0 + ph * 2.0).sin());
-            (env * (0.6 + 0.4 * (t * 91.0 + ph).sin().abs())).clamp(0.05, 1.0)
+            let a = (env * (0.6 + 0.4 * (t * 91.0 + ph).sin().abs())).clamp(0.05, 1.0);
+            (a, -a * 0.8)
         })
         .collect()
 }

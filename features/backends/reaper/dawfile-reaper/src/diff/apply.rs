@@ -20,8 +20,8 @@
 //! - Tempo envelope changes are not yet applied.
 //! - Project-level property changes are not yet applied.
 
-use crate::types::ReaperProject;
 use crate::types::marker_region::MarkerRegion;
+use crate::types::ReaperProject;
 
 use super::f64_eq;
 use super::types::*;
@@ -402,9 +402,9 @@ fn apply_markers_regions(
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
-    use crate::types::Item;
     use crate::types::marker_region::{MarkerRegion, MarkerRegionCollection};
     use crate::types::track::Track;
+    use crate::types::Item;
 
     // ── Helpers ─────────────────────────────────────────────────────────
 

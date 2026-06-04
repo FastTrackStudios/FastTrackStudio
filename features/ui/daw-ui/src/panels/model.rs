@@ -17,9 +17,10 @@ pub struct ClipView {
     pub name: String,
     /// `#rrggbb`; falls back to the track colour when `None`.
     pub color: Option<String>,
-    /// Waveform peaks: normalized amplitudes (0–1), evenly spaced across the
-    /// clip. Empty = no peaks drawn.
-    pub peaks: Vec<f32>,
+    /// Waveform peaks: normalized `(max, min)` pairs (−1…1), one per column,
+    /// evenly spaced across the clip — REAPER's asymmetric peak model
+    /// (read straight out of `.reapeaks` mipmaps). Empty = no peaks drawn.
+    pub peaks: Vec<(f32, f32)>,
     /// Fade-in length in seconds (0 = none); drawn REAPER-style as a fade
     /// triangle at the item head.
     pub fade_in: f64,
