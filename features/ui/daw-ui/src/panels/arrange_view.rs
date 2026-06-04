@@ -366,10 +366,17 @@ pub fn ArrangeView(
             }
 
             // ── Body: TCP sidebar + lanes, sharing one vertical scroll ──
+            // The inner row is content-height (`align-items:flex-start`), so
+            // the lanes wrapper never overflows vertically — `overflow-x:auto`
+            // would otherwise make it an independent vertical scroller too
+            // (CSS computes overflow-y:auto alongside it) and the TCP and
+            // lanes would scroll apart.
             div {
-                style: "flex:1 1 0; min-height:0; display:flex; overflow-y:auto;",
+                style: "flex:1 1 0; min-height:0; overflow-y:auto;",
+                div {
+                    style: "display:flex; align-items:flex-start;",
 
-                TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false }
+                    TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false }
 
                 // Timeline lanes (own horizontal scroll, mirrored to the ruler).
                 div {
@@ -466,6 +473,7 @@ pub fn ArrangeView(
                                  background:{play_cursor}; pointer-events:none;", x = t * pps) }
                         }
                     }
+                }
                 }
             }
         }
