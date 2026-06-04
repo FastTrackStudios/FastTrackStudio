@@ -81,7 +81,11 @@ fn main() {
         println!("{probe} = {:?}", out.get(probe));
     }
     let prefix = std::env::args().nth(3).unwrap_or_else(|| "mcp.".into());
-    let mut keys: Vec<&String> = out.attrs.keys().filter(|k| k.starts_with(&prefix)).collect();
+    let mut keys: Vec<&String> = out
+        .attrs
+        .keys()
+        .filter(|k| k.starts_with(&prefix))
+        .collect();
     keys.sort();
     println!("{prefix}* attrs: {}", keys.len());
     for k in keys.iter() {

@@ -2,6 +2,8 @@
 //!
 //! Provides customizable styling through the `StyleSheet` trait and preset themes.
 
+/// The arrange-view context — REAPER's palette-driven ruler/grid/item colours.
+pub mod arrange;
 pub mod context;
 /// The MCP strip context — REAPER's `mcp.*` element vocabulary as typed layouts.
 pub mod mcp;
@@ -16,6 +18,7 @@ pub mod theme;
 /// WALTER layout primitives (8-value anchor coords, margins, fonts, params).
 pub mod walter;
 
+pub use arrange::ArrangeTheme;
 pub use context::{ControlConfig, ThemeContext, ThemeProvider, use_theme};
 pub use mcp::{
     ButtonSkin, ButtonStateSkin, KnobSkin, McpColors, McpCustom, McpLayout, McpSkin, McpTheme,

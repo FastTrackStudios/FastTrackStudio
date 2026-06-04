@@ -39,6 +39,16 @@ impl Rgba {
     }
 }
 
+/// A decoded `*_drawmode` blend word — how a paired color composites over
+/// what's beneath it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Drawmode {
+    /// 0 normal, 1 additive, 2 dodge, 3 multiply, 4 overlay, 254 HSV adjust.
+    pub blend: u8,
+    /// 0.0–1.0 (clamp for safety; the encoding allows out-of-range words).
+    pub alpha: f32,
+}
+
 /// The `[color theme]` section: raw ints by key.
 #[derive(Clone, Debug, Default)]
 pub struct Palette {
@@ -76,6 +86,18 @@ impl Palette {
     /// COLORREF-decoded color for a key.
     pub fn color(&self, key: &str) -> Option<Rgba> {
         self.int(key).map(Rgba::from_colorref)
+    }
+
+    /// Decoded `*_drawmode` / `*dm` blend word for a key (per
+    /// `ReaperTheme_Combiner.lua`): low byte = blend mode (0 normal, 1 add,
+    /// 2 dodge, 3 multiply, 4 overlay, 254 HSV adjust), alpha =
+    /// `(((n >> 8) & 0x3ff) - 0x200) / 256`.
+    pub fn drawmode(&self, key: &str) -> Option<Drawmode> {
+        let n = self.int(key)? as u32;
+        Some(Drawmode {
+            blend: (n & 0xff) as u8,
+            alpha: ((((n >> 8) & 0x3ff) as f32) - 512.0) / 256.0,
+        })
     }
 
     /// Number of parsed entries.

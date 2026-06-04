@@ -21,7 +21,7 @@ pub mod rtconfig;
 pub mod walter;
 
 pub use images::{ImageCatalog, Slice3};
-pub use palette::{Palette, Rgba};
+pub use palette::{Drawmode, Palette, Rgba};
 pub use rtconfig::{RtConfig, ThemeParamDef};
 
 /// Re-export of the image crate (consumers compose slices without adding the

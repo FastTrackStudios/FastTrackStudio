@@ -317,6 +317,9 @@ pub struct Theme {
     /// context's layout at the renderer's *actual* px size, the way REAPER
     /// re-runs WALTER on resize. `None` = anchor-resolved baked layouts only.
     pub engine: Option<super::mcp::LayoutEngine>,
+    /// The arrange-view context — ruler/grid/lane/item colours (REAPER themes
+    /// these purely through the palette; no WALTER).
+    pub arrange: super::arrange::ArrangeTheme,
 }
 
 impl Default for Theme {
@@ -354,6 +357,7 @@ impl Theme {
             mcp: McpTheme::fts_default(),
             tcp: McpTheme::fts_default_tcp(),
             engine: None,
+            arrange: super::arrange::ArrangeTheme::fts_default(),
         }
     }
 

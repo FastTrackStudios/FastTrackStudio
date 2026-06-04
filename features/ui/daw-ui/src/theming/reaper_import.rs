@@ -171,6 +171,78 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         theme.engine = Some(make_layout_engine(rt, scale, dpi_folder.clone()));
     }
 
+    // ── arrange context ──
+    // REAPER themes the arrange view + time ruler purely through palette
+    // keys (no WALTER). Drawmode words (`*dm`/`*_drawmode`) carry the line
+    // alpha — pre-applied here so renderers just paint the colour.
+    {
+        let with_dm = |key: &str, dm_key: &str| -> Option<Color> {
+            let c = pal(key)?;
+            let a = rt
+                .palette
+                .drawmode(dm_key)
+                .map(|d| d.alpha.clamp(0.0, 1.0))
+                .unwrap_or(1.0);
+            Some(c.with_alpha((a * 255.0).round() as u8))
+        };
+        let ar = &mut theme.arrange;
+        let mut set = |dst: &mut Color, v: Option<Color>| {
+            if let Some(c) = v {
+                *dst = c;
+            }
+        };
+        set(&mut ar.bg, pal("col_arrangebg"));
+        set(&mut ar.empty_bg, pal("col_tracklistbg"));
+        set(&mut ar.row_bg[0], pal("col_tr1_bg"));
+        set(&mut ar.row_bg[1], pal("col_tr2_bg"));
+        set(&mut ar.row_divider[0], pal("col_tr1_divline"));
+        set(&mut ar.row_divider[1], pal("col_tr2_divline"));
+        set(
+            &mut ar.grid_measure,
+            with_dm("col_gridlines2", "col_gridlines2dm"),
+        );
+        set(
+            &mut ar.grid_beat,
+            with_dm("col_gridlines3", "col_gridlines3dm"),
+        );
+        set(
+            &mut ar.grid_sub,
+            with_dm("col_gridlines", "col_gridlines1dm"),
+        );
+        set(&mut ar.ruler_bg, pal("col_tl_bg"));
+        set(&mut ar.ruler_fg, pal("col_tl_fg"));
+        set(&mut ar.ruler_fg2, pal("col_tl_fg2"));
+        set(&mut ar.ruler_sel_bg, pal("col_tl_bgsel"));
+        set(&mut ar.ruler_loop_bg, pal("col_tl_bgsel2"));
+        set(&mut ar.edit_cursor, pal("col_cursor"));
+        set(
+            &mut ar.play_cursor,
+            with_dm("playcursor_color", "playcursor_drawmode"),
+        );
+        set(&mut ar.item_bg, pal("col_mi_bg"));
+        set(&mut ar.item_label, pal("col_mi_label"));
+        set(&mut ar.item_label_sel, pal("col_mi_label_sel"));
+        set(&mut ar.item_edge, pal("col_peaksedge"));
+        set(&mut ar.peaks[0], pal("col_tr1_peaks"));
+        set(&mut ar.peaks[1], pal("col_tr2_peaks"));
+        set(&mut ar.item_bg_sel[0], pal("col_tr1_itembgsel"));
+        set(&mut ar.item_bg_sel[1], pal("col_tr2_itembgsel"));
+        set(&mut ar.marker, pal("marker"));
+        set(&mut ar.marker_lane_bg, pal("marker_lane_bg"));
+        set(&mut ar.marker_lane_text, pal("marker_lane_text"));
+        set(&mut ar.region, pal("region"));
+        set(&mut ar.region_lane_bg, pal("region_lane_bg"));
+        set(&mut ar.region_lane_text, pal("region_lane_text"));
+        set(
+            &mut ar.sel_fill,
+            with_dm("areasel_fill", "areasel_drawmode"),
+        );
+        set(
+            &mut ar.marquee_fill,
+            with_dm("marquee_fill", "marquee_drawmode"),
+        );
+    }
+
     // ── define_parameter knobs ──
     // Imported knobs are appended after the FTS ones; same-name knobs from
     // the theme replace ours.
@@ -892,6 +964,58 @@ mod tests {
         // Name bar pinned to the bottom, spanning the strip.
         assert!((a.label.ts - 1.0).abs() < 0.01 && (a.label.bs - 1.0).abs() < 0.01);
         assert_eq!(a.label.w, 88.0);
+    }
+}
+
+#[cfg(test)]
+mod arrange_tests {
+    use super::*;
+
+    #[test]
+    fn maps_anti_theme_arrange_palette() {
+        let dir = std::env::var("REAPER_ANTITHEME_DIR").unwrap_or_else(|_| {
+            "/home/cody/Development/FastTrackStudio/reaper-theme/extracted/antitheme".to_string()
+        });
+        let Ok(rt) = ReaperTheme::load_dir(&dir) else {
+            eprintln!("anti-theme not found — skipping");
+            return;
+        };
+        let ar = theme_from_reaper(&rt).arrange;
+
+        // col_tl_bg = 3355443 = 0x333333; col_tl_fg = 7631988 = 0x747474.
+        assert_eq!(
+            (ar.ruler_bg.r, ar.ruler_bg.g, ar.ruler_bg.b),
+            (0x33, 0x33, 0x33)
+        );
+        assert_eq!(
+            (ar.ruler_fg.r, ar.ruler_fg.g, ar.ruler_fg.b),
+            (0x74, 0x74, 0x74)
+        );
+
+        // Alternating rows: col_tr1_bg = 0x424242, col_tr2_bg = 0x454545.
+        assert_eq!(ar.row_bg[0].r, 0x42);
+        assert_eq!(ar.row_bg[1].r, 0x45);
+        assert_eq!(ar.bg.r, 0x45); // col_arrangebg = 0x454545
+
+        // Grid lines: black with the drawmode alpha applied.
+        // col_gridlines2dm = 180224 = 0x2C000 → (0x2C0-0x200)/256 = 0.75.
+        assert_eq!(
+            (ar.grid_measure.r, ar.grid_measure.g, ar.grid_measure.b),
+            (0, 0, 0)
+        );
+        assert_eq!(ar.grid_measure.a, 191); // 0.75 * 255 rounded
+        // col_gridlines1dm = 153856 = 0x25900 → (0x259-0x200)/256 ≈ 0.348.
+        assert_eq!(ar.grid_sub.a, 89);
+
+        // playcursor_drawmode = 163840 = 0x28000 → 0.5 alpha.
+        assert_eq!(ar.play_cursor.a, 128);
+
+        // Items + markers present.
+        assert_eq!(
+            (ar.item_bg.r, ar.item_bg.g, ar.item_bg.b),
+            (0x84, 0x84, 0x84)
+        );
+        assert_ne!(ar.marker, ar.region);
     }
 }
 
