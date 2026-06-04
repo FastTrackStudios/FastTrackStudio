@@ -128,31 +128,6 @@ moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7
 moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
-# Dioxus: FTS fork (codywright/dioxus) — must match daw exactly so the
-# reaper → daw-reaper-dioxus → patched-dioxus graph resolves one copy.
-dioxus = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus" }
-dioxus-asset-resolver = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-asset-resolver" }
-dioxus-cli-config = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-cli-config" }
-dioxus-config-macros = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-config-macros" }
-dioxus-core = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-core" }
-dioxus-core-macro = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-core-macro" }
-dioxus-core-types = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-core-types" }
-dioxus-devtools = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-devtools" }
-dioxus-devtools-types = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-devtools-types" }
-dioxus-document = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-document" }
-dioxus-history = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-history" }
-dioxus-hooks = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-hooks" }
-dioxus-html = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-html" }
-dioxus-html-internal-macro = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-html-internal-macro" }
-dioxus-rsx = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-rsx" }
-dioxus-signals = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-signals" }
-dioxus-stores = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-stores" }
-dioxus-stores-macro = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "dioxus-stores-macro" }
-generational-box = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "generational-box" }
-manganis = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "manganis" }
-manganis-core = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "manganis-core" }
-manganis-macro = { git = "https://codeberg.org/FastTrackStudios/dioxus", rev = "2a776101ae2544244c296734561d71bc0ebb46a6", package = "manganis-macro" }
-
 moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
