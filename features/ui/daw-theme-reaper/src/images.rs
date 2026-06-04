@@ -339,12 +339,15 @@ pub fn strip_markers(img: RgbaImage) -> Sliced {
         n
     };
 
-    // A pink run on a line whose corners are *not* pink marks the STRETCH
-    // zone instead of the fixed margins (the SDK's scrollbar/dropdown
+    // A pink run on a line whose corners are *completely unmarked* marks
+    // the STRETCH zone instead of the fixed margins (the SDK's scrollbar
     // convention: "the pink sections determine how each slice will be
     // stretched; the areas delimited by the pink color will not be
-    // stretched"). `mcp_recinput` is the worked example: a short pink run
-    // before the dropdown arrow stretches the text area and pins the arrow.
+    // stretched" — `scrollbar.png` is the only corpus image using it).
+    // Corners count as anchored when they hold *either* marker colour:
+    // yellow corners accompany pink runs on ordinary fixed-margin art
+    // (`tcp_labelBlock_bg` = `YPPP…`, `mcp_recinput` = `YPP…`), so testing
+    // pink-only mis-routes them here and warps the fixed caps.
     // Returns the run as `(offset, len)` in content coordinates.
     let interior_run = |horiz: bool, idx: u32| -> Option<(u32, u32)> {
         let span: Vec<u32> = if horiz {
@@ -370,8 +373,8 @@ pub fn strip_markers(img: RgbaImage) -> Sliced {
     // (top line left-anchored, bottom line right-anchored; a single line
     // may carry both); a non-anchored run marks the stretch zone.
     if top {
-        let anchored_l = is_pink(*img.get_pixel(0, 0));
-        let anchored_r = is_pink(*img.get_pixel(w - 1, 0));
+        let anchored_l = is_marker(*img.get_pixel(0, 0));
+        let anchored_r = is_marker(*img.get_pixel(w - 1, 0));
         if anchored_l {
             m.fixed_left = run_from_start(true, 0);
         }
@@ -387,8 +390,8 @@ pub fn strip_markers(img: RgbaImage) -> Sliced {
         }
     }
     if bottom {
-        let anchored_r = is_pink(*img.get_pixel(w - 1, h - 1));
-        let anchored_l = is_pink(*img.get_pixel(0, h - 1));
+        let anchored_r = is_marker(*img.get_pixel(w - 1, h - 1));
+        let anchored_l = is_marker(*img.get_pixel(0, h - 1));
         if anchored_r {
             m.fixed_right = run_from_end(true, h - 1);
         }
@@ -406,8 +409,8 @@ pub fn strip_markers(img: RgbaImage) -> Sliced {
     }
     // Vertical regions: left col top-anchored, right col bottom-anchored.
     if left {
-        let anchored_t = is_pink(*img.get_pixel(0, 0));
-        let anchored_b = is_pink(*img.get_pixel(0, h - 1));
+        let anchored_t = is_marker(*img.get_pixel(0, 0));
+        let anchored_b = is_marker(*img.get_pixel(0, h - 1));
         if anchored_t {
             m.fixed_top = run_from_start(false, 0);
         }
@@ -423,8 +426,8 @@ pub fn strip_markers(img: RgbaImage) -> Sliced {
         }
     }
     if right {
-        let anchored_b = is_pink(*img.get_pixel(w - 1, h - 1));
-        let anchored_t = is_pink(*img.get_pixel(w - 1, 0));
+        let anchored_b = is_marker(*img.get_pixel(w - 1, h - 1));
+        let anchored_t = is_marker(*img.get_pixel(w - 1, 0));
         if anchored_b {
             m.fixed_bottom = run_from_end(false, w - 1);
         }
@@ -546,4 +549,48 @@ mod tests {
     const PINK_FREE_RED: Rgba<u8> = Rgba([200, 10, 10, 255]);
     const PINK_FREE_GREEN: Rgba<u8> = Rgba([10, 200, 10, 255]);
     const PINK_FREE_BLUE: Rgba<u8> = Rgba([10, 10, 200, 255]);
+}
+
+#[cfg(test)]
+mod marker_semantics_tests {
+    use super::*;
+
+    /// `tcp_labelBlock_bg` (`YPPP…` top, `…PPPYYY` bottom): yellow-anchored
+    /// pink runs are FIXED margins — the capsule's rounded caps must not
+    /// stretch (a pink-only corner test warped the left cap).
+    #[test]
+    fn yellow_anchored_runs_are_fixed_margins() {
+        let Ok(theme) = crate::ReaperTheme::load_dir(
+            "/home/cody/Development/FastTrackStudio/reaper-theme/extracted/antitheme",
+        ) else {
+            eprintln!("anti-theme not found — skipping");
+            return;
+        };
+        let cat = &theme.images;
+        let s = cat.load("tcp_labelBlock_bg").expect("labelBlock loads");
+        assert_eq!(s.markers.fixed_left, 12, "left cap fixed (12P run)");
+        assert_eq!(s.markers.fixed_right, 12, "right cap fixed (P run + Y)");
+
+        // `mcp_recinput`: fixed margins pin the dropdown arrow (it lives in
+        // the bottom-right fixed region) — only the small text gap stretches.
+        let s = cat.load("mcp_recinput").expect("recinput loads");
+        assert_eq!(s.markers.fixed_left, 2);
+        assert_eq!(s.markers.fixed_right, 18);
+        assert!(s.markers.fixed_bottom >= 18);
+    }
+
+    /// Completely unmarked corners + an interior pink run = the SDK's
+    /// scrollbar stretch-zone convention: the run stretches, the rest fixes.
+    #[test]
+    fn unmarked_corner_interior_run_is_stretch_zone() {
+        // 12x4: top line with pink at x=4..6 only, corners empty.
+        let mut img = RgbaImage::from_pixel(12, 4, image::Rgba([10, 10, 10, 255]));
+        for x in 4..7 {
+            img.put_pixel(x, 0, image::Rgba([255, 0, 255, 255]));
+        }
+        let s = strip_markers(img);
+        // Content is 12 wide (no left/right lines), 3 tall (top stripped).
+        assert_eq!(s.markers.fixed_left, 4);
+        assert_eq!(s.markers.fixed_right, 12 - (4 + 3));
+    }
 }
