@@ -15,6 +15,7 @@ members = [
     "features/backends/logic/dawfile-logic",
     "features/backends/dawproject/dawfile-dawproject",
     "features/ui/daw-ui",
+    "features/ui/daw-theme-reaper",
     "crates/daw-test-macro",
     "features/backends/reaper/reaper-launcher",
     "features/audio/daw-allocator",

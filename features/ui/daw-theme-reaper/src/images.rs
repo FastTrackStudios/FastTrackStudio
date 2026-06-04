@@ -1,0 +1,355 @@
+//! Theme image catalog + atlas slicers.
+//!
+//! REAPER theme images encode geometry with **pink `RGB(255,0,255)` marker
+//! lines** along the 1px image edges (see `reaper-theme/docs/theme-images.md`
+//! §3, verified against the Anti-Theme):
+//!
+//! - the **top** edge line carries a left-anchored pink run = the *fixed left*
+//!   region; the **bottom** edge a right-anchored run = *fixed right*;
+//! - the **left** edge a top-anchored run = *fixed top*; the **right** edge a
+//!   bottom-anchored run = *fixed bottom* (a single line may carry both runs);
+//! - marker lines are not part of the rendered content and are stripped;
+//! - yellow `RGB(255,255,0)` marks outer extents (treated as marker too).
+//!
+//! 3-slice buttons are `normal | mouseover | pressed` left→right; with a
+//! marker ring the content width is `(w − 2)` (e.g. Anti-Theme `mcp_io`
+//! 62×34 → 3 × 20×32 states).
+
+use crate::ThemeError;
+use image::{GenericImageView, RgbaImage};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+/// Pink/yellow marker detection.
+fn is_marker(px: image::Rgba<u8>) -> bool {
+    let [r, g, b, _] = px.0;
+    (r == 255 && g == 0 && b == 255) || (r == 255 && g == 255 && b == 0)
+}
+
+/// Stretch-geometry margins decoded from the pink marker lines (px, relative
+/// to the *content* image, i.e. after marker lines are stripped).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Markers {
+    pub fixed_left: u32,
+    pub fixed_top: u32,
+    pub fixed_right: u32,
+    pub fixed_bottom: u32,
+}
+
+/// An image with its marker lines stripped + decoded margins.
+#[derive(Clone, Debug)]
+pub struct Sliced {
+    pub image: RgbaImage,
+    pub markers: Markers,
+}
+
+/// A 3-slice button: normal / mouseover / pressed.
+#[derive(Clone, Debug)]
+pub struct Slice3 {
+    pub normal: RgbaImage,
+    pub hover: RgbaImage,
+    pub pressed: RgbaImage,
+}
+
+/// The theme folder's PNG vocabulary, by image name (file stem).
+pub struct ImageCatalog {
+    dir: PathBuf,
+    names: HashMap<String, PathBuf>,
+}
+
+impl ImageCatalog {
+    /// Scan a theme image folder (non-recursive; per-DPI subfolders are a
+    /// later phase).
+    pub fn scan(dir: &Path) -> Result<Self, ThemeError> {
+        let mut names = HashMap::new();
+        let entries = std::fs::read_dir(dir).map_err(|source| ThemeError::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                names.insert(stem.to_string(), path);
+            }
+        }
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            names,
+        })
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    pub fn has(&self, name: &str) -> bool {
+        self.names.contains_key(name)
+    }
+
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.names.keys().map(|s| s.as_str())
+    }
+
+    /// Decode an image by name (raw, markers included).
+    pub fn load_raw(&self, name: &str) -> Result<RgbaImage, ThemeError> {
+        let path = self
+            .names
+            .get(name)
+            .ok_or_else(|| ThemeError::Io {
+                path: self.dir.join(format!("{name}.png")),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "no such theme image"),
+            })?
+            .clone();
+        let img = image::open(&path)
+            .map_err(|source| ThemeError::Image { path, source })?
+            .to_rgba8();
+        Ok(img)
+    }
+
+    /// Decode an image and strip/decode its pink marker lines.
+    pub fn load(&self, name: &str) -> Result<Sliced, ThemeError> {
+        Ok(strip_markers(self.load_raw(name)?))
+    }
+
+    /// Slice a 3-state button image (`normal|hover|pressed` left→right).
+    pub fn button3(&self, name: &str) -> Result<Slice3, ThemeError> {
+        let sliced = self.load(name)?;
+        let img = sliced.image;
+        let (w, h) = img.dimensions();
+        if w < 3 || w % 3 != 0 {
+            return Err(ThemeError::BadGeometry {
+                path: self.dir.join(format!("{name}.png")),
+                geometry: "3-slice button",
+                width: w,
+                height: h,
+            });
+        }
+        let sw = w / 3;
+        let crop = |i: u32| img.view(i * sw, 0, sw, h).to_image();
+        Ok(Slice3 {
+            normal: crop(0),
+            hover: crop(1),
+            pressed: crop(2),
+        })
+    }
+
+    /// Encode an RGBA image back to PNG bytes (for data-URI delivery).
+    pub fn encode_png(img: &RgbaImage) -> Vec<u8> {
+        let mut out = std::io::Cursor::new(Vec::new());
+        // Encoding an in-memory RGBA image to PNG cannot fail.
+        image::write_buffer_with_format(
+            &mut out,
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .expect("in-memory png encode");
+        out.into_inner()
+    }
+}
+
+/// Detect + strip pink/yellow marker edge lines, decoding the fixed-region
+/// margins they describe.
+pub fn strip_markers(img: RgbaImage) -> Sliced {
+    let (w, h) = img.dimensions();
+    if w < 3 || h < 3 {
+        return Sliced {
+            image: img,
+            markers: Markers::default(),
+        };
+    }
+
+    // An edge is a marker line iff its *interior* (corners excluded) holds
+    // marker pixels, or it owns an *isolated* marker corner — one whose
+    // neighbour along the perpendicular edge is not a marker (otherwise the
+    // corner belongs to that perpendicular line's run). Verified against the
+    // Anti-Theme: `mcp_volbg` (full ring with runs), `mcp_volthumb` (right
+    // line only; its corners are the line's own run ends), `mcp_io` (left
+    // run + a lone lower-right corner marking bottom+right).
+    let mk = |x: u32, y: u32| is_marker(*img.get_pixel(x, y));
+    let interior_h = |y: u32| (1..w - 1).any(|x| mk(x, y));
+    let interior_v = |x: u32| (1..h - 1).any(|y| mk(x, y));
+    // corner (x,y) counts toward a horizontal edge iff not part of a vertical run.
+    let corner_owns_h = |x: u32, y: u32| mk(x, y) && !mk(x, if y == 0 { 1 } else { h - 2 });
+    let corner_owns_v = |x: u32, y: u32| mk(x, y) && !mk(if x == 0 { 1 } else { w - 2 }, y);
+
+    let top = interior_h(0) || corner_owns_h(0, 0) || corner_owns_h(w - 1, 0);
+    let bottom = interior_h(h - 1) || corner_owns_h(0, h - 1) || corner_owns_h(w - 1, h - 1);
+    let left = interior_v(0) || corner_owns_v(0, 0) || corner_owns_v(0, h - 1);
+    let right = interior_v(w - 1) || corner_owns_v(w - 1, 0) || corner_owns_v(w - 1, h - 1);
+
+    // Content rect after stripping marker lines.
+    let cx = u32::from(left);
+    let cy = u32::from(top);
+    let cw = w - cx - u32::from(right);
+    let ch = h - cy - u32::from(bottom);
+
+    // Run lengths measured over the content span (corner pixels excluded).
+    let run_from_start = |horiz: bool, idx: u32| -> u32 {
+        let span = if horiz { cx..cx + cw } else { cy..cy + ch };
+        let mut n = 0;
+        for i in span {
+            let px = if horiz {
+                img.get_pixel(i, idx)
+            } else {
+                img.get_pixel(idx, i)
+            };
+            if is_marker(*px) {
+                n += 1;
+            } else {
+                break;
+            }
+        }
+        n
+    };
+    let run_from_end = |horiz: bool, idx: u32| -> u32 {
+        let span = if horiz { cx..cx + cw } else { cy..cy + ch };
+        let mut n = 0;
+        for i in span.rev() {
+            let px = if horiz {
+                img.get_pixel(i, idx)
+            } else {
+                img.get_pixel(idx, i)
+            };
+            if is_marker(*px) {
+                n += 1;
+            } else {
+                break;
+            }
+        }
+        n
+    };
+
+    let mut m = Markers::default();
+    // Horizontal fixed regions: top line (left-anchored), bottom line
+    // (right-anchored); a single present line may carry both runs.
+    if top {
+        m.fixed_left = run_from_start(true, 0);
+        if !bottom {
+            m.fixed_right = run_from_end(true, 0);
+        }
+    }
+    if bottom {
+        m.fixed_right = run_from_end(true, h - 1);
+        if !top {
+            m.fixed_left = run_from_start(true, h - 1);
+        }
+    }
+    // Vertical fixed regions: left col (top-anchored), right col
+    // (bottom-anchored); single line may carry both.
+    if left {
+        m.fixed_top = run_from_start(false, 0);
+        if !right {
+            m.fixed_bottom = run_from_end(false, 0);
+        }
+    }
+    if right {
+        m.fixed_bottom = run_from_end(false, w - 1);
+        if !left {
+            m.fixed_top = run_from_start(false, w - 1);
+        }
+    }
+
+    let content = img.view(cx, cy, cw, ch).to_image();
+    Sliced {
+        image: content,
+        markers: m,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgba;
+
+    const PINK: Rgba<u8> = Rgba([255, 0, 255, 255]);
+    const GREY: Rgba<u8> = Rgba([40, 40, 40, 255]);
+
+    fn img(w: u32, h: u32) -> RgbaImage {
+        RgbaImage::from_pixel(w, h, GREY)
+    }
+
+    #[test]
+    fn no_markers_passthrough() {
+        let s = strip_markers(img(60, 20));
+        assert_eq!(s.image.dimensions(), (60, 20));
+        assert_eq!(s.markers, Markers::default());
+    }
+
+    #[test]
+    fn full_ring_margins_decode() {
+        // Mimic mcp_volbg: 26×22 ring; top run 12 from left, bottom run 12
+        // from right, left run 10 from top, right run 10 from bottom.
+        let mut i = img(26, 22);
+        for x in 0..12 {
+            i.put_pixel(x, 0, PINK);
+        }
+        for x in 14..26 {
+            i.put_pixel(x, 21, PINK);
+        }
+        for y in 0..10 {
+            i.put_pixel(0, y, PINK);
+        }
+        for y in 12..22 {
+            i.put_pixel(25, y, PINK);
+        }
+        let s = strip_markers(i);
+        assert_eq!(s.image.dimensions(), (24, 20));
+        assert_eq!(
+            s.markers,
+            Markers {
+                // Runs measured over the content span: corner pixel excluded.
+                fixed_left: 11,
+                fixed_right: 11,
+                fixed_top: 9,
+                fixed_bottom: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn single_right_line_carries_both_runs() {
+        // Mimic mcp_volthumb: only the right column is a marker line, with
+        // top- and bottom-anchored runs of 5.
+        let mut i = img(24, 53);
+        for y in 0..5 {
+            i.put_pixel(23, y, PINK);
+        }
+        for y in 48..53 {
+            i.put_pixel(23, y, PINK);
+        }
+        let s = strip_markers(i);
+        assert_eq!(s.image.dimensions(), (23, 53));
+        assert_eq!(s.markers.fixed_top, 5);
+        assert_eq!(s.markers.fixed_bottom, 5);
+        assert_eq!(s.markers.fixed_left, 0);
+    }
+
+    #[test]
+    fn button3_plain_thirds() {
+        let mut i = img(60, 20);
+        // Distinguish the states by a corner pixel each.
+        i.put_pixel(0, 5, PINK_FREE_RED);
+        i.put_pixel(20, 5, PINK_FREE_GREEN);
+        i.put_pixel(40, 5, PINK_FREE_BLUE);
+        let dir = std::env::temp_dir().join("daw-theme-reaper-test-btn");
+        std::fs::create_dir_all(&dir).unwrap();
+        i.save(dir.join("btn.png")).unwrap();
+        let cat = ImageCatalog::scan(&dir).unwrap();
+        let s = cat.button3("btn").unwrap();
+        assert_eq!(s.normal.dimensions(), (20, 20));
+        assert_eq!(*s.normal.get_pixel(0, 5), PINK_FREE_RED);
+        assert_eq!(*s.hover.get_pixel(0, 5), PINK_FREE_GREEN);
+        assert_eq!(*s.pressed.get_pixel(0, 5), PINK_FREE_BLUE);
+    }
+
+    const PINK_FREE_RED: Rgba<u8> = Rgba([200, 10, 10, 255]);
+    const PINK_FREE_GREEN: Rgba<u8> = Rgba([10, 200, 10, 255]);
+    const PINK_FREE_BLUE: Rgba<u8> = Rgba([10, 10, 200, 255]);
+}

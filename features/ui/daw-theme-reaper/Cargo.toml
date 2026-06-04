@@ -1,0 +1,14 @@
+[package]
+name = "daw-theme-reaper"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "REAPER theme importer: .ReaperTheme palette, rtconfig globals/params, image-atlas slicing"
+
+[dependencies]
+# PNG decode + slicing for the theme image atlases.
+image = { version = "0.25", default-features = false, features = ["png"] }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

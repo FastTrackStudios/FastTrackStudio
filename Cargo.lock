@@ -2488,6 +2488,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-theme-reaper"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "daw-ui"
 version = "0.1.0"
 dependencies = [
