@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 
 use daw::rpc::{Caller, Daw};
 use daw_reaper::{LocalCaller, Reaper};
-use eyre::{Result, bail};
+use eyre::{bail, Result};
 use session::{
-    SetlistServiceClient, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
     serve_setlist_service, setlist_service_service_descriptor, song_service_service_descriptor,
+    SetlistServiceClient, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
 };
 use session_ui::Session;
 

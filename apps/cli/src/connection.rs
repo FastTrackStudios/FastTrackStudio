@@ -13,7 +13,7 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use eyre::{Result, WrapErr, eyre};
+use eyre::{eyre, Result, WrapErr};
 
 /// Pick a socket and open a Vox connection against it.
 ///
