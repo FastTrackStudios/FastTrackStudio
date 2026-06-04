@@ -115,6 +115,8 @@ pub struct TrackView {
     pub mute: Signal<bool>,
     pub solo: Signal<bool>,
     pub record_arm: Signal<bool>,
+    /// Polarity/phase invert.
+    pub phase: Signal<bool>,
     /// Track selection (drives the selected row/strip styling).
     pub selected: Signal<bool>,
 
@@ -132,6 +134,8 @@ pub struct TrackView {
     // ── routing flags (for the mixer routing button) ──
     pub sends: bool,
     pub receives: bool,
+    /// Master/parent send enabled (folder routing).
+    pub parent_send: bool,
 
     // ── hierarchy + layout ──
     /// Absolute folder depth: 0 = top level, 1 = inside one folder, etc.
@@ -161,6 +165,7 @@ impl TrackView {
             mute: Signal::new(false),
             solo: Signal::new(false),
             record_arm: Signal::new(false),
+            phase: Signal::new(false),
             selected: Signal::new(false),
             level: Signal::new(0.0),
             level_right: Signal::new(0.0),
@@ -168,6 +173,7 @@ impl TrackView {
             stereo: false,
             sends: false,
             receives: false,
+            parent_send: true,
             depth: 0,
             is_folder: false,
             height: DEFAULT_LANE_HEIGHT,

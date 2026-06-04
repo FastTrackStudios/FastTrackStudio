@@ -396,7 +396,7 @@ pub fn McpStrip(
                             pos = l.io.css_position(nat),
                         ),
                         RoutingButton {
-                            parent_send: true,
+                            parent_send: track.parent_send,
                             sends: track.sends,
                             receives: track.receives,
                             disabled,
@@ -409,7 +409,16 @@ pub fn McpStrip(
             // mcp.phase / mcp.fx / mcp.fxbyp / mcp.env / mcp.folder — inert
             // until the view-model carries their state; themed + positionable.
             if !l.phase.is_hidden() {
-                McpFlag { pos: l.phase.css_position(nat), box_w: l.phase.w, box_h: l.phase.h, glyph: "ø", title: "Phase", skin: skin.phase.as_ref().map(|b| b.off.normal.clone()) }
+                McpStateFlag {
+                    pos: l.phase.css_position(nat),
+                    box_w: l.phase.w,
+                    box_h: l.phase.h,
+                    glyph: "ø",
+                    title: "Phase invert",
+                    active: track.phase,
+                    skin: skin.phase.clone(),
+                    disabled,
+                }
             }
             if !l.fx.is_hidden() {
                 McpFlag { pos: l.fx.css_position(nat), box_w: l.fx.w, box_h: l.fx.h, glyph: "FX", title: "FX chain", skin: skin.fx.as_ref().map(|b| b.off.normal.clone()) }
@@ -823,6 +832,61 @@ fn McpFlag(
                 fg = tk.text_faint.css(),
                 border = tk.border.css(),
             ),
+            "{glyph}"
+        }
+    }
+}
+
+/// A stateful, image-skinned flag (phase invert): the on/off atlas states
+/// follow the bound signal, clicking toggles it. Vector chip fallback.
+#[component]
+fn McpStateFlag(
+    pos: String,
+    box_w: f32,
+    box_h: f32,
+    glyph: &'static str,
+    title: &'static str,
+    active: Signal<bool>,
+    #[props(default)] skin: Option<crate::theming::ButtonSkin>,
+    #[props(default)] disabled: bool,
+) -> Element {
+    let tk = use_theme().theme.tokens;
+    let on = active();
+    if let Some(skin) = skin {
+        let states = if on { &skin.on } else { &skin.off };
+        let fill = skin_button(&states.normal, box_w, box_h);
+        return rsx! {
+            div {
+                title,
+                style: format!("{pos} cursor:pointer;"),
+                onclick: move |_| {
+                    if disabled { return; }
+                    let next = !active();
+                    active.set(next);
+                },
+                {fill}
+            }
+        };
+    }
+    let (bg, fg) = if on {
+        (tk.accent.css(), tk.accent.on().css())
+    } else {
+        (tk.surface_sunken.css(), tk.text_faint.css())
+    };
+    rsx! {
+        div {
+            title,
+            style: format!(
+                "{pos} display:flex; align-items:center; justify-content:center; \
+                 font-size:9px; font-weight:800; border-radius:4px; \
+                 background:{bg}; color:{fg}; border:1px solid {bd}; cursor:pointer;",
+                bd = tk.border.css(),
+            ),
+            onclick: move |_| {
+                if disabled { return; }
+                let next = !active();
+                active.set(next);
+            },
             "{glyph}"
         }
     }

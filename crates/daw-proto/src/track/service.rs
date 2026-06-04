@@ -64,6 +64,14 @@ pub trait Tracks {
 
     fn set_pan(&self, project: ProjectContext, track: TrackRef, pan: f64) -> DawResult<()>;
 
+    /// Set polarity/phase inversion (flip the signal's sign).
+    fn set_phase_inverted(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        inverted: bool,
+    ) -> DawResult<()>;
+
     // ── Selection ───────────────────────────────────────────────────
 
     fn set_selected(

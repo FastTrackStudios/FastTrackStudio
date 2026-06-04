@@ -24,6 +24,7 @@ use std::time::Duration;
 use daw::service::item::{Item, ItemRef, Items};
 use daw::service::marker::Markers as MarkersService;
 use daw::service::region::Regions as RegionsService;
+use daw::service::routing::Routing;
 use daw::service::take::Takes;
 use daw::service::tempo_map::TempoMap;
 use daw::service::transport::service::Transport;
@@ -225,6 +226,12 @@ fn App() -> Element {
                 let _ = Tracks::set_muted(&engine, ctx.clone(), tref.clone(), (t.mute)());
                 let _ = Tracks::set_soloed(&engine, ctx.clone(), tref.clone(), (t.solo)());
                 let _ = Tracks::set_armed(&engine, ctx.clone(), tref.clone(), (t.record_arm)());
+                let _ = Tracks::set_phase_inverted(
+                    &engine,
+                    ctx.clone(),
+                    tref.clone(),
+                    (t.phase)(),
+                );
                 let _ =
                     Tracks::set_volume(&engine, ctx.clone(), tref.clone(), (t.fader)() as f64);
                 let _ = Tracks::set_pan(
@@ -432,6 +439,14 @@ fn load_rpp_project(engine: &Standalone, rpp_path: &str) -> Option<BootedProject
 
     // Tracks + items (+ real REAPER peak caches for the waveforms).
     let mut tracks = build_track_views(engine, &ctx, false);
+    // Routing flags for the strip routing button: real sends/receives and
+    // the master/parent send (folder routing).
+    for (i, view) in tracks.iter_mut().enumerate() {
+        let tref = TrackRef::Index(i as u32);
+        view.sends = Routing::send_count(engine, ctx.clone(), tref.clone()) > 0;
+        view.receives = Routing::receive_count(engine, ctx.clone(), tref.clone()) > 0;
+        view.parent_send = Routing::parent_send_enabled(engine, ctx.clone(), tref);
+    }
     let mut peaks_cache: std::collections::HashMap<String, Option<Rc<ReaPeaks>>> =
         std::collections::HashMap::new();
     let mut end = 0.0f64;
@@ -668,6 +683,9 @@ fn track_to_view(id: usize, track: &Track, depth: u32, demo: bool) -> TrackView 
     view.mute.set(track.muted);
     view.solo.set(track.soloed);
     view.record_arm.set(track.armed);
+    view.phase.set(track.phase_inverted);
+    // Engine pan is bipolar (−1…1); the UI signal is normalized (0…1).
+    view.pan.set(((track.pan + 1.0) / 2.0) as f32);
     view
 }
 

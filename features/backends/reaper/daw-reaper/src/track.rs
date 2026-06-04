@@ -18,7 +18,9 @@ use daw_proto::{
     ReorderTracksBehavior as ProtoReorderTracksBehavior, Track, TrackRef,
 };
 use reaper_high::{GroupingBehavior, Project, Reaper as ReaperHigh};
-use reaper_medium::{ChunkCacheHint, GangBehavior, ReorderTracksBehavior, TrackAttributeKey};
+use reaper_medium::{
+    ChunkCacheHint, GangBehavior, ReorderTracksBehavior, TrackAttributeKey, TrackPolarity,
+};
 
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};
@@ -150,6 +152,7 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
         selected,
         volume,
         pan,
+        phase_inverted: track.phase_is_inverted(),
         parent_guid: None,
         folder_depth,
         is_folder,
@@ -236,13 +239,11 @@ pub fn set_folder_compact_on_main_thread(
         unsafe {
             ReaperHigh::get()
                 .medium_reaper()
-                .set_media_track_info_value(
-                    raw,
-                    TrackAttributeKey::FolderCompact,
-                    arrange as f64,
-                )
+                .set_media_track_info_value(raw, TrackAttributeKey::FolderCompact, arrange as f64)
                 .map_err(|err| {
-                    DawError::operation_failed(format!("set folder compact (arrange) failed: {err}"))
+                    DawError::operation_failed(format!(
+                        "set folder compact (arrange) failed: {err}"
+                    ))
                 })?;
         }
     }
@@ -428,6 +429,26 @@ impl Tracks for crate::Reaper {
     fn master(&self, project: ProjectContext) -> Option<Track> {
         let proj = resolve_project(&project)?;
         proj.master_track().ok().as_ref().map(build_track_info)
+    }
+
+    fn set_phase_inverted(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        inverted: bool,
+    ) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        t.set_phase_inverted(
+            if inverted {
+                TrackPolarity::Inverted
+            } else {
+                TrackPolarity::Normal
+            },
+            GangBehavior::DenyGang,
+            GroupingBehavior::PreventGrouping,
+        );
+        Ok(())
     }
 
     fn set_muted(&self, project: ProjectContext, track: TrackRef, muted: bool) -> DawResult<()> {

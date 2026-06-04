@@ -96,6 +96,8 @@ pub struct Track {
     pub volume: f64,
     /// Pan position (-1.0 = left, 0.0 = center, 1.0 = right)
     pub pan: f64,
+    /// Polarity/phase invert (REAPER `IPHASE`): flip the signal's sign.
+    pub phase_inverted: bool,
 
     // === Structure ===
     /// GUID of the parent folder track, if any
@@ -132,6 +134,7 @@ impl Track {
             selected: false,
             volume: 1.0,
             pan: 0.0,
+            phase_inverted: false,
             parent_guid: None,
             folder_depth: 0,
             is_folder: false,

@@ -536,6 +536,7 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
         selected,
         volume,
         pan,
+        phase_inverted: track.phase_is_inverted(),
         parent_guid: None,
         folder_depth,
         is_folder,
