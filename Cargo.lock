@@ -12527,109 +12527,109 @@ dependencies = [
 [[patch.unused]]
 name = "dioxus"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-asset-resolver"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-cli-config"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-config-macros"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-core"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-core-macro"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-core-types"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-devtools"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-devtools-types"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-document"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-history"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-hooks"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-html"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-html-internal-macro"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-rsx"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-signals"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-stores"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "dioxus-stores-macro"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "generational-box"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "manganis"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "manganis-core"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
 
 [[patch.unused]]
 name = "manganis-macro"
 version = "0.7.6"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus?rev=2a776101ae2544244c296734561d71bc0ebb46a6#2a776101ae2544244c296734561d71bc0ebb46a6"
