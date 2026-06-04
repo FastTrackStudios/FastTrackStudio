@@ -834,36 +834,52 @@ impl Item {
                     item.item_id = Some(Self::parse_int(&tokens[1])?);
                 }
             }
+            // REAPER writes the FIRST take's attributes at item level (the
+            // implicit take before any `TAKE` statement); later takes carry
+            // theirs after their `TAKE` line. These arms therefore route to
+            // the current take always, and mirror onto the item fields
+            // outside take context (compatibility with existing readers).
             "NAME" => {
                 if tokens.len() > 1 {
                     let name = Self::parse_string(&tokens[1])?;
-                    if *in_take_context {
-                        if let Some(ref mut take) = current_take {
-                            take.name = name;
-                        }
-                    } else {
-                        item.name = name;
+                    if !*in_take_context {
+                        item.name = name.clone();
+                    }
+                    if let Some(ref mut take) = current_take {
+                        take.name = name;
                     }
                 }
             }
             "VOLPAN" => {
                 if tokens.len() >= 5 {
-                    item.volpan = Some(VolPanSettings {
+                    let vp = VolPanSettings {
                         item_trim: Self::parse_float(&tokens[1])?,
                         take_pan: Self::parse_float(&tokens[2])?,
                         take_volume: Self::parse_float(&tokens[3])?,
                         take_pan_law: Self::parse_float(&tokens[4])?,
-                    });
+                    };
+                    if !*in_take_context {
+                        item.volpan = Some(vp.clone());
+                    }
+                    if let Some(ref mut take) = current_take {
+                        take.volpan = Some(vp);
+                    }
                 }
             }
             "SOFFS" => {
                 if tokens.len() > 1 {
-                    item.slip_offset = Self::parse_float(&tokens[1])?;
+                    let v = Self::parse_float(&tokens[1])?;
+                    if !*in_take_context {
+                        item.slip_offset = v;
+                    }
+                    if let Some(ref mut take) = current_take {
+                        take.slip_offset = v;
+                    }
                 }
             }
             "PLAYRATE" => {
                 if tokens.len() >= 4 {
-                    item.playrate = Some(PlayRateSettings {
+                    let pr = PlayRateSettings {
                         rate: Self::parse_float(&tokens[1])?,
                         preserve_pitch: Self::parse_bool(&tokens[2])?,
                         pitch_adjust: Self::parse_float(&tokens[3])?,
@@ -878,12 +894,24 @@ impl Item {
                         } else {
                             0.0
                         },
-                    });
+                    };
+                    if !*in_take_context {
+                        item.playrate = Some(pr.clone());
+                    }
+                    if let Some(ref mut take) = current_take {
+                        take.playrate = Some(pr);
+                    }
                 }
             }
             "CHANMODE" => {
                 if tokens.len() > 1 {
-                    item.channel_mode = ChannelMode::from(Self::parse_int(&tokens[1])?);
+                    let cm = ChannelMode::from(Self::parse_int(&tokens[1])?);
+                    if !*in_take_context {
+                        item.channel_mode = cm;
+                    }
+                    if let Some(ref mut take) = current_take {
+                        take.channel_mode = cm;
+                    }
                 }
             }
             "GUID" => {
@@ -960,37 +988,7 @@ impl Item {
                     });
                 }
             }
-            _ => {
-                if let Some(ref mut take) = current_take {
-                    match identifier {
-                        "SOFFS" if tokens.len() > 1 => {
-                            take.slip_offset = Self::parse_float(&tokens[1])?;
-                        }
-                        "PLAYRATE" if tokens.len() >= 4 => {
-                            take.playrate = Some(PlayRateSettings {
-                                rate: Self::parse_float(&tokens[1])?,
-                                preserve_pitch: Self::parse_bool(&tokens[2])?,
-                                pitch_adjust: Self::parse_float(&tokens[3])?,
-                                pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
-                                unknown_field_5: if tokens.len() > 5 {
-                                    Self::parse_int(&tokens[5])?
-                                } else {
-                                    0
-                                },
-                                unknown_field_6: if tokens.len() > 6 {
-                                    Self::parse_float(&tokens[6])?
-                                } else {
-                                    0.0
-                                },
-                            });
-                        }
-                        "CHANMODE" if tokens.len() > 1 => {
-                            take.channel_mode = ChannelMode::from(Self::parse_int(&tokens[1])?);
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            _ => {}
         }
 
         Ok(())
@@ -1788,10 +1786,11 @@ mod tests {
         // Verify takes
         assert_eq!(item.takes.len(), 4);
 
-        // First take (implicit, not selected)
+        // First take (implicit, not selected). REAPER writes the first
+        // take's attributes at item level — the implicit take inherits them.
         let take1 = &item.takes[0];
         assert!(!take1.is_selected);
-        assert_eq!(take1.name, "");
+        assert_eq!(take1.name, "01-250919_0416.wav");
         assert_eq!(take1.rec_pass, None);
         assert!(take1.source.is_some());
         let source1 = take1.source.as_ref().unwrap();
