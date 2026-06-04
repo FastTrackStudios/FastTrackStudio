@@ -493,33 +493,59 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
             .find(|n| imgs.has(n))
     };
 
-    // Build a SkinImage, pre-slicing vertical stretch bands when the art
-    // carries pink fixed margins (the "Pink Line Crush" technique: fixed
-    // caps render 1:1, only the middle band stretches/crushes).
+    // Build a SkinImage, pre-slicing a 9-patch grid when the art carries
+    // pink fixed margins (the "Pink Line Crush" technique: fixed margins
+    // render 1:1, only the unmarked bands stretch/crush).
     let skin_image = |img: &daw_theme_reaper::image::RgbaImage,
-                      fixed_top: u32,
-                      fixed_bottom: u32| {
+                      markers: &daw_theme_reaper::images::Markers| {
         use daw_theme_reaper::image::GenericImageView;
         let (w, h) = img.dimensions();
         let plain_img = |i: daw_theme_reaper::image::RgbaImage| SkinImage {
             url: ImageCatalog::data_uri(&i),
             w: i.width(),
             h: i.height(),
-            vbands: None,
+            slices: None,
         };
-        let vbands = (fixed_top + fixed_bottom > 0 && fixed_top + fixed_bottom < h).then(|| {
-            let band = |y: u32, bh: u32| plain_img(img.view(0, y, w, bh).to_image());
-            Box::new(super::mcp::VBands {
-                top: band(0, fixed_top.max(1)),
-                mid: band(fixed_top, h - fixed_top - fixed_bottom),
-                bottom: band(h - fixed_bottom.max(1), fixed_bottom.max(1)),
+        // Per-axis margins, dropped when degenerate (margins >= dimension).
+        let (ml, mr) = if markers.fixed_left + markers.fixed_right < w {
+            (markers.fixed_left, markers.fixed_right)
+        } else {
+            (0, 0)
+        };
+        let (mt, mb) = if markers.fixed_top + markers.fixed_bottom < h {
+            (markers.fixed_top, markers.fixed_bottom)
+        } else {
+            (0, 0)
+        };
+        let slices = (ml + mr + mt + mb > 0).then(|| {
+            let xs = [
+                (0, ml.max(1)),
+                (ml, w - ml - mr),
+                (w - mr.max(1), mr.max(1)),
+            ];
+            let ys = [
+                (0, mt.max(1)),
+                (mt, h - mt - mb),
+                (h - mb.max(1), mb.max(1)),
+            ];
+            let patches = ys
+                .iter()
+                .flat_map(|&(y, ph)| xs.iter().map(move |&(x, pw)| (x, y, pw, ph)))
+                .map(|(x, y, pw, ph)| plain_img(img.view(x, y, pw, ph).to_image()))
+                .collect();
+            Box::new(super::mcp::NineSlice {
+                l: ml,
+                t: mt,
+                r: mr,
+                b: mb,
+                patches,
             })
         });
         SkinImage {
             url: ImageCatalog::data_uri(img),
             w,
             h,
-            vbands,
+            slices,
         }
     };
 
@@ -538,7 +564,7 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
                 Some(o) => daw_theme_reaper::images::alpha_over(b, o),
                 None => b.clone(),
             };
-            skin_image(&img, s.markers.fixed_top, s.markers.fixed_bottom)
+            skin_image(&img, &s.markers)
         };
         Some(ButtonStateSkin {
             normal: state(&s.normal, ol.as_ref().map(|o| &o.normal)),
@@ -555,11 +581,7 @@ fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
     // A plain (marker-stripped) image, banded when pink-marked.
     let plain = |name: &str| -> Option<SkinImage> {
         let s = imgs.load(name).ok()?;
-        Some(skin_image(
-            &s.image,
-            s.markers.fixed_top,
-            s.markers.fixed_bottom,
-        ))
+        Some(skin_image(&s.image, &s.markers))
     };
     // A knob filmstrip along the fallback chain (`mcp_X` → `tcp_X` → `gen_X`
     // — knob stacks commonly ship as `tcp_*` and are shared).
@@ -707,5 +729,32 @@ mod tests {
         // Name bar pinned to the bottom, spanning the strip.
         assert!((a.label.ts - 1.0).abs() < 0.01 && (a.label.bs - 1.0).abs() < 0.01);
         assert_eq!(a.label.w, 88.0);
+    }
+}
+
+#[cfg(test)]
+mod nine_slice_tests {
+    use super::*;
+
+    #[test]
+    fn io_slices_into_patches() {
+        let dir = std::env::var("REAPER_ANTITHEME_DIR").unwrap_or_else(|_| {
+            "/home/cody/Development/FastTrackStudio/reaper-theme/extracted/antitheme".to_string()
+        });
+        let Ok(rt) = ReaperTheme::load_dir(&dir) else {
+            eprintln!("anti-theme not found — skipping");
+            return;
+        };
+        let theme = theme_from_reaper(&rt);
+        let skin = theme.mcp.skin.as_ref().unwrap();
+        let io = skin.io.as_ref().expect("io skin");
+        let n = io.normal.slices.as_ref().expect("io has pink margins");
+        assert_eq!((n.l, n.t, n.r, n.b), (0, 23, 0, 0));
+        assert_eq!(n.patches.len(), 9);
+        // top-middle patch = the fixed icon cap.
+        assert_eq!(n.patches[1].h, 23);
+        assert!(n.patches[1].w > 0);
+        // centre patch = the stretch band.
+        assert_eq!(n.patches[4].h, io.normal.h - 23);
     }
 }

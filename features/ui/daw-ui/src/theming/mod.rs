@@ -19,7 +19,7 @@ pub mod walter;
 pub use context::{ControlConfig, ThemeContext, ThemeProvider, use_theme};
 pub use mcp::{
     ButtonSkin, ButtonStateSkin, KnobSkin, McpColors, McpCustom, McpLayout, McpSkin, McpTheme,
-    SkinImage, VBands,
+    NineSlice, SkinImage,
 };
 pub use style::{ControlState, ControlVariant, KnobStyle, SliderStyle, StyleSheet, XYPadStyle};
 pub use svg_texture::SvgTexture;

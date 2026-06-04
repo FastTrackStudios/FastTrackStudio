@@ -250,21 +250,24 @@ pub struct SkinImage {
     pub url: String,
     pub w: u32,
     pub h: u32,
-    /// Vertical stretch bands from the art's pink marker lines (the "Pink
-    /// Line Crush" technique): fixed top/bottom render 1:1, only the middle
-    /// band absorbs box-height differences. `None` = uniform stretch.
-    pub vbands: Option<Box<VBands>>,
+    /// 9-slice patches from the art's pink marker lines (the "Pink Line
+    /// Crush" technique): fixed margins render 1:1, only the unmarked bands
+    /// absorb box-size differences. `None` = uniform stretch.
+    pub slices: Option<Box<NineSlice>>,
 }
 
-/// Pre-sliced vertical bands of a pink-marked image.
+/// A pink-marked image pre-cut into a 3×3 patch grid. Margins are native px;
+/// zero-sized patches (when a margin is 0) are simply absent from rendering.
 #[derive(Clone, PartialEq, Debug)]
-pub struct VBands {
-    /// Fixed top cap (native height `top.h`).
-    pub top: SkinImage,
-    /// The stretchable middle band.
-    pub mid: SkinImage,
-    /// Fixed bottom cap (native height `bottom.h`).
-    pub bottom: SkinImage,
+pub struct NineSlice {
+    /// Fixed margins: left, top, right, bottom (px).
+    pub l: u32,
+    pub t: u32,
+    pub r: u32,
+    pub b: u32,
+    /// Row-major patches: `[tl, tm, tr, ml, c, mr, bl, bm, br]` — corners
+    /// fixed both axes, edges stretch one axis, the centre stretches both.
+    pub patches: Vec<SkinImage>,
 }
 
 /// The three interaction states of one 3-slice button image.

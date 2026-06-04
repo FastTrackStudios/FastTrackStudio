@@ -186,13 +186,13 @@ pub fn McpStrip(
                 }
             }
             if !l.recmode.is_hidden() {
-                McpFlag { pos: l.recmode.css_position(nat), glyph: "REC", title: "Record mode", skin: skin.recmode.as_ref().map(|b| b.on.normal.clone()) }
+                McpFlag { pos: l.recmode.css_position(nat), box_w: l.recmode.w, box_h: l.recmode.h, glyph: "REC", title: "Record mode", skin: skin.recmode.as_ref().map(|b| b.on.normal.clone()) }
             }
             if !l.recmon.is_hidden() {
-                McpFlag { pos: l.recmon.css_position(nat), glyph: "MON", title: "Record monitoring" }
+                McpFlag { pos: l.recmon.css_position(nat), box_w: l.recmon.w, box_h: l.recmon.h, glyph: "MON", title: "Record monitoring" }
             }
             if !l.fxin.is_hidden() {
-                McpFlag { pos: l.fxin.css_position(nat), glyph: "FX", title: "Input FX", skin: skin.fxin.as_ref().map(|b| b.off.normal.clone()) }
+                McpFlag { pos: l.fxin.css_position(nat), box_w: l.fxin.w, box_h: l.fxin.h, glyph: "FX", title: "Input FX", skin: skin.fxin.as_ref().map(|b| b.off.normal.clone()) }
             }
 
             // mcp.pan — horizontal slider per `mcp.pan.fadermode` (REAPER's
@@ -223,13 +223,13 @@ pub fn McpStrip(
 
             // mcp.solo / mcp.mute / mcp.recarm
             if !l.solo.is_hidden() {
-                McpToggle { pos: l.solo.css_position(nat), active: track.solo, kind: ToggleKind::Solo, skin: skin.solo.clone(), disabled }
+                McpToggle { pos: l.solo.css_position(nat), box_w: l.solo.w, box_h: l.solo.h, active: track.solo, kind: ToggleKind::Solo, skin: skin.solo.clone(), disabled }
             }
             if !l.mute.is_hidden() {
-                McpToggle { pos: l.mute.css_position(nat), active: track.mute, kind: ToggleKind::Mute, skin: skin.mute.clone(), disabled }
+                McpToggle { pos: l.mute.css_position(nat), box_w: l.mute.w, box_h: l.mute.h, active: track.mute, kind: ToggleKind::Mute, skin: skin.mute.clone(), disabled }
             }
             if !l.recarm.is_hidden() {
-                McpToggle { pos: l.recarm.css_position(nat), active: track.record_arm, kind: ToggleKind::RecArm, skin: skin.recarm.clone(), disabled }
+                McpToggle { pos: l.recarm.css_position(nat), box_w: l.recarm.w, box_h: l.recarm.h, active: track.record_arm, kind: ToggleKind::RecArm, skin: skin.recarm.clone(), disabled }
             }
 
             // mcp.volume
@@ -285,7 +285,7 @@ pub fn McpStrip(
                             "{pos} cursor:pointer;",
                             pos = l.io.css_position(nat),
                         ),
-                        {skin_fill(&io.normal)}
+                        {skin_fill(&io.normal, l.io.w, l.io.h)}
                     }
                 } else {
                     div {
@@ -307,19 +307,19 @@ pub fn McpStrip(
             // mcp.phase / mcp.fx / mcp.fxbyp / mcp.env / mcp.folder — inert
             // until the view-model carries their state; themed + positionable.
             if !l.phase.is_hidden() {
-                McpFlag { pos: l.phase.css_position(nat), glyph: "ø", title: "Phase", skin: skin.phase.as_ref().map(|b| b.off.normal.clone()) }
+                McpFlag { pos: l.phase.css_position(nat), box_w: l.phase.w, box_h: l.phase.h, glyph: "ø", title: "Phase", skin: skin.phase.as_ref().map(|b| b.off.normal.clone()) }
             }
             if !l.fx.is_hidden() {
-                McpFlag { pos: l.fx.css_position(nat), glyph: "FX", title: "FX chain", skin: skin.fx.as_ref().map(|b| b.off.normal.clone()) }
+                McpFlag { pos: l.fx.css_position(nat), box_w: l.fx.w, box_h: l.fx.h, glyph: "FX", title: "FX chain", skin: skin.fx.as_ref().map(|b| b.off.normal.clone()) }
             }
             if !l.fxbyp.is_hidden() {
-                McpFlag { pos: l.fxbyp.css_position(nat), glyph: "BYP", title: "FX bypass", skin: skin.fxbyp.as_ref().map(|b| b.on.normal.clone()) }
+                McpFlag { pos: l.fxbyp.css_position(nat), box_w: l.fxbyp.w, box_h: l.fxbyp.h, glyph: "BYP", title: "FX bypass", skin: skin.fxbyp.as_ref().map(|b| b.on.normal.clone()) }
             }
             if !l.env.is_hidden() {
-                McpFlag { pos: l.env.css_position(nat), glyph: "ENV", title: "Envelopes", skin: skin.env.as_ref().map(|b| b.off.normal.clone()) }
+                McpFlag { pos: l.env.css_position(nat), box_w: l.env.w, box_h: l.env.h, glyph: "ENV", title: "Envelopes", skin: skin.env.as_ref().map(|b| b.off.normal.clone()) }
             }
             if !l.folder.is_hidden() {
-                McpFlag { pos: l.folder.css_position(nat), glyph: "▼", title: "Folder", skin: skin.folder.as_ref().map(|b| if track.is_folder { b.on.normal.clone() } else { b.off.normal.clone() }) }
+                McpFlag { pos: l.folder.css_position(nat), box_w: l.folder.w, box_h: l.folder.h, glyph: "▼", title: "Folder", skin: skin.folder.as_ref().map(|b| if track.is_folder { b.on.normal.clone() } else { b.off.normal.clone() }) }
             }
 
             // mcp.label — track-name footer.
@@ -443,38 +443,53 @@ fn McpKnob(
 /// three stacked bands — fixed top/bottom caps at native height, the middle
 /// band absorbing the size difference (REAPER's "Pink Line Crush") — instead
 /// of a uniform (squishing) stretch.
-fn skin_fill(img: &crate::theming::SkinImage) -> Element {
-    match &img.vbands {
-        Some(b) => rsx! {
-            div {
-                style: "position:absolute; inset:0; pointer-events:none; overflow:hidden;",
-                div {
-                    style: format!(
-                        "position:absolute; left:0; right:0; top:0; height:{h}px; \
-                         background-image:url({url}); background-size:100% 100%;",
-                        h = b.top.h,
-                        url = b.top.url,
-                    ),
+fn skin_fill(img: &crate::theming::SkinImage, box_w: f32, box_h: f32) -> Element {
+    match &img.slices {
+        Some(n) => {
+            // Patch geometry computed in px against the (fixed-size) box so
+            // the crush clamps cleanly — a negative CSS band (top+bottom
+            // exceeding the box) feeds NaN paths to the renderer.
+            let fit = |a: u32, b: u32, total: f32| -> (f32, f32) {
+                let (a, b) = (a as f32, b as f32);
+                if a + b <= total {
+                    (a, b)
+                } else if a + b > 0.0 {
+                    // Box smaller than the fixed caps: scale them down
+                    // proportionally (REAPER stretches the remainder).
+                    (a * total / (a + b), b * total / (a + b))
+                } else {
+                    (0.0, 0.0)
                 }
+            };
+            let (l, r) = fit(n.l, n.r, box_w);
+            let (t, b) = fit(n.t, n.b, box_h);
+            let mid_w = (box_w - l - r).max(0.0);
+            let mid_h = (box_h - t - b).max(0.0);
+            let cols = [(0.0, l), (l, mid_w), (box_w - r, r)];
+            let rows = [(0.0, t), (t, mid_h), (box_h - b, b)];
+            rsx! {
                 div {
-                    style: format!(
-                        "position:absolute; left:0; right:0; top:{t}px; bottom:{bo}px; \
-                         background-image:url({url}); background-size:100% 100%;",
-                        t = b.top.h,
-                        bo = b.bottom.h,
-                        url = b.mid.url,
-                    ),
-                }
-                div {
-                    style: format!(
-                        "position:absolute; left:0; right:0; bottom:0; height:{h}px; \
-                         background-image:url({url}); background-size:100% 100%;",
-                        h = b.bottom.h,
-                        url = b.bottom.url,
-                    ),
+                    style: "position:absolute; inset:0; pointer-events:none; overflow:hidden;",
+                    for (i, patch) in n.patches.iter().enumerate() {
+                        if cols[i % 3].1 >= 0.5 && rows[i / 3].1 >= 0.5 {
+                            div {
+                                key: "{i}",
+                                style: format!(
+                                    "position:absolute; left:{x:.1}px; top:{y:.1}px; \
+                                     width:{w:.1}px; height:{h:.1}px; \
+                                     background-image:url({url}); background-size:100% 100%;",
+                                    x = cols[i % 3].0,
+                                    y = rows[i / 3].0,
+                                    w = cols[i % 3].1,
+                                    h = rows[i / 3].1,
+                                    url = patch.url,
+                                ),
+                            }
+                        }
+                    }
                 }
             }
-        },
+        }
         None => rsx! {
             div {
                 style: format!(
@@ -505,6 +520,8 @@ fn flex_justify(m: &crate::theming::Margin) -> &'static str {
 #[component]
 fn McpToggle(
     pos: String,
+    box_w: f32,
+    box_h: f32,
     active: Signal<bool>,
     kind: ToggleKind,
     #[props(default)] skin: Option<crate::theming::ButtonSkin>,
@@ -533,7 +550,7 @@ fn McpToggle(
         };
         // div, not button: blitz's UA button background paints over
         // background-image.
-        let fill = skin_fill(img);
+        let fill = skin_fill(img, box_w, box_h);
         return rsx! {
             div {
                 title,
@@ -593,13 +610,15 @@ fn McpToggle(
 #[component]
 fn McpFlag(
     pos: String,
+    box_w: f32,
+    box_h: f32,
     glyph: &'static str,
     title: &'static str,
     #[props(default)] skin: Option<crate::theming::SkinImage>,
 ) -> Element {
     let tk = use_theme().theme.tokens;
     if let Some(img) = skin {
-        let fill = skin_fill(&img);
+        let fill = skin_fill(&img, box_w, box_h);
         return rsx! {
             div {
                 title,
