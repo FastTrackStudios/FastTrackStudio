@@ -108,6 +108,9 @@ pub struct Output {
     /// Attribute names in first-assignment order — WALTER's z-order for
     /// custom elements (later `set`s paint over earlier ones).
     pub set_order: Vec<String>,
+    /// `custom` declarations that carry a button image (5th arg): element
+    /// name → image name (e.g. `tcp.custom.labelBlockBg` → `tcp_labelBlock_bg`).
+    pub custom_images: std::collections::HashMap<String, String>,
 }
 
 impl Output {
@@ -396,6 +399,27 @@ impl Interp<'_> {
                 "front" => {
                     for name in &line[1..] {
                         self.out.fronts.push(name.clone());
+                    }
+                }
+                // `custom <name> <text_label> <command_id> <accessibility>
+                // <button_image>` (7.0+). The declaration itself just creates
+                // the element; capture the button-image name (5th arg, quoted)
+                // so renderers can draw image-backed customs
+                // (`tcp_labelBlock_bg` is the REAPER 7 name-field art).
+                "custom" => {
+                    if let Some(name) = line.get(1) {
+                        // The button image is the *last* argument. The
+                        // tokenizer drops empty quoted args (`''`), so arg
+                        // positions shift — take the last non-numeric token
+                        // (consumers validate it against the image catalog,
+                        // so a text label here resolves to nothing).
+                        let img = (line.len() >= 3)
+                            .then(|| line.last())
+                            .flatten()
+                            .filter(|s| !s.is_empty() && s.parse::<f64>().is_err());
+                        if let Some(img) = img {
+                            self.out.custom_images.insert(name.clone(), img.to_string());
+                        }
                     }
                 }
                 // Globals / define_parameter / version gates etc. are handled

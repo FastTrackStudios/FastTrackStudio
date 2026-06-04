@@ -173,16 +173,25 @@ pub fn McpStrip(
             style: container,
 
             // Theme-drawn chrome: `mcp.custom.*` boxes, painted first in
-            // WALTER z-order (track-colour sentinels resolve to the accent).
+            // WALTER z-order. Only the `.color` *background* (second four
+            // components) fills the box — the first four are the custom's
+            // text colour. Image-backed customs render their sliced art.
+            // Track-colour sentinels resolve to the accent.
             for c in l.customs.iter() {
-                if let Some(fill) = c.bg.or(c.fg) {
+                if c.image.is_some() || c.bg.is_some() {
                     div {
                         key: "{c.name}",
                         style: format!(
-                            "{pos} background:{fill}; pointer-events:none;",
+                            "{pos}{fill} pointer-events:none;",
                             pos = c.coord.css_position(nat),
-                            fill = fill.resolve_track(accent).css(),
+                            fill = c
+                                .bg
+                                .map(|b| format!(" background:{};", b.resolve_track(accent).css()))
+                                .unwrap_or_default(),
                         ),
+                        if let Some(img) = &c.image {
+                            {skin_fill(img, c.coord.w, c.coord.h)}
+                        }
                     }
                 }
             }

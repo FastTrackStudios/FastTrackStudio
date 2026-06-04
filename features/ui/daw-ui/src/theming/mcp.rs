@@ -111,17 +111,23 @@ pub struct KnobSkin {
     pub frame_h: u32,
 }
 
-/// One `mcp.custom.*` element: a positioned, colour-filled box. Colours may
-/// be the [`Color::TRACK`] sentinel (substituted with the live track accent).
+/// One `mcp.custom.*` element: a positioned box. Per the SDK, `.color`'s
+/// first four components are the custom's *text* colour and the second four
+/// the **background fill** — only the fill paints the box. Colours may be
+/// the [`Color::TRACK`] sentinel (substituted with the live track accent).
+/// Customs declared with a button image (`custom … 'tcp_labelBlock_bg'`)
+/// carry the sliced art.
 #[derive(Clone, PartialEq, Debug)]
 pub struct McpCustom {
     /// Full attribute name (`mcp.custom.mcpDarkBox`).
     pub name: String,
     pub coord: Coord,
-    /// `*.color` foreground (RGBA).
+    /// `*.color` foreground — the custom's text colour (not a fill).
     pub fg: Option<Color>,
     /// `*.color` background fill (RGBA).
     pub bg: Option<Color>,
+    /// Button image from the `custom` declaration (pink-margin sliced).
+    pub image: Option<SkinImage>,
 }
 
 impl McpLayout {

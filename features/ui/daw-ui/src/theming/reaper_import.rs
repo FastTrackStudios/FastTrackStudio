@@ -139,7 +139,7 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
     // Run the theme's own rtconfig program per named layout and convert the
     // resolved `mcp.*` geometry into McpLayouts. These take precedence (the
     // first layout is the default); the FTS fallbacks stay reachable by name.
-    let walter_layouts = walter_strip_layouts(rt, scale, dpi_folder.as_deref(), "mcp");
+    let walter_layouts = walter_strip_layouts(rt, scale, dpi_folder.as_deref(), "mcp", Some(&imgs));
     let has_walter_mcp = !walter_layouts.is_empty();
     if has_walter_mcp {
         let fallbacks = std::mem::take(&mut mcp.layouts);
@@ -155,7 +155,7 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         tcp.colors.volume = Some(color(zl));
     }
     tcp.skin = extract_skin(&imgs, "tcp");
-    let tcp_layouts = walter_strip_layouts(rt, scale, dpi_folder.as_deref(), "tcp");
+    let tcp_layouts = walter_strip_layouts(rt, scale, dpi_folder.as_deref(), "tcp", Some(&imgs));
     let has_walter_tcp = !tcp_layouts.is_empty();
     if has_walter_tcp {
         let fallbacks = std::mem::take(&mut tcp.layouts);
@@ -168,7 +168,12 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
     // theme at that size — REAPER's resize model — instead of springing the
     // baked anchors. Only worth installing when the theme has WALTER layouts.
     if has_walter_tcp || has_walter_mcp {
-        theme.engine = Some(make_layout_engine(rt, scale, dpi_folder.clone()));
+        theme.engine = Some(make_layout_engine(
+            rt,
+            scale,
+            dpi_folder.clone(),
+            imgs.clone(),
+        ));
     }
 
     // ── arrange context ──
@@ -302,7 +307,7 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         tr.fg = c;
     }
     tr.skin = extract_trans_skin(&imgs);
-    let trans_layouts = walter_trans_layouts(rt, scale, dpi_folder.as_deref());
+    let trans_layouts = walter_trans_layouts(rt, scale, dpi_folder.as_deref(), Some(&imgs));
     if !trans_layouts.is_empty() {
         let fallbacks = std::mem::take(&mut tr.layouts);
         tr.layouts = trans_layouts;
@@ -312,7 +317,7 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
     // ── envcp context ──
     let ecp = &mut theme.envcp;
     ecp.skin = extract_envcp_skin(&imgs);
-    let envcp_layouts = walter_envcp_layouts(rt, scale, dpi_folder.as_deref());
+    let envcp_layouts = walter_envcp_layouts(rt, scale, dpi_folder.as_deref(), Some(&imgs));
     if !envcp_layouts.is_empty() {
         let fallbacks = std::mem::take(&mut ecp.layouts);
         ecp.layouts = envcp_layouts;
@@ -328,6 +333,7 @@ fn walter_envcp_layouts(
     rt: &ReaperTheme,
     scale: f32,
     dpi_folder: Option<&str>,
+    imgs: Option<&ImageCatalog>,
 ) -> Vec<super::envcp::EnvcpLayout> {
     use daw_theme_reaper::walter::{Env, evaluate};
 
@@ -386,6 +392,7 @@ fn walter_envcp_layouts(
             &out_w,
             &out_h,
             (DW, DH),
+            imgs,
         ));
     }
     layouts
@@ -400,6 +407,7 @@ fn envcp_layout_from_walter(
     out_w: &daw_theme_reaper::walter::Output,
     out_h: &daw_theme_reaper::walter::Output,
     (dw, dh): (f32, f32),
+    imgs: Option<&ImageCatalog>,
 ) -> super::envcp::EnvcpLayout {
     use super::walter::{Coord, FaderMode, Margin};
 
@@ -482,6 +490,7 @@ fn envcp_layout_from_walter(
                 coord: c,
                 fg: pair.map(|p| p.fg).and_then(usable),
                 bg: pair.and_then(|p| p.bg).and_then(usable),
+                image: custom_image(imgs, out0, n),
             })
         })
         .collect();
@@ -591,6 +600,7 @@ fn walter_trans_layouts(
     rt: &ReaperTheme,
     scale: f32,
     dpi_folder: Option<&str>,
+    imgs: Option<&ImageCatalog>,
 ) -> Vec<super::trans::TransLayout> {
     use daw_theme_reaper::walter::{Env, evaluate};
 
@@ -642,7 +652,7 @@ fn walter_trans_layouts(
         let out_w = evaluate(src, Some(&eval_name), &make_env(w0 + DW, h0));
         let out_h = evaluate(src, Some(&eval_name), &make_env(w0, h0 + DH));
         layouts.push(trans_layout_from_walter(
-            &name, w0, h0, &out0, &out_w, &out_h, DW, DH,
+            &name, w0, h0, &out0, &out_w, &out_h, DW, DH, imgs,
         ));
     }
     layouts
@@ -659,6 +669,7 @@ fn trans_layout_from_walter(
     out_h: &daw_theme_reaper::walter::Output,
     dw: f32,
     dh: f32,
+    imgs: Option<&ImageCatalog>,
 ) -> super::trans::TransLayout {
     use super::walter::{Coord, Margin};
 
@@ -742,6 +753,7 @@ fn trans_layout_from_walter(
                 coord: c,
                 fg: pair.map(|p| p.fg).and_then(usable),
                 bg: pair.and_then(|p| p.bg).and_then(usable),
+                image: custom_image(imgs, out0, n),
             })
         })
         .collect();
@@ -840,7 +852,12 @@ fn extract_trans_skin(imgs: &ImageCatalog) -> Option<super::trans::TransSkin> {
 /// reproduce. Evaluated at the real size, the anchors collapse to zero and
 /// the geometry is exact; results are memoized per `(ctx, layout, w, h,
 /// armed)`.
-fn make_layout_engine(rt: &ReaperTheme, scale: f32, dpi_folder: Option<String>) -> LayoutEngine {
+fn make_layout_engine(
+    rt: &ReaperTheme,
+    scale: f32,
+    dpi_folder: Option<String>,
+    imgs: ImageCatalog,
+) -> LayoutEngine {
     use daw_theme_reaper::walter::{Env, evaluate};
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -899,7 +916,7 @@ fn make_layout_engine(rt: &ReaperTheme, scale: f32, dpi_folder: Option<String>) 
             // Same output for all three passes → zero attach scales:
             // positions are already exact for this size (re-evaluation
             // replaces springing).
-            layout_from_walter(name, w, h, scale, &out, &out, &out, &rtc, ctx)
+            layout_from_walter(name, w, h, scale, &out, &out, &out, &rtc, ctx, Some(&imgs))
         });
         cache.lock().unwrap().insert(key, layout.clone());
         layout
@@ -921,6 +938,7 @@ fn walter_strip_layouts(
     scale: f32,
     dpi_folder: Option<&str>,
     ctx: &str,
+    imgs: Option<&ImageCatalog>,
 ) -> Vec<super::mcp::McpLayout> {
     use daw_theme_reaper::walter::{Env, Output, evaluate};
 
@@ -1034,6 +1052,7 @@ fn walter_strip_layouts(
                 &out_h,
                 &rt.rtconfig,
                 ctx,
+                imgs,
             )
         };
 
@@ -1061,6 +1080,7 @@ fn layout_from_walter(
     out_h: &daw_theme_reaper::walter::Output,
     rtc: &daw_theme_reaper::RtConfig,
     ctx: &str,
+    imgs: Option<&ImageCatalog>,
 ) -> super::mcp::McpLayout {
     use super::mcp::McpLayout;
     use super::walter::{Coord, FaderMode, Margin};
@@ -1193,6 +1213,7 @@ fn layout_from_walter(
                 coord: c,
                 fg: pair.map(|p| p.fg).and_then(usable),
                 bg: pair.and_then(|p| p.bg).and_then(usable),
+                image: custom_image(imgs, out0, n),
             })
         })
         .collect();
@@ -1282,6 +1303,76 @@ fn layout_from_walter(
 /// `mcp_X`/`tcp_X`), then the shared track vocabulary (`track_X`), then the
 /// general fallback (`gen_X`) — the Anti-Theme, like the stock default, ships
 /// most strip buttons as `track_*`/`gen_*`.
+/// Build a [`SkinImage`], pre-slicing a 9-patch grid when the art carries
+/// pink fixed margins (the "Pink Line Crush" technique: fixed margins render
+/// 1:1, only the unmarked bands stretch/crush).
+fn make_skin_image(
+    img: &daw_theme_reaper::image::RgbaImage,
+    markers: &daw_theme_reaper::images::Markers,
+) -> SkinImage {
+    use daw_theme_reaper::image::GenericImageView;
+    let (w, h) = img.dimensions();
+    let plain_img = |i: daw_theme_reaper::image::RgbaImage| SkinImage {
+        url: ImageCatalog::data_uri(&i),
+        w: i.width(),
+        h: i.height(),
+        slices: None,
+    };
+    // Per-axis margins, dropped when degenerate (margins >= dimension).
+    let (ml, mr) = if markers.fixed_left + markers.fixed_right < w {
+        (markers.fixed_left, markers.fixed_right)
+    } else {
+        (0, 0)
+    };
+    let (mt, mb) = if markers.fixed_top + markers.fixed_bottom < h {
+        (markers.fixed_top, markers.fixed_bottom)
+    } else {
+        (0, 0)
+    };
+    let slices = (ml + mr + mt + mb > 0).then(|| {
+        let xs = [
+            (0, ml.max(1)),
+            (ml, w - ml - mr),
+            (w - mr.max(1), mr.max(1)),
+        ];
+        let ys = [
+            (0, mt.max(1)),
+            (mt, h - mt - mb),
+            (h - mb.max(1), mb.max(1)),
+        ];
+        let patches = ys
+            .iter()
+            .flat_map(|&(y, ph)| xs.iter().map(move |&(x, pw)| (x, y, pw, ph)))
+            .map(|(x, y, pw, ph)| plain_img(img.view(x, y, pw, ph).to_image()))
+            .collect();
+        Box::new(super::mcp::NineSlice {
+            l: ml,
+            t: mt,
+            r: mr,
+            b: mb,
+            patches,
+        })
+    });
+    SkinImage {
+        url: ImageCatalog::data_uri(img),
+        w,
+        h,
+        slices,
+    }
+}
+
+/// Resolve a custom element's declared button image (`custom … 'name'`)
+/// against the catalog, pink-margin sliced.
+fn custom_image(
+    imgs: Option<&ImageCatalog>,
+    out0: &daw_theme_reaper::walter::Output,
+    name: &str,
+) -> Option<SkinImage> {
+    let img_name = out0.custom_images.get(name)?;
+    let s = imgs?.load(img_name).ok()?;
+    Some(make_skin_image(&s.image, &s.markers))
+}
+
 fn extract_skin(imgs: &ImageCatalog, ctx: &str) -> Option<McpSkin> {
     let ctx_prefix = format!("{ctx}_");
     // First catalog name present along the fallback chain.
@@ -1292,61 +1383,7 @@ fn extract_skin(imgs: &ImageCatalog, ctx: &str) -> Option<McpSkin> {
             .find(|n| imgs.has(n))
     };
 
-    // Build a SkinImage, pre-slicing a 9-patch grid when the art carries
-    // pink fixed margins (the "Pink Line Crush" technique: fixed margins
-    // render 1:1, only the unmarked bands stretch/crush).
-    let skin_image = |img: &daw_theme_reaper::image::RgbaImage,
-                      markers: &daw_theme_reaper::images::Markers| {
-        use daw_theme_reaper::image::GenericImageView;
-        let (w, h) = img.dimensions();
-        let plain_img = |i: daw_theme_reaper::image::RgbaImage| SkinImage {
-            url: ImageCatalog::data_uri(&i),
-            w: i.width(),
-            h: i.height(),
-            slices: None,
-        };
-        // Per-axis margins, dropped when degenerate (margins >= dimension).
-        let (ml, mr) = if markers.fixed_left + markers.fixed_right < w {
-            (markers.fixed_left, markers.fixed_right)
-        } else {
-            (0, 0)
-        };
-        let (mt, mb) = if markers.fixed_top + markers.fixed_bottom < h {
-            (markers.fixed_top, markers.fixed_bottom)
-        } else {
-            (0, 0)
-        };
-        let slices = (ml + mr + mt + mb > 0).then(|| {
-            let xs = [
-                (0, ml.max(1)),
-                (ml, w - ml - mr),
-                (w - mr.max(1), mr.max(1)),
-            ];
-            let ys = [
-                (0, mt.max(1)),
-                (mt, h - mt - mb),
-                (h - mb.max(1), mb.max(1)),
-            ];
-            let patches = ys
-                .iter()
-                .flat_map(|&(y, ph)| xs.iter().map(move |&(x, pw)| (x, y, pw, ph)))
-                .map(|(x, y, pw, ph)| plain_img(img.view(x, y, pw, ph).to_image()))
-                .collect();
-            Box::new(super::mcp::NineSlice {
-                l: ml,
-                t: mt,
-                r: mr,
-                b: mb,
-                patches,
-            })
-        });
-        SkinImage {
-            url: ImageCatalog::data_uri(img),
-            w,
-            h,
-            slices,
-        }
-    };
+    let skin_image = make_skin_image;
 
     // All three interaction states of a 3-slice button, with the `*_ol`
     // overlay composited per state — `use_overlays 1` themes (incl. the
@@ -1652,6 +1689,29 @@ mod tcp_tests {
             );
             assert_eq!((c.ls, c.ts, c.rs, c.bs), (0.0, 0.0, 0.0, 0.0));
         }
+
+        // Customs: only `.color` backgrounds fill (the first four components
+        // are text colour — `sectionMain [0]` must NOT paint a black strip),
+        // and image-backed customs carry their declared art.
+        let l = engine
+            .layout_at("tcp", "A", 368.0, 72.0, false)
+            .expect("tcp layout");
+        let main = l
+            .customs
+            .iter()
+            .find(|c| c.name == "tcp.custom.sectionMain")
+            .expect("sectionMain present");
+        assert!(main.bg.is_none(), "sectionMain has no background fill");
+        assert!(main.fg.is_some(), "sectionMain fg is text colour only");
+        let label_bg = l
+            .customs
+            .iter()
+            .find(|c| c.name == "tcp.custom.labelBlockBg")
+            .expect("labelBlockBg present");
+        assert!(
+            label_bg.image.is_some(),
+            "labelBlockBg carries its declared tcp_labelBlock_bg image"
+        );
 
         // Unknown layout name → None (callers fall back to bakes).
         assert!(engine.layout_at("tcp", "row", 260.0, 64.0, false).is_none());

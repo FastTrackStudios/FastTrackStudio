@@ -55,16 +55,22 @@ pub fn TransportBar(
                  overflow:hidden; background:{bg}; color:{fg}; user-select:none;"
             ),
 
-            // trans.custom.* chrome.
+            // trans.custom.* chrome (background fills + declared images).
             for c in l.customs.iter() {
-                if let Some(fill) = c.bg.or(c.fg) {
+                if c.image.is_some() || c.bg.is_some() {
                     div {
                         key: "{c.name}",
                         style: format!(
-                            "{pos} background:{fill}; pointer-events:none;",
+                            "{pos}{fill} pointer-events:none;",
                             pos = c.coord.css_position(nat),
-                            fill = fill.css(),
+                            fill = c
+                                .bg
+                                .map(|b| format!(" background:{};", b.css()))
+                                .unwrap_or_default(),
                         ),
+                        if let Some(img) = &c.image {
+                            {skin_fill(img, c.coord.w, c.coord.h)}
+                        }
                     }
                 }
             }
