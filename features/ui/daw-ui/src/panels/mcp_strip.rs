@@ -351,9 +351,9 @@ pub fn McpStrip(
             if !l.meter.is_hidden() {
                 McpMeter {
                     pos: l.meter.css_position(nat),
-                    level: (track.level)(),
-                    level_right: track.stereo.then(|| (track.level_right)()),
-                    peak: (track.peak)(),
+                    level: track.level,
+                    level_right: track.stereo.then_some(track.level_right),
+                    peak: track.peak,
                     skin_strip: skin.meter_strip.clone(),
                     skin_bg: skin.meter_bg.clone(),
                 }
@@ -1056,12 +1056,17 @@ fn McpFader(
 #[component]
 fn McpMeter(
     pos: String,
-    level: f32,
-    level_right: Option<f32>,
-    peak: f32,
+    level: Signal<f32>,
+    level_right: Option<Signal<f32>>,
+    peak: Signal<f32>,
     #[props(default)] skin_strip: Option<crate::theming::SkinImage>,
     #[props(default)] skin_bg: Option<crate::theming::SkinImage>,
 ) -> Element {
+    // Reading the signals HERE scopes meter ticks to this component —
+    // reading them in the strip body re-rendered the whole strip per tick.
+    let level = level();
+    let level_right = level_right.map(|s| s());
+    let peak = peak();
     let theme = use_theme().theme;
     let m = theme.meter();
     let c = theme.mcp.colors;

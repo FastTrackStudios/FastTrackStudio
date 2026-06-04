@@ -92,8 +92,9 @@ fn prefer_wayland() {
     }
 }
 
-/// Root component: boots the engine once, snapshots its tracks into the panel
-/// view-model, and renders the workspace under a transport bar.
+/// Root component: theme + async project boot. The window paints
+/// immediately with a loading screen; the project (RPP parse + peak caches)
+/// loads on a worker thread and [`MainUi`] mounts when it lands.
 #[component]
 fn App() -> Element {
     // Resolve the active theme once: `FTS_REAPER_THEME=<unpacked theme dir>`
@@ -120,16 +121,60 @@ fn App() -> Element {
         ctx
     });
 
-    // Boot the standalone engine once: open the real RPP project when its
-    // file exists (structure only — audio materializes in the background),
-    // otherwise seed the test-tone demo. `Arc`-backed, cheap to clone.
-    let boot = use_hook(|| Rc::new(boot_project()));
+    // Boot asynchronously on a worker thread: open the real RPP project
+    // when its file exists (structure + peak caches; audio materializes
+    // separately), otherwise seed the test-tone demo. First paint happens
+    // before any of that.
+    let mut booted: Signal<Option<Rc<BootedProject>>> = use_signal(|| None);
+    use_future(move || async move {
+        match tokio::task::spawn_blocking(boot_project).await {
+            Ok(data) => booted.set(Some(Rc::new(data))),
+            Err(e) => tracing::error!("project boot failed: {e}"),
+        }
+    });
+    use_context_provider(|| booted);
+
+    let tk = theme_ctx.theme.tokens;
+    let loading_bg = tk.surface.css();
+    let loading_fg = tk.text_dim.css();
+
+    rsx! {
+        // Blitz mounts the app inside `<div id="main">` under html/body; size
+        // the whole ancestor chain to the viewport (the upstream blitz
+        // example pattern) so percentage sizing reaches the app root.
+        style { {ROOT_CSS} }
+        ThemeProvider {
+            theme: theme_ctx.clone(),
+            if booted().is_some() {
+                MainUi {}
+            } else {
+                div {
+                    style: format!(
+                        "display:flex; align-items:center; justify-content:center; \
+                         width:100%; height:100%; background:{loading_bg}; \
+                         color:{loading_fg}; font-size:14px; letter-spacing:0.06em; \
+                         font-family:'Inter','SF Pro Display',system-ui,sans-serif;"
+                    ),
+                    "Loading project…"
+                }
+            }
+        }
+    }
+}
+
+/// The loaded application: engine wiring, metering, transport and the
+/// workspace. Mounted once the async boot lands (hooks below assume the
+/// project is present).
+#[component]
+fn MainUi() -> Element {
+    let booted: Signal<Option<Rc<BootedProject>>> = use_context();
+    let boot = booted().expect("MainUi mounts only after boot");
     let engine = boot.engine.clone();
     let ctx = boot.ctx.clone();
 
-    // Snapshot engine tracks → view-models once; the per-track `Signal`s then
-    // live in this root scope and stay shared across all three panels.
-    let tracks = use_signal(|| boot.tracks.clone());
+    // Build the view-models (with their `Signal`s) once, on the UI thread;
+    // they live in this scope and stay shared across all three panels.
+    let tracks = use_signal(|| views_from_specs(&boot.specs));
 
     // Audio:
     // - demo: one test tone per audible track, immediately.
@@ -265,9 +310,9 @@ fn App() -> Element {
         }
     });
 
-    // Theme tokens drive the shell chrome (the panels theme themselves through
-    // the provider below; App itself sits above it, so read the context value).
-    let tk = theme_ctx.theme.tokens;
+    // Theme tokens drive the shell chrome (MainUi mounts inside the
+    // provider, so read them from context).
+    let tk = daw::ui::theming::use_theme().theme.tokens;
     let bg = tk.surface.css();
     let header_bg = tk.surface_raised.css();
     let border = tk.border.css();
@@ -279,13 +324,6 @@ fn App() -> Element {
     let is_playing = playing();
 
     rsx! {
-        // Blitz mounts the app inside `<div id="main">` under html/body; size the
-        // whole ancestor chain to the viewport (the upstream blitz example
-        // pattern) so percentage sizing reaches the app root. `vw/vh` on the app
-        // root alone leaves the unstyled ancestors at auto height.
-        style { {ROOT_CSS} }
-        ThemeProvider {
-            theme: theme_ctx.clone(),
         div {
             style: format!(
                 "display:flex; flex-direction:column; width:100%; height:100%; \
@@ -310,7 +348,7 @@ fn App() -> Element {
             TransportBar {
                 playing,
                 bpm: boot.bpm,
-                position: playhead(),
+                position: playhead,
                 on_play: {
                     let engine = engine.clone();
                     let ctx = ctx.clone();
@@ -346,21 +384,24 @@ fn App() -> Element {
                     beats_per_measure: boot.beats_per_measure,
                     seconds: boot.seconds,
                     cursor: 0.0,
-                    playhead: is_playing.then(|| playhead()),
+                    playhead: is_playing.then_some(playhead),
                 }
             }
-        }
         }
     }
 }
 
-/// Everything App needs from the booted project.
+/// Everything the UI needs from the booted project — **Signal-free**, so it
+/// can be produced on a worker thread (the first paint must not wait for a
+/// multi-second RPP + peak-cache load; in debug builds that took ~20 s and
+/// looked like the app never opened). `TrackView`s (which carry dioxus
+/// `Signal`s) are built on the UI thread from these specs.
 struct BootedProject {
     engine: Standalone,
     ctx: ProjectContext,
     /// `Some(guid)` when a real RPP was loaded (audio materializes async).
     rpp_guid: Option<String>,
-    tracks: Vec<TrackView>,
+    specs: Vec<TrackSpec>,
     markers: Vec<MarkerView>,
     regions: Vec<RegionView>,
     tempo_markers: Vec<TempoMarkerView>,
@@ -368,6 +409,50 @@ struct BootedProject {
     beats_per_measure: u32,
     /// Timeline length (s) for the arrange view.
     seconds: f64,
+}
+
+/// One track's view-model ingredients (no `Signal`s — thread-safe).
+struct TrackSpec {
+    track: Track,
+    depth: u32,
+    clips: Vec<ClipView>,
+    envelopes: Vec<EnvelopeView>,
+    sends: bool,
+    receives: bool,
+    parent_send: bool,
+}
+
+/// Build the live `TrackView`s (with their `Signal`s) from the specs —
+/// **UI thread only**.
+fn views_from_specs(specs: &[TrackSpec]) -> Vec<TrackView> {
+    specs
+        .iter()
+        .enumerate()
+        .map(|(id, spec)| {
+            let track = &spec.track;
+            let color = track.color.map(u32_to_hex);
+            let mut view = TrackView::new(id, &track.name, color.as_deref())
+                .fader(track.volume as f32)
+                .depth(spec.depth);
+            if track.is_folder {
+                view = view.folder();
+            } else {
+                view = view.stereo();
+            }
+            view.clips = spec.clips.clone();
+            view.envelopes = spec.envelopes.clone();
+            view.sends = spec.sends;
+            view.receives = spec.receives;
+            view.parent_send = spec.parent_send;
+            view.mute.set(track.muted);
+            view.solo.set(track.soloed);
+            view.record_arm.set(track.armed);
+            view.phase.set(track.phase_inverted);
+            // Engine pan is bipolar (−1…1); the UI signal is normalized (0…1).
+            view.pan.set(((track.pan + 1.0) / 2.0) as f32);
+            view
+        })
+        .collect()
 }
 
 /// Boot the engine: open the real RPP (`FTS_RPP`, default the converted PT
@@ -380,12 +465,12 @@ fn boot_project() -> BootedProject {
         Some(boot) => boot,
         None => {
             seed_demo_project(&engine);
-            let tracks = build_track_views(&engine, &ProjectContext::Current, true);
+            let specs = build_track_specs(&engine, &ProjectContext::Current, true);
             BootedProject {
                 engine,
                 ctx: ProjectContext::Current,
                 rpp_guid: None,
-                tracks,
+                specs,
                 markers: demo_markers(),
                 regions: demo_regions(),
                 tempo_markers: demo_tempo_markers(),
@@ -437,22 +522,19 @@ fn load_rpp_project(engine: &Standalone, rpp_path: &str) -> Option<BootedProject
     );
     let ctx = ProjectContext::Project(proj.project_guid.clone());
 
-    // Tracks + items (+ real REAPER peak caches for the waveforms).
-    let mut tracks = build_track_views(engine, &ctx, false);
-    // Routing flags for the strip routing button: real sends/receives and
-    // the master/parent send (folder routing).
-    for (i, view) in tracks.iter_mut().enumerate() {
-        let tref = TrackRef::Index(i as u32);
-        view.sends = Routing::send_count(engine, ctx.clone(), tref.clone()) > 0;
-        view.receives = Routing::receive_count(engine, ctx.clone(), tref.clone()) > 0;
-        view.parent_send = Routing::parent_send_enabled(engine, ctx.clone(), tref);
-    }
+    // Tracks + items (+ real REAPER peak caches for the waveforms) +
+    // routing flags (real sends/receives, master/parent send).
+    let mut specs = build_track_specs(engine, &ctx, false);
     let mut peaks_cache: std::collections::HashMap<String, Option<Rc<ReaPeaks>>> =
         std::collections::HashMap::new();
     let mut end = 0.0f64;
-    for (i, view) in tracks.iter_mut().enumerate() {
-        let items = Items::get_items(engine, ctx.clone(), TrackRef::Index(i as u32));
-        let clips: Vec<ClipView> = items
+    for (i, spec) in specs.iter_mut().enumerate() {
+        let tref = TrackRef::Index(i as u32);
+        spec.sends = Routing::send_count(engine, ctx.clone(), tref.clone()) > 0;
+        spec.receives = Routing::receive_count(engine, ctx.clone(), tref.clone()) > 0;
+        spec.parent_send = Routing::parent_send_enabled(engine, ctx.clone(), tref.clone());
+        let items = Items::get_items(engine, ctx.clone(), tref);
+        spec.clips = items
             .iter()
             .map(|item| {
                 let clip = clip_from_item(engine, &ctx, item, &project_dir, &mut peaks_cache);
@@ -460,7 +542,6 @@ fn load_rpp_project(engine: &Standalone, rpp_path: &str) -> Option<BootedProject
                 clip
             })
             .collect();
-        view.clips = clips;
     }
 
     // Markers / regions / tempo map.
@@ -519,7 +600,7 @@ fn load_rpp_project(engine: &Standalone, rpp_path: &str) -> Option<BootedProject
         engine: engine.clone(),
         ctx,
         rpp_guid: Some(proj.project_guid),
-        tracks,
+        specs,
         markers,
         regions,
         tempo_markers,
@@ -652,41 +733,37 @@ fn seed_demo_project(engine: &Standalone) {
 
 /// Snapshot the engine's current tracks into the panel [`TrackView`] model,
 /// computing absolute folder depth from the running folder-depth delta.
-fn build_track_views(engine: &Standalone, ctx: &ProjectContext, demo: bool) -> Vec<TrackView> {
+fn build_track_specs(engine: &Standalone, ctx: &ProjectContext, demo: bool) -> Vec<TrackSpec> {
     let mut depth: i32 = 0;
-    let mut views = Vec::new();
+    let mut specs = Vec::new();
     for (i, track) in Tracks::all(engine, ctx.clone()).iter().enumerate() {
-        views.push(track_to_view(i, track, depth.max(0) as u32, demo));
+        specs.push(track_to_spec(i, track, depth.max(0) as u32, demo));
         depth = (depth + track.folder_depth).max(0);
     }
-    views
+    specs
 }
 
 /// Adapt one engine [`Track`] into a [`TrackView`] at the given absolute depth.
-fn track_to_view(id: usize, track: &Track, depth: u32, demo: bool) -> TrackView {
-    let color = track.color.map(u32_to_hex);
-    let mut view = TrackView::new(id, &track.name, color.as_deref())
-        .fader(track.volume as f32)
-        .depth(depth);
-    if track.is_folder {
-        view = view.folder();
+fn track_to_spec(id: usize, track: &Track, depth: u32, demo: bool) -> TrackSpec {
+    let clips = if demo && !track.is_folder {
+        demo_clips(id)
     } else {
-        view = view.stereo(); // dual-column meter
-        if demo {
-            view = view.clips(demo_clips(id)); // demo items
-        }
+        Vec::new()
+    };
+    let envelopes = if demo && track.name == "BASS" {
+        vec![demo_envelope()]
+    } else {
+        Vec::new()
+    };
+    TrackSpec {
+        track: track.clone(),
+        depth,
+        clips,
+        envelopes,
+        sends: false,
+        receives: false,
+        parent_send: true,
     }
-    if demo && track.name == "BASS" {
-        view = view.envelopes(vec![demo_envelope()]);
-    }
-    // Mirror the engine's per-track state into the shared UI signals.
-    view.mute.set(track.muted);
-    view.solo.set(track.soloed);
-    view.record_arm.set(track.armed);
-    view.phase.set(track.phase_inverted);
-    // Engine pan is bipolar (−1…1); the UI signal is normalized (0…1).
-    view.pan.set(((track.pan + 1.0) / 2.0) as f32);
-    view
 }
 
 /// Demo arrangement clips for an audible track: a couple of bars with fades,

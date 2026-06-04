@@ -24,7 +24,7 @@ pub fn DawWorkspace(
     #[props(default)] time_sel: Option<(f64, f64)>,
     #[props(default)] loop_range: Option<(f64, f64)>,
     #[props(default)] bpm: Option<f64>,
-    #[props(default)] playhead: Option<f64>,
+    #[props(default)] playhead: Option<Signal<f64>>,
     #[props(default)] cursor: Option<f64>,
     #[props(default = 12.0)] pps: f64,
     #[props(default = 120.0)] seconds: f64,

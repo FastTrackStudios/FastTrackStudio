@@ -18,7 +18,7 @@ pub fn TransportBar(
     playing: Signal<bool>,
     #[props(default)] on_play: Option<EventHandler<()>>,
     #[props(default)] on_stop: Option<EventHandler<()>>,
-    #[props(default = 0.0)] position: f64,
+    #[props(default)] position: Option<Signal<f64>>,
     #[props(default = 120.0)] bpm: f64,
     /// Named layout (`None` = the theme's first).
     #[props(default)]
@@ -43,7 +43,9 @@ pub fn TransportBar(
         .unwrap_or_default();
     let bpm_fg = l.bpm_edit_color.map(|c| c.fg).unwrap_or(tr.fg).css();
 
-    // Position readout, REAPER-style `m:ss.mmm`-ish.
+    // Position readout, REAPER-style `m:ss.mmm`-ish. (Read inside this
+    // component so transport ticks re-render the bar, not the whole app.)
+    let position = position.map(|p| p()).unwrap_or(0.0);
     let m = (position / 60.0).floor() as i64;
     let s = position - m as f64 * 60.0;
     let status_text = format!("{}  {m}:{s:05.2}", if is_playing { "▶" } else { "■" });

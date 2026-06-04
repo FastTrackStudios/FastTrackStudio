@@ -126,7 +126,7 @@ pub fn ArrangeView(
     #[props(default = 12.0)] pps: f64,
     #[props(default = 380)] tcp_width: u32,
     #[props(default = 120.0)] seconds: f64,
-    #[props(default)] playhead: Option<f64>,
+    #[props(default)] playhead: Option<Signal<f64>>,
     #[props(default)] cursor: Option<f64>,
     #[props(default)] markers: Vec<MarkerView>,
     #[props(default)] regions: Vec<RegionView>,
@@ -356,10 +356,8 @@ pub fn ArrangeView(
                                 "position:absolute; top:0; bottom:0; left:{x:.1}px; width:1px; \
                                  background:{edit_cursor};", x = t * pps) }
                         }
-                        if let Some(t) = playhead {
-                            div { style: format!(
-                                "position:absolute; top:0; bottom:0; left:{x:.1}px; width:1px; \
-                                 background:{play_cursor};", x = t * pps) }
+                        if let Some(pos) = playhead {
+                            PlayCursor { pos, pps, color: play_cursor.clone() }
                         }
                     }
                 }
@@ -467,15 +465,28 @@ pub fn ArrangeView(
                                 "position:absolute; top:0; bottom:0; left:{x:.1}px; width:1px; \
                                  background:{edit_cursor}; pointer-events:none;", x = t * pps) }
                         }
-                        if let Some(t) = playhead {
-                            div { style: format!(
-                                "position:absolute; top:0; bottom:0; left:{x:.1}px; width:1px; \
-                                 background:{play_cursor}; pointer-events:none;", x = t * pps) }
+                        if let Some(pos) = playhead {
+                            PlayCursor { pos, pps, color: play_cursor.clone() }
                         }
                     }
                 }
                 }
             }
+        }
+    }
+}
+
+/// The moving play cursor — a leaf component so transport ticks re-render
+/// one line, not the whole arrange view (123 lanes × 30 fps killed the CPU).
+#[component]
+fn PlayCursor(pos: Signal<f64>, pps: f64, color: String) -> Element {
+    let x = pos() * pps;
+    rsx! {
+        div {
+            style: format!(
+                "position:absolute; top:0; bottom:0; left:{x:.1}px; width:1px; \
+                 background:{color}; pointer-events:none;"
+            ),
         }
     }
 }
