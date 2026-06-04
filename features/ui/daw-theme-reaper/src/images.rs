@@ -63,6 +63,7 @@ pub struct KnobStack {
 }
 
 /// The theme folder's PNG vocabulary, by image name (file stem).
+#[derive(Clone)]
 pub struct ImageCatalog {
     dir: PathBuf,
     names: HashMap<String, PathBuf>,
@@ -95,6 +96,28 @@ impl ImageCatalog {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// Overlay a per-DPI image subfolder (`150/`, `200/` — selected via the
+    /// rtconfig `misc_dpi_translate` table): its images override the base
+    /// names; everything else falls back to the 100% set.
+    pub fn overlay_subdir(&mut self, sub: &str) -> Result<(), ThemeError> {
+        let dir = self.dir.join(sub);
+        let entries = std::fs::read_dir(&dir).map_err(|source| ThemeError::Io {
+            path: dir.clone(),
+            source,
+        })?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                self.names.insert(stem.to_string(), path);
+            }
+        }
+        Ok(())
     }
 
     pub fn has(&self, name: &str) -> bool {

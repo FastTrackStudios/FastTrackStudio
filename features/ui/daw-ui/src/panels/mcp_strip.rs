@@ -106,6 +106,15 @@ pub fn McpStrip(
 
     let display_pct = format!("{:.0}%", (track.fader)().clamp(0.0, 1.0) * 100.0);
 
+    // Strip body: with theme-drawn chrome the panel base is the plain mixer
+    // surface (REAPER's customs paint the strip; tinting comes from the
+    // theme's own colour boxes). Bare layouts keep the FTS track tint.
+    let (body, border) = if l.customs.is_empty() {
+        (strip.body, strip.border)
+    } else {
+        (theme.tokens.surface, theme.tokens.border)
+    };
+
     rsx! {
         div {
             style: format!(
@@ -115,8 +124,8 @@ pub fn McpStrip(
                  background:{body}; border:1px solid {border};",
                 minw = l.min_size.0,
                 minh = l.min_size.1,
-                body = strip.body.css(),
-                border = strip.border.css(),
+                body = body.css(),
+                border = border.css(),
             ),
 
             // Theme-drawn chrome: `mcp.custom.*` boxes, painted first in

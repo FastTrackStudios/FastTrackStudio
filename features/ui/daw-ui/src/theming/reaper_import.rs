@@ -24,21 +24,52 @@ use super::walter::ThemeParam;
 
 /// Load an unpacked REAPER theme directory and map it to an FTS [`Theme`]
 /// in one step (apps depend only on the facade; the parser stays internal).
+/// Scale comes from `FTS_THEME_SCALE` (default 1.0).
 pub fn theme_from_dir(dir: impl AsRef<std::path::Path>) -> Result<Theme, ThemeError> {
-    Ok(theme_from_reaper(&ReaperTheme::load_dir(dir)?))
+    let scale = std::env::var("FTS_THEME_SCALE")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(1.0);
+    theme_from_dir_scaled(dir, scale)
+}
+
+/// [`theme_from_dir`] at an explicit DPI scale: ≥1.25 selects the theme's
+/// `150%_*` layout variants + `150/` images (≥1.75 → `200%_*`/`200/`),
+/// mirroring REAPER's `misc_dpi_translate` behaviour.
+pub fn theme_from_dir_scaled(
+    dir: impl AsRef<std::path::Path>,
+    scale: f32,
+) -> Result<Theme, ThemeError> {
+    Ok(theme_from_reaper_scaled(
+        &ReaperTheme::load_dir(dir)?,
+        scale,
+    ))
 }
 
 fn color(c: Rgba) -> Color {
     Color::rgba(c.r, c.g, c.b, c.a)
 }
 
-/// Build an FTS [`Theme`] from a loaded REAPER theme (colors + params).
-///
-/// Image-skin extraction is a separate layer; this covers the palette,
-/// rtconfig globals and adjuster knobs.
+/// Build an FTS [`Theme`] from a loaded REAPER theme at 100% scale.
 pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
+    theme_from_reaper_scaled(rt, 1.0)
+}
+
+/// Build an FTS [`Theme`] from a loaded REAPER theme (colors + params) at a
+/// DPI scale (1.0 / 1.5 / 2.0 — the theme's layout + image variants).
+pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
     let mut theme = Theme::dark();
     let pal = |key: &str| rt.palette.color(key).map(color);
+
+    // The per-DPI image folder + layout-name prefix REAPER would pick for
+    // this scale (`misc_dpi_translate 134 150` → folder "150" at ≥134%).
+    let dpi_folder: Option<String> = rt
+        .rtconfig
+        .dpi_translate
+        .iter()
+        .filter(|(min_dpi, _)| scale * 100.0 >= *min_dpi)
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, folder)| folder.clone());
 
     // ── semantic tokens ──
     let t = &mut theme.tokens;
@@ -83,8 +114,12 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
         mcp.colors.volume = Some(color(zl));
     }
 
-    // ── image skin ──
-    mcp.skin = extract_skin(rt);
+    // ── image skin ── (per-DPI images override the base set)
+    let mut imgs = rt.images.clone();
+    if let Some(folder) = &dpi_folder {
+        let _ = imgs.overlay_subdir(folder);
+    }
+    mcp.skin = extract_skin(&imgs);
 
     // REAPER's MCP pan is a horizontal slider (`mcp.pan.fadermode` resolves
     // to 1 in the default theme's WALTER, knob only for dual-pan). When the
@@ -104,7 +139,7 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
     // Run the theme's own rtconfig program per named layout and convert the
     // resolved `mcp.*` geometry into McpLayouts. These take precedence (the
     // first layout is the default); the FTS fallbacks stay reachable by name.
-    let walter_layouts = walter_mcp_layouts(rt);
+    let walter_layouts = walter_mcp_layouts(rt, scale, dpi_folder.as_deref());
     if !walter_layouts.is_empty() {
         let fallbacks = std::mem::take(&mut mcp.layouts);
         mcp.layouts = walter_layouts;
@@ -140,12 +175,17 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
 /// at the natural size and at `+Δw`/`+Δh` yields each element's edge-attach
 /// scales exactly. Natural width comes from the theme's own `mcpWidth`
 /// (two-pass: probe, then evaluate at that width).
-fn walter_mcp_layouts(rt: &ReaperTheme) -> Vec<super::mcp::McpLayout> {
+fn walter_mcp_layouts(
+    rt: &ReaperTheme,
+    scale: f32,
+    dpi_folder: Option<&str>,
+) -> Vec<super::mcp::McpLayout> {
     use daw_theme_reaper::walter::{Env, Output, evaluate};
 
     let src = &rt.rtconfig_src;
     let make_env = |w: f32, h: f32| -> Env {
         let mut env = Env::reaper_defaults(w, h);
+        env.set("Scale", scale);
         // Bake with the track-colour *sentinel* so colours the theme derives
         // from it stay dynamic (renderers substitute the live accent).
         env.set("trackcolor_valid", 1.0);
@@ -158,24 +198,42 @@ fn walter_mcp_layouts(rt: &ReaperTheme) -> Vec<super::mcp::McpLayout> {
         env
     };
 
-    const H0: f32 = 600.0;
+    let h0 = 600.0 * scale;
     const DW: f32 = 16.0;
     const DH: f32 = 32.0;
+    let (h0, dw, dh) = (h0, DW, DH);
 
-    // Which layouts exist? (Skip DPI variants like "150%_A" — those are the
-    // same layout at another Scale.)
-    let probe = evaluate(src, None, &make_env(100.0, H0));
+    // Which layouts exist? Base names only — DPI variants (`150%_A`) are the
+    // same layout at another Scale and are selected below per `scale`.
+    let probe = evaluate(src, None, &make_env(100.0, h0));
     let names: Vec<String> = probe
         .layouts
         .iter()
         .filter(|n| !n.contains('%'))
         .cloned()
         .collect();
+    // Evaluate the DPI variant when the theme ships one for this scale
+    // (`Layout "150%_A" "150"` runs the same macros at Scale 1.5 with the
+    // `150/` images); the result is exposed under the base name.
+    let variant_of = |base: &str| -> String {
+        match dpi_folder {
+            Some(folder) => {
+                let v = format!("{folder}%_{base}");
+                if probe.layouts.iter().any(|l| l == &v) {
+                    v
+                } else {
+                    base.to_string()
+                }
+            }
+            None => base.to_string(),
+        }
+    };
 
     let mut layouts = Vec::new();
     for name in names {
+        let eval_name = variant_of(&name);
         // Pass 1: the theme's own strip width for this layout.
-        let pass1 = evaluate(src, Some(&name), &make_env(100.0, H0));
+        let pass1 = evaluate(src, Some(&eval_name), &make_env(100.0, h0));
         let w0 = match pass1
             .get("mcpWidth")
             .map(|v| v.first().copied().unwrap_or(0.0))
@@ -196,24 +254,24 @@ fn walter_mcp_layouts(rt: &ReaperTheme) -> Vec<super::mcp::McpLayout> {
                 }
                 env
             };
-            let pass1 = evaluate(src, Some(&name), &with_state(make_env(100.0, H0)));
+            let pass1 = evaluate(src, Some(&eval_name), &with_state(make_env(100.0, h0)));
             let w0s = pass1
                 .get("mcpWidth")
                 .and_then(|v| v.first().copied())
                 .filter(|w| *w >= 24.0)
                 .unwrap_or(w0);
-            let out0 = evaluate(src, Some(&name), &with_state(make_env(w0s, H0)));
-            let mut env_w = with_state(make_env(w0s + DW, H0));
+            let out0 = evaluate(src, Some(&eval_name), &with_state(make_env(w0s, h0)));
+            let mut env_w = with_state(make_env(w0s + dw, h0));
             // Bump every width knob this state can select.
             for suffix in ["", "Sel", "Recarm"] {
                 let knob = format!("Layout{name}-mcpWidth{suffix}");
                 if let Some(p) = rt.rtconfig.params.iter().find(|p| p.name == knob) {
-                    env_w.set(&p.name, p.default + DW);
+                    env_w.set(&p.name, p.default + dw);
                 }
             }
-            let out_w = evaluate(src, Some(&name), &env_w);
-            let out_h = evaluate(src, Some(&name), &with_state(make_env(w0s, H0 + DH)));
-            layout_from_walter(label, w0s, H0, &out0, &out_w, &out_h, rt)
+            let out_w = evaluate(src, Some(&eval_name), &env_w);
+            let out_h = evaluate(src, Some(&eval_name), &with_state(make_env(w0s, h0 + dh)));
+            layout_from_walter(label, w0s, h0, scale, &out0, &out_w, &out_h, rt)
         };
 
         let base = bake(&[], &name);
@@ -234,6 +292,7 @@ fn layout_from_walter(
     name: &str,
     w0: f32,
     h0: f32,
+    scale: f32,
     out0: &daw_theme_reaper::walter::Output,
     out_w: &daw_theme_reaper::walter::Output,
     out_h: &daw_theme_reaper::walter::Output,
@@ -346,7 +405,17 @@ fn layout_from_walter(
         .filter(|h| *h > 0.0)
         .or_else(|| rt.rtconfig.global_f32("mcp_min_height"))
         .unwrap_or(180.0);
-    let base = McpLayout::vertical();
+    let mut base = McpLayout::vertical();
+    // Fonts scale with the DPI variant (geometry already comes scaled from
+    // the evaluation).
+    for f in [
+        &mut base.trackidx_font,
+        &mut base.label_font,
+        &mut base.volume_label_font,
+        &mut base.pan_label_font,
+    ] {
+        f.size *= scale;
+    }
 
     let volume = coord("mcp.volume");
     let pan = coord("mcp.pan");
@@ -409,9 +478,7 @@ fn layout_from_walter(
 /// then the shared track vocabulary (`track_X`), then the general fallback
 /// (`gen_X`) — the Anti-Theme, like the stock default, ships most strip
 /// buttons as `track_*`/`gen_*`.
-fn extract_skin(rt: &ReaperTheme) -> Option<McpSkin> {
-    let imgs = &rt.images;
-
+fn extract_skin(imgs: &ImageCatalog) -> Option<McpSkin> {
     // First catalog name present along the fallback chain.
     let find = |base: &str| -> Option<String> {
         ["mcp_", "track_", "gen_"]
