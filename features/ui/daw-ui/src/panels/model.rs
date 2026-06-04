@@ -28,6 +28,8 @@ pub struct ClipView {
     pub fade_out: f64,
     pub selected: bool,
     pub muted: bool,
+    /// Fixed item lane (REAPER 7 comping). `None` on ordinary tracks.
+    pub lane: Option<u32>,
 }
 
 impl ClipView {
@@ -42,6 +44,7 @@ impl ClipView {
             fade_out: 0.0,
             selected: false,
             muted: false,
+            lane: None,
         }
     }
 }
@@ -145,6 +148,14 @@ pub struct TrackView {
     /// Lane height in px (TCP rows + arrange lanes share this so they align).
     pub height: u32,
 
+    // ── fixed item lanes (REAPER 7 comping) ──
+    /// Number of fixed lanes (0/1 = no lane subdivision).
+    pub lane_count: u32,
+    /// Bitmask of lanes that play; non-playing lanes render dimmed.
+    pub lane_play_mask: u64,
+    /// Lane display names (chips at the lane's left edge).
+    pub lane_names: Vec<String>,
+
     // ── arrangement ──
     pub clips: Vec<ClipView>,
     /// Automation envelopes; visible ones add lanes under the track.
@@ -177,6 +188,9 @@ impl TrackView {
             depth: 0,
             is_folder: false,
             height: DEFAULT_LANE_HEIGHT,
+            lane_count: 0,
+            lane_play_mask: 0,
+            lane_names: Vec::new(),
             clips: Vec::new(),
             envelopes: Vec::new(),
         }

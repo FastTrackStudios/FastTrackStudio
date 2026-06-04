@@ -540,6 +540,10 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
         parent_guid: None,
         folder_depth,
         is_folder,
+        // Fixed lanes via the live API — not yet wired through reaper-rs.
+        lane_count: 0,
+        lane_play_mask: 0,
+        lane_names: Vec::new(),
         visible_in_tcp,
         visible_in_mixer,
         fx_count,

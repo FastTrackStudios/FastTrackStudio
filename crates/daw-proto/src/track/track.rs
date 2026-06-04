@@ -107,6 +107,16 @@ pub struct Track {
     /// Whether this track is a folder track
     pub is_folder: bool,
 
+    // === Fixed item lanes (REAPER 7 comping) ===
+    /// Number of fixed item lanes (0 = lanes disabled).
+    pub lane_count: u32,
+    /// Bitmask of lanes that PLAY (bit n = lane n audible). Lanes
+    /// outside the mask hold alternate takes that stay silent.
+    pub lane_play_mask: u64,
+    /// Lane display names, one per lane (may be shorter than
+    /// `lane_count`; missing entries default to 1-based numbers).
+    pub lane_names: Vec<String>,
+
     // === Visibility ===
     /// Whether the track is visible in the TCP (track control panel / arrange view)
     pub visible_in_tcp: bool,
@@ -138,6 +148,9 @@ impl Track {
             parent_guid: None,
             folder_depth: 0,
             is_folder: false,
+            lane_count: 0,
+            lane_play_mask: 0,
+            lane_names: Vec::new(),
             visible_in_tcp: true,
             visible_in_mixer: true,
             fx_count: 0,

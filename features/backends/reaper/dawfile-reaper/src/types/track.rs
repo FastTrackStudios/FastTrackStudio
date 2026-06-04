@@ -676,6 +676,7 @@ impl Track {
                 | "FIXEDLANES"
                 | "LANEREC"
                 | "LANENAME"
+                | "LANESOLO"
                 | "REC"
                 | "TRACKHEIGHT"
                 | "INQ"
@@ -845,14 +846,35 @@ impl Track {
                 });
             }
             "LANENAME" if tokens.len() >= 2 => {
-                let lane_count = Self::parse_int(&tokens[1])?;
-                let lane_names = tokens[2..]
+                // EVERY token after the keyword is a lane name —
+                // `LANENAME 1 2 3` is a 3-lane track whose lanes are
+                // named "1", "2", "3" (REAPER's defaults), not a count
+                // followed by names.
+                let lane_names = tokens[1..]
                     .iter()
                     .map(Self::parse_string)
                     .collect::<Result<Vec<_>, _>>()?;
                 track.lane_names = Some(LaneNameSettings {
-                    lane_count,
+                    lane_count: lane_names.len() as i32,
                     lane_names,
+                });
+            }
+            "LANESOLO" if tokens.len() >= 2 => {
+                // Bitfield of PLAYING lanes, stored as up to 8 32-bit
+                // words (256 lanes). Values like 4294967295 overflow
+                // i32 textually but wrap bit-exact via i64 → i32.
+                let word = |i: usize| -> Result<i32, String> {
+                    tokens.get(i).map(Self::parse_int).unwrap_or(Ok(0))
+                };
+                track.lane_solo = Some(LaneSoloSettings {
+                    playing_lanes: word(1)?,
+                    unknown_field_2: word(2)?,
+                    unknown_field_3: word(3)?,
+                    unknown_field_4: word(4)?,
+                    unknown_field_5: word(5)?,
+                    unknown_field_6: word(6)?,
+                    unknown_field_7: word(7)?,
+                    unknown_field_8: word(8)?,
                 });
             }
             "REC" if tokens.len() >= 8 => {

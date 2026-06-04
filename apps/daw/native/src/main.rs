@@ -33,9 +33,9 @@ use daw::ui::panels::{
     ClipView, DawWorkspace, EnvelopeView, MarkerView, RegionView, TempoMarkerView, TrackView,
     TransportBar,
 };
-use daw_standalone::reapeaks::ReaPeaks;
 use daw::ui::theming::ThemeProvider;
 use daw_standalone::audio_engine::{AudioEngine, test_tone};
+use daw_standalone::reapeaks::ReaPeaks;
 use daw_standalone::sync::Standalone;
 use dioxus::prelude::*;
 
@@ -271,20 +271,9 @@ fn MainUi() -> Element {
                 let _ = Tracks::set_muted(&engine, ctx.clone(), tref.clone(), (t.mute)());
                 let _ = Tracks::set_soloed(&engine, ctx.clone(), tref.clone(), (t.solo)());
                 let _ = Tracks::set_armed(&engine, ctx.clone(), tref.clone(), (t.record_arm)());
-                let _ = Tracks::set_phase_inverted(
-                    &engine,
-                    ctx.clone(),
-                    tref.clone(),
-                    (t.phase)(),
-                );
-                let _ =
-                    Tracks::set_volume(&engine, ctx.clone(), tref.clone(), (t.fader)() as f64);
-                let _ = Tracks::set_pan(
-                    &engine,
-                    ctx.clone(),
-                    tref,
-                    ((t.pan)() as f64) * 2.0 - 1.0,
-                );
+                let _ = Tracks::set_phase_inverted(&engine, ctx.clone(), tref.clone(), (t.phase)());
+                let _ = Tracks::set_volume(&engine, ctx.clone(), tref.clone(), (t.fader)() as f64);
+                let _ = Tracks::set_pan(&engine, ctx.clone(), tref, ((t.pan)() as f64) * 2.0 - 1.0);
             }
         });
     }
@@ -441,6 +430,10 @@ fn views_from_specs(specs: &[TrackSpec]) -> Vec<TrackView> {
             }
             view.clips = spec.clips.clone();
             view.envelopes = spec.envelopes.clone();
+            // Fixed item lanes (REAPER 7 comping).
+            view.lane_count = track.lane_count;
+            view.lane_play_mask = track.lane_play_mask;
+            view.lane_names = track.lane_names.clone();
             view.sends = spec.sends;
             view.receives = spec.receives;
             view.parent_send = spec.parent_send;
@@ -499,7 +492,10 @@ fn load_rpp_project(engine: &Standalone, rpp_path: &str) -> Option<BootedProject
         }
     };
     let project_dir = path.parent().map(PathBuf::from).unwrap_or_default();
-    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("project");
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("project");
 
     engine
         .media_bay()
@@ -638,6 +634,7 @@ fn clip_from_item(
     clip.fade_out = item.fade_out_length.as_seconds();
     clip.muted = item.muted;
     clip.selected = item.selected;
+    clip.lane = item.fixed_lane;
 
     // Waveform from the REAPER peak cache, windowed by the take's source
     // offset + play rate (REAPER's source mapping).
@@ -844,8 +841,18 @@ fn synth_peaks(seed: usize, n: usize) -> Vec<(f32, f32)> {
 /// Demo tempo markers (ruler tempo lane).
 fn demo_tempo_markers() -> Vec<TempoMarkerView> {
     vec![
-        TempoMarkerView { time: 0.0, bpm: 120.0, num: 4, den: 4 },
-        TempoMarkerView { time: 40.0, bpm: 140.0, num: 7, den: 8 },
+        TempoMarkerView {
+            time: 0.0,
+            bpm: 120.0,
+            num: 4,
+            den: 4,
+        },
+        TempoMarkerView {
+            time: 40.0,
+            bpm: 140.0,
+            num: 7,
+            den: 8,
+        },
     ]
 }
 
@@ -870,16 +877,21 @@ fn demo_envelope() -> EnvelopeView {
 
 /// Demo project markers (ruler marker lane).
 fn demo_markers() -> Vec<MarkerView> {
-    [(0.0, "Intro"), (16.0, "Verse"), (24.0, "Chorus"), (40.0, "Bridge")]
-        .into_iter()
-        .enumerate()
-        .map(|(i, (t, n))| MarkerView {
-            time: t,
-            name: n.to_string(),
-            color: None,
-            idx: i as u32 + 1,
-        })
-        .collect()
+    [
+        (0.0, "Intro"),
+        (16.0, "Verse"),
+        (24.0, "Chorus"),
+        (40.0, "Bridge"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (t, n))| MarkerView {
+        time: t,
+        name: n.to_string(),
+        color: None,
+        idx: i as u32 + 1,
+    })
+    .collect()
 }
 
 /// Demo regions (ruler region lane).

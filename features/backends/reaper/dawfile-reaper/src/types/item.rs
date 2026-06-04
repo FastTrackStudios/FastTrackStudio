@@ -277,6 +277,16 @@ impl fmt::Display for ItemTimebase {
 }
 
 /// A REAPER media item
+/// Item vertical geometry within its track (`YPOS`): fractions of the
+/// track height. REAPER writes this for free item positioning and for
+/// fixed-lane membership (lane = `y / height` when lanes are uniform).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ItemYPos {
+    pub y: f64,
+    pub height: f64,
+    pub mode: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     // Basic item properties
@@ -308,8 +318,12 @@ pub struct Item {
     pub channel_mode: ChannelMode,          // CHANMODE - Channel mode
     pub take_guid: Option<String>,          // GUID - Take GUID
     pub rec_pass: Option<i32>,              // RECPASS - Recording pass number
-    /// Fixed item lane index (`LANE`), REAPER 7+ comping. `None` for ordinary items.
+    /// Fixed item lane index (`LANE`, or derived from `YPOS` on
+    /// fixed-lanes tracks), REAPER 7+ comping. `None` for ordinary items.
     pub lane: Option<i32>,
+    /// Raw vertical geometry (`YPOS y height [mode]`) — free item
+    /// positioning and fixed-lane placement.
+    pub y_pos: Option<ItemYPos>,
 
     // Takes
     pub takes: Vec<Take>,
@@ -345,6 +359,7 @@ impl Default for Item {
             take_guid: None,
             rec_pass: None,
             lane: None,
+            y_pos: None,
             takes: vec![],
             stretch_markers: vec![],
             raw_content: String::new(),
@@ -629,6 +644,7 @@ impl Item {
                 | "GUID"
                 | "RECPASS"
                 | "LANE"
+                | "YPOS"
                 | "TAKE"
                 | "TAKEVOLPAN"
                 | "TAKECOLOR"
@@ -932,6 +948,24 @@ impl Item {
             "LANE" if tokens.len() >= 2 => {
                 item.lane = Some(Self::parse_int(&tokens[1])?);
             }
+            "YPOS" if tokens.len() >= 3 => {
+                // Free-positioning / fixed-lane geometry:
+                // `YPOS <y> <height> [mode]`, both 0..1 fractions of
+                // the track height. On a fixed-lanes track each lane
+                // is `1/lane_count` tall, so `lane = round(y/height)`.
+                let y = Self::parse_float(&tokens[1])?;
+                let height = Self::parse_float(&tokens[2])?;
+                item.y_pos = Some(ItemYPos {
+                    y,
+                    height,
+                    mode: tokens.get(3).map(Self::parse_int).transpose()?.unwrap_or(0),
+                });
+                // Derive the fixed-lane index when not explicitly set
+                // via a LANE line.
+                if item.lane.is_none() && height > 1e-9 {
+                    item.lane = Some((y / height).round() as i32);
+                }
+            }
             "RECPASS" => {
                 if tokens.len() > 1 {
                     let rec_pass = Self::parse_int(&tokens[1])?;
@@ -1019,6 +1053,7 @@ impl Item {
             take_guid: None,
             rec_pass: None,
             lane: None,
+            y_pos: None,
             takes: Vec::new(),
             stretch_markers: Vec::new(),
             raw_content: String::new(),
@@ -1142,6 +1177,7 @@ impl Item {
             take_guid: None,
             rec_pass: None,
             lane: None,
+            y_pos: None,
             takes: Vec::new(),
             stretch_markers: Vec::new(),
             raw_content: block_content.to_string(),

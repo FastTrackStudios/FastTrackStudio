@@ -266,6 +266,7 @@ pub fn poll_and_broadcast_items() {
                                 auto_stretch: false,
                                 color: None,
                                 group_id: None,
+                                fixed_lane: None,
                                 take_count: 0,
                                 active_take_index: curr.active_take_index,
                             },
@@ -552,6 +553,8 @@ impl ReaperItem {
             auto_stretch,
             color,
             group_id,
+            // I_FIXEDLANE via the live API — not yet wired.
+            fixed_lane: None,
             take_count,
             active_take_index,
         })

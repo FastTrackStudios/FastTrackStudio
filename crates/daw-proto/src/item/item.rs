@@ -68,6 +68,9 @@ pub struct Item {
     pub color: Option<u32>,
     /// Group ID for linked items
     pub group_id: Option<u32>,
+    /// Fixed item lane this item sits on (REAPER 7 comping lanes).
+    /// `None` when the track has no fixed lanes.
+    pub fixed_lane: Option<u32>,
 
     // Takes
     /// Number of takes in this item
@@ -141,6 +144,7 @@ impl Default for Item {
             auto_stretch: false,
             color: None,
             group_id: None,
+            fixed_lane: None,
             take_count: 0,
             active_take_index: 0,
         }

@@ -527,7 +527,18 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
     let divider = ar.row_divider[i].css();
     let item_edge = ar.item_edge.css();
     let track_color = track.color.as_deref().and_then(Color::hex);
-    let item_h = track.height.saturating_sub(4) as f64;
+
+    // Fixed item lanes (REAPER 7 comping): subdivide the row into
+    // `lane_count` equal sub-lanes. Items land on their lane; lanes
+    // outside the play mask hold alternate takes and render dimmed.
+    let lane_count = track.lane_count.max(1);
+    let lane_area_h = track.height.saturating_sub(4) as f64;
+    let lane_h = lane_area_h / lane_count as f64;
+    let item_h = if lane_count > 1 {
+        (lane_h - 1.0).max(4.0)
+    } else {
+        lane_area_h
+    };
 
     rsx! {
         div {
@@ -553,6 +564,12 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                     let label = if clip.selected { ar.item_label_sel } else { ar.item_label };
                     let x = clip.start * pps;
                     let w = (clip.length * pps).max(2.0);
+                    // Lane geometry + playing state for this item.
+                    let lane = clip.lane.unwrap_or(0).min(lane_count - 1);
+                    let top = 2.0 + lane as f64 * lane_h;
+                    let lane_playing = lane_count <= 1
+                        || track.lane_play_mask == 0
+                        || (lane < 64 && track.lane_play_mask & (1u64 << lane) != 0);
                     let fade_in_w = (clip.fade_in * pps).min(w);
                     let fade_out_w = (clip.fade_out * pps).min(w);
                     // Waveform peaks: REAPER's asymmetric model — the top
@@ -579,13 +596,16 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                             key: "c{ci}",
                             title: "{clip.name}",
                             style: format!(
-                                "position:absolute; top:2px; height:{item_h}px; left:{x:.1}px; \
+                                "position:absolute; top:{top:.1}px; height:{item_h}px; left:{x:.1}px; \
                                  width:{w:.1}px; background:{body}; border:1px solid {item_edge}; \
                                  border-radius:3px; overflow:hidden; box-sizing:border-box; \
                                  font-size:10px; color:{fg}; font-weight:700; \
-                                 white-space:nowrap; text-overflow:ellipsis;",
+                                 white-space:nowrap; text-overflow:ellipsis;{dim}",
                                 body = body.css(),
                                 fg = label.css(),
+                                // REAPER greys out non-playing lanes —
+                                // they're alternate takes, not audible.
+                                dim = if lane_playing { "" } else { " opacity:0.35;" },
                             ),
 
                             // Peaks under the label (`col_tr1/2_peaks`).
@@ -653,6 +673,51 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                                 div { style: format!(
                                     "position:absolute; inset:0; background:{c}; pointer-events:none;",
                                     c = ar.mute_overlay.css()) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fixed-lane chrome: separator lines between lanes + the
+            // lane-name chip at each lane's left edge (REAPER 7 style).
+            if lane_count > 1 {
+                for ln in 1..lane_count {
+                    div {
+                        key: "ls{ln}",
+                        style: format!(
+                            "position:absolute; left:0; right:0; top:{y:.1}px; height:1px; \
+                             background:{divider}; opacity:0.6; pointer-events:none;",
+                            y = 2.0 + ln as f64 * lane_h,
+                        ),
+                    }
+                }
+                for ln in 0..lane_count {
+                    {
+                        let name = track
+                            .lane_names
+                            .get(ln as usize)
+                            .cloned()
+                            .unwrap_or_else(|| (ln + 1).to_string());
+                        let playing = track.lane_play_mask == 0
+                            || (ln < 64 && track.lane_play_mask & (1u64 << ln) != 0);
+                        rsx! {
+                            div {
+                                key: "ln{ln}",
+                                style: format!(
+                                    "position:absolute; left:0; top:{y:.1}px; height:{h:.1}px; \
+                                     display:flex; align-items:center; padding:0 3px; \
+                                     font-size:8px; color:{fg}; background:{bg}; \
+                                     border-right:1px solid {divider}; \
+                                     border-bottom:1px solid {divider}; \
+                                     opacity:{op}; pointer-events:none;",
+                                    y = 2.0 + ln as f64 * lane_h,
+                                    h = (lane_h - 1.0).max(4.0),
+                                    fg = ar.item_label.css(),
+                                    bg = ar.row_bg[i].css(),
+                                    op = if playing { "0.9" } else { "0.4" },
+                                ),
+                                "{name}"
                             }
                         }
                     }
