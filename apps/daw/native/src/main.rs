@@ -24,7 +24,7 @@ use std::time::Duration;
 use daw::service::transport::service::Transport;
 use daw::service::{Peaks, ProjectContext, ProjectInfo, Track, TrackRef, Tracks};
 use daw::ui::panels::{DawWorkspace, TrackView};
-use daw::ui::theming::use_theme;
+use daw::ui::theming::ThemeProvider;
 use daw_standalone::audio_engine::{AudioEngine, test_tone};
 use daw_standalone::sync::Standalone;
 use dioxus::prelude::*;
@@ -36,6 +36,11 @@ const PROJECT_GUID: &str = "fts-native-demo";
 /// Metering refresh rate (~30 fps): poll the engine peaks and push them into the
 /// per-track meter signals.
 const METER_INTERVAL: Duration = Duration::from_millis(33);
+
+/// Default REAPER theme to import (the Anti-Theme — our fidelity target).
+/// Override with `FTS_REAPER_THEME`; falls back to FTS dark when absent.
+const DEFAULT_REAPER_THEME: &str =
+    "/home/cody/Development/FastTrackStudio/reaper-theme/extracted/antitheme";
 
 fn main() {
     prefer_wayland();
@@ -76,6 +81,24 @@ fn prefer_wayland() {
 /// view-model, and renders the workspace under a transport bar.
 #[component]
 fn App() -> Element {
+    // Resolve the active theme once: `FTS_REAPER_THEME=<unpacked theme dir>`
+    // imports a REAPER theme (palette + adjuster knobs). Defaults to the
+    // Anti-Theme extraction (our import fidelity target) when present;
+    // otherwise FTS dark.
+    let theme_ctx = use_hook(|| {
+        let mut ctx = daw::ui::theming::ThemeContext::new();
+        let dir =
+            std::env::var("FTS_REAPER_THEME").unwrap_or_else(|_| DEFAULT_REAPER_THEME.to_string());
+        match daw::ui::theming::reaper_import::theme_from_dir(&dir) {
+            Ok(theme) => {
+                tracing::info!("imported REAPER theme from {dir}");
+                ctx = ctx.with_theme(theme);
+            }
+            Err(e) => tracing::warn!("REAPER theme import failed ({dir}): {e} — using FTS dark"),
+        }
+        ctx
+    });
+
     // Boot the standalone engine + seed the demo project exactly once. The
     // engine is `Arc`-backed, so clones into event handlers are cheap.
     let engine = use_hook(|| {
@@ -124,8 +147,9 @@ fn App() -> Element {
 
     let mut playing = use_signal(|| false);
 
-    // Theme tokens drive the shell chrome (the panels theme themselves).
-    let tk = use_theme().theme.tokens;
+    // Theme tokens drive the shell chrome (the panels theme themselves through
+    // the provider below; App itself sits above it, so read the context value).
+    let tk = theme_ctx.theme.tokens;
     let bg = tk.surface.css();
     let header_bg = tk.surface_raised.css();
     let border = tk.border.css();
@@ -142,6 +166,8 @@ fn App() -> Element {
         // pattern) so percentage sizing reaches the app root. `vw/vh` on the app
         // root alone leaves the unstyled ancestors at auto height.
         style { {ROOT_CSS} }
+        ThemeProvider {
+            theme: theme_ctx.clone(),
         div {
             style: format!(
                 "display:flex; flex-direction:column; width:100%; height:100%; \
@@ -210,6 +236,7 @@ fn App() -> Element {
                 style: "flex:1 1 0; min-height:0;",
                 DawWorkspace { tracks: tracks() }
             }
+        }
         }
     }
 }

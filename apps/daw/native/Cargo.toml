@@ -25,7 +25,11 @@ native = []
 # domain types + service traits (Tracks / Transport / Track / ProjectContext)
 # come through `daw::service` (re-exported `daw-proto`). No internal crate but
 # the engine is referenced directly.
-daw = { path = "../../../crates/daw", default-features = false, features = ["ui"] }
+daw = { path = "../../../crates/daw", default-features = false, features = [
+    "ui",
+    # REAPER theme import: point FTS_REAPER_THEME at an unpacked theme dir.
+    "ui-reaper-theme",
+] }
 # Engine: the standalone DAW backend that implements the service traits the UI
 # binds to. `audio` = cpal output stream + decoder + the test-tone generators,
 # so the demo tracks are audible and the per-track meter bank is populated.

@@ -2503,6 +2503,7 @@ dependencies = [
  "daw-module",
  "daw-proto",
  "daw-reaper-dioxus",
+ "daw-theme-reaper",
  "dioxus",
  "dioxus-native",
  "dock-dioxus",

@@ -6,6 +6,9 @@ pub mod context;
 /// The MCP strip context — REAPER's `mcp.*` element vocabulary as typed layouts.
 pub mod mcp;
 pub mod presets;
+/// REAPER theme import (palette/params → [`Theme`]) — `reaper-theme` feature.
+#[cfg(feature = "reaper-theme")]
+pub mod reaper_import;
 pub mod style;
 pub mod svg_texture;
 /// Token-based theme model (vector-first; Phase 1 of the themeable-UI plan).
@@ -22,3 +25,6 @@ pub use theme::{
     ToggleKind, ToggleStyle, Tokens,
 };
 pub use walter::{ColorPair, Coord, FaderMode, FontSpec, Margin, Rect, ThemeParam};
+
+#[cfg(feature = "reaper-theme")]
+pub use reaper_import::theme_from_reaper;
