@@ -84,7 +84,9 @@ impl Env {
             ("trackfixedlanes", 0.0),
             ("trackpinned", 0.0),
             ("tcp_hidden_overridden", 0.0),
-            ("reaper_version", 7.0),
+            // Version is an integer ×100 (the guide: "example: 414" = 4.14;
+            // themes gate on `reaper_version<700`).
+            ("reaper_version", 723.0),
             ("os_type", 2.0),
             // The DPI scale variable theme macros multiply by (1.0 = 100%).
             ("Scale", 1.0),
