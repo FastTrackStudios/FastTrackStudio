@@ -39,13 +39,13 @@ editor = { path = "crates/editor" }
 # the sibling keyflow checkout. Editor and keyflow live under
 # `~/Development/{Editor,FastTrackStudio/keyflow}`, so this relative path
 # matches what Task uses for engraver today.
-engraver = { path = "../FastTrackStudio/keyflow/crates/engraver", default-features = false }
+engraver = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main", default-features = false }
 # `editor-keyflow-lang` depends on keyflow-text DIRECTLY (not the `keyflow`
 # facade) on purpose: the facade hard-deps `daw-module`, which pulls full
 # tokio (net) and can't build for wasm32. keyflow-text only needs
 # keyflow-proto + keyflow-syntax, so the highlighter/IDE path stays
 # wasm-friendly. `highlighting` exposes `keyflow_text::highlighting::*`.
-keyflow-text = { path = "../FastTrackStudio/keyflow/crates/keyflow-text", default-features = false, features = ["highlighting"] }
+keyflow-text = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main", default-features = false, features = ["highlighting"] }
 
 # UI
 dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
