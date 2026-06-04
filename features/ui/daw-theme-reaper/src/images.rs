@@ -26,6 +26,13 @@ fn is_marker(px: image::Rgba<u8>) -> bool {
     (r == 255 && g == 0 && b == 255) || (r == 255 && g == 255 && b == 0)
 }
 
+/// Pink only — the stretch-geometry colour. Yellow marks outer extents and
+/// is stripped like a marker line but carries no fixed-margin meaning.
+fn is_pink(px: image::Rgba<u8>) -> bool {
+    let [r, g, b, _] = px.0;
+    r == 255 && g == 0 && b == 255
+}
+
 /// Stretch-geometry margins decoded from the pink marker lines (px, relative
 /// to the *content* image, i.e. after marker lines are stripped).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -332,33 +339,105 @@ pub fn strip_markers(img: RgbaImage) -> Sliced {
         n
     };
 
+    // A pink run on a line whose corners are *not* pink marks the STRETCH
+    // zone instead of the fixed margins (the SDK's scrollbar/dropdown
+    // convention: "the pink sections determine how each slice will be
+    // stretched; the areas delimited by the pink color will not be
+    // stretched"). `mcp_recinput` is the worked example: a short pink run
+    // before the dropdown arrow stretches the text area and pins the arrow.
+    // Returns the run as `(offset, len)` in content coordinates.
+    let interior_run = |horiz: bool, idx: u32| -> Option<(u32, u32)> {
+        let span: Vec<u32> = if horiz {
+            (cx..cx + cw).collect()
+        } else {
+            (cy..cy + ch).collect()
+        };
+        let pink_at = |i: u32| {
+            let px = if horiz {
+                img.get_pixel(i, idx)
+            } else {
+                img.get_pixel(idx, i)
+            };
+            is_pink(*px)
+        };
+        let start = span.iter().position(|&i| pink_at(i))?;
+        let len = span[start..].iter().take_while(|&&i| pink_at(i)).count() as u32;
+        Some((start as u32, len))
+    };
+
     let mut m = Markers::default();
-    // Horizontal fixed regions: top line (left-anchored), bottom line
-    // (right-anchored); a single present line may carry both runs.
+    // Horizontal regions: corner-anchored pink runs mark fixed margins
+    // (top line left-anchored, bottom line right-anchored; a single line
+    // may carry both); a non-anchored run marks the stretch zone.
     if top {
-        m.fixed_left = run_from_start(true, 0);
-        if !bottom {
+        let anchored_l = is_pink(*img.get_pixel(0, 0));
+        let anchored_r = is_pink(*img.get_pixel(w - 1, 0));
+        if anchored_l {
+            m.fixed_left = run_from_start(true, 0);
+        }
+        if anchored_r && !bottom {
             m.fixed_right = run_from_end(true, 0);
+        }
+        if !anchored_l
+            && !anchored_r
+            && let Some((a, len)) = interior_run(true, 0)
+        {
+            m.fixed_left = a;
+            m.fixed_right = cw.saturating_sub(a + len);
         }
     }
     if bottom {
-        m.fixed_right = run_from_end(true, h - 1);
-        if !top {
+        let anchored_r = is_pink(*img.get_pixel(w - 1, h - 1));
+        let anchored_l = is_pink(*img.get_pixel(0, h - 1));
+        if anchored_r {
+            m.fixed_right = run_from_end(true, h - 1);
+        }
+        if anchored_l && !top {
             m.fixed_left = run_from_start(true, h - 1);
         }
+        if !anchored_l
+            && !anchored_r
+            && !top
+            && let Some((a, len)) = interior_run(true, h - 1)
+        {
+            m.fixed_left = a;
+            m.fixed_right = cw.saturating_sub(a + len);
+        }
     }
-    // Vertical fixed regions: left col (top-anchored), right col
-    // (bottom-anchored); single line may carry both.
+    // Vertical regions: left col top-anchored, right col bottom-anchored.
     if left {
-        m.fixed_top = run_from_start(false, 0);
-        if !right {
+        let anchored_t = is_pink(*img.get_pixel(0, 0));
+        let anchored_b = is_pink(*img.get_pixel(0, h - 1));
+        if anchored_t {
+            m.fixed_top = run_from_start(false, 0);
+        }
+        if anchored_b && !right {
             m.fixed_bottom = run_from_end(false, 0);
+        }
+        if !anchored_t
+            && !anchored_b
+            && let Some((a, len)) = interior_run(false, 0)
+        {
+            m.fixed_top = a;
+            m.fixed_bottom = ch.saturating_sub(a + len);
         }
     }
     if right {
-        m.fixed_bottom = run_from_end(false, w - 1);
-        if !left {
+        let anchored_b = is_pink(*img.get_pixel(w - 1, h - 1));
+        let anchored_t = is_pink(*img.get_pixel(w - 1, 0));
+        if anchored_b {
+            m.fixed_bottom = run_from_end(false, w - 1);
+        }
+        if anchored_t && !left {
             m.fixed_top = run_from_start(false, w - 1);
+        }
+        if !anchored_t
+            && !anchored_b
+            && !left
+            && let Some((a, len)) = interior_run(false, w - 1)
+        {
+            m.fixed_top = a;
+            m.fixed_bottom = ch.saturating_sub(a + len);
         }
     }
 

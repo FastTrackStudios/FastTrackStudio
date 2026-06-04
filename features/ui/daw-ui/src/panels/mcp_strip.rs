@@ -232,21 +232,19 @@ pub fn McpStrip(
                     style: format!(
                         "{pos} display:flex; align-items:center; justify-content:{justify}; \
                          padding:{pad}; color:{fg}; font-size:10px; \
-                         white-space:nowrap; overflow:hidden;{bg}",
+                         white-space:nowrap; overflow:hidden;",
                         pos = l.recinput.css_position(nat),
                         justify = flex_justify(&l.recinput_margin),
                         pad = l.recinput_margin.css_padding(),
                         fg = theme.tokens.text_dim.css(),
-                        bg = skin
-                            .recinput_bg
-                            .as_ref()
-                            .map(|i| format!(
-                                " background-image:url({}); background-size:100% 100%;",
-                                i.url
-                            ))
-                            .unwrap_or_default(),
                     ),
-                    "Input 1"
+                    // 9-slice bg: the dropdown art's pink run marks its
+                    // stretch zone — only the text area grows, the arrow
+                    // stays at native size.
+                    if let Some(bg) = skin.recinput_bg.as_ref() {
+                        {skin_fill(bg, l.recinput.w, l.recinput.h)}
+                    }
+                    span { style: "position:relative;", "Input 1" }
                 }
             }
             if !l.recmode.is_hidden() {
@@ -865,42 +863,51 @@ fn McpFader(
     // the vector cap + accent line.
     // `Knob` never reaches the fader (callers route it to [`McpKnob`]);
     // treat it as vertical defensively.
+    // Cap travel is inset by the cap's own size, REAPER's model: at 100%
+    // the cap's TOP edge touches the well top (`bottom = 100% − cap_h`), at
+    // 0% its bottom edge sits on the well floor — the cap body never leaves
+    // the well. `offset = pct/100 × cap_size` keeps that without knowing
+    // the well's px height.
     let cap = match (&skin_thumb, mode) {
         (Some(thumb), FaderMode::Vertical | FaderMode::Knob) => format!(
             "position:absolute; left:calc(50% - {hw}px); width:{w}px; height:{h}px; \
-             bottom:calc({fill_pct}% - {hh}px); pointer-events:none; \
+             bottom:calc({fill_pct}% - {inset:.1}px); pointer-events:none; \
              background-image:url({url}); background-size:100% 100%;",
             w = thumb.w,
             h = thumb.h,
             hw = thumb.w as f32 / 2.0,
-            hh = thumb.h as f32 / 2.0,
+            inset = fill_pct / 100.0 * thumb.h as f32,
             url = thumb.url,
         ),
         (Some(thumb), FaderMode::Horizontal) => format!(
             "position:absolute; top:calc(50% - {hh}px); width:{w}px; height:{h}px; \
-             left:calc({fill_pct}% - {hw}px); pointer-events:none; \
+             left:calc({fill_pct}% - {inset:.1}px); pointer-events:none; \
              background-image:url({url}); background-size:100% 100%;",
             w = thumb.w,
             h = thumb.h,
-            hw = thumb.w as f32 / 2.0,
             hh = thumb.h as f32 / 2.0,
+            inset = fill_pct / 100.0 * thumb.w as f32,
             url = thumb.url,
         ),
         (None, FaderMode::Vertical | FaderMode::Knob) => format!(
-            "position:absolute; left:-3px; right:-3px; bottom:calc({fill_pct}% - 6px); \
+            "position:absolute; left:-3px; right:-3px; \
+             bottom:calc({fill_pct}% - {inset:.1}px); \
              height:12px; border-radius:3px; \
              background:linear-gradient(180deg,{top},{bottom}); \
              border:1px solid #15151a; pointer-events:none; \
              box-shadow:0 1px 2px rgba(0,0,0,0.6);",
+            inset = fill_pct / 100.0 * 12.0,
             top = f.cap_top.css(),
             bottom = f.cap_bottom.css(),
         ),
         (None, FaderMode::Horizontal) => format!(
-            "position:absolute; top:-3px; bottom:-3px; left:calc({fill_pct}% - 6px); \
+            "position:absolute; top:-3px; bottom:-3px; \
+             left:calc({fill_pct}% - {inset:.1}px); \
              width:12px; border-radius:3px; \
              background:linear-gradient(90deg,{top},{bottom}); \
              border:1px solid #15151a; pointer-events:none; \
              box-shadow:0 1px 2px rgba(0,0,0,0.6);",
+            inset = fill_pct / 100.0 * 12.0,
             top = f.cap_top.css(),
             bottom = f.cap_bottom.css(),
         ),
