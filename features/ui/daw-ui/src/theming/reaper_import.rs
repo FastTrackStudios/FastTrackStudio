@@ -15,9 +15,10 @@
 //! - Button colours (mute/solo/arm) stay FTS defaults: REAPER themes carry
 //!   them as images, not palette keys (the image skin is the next layer).
 
-use daw_theme_reaper::Rgba;
+use daw_theme_reaper::{ImageCatalog, Rgba};
 pub use daw_theme_reaper::{ReaperTheme, ThemeError};
 
+use super::mcp::{ButtonSkin, McpSkin, SkinImage};
 use super::theme::{Color, Theme};
 use super::walter::ThemeParam;
 
@@ -82,6 +83,9 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
         mcp.colors.volume = Some(color(zl));
     }
 
+    // ── image skin ──
+    mcp.skin = extract_skin(rt);
+
     // ── define_parameter knobs ──
     // Imported knobs are appended after the FTS ones; same-name knobs from
     // the theme replace ours.
@@ -101,6 +105,74 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
     }
 
     theme
+}
+
+/// Slice the theme's button/fader atlases into an [`McpSkin`] (data-URI PNGs).
+///
+/// Image lookup walks REAPER's fallback chain: a context image (`mcp_X`),
+/// then the shared track vocabulary (`track_X`), then the general fallback
+/// (`gen_X`) — the Anti-Theme, like the stock default, ships most strip
+/// buttons as `track_*`/`gen_*`.
+fn extract_skin(rt: &ReaperTheme) -> Option<McpSkin> {
+    let imgs = &rt.images;
+
+    // First catalog name present along the fallback chain.
+    let find = |base: &str| -> Option<String> {
+        ["mcp_", "track_", "gen_"]
+            .iter()
+            .map(|p| format!("{p}{base}"))
+            .find(|n| imgs.has(n))
+    };
+
+    // Normal (unhovered) state of a 3-slice button, with the `*_ol` overlay
+    // composited on top — `use_overlays 1` themes (incl. the default) keep
+    // the base states transparent and ship the visible art in the overlay.
+    let button = |base: &str| -> Option<SkinImage> {
+        let name = find(base)?;
+        let s = imgs.button3(&name).ok()?;
+        let img = match imgs.button3(&format!("{name}_ol")) {
+            Ok(ol) => daw_theme_reaper::images::alpha_over(&s.normal, &ol.normal),
+            Err(_) => s.normal,
+        };
+        Some(SkinImage {
+            url: ImageCatalog::data_uri(&img),
+            w: img.width(),
+            h: img.height(),
+        })
+    };
+    let toggle = |base_off: &str, base_on: &str| -> Option<ButtonSkin> {
+        Some(ButtonSkin {
+            off: button(base_off)?,
+            on: button(base_on)?,
+        })
+    };
+    // A plain (marker-stripped) image.
+    let plain = |name: &str| -> Option<SkinImage> {
+        let s = imgs.load(name).ok()?;
+        Some(SkinImage {
+            url: ImageCatalog::data_uri(&s.image),
+            w: s.image.width(),
+            h: s.image.height(),
+        })
+    };
+
+    let skin = McpSkin {
+        mute: toggle("mute_off", "mute_on"),
+        solo: toggle("solo_off", "solo_on"),
+        recarm: toggle("recarm_off", "recarm_on"),
+        io: button("io"),
+        volbg: plain("mcp_volbg"),
+        volthumb: plain("mcp_volthumb"),
+    };
+
+    // No images at all → stay vector.
+    let any = skin.mute.is_some()
+        || skin.solo.is_some()
+        || skin.recarm.is_some()
+        || skin.io.is_some()
+        || skin.volbg.is_some()
+        || skin.volthumb.is_some();
+    any.then_some(skin)
 }
 
 #[cfg(test)]
@@ -139,5 +211,19 @@ mod tests {
         assert!(theme.mcp.params.iter().any(|p| p.name == "textBrightness"));
         // FTS knobs are kept too.
         assert!(theme.mcp.params.iter().any(|p| p.name == "mcp_show_pan"));
+
+        // Image skin extracted: mute/solo via the track_* fallback, fader
+        // bg/thumb from mcp_volbg/mcp_volthumb — all as data URIs.
+        let skin = theme.mcp.skin.as_ref().expect("anti-theme yields a skin");
+        let mute = skin.mute.as_ref().expect("mute skin");
+        assert!(mute.off.url.starts_with("data:image/png;base64,"));
+        // 20 wide from the base 3-slice; height includes the _ol overlay's
+        // shadow rows (the visible art — the base off-state is transparent).
+        assert_eq!(mute.off.w, 20);
+        assert!(mute.off.h >= 20);
+        assert!(skin.solo.is_some());
+        assert!(skin.io.is_some());
+        let thumb = skin.volthumb.as_ref().expect("volthumb");
+        assert_eq!((thumb.w, thumb.h), (23, 53));
     }
 }

@@ -187,6 +187,41 @@ pub struct McpColors {
     pub meter_readout: Option<ColorPair>,
 }
 
+/// One skin image, delivered as a CSS-loadable URL (data URI or file) plus
+/// its native px size (for aspect-correct placement).
+#[derive(Clone, PartialEq, Debug)]
+pub struct SkinImage {
+    pub url: String,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// A two-state (off/on) image-skinned button.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ButtonSkin {
+    pub off: SkinImage,
+    pub on: SkinImage,
+}
+
+/// The optional image skin for the MCP strip — REAPER's atlas vocabulary
+/// sliced into per-element images (`mcp_*` → `track_*` → `gen_*` fallback
+/// chain). Elements without an entry render vector styles.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct McpSkin {
+    /// `*_mute_off/on` (normal state of the 3-slice).
+    pub mute: Option<ButtonSkin>,
+    /// `*_solo_off/on`.
+    pub solo: Option<ButtonSkin>,
+    /// `*_recarm_off/on`.
+    pub recarm: Option<ButtonSkin>,
+    /// `mcp_io` / `track_io` (normal state).
+    pub io: Option<SkinImage>,
+    /// `mcp_volbg` — the fader well.
+    pub volbg: Option<SkinImage>,
+    /// `mcp_volthumb` — the fader cap.
+    pub volthumb: Option<SkinImage>,
+}
+
 /// The MCP theme context: named layouts + colour overrides + author params.
 #[derive(Clone, PartialEq, Debug)]
 pub struct McpTheme {
@@ -195,6 +230,8 @@ pub struct McpTheme {
     /// `define_parameter` knobs. [`McpTheme::param`] resolves by name;
     /// `mcp_show_pan` and `mcp_strip_width` are honoured by the strip widget.
     pub params: Vec<ThemeParam>,
+    /// Image skin (imported themes); `None` = pure vector rendering.
+    pub skin: Option<McpSkin>,
 }
 
 impl McpTheme {
@@ -214,6 +251,7 @@ impl McpTheme {
                     128.0,
                 ),
             ],
+            skin: None,
         }
     }
 

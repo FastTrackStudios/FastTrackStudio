@@ -64,6 +64,9 @@ pub fn McpStrip(
     let pan_color = mcp.colors.pan; // Knob themes itself; reserved for importer use.
     let _ = pan_color;
 
+    // Image skin (imported REAPER themes): per-element image overrides.
+    let skin = mcp.skin.clone().unwrap_or_default();
+
     let display_pct = format!("{:.0}%", (track.fader)().clamp(0.0, 1.0) * 100.0);
 
     rsx! {
@@ -116,13 +119,13 @@ pub fn McpStrip(
 
             // mcp.solo / mcp.mute / mcp.recarm
             if !l.solo.is_hidden() {
-                McpToggle { pos: l.solo.css_position(nat), active: track.solo, kind: ToggleKind::Solo, disabled }
+                McpToggle { pos: l.solo.css_position(nat), active: track.solo, kind: ToggleKind::Solo, skin: skin.solo.clone(), disabled }
             }
             if !l.mute.is_hidden() {
-                McpToggle { pos: l.mute.css_position(nat), active: track.mute, kind: ToggleKind::Mute, disabled }
+                McpToggle { pos: l.mute.css_position(nat), active: track.mute, kind: ToggleKind::Mute, skin: skin.mute.clone(), disabled }
             }
             if !l.recarm.is_hidden() {
-                McpToggle { pos: l.recarm.css_position(nat), active: track.record_arm, kind: ToggleKind::RecArm, disabled }
+                McpToggle { pos: l.recarm.css_position(nat), active: track.record_arm, kind: ToggleKind::RecArm, skin: skin.recarm.clone(), disabled }
             }
 
             // mcp.volume
@@ -132,6 +135,8 @@ pub fn McpStrip(
                     value: track.fader,
                     mode: l.volume_fadermode,
                     accent: fader_accent,
+                    skin_bg: skin.volbg.clone(),
+                    skin_thumb: skin.volthumb.clone(),
                     disabled,
                 }
             }
@@ -163,19 +168,34 @@ pub fn McpStrip(
                 }
             }
 
-            // mcp.io — routing.
+            // mcp.io — routing. Image-skinned when the theme ships one.
             if !l.io.is_hidden() {
-                div {
-                    style: format!(
-                        "{pos} display:flex; align-items:center; justify-content:center;",
-                        pos = l.io.css_position(nat),
-                    ),
-                    RoutingButton {
-                        parent_send: true,
-                        sends: track.sends,
-                        receives: track.receives,
-                        disabled,
-                        on_click: move |_| {},
+                if let Some(io) = skin.io.clone() {
+                    // div, not button: blitz's UA button background paints
+                    // over background-image.
+                    div {
+                        title: "Routing",
+                        style: format!(
+                            "{pos} cursor:pointer; background-image:url({url}); \
+                             background-size:contain; background-repeat:no-repeat; \
+                             background-position:center;",
+                            pos = l.io.css_position(nat),
+                            url = io.url,
+                        ),
+                    }
+                } else {
+                    div {
+                        style: format!(
+                            "{pos} display:flex; align-items:center; justify-content:center;",
+                            pos = l.io.css_position(nat),
+                        ),
+                        RoutingButton {
+                            parent_send: true,
+                            sends: track.sends,
+                            receives: track.receives,
+                            disabled,
+                            on_click: move |_| {},
+                        }
                     }
                 }
             }
@@ -233,9 +253,17 @@ fn flex_justify(m: &crate::theming::Margin) -> &'static str {
 
 // ── element widgets ───────────────────────────────────────────────────────────
 
-/// A toggle button filling its anchor box (mute/solo/recarm).
+/// A toggle button filling its anchor box (mute/solo/recarm). With an image
+/// [`ButtonSkin`] the off/on atlas states paint the button (glyph omitted —
+/// REAPER images carry their own); otherwise vector toggle styles.
 #[component]
-fn McpToggle(pos: String, active: Signal<bool>, kind: ToggleKind, disabled: bool) -> Element {
+fn McpToggle(
+    pos: String,
+    active: Signal<bool>,
+    kind: ToggleKind,
+    #[props(default)] skin: Option<crate::theming::ButtonSkin>,
+    disabled: bool,
+) -> Element {
     let t = use_theme().theme.toggle(kind);
     let (glyph, title) = match kind {
         ToggleKind::Solo => ("S", "Solo"),
@@ -244,6 +272,28 @@ fn McpToggle(pos: String, active: Signal<bool>, kind: ToggleKind, disabled: bool
     };
     let on = active();
     let cursor = if disabled { "not-allowed" } else { "pointer" };
+
+    if let Some(skin) = skin {
+        let img = if on { &skin.on } else { &skin.off };
+        // div, not button: blitz's UA button background paints over
+        // background-image.
+        return rsx! {
+            div {
+                title,
+                style: format!(
+                    "{pos} cursor:{cursor}; background-image:url({url}); \
+                     background-size:100% 100%; background-repeat:no-repeat;",
+                    url = img.url,
+                ),
+                onclick: move |_| {
+                    if disabled { return; }
+                    let next = !active();
+                    active.set(next);
+                },
+            }
+        };
+    }
+
     let colors = if on {
         format!(
             "background:{fill}; color:{fg}; border:1px solid {fill}; \
@@ -301,12 +351,16 @@ fn McpFlag(pos: String, glyph: &'static str, title: &'static str) -> Element {
 }
 
 /// The volume fader, vertical or horizontal per `mcp.volume.fadermode`.
+/// With an image skin, `skin_bg` paints the well (`mcp_volbg`, stretched) and
+/// `skin_thumb` replaces the vector cap (`mcp_volthumb`, native aspect).
 #[component]
 fn McpFader(
     pos: String,
     value: Signal<f32>,
     mode: FaderMode,
     accent: Color,
+    #[props(default)] skin_bg: Option<crate::theming::SkinImage>,
+    #[props(default)] skin_thumb: Option<crate::theming::SkinImage>,
     disabled: bool,
 ) -> Element {
     let mut is_dragging = use_signal(|| false);
@@ -326,8 +380,31 @@ fn McpFader(
 
     let theme = use_theme().theme;
     let f = theme.fader(&ThemeState::new());
-    let cap = match mode {
-        FaderMode::Vertical => format!(
+
+    // Cap: image thumb at native aspect (centered on the value position), or
+    // the vector cap + accent line.
+    let cap = match (&skin_thumb, mode) {
+        (Some(thumb), FaderMode::Vertical) => format!(
+            "position:absolute; left:calc(50% - {hw}px); width:{w}px; height:{h}px; \
+             bottom:calc({fill_pct}% - {hh}px); pointer-events:none; \
+             background-image:url({url}); background-size:100% 100%;",
+            w = thumb.w,
+            h = thumb.h,
+            hw = thumb.w as f32 / 2.0,
+            hh = thumb.h as f32 / 2.0,
+            url = thumb.url,
+        ),
+        (Some(thumb), FaderMode::Horizontal) => format!(
+            "position:absolute; top:calc(50% - {hh}px); width:{w}px; height:{h}px; \
+             left:calc({fill_pct}% - {hw}px); pointer-events:none; \
+             background-image:url({url}); background-size:100% 100%;",
+            w = thumb.h,
+            h = thumb.w,
+            hw = thumb.h as f32 / 2.0,
+            hh = thumb.w as f32 / 2.0,
+            url = thumb.url,
+        ),
+        (None, FaderMode::Vertical) => format!(
             "position:absolute; left:-3px; right:-3px; bottom:calc({fill_pct}% - 6px); \
              height:12px; border-radius:3px; \
              background:linear-gradient(180deg,{top},{bottom}); \
@@ -336,7 +413,7 @@ fn McpFader(
             top = f.cap_top.css(),
             bottom = f.cap_bottom.css(),
         ),
-        FaderMode::Horizontal => format!(
+        (None, FaderMode::Horizontal) => format!(
             "position:absolute; top:-3px; bottom:-3px; left:calc({fill_pct}% - 6px); \
              width:12px; border-radius:3px; \
              background:linear-gradient(90deg,{top},{bottom}); \
@@ -346,6 +423,7 @@ fn McpFader(
             bottom = f.cap_bottom.css(),
         ),
     };
+    let skinned = skin_thumb.is_some();
     let cap_line = match mode {
         FaderMode::Vertical => format!(
             "position:absolute; left:3px; right:3px; top:5px; height:2px; \
@@ -359,15 +437,31 @@ fn McpFader(
         ),
     };
 
+    // Well: image bg (stretched; its pink-marked fixed regions are baked into
+    // the slice) or the vector well.
+    let well = match &skin_bg {
+        Some(bg) => format!(
+            "{pos} cursor:{cursor}; background-image:url({url}); \
+             background-size:100% 100%; overflow:visible;",
+            url = bg.url,
+        ),
+        None => format!(
+            "{pos} background:{well}; border-radius:5px; border:1px solid {border}; \
+             cursor:{cursor}; box-shadow:inset 0 1px 3px rgba(0,0,0,0.5);",
+            well = f.well.css(),
+            border = f.border.css(),
+        ),
+    };
+
     rsx! {
         div {
-            style: format!(
-                "{pos} background:{well}; border-radius:5px; border:1px solid {border}; \
-                 cursor:{cursor}; box-shadow:inset 0 1px 3px rgba(0,0,0,0.5);",
-                well = f.well.css(),
-                border = f.border.css(),
-            ),
-            div { style: cap, div { style: cap_line } }
+            style: well,
+            div {
+                style: cap,
+                if !skinned {
+                    div { style: cap_line }
+                }
+            }
 
             // Drag overlay.
             div {

@@ -161,6 +161,8 @@ anyrender_vello = "0.10"
 # Dioxus native rendering (used by daw-reaper-dioxus)
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = [
     "prelude", "svg", "system-fonts", "autofocus", "incremental",
+    # data: URLs (theme image skins are delivered as data-URI PNGs)
+    "data-uri",
 ] }
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
 blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }

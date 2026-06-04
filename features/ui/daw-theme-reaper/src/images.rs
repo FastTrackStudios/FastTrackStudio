@@ -116,11 +116,13 @@ impl ImageCatalog {
     }
 
     /// Slice a 3-state button image (`normal|hover|pressed` left→right).
+    /// Width divides by 3 with the remainder ignored — overlay (`*_ol`)
+    /// variants pad a pixel or two beyond exact thirds.
     pub fn button3(&self, name: &str) -> Result<Slice3, ThemeError> {
         let sliced = self.load(name)?;
         let img = sliced.image;
         let (w, h) = img.dimensions();
-        if w < 3 || w % 3 != 0 {
+        if w < 3 {
             return Err(ThemeError::BadGeometry {
                 path: self.dir.join(format!("{name}.png")),
                 geometry: "3-slice button",
@@ -152,6 +154,45 @@ impl ImageCatalog {
         .expect("in-memory png encode");
         out.into_inner()
     }
+
+    /// Encode an RGBA image as a `data:image/png;base64,…` URI.
+    pub fn data_uri(img: &RgbaImage) -> String {
+        format!("data:image/png;base64,{}", base64(&Self::encode_png(img)))
+    }
+}
+
+/// Alpha-composite `top` over `base`, both anchored top-left, on a canvas
+/// covering both. Used to merge `name_ol.png` button overlays (the visible
+/// art in `use_overlays 1` themes — the default theme's button bases are
+/// fully transparent) onto their base states.
+pub fn alpha_over(base: &RgbaImage, top: &RgbaImage) -> RgbaImage {
+    let w = base.width().max(top.width());
+    let h = base.height().max(top.height());
+    let mut out = RgbaImage::from_pixel(w, h, image::Rgba([0, 0, 0, 0]));
+    image::imageops::overlay(&mut out, base, 0, 0);
+    image::imageops::overlay(&mut out, top, 0, 0);
+    out
+}
+
+/// Minimal standard-alphabet base64 (padding included) — avoids a dependency
+/// for the one data-URI use.
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
+        let enc = |shift: u32| ABC[((n >> shift) & 0x3f) as usize] as char;
+        out.push(enc(18));
+        out.push(enc(12));
+        out.push(if chunk.len() > 1 { enc(6) } else { '=' });
+        out.push(if chunk.len() > 2 { enc(0) } else { '=' });
+    }
+    out
 }
 
 /// Detect + strip pink/yellow marker edge lines, decoding the fixed-region
@@ -273,6 +314,15 @@ mod tests {
 
     fn img(w: u32, h: u32) -> RgbaImage {
         RgbaImage::from_pixel(w, h, GREY)
+    }
+
+    #[test]
+    fn base64_rfc_vectors() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
     }
 
     #[test]
