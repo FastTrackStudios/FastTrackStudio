@@ -15,14 +15,17 @@
 //! attribute map. Re-evaluate when the environment changes — WALTER has no
 //! hidden state between runs.
 //!
-//! Semantics verified against the Anti-Theme (the REAPER 7 default rebuilt):
-//! - arithmetic is element-wise over the longer operand with missing
-//!   components read as 0, except **single-element lists broadcast** (the
-//!   theme writes both `* Scale [0 0 0 x]` — broadcast — and
-//!   `* [Scale Scale Scale Scale 1] […]` — explicit, length-preserving);
-//! - a condition token (`w<100`, `a<=b`, `?x`, `!x`) selects the following
-//!   value expression; chains fall through to a final value, a bare `.`
-//!   (or the destination's own name) meaning "current value";
+//! Semantics per White Tie's *WALTER: A themer's guide* (the authoritative
+//! companion to the SDK), verified against the Anti-Theme, Reapertips,
+//! Neptune VI and Imperial:
+//! - conditions are **strictly binary Polish notation** — `question
+//!   true-answer false-answer`, nestable in either answer
+//!   (`w>=230 h<40 A B C` = w≥230 ? (h<40 ? A : B) : C); a missing
+//!   false-answer at end of statement leaves the value unchanged;
+//! - condition tokens: comparisons (`a<b a<=b a==b a!=b …`), truthiness
+//!   (`?x` nonzero, `!x` zero), bitwise AND (`a&b`);
+//! - arithmetic is element-wise by list position with missing components
+//!   read as 0; bare scalars broadcast, `[x]` literals stay positional;
 //! - `def` is preprocessor-level token substitution; `set` evaluates.
 
 use std::collections::HashMap;
@@ -473,25 +476,13 @@ impl Interp<'_> {
     /// Evaluate a conditional chain: `cond expr cond expr … final-expr`.
     /// `dest`/`current` feed the "keep current value" forms (`.`, dest name,
     /// or a chain with no final else).
+    /// Evaluate a full `set` expression (one binary-conditional Polish
+    /// expression). An empty token list keeps the current value.
     fn eval_chain(&mut self, toks: &[String], dest: &str, current: &Val) -> Val {
-        let mut pos = 0;
-        while pos < toks.len() {
-            if let Some(cond) = self.parse_condition(&toks[pos]) {
-                pos += 1;
-                // The value expression following the condition.
-                let (val, next) = self.eval_expr(toks, pos, dest, current);
-                if cond {
-                    return val;
-                }
-                pos = next;
-            } else {
-                let (val, next) = self.eval_expr(toks, pos, dest, current);
-                let _ = next;
-                return val;
-            }
+        if toks.is_empty() {
+            return current.clone();
         }
-        // Chain exhausted with no else → keep current.
-        current.clone()
+        self.eval_expr(toks, 0, dest, current).0
     }
 
     /// A condition token: `?name` (nonzero), `!name` (zero), or an embedded
@@ -506,6 +497,16 @@ impl Interp<'_> {
             if !name.contains(['<', '>', '=']) {
                 return Some(self.scalar_operand(name) == 0.0);
             }
+        }
+        // `a&b` — bitwise AND as a truth test (`fish{0}&chips{0}`).
+        if let Some((l, r)) = tok.split_once('&')
+            && !l.is_empty()
+            && !r.is_empty()
+            && !tok.contains(['<', '>', '='])
+        {
+            let a = self.scalar_operand(l) as i64;
+            let b = self.scalar_operand(r) as i64;
+            return Some((a & b) != 0);
         }
         for op in ["<=", ">=", "==", "!=", "<", ">"] {
             if let Some(idx) = tok.find(op) {
@@ -549,12 +550,25 @@ impl Interp<'_> {
         if std::env::var("WALTER_TRACE_EXPR").is_ok() {
             eprintln!("  expr@{pos}: {tok}");
         }
-        // A condition token in operand position opens a nested conditional
-        // chain spanning the rest of the expression (the Anti-Theme writes
-        // `* Scale + base{0} ?recarm A ?sel B C`).
-        if self.parse_condition(tok).is_some() {
-            let v = self.eval_chain(&toks[pos..], dest, current);
-            return (v, toks.len());
+        // Stray `]` (theme typos like `name{3}]==0` — the Anti-Theme ships
+        // one): treat the rest of the statement as malformed and keep the
+        // current value, as REAPER's lenient parser effectively does.
+        if tok == "]" {
+            return (current.clone(), toks.len());
+        }
+        // Conditions are strictly binary Polish notation (the WALTER
+        // themer's guide): `question true-answer false-answer`, nestable in
+        // either answer (`w>=230 h<40 A B C` = w≥230 ? (h<40 ? A : B) : C).
+        // A missing false-answer at end of statement keeps the current value
+        // ("WALTER does nothing").
+        if let Some(cond) = self.parse_condition(tok) {
+            let (t, p1) = self.eval_expr(toks, pos + 1, dest, current);
+            let (f, p2) = if p1 < toks.len() {
+                self.eval_expr(toks, p1, dest, current)
+            } else {
+                (current.clone(), p1)
+            };
+            return (if cond { t } else { f }, p2);
         }
         match tok.as_str() {
             "[" => self.eval_list(toks, pos, dest, current),
@@ -853,6 +867,42 @@ setall tcp.mute 1
     fn dot_keeps_current_in_chain() {
         let out = eval("set a [7]\nset a w<200 . [9]");
         assert_eq!(out.get("a").unwrap(), &[7.0]);
+    }
+
+    #[test]
+    fn true_position_nesting_is_binary() {
+        // The themer's guide canonical example:
+        // `w>=230 h<40 A B C` = w>=230 ? (h<40 ? A : B) : C.
+        let src = "set s w>=230 h<40 [1] [2] [3]";
+        let at = |w: f32, h: f32| {
+            evaluate(src, None, &Env::new().with("w", w).with("h", h))
+                .get("s")
+                .unwrap()
+                .to_vec()
+        };
+        assert_eq!(at(300.0, 30.0), vec![1.0]);
+        assert_eq!(at(300.0, 100.0), vec![2.0]);
+        assert_eq!(at(100.0, 30.0), vec![3.0]);
+    }
+
+    #[test]
+    fn bitwise_and_condition() {
+        let out = evaluate(
+            "set fish [21]\nset chips [31]\nset a fish{0}&chips{0} [1] [2]\nset b fish{0}&8 [1] [2]",
+            None,
+            &Env::new(),
+        );
+        assert_eq!(out.get("a").unwrap(), &[1.0]); // 21 & 31 != 0
+        assert_eq!(out.get("b").unwrap(), &[2.0]); // 21 & 8 == 0
+    }
+
+    #[test]
+    fn stray_bracket_terminates_chain() {
+        // Theme typos like `cond name{3}]==0 [0] …` (the Anti-Theme ships
+        // one) must not clobber the current value with garbage: the false
+        // condition skips its value, then the stray `]` ends the chain.
+        let out = eval("set a [1 2 3 4]\nset a w<50 junk{3} ] ==0 [9]");
+        assert_eq!(out.get("a").unwrap(), &[1., 2., 3., 4.]);
     }
 
     #[test]

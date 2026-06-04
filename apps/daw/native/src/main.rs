@@ -89,12 +89,12 @@ fn App() -> Element {
         let mut ctx = daw::ui::theming::ThemeContext::new();
         let dir =
             std::env::var("FTS_REAPER_THEME").unwrap_or_else(|_| DEFAULT_REAPER_THEME.to_string());
-        // 150% is REAPER's typical rendering on this rig (misc_dpi_translate
-        // kicks in at >=134%); FTS_THEME_SCALE overrides.
+        // FTS_THEME_SCALE picks the theme's DPI variant (1.5 → 150%_ layouts
+        // + 150/ images); 1.0 matches REAPER at 100%.
         let scale = std::env::var("FTS_THEME_SCALE")
             .ok()
             .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(1.5);
+            .unwrap_or(1.0);
         match daw::ui::theming::reaper_import::theme_from_dir_scaled(&dir, scale) {
             Ok(theme) => {
                 tracing::info!("imported REAPER theme from {dir} at {scale}x");

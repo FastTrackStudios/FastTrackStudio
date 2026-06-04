@@ -168,11 +168,19 @@ pub fn McpStrip(
                     style: format!(
                         "{pos} display:flex; align-items:center; justify-content:{justify}; \
                          padding:{pad}; color:{fg}; font-size:10px; \
-                         white-space:nowrap; overflow:hidden;",
+                         white-space:nowrap; overflow:hidden;{bg}",
                         pos = l.recinput.css_position(nat),
                         justify = flex_justify(&l.recinput_margin),
                         pad = l.recinput_margin.css_padding(),
                         fg = theme.tokens.text_dim.css(),
+                        bg = skin
+                            .recinput_bg
+                            .as_ref()
+                            .map(|i| format!(
+                                " background-image:url({}); background-size:100% 100%;",
+                                i.url
+                            ))
+                            .unwrap_or_default(),
                     ),
                     "Input 1"
                 }

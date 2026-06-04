@@ -232,15 +232,21 @@ fn walter_mcp_layouts(
     let mut layouts = Vec::new();
     for name in names {
         let eval_name = variant_of(&name);
-        // Pass 1: the theme's own strip width for this layout.
+        // Pass 1: the layout's natural size. `mcp.size` ([default w,
+        // default h, min w, min h]) is REAPER's mechanism and holds across
+        // themes (Anti/Reapertips/Neptune/Imperial); the Anti-Theme's
+        // `mcpWidth` variable is the fallback.
         let pass1 = evaluate(src, Some(&eval_name), &make_env(100.0, h0));
-        let w0 = match pass1
-            .get("mcpWidth")
-            .map(|v| v.first().copied().unwrap_or(0.0))
+        let size = pass1.coord("mcp.size");
+        let w0 = match size
+            .map(|s| s[0])
+            .filter(|w| *w >= 24.0)
+            .or_else(|| pass1.get("mcpWidth").and_then(|v| v.first().copied()))
         {
             Some(w) if w >= 24.0 => w,
             _ => continue,
         };
+        let h0 = size.map(|s| s[1]).filter(|h| *h >= 100.0).unwrap_or(h0);
 
         // Pass 2: natural + finite-difference evaluations. Strip width is
         // theme-driven (`mcpWidth` reads the layout's width knob, not env
