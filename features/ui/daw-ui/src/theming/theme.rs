@@ -322,6 +322,8 @@ pub struct Theme {
     pub arrange: super::arrange::ArrangeTheme,
     /// The transport context — `trans.*` layout + transport_* images.
     pub trans: super::trans::TransTheme,
+    /// The envelope-control-panel context — `envcp.*` layout + envcp_* images.
+    pub envcp: super::envcp::EnvcpTheme,
 }
 
 impl Default for Theme {
@@ -361,6 +363,7 @@ impl Theme {
             engine: None,
             arrange: super::arrange::ArrangeTheme::fts_default(),
             trans: super::trans::TransTheme::fts_default(),
+            envcp: super::envcp::EnvcpTheme::fts_default(),
         }
     }
 

@@ -9,7 +9,7 @@
 
 use crate::panels::arrange_view::ArrangeView;
 use crate::panels::mixer_control_panel::MixerControlPanel;
-use crate::panels::model::{MarkerView, RegionView, TrackView};
+use crate::panels::model::{MarkerView, RegionView, TempoMarkerView, TrackView};
 use crate::prelude::*;
 
 /// Full DAW workspace. `mixer_fraction` is the mixer's share of the height
@@ -20,6 +20,7 @@ pub fn DawWorkspace(
     #[props(default = 0.34)] mixer_fraction: f32,
     #[props(default)] markers: Vec<MarkerView>,
     #[props(default)] regions: Vec<RegionView>,
+    #[props(default)] tempo_markers: Vec<TempoMarkerView>,
     #[props(default)] time_sel: Option<(f64, f64)>,
     #[props(default)] loop_range: Option<(f64, f64)>,
     #[props(default)] bpm: Option<f64>,
@@ -46,6 +47,7 @@ pub fn DawWorkspace(
                     tracks: tracks.clone(),
                     markers,
                     regions,
+                    tempo_markers,
                     time_sel,
                     loop_range,
                     bpm,

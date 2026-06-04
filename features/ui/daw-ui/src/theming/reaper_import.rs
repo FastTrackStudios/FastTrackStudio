@@ -258,6 +258,13 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         set(&mut ar.region_edge, pal("region_edge"));
         set(&mut ar.region_lane_bg, pal("region_lane_bg"));
         set(&mut ar.region_lane_text, pal("region_lane_text"));
+        set(&mut ar.tsig, pal("col_tsigmark"));
+        set(&mut ar.ts_lane_bg, pal("ts_lane_bg"));
+        set(&mut ar.ts_lane_text, pal("ts_lane_text"));
+        set(&mut ar.env_default, pal("col_env1"));
+        set(&mut ar.env_vol, pal("env_trim_vol"));
+        set(&mut ar.envlane_divider[0], pal("col_envlane1_divline"));
+        set(&mut ar.envlane_divider[1], pal("col_envlane2_divline"));
         set(
             &mut ar.sel_fill,
             with_dm("areasel_fill", "areasel_drawmode"),
@@ -302,7 +309,279 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         tr.layouts.extend(fallbacks);
     }
 
+    // ── envcp context ──
+    let ecp = &mut theme.envcp;
+    ecp.skin = extract_envcp_skin(&imgs);
+    let envcp_layouts = walter_envcp_layouts(rt, scale, dpi_folder.as_deref());
+    if !envcp_layouts.is_empty() {
+        let fallbacks = std::mem::take(&mut ecp.layouts);
+        ecp.layouts = envcp_layouts;
+        ecp.layouts.extend(fallbacks);
+    }
+
     theme
+}
+
+/// Evaluate the theme's `envcp.*` context per layout (finite-difference
+/// anchors; natural size from `envcp.size` = `[default w, default h, min w]`).
+fn walter_envcp_layouts(
+    rt: &ReaperTheme,
+    scale: f32,
+    dpi_folder: Option<&str>,
+) -> Vec<super::envcp::EnvcpLayout> {
+    use daw_theme_reaper::walter::{Env, evaluate};
+
+    let src = &rt.rtconfig_src;
+    let make_env = |w: f32, h: f32| -> Env {
+        let mut env = Env::reaper_defaults(w, h);
+        env.set("Scale", scale);
+        for p in &rt.rtconfig.params {
+            env.set(&p.name, p.default);
+        }
+        env
+    };
+    const DW: f32 = 32.0;
+    const DH: f32 = 16.0;
+
+    let probe = evaluate(src, None, &make_env(300.0, 40.0));
+    let names: Vec<String> = probe
+        .layouts
+        .iter()
+        .filter(|n| !n.contains('%'))
+        .cloned()
+        .collect();
+    let variant_of = |base: &str| -> String {
+        match dpi_folder {
+            Some(folder) => {
+                let v = format!("{folder}%_{base}");
+                if probe.layouts.iter().any(|l| l == &v) {
+                    v
+                } else {
+                    base.to_string()
+                }
+            }
+            None => base.to_string(),
+        }
+    };
+
+    let mut layouts = Vec::new();
+    for name in names {
+        let eval_name = variant_of(&name);
+        let pass1 = evaluate(src, Some(&eval_name), &make_env(300.0, 40.0));
+        let Some(size) = pass1.coord("envcp.size") else {
+            continue;
+        };
+        let (w0, h0) = (size[0], size[1].max(24.0));
+        if w0 < 60.0 {
+            continue;
+        }
+        let out0 = evaluate(src, Some(&eval_name), &make_env(w0, h0));
+        let out_w = evaluate(src, Some(&eval_name), &make_env(w0 + DW, h0));
+        let out_h = evaluate(src, Some(&eval_name), &make_env(w0, h0 + DH));
+        layouts.push(envcp_layout_from_walter(
+            &name,
+            (w0, h0),
+            size[2].max(60.0),
+            &out0,
+            &out_w,
+            &out_h,
+            (DW, DH),
+        ));
+    }
+    layouts
+}
+
+/// Convert one evaluated ECP layout into an [`EnvcpLayout`].
+fn envcp_layout_from_walter(
+    name: &str,
+    size: (f32, f32),
+    min_w: f32,
+    out0: &daw_theme_reaper::walter::Output,
+    out_w: &daw_theme_reaper::walter::Output,
+    out_h: &daw_theme_reaper::walter::Output,
+    (dw, dh): (f32, f32),
+) -> super::envcp::EnvcpLayout {
+    use super::walter::{Coord, FaderMode, Margin};
+
+    let coord = |attr: &str| -> Coord {
+        let Some(c0) = out0.coord(attr) else {
+            return Coord::hidden();
+        };
+        let (x, y, w, h) = (c0[0], c0[1], c0[2], c0[3]);
+        if w <= 0.0 || h <= 0.0 {
+            return Coord::hidden();
+        }
+        let cw = out_w.coord(attr).unwrap_or(c0);
+        let ch = out_h.coord(attr).unwrap_or(c0);
+        Coord::new(
+            x,
+            y,
+            w,
+            h,
+            (cw[0] - x) / dw,
+            (ch[1] - y) / dh,
+            ((cw[0] + cw[2]) - (x + w)) / dw,
+            ((ch[1] + ch[3]) - (y + h)) / dh,
+        )
+    };
+    let color_at = |v: &[f32], i: usize| -> Option<Color> {
+        let r = *v.get(i)? as u8;
+        let g = v.get(i + 1).copied().unwrap_or(0.0) as u8;
+        let b = v.get(i + 2).copied().unwrap_or(0.0) as u8;
+        let a = match v.get(i + 3).copied() {
+            Some(a) => a as u8,
+            None => 255,
+        };
+        Some(Color::rgba(r, g, b, a))
+    };
+    let color_pair = |attr: &str| -> Option<super::walter::ColorPair> {
+        let v = out0.get(attr)?;
+        Some(super::walter::ColorPair {
+            fg: color_at(v, 0)?,
+            bg: color_at(v, 4),
+        })
+    };
+    let margin = |attr: &str, fallback: Margin| -> Margin {
+        match out0.get(attr) {
+            Some(v) => Margin::new(
+                v.first().copied().unwrap_or(0.0),
+                v.get(1).copied().unwrap_or(0.0),
+                v.get(2).copied().unwrap_or(0.0),
+                v.get(3).copied().unwrap_or(0.0),
+                v.get(4).copied().unwrap_or(0.0),
+            ),
+            None => fallback,
+        }
+    };
+
+    // `envcp.custom.*` chrome: reverse declaration order + `front` lifts.
+    let mut names: Vec<&String> = Vec::new();
+    for n in &out0.set_order {
+        if n.starts_with("envcp.custom.") && !n.ends_with(".color") && !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    names.reverse();
+    for f in &out0.fronts {
+        if let Some(pos) = names.iter().position(|n| *n == f) {
+            let n = names.remove(pos);
+            names.push(n);
+        }
+    }
+    let customs: Vec<super::mcp::McpCustom> = names
+        .into_iter()
+        .filter_map(|n| {
+            let c = coord(n);
+            if c.is_hidden() {
+                return None;
+            }
+            let usable = |c: Color| (c.a > 0).then_some(c);
+            let pair = color_pair(&format!("{n}.color"));
+            Some(super::mcp::McpCustom {
+                name: n.clone(),
+                coord: c,
+                fg: pair.map(|p| p.fg).and_then(usable),
+                bg: pair.and_then(|p| p.bg).and_then(usable),
+            })
+        })
+        .collect();
+
+    let fader = coord("envcp.fader");
+    let forced_knob = out0
+        .get("envcp.fader.fadermode")
+        .and_then(|v| v.first().copied())
+        .unwrap_or(0.0)
+        > 0.5;
+    let base = super::envcp::EnvcpLayout::fts_default();
+    super::envcp::EnvcpLayout {
+        name: name.to_string(),
+        size,
+        min_w,
+        label: coord("envcp.label"),
+        label_font: base.label_font,
+        label_margin: margin("envcp.label.margin", base.label_margin),
+        label_color: color_pair("envcp.label.color"),
+        fader_mode: if forced_knob {
+            FaderMode::Knob
+        } else if fader.w > fader.h {
+            FaderMode::Horizontal
+        } else {
+            FaderMode::Vertical
+        },
+        fader,
+        value: coord("envcp.value"),
+        value_font: base.value_font,
+        value_margin: margin("envcp.value.margin", base.value_margin),
+        value_color: color_pair("envcp.value.color"),
+        arm: coord("envcp.arm"),
+        bypass: coord("envcp.bypass"),
+        hide: coord("envcp.hide"),
+        learn: coord("envcp.learn"),
+        modulate: coord("envcp.mod"),
+        customs,
+    }
+}
+
+/// Slice the `envcp_*` atlases into an [`super::envcp::EnvcpSkin`].
+fn extract_envcp_skin(imgs: &ImageCatalog) -> Option<super::envcp::EnvcpSkin> {
+    let button = |name: &str| -> Option<ButtonStateSkin> {
+        let s = imgs.button3(name).ok()?;
+        let ol = imgs.button3(&format!("{name}_ol")).ok();
+        let state = |b: &daw_theme_reaper::image::RgbaImage,
+                     o: Option<&daw_theme_reaper::image::RgbaImage>| {
+            let img = match o {
+                Some(o) => daw_theme_reaper::images::alpha_over(b, o),
+                None => b.clone(),
+            };
+            SkinImage {
+                url: ImageCatalog::data_uri(&img),
+                w: img.width(),
+                h: img.height(),
+                slices: None,
+            }
+        };
+        Some(ButtonStateSkin {
+            normal: state(&s.normal, ol.as_ref().map(|o| &o.normal)),
+            hover: state(&s.hover, ol.as_ref().map(|o| &o.hover)),
+            pressed: state(&s.pressed, ol.as_ref().map(|o| &o.pressed)),
+        })
+    };
+    let toggle = |off: &str, on: &str| -> Option<ButtonSkin> {
+        Some(ButtonSkin {
+            off: button(off)?,
+            on: button(on)?,
+        })
+    };
+    let plain = |name: &str| -> Option<SkinImage> {
+        let s = imgs.load(name).ok()?;
+        Some(SkinImage {
+            url: ImageCatalog::data_uri(&s.image),
+            w: s.image.width(),
+            h: s.image.height(),
+            slices: None,
+        })
+    };
+    let knob = |name: &str| -> Option<super::mcp::KnobSkin> {
+        let stack = imgs.knob_stack(name).ok()?;
+        Some(super::mcp::KnobSkin {
+            url: ImageCatalog::data_uri(&stack.image),
+            frames: stack.frames,
+            frame_w: stack.frame_w,
+            frame_h: stack.frame_h,
+        })
+    };
+
+    let skin = super::envcp::EnvcpSkin {
+        arm: toggle("envcp_arm_off", "envcp_arm_on"),
+        bypass: toggle("envcp_bypass_off", "envcp_bypass_on"),
+        hide: button("envcp_hide"),
+        learn: toggle("envcp_learn", "envcp_learn_on"),
+        parammod: toggle("envcp_parammod", "envcp_parammod_on"),
+        fader_bg: plain("envcp_faderbg"),
+        fader_thumb: plain("envcp_fader"),
+        knob: knob("envcp_knob_stack"),
+    };
+    (skin.arm.is_some() || skin.fader_bg.is_some()).then_some(skin)
 }
 
 /// Evaluate the theme's `trans.*` context per layout — the same

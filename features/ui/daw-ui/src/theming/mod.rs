@@ -5,6 +5,8 @@
 /// The arrange-view context — REAPER's palette-driven ruler/grid/item colours.
 pub mod arrange;
 pub mod context;
+/// The envelope-control-panel context — REAPER's `envcp.*` vocabulary.
+pub mod envcp;
 /// The MCP strip context — REAPER's `mcp.*` element vocabulary as typed layouts.
 pub mod mcp;
 pub mod presets;
@@ -22,6 +24,7 @@ pub mod walter;
 
 pub use arrange::ArrangeTheme;
 pub use context::{ControlConfig, ThemeContext, ThemeProvider, use_theme};
+pub use envcp::{EnvcpLayout, EnvcpSkin, EnvcpTheme};
 pub use mcp::{
     ButtonSkin, ButtonStateSkin, KnobSkin, McpColors, McpCustom, McpLayout, McpSkin, McpTheme,
     NineSlice, SkinImage,

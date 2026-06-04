@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use daw::service::transport::service::Transport;
 use daw::service::{Peaks, ProjectContext, ProjectInfo, Track, TrackRef, Tracks};
-use daw::ui::panels::{ClipView, DawWorkspace, MarkerView, RegionView, TrackView, TransportBar};
+use daw::ui::panels::{ClipView, DawWorkspace, EnvelopeView, MarkerView, RegionView, TempoMarkerView, TrackView, TransportBar};
 use daw::ui::theming::ThemeProvider;
 use daw_standalone::audio_engine::{AudioEngine, test_tone};
 use daw_standalone::sync::Standalone;
@@ -152,6 +152,23 @@ fn App() -> Element {
     });
 
     let mut playing = use_signal(|| false);
+    let playhead = use_signal(|| 0.0f64);
+
+    // Playhead poll: track the transport clock at the metering rate.
+    let pos_engine = engine.clone();
+    use_future(move || {
+        let engine = pos_engine.clone();
+        let mut playhead = playhead;
+        async move {
+            loop {
+                tokio::time::sleep(METER_INTERVAL).await;
+                let pos = engine.get_position(ProjectContext::Current);
+                if (playhead.peek().clone() - pos).abs() > 1e-3 {
+                    playhead.set(pos);
+                }
+            }
+        }
+    });
 
     // Theme tokens drive the shell chrome (the panels theme themselves through
     // the provider below; App itself sits above it, so read the context value).
@@ -198,6 +215,7 @@ fn App() -> Element {
             TransportBar {
                 playing,
                 bpm: 120.0,
+                position: playhead(),
                 on_play: {
                     let engine = engine.clone();
                     move |_| {
@@ -226,10 +244,12 @@ fn App() -> Element {
                     tracks: tracks(),
                     markers: demo_markers(),
                     regions: demo_regions(),
+                    tempo_markers: demo_tempo_markers(),
                     time_sel: Some((16.0, 24.0)),
                     loop_range: Some((16.0, 24.0)),
                     bpm: 120.0,
                     cursor: 16.0,
+                    playhead: is_playing.then(|| playhead()),
                 }
             }
         }
@@ -299,6 +319,9 @@ fn track_to_view(id: usize, track: &Track, depth: u32) -> TrackView {
     } else {
         view = view.stereo().clips(demo_clips(id)); // dual-column meter + demo items
     }
+    if track.name == "BASS" {
+        view = view.envelopes(vec![demo_envelope()]);
+    }
     // Mirror the engine's per-track state into the shared UI signals.
     view.mute.set(track.muted);
     view.solo.set(track.soloed);
@@ -314,12 +337,53 @@ fn demo_clips(id: usize) -> Vec<ClipView> {
     let mut a = ClipView::new(off, 16.0 - off, "Verse", None);
     a.fade_in = 0.8;
     a.fade_out = 1.5;
+    a.peaks = demo_peaks(id, 96);
     let mut b = ClipView::new(24.0, 16.0, "Chorus", None);
     b.fade_in = 0.4;
     b.fade_out = 2.0;
     b.selected = id == 2;
     b.muted = id == 7;
+    b.peaks = demo_peaks(id + 3, 96);
     vec![a, b]
+}
+
+/// Deterministic fake waveform peaks (per-track phase so lanes differ).
+fn demo_peaks(seed: usize, n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / n as f32;
+            let ph = seed as f32 * 1.7;
+            let env = 0.55 + 0.35 * ((t * 6.3 + ph).sin() * (t * 23.0 + ph * 2.0).sin());
+            (env * (0.6 + 0.4 * (t * 91.0 + ph).sin().abs())).clamp(0.05, 1.0)
+        })
+        .collect()
+}
+
+/// Demo tempo markers (ruler tempo lane).
+fn demo_tempo_markers() -> Vec<TempoMarkerView> {
+    vec![
+        TempoMarkerView { time: 0.0, bpm: 120.0, num: 4, den: 4 },
+        TempoMarkerView { time: 40.0, bpm: 140.0, num: 7, den: 8 },
+    ]
+}
+
+/// A demo volume envelope (visible lane under the track).
+fn demo_envelope() -> EnvelopeView {
+    EnvelopeView {
+        name: "Volume".to_string(),
+        color: None,
+        points: vec![
+            (0.0, 0.75),
+            (8.0, 0.75),
+            (12.0, 0.4),
+            (16.0, 0.4),
+            (24.0, 0.9),
+            (40.0, 0.6),
+            (60.0, 0.6),
+        ],
+        height: 32,
+        visible: true,
+    }
 }
 
 /// Demo project markers (ruler marker lane).

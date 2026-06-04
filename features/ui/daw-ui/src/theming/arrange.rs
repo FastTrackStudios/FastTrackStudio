@@ -101,6 +101,20 @@ pub struct ArrangeTheme {
     /// `region_lane_bg` / `region_lane_text`.
     pub region_lane_bg: Color,
     pub region_lane_text: Color,
+    /// `col_tsigmark` — tempo/time-signature change marker.
+    pub tsig: Color,
+    /// `ts_lane_bg` / `ts_lane_text` — the tempo lane.
+    pub ts_lane_bg: Color,
+    pub ts_lane_text: Color,
+
+    // ── envelopes ──
+    /// `col_env1` — default envelope curve colour (per-envelope colours
+    /// override).
+    pub env_default: Color,
+    /// `env_trim_vol` — volume-envelope curve colour.
+    pub env_vol: Color,
+    /// `col_envlane1/2_divline` — envelope-lane divider lines.
+    pub envlane_divider: [Color; 2],
 
     // ── selections ──
     /// `areasel_fill` (+ `areasel_drawmode`) — razor/area selection fill.
@@ -157,6 +171,12 @@ impl ArrangeTheme {
             region_edge: c(0x71717a),
             region_lane_bg: c(0x18181b),
             region_lane_text: c(0xa1a1aa),
+            tsig: c(0xeab308),
+            ts_lane_bg: c(0x18181b),
+            ts_lane_text: c(0xa1a1aa),
+            env_default: c(0x22c55e),
+            env_vol: c(0x38bdf8),
+            envlane_divider: [c(0x1d1d21), c(0x1d1d21)],
             sel_fill: Color::rgba(56, 189, 248, 40),
             marquee_fill: Color::rgba(56, 189, 248, 40),
         }

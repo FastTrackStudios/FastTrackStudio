@@ -1,27 +1,34 @@
 //! ArrangeView — the main timeline, Reaper-style.
 //!
 //! Composes a [`TrackControlPanel`] sidebar on the left with a scrollable
-//! timeline on the right: region/marker lanes + a time ruler across the top
-//! and one lane per track (height `track.height`, aligned with the TCP rows)
-//! carrying its clips.
+//! timeline on the right: region/marker/tempo lanes + a time ruler across the
+//! top and one lane per track (height `track.height`, aligned with the TCP
+//! rows) carrying its clips, plus an envelope lane per visible envelope.
 //!
 //! Themed by [`crate::theming::ArrangeTheme`] — REAPER's palette-driven
 //! arrange vocabulary, rendered the way REAPER composites it:
 //! - ruler: `col_tl_bg/fg/fg2`, loop-point band (`col_tl_bgsel2`), the
 //!   time-selection band (`col_tl_bgsel`) + its `timesel_drawmode` shading
-//!   over the arrange body;
+//!   over the arrange body; the tempo lane (`ts_lane_*`/`col_tsigmark`)
+//!   sits at the bottom of the ruler;
 //! - grid: the `col_gridlines2/3/''` measure→beat→sub hierarchy (musical
 //!   when a tempo is supplied, time-based otherwise), with REAPER's
 //!   zoom-gating (levels drop out when their spacing gets too dense);
 //! - lanes: alternating `col_tr1/2_bg` (+ `selcol_*` when selected),
 //!   `arrange_vgrid` shading in the empty area below the last track;
 //! - items: per-parity `col_mi_bg/2` bodies tinted by the item colour at
-//!   `itembg_drawmode` strength, `col_mi_label(_sel)` text, selected bodies
-//!   (`col_tr*_itembgsel` + `selitem_tag` bar), fade triangles
-//!   (`fadezone_color` fill, `col_mi_fades` line) and the mute overlay;
+//!   `itembg_drawmode` strength, waveform peaks (`col_tr*_peaks`),
+//!   `col_mi_label(_sel)` text, selected bodies (`col_tr*_itembgsel` +
+//!   `selitem_tag` bar), fade triangles (`fadezone_color` fill,
+//!   `col_mi_fades` line) and the mute overlay;
+//! - envelopes: one lane per visible envelope (`col_env*` curve over a
+//!   dimmed row, `col_envlane*_divline` dividers);
 //! - marker/region lanes: `marker*`/`region*` flags and bands.
+//!
+//! The ruler shares the lanes' horizontal scroll: the lane scroller's
+//! `onscroll` mirrors `scroll_left` into the ruler content's offset.
 
-use crate::panels::model::{MarkerView, RegionView, TrackView};
+use crate::panels::model::{EnvelopeView, MarkerView, RegionView, TempoMarkerView, TrackView};
 use crate::panels::track_control_panel::TrackControlPanel;
 use crate::prelude::*;
 use crate::theming::{Color, use_theme};
@@ -64,7 +71,7 @@ struct GridSteps {
     beat: f64,
     /// Sub-beat level, seconds (== beat when gated out).
     sub: f64,
-    /// Label for a major line at time `t`.
+    /// Whether `major` is a bar (label = bar number).
     musical: bool,
 }
 
@@ -110,9 +117,9 @@ fn grid_steps(pps: f64, bpm: Option<f64>, beats_per_measure: u32) -> GridSteps {
 /// is the control-sidebar width; `seconds` is the visible timeline length.
 ///
 /// Optional project data: `playhead`/`cursor` (s) draw the cursors,
-/// `markers`/`regions` add their ruler lanes, `time_sel`/`loop_range` draw
-/// the selection/loop bands, and `bpm` (+ `beats_per_measure`) switches the
-/// grid + ruler to musical bars.
+/// `markers`/`regions`/`tempo_markers` add their ruler lanes,
+/// `time_sel`/`loop_range` draw the selection/loop bands, and `bpm`
+/// (+ `beats_per_measure`) switches the grid + ruler to musical bars.
 #[component]
 pub fn ArrangeView(
     tracks: Vec<TrackView>,
@@ -123,6 +130,7 @@ pub fn ArrangeView(
     #[props(default)] cursor: Option<f64>,
     #[props(default)] markers: Vec<MarkerView>,
     #[props(default)] regions: Vec<RegionView>,
+    #[props(default)] tempo_markers: Vec<TempoMarkerView>,
     #[props(default)] time_sel: Option<(f64, f64)>,
     #[props(default)] loop_range: Option<(f64, f64)>,
     #[props(default)] bpm: Option<f64>,
@@ -132,20 +140,25 @@ pub fn ArrangeView(
 
     let g = grid_steps(pps, bpm, beats_per_measure);
     let n_at = |step: f64| (seconds / step).ceil() as i64;
-    // Total lane height (the grid covers the tracks; `arrange_vgrid` shades
-    // the empty area below, REAPER-style).
-    let lanes_h: u32 = tracks.iter().map(|t| t.height).sum();
+    // Total lane height — track rows + visible envelope lanes (the grid
+    // covers the tracks; `arrange_vgrid` shades the empty area below).
+    let lanes_h: u32 = tracks.iter().map(|t| t.total_height()).sum();
+
+    // The lanes scroller owns horizontal scroll; the ruler mirrors it.
+    let mut scroll_x = use_signal(|| 0.0f64);
 
     let theme = use_theme().theme;
     let ar = theme.arrange;
     let border = theme.tokens.border.css();
 
-    // Ruler lanes: regions on top, markers under them, time scale at the
-    // bottom (REAPER's stacking).
+    // Ruler lanes: regions on top, markers under them, the time scale, and
+    // the tempo/time-signature lane at the bottom (REAPER's stacking).
     let region_lane_h = if regions.is_empty() { 0 } else { 14u32 };
     let marker_lane_h = if markers.is_empty() { 0 } else { 14u32 };
+    let ts_lane_h = if tempo_markers.is_empty() { 0 } else { 13u32 };
     let scale_h = 26u32;
-    let ruler_h = region_lane_h + marker_lane_h + scale_h;
+    let ruler_h = region_lane_h + marker_lane_h + scale_h + ts_lane_h;
+    let scale_top = region_lane_h + marker_lane_h;
 
     let ruler_bg = ar.ruler_bg.css();
     let ruler_fg = ar.ruler_fg.css();
@@ -180,7 +193,12 @@ pub fn ArrangeView(
                 div {
                     style: "flex:1 1 0; position:relative; overflow:hidden;",
                     div {
-                        style: format!("position:relative; width:{content_w}px; height:100%;"),
+                        // Mirrors the lane scroller's horizontal offset.
+                        style: format!(
+                            "position:relative; width:{content_w}px; height:100%; \
+                             left:{x:.1}px;",
+                            x = -scroll_x(),
+                        ),
 
                         // Region lane.
                         if region_lane_h > 0 {
@@ -251,7 +269,7 @@ pub fn ArrangeView(
                         // Time scale (loop band under everything, then ticks).
                         div {
                             style: format!(
-                                "position:absolute; left:0; right:0; bottom:0; height:{scale_h}px;"
+                                "position:absolute; left:0; right:0; top:{scale_top}px; height:{scale_h}px;"
                             ),
                             if let Some(range) = loop_range {
                                 {
@@ -304,6 +322,34 @@ pub fn ArrangeView(
                             }
                         }
 
+                        // Tempo / time-signature lane (`ts_lane_*`).
+                        if ts_lane_h > 0 {
+                            div {
+                                style: format!(
+                                    "position:absolute; left:0; right:0; bottom:0; height:{ts_lane_h}px; \
+                                     background:{bg};",
+                                    bg = ar.ts_lane_bg.css(),
+                                ),
+                                for (i, t) in tempo_markers.iter().enumerate() {
+                                    div {
+                                        key: "t{i}",
+                                        title: "Tempo {t.bpm} BPM, {t.num}/{t.den}",
+                                        style: format!(
+                                            "position:absolute; left:{x:.1}px; top:0; bottom:0; \
+                                             border-left:2px solid {mark}; color:{fg}; \
+                                             background:{mark_bg}; font-size:8px; font-weight:700; \
+                                             padding:1px 4px 0 3px; white-space:nowrap;",
+                                            x = t.time * pps,
+                                            mark = ar.tsig.css(),
+                                            mark_bg = ar.tsig.with_alpha(48).css(),
+                                            fg = ar.ts_lane_text.css(),
+                                        ),
+                                        "{t.bpm:.0} {t.num}/{t.den}"
+                                    }
+                                }
+                            }
+                        }
+
                         // Cursors carry into the ruler, REAPER-style.
                         if let Some(t) = cursor {
                             div { style: format!(
@@ -325,12 +371,15 @@ pub fn ArrangeView(
 
                 TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false }
 
-                // Timeline lanes (own horizontal scroll).
+                // Timeline lanes (own horizontal scroll, mirrored to the ruler).
                 div {
                     style: format!(
                         "flex:1 1 0; min-width:0; overflow-x:auto; position:relative; \
                          background:{empty_bg};"
                     ),
+                    onscroll: move |evt| {
+                        scroll_x.set(evt.data.scroll_left());
+                    },
                     // `arrange_vgrid` shading in the empty area below the tracks.
                     for i in 0..n_at(g.major) {
                         div {
@@ -351,7 +400,7 @@ pub fn ArrangeView(
                         ),
                         // Lane rows (the grid draws over them, like REAPER).
                         for (idx, track) in tracks.iter().enumerate() {
-                            Lane { key: "{track.id}", track: track.clone(), pps, alt: idx % 2 == 1 }
+                            TrackLanes { key: "{track.id}", track: track.clone(), pps, alt: idx % 2 == 1 }
                         }
 
                         // Grid hierarchy over the tracks: sub, beat, measure.
@@ -393,6 +442,7 @@ pub fn ArrangeView(
                                 ),
                             }
                         }
+
                         // Time-selection shading over the arrange body.
                         if let Some(range) = time_sel {
                             {
@@ -422,10 +472,28 @@ pub fn ArrangeView(
     }
 }
 
+/// One track's arrange rows: the clip lane plus an envelope lane per visible
+/// envelope (heights match the TCP side via [`TrackView::total_height`]).
+#[component]
+fn TrackLanes(track: TrackView, pps: f64, alt: bool) -> Element {
+    let envelopes: Vec<EnvelopeView> = track
+        .envelopes
+        .iter()
+        .filter(|e| e.visible)
+        .cloned()
+        .collect();
+    rsx! {
+        Lane { track: track.clone(), pps, alt }
+        for (i, env) in envelopes.into_iter().enumerate() {
+            EnvelopeLane { key: "e{i}", envelope: env, pps, alt }
+        }
+    }
+}
+
 /// One arrangement lane: alternating row background (`col_tr1/2_bg`,
 /// `selcol_*` when the track is selected), the divider line, and the track's
-/// items rendered REAPER-style (parity body + colour tint, label, fades,
-/// selection + mute states).
+/// items rendered REAPER-style (parity body + colour tint, peaks, label,
+/// fades, selection + mute states).
 #[component]
 fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
     let theme = use_theme().theme;
@@ -468,6 +536,23 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                     let w = (clip.length * pps).max(2.0);
                     let fade_in_w = (clip.fade_in * pps).min(w);
                     let fade_out_w = (clip.fade_out * pps).min(w);
+                    // Waveform peaks: a polygon mirrored around the item's
+                    // vertical centre, filled with the parity peaks colour.
+                    let peaks_path = (!clip.peaks.is_empty()).then(|| {
+                        let mid = item_h / 2.0;
+                        let half = mid - 1.0;
+                        let n = clip.peaks.len().max(2) as f64;
+                        let step = w / (n - 1.0);
+                        let mut up = String::new();
+                        let mut down = String::new();
+                        for (pi, amp) in clip.peaks.iter().enumerate() {
+                            let px = pi as f64 * step;
+                            let a = (*amp as f64).clamp(0.0, 1.0) * half;
+                            up.push_str(&format!("{px:.1},{:.1} ", mid - a));
+                            down.insert_str(0, &format!("{px:.1},{:.1} ", mid + a));
+                        }
+                        format!("{up}{down}")
+                    });
                     rsx! {
                         div {
                             key: "c{ci}",
@@ -481,7 +566,21 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                                 body = body.css(),
                                 fg = label.css(),
                             ),
-                            div { style: "padding:1px 5px; pointer-events:none;", "{clip.name}" }
+
+                            // Peaks under the label (`col_tr1/2_peaks`).
+                            if let Some(points) = peaks_path {
+                                svg {
+                                    width: "{w:.0}",
+                                    height: "{item_h:.0}",
+                                    style: "position:absolute; left:0; top:0; pointer-events:none;",
+                                    polygon {
+                                        points,
+                                        fill: ar.peaks[i].css(),
+                                    }
+                                }
+                            }
+
+                            div { style: "position:relative; padding:1px 5px; pointer-events:none;", "{clip.name}" }
 
                             // Fade triangles (`fadezone` fill + `col_mi_fades` line).
                             if fade_in_w >= 2.0 {
@@ -533,6 +632,88 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                                 div { style: format!(
                                     "position:absolute; inset:0; background:{c}; pointer-events:none;",
                                     c = ar.mute_overlay.css()) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One envelope lane: a dimmed row with the envelope curve drawn over it
+/// (`col_env*` colour, filled below the line REAPER-style).
+#[component]
+fn EnvelopeLane(envelope: EnvelopeView, pps: f64, alt: bool) -> Element {
+    let theme = use_theme().theme;
+    let ar = theme.arrange;
+    let i = alt as usize;
+    let h = envelope.height;
+    let curve = envelope
+        .color
+        .as_deref()
+        .and_then(Color::hex)
+        .unwrap_or(ar.env_default);
+
+    // Curve polyline + the area fill beneath it.
+    let inner_h = h.saturating_sub(2) as f64;
+    let xy =
+        |t: f64, v: f32| -> (f64, f64) { (t * pps, (1.0 - v.clamp(0.0, 1.0)) as f64 * inner_h) };
+    let mut line_pts = String::new();
+    for (t, v) in &envelope.points {
+        let (x, y) = xy(*t, *v);
+        line_pts.push_str(&format!("{x:.1},{y:.1} "));
+    }
+    // Close the curve down to the lane floor for the area fill.
+    let fill_pts = match (envelope.points.first(), envelope.points.last()) {
+        (Some(first), Some(last)) => {
+            let (fx, _) = xy(first.0, first.1);
+            let (lx, _) = xy(last.0, last.1);
+            format!("{line_pts}{lx:.1},{inner_h:.1} {fx:.1},{inner_h:.1}")
+        }
+        _ => String::new(),
+    };
+    let svg_w = envelope
+        .points
+        .last()
+        .map(|p| (p.0 * pps).ceil().max(2.0))
+        .unwrap_or(2.0);
+
+    rsx! {
+        div {
+            style: format!(
+                "position:relative; height:{h}px; background:{bg}; \
+                 border-bottom:1px solid {divider}; box-sizing:border-box; overflow:hidden;",
+                bg = ar.row_bg[i].darken(0.25).css(),
+                divider = ar.envlane_divider[i].css(),
+            ),
+            if !envelope.points.is_empty() {
+                svg {
+                    width: "{svg_w:.0}",
+                    height: "{inner_h:.0}",
+                    style: "position:absolute; left:0; top:1px; pointer-events:none;",
+                    if !fill_pts.is_empty() {
+                        polygon { points: fill_pts, fill: curve.with_alpha(40).css() }
+                    }
+                    polyline {
+                        points: line_pts,
+                        fill: "none",
+                        stroke: curve.css(),
+                        stroke_width: "1.5",
+                    }
+                    // Envelope points, REAPER-style square handles.
+                    for (pi, (t, v)) in envelope.points.iter().enumerate() {
+                        {
+                            let (x, y) = xy(*t, *v);
+                            rsx! {
+                                rect {
+                                    key: "p{pi}",
+                                    x: "{x - 2.0:.1}",
+                                    y: "{y - 2.0:.1}",
+                                    width: "4",
+                                    height: "4",
+                                    fill: curve.css(),
+                                }
                             }
                         }
                     }

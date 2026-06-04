@@ -17,6 +17,9 @@ pub struct ClipView {
     pub name: String,
     /// `#rrggbb`; falls back to the track colour when `None`.
     pub color: Option<String>,
+    /// Waveform peaks: normalized amplitudes (0–1), evenly spaced across the
+    /// clip. Empty = no peaks drawn.
+    pub peaks: Vec<f32>,
     /// Fade-in length in seconds (0 = none); drawn REAPER-style as a fade
     /// triangle at the item head.
     pub fade_in: f64,
@@ -33,12 +36,39 @@ impl ClipView {
             length,
             name: name.into(),
             color: color.map(|c| c.to_string()),
+            peaks: Vec::new(),
             fade_in: 0.0,
             fade_out: 0.0,
             selected: false,
             muted: false,
         }
     }
+}
+
+/// A tempo / time-signature change on the ruler's tempo lane.
+#[derive(Clone, PartialEq)]
+pub struct TempoMarkerView {
+    /// Position in seconds.
+    pub time: f64,
+    pub bpm: f64,
+    /// Time signature numerator/denominator.
+    pub num: u32,
+    pub den: u32,
+}
+
+/// One automation envelope on a track (its own lane under the track lane,
+/// with an ECP row under the TCP row — REAPER's layout).
+#[derive(Clone, PartialEq)]
+pub struct EnvelopeView {
+    /// Display name ("Volume", "Pan", …).
+    pub name: String,
+    /// `#rrggbb`; the theme's envelope colour when `None`.
+    pub color: Option<String>,
+    /// Envelope points: (time s, normalized value 0–1). Linear segments.
+    pub points: Vec<(f64, f32)>,
+    /// Lane height in px.
+    pub height: u32,
+    pub visible: bool,
 }
 
 /// A project marker on the ruler's marker lane.
@@ -110,6 +140,8 @@ pub struct TrackView {
 
     // ── arrangement ──
     pub clips: Vec<ClipView>,
+    /// Automation envelopes; visible ones add lanes under the track.
+    pub envelopes: Vec<EnvelopeView>,
 }
 
 impl TrackView {
@@ -137,6 +169,7 @@ impl TrackView {
             is_folder: false,
             height: DEFAULT_LANE_HEIGHT,
             clips: Vec::new(),
+            envelopes: Vec::new(),
         }
     }
 
@@ -180,6 +213,24 @@ impl TrackView {
     pub fn clips(mut self, clips: Vec<ClipView>) -> Self {
         self.clips = clips;
         self
+    }
+    /// Builder: attach automation envelopes.
+    pub fn envelopes(mut self, envelopes: Vec<EnvelopeView>) -> Self {
+        self.envelopes = envelopes;
+        self
+    }
+
+    /// Total vertical space this track occupies in the TCP / arrange view:
+    /// the track row plus every visible envelope lane (they must agree so
+    /// the rows stay aligned).
+    pub fn total_height(&self) -> u32 {
+        self.height
+            + self
+                .envelopes
+                .iter()
+                .filter(|e| e.visible)
+                .map(|e| e.height)
+                .sum::<u32>()
     }
     /// Builder: routing flags.
     pub fn routing(mut self, sends: bool, receives: bool) -> Self {

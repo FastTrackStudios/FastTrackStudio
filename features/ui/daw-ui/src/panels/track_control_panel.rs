@@ -6,6 +6,7 @@
 //! Each row is `track.height` px tall so the rows line up with the arrange
 //! lanes on the right; folder depth indents the row, REAPER-style.
 
+use crate::panels::envcp_row::EnvcpRow;
 use crate::panels::mcp_strip::McpStrip;
 use crate::panels::model::TrackView;
 use crate::prelude::*;
@@ -48,18 +49,43 @@ pub fn TrackControlPanel(
 fn TcpRow(track: TrackView, panel_w: u32) -> Element {
     let indent = track.depth * INDENT;
     let h = track.height;
+    let total = track.total_height();
     // The strip's actual px box — lets an imported REAPER theme re-run
     // WALTER at this exact size (flow themes rewrap/cull per width).
     let size = (panel_w.saturating_sub(indent) as f32, h as f32);
+    let envelopes: Vec<_> = track
+        .envelopes
+        .iter()
+        .filter(|e| e.visible)
+        .cloned()
+        .collect();
     rsx! {
         div {
-            style: format!("flex:0 0 {h}px; height:{h}px; display:flex; align-items:stretch;"),
+            style: format!(
+                "flex:0 0 {total}px; height:{total}px; display:flex; align-items:stretch;"
+            ),
             if indent > 0 {
                 div { style: format!("flex:0 0 {indent}px;") }
             }
             div {
-                style: "flex:1 1 0; min-width:0; position:relative;",
-                McpStrip { track, tcp: true, size }
+                style: "flex:1 1 0; min-width:0; display:flex; flex-direction:column;",
+                div {
+                    style: format!("flex:0 0 {h}px; height:{h}px; position:relative;"),
+                    McpStrip { track: track.clone(), tcp: true, size }
+                }
+                // ECP rows under the track, one per visible envelope.
+                for (i, env) in envelopes.into_iter().enumerate() {
+                    {
+                        let eh = env.height;
+                        rsx! {
+                            div {
+                                key: "e{i}",
+                                style: format!("flex:0 0 {eh}px; height:{eh}px; position:relative;"),
+                                EnvcpRow { envelope: env }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
