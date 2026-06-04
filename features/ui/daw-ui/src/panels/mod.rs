@@ -9,12 +9,14 @@
 //! - [`DawWorkspace`] — arrange-over-mixer composition of all three.
 
 pub mod arrange_view;
+pub mod mcp_strip;
 pub mod mixer_control_panel;
 pub mod model;
 pub mod track_control_panel;
 pub mod workspace;
 
 pub use arrange_view::ArrangeView;
+pub use mcp_strip::McpStrip;
 pub use mixer_control_panel::MixerControlPanel;
 pub use model::{ClipView, TrackView};
 pub use track_control_panel::TrackControlPanel;

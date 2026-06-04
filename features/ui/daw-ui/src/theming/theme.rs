@@ -10,6 +10,7 @@
 //! This sits alongside the legacy `StyleSheet` (knob/slider/xypad) during the
 //! migration; new panels consume [`Theme`] via [`super::context::use_theme`].
 
+use super::mcp::McpTheme;
 use super::style::ControlState;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -283,13 +284,17 @@ pub enum ToggleKind {
 // Theme — owned, cloneable; resolves styles from tokens + state.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The active theme: semantic [`Tokens`] + [`Metrics`]. Owned & cloneable so it
-/// can be runtime-switched, hot-reloaded, and (later) imported from a REAPER
-/// theme. Presets are constructors (see [`Theme::dark`]).
+/// The active theme: semantic [`Tokens`] + [`Metrics`] + per-context WALTER
+/// vocabularies (currently [`McpTheme`]). Owned & cloneable so it can be
+/// runtime-switched, hot-reloaded, and (later) imported from a REAPER theme.
+/// Presets are constructors (see [`Theme::dark`]).
 #[derive(Clone, PartialEq, Debug)]
 pub struct Theme {
     pub tokens: Tokens,
     pub metrics: Metrics,
+    /// The MCP strip context — named layouts, per-element colour overrides,
+    /// and `define_parameter`-style knobs (`super::mcp`).
+    pub mcp: McpTheme,
 }
 
 impl Default for Theme {
@@ -324,6 +329,7 @@ impl Theme {
                 route_recv: c("#38bdf8").unwrap(),
             },
             metrics: Metrics::default(),
+            mcp: McpTheme::fts_default(),
         }
     }
 

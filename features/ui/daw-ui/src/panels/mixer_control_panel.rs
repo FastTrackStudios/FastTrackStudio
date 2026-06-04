@@ -1,13 +1,15 @@
 //! MixerControlPanel (MCP) — the bottom-third mixer console.
 //!
-//! A horizontal, scrollable row of [`ChannelStrip`]s driven by [`TrackView`],
-//! under a titled header bar. Folder tracks are rendered as tinted group
-//! headers spanning their children (Reaper-MCP style).
+//! A horizontal, scrollable row of [`McpStrip`]s driven by [`TrackView`],
+//! under a titled header bar. Strips are laid out by the theme's WALTER-style
+//! MCP context (`theme.mcp` — anchor coords, per-element colours, named
+//! layouts). Folder tracks are rendered as tinted group headers spanning
+//! their children (Reaper-MCP style).
 
+use crate::panels::mcp_strip::McpStrip;
 use crate::panels::model::TrackView;
 use crate::prelude::*;
 use crate::theming::use_theme;
-use crate::widgets::mixer::ChannelStrip;
 
 /// The mixer console panel. Pass the full track list; strips render left→right
 /// in track order with folder tracks shown as group headers.
@@ -50,8 +52,9 @@ pub fn MixerControlPanel(tracks: Vec<TrackView>) -> Element {
     }
 }
 
-/// One mixer column: a [`ChannelStrip`], or a tinted vertical group header when
-/// the track is a folder parent (its children follow as their own strips).
+/// One mixer column: a WALTER-laid-out [`McpStrip`], or a tinted vertical
+/// group header when the track is a folder parent (its children follow as
+/// their own strips).
 #[component]
 fn MixerCell(track: TrackView) -> Element {
     let accent = track.hex();
@@ -75,22 +78,7 @@ fn MixerCell(track: TrackView) -> Element {
         }
     } else {
         rsx! {
-            ChannelStrip {
-                fader: track.fader,
-                mute: track.mute,
-                solo: track.solo,
-                pan: Some(track.pan),
-                name: track.name.clone(),
-                color: track.color.clone(),
-                // Read the live signals here so this strip re-renders when the
-                // host pushes new levels; mono tracks collapse to one column.
-                level: (track.level)(),
-                level_right: track.stereo.then(|| (track.level_right)()),
-                peak: Some((track.peak)()),
-                sends: track.sends,
-                receives: track.receives,
-                on_routing: move |_| {},
-            }
+            McpStrip { track }
         }
     }
 }

@@ -1,0 +1,268 @@
+//! The MCP (Mixer Control Panel) theme context.
+//!
+//! Mirrors REAPER's `mcp.*` WALTER vocabulary (see
+//! `reaper-theme/docs/walter-elements.md` §mcp): every element a theme can
+//! position gets a [`Coord`] field of the same name, the `.color/.font/
+//! .margin` attributes get typed counterparts, and layouts are **named**
+//! ([`McpLayout`]) so themes ship variants the user/importer picks between —
+//! exactly REAPER's `Layout "name" … EndLayout` model.
+//!
+//! Element coverage: `trackidx label volume volume.label pan pan.label width
+//! meter mute solo recarm phase fx fxbyp io env folder` (+ `size margin`).
+//! `recinput recmode recmon extmixer sendlist fxlist fxparm` belong to strip
+//! extensions we don't render yet; an importer maps them when the widgets
+//! exist.
+
+use super::theme::Color;
+use super::walter::{ColorPair, Coord, FaderMode, FontSpec, Margin, ThemeParam};
+
+/// One named MCP strip layout — geometry, fonts and modes for every element.
+/// A REAPER `Layout "…" … EndLayout` block flattens into one of these.
+#[derive(Clone, PartialEq, Debug)]
+pub struct McpLayout {
+    pub name: String,
+
+    /// `mcp.size` — natural strip size (px); coordinates below are authored at
+    /// this size and spring from it via their attach scales.
+    pub size: (f32, f32),
+    /// `mcp.size` minimums (the "not seeing everything" threshold).
+    pub min_size: (f32, f32),
+    /// `mcp.margin`.
+    pub margin: Margin,
+
+    // ── texts ──
+    /// `mcp.trackidx` (+ font/margin).
+    pub trackidx: Coord,
+    pub trackidx_font: FontSpec,
+    pub trackidx_margin: Margin,
+    /// `mcp.label` — the track-name footer (+ font/margin).
+    pub label: Coord,
+    pub label_font: FontSpec,
+    pub label_margin: Margin,
+
+    // ── faders / knobs ──
+    /// `mcp.volume` + `mcp.volume.fadermode`.
+    pub volume: Coord,
+    pub volume_fadermode: FaderMode,
+    /// `mcp.volume.label` — the volume readout (+ font/margin).
+    pub volume_label: Coord,
+    pub volume_label_font: FontSpec,
+    pub volume_label_margin: Margin,
+    /// `mcp.pan` + `mcp.pan.fadermode`.
+    pub pan: Coord,
+    pub pan_fadermode: FaderMode,
+    /// `mcp.pan.label` (+ font/margin).
+    pub pan_label: Coord,
+    pub pan_label_font: FontSpec,
+    pub pan_label_margin: Margin,
+    /// `mcp.width` (stereo width; hidden until the engine carries it).
+    pub width: Coord,
+    pub width_fadermode: FaderMode,
+
+    // ── meter ──
+    /// `mcp.meter`.
+    pub meter: Coord,
+
+    // ── buttons ──
+    /// `mcp.mute` / `mcp.solo` / `mcp.recarm`.
+    pub mute: Coord,
+    pub solo: Coord,
+    pub recarm: Coord,
+    /// `mcp.phase` / `mcp.fx` / `mcp.fxbyp` / `mcp.io` / `mcp.env` /
+    /// `mcp.folder`.
+    pub phase: Coord,
+    pub fx: Coord,
+    pub fxbyp: Coord,
+    pub io: Coord,
+    pub env: Coord,
+    pub folder: Coord,
+}
+
+impl McpLayout {
+    /// The FTS default vertical strip (natural 64×300) — pan knob over
+    /// solo/mute, fader beside meter, readout + routing + name footer pinned
+    /// to the bottom. Mirrors the pre-WALTER `ChannelStrip` appearance.
+    pub fn vertical() -> Self {
+        Self {
+            name: "vertical".to_string(),
+            size: (64.0, 300.0),
+            min_size: (48.0, 220.0),
+            margin: Margin::default(),
+
+            trackidx: Coord::hidden(),
+            trackidx_font: FontSpec::new(9.0, 700),
+            trackidx_margin: Margin::default(),
+
+            // Footer spans the strip, pinned to the bottom edge.
+            label: Coord::new(0.0, 280.0, 64.0, 20.0, 0.0, 1.0, 1.0, 1.0),
+            label_font: FontSpec::new(11.0, 700),
+            label_margin: Margin::new(6.0, 4.0, 6.0, 4.0, 0.5),
+
+            // Fader fills the left column down to the readout.
+            volume: Coord::new(6.0, 88.0, 30.0, 140.0, 0.0, 0.0, 0.0, 1.0),
+            volume_fadermode: FaderMode::Vertical,
+            volume_label: Coord::new(4.0, 232.0, 56.0, 12.0, 0.0, 1.0, 1.0, 1.0),
+            volume_label_font: FontSpec::new(10.0, 600),
+            volume_label_margin: Margin::new(0.0, 0.0, 0.0, 0.0, 0.5),
+
+            // Pan knob centered at the top.
+            pan: Coord::new(15.0, 8.0, 34.0, 34.0, 0.5, 0.0, 0.5, 0.0),
+            pan_fadermode: FaderMode::Vertical,
+            pan_label: Coord::hidden(),
+            pan_label_font: FontSpec::new(9.0, 600),
+            pan_label_margin: Margin::default(),
+            width: Coord::hidden(),
+            width_fadermode: FaderMode::Vertical,
+
+            // Meter beside the fader; right edge follows the strip width.
+            meter: Coord::new(42.0, 88.0, 16.0, 140.0, 0.0, 0.0, 1.0, 1.0),
+
+            // Solo | Mute row under the pan knob.
+            solo: Coord::new(6.0, 52.0, 25.0, 22.0, 0.0, 0.0, 0.5, 0.0),
+            mute: Coord::new(33.0, 52.0, 25.0, 22.0, 0.5, 0.0, 1.0, 0.0),
+            recarm: Coord::hidden(),
+
+            phase: Coord::hidden(),
+            fx: Coord::hidden(),
+            fxbyp: Coord::hidden(),
+            // Routing button centered above the footer.
+            io: Coord::new(19.0, 250.0, 26.0, 26.0, 0.5, 1.0, 0.5, 1.0),
+            env: Coord::hidden(),
+            folder: Coord::hidden(),
+        }
+    }
+
+    /// A narrow 40px variant — pan/io hidden, stacked solo/mute (the
+    /// `w<N` conditional branch a WALTER theme would express inline).
+    pub fn narrow() -> Self {
+        Self {
+            name: "narrow".to_string(),
+            size: (40.0, 300.0),
+            min_size: (32.0, 180.0),
+
+            label: Coord::new(0.0, 282.0, 40.0, 18.0, 0.0, 1.0, 1.0, 1.0),
+            label_font: FontSpec::new(9.0, 700),
+            label_margin: Margin::new(2.0, 3.0, 2.0, 3.0, 0.5),
+
+            volume: Coord::new(4.0, 56.0, 20.0, 214.0, 0.0, 0.0, 0.0, 1.0),
+            volume_label: Coord::hidden(),
+
+            pan: Coord::hidden(),
+            meter: Coord::new(27.0, 56.0, 9.0, 214.0, 0.0, 0.0, 1.0, 1.0),
+
+            solo: Coord::new(4.0, 6.0, 32.0, 20.0, 0.0, 0.0, 1.0, 0.0),
+            mute: Coord::new(4.0, 30.0, 32.0, 20.0, 0.0, 0.0, 1.0, 0.0),
+            io: Coord::hidden(),
+
+            ..Self::vertical()
+        }
+    }
+}
+
+/// Per-element colour overrides — the `mcp.*.color` attributes. `None` falls
+/// back to the semantic token derivation, so a plain theme needs nothing here
+/// while an imported REAPER theme can pin every slot.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct McpColors {
+    /// `mcp.label.color`.
+    pub label: Option<ColorPair>,
+    /// `mcp.trackidx.color`.
+    pub trackidx: Option<ColorPair>,
+    /// `mcp.volume.color` — fader accent.
+    pub volume: Option<Color>,
+    /// `mcp.volume.label.color`.
+    pub volume_label: Option<ColorPair>,
+    /// `mcp.pan.color`.
+    pub pan: Option<Color>,
+    /// `mcp.pan.label.color`.
+    pub pan_label: Option<ColorPair>,
+    /// `mcp.meter.scale.color.lit.top` / `…lit.bottom` — when set, the meter
+    /// fill becomes a bottom→top gradient instead of the token zone colours.
+    pub meter_lit_top: Option<Color>,
+    pub meter_lit_bottom: Option<Color>,
+    /// `mcp.meter.scale.color.unlit.top` / `…unlit.bottom` — the meter well.
+    pub meter_unlit_top: Option<Color>,
+    pub meter_unlit_bottom: Option<Color>,
+    /// `mcp.meter.readout.color`.
+    pub meter_readout: Option<ColorPair>,
+}
+
+/// The MCP theme context: named layouts + colour overrides + author params.
+#[derive(Clone, PartialEq, Debug)]
+pub struct McpTheme {
+    pub layouts: Vec<McpLayout>,
+    pub colors: McpColors,
+    /// `define_parameter` knobs. [`McpTheme::param`] resolves by name;
+    /// `mcp_show_pan` and `mcp_strip_width` are honoured by the strip widget.
+    pub params: Vec<ThemeParam>,
+}
+
+impl McpTheme {
+    /// FTS defaults: vertical + narrow layouts, token-derived colours, and the
+    /// two starter adjuster knobs.
+    pub fn fts_default() -> Self {
+        Self {
+            layouts: vec![McpLayout::vertical(), McpLayout::narrow()],
+            colors: McpColors::default(),
+            params: vec![
+                ThemeParam::new("mcp_show_pan", "Show pan knob", 1.0, 0.0, 1.0),
+                ThemeParam::new(
+                    "mcp_strip_width",
+                    "Strip width (0 = layout default)",
+                    0.0,
+                    0.0,
+                    128.0,
+                ),
+            ],
+        }
+    }
+
+    /// Resolve a layout by name; unknown/`None` falls back to the first.
+    pub fn layout(&self, name: Option<&str>) -> &McpLayout {
+        name.and_then(|n| self.layouts.iter().find(|l| l.name == n))
+            .or(self.layouts.first())
+            .expect("McpTheme has at least one layout")
+    }
+
+    /// Look up a `define_parameter` knob's current value.
+    pub fn param(&self, name: &str) -> Option<f32> {
+        self.params.iter().find(|p| p.name == name).map(|p| p.value)
+    }
+}
+
+impl Default for McpTheme {
+    fn default() -> Self {
+        Self::fts_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_theme_has_named_layouts() {
+        let mcp = McpTheme::fts_default();
+        assert_eq!(mcp.layout(Some("narrow")).name, "narrow");
+        assert_eq!(mcp.layout(Some("vertical")).name, "vertical");
+        // Unknown / None fall back to the first layout.
+        assert_eq!(mcp.layout(Some("nope")).name, "vertical");
+        assert_eq!(mcp.layout(None).name, "vertical");
+    }
+
+    #[test]
+    fn narrow_layout_hides_pan_and_io() {
+        let narrow = McpLayout::narrow();
+        assert!(narrow.pan.is_hidden());
+        assert!(narrow.io.is_hidden());
+        assert!(!narrow.volume.is_hidden());
+        assert!(!narrow.meter.is_hidden());
+    }
+
+    #[test]
+    fn params_resolve_by_name() {
+        let mcp = McpTheme::fts_default();
+        assert_eq!(mcp.param("mcp_show_pan"), Some(1.0));
+        assert_eq!(mcp.param("missing"), None);
+    }
+}
