@@ -88,7 +88,9 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
 
     // REAPER's MCP pan is a horizontal slider (`mcp.pan.fadermode` resolves
     // to 1 in the default theme's WALTER, knob only for dual-pan). When the
-    // theme ships pan slider art, switch visible pan elements over.
+    // theme ships pan slider art, switch the *fallback* layouts' visible pan
+    // elements over (the WALTER-evaluated layouts below carry their own pan
+    // geometry).
     if mcp.skin.as_ref().is_some_and(|s| s.panbg.is_some()) {
         for layout in &mut mcp.layouts {
             if !layout.pan.is_hidden() {
@@ -96,6 +98,17 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
                 layout.pan_fadermode = super::walter::FaderMode::Horizontal;
             }
         }
+    }
+
+    // ── WALTER-evaluated layouts ──
+    // Run the theme's own rtconfig program per named layout and convert the
+    // resolved `mcp.*` geometry into McpLayouts. These take precedence (the
+    // first layout is the default); the FTS fallbacks stay reachable by name.
+    let walter_layouts = walter_mcp_layouts(rt);
+    if !walter_layouts.is_empty() {
+        let fallbacks = std::mem::take(&mut mcp.layouts);
+        mcp.layouts = walter_layouts;
+        mcp.layouts.extend(fallbacks);
     }
 
     // ── define_parameter knobs ──
@@ -117,6 +130,176 @@ pub fn theme_from_reaper(rt: &ReaperTheme) -> Theme {
     }
 
     theme
+}
+
+/// Evaluate the theme's WALTER program per named layout and convert the
+/// resolved `mcp.*` attributes into [`McpLayout`]s.
+///
+/// The 8-value anchor model is recovered by **finite differences**: WALTER
+/// output is piecewise-linear in the panel size within a form, so evaluating
+/// at the natural size and at `+Δw`/`+Δh` yields each element's edge-attach
+/// scales exactly. Natural width comes from the theme's own `mcpWidth`
+/// (two-pass: probe, then evaluate at that width).
+fn walter_mcp_layouts(rt: &ReaperTheme) -> Vec<super::mcp::McpLayout> {
+    use daw_theme_reaper::walter::{Env, Output, evaluate};
+
+    let src = &rt.rtconfig_src;
+    let make_env = |w: f32, h: f32| -> Env {
+        let mut env = Env::reaper_defaults(w, h);
+        for p in &rt.rtconfig.params {
+            env.set(&p.name, p.default);
+        }
+        env
+    };
+
+    const H0: f32 = 600.0;
+    const DW: f32 = 16.0;
+    const DH: f32 = 32.0;
+
+    // Which layouts exist? (Skip DPI variants like "150%_A" — those are the
+    // same layout at another Scale.)
+    let probe = evaluate(src, None, &make_env(100.0, H0));
+    let names: Vec<String> = probe
+        .layouts
+        .iter()
+        .filter(|n| !n.contains('%'))
+        .cloned()
+        .collect();
+
+    let mut layouts = Vec::new();
+    for name in names {
+        // Pass 1: the theme's own strip width for this layout.
+        let pass1 = evaluate(src, Some(&name), &make_env(100.0, H0));
+        let w0 = match pass1
+            .get("mcpWidth")
+            .map(|v| v.first().copied().unwrap_or(0.0))
+        {
+            Some(w) if w >= 24.0 => w,
+            _ => continue,
+        };
+
+        // Pass 2: natural + finite-difference evaluations. Strip width is
+        // theme-driven (`mcpWidth` reads the layout's width knob, not env
+        // `w`), so the +Δw pass bumps the matching `define_parameter` too.
+        let out0 = evaluate(src, Some(&name), &make_env(w0, H0));
+        let mut env_w = make_env(w0 + DW, H0);
+        let width_knob = format!("Layout{name}-mcpWidth");
+        if let Some(p) = rt.rtconfig.params.iter().find(|p| p.name == width_knob) {
+            env_w.set(&p.name, p.default + DW);
+        }
+        let out_w = evaluate(src, Some(&name), &env_w);
+        let out_h = evaluate(src, Some(&name), &make_env(w0, H0 + DH));
+        layouts.push(layout_from_walter(&name, w0, H0, &out0, &out_w, &out_h, rt));
+        let _: &Output = &out0;
+    }
+    layouts
+}
+
+/// Convert one evaluated layout into an [`McpLayout`].
+#[allow(clippy::too_many_arguments)]
+fn layout_from_walter(
+    name: &str,
+    w0: f32,
+    h0: f32,
+    out0: &daw_theme_reaper::walter::Output,
+    out_w: &daw_theme_reaper::walter::Output,
+    out_h: &daw_theme_reaper::walter::Output,
+    rt: &ReaperTheme,
+) -> super::mcp::McpLayout {
+    use super::mcp::McpLayout;
+    use super::walter::{Coord, FaderMode, Margin};
+
+    const DW: f32 = 16.0;
+    const DH: f32 = 32.0;
+
+    // An element's anchor coord from the three evaluations.
+    let coord = |attr: &str| -> Coord {
+        let Some(c0) = out0.coord(attr) else {
+            return Coord::hidden();
+        };
+        let (x, y, w, h) = (c0[0], c0[1], c0[2], c0[3]);
+        if w <= 0.0 || h <= 0.0 {
+            return Coord::hidden();
+        }
+        // Edge-attach scales via finite differences (fall back to the
+        // natural-size values when a perturbed run hides the element).
+        let cw = out_w.coord(attr).unwrap_or(c0);
+        let ch = out_h.coord(attr).unwrap_or(c0);
+        let ls = (cw[0] - x) / DW;
+        let rs = ((cw[0] + cw[2]) - (x + w)) / DW;
+        let ts = (ch[1] - y) / DH;
+        let bs = ((ch[1] + ch[3]) - (y + h)) / DH;
+        Coord::new(x, y, w, h, ls, ts, rs, bs)
+    };
+
+    // `*.margin` = [l t r b justify].
+    let margin = |attr: &str, fallback: Margin| -> Margin {
+        match out0.get(attr) {
+            Some(v) => Margin::new(
+                v.first().copied().unwrap_or(0.0),
+                v.get(1).copied().unwrap_or(0.0),
+                v.get(2).copied().unwrap_or(0.0),
+                v.get(3).copied().unwrap_or(0.0),
+                v.get(4).copied().unwrap_or(0.5),
+            ),
+            None => fallback,
+        }
+    };
+
+    // Sliders read their orientation from the resolved geometry (REAPER's
+    // `.fadermode` values are theme-convention; the box shape is ground truth).
+    let fadermode = |c: &Coord| -> FaderMode {
+        if c.w > c.h {
+            FaderMode::Horizontal
+        } else {
+            FaderMode::Vertical
+        }
+    };
+
+    let min_h = rt.rtconfig.global_f32("mcp_min_height").unwrap_or(180.0);
+    let base = McpLayout::vertical();
+
+    let volume = coord("mcp.volume");
+    let pan = coord("mcp.pan");
+    let width = coord("mcp.width");
+    McpLayout {
+        name: name.to_string(),
+        size: (w0, h0),
+        min_size: (24.0, min_h),
+        margin: margin("mcp.margin", base.margin),
+
+        trackidx: coord("mcp.trackidx"),
+        trackidx_font: base.trackidx_font,
+        trackidx_margin: margin("mcp.trackidx.margin", base.trackidx_margin),
+        label: coord("mcp.label"),
+        label_font: base.label_font,
+        label_margin: margin("mcp.label.margin", base.label_margin),
+
+        volume_fadermode: fadermode(&volume),
+        volume,
+        volume_label: coord("mcp.volume.label"),
+        volume_label_font: base.volume_label_font,
+        volume_label_margin: margin("mcp.volume.label.margin", base.volume_label_margin),
+        pan_fadermode: fadermode(&pan),
+        pan,
+        pan_label: coord("mcp.pan.label"),
+        pan_label_font: base.pan_label_font,
+        pan_label_margin: margin("mcp.pan.label.margin", base.pan_label_margin),
+        width_fadermode: fadermode(&width),
+        width,
+
+        meter: coord("mcp.meter"),
+
+        mute: coord("mcp.mute"),
+        solo: coord("mcp.solo"),
+        recarm: coord("mcp.recarm"),
+        phase: coord("mcp.phase"),
+        fx: coord("mcp.fx"),
+        fxbyp: coord("mcp.fxbyp"),
+        io: coord("mcp.io"),
+        env: coord("mcp.env"),
+        folder: coord("mcp.folder"),
+    }
 }
 
 /// Slice the theme's button/fader atlases into an [`McpSkin`] (data-URI PNGs).
@@ -259,5 +442,45 @@ mod tests {
         use crate::theming::FaderMode;
         let vertical = theme.mcp.layout(Some("vertical"));
         assert_eq!(vertical.pan_fadermode, FaderMode::Horizontal);
+    }
+
+    #[test]
+    fn walter_layouts_drive_the_strip_geometry() {
+        let Some(rt) = antitheme() else {
+            eprintln!("anti-theme not found — skipping");
+            return;
+        };
+        let theme = theme_from_reaper(&rt);
+
+        // The theme's own layouts (A/B/C) lead; FTS fallbacks stay reachable.
+        let a = theme.mcp.layout(None);
+        assert_eq!(a.name, "A");
+        assert_eq!(theme.mcp.layout(Some("vertical")).name, "vertical");
+
+        // Layout A at its natural width (LayoutA-mcpWidth = 88): the REAPER 7
+        // default geometry, with sensible edge-attach scales recovered.
+        assert_eq!(a.size.0, 88.0);
+        assert_eq!(
+            (a.mute.x, a.mute.y, a.mute.w, a.mute.h),
+            (62., 86., 20., 20.)
+        );
+        // The right-hand button column tracks the strip width 1:1.
+        assert!((a.mute.ls - 1.0).abs() < 0.01, "mute.ls = {}", a.mute.ls);
+        assert!((a.mute.rs - 1.0).abs() < 0.01);
+        // The fader stretches with panel height (x = 30 at the natural
+        // 88px width: meter block, gap, fader, button column).
+        assert_eq!((a.volume.x, a.volume.w), (30., 25.));
+        assert!(
+            (a.volume.bs - 1.0).abs() < 0.01,
+            "volume.bs = {}",
+            a.volume.bs
+        );
+        assert!(a.volume.ts.abs() < 0.01);
+        // Vertical fader, horizontal-ish pan box.
+        use crate::theming::FaderMode;
+        assert_eq!(a.volume_fadermode, FaderMode::Vertical);
+        // Name bar pinned to the bottom, spanning the strip.
+        assert!((a.label.ts - 1.0).abs() < 0.01 && (a.label.bs - 1.0).abs() < 0.01);
+        assert_eq!(a.label.w, 88.0);
     }
 }

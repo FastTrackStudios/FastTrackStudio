@@ -64,6 +64,9 @@ pub struct ReaperTheme {
     pub palette: Palette,
     /// `rtconfig.txt` globals + `define_parameter`s.
     pub rtconfig: RtConfig,
+    /// The raw `rtconfig.txt` source — the WALTER program
+    /// ([`walter::evaluate`] runs it per environment).
+    pub rtconfig_src: String,
     /// The image folder's PNG vocabulary (lazy decode).
     pub images: ImageCatalog,
 }
@@ -117,6 +120,7 @@ impl ReaperTheme {
             root: dir.to_path_buf(),
             palette: Palette::parse(&ini),
             rtconfig: RtConfig::parse(&rt),
+            rtconfig_src: rt,
             images: ImageCatalog::scan(&image_dir)?,
         })
     }

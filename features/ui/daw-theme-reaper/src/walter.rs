@@ -47,6 +47,49 @@ impl Env {
     pub fn set(&mut self, name: &str, value: f32) {
         self.scalars.insert(name.to_string(), value);
     }
+
+    /// A baseline REAPER environment for a panel of `w`×`h`: a plain,
+    /// unselected, unarmed stereo track at 100% DPI scale. Callers override
+    /// the track-state scalars that differ.
+    pub fn reaper_defaults(w: f32, h: f32) -> Self {
+        let mut env = Self::new();
+        for (k, v) in [
+            ("w", w),
+            ("h", h),
+            ("trackpanmode", 3.0),
+            ("tracknch", 2.0),
+            ("recarm", 0.0),
+            ("track_selected", 0.0),
+            ("folderstate", 0.0),
+            ("folderdepth", 0.0),
+            ("maxfolderdepth", 0.0),
+            ("mcp_maxfolderdepth", 0.0),
+            ("trackcolor_valid", 0.0),
+            ("trackidx", 1.0),
+            ("ntracks", 1.0),
+            ("mixer_visible", 1.0),
+            ("send_cnt", 0.0),
+            ("fx_cnt", 0.0),
+            ("fx_parm_cnt", 0.0),
+            ("recfx_cnt", 0.0),
+            ("mcp_wantextmix", 0.0),
+            ("tcp_sends_enabled", 1.0),
+            ("tcp_fxlist_enabled", 1.0),
+            ("tcp_fxparms", 0.0),
+            ("tcp_fxembed", 0.0),
+            ("mcp_fxembed", 0.0),
+            ("trackfixedlanes", 0.0),
+            ("trackpinned", 0.0),
+            ("tcp_hidden_overridden", 0.0),
+            ("reaper_version", 7.0),
+            ("os_type", 2.0),
+            // The DPI scale variable theme macros multiply by (1.0 = 100%).
+            ("Scale", 1.0),
+        ] {
+            env.set(k, v);
+        }
+        env
+    }
 }
 
 /// Evaluation result: the final value of every assigned attribute/variable
