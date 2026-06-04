@@ -9,7 +9,7 @@
 
 use crate::panels::arrange_view::ArrangeView;
 use crate::panels::mixer_control_panel::MixerControlPanel;
-use crate::panels::model::TrackView;
+use crate::panels::model::{MarkerView, RegionView, TrackView};
 use crate::prelude::*;
 
 /// Full DAW workspace. `mixer_fraction` is the mixer's share of the height
@@ -18,6 +18,13 @@ use crate::prelude::*;
 pub fn DawWorkspace(
     tracks: Vec<TrackView>,
     #[props(default = 0.34)] mixer_fraction: f32,
+    #[props(default)] markers: Vec<MarkerView>,
+    #[props(default)] regions: Vec<RegionView>,
+    #[props(default)] time_sel: Option<(f64, f64)>,
+    #[props(default)] loop_range: Option<(f64, f64)>,
+    #[props(default)] bpm: Option<f64>,
+    #[props(default)] playhead: Option<f64>,
+    #[props(default)] cursor: Option<f64>,
 ) -> Element {
     let arrange_grow = ((1.0 - mixer_fraction) * 100.0).round() as u32;
     let mixer_grow = (mixer_fraction * 100.0).round() as u32;
@@ -35,7 +42,16 @@ pub fn DawWorkspace(
             // Arrange (top).
             div {
                 style: format!("flex:{arrange_grow} 1 0; min-height:0;"),
-                ArrangeView { tracks: tracks.clone() }
+                ArrangeView {
+                    tracks: tracks.clone(),
+                    markers,
+                    regions,
+                    time_sel,
+                    loop_range,
+                    bpm,
+                    playhead,
+                    cursor,
+                }
             }
             // Mixer (bottom third).
             div {

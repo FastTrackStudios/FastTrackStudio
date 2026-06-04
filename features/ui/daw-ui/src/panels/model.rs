@@ -17,6 +17,52 @@ pub struct ClipView {
     pub name: String,
     /// `#rrggbb`; falls back to the track colour when `None`.
     pub color: Option<String>,
+    /// Fade-in length in seconds (0 = none); drawn REAPER-style as a fade
+    /// triangle at the item head.
+    pub fade_in: f64,
+    /// Fade-out length in seconds (0 = none).
+    pub fade_out: f64,
+    pub selected: bool,
+    pub muted: bool,
+}
+
+impl ClipView {
+    pub fn new(start: f64, length: f64, name: impl Into<String>, color: Option<&str>) -> Self {
+        Self {
+            start,
+            length,
+            name: name.into(),
+            color: color.map(|c| c.to_string()),
+            fade_in: 0.0,
+            fade_out: 0.0,
+            selected: false,
+            muted: false,
+        }
+    }
+}
+
+/// A project marker on the ruler's marker lane.
+#[derive(Clone, PartialEq)]
+pub struct MarkerView {
+    /// Position in seconds.
+    pub time: f64,
+    pub name: String,
+    /// `#rrggbb`; theme marker colour when `None`.
+    pub color: Option<String>,
+    /// Marker number (REAPER shows it in the flag).
+    pub idx: u32,
+}
+
+/// A project region band on the ruler's region lane.
+#[derive(Clone, PartialEq)]
+pub struct RegionView {
+    /// Start/end in seconds.
+    pub start: f64,
+    pub end: f64,
+    pub name: String,
+    /// `#rrggbb`; theme region colour when `None`.
+    pub color: Option<String>,
+    pub idx: u32,
 }
 
 /// A track as the TrackControlPanel, MixerControlPanel, and ArrangeView all
@@ -36,6 +82,8 @@ pub struct TrackView {
     pub mute: Signal<bool>,
     pub solo: Signal<bool>,
     pub record_arm: Signal<bool>,
+    /// Track selection (drives the selected row/strip styling).
+    pub selected: Signal<bool>,
 
     // ── metering (live inputs) ──
     /// Left/mono meter level (linear, 0–1). A `Signal` so a host can push live
@@ -78,6 +126,7 @@ impl TrackView {
             mute: Signal::new(false),
             solo: Signal::new(false),
             record_arm: Signal::new(false),
+            selected: Signal::new(false),
             level: Signal::new(0.0),
             level_right: Signal::new(0.0),
             peak: Signal::new(0.0),

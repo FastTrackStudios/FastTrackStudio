@@ -195,8 +195,11 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         set(&mut ar.empty_bg, pal("col_tracklistbg"));
         set(&mut ar.row_bg[0], pal("col_tr1_bg"));
         set(&mut ar.row_bg[1], pal("col_tr2_bg"));
+        set(&mut ar.sel_row_bg[0], pal("selcol_tr1_bg"));
+        set(&mut ar.sel_row_bg[1], pal("selcol_tr2_bg"));
         set(&mut ar.row_divider[0], pal("col_tr1_divline"));
         set(&mut ar.row_divider[1], pal("col_tr2_divline"));
+        set(&mut ar.vgrid, pal("arrange_vgrid"));
         set(
             &mut ar.grid_measure,
             with_dm("col_gridlines2", "col_gridlines2dm"),
@@ -213,13 +216,20 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         set(&mut ar.ruler_fg, pal("col_tl_fg"));
         set(&mut ar.ruler_fg2, pal("col_tl_fg2"));
         set(&mut ar.ruler_sel_bg, pal("col_tl_bgsel"));
+        set(&mut ar.timesel, with_dm("col_tl_bgsel", "timesel_drawmode"));
         set(&mut ar.ruler_loop_bg, pal("col_tl_bgsel2"));
         set(&mut ar.edit_cursor, pal("col_cursor"));
         set(
             &mut ar.play_cursor,
             with_dm("playcursor_color", "playcursor_drawmode"),
         );
-        set(&mut ar.item_bg, pal("col_mi_bg"));
+        // Item bodies: per-track-parity backgrounds; `itembg_drawmode`'s
+        // alpha is how strongly the item colour tints over them.
+        set(&mut ar.item_bg[0], pal("col_mi_bg"));
+        set(&mut ar.item_bg[1], pal("col_mi_bg2"));
+        if let Some(dm) = rt.palette.drawmode("itembg_drawmode") {
+            ar.item_blend = dm.alpha.clamp(0.0, 1.0);
+        }
         set(&mut ar.item_label, pal("col_mi_label"));
         set(&mut ar.item_label_sel, pal("col_mi_label_sel"));
         set(&mut ar.item_edge, pal("col_peaksedge"));
@@ -227,10 +237,25 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         set(&mut ar.peaks[1], pal("col_tr2_peaks"));
         set(&mut ar.item_bg_sel[0], pal("col_tr1_itembgsel"));
         set(&mut ar.item_bg_sel[1], pal("col_tr2_itembgsel"));
+        // `selitem_tag` doubles as the enable flag: 0 = no tag bar.
+        if let Some(v) = rt.palette.int("selitem_tag") {
+            ar.selitem_tag = (v != 0).then(|| color(Rgba::from_colorref(v)));
+        }
+        set(&mut ar.fade_line, pal("col_mi_fades"));
+        set(
+            &mut ar.fadezone,
+            with_dm("fadezone_color", "fadezone_drawmode"),
+        );
+        set(
+            &mut ar.mute_overlay,
+            with_dm("mute_overlay_col", "mute_overlay_mode"),
+        );
         set(&mut ar.marker, pal("marker"));
+        set(&mut ar.marker_edge, pal("marker_edge"));
         set(&mut ar.marker_lane_bg, pal("marker_lane_bg"));
         set(&mut ar.marker_lane_text, pal("marker_lane_text"));
         set(&mut ar.region, pal("region"));
+        set(&mut ar.region_edge, pal("region_edge"));
         set(&mut ar.region_lane_bg, pal("region_lane_bg"));
         set(&mut ar.region_lane_text, pal("region_lane_text"));
         set(
@@ -261,7 +286,271 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
         }
     }
 
+    // ── transport context ──
+    let tr = &mut theme.trans;
+    if let Some(c) = pal("col_trans_bg") {
+        tr.bg = c;
+    }
+    if let Some(c) = pal("col_trans_fg") {
+        tr.fg = c;
+    }
+    tr.skin = extract_trans_skin(&imgs);
+    let trans_layouts = walter_trans_layouts(rt, scale, dpi_folder.as_deref());
+    if !trans_layouts.is_empty() {
+        let fallbacks = std::mem::take(&mut tr.layouts);
+        tr.layouts = trans_layouts;
+        tr.layouts.extend(fallbacks);
+    }
+
     theme
+}
+
+/// Evaluate the theme's `trans.*` context per layout — the same
+/// finite-difference anchor recovery as the strips, against the transport
+/// element vocabulary. Natural size from `trans.size` (`[w h]`).
+fn walter_trans_layouts(
+    rt: &ReaperTheme,
+    scale: f32,
+    dpi_folder: Option<&str>,
+) -> Vec<super::trans::TransLayout> {
+    use daw_theme_reaper::walter::{Env, evaluate};
+
+    let src = &rt.rtconfig_src;
+    let make_env = |w: f32, h: f32| -> Env {
+        let mut env = Env::reaper_defaults(w, h);
+        env.set("Scale", scale);
+        for p in &rt.rtconfig.params {
+            env.set(&p.name, p.default);
+        }
+        env
+    };
+    const DW: f32 = 64.0;
+    const DH: f32 = 16.0;
+
+    let probe = evaluate(src, None, &make_env(1000.0, 40.0));
+    let names: Vec<String> = probe
+        .layouts
+        .iter()
+        .filter(|n| !n.contains('%'))
+        .cloned()
+        .collect();
+    let variant_of = |base: &str| -> String {
+        match dpi_folder {
+            Some(folder) => {
+                let v = format!("{folder}%_{base}");
+                if probe.layouts.iter().any(|l| l == &v) {
+                    v
+                } else {
+                    base.to_string()
+                }
+            }
+            None => base.to_string(),
+        }
+    };
+
+    let mut layouts = Vec::new();
+    for name in names {
+        let eval_name = variant_of(&name);
+        let pass1 = evaluate(src, Some(&eval_name), &make_env(1000.0, 40.0));
+        let Some(size) = pass1.coord("trans.size") else {
+            continue;
+        };
+        let (w0, h0) = (size[0], size[1]);
+        if w0 < 100.0 || h0 < 16.0 {
+            continue;
+        }
+        let out0 = evaluate(src, Some(&eval_name), &make_env(w0, h0));
+        let out_w = evaluate(src, Some(&eval_name), &make_env(w0 + DW, h0));
+        let out_h = evaluate(src, Some(&eval_name), &make_env(w0, h0 + DH));
+        layouts.push(trans_layout_from_walter(
+            &name, w0, h0, &out0, &out_w, &out_h, DW, DH,
+        ));
+    }
+    layouts
+}
+
+/// Convert one evaluated transport layout into a [`TransLayout`].
+#[allow(clippy::too_many_arguments)]
+fn trans_layout_from_walter(
+    name: &str,
+    w0: f32,
+    h0: f32,
+    out0: &daw_theme_reaper::walter::Output,
+    out_w: &daw_theme_reaper::walter::Output,
+    out_h: &daw_theme_reaper::walter::Output,
+    dw: f32,
+    dh: f32,
+) -> super::trans::TransLayout {
+    use super::walter::{Coord, Margin};
+
+    let coord = |attr: &str| -> Coord {
+        let Some(c0) = out0.coord(attr) else {
+            return Coord::hidden();
+        };
+        let (x, y, w, h) = (c0[0], c0[1], c0[2], c0[3]);
+        if w <= 0.0 || h <= 0.0 {
+            return Coord::hidden();
+        }
+        let cw = out_w.coord(attr).unwrap_or(c0);
+        let ch = out_h.coord(attr).unwrap_or(c0);
+        Coord::new(
+            x,
+            y,
+            w,
+            h,
+            (cw[0] - x) / dw,
+            (ch[1] - y) / dh,
+            ((cw[0] + cw[2]) - (x + w)) / dw,
+            ((ch[1] + ch[3]) - (y + h)) / dh,
+        )
+    };
+    let color_at = |v: &[f32], i: usize| -> Option<Color> {
+        let r = *v.get(i)? as u8;
+        let g = v.get(i + 1).copied().unwrap_or(0.0) as u8;
+        let b = v.get(i + 2).copied().unwrap_or(0.0) as u8;
+        let a = match v.get(i + 3).copied() {
+            Some(a) => a as u8,
+            None => 255,
+        };
+        Some(Color::rgba(r, g, b, a))
+    };
+    let color_pair = |attr: &str| -> Option<super::walter::ColorPair> {
+        let v = out0.get(attr)?;
+        Some(super::walter::ColorPair {
+            fg: color_at(v, 0)?,
+            bg: color_at(v, 4),
+        })
+    };
+    let margin = |attr: &str, fallback: Margin| -> Margin {
+        match out0.get(attr) {
+            Some(v) => Margin::new(
+                v.first().copied().unwrap_or(0.0),
+                v.get(1).copied().unwrap_or(0.0),
+                v.get(2).copied().unwrap_or(0.0),
+                v.get(3).copied().unwrap_or(0.0),
+                v.get(4).copied().unwrap_or(0.0),
+            ),
+            None => fallback,
+        }
+    };
+
+    // `trans.custom.*` chrome: reverse declaration order + `front` lifts
+    // (the custom-element z-order rule).
+    let mut names: Vec<&String> = Vec::new();
+    for n in &out0.set_order {
+        if n.starts_with("trans.custom.") && !n.ends_with(".color") && !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    names.reverse();
+    for f in &out0.fronts {
+        if let Some(pos) = names.iter().position(|n| *n == f) {
+            let n = names.remove(pos);
+            names.push(n);
+        }
+    }
+    let customs: Vec<super::mcp::McpCustom> = names
+        .into_iter()
+        .filter_map(|n| {
+            let c = coord(n);
+            if c.is_hidden() {
+                return None;
+            }
+            let usable = |c: Color| (c.a > 0).then_some(c);
+            let pair = color_pair(&format!("{n}.color"));
+            Some(super::mcp::McpCustom {
+                name: n.clone(),
+                coord: c,
+                fg: pair.map(|p| p.fg).and_then(usable),
+                bg: pair.and_then(|p| p.bg).and_then(usable),
+            })
+        })
+        .collect();
+
+    let base = super::trans::TransLayout::fts_default();
+    super::trans::TransLayout {
+        name: name.to_string(),
+        size: (w0, h0),
+        docked_height: out0
+            .get("trans.size.dockedheight")
+            .and_then(|v| v.first().copied())
+            .unwrap_or(h0),
+        rew: coord("trans.rew"),
+        fwd: coord("trans.fwd"),
+        play: coord("trans.play"),
+        stop: coord("trans.stop"),
+        pause: coord("trans.pause"),
+        rec: coord("trans.rec"),
+        repeat: coord("trans.repeat"),
+        automode: coord("trans.automode"),
+        timebase: coord("trans.timebase"),
+        bpm_edit: coord("trans.bpm.edit"),
+        bpm_edit_font: base.bpm_edit_font,
+        bpm_edit_color: color_pair("trans.bpm.edit.color"),
+        bpm_tap: coord("trans.bpm.tap"),
+        curtimesig: coord("trans.curtimesig"),
+        curtimesig_color: color_pair("trans.curtimesig.color"),
+        rate: coord("trans.rate"),
+        rate_fader: coord("trans.rate.fader"),
+        status: coord("trans.status"),
+        status_font: base.status_font,
+        status_color: color_pair("trans.status.color"),
+        status_margin: margin("trans.status.margin", base.status_margin),
+        sel: coord("trans.sel"),
+        sel_font: base.sel_font,
+        sel_color: color_pair("trans.sel.color"),
+        customs,
+    }
+}
+
+/// Slice the `transport_*` atlases into a [`super::trans::TransSkin`].
+fn extract_trans_skin(imgs: &ImageCatalog) -> Option<super::trans::TransSkin> {
+    let button = |name: &str| -> Option<ButtonStateSkin> {
+        let s = imgs.button3(name).ok()?;
+        let img = |b: &daw_theme_reaper::image::RgbaImage| SkinImage {
+            url: ImageCatalog::data_uri(b),
+            w: b.width(),
+            h: b.height(),
+            slices: None,
+        };
+        Some(ButtonStateSkin {
+            normal: img(&s.normal),
+            hover: img(&s.hover),
+            pressed: img(&s.pressed),
+        })
+    };
+    let toggle = |off: &str, on: &str| -> Option<ButtonSkin> {
+        Some(ButtonSkin {
+            off: button(off)?,
+            on: button(on)?,
+        })
+    };
+    let plain = |name: &str| -> Option<SkinImage> {
+        let s = imgs.load(name).ok()?;
+        Some(SkinImage {
+            url: ImageCatalog::data_uri(&s.image),
+            w: s.image.width(),
+            h: s.image.height(),
+            slices: None,
+        })
+    };
+
+    let skin = super::trans::TransSkin {
+        play: toggle("transport_play", "transport_play_on"),
+        pause: toggle("transport_pause", "transport_pause_on"),
+        rec: toggle("transport_record", "transport_record_on"),
+        repeat: toggle("transport_repeat_off", "transport_repeat_on"),
+        stop: button("transport_stop"),
+        rew: button("transport_previous"),
+        fwd: button("transport_next"),
+        home: button("transport_home"),
+        end: button("transport_end"),
+        bpm_bg: plain("transport_bpm_bg"),
+        section_bg: plain("transSectionBg"),
+        rate_bg: plain("transRateFaderBg"),
+        rate_thumb: plain("transport_playspeedthumb"),
+    };
+    (skin.play.is_some() || skin.stop.is_some()).then_some(skin)
 }
 
 /// Build the runtime [`LayoutEngine`]: re-evaluates the theme's WALTER at an
@@ -1010,11 +1299,12 @@ mod arrange_tests {
         // playcursor_drawmode = 163840 = 0x28000 → 0.5 alpha.
         assert_eq!(ar.play_cursor.a, 128);
 
-        // Items + markers present.
+        // Items + markers present (col_mi_bg = col_mi_bg2 = 0x848484).
         assert_eq!(
-            (ar.item_bg.r, ar.item_bg.g, ar.item_bg.b),
+            (ar.item_bg[0].r, ar.item_bg[0].g, ar.item_bg[0].b),
             (0x84, 0x84, 0x84)
         );
+        assert_eq!(ar.item_bg[1].r, 0x84);
         assert_ne!(ar.marker, ar.region);
     }
 }

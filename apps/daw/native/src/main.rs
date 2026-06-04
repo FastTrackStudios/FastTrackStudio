@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use daw::service::transport::service::Transport;
 use daw::service::{Peaks, ProjectContext, ProjectInfo, Track, TrackRef, Tracks};
-use daw::ui::panels::{DawWorkspace, TrackView};
+use daw::ui::panels::{ClipView, DawWorkspace, MarkerView, RegionView, TrackView, TransportBar};
 use daw::ui::theming::ThemeProvider;
 use daw_standalone::audio_engine::{AudioEngine, test_tone};
 use daw_standalone::sync::Standalone;
@@ -192,55 +192,45 @@ fn App() -> Element {
                 span { style: format!("color:{text_dim}; font-weight:500;"), "Native" }
 
                 div { style: "flex:1 1 0;" }
+            }
 
-                // Play.
-                button {
-                    r#type: "button",
-                    title: "Play",
-                    style: format!(
-                        "width:30px; height:24px; border-radius:5px; cursor:pointer; \
-                         border:1px solid {border}; \
-                         background:{bg}; color:{fg}; font-size:12px;",
-                        bg = if is_playing { accent.clone() } else { "transparent".to_string() },
-                        fg = if is_playing { tk.surface.css() } else { text.clone() },
-                    ),
-                    onclick: {
-                        let engine = engine.clone();
-                        move |_| {
-                            if let Err(e) = engine.play(ProjectContext::Current) {
-                                tracing::warn!("play failed: {e:?}");
-                            }
-                            playing.set(true);
+            // ── Transport (themed `trans.*` context) ──
+            TransportBar {
+                playing,
+                bpm: 120.0,
+                on_play: {
+                    let engine = engine.clone();
+                    move |_| {
+                        if let Err(e) = engine.play(ProjectContext::Current) {
+                            tracing::warn!("play failed: {e:?}");
                         }
-                    },
-                    "▶"
-                }
-                // Stop.
-                button {
-                    r#type: "button",
-                    title: "Stop",
-                    style: format!(
-                        "width:30px; height:24px; border-radius:5px; cursor:pointer; \
-                         border:1px solid {border}; background:transparent; color:{text}; font-size:12px;"
-                    ),
-                    onclick: {
-                        let engine = engine.clone();
-                        move |_| {
-                            if let Err(e) = engine.stop(ProjectContext::Current) {
-                                tracing::warn!("stop failed: {e:?}");
-                            }
-                            let _ = engine.goto_start(ProjectContext::Current);
-                            playing.set(false);
+                        playing.set(true);
+                    }
+                },
+                on_stop: {
+                    let engine = engine.clone();
+                    move |_| {
+                        if let Err(e) = engine.stop(ProjectContext::Current) {
+                            tracing::warn!("stop failed: {e:?}");
                         }
-                    },
-                    "⏹"
-                }
+                        let _ = engine.goto_start(ProjectContext::Current);
+                        playing.set(false);
+                    }
+                },
             }
 
             // ── Workspace (arrange-over-mixer) ──
             div {
                 style: "flex:1 1 0; min-height:0;",
-                DawWorkspace { tracks: tracks() }
+                DawWorkspace {
+                    tracks: tracks(),
+                    markers: demo_markers(),
+                    regions: demo_regions(),
+                    time_sel: Some((16.0, 24.0)),
+                    loop_range: Some((16.0, 24.0)),
+                    bpm: 120.0,
+                    cursor: 16.0,
+                }
             }
         }
         }
@@ -307,13 +297,61 @@ fn track_to_view(id: usize, track: &Track, depth: u32) -> TrackView {
     if track.is_folder {
         view = view.folder();
     } else {
-        view = view.stereo(); // dual-column meter for audible tracks
+        view = view.stereo().clips(demo_clips(id)); // dual-column meter + demo items
     }
     // Mirror the engine's per-track state into the shared UI signals.
     view.mute.set(track.muted);
     view.solo.set(track.soloed);
     view.record_arm.set(track.armed);
     view
+}
+
+/// Demo arrangement clips for an audible track: a couple of bars with fades,
+/// staggered per track so the lanes read like a song (one muted clip on the
+/// later tracks shows the mute overlay).
+fn demo_clips(id: usize) -> Vec<ClipView> {
+    let off = (id % 4) as f64 * 4.0;
+    let mut a = ClipView::new(off, 16.0 - off, "Verse", None);
+    a.fade_in = 0.8;
+    a.fade_out = 1.5;
+    let mut b = ClipView::new(24.0, 16.0, "Chorus", None);
+    b.fade_in = 0.4;
+    b.fade_out = 2.0;
+    b.selected = id == 2;
+    b.muted = id == 7;
+    vec![a, b]
+}
+
+/// Demo project markers (ruler marker lane).
+fn demo_markers() -> Vec<MarkerView> {
+    [(0.0, "Intro"), (16.0, "Verse"), (24.0, "Chorus"), (40.0, "Bridge")]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (t, n))| MarkerView {
+            time: t,
+            name: n.to_string(),
+            color: None,
+            idx: i as u32 + 1,
+        })
+        .collect()
+}
+
+/// Demo regions (ruler region lane).
+fn demo_regions() -> Vec<RegionView> {
+    [
+        (0.0, 16.0, "Verse 1", "#7c5cff"),
+        (24.0, 40.0, "Chorus", "#2dd4bf"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (a, b, n, c))| RegionView {
+        start: a,
+        end: b,
+        name: n.to_string(),
+        color: Some(c.to_string()),
+        idx: i as u32 + 1,
+    })
+    .collect()
 }
 
 /// `0xRRGGBB` → `#rrggbb`.

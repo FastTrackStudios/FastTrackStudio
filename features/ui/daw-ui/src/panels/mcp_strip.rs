@@ -527,7 +527,7 @@ fn McpKnob(
 /// three stacked bands — fixed top/bottom caps at native height, the middle
 /// band absorbing the size difference (REAPER's "Pink Line Crush") — instead
 /// of a uniform (squishing) stretch.
-fn skin_fill(img: &crate::theming::SkinImage, box_w: f32, box_h: f32) -> Element {
+pub(crate) fn skin_fill(img: &crate::theming::SkinImage, box_w: f32, box_h: f32) -> Element {
     match &img.slices {
         Some(n) => {
             // Patch geometry computed in px against the (fixed-size) box so
@@ -588,7 +588,7 @@ fn skin_fill(img: &crate::theming::SkinImage, box_w: f32, box_h: f32) -> Element
 }
 
 /// Map a WALTER margin justification to flex `justify-content`.
-fn flex_justify(m: &crate::theming::Margin) -> &'static str {
+pub(crate) fn flex_justify(m: &crate::theming::Margin) -> &'static str {
     match m.text_align() {
         "left" => "flex-start",
         "right" => "flex-end",

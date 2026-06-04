@@ -320,6 +320,8 @@ pub struct Theme {
     /// The arrange-view context — ruler/grid/lane/item colours (REAPER themes
     /// these purely through the palette; no WALTER).
     pub arrange: super::arrange::ArrangeTheme,
+    /// The transport context — `trans.*` layout + transport_* images.
+    pub trans: super::trans::TransTheme,
 }
 
 impl Default for Theme {
@@ -358,6 +360,7 @@ impl Theme {
             tcp: McpTheme::fts_default_tcp(),
             engine: None,
             arrange: super::arrange::ArrangeTheme::fts_default(),
+            trans: super::trans::TransTheme::fts_default(),
         }
     }
 

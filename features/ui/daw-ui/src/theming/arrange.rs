@@ -22,8 +22,14 @@ pub struct ArrangeTheme {
     /// `col_tr1_bg` / `col_tr2_bg` — alternating lane backgrounds
     /// (REAPER alternates per track index).
     pub row_bg: [Color; 2],
+    /// `selcol_tr1_bg` / `selcol_tr2_bg` — lane backgrounds of *selected*
+    /// tracks.
+    pub sel_row_bg: [Color; 2],
     /// `col_tr1_divline` / `col_tr2_divline` — the lane divider lines.
     pub row_divider: [Color; 2],
+    /// `arrange_vgrid` — vertical grid shading in the empty area below the
+    /// last track.
+    pub vgrid: Color,
 
     // ── grid (drawmode alpha applied) ──
     /// `col_gridlines2` (+ `col_gridlines2dm`) — start-of-measure lines.
@@ -42,6 +48,9 @@ pub struct ArrangeTheme {
     pub ruler_fg2: Color,
     /// `col_tl_bgsel` — the time-selection band in the ruler.
     pub ruler_sel_bg: Color,
+    /// `col_tl_bgsel` + `timesel_drawmode` — the time-selection shading over
+    /// the arrange body (alpha pre-applied).
+    pub timesel: Color,
     /// `col_tl_bgsel2` — the ruler background inside loop points.
     pub ruler_loop_bg: Color,
 
@@ -52,8 +61,11 @@ pub struct ArrangeTheme {
     pub play_cursor: Color,
 
     // ── media items ──
-    /// `col_mi_bg` — item body fallback (uncolored items).
-    pub item_bg: Color,
+    /// `col_mi_bg` / `col_mi_bg2` — item body fallbacks (even / odd tracks).
+    pub item_bg: [Color; 2],
+    /// `itembg_drawmode` alpha — how strongly the item/track colour tints
+    /// the item body over `item_bg` (1.0 = solid colour).
+    pub item_blend: f32,
     /// `col_mi_label` — item label text.
     pub item_label: Color,
     /// `col_mi_label_sel` — selected-item label text.
@@ -64,15 +76,28 @@ pub struct ArrangeTheme {
     pub peaks: [Color; 2],
     /// `col_tr1_itembgsel` / `col_tr2_itembgsel` — selected item bodies.
     pub item_bg_sel: [Color; 2],
+    /// `selitem_tag` — the coloured bar drawn on selected items
+    /// (`None`/0 = the theme disables the tag, REAPER's flag convention).
+    pub selitem_tag: Option<Color>,
+    /// `col_mi_fades` — fade handle/curve lines.
+    pub fade_line: Color,
+    /// `fadezone_color` (+ drawmode) — the fade-triangle fill.
+    pub fadezone: Color,
+    /// `mute_overlay_col` (+ mode) — overlay across muted items.
+    pub mute_overlay: Color,
 
     // ── markers / regions (ruler lanes) ──
     /// `marker` — marker flag fill.
     pub marker: Color,
+    /// `marker_edge` — marker edge line.
+    pub marker_edge: Color,
     /// `marker_lane_bg` / `marker_lane_text`.
     pub marker_lane_bg: Color,
     pub marker_lane_text: Color,
     /// `region` — region band fill.
     pub region: Color,
+    /// `region_edge` — region edge line.
+    pub region_edge: Color,
     /// `region_lane_bg` / `region_lane_text`.
     pub region_lane_bg: Color,
     pub region_lane_text: Color,
@@ -99,7 +124,9 @@ impl ArrangeTheme {
             bg: c(0x0a0a0c),
             empty_bg: c(0x09090b),
             row_bg: [c(0x121215), c(0x101013)],
+            sel_row_bg: [c(0x1c1c22), c(0x1a1a20)],
             row_divider: [c(0x1d1d21), c(0x1d1d21)],
+            vgrid: Color::rgba(255, 255, 255, 8),
             grid_measure: Color::rgba(255, 255, 255, 36),
             grid_beat: Color::rgba(255, 255, 255, 20),
             grid_sub: Color::rgba(255, 255, 255, 10),
@@ -107,19 +134,27 @@ impl ArrangeTheme {
             ruler_fg: c(0xa1a1aa),
             ruler_fg2: c(0x71717a),
             ruler_sel_bg: Color::rgba(56, 189, 248, 64),
+            timesel: Color::rgba(255, 255, 255, 24),
             ruler_loop_bg: c(0x27272a),
             edit_cursor: c(0x38bdf8),
             play_cursor: Color::rgba(255, 255, 255, 160),
-            item_bg: c(0x3f3f46),
+            item_bg: [c(0x3f3f46), c(0x3f3f46)],
+            item_blend: 1.0,
             item_label: c(0x0c0c0f),
             item_label_sel: c(0xffffff),
             item_edge: c(0x0a0a0c),
             peaks: [c(0x18181b), c(0x18181b)],
             item_bg_sel: [c(0x52525b), c(0x52525b)],
+            selitem_tag: None,
+            fade_line: c(0x791111),
+            fadezone: Color::rgba(0, 0, 0, 60),
+            mute_overlay: Color::rgba(0, 0, 0, 110),
             marker: c(0xef4444),
+            marker_edge: c(0x71717a),
             marker_lane_bg: c(0x18181b),
             marker_lane_text: c(0xa1a1aa),
             region: c(0x22c55e),
+            region_edge: c(0x71717a),
             region_lane_bg: c(0x18181b),
             region_lane_text: c(0xa1a1aa),
             sel_fill: Color::rgba(56, 189, 248, 40),

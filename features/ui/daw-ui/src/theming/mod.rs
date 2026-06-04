@@ -15,6 +15,8 @@ pub mod style;
 pub mod svg_texture;
 /// Token-based theme model (vector-first; Phase 1 of the themeable-UI plan).
 pub mod theme;
+/// The transport context — REAPER's `trans.*` element vocabulary.
+pub mod trans;
 /// WALTER layout primitives (8-value anchor coords, margins, fonts, params).
 pub mod walter;
 
@@ -30,6 +32,7 @@ pub use theme::{
     Color, ElementRole, FaderStyle, MeterStyle, Metrics, PanelStyle, StripStyle, Theme, ThemeState,
     ToggleKind, ToggleStyle, Tokens,
 };
+pub use trans::{TransLayout, TransSkin, TransTheme};
 pub use walter::{ColorPair, Coord, FaderMode, FontSpec, Margin, Rect, ThemeParam};
 
 #[cfg(feature = "reaper-theme")]

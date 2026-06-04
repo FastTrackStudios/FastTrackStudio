@@ -13,11 +13,13 @@ pub mod mcp_strip;
 pub mod mixer_control_panel;
 pub mod model;
 pub mod track_control_panel;
+pub mod transport_bar;
 pub mod workspace;
 
 pub use arrange_view::ArrangeView;
 pub use mcp_strip::McpStrip;
 pub use mixer_control_panel::MixerControlPanel;
-pub use model::{ClipView, TrackView};
+pub use model::{ClipView, MarkerView, RegionView, TrackView};
 pub use track_control_panel::TrackControlPanel;
+pub use transport_bar::TransportBar;
 pub use workspace::DawWorkspace;
