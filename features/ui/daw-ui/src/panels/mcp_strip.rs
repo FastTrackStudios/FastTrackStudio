@@ -47,18 +47,42 @@ pub fn McpStrip(
     let opacity = if disabled { "0.5" } else { "1.0" };
 
     // ── element styles ──
-    let label_fg = mcp.colors.label.map(|c| c.fg).unwrap_or(accent.on());
-    let label_bg = mcp.colors.label.and_then(|c| c.bg).unwrap_or(accent);
-    let vol_label_fg = mcp
+    // Colour resolution: per-layout WALTER colours → theme-level overrides →
+    // token fallbacks. Track-colour sentinels resolve to the live accent.
+    let label_fg = l
+        .colors
+        .label
+        .map(|c| c.fg)
+        .or(mcp.colors.label.map(|c| c.fg))
+        .unwrap_or(accent.on())
+        .resolve_track(accent);
+    // With theme-drawn chrome (`mcp.custom.*` name-bar boxes) behind it, the
+    // label itself stays transparent; bare layouts get the accent bar.
+    let label_bg = l
+        .colors
+        .label
+        .and_then(|c| c.bg)
+        .or(mcp.colors.label.and_then(|c| c.bg))
+        .unwrap_or(if l.customs.is_empty() {
+            accent
+        } else {
+            Color::rgba(0, 0, 0, 0)
+        })
+        .resolve_track(accent);
+    let vol_label_fg = l
         .colors
         .volume_label
         .map(|c| c.fg)
-        .unwrap_or(strip.value_text);
-    let idx_fg = mcp
+        .or(mcp.colors.volume_label.map(|c| c.fg))
+        .unwrap_or(strip.value_text)
+        .resolve_track(accent);
+    let idx_fg = l
         .colors
         .trackidx
         .map(|c| c.fg)
-        .unwrap_or(theme.tokens.text_faint);
+        .or(mcp.colors.trackidx.map(|c| c.fg))
+        .unwrap_or(theme.tokens.text_faint)
+        .resolve_track(accent);
 
     let fader_accent = mcp.colors.volume.unwrap_or(accent);
     let pan_color = mcp.colors.pan; // Knob themes itself; reserved for importer use.
@@ -82,6 +106,21 @@ pub fn McpStrip(
                 border = strip.border.css(),
             ),
 
+            // Theme-drawn chrome: `mcp.custom.*` boxes, painted first in
+            // WALTER z-order (track-colour sentinels resolve to the accent).
+            for c in l.customs.iter() {
+                if let Some(fill) = c.bg.or(c.fg) {
+                    div {
+                        key: "{c.name}",
+                        style: format!(
+                            "{pos} background:{fill}; pointer-events:none;",
+                            pos = c.coord.css_position(nat),
+                            fill = fill.resolve_track(accent).css(),
+                        ),
+                    }
+                }
+            }
+
             // mcp.trackidx
             if !l.trackidx.is_hidden() {
                 div {
@@ -96,6 +135,34 @@ pub fn McpStrip(
                     ),
                     "{track.id + 1}"
                 }
+            }
+
+            // mcp.recinput / mcp.recmode / mcp.recmon / mcp.fxin — the record
+            // row. Inert until the view-model carries record state; themed +
+            // positioned by the layout.
+            if !l.recinput.is_hidden() {
+                div {
+                    title: "Record input",
+                    style: format!(
+                        "{pos} display:flex; align-items:center; justify-content:{justify}; \
+                         padding:{pad}; color:{fg}; font-size:10px; \
+                         white-space:nowrap; overflow:hidden;",
+                        pos = l.recinput.css_position(nat),
+                        justify = flex_justify(&l.recinput_margin),
+                        pad = l.recinput_margin.css_padding(),
+                        fg = theme.tokens.text_dim.css(),
+                    ),
+                    "Input 1"
+                }
+            }
+            if !l.recmode.is_hidden() {
+                McpFlag { pos: l.recmode.css_position(nat), glyph: "REC", title: "Record mode", skin: skin.recmode.as_ref().map(|b| b.on.normal.clone()) }
+            }
+            if !l.recmon.is_hidden() {
+                McpFlag { pos: l.recmon.css_position(nat), glyph: "MON", title: "Record monitoring" }
+            }
+            if !l.fxin.is_hidden() {
+                McpFlag { pos: l.fxin.css_position(nat), glyph: "FX", title: "Input FX", skin: skin.fxin.as_ref().map(|b| b.off.normal.clone()) }
             }
 
             // mcp.pan — horizontal slider per `mcp.pan.fadermode` (REAPER's
@@ -218,19 +285,19 @@ pub fn McpStrip(
             // mcp.phase / mcp.fx / mcp.fxbyp / mcp.env / mcp.folder — inert
             // until the view-model carries their state; themed + positionable.
             if !l.phase.is_hidden() {
-                McpFlag { pos: l.phase.css_position(nat), glyph: "ø", title: "Phase" }
+                McpFlag { pos: l.phase.css_position(nat), glyph: "ø", title: "Phase", skin: skin.phase.as_ref().map(|b| b.off.normal.clone()) }
             }
             if !l.fx.is_hidden() {
-                McpFlag { pos: l.fx.css_position(nat), glyph: "FX", title: "FX chain" }
+                McpFlag { pos: l.fx.css_position(nat), glyph: "FX", title: "FX chain", skin: skin.fx.as_ref().map(|b| b.off.normal.clone()) }
             }
             if !l.fxbyp.is_hidden() {
-                McpFlag { pos: l.fxbyp.css_position(nat), glyph: "BYP", title: "FX bypass" }
+                McpFlag { pos: l.fxbyp.css_position(nat), glyph: "BYP", title: "FX bypass", skin: skin.fxbyp.as_ref().map(|b| b.on.normal.clone()) }
             }
             if !l.env.is_hidden() {
-                McpFlag { pos: l.env.css_position(nat), glyph: "ENV", title: "Envelopes" }
+                McpFlag { pos: l.env.css_position(nat), glyph: "ENV", title: "Envelopes", skin: skin.env.as_ref().map(|b| b.off.normal.clone()) }
             }
             if !l.folder.is_hidden() {
-                McpFlag { pos: l.folder.css_position(nat), glyph: "▼", title: "Folder" }
+                McpFlag { pos: l.folder.css_position(nat), glyph: "▼", title: "Folder", skin: skin.folder.as_ref().map(|b| if track.is_folder { b.on.normal.clone() } else { b.off.normal.clone() }) }
             }
 
             // mcp.label — track-name footer.
@@ -358,11 +425,29 @@ fn McpToggle(
     }
 }
 
-/// An inert, themed flag button (phase/fx/fxbyp/env/folder) — positionable by
-/// layouts today, wired to state when the view-model carries it.
+/// An inert, themed flag button (phase/fx/fxbyp/env/folder/rec row) —
+/// positionable by layouts today, wired to state when the view-model carries
+/// it. With a skin image the theme's art renders; vector chip otherwise.
 #[component]
-fn McpFlag(pos: String, glyph: &'static str, title: &'static str) -> Element {
+fn McpFlag(
+    pos: String,
+    glyph: &'static str,
+    title: &'static str,
+    #[props(default)] skin: Option<crate::theming::SkinImage>,
+) -> Element {
     let tk = use_theme().theme.tokens;
+    if let Some(img) = skin {
+        return rsx! {
+            div {
+                title,
+                style: format!(
+                    "{pos} background-image:url({url}); background-size:100% 100%; \
+                     background-repeat:no-repeat;",
+                    url = img.url,
+                ),
+            }
+        };
+    }
     rsx! {
         div {
             title,

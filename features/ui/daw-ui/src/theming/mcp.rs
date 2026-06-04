@@ -63,6 +63,10 @@ pub struct McpLayout {
     /// `mcp.meter`.
     pub meter: Coord,
 
+    /// `mcp.width.label` (+ margin).
+    pub width_label: Coord,
+    pub width_label_margin: Margin,
+
     // ── buttons ──
     /// `mcp.mute` / `mcp.solo` / `mcp.recarm`.
     pub mute: Coord,
@@ -76,6 +80,37 @@ pub struct McpLayout {
     pub io: Coord,
     pub env: Coord,
     pub folder: Coord,
+
+    // ── record row ──
+    /// `mcp.recinput` (+ margin) — the record-input selector.
+    pub recinput: Coord,
+    pub recinput_margin: Margin,
+    /// `mcp.recmode` / `mcp.recmon` / `mcp.fxin`.
+    pub recmode: Coord,
+    pub recmon: Coord,
+    pub fxin: Coord,
+
+    // ── theme-drawn chrome ──
+    /// `mcp.custom.*` boxes (REAPER 7 themes draw the strip's backgrounds —
+    /// dark fader well, track-colour tint, name/idx bars — as custom
+    /// elements), in WALTER z-order (assignment order).
+    pub customs: Vec<McpCustom>,
+    /// Per-layout colour overrides (`mcp.*.color` resolved by the layout's
+    /// WALTER); fall back to the theme-level [`McpColors`], then tokens.
+    pub colors: McpColors,
+}
+
+/// One `mcp.custom.*` element: a positioned, colour-filled box. Colours may
+/// be the [`Color::TRACK`] sentinel (substituted with the live track accent).
+#[derive(Clone, PartialEq, Debug)]
+pub struct McpCustom {
+    /// Full attribute name (`mcp.custom.mcpDarkBox`).
+    pub name: String,
+    pub coord: Coord,
+    /// `*.color` foreground (RGBA).
+    pub fg: Option<Color>,
+    /// `*.color` background fill (RGBA).
+    pub bg: Option<Color>,
 }
 
 impl McpLayout {
@@ -129,6 +164,16 @@ impl McpLayout {
             io: Coord::new(19.0, 250.0, 26.0, 26.0, 0.5, 1.0, 0.5, 1.0),
             env: Coord::hidden(),
             folder: Coord::hidden(),
+
+            width_label: Coord::hidden(),
+            width_label_margin: Margin::default(),
+            recinput: Coord::hidden(),
+            recinput_margin: Margin::default(),
+            recmode: Coord::hidden(),
+            recmon: Coord::hidden(),
+            fxin: Coord::hidden(),
+            customs: Vec::new(),
+            colors: McpColors::default(),
         }
     }
 
@@ -225,6 +270,22 @@ pub struct McpSkin {
     pub recarm: Option<ButtonSkin>,
     /// `mcp_io` / `track_io`.
     pub io: Option<ButtonStateSkin>,
+    /// `*_fx_empty` (off = no FX) / `*_fx_norm` (on).
+    pub fx: Option<ButtonSkin>,
+    /// `*_fxoff_h` / `*_fxon_h` — the FX bypass on/off switch.
+    pub fxbyp: Option<ButtonSkin>,
+    /// `*_env`.
+    pub env: Option<ButtonSkin>,
+    /// `*_phase_norm` (off) / `*_phase_inv` (on).
+    pub phase: Option<ButtonSkin>,
+    /// `*_recmode_off` / `*_recmode_in`.
+    pub recmode: Option<ButtonSkin>,
+    /// `*_folder_off` / `*_folder_on`.
+    pub folder: Option<ButtonSkin>,
+    /// `*_fx_in_empty` / `*_fx_in_norm` — input FX.
+    pub fxin: Option<ButtonSkin>,
+    /// `mcp_recinput` — the record-input selector background.
+    pub recinput_bg: Option<SkinImage>,
     /// `mcp_volbg` — the fader well.
     pub volbg: Option<SkinImage>,
     /// `mcp_volthumb` — the fader cap.

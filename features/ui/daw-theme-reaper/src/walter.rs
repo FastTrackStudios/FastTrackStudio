@@ -100,6 +100,9 @@ pub struct Output {
     pub attrs: HashMap<String, Vec<f32>>,
     pub fronts: Vec<String>,
     pub layouts: Vec<String>,
+    /// Attribute names in first-assignment order — WALTER's z-order for
+    /// custom elements (later `set`s paint over earlier ones).
+    pub set_order: Vec<String>,
 }
 
 impl Output {
@@ -432,6 +435,9 @@ impl Interp<'_> {
                     eprintln!("    {base} = {:?} (scalar={})", v.v, v.scalar);
                 }
             }
+        }
+        if !self.vars.contains_key(dest) {
+            self.out.set_order.push(dest.clone());
         }
         self.vars.insert(dest.clone(), value);
     }

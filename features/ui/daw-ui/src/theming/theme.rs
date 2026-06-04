@@ -28,6 +28,21 @@ pub struct Color {
 }
 
 impl Color {
+    /// Sentinel meaning "the track's colour" — theme importers bake layouts
+    /// with this RGB and renderers substitute the live track accent
+    /// (preserving the baked alpha). See [`Color::resolve_track`].
+    pub const TRACK: Color = Color::rgba(252, 3, 244, 255);
+
+    /// Substitute the track accent when this is the [`Color::TRACK`]
+    /// sentinel (alpha carried over); otherwise unchanged.
+    pub fn resolve_track(self, accent: Color) -> Color {
+        if self.r == Self::TRACK.r && self.g == Self::TRACK.g && self.b == Self::TRACK.b {
+            accent.with_alpha(self.a)
+        } else {
+            self
+        }
+    }
+
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b, a: 255 }
     }

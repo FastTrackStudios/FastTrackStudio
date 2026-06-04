@@ -146,6 +146,12 @@ fn walter_mcp_layouts(rt: &ReaperTheme) -> Vec<super::mcp::McpLayout> {
     let src = &rt.rtconfig_src;
     let make_env = |w: f32, h: f32| -> Env {
         let mut env = Env::reaper_defaults(w, h);
+        // Bake with the track-colour *sentinel* so colours the theme derives
+        // from it stay dynamic (renderers substitute the live accent).
+        env.set("trackcolor_valid", 1.0);
+        env.set("trackcolor_r", Color::TRACK.r as f32);
+        env.set("trackcolor_g", Color::TRACK.g as f32);
+        env.set("trackcolor_b", Color::TRACK.b as f32);
         for p in &rt.rtconfig.params {
             env.set(&p.name, p.default);
         }
@@ -256,7 +262,63 @@ fn layout_from_walter(
         }
     };
 
-    let min_h = rt.rtconfig.global_f32("mcp_min_height").unwrap_or(180.0);
+    // `*.color` = [fg r g b a, optional bg r g b a]. Alpha 0/absent → opaque.
+    let color_at = |v: &[f32], i: usize| -> Option<Color> {
+        let r = *v.get(i)? as u8;
+        let g = v.get(i + 1).copied().unwrap_or(0.0) as u8;
+        let b = v.get(i + 2).copied().unwrap_or(0.0) as u8;
+        let a = match v.get(i + 3).copied() {
+            Some(a) if a > 0.0 => a as u8,
+            _ => 255,
+        };
+        Some(Color::rgba(r, g, b, a))
+    };
+    let color_pair = |attr: &str| -> Option<super::walter::ColorPair> {
+        let v = out0.get(attr)?;
+        let fg = color_at(v, 0)?;
+        Some(super::walter::ColorPair {
+            fg,
+            bg: if v.len() >= 8 { color_at(v, 4) } else { None },
+        })
+    };
+
+    // Per-layout colour overrides. Colours the theme derives from the track
+    // colour come back as the sentinel (the bake env paints the track with
+    // `Color::TRACK`) and resolve to the live accent at render time.
+    let mut colors = super::mcp::McpColors::default();
+    colors.label = color_pair("mcp.label.color");
+    colors.trackidx = color_pair("mcp.trackidx.color");
+    colors.volume_label = color_pair("mcp.volume.label.color");
+    colors.pan_label = color_pair("mcp.pan.label.color");
+    colors.meter_readout = color_pair("mcp.meter.readout.color");
+
+    // Theme-drawn chrome: every `mcp.custom.*` box, in WALTER z-order.
+    let customs: Vec<super::mcp::McpCustom> = out0
+        .set_order
+        .iter()
+        .filter(|n| n.starts_with("mcp.custom.") && !n.ends_with(".color"))
+        .filter_map(|n| {
+            let c = coord(n);
+            if c.is_hidden() {
+                return None;
+            }
+            let pair = color_pair(&format!("{n}.color"));
+            Some(super::mcp::McpCustom {
+                name: n.clone(),
+                coord: c,
+                fg: pair.map(|p| p.fg),
+                bg: pair.and_then(|p| p.bg),
+            })
+        })
+        .collect();
+
+    // `mcp.size` = [default w, default h, min w, min h].
+    let size_attr = out0.coord("mcp.size");
+    let min_h = size_attr
+        .map(|s| s[3])
+        .filter(|h| *h > 0.0)
+        .or_else(|| rt.rtconfig.global_f32("mcp_min_height"))
+        .unwrap_or(180.0);
     let base = McpLayout::vertical();
 
     let volume = coord("mcp.volume");
@@ -290,6 +352,9 @@ fn layout_from_walter(
 
         meter: coord("mcp.meter"),
 
+        width_label: coord("mcp.width.label"),
+        width_label_margin: margin("mcp.width.label.margin", base.width_label_margin),
+
         mute: coord("mcp.mute"),
         solo: coord("mcp.solo"),
         recarm: coord("mcp.recarm"),
@@ -299,6 +364,15 @@ fn layout_from_walter(
         io: coord("mcp.io"),
         env: coord("mcp.env"),
         folder: coord("mcp.folder"),
+
+        recinput: coord("mcp.recinput"),
+        recinput_margin: margin("mcp.recinput.margin", base.recinput_margin),
+        recmode: coord("mcp.recmode"),
+        recmon: coord("mcp.recmon"),
+        fxin: coord("mcp.fxin"),
+
+        customs,
+        colors,
     }
 }
 
@@ -366,6 +440,14 @@ fn extract_skin(rt: &ReaperTheme) -> Option<McpSkin> {
         solo: toggle("solo_off", "solo_on"),
         recarm: toggle("recarm_off", "recarm_on"),
         io: button("io"),
+        fx: toggle("fx_empty", "fx_norm"),
+        fxbyp: toggle("fxoff_h", "fxon_h"),
+        env: toggle("env", "env"),
+        phase: toggle("phase_norm", "phase_inv"),
+        recmode: toggle("recmode_off", "recmode_in"),
+        folder: toggle("folder_off", "folder_on"),
+        fxin: toggle("fx_in_empty", "fx_in_norm"),
+        recinput_bg: plain("mcp_recinput"),
         volbg: plain("mcp_volbg"),
         volthumb: plain("mcp_volthumb"),
         panbg: plain("mcp_panbg"),
