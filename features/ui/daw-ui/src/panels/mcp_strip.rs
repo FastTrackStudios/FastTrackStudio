@@ -382,11 +382,13 @@ fn McpFader(
                 onmousemove: move |evt: MouseEvent| {
                     if !*is_dragging.read() || disabled { return; }
                     let p = evt.client_coordinates();
+                    // `calculate_delta` negates internally (screen-Y convention:
+                    // positive input = down = decrease), so pass raw deltas.
                     let delta_px = match mode {
                         // Up = increase.
-                        FaderMode::Vertical => drag_start() - p.y as f32,
+                        FaderMode::Vertical => p.y as f32 - drag_start(),
                         // Right = increase.
-                        FaderMode::Horizontal => p.x as f32 - drag_start(),
+                        FaderMode::Horizontal => drag_start() - p.x as f32,
                     };
                     let modifiers = ModifierKeys::new(
                         evt.modifiers().shift(), evt.modifiers().ctrl(), evt.modifiers().alt(),
