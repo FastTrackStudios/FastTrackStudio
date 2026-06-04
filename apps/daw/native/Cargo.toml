@@ -33,7 +33,7 @@ daw = { path = "../../../crates/daw", default-features = false, features = [
 # Engine: the standalone DAW backend that implements the service traits the UI
 # binds to. `audio` = cpal output stream + decoder + the test-tone generators,
 # so the demo tracks are audible and the per-track meter bank is populated.
-daw-standalone = { path = "../../../features/standalone/daw-standalone", features = ["audio", "reapeaks"] }
+daw-standalone = { path = "../../../features/standalone/daw-standalone", features = ["audio", "reapeaks", "rpp-loader"] }
 
 dioxus = { workspace = true }
 # Native (Blitz/GPU) renderer.

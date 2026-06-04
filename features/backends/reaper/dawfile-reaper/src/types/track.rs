@@ -742,6 +742,10 @@ impl Track {
         match token {
             Token::String(s, _) => Ok(s.clone()),
             Token::Identifier(s) => Ok(s.clone()),
+            // Purely numeric names appear unquoted in real projects
+            // (`LANENAME 1 2 3`, takes named `2`) — stringify them.
+            Token::Integer(i) => Ok(i.to_string()),
+            Token::Float(f) => Ok(f.to_string()),
             _ => Err(format!("Expected string or identifier, got {:?}", token)),
         }
     }

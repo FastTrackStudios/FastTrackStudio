@@ -100,15 +100,22 @@ pub struct McpLayout {
     pub colors: McpColors,
 }
 
-/// A knob filmstrip skin: `frames` square frames stacked vertically in one
-/// image; renderers pick the frame for the current value via
-/// `background-position`.
+/// A knob filmstrip skin, pre-sliced: one image per frame (index = value
+/// position). Sliced at import because blitz paints `background-position`
+/// offsets outside the element box — the whole stack leaked as a column of
+/// ghost knobs.
 #[derive(Clone, PartialEq, Debug)]
 pub struct KnobSkin {
-    pub url: String,
-    pub frames: u32,
+    /// Frame images (data URIs), value-ordered. The frames carry only the
+    /// rotating indicator — REAPER composites them over the static knob
+    /// `face` (`*_knob_small`, the guide: "a static image of a knob, over
+    /// which the code line is drawn").
+    pub frames: Vec<String>,
     pub frame_w: u32,
     pub frame_h: u32,
+    /// The knob body (`tcp_vol_knob_small` / `gen_knob_bg_small`), drawn
+    /// centered at native size under the frame overlay.
+    pub face: Option<SkinImage>,
 }
 
 /// One `mcp.custom.*` element: a positioned box. Per the SDK, `.color`'s

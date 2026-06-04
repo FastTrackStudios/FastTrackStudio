@@ -7,7 +7,7 @@
 //! skin carries them, vector glyphs otherwise; `trans.custom.*` chrome paints
 //! first in custom z-order.
 
-use crate::panels::mcp_strip::{flex_justify, skin_fill};
+use crate::panels::mcp_strip::{flex_justify, skin_button, skin_fill};
 use crate::prelude::*;
 use crate::theming::{ButtonSkin, ButtonStateSkin, Coord, use_theme};
 
@@ -176,7 +176,7 @@ fn TransButton(
         } else {
             &s.normal
         };
-        let fill = skin_fill(img, coord.w, coord.h);
+        let fill = skin_button(img, coord.w, coord.h);
         return rsx! {
             div {
                 title,

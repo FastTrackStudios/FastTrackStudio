@@ -572,12 +572,13 @@ fn extract_envcp_skin(imgs: &ImageCatalog) -> Option<super::envcp::EnvcpSkin> {
     };
     let knob = |name: &str| -> Option<super::mcp::KnobSkin> {
         let stack = imgs.knob_stack(name).ok()?;
-        Some(super::mcp::KnobSkin {
-            url: ImageCatalog::data_uri(&stack.image),
-            frames: stack.frames,
-            frame_w: stack.frame_w,
-            frame_h: stack.frame_h,
-        })
+        let face_name = name.replace("_knob_stack", "_knob_small");
+        let face = [face_name.as_str(), "gen_knob_bg_small"]
+            .iter()
+            .find(|n| imgs.has(n))
+            .and_then(|n| imgs.load(n).ok())
+            .map(|s| make_skin_image(&s.image, &s.markers));
+        Some(knob_skin_from_stack(&stack, face))
     };
 
     let skin = super::envcp::EnvcpSkin {
@@ -1364,6 +1365,31 @@ fn make_skin_image(
     }
 }
 
+/// Slice a knob filmstrip into per-frame images (vertical stack of square
+/// frames). Pre-sliced because blitz paints `background-position` offsets
+/// outside the element box.
+fn knob_skin_from_stack(
+    stack: &daw_theme_reaper::images::KnobStack,
+    face: Option<SkinImage>,
+) -> super::mcp::KnobSkin {
+    use daw_theme_reaper::image::GenericImageView;
+    let frames = (0..stack.frames)
+        .map(|i| {
+            let view = stack
+                .image
+                .view(0, i * stack.frame_h, stack.frame_w, stack.frame_h)
+                .to_image();
+            ImageCatalog::data_uri(&view)
+        })
+        .collect();
+    super::mcp::KnobSkin {
+        frames,
+        frame_w: stack.frame_w,
+        frame_h: stack.frame_h,
+        face,
+    }
+}
+
 /// Resolve a custom element's declared button image (`custom … 'name'`)
 /// against the catalog, pink-margin sliced.
 fn custom_image(
@@ -1431,12 +1457,15 @@ fn extract_skin(imgs: &ImageCatalog, ctx: &str) -> Option<McpSkin> {
             .map(|p| format!("{p}{base}"))
             .find(|n| imgs.has(n))?;
         let stack = imgs.knob_stack(&name).ok()?;
-        Some(super::mcp::KnobSkin {
-            url: ImageCatalog::data_uri(&stack.image),
-            frames: stack.frames,
-            frame_w: stack.frame_w,
-            frame_h: stack.frame_h,
-        })
+        // The knob body: `…_knob_small` next to the stack, then the general
+        // knob background.
+        let face_name = name.replace("_knob_stack", "_knob_small");
+        let face = [face_name.as_str(), "gen_knob_bg_small"]
+            .iter()
+            .find(|n| imgs.has(n))
+            .and_then(|n| imgs.load(n).ok())
+            .map(|s| make_skin_image(&s.image, &s.markers));
+        Some(knob_skin_from_stack(&stack, face))
     };
     // Context-owned (non-falling-back) images: `mcp_volbg`, `tcp_panbg`, …
     let ctx_plain = |base: &str| plain(&format!("{ctx_prefix}{base}"));

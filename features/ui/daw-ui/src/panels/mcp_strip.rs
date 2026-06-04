@@ -389,7 +389,7 @@ pub fn McpStrip(
                             "{pos} cursor:pointer;",
                             pos = l.io.css_position(nat),
                         ),
-                        {skin_fill(&io.normal, l.io.w, l.io.h)}
+                        {skin_button(&io.normal, l.io.w, l.io.h)}
                     }
                 } else {
                     div {
@@ -501,17 +501,25 @@ fn McpKnob(
     let v = value().clamp(0.0, 1.0);
     let cursor = if disabled { "not-allowed" } else { "ns-resize" };
 
-    let face = if let Some(skin) = &skin {
-        // Filmstrip frame for the value (frames stack vertically).
-        let frame = ((v * (skin.frames.saturating_sub(1)) as f32).round()) as u32;
-        format!(
-            "background-image:url({url}); background-repeat:no-repeat; \
-             background-size:{bw}px {th}px; background-position:0px -{off}px;",
-            url = skin.url,
-            bw = box_w,
-            th = box_h * skin.frames as f32,
-            off = frame as f32 * box_h,
-        )
+    // Filmstrip frame for the value: the frames are pre-sliced at import, so
+    // the face is a single plain image (blitz paints `background-position`
+    // offsets outside the element box — the unsliced stack leaked every
+    // frame as a column of ghost knobs).
+    let film = skin.as_ref().and_then(|skin| {
+        let frame = ((v * (skin.frames.len().saturating_sub(1)) as f32).round() as usize)
+            .min(skin.frames.len().saturating_sub(1));
+        skin.frames.get(frame).map(|url| {
+            format!(
+                "position:absolute; left:0; top:0; width:{bw:.1}px; height:{bh:.1}px; \
+                 background-image:url({url}); background-size:100% 100%; \
+                 background-repeat:no-repeat; pointer-events:none;",
+                bw = box_w,
+                bh = box_h,
+            )
+        })
+    });
+    let face = if film.is_some() {
+        String::new()
     } else {
         let theme = use_theme().theme;
         format!(
@@ -538,9 +546,30 @@ fn McpKnob(
         )
     });
 
+    // The knob body (`*_knob_small`): centered at native size under the
+    // frame overlay, REAPER's compositing.
+    let body = skin.as_ref().and_then(|s| s.face.as_ref()).map(|img| {
+        format!(
+            "position:absolute; left:{x:.1}px; top:{y:.1}px; width:{w}px; height:{h}px; \
+             background-image:url({url}); background-size:100% 100%; \
+             background-repeat:no-repeat; pointer-events:none;",
+            x = (box_w - img.w as f32) / 2.0,
+            y = (box_h - img.h as f32) / 2.0,
+            w = img.w,
+            h = img.h,
+            url = img.url,
+        )
+    });
+
     rsx! {
         div {
             style: format!("{pos} cursor:{cursor}; {face}"),
+            if let Some(body) = body {
+                div { style: body }
+            }
+            if let Some(film) = film {
+                div { style: film }
+            }
             if let Some(dot) = dot {
                 div { style: dot }
             }
@@ -636,6 +665,31 @@ pub(crate) fn skin_fill(img: &crate::theming::SkinImage, box_w: f32, box_h: f32)
     }
 }
 
+/// Fill a button box with its skin image, REAPER-style: pink-marked art
+/// 9-slices (fixed caps 1:1, bands stretch), but **unmarked button art draws
+/// at native size, centered** — REAPER never stretches plain button images,
+/// which is why uniform stretching looked vertically squished (the `_ol`
+/// overlay shadow rows make the art taller than the WALTER box).
+pub(crate) fn skin_button(img: &crate::theming::SkinImage, box_w: f32, box_h: f32) -> Element {
+    if img.slices.is_some() {
+        return skin_fill(img, box_w, box_h);
+    }
+    let (w, h) = (img.w as f32, img.h as f32);
+    rsx! {
+        div {
+            style: format!(
+                "position:absolute; left:{x:.1}px; top:{y:.1}px; width:{w:.1}px; \
+                 height:{h:.1}px; background-image:url({url}); \
+                 background-size:100% 100%; background-repeat:no-repeat; \
+                 pointer-events:none;",
+                x = (box_w - w) / 2.0,
+                y = (box_h - h) / 2.0,
+                url = img.url,
+            ),
+        }
+    }
+}
+
 /// Map a WALTER margin justification to flex `justify-content`.
 pub(crate) fn flex_justify(m: &crate::theming::Margin) -> &'static str {
     match m.text_align() {
@@ -683,7 +737,7 @@ fn McpToggle(
         };
         // div, not button: blitz's UA button background paints over
         // background-image.
-        let fill = skin_fill(img, box_w, box_h);
+        let fill = skin_button(img, box_w, box_h);
         return rsx! {
             div {
                 title,
@@ -751,7 +805,7 @@ fn McpFlag(
 ) -> Element {
     let tk = use_theme().theme.tokens;
     if let Some(img) = skin {
-        let fill = skin_fill(&img, box_w, box_h);
+        let fill = skin_button(&img, box_w, box_h);
         return rsx! {
             div {
                 title,

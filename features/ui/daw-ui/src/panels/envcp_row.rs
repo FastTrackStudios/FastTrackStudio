@@ -6,7 +6,7 @@
 //! readout, and the arm/bypass/hide button cluster — skinned by the theme's
 //! `envcp_*` atlases when present.
 
-use crate::panels::mcp_strip::{flex_justify, skin_fill};
+use crate::panels::mcp_strip::{flex_justify, skin_button, skin_fill};
 use crate::panels::model::EnvelopeView;
 use crate::prelude::*;
 use crate::theming::{ButtonStateSkin, Color, Coord, use_theme};
@@ -183,7 +183,7 @@ fn EnvcpFlag(
     let tk = use_theme().theme.tokens;
     let pos = coord.css_position(nat);
     if let Some(img) = skin {
-        let fill = skin_fill(&img, coord.w, coord.h);
+        let fill = skin_button(&img, coord.w, coord.h);
         return rsx! {
             div { title, style: pos, {fill} }
         };

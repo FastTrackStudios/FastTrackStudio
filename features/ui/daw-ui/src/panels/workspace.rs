@@ -26,6 +26,9 @@ pub fn DawWorkspace(
     #[props(default)] bpm: Option<f64>,
     #[props(default)] playhead: Option<f64>,
     #[props(default)] cursor: Option<f64>,
+    #[props(default = 12.0)] pps: f64,
+    #[props(default = 120.0)] seconds: f64,
+    #[props(default = 4)] beats_per_measure: u32,
 ) -> Element {
     let arrange_grow = ((1.0 - mixer_fraction) * 100.0).round() as u32;
     let mixer_grow = (mixer_fraction * 100.0).round() as u32;
@@ -53,6 +56,9 @@ pub fn DawWorkspace(
                     bpm,
                     playhead,
                     cursor,
+                    pps,
+                    seconds,
+                    beats_per_measure,
                 }
             }
             // Mixer (bottom third).

@@ -9,7 +9,7 @@
 //! written by REAPER 7.x; little-endian throughout):
 //!
 //! ```text
-//! magic       4 bytes  "RPKN"
+//! magic       4 bytes  "RPKN" (older writers: "RPKL", same layout)
 //! nch         u8       channel count
 //! nlevels     u8       mipmap level count (REAPER writes 3)
 //! samplerate  u32      source sample rate
@@ -90,7 +90,9 @@ impl ReaPeaks {
         };
         need(18)?;
         let magic: [u8; 4] = b[0..4].try_into().unwrap();
-        if &magic != b"RPKN" {
+        // RPKN = current writer; RPKL = older REAPER versions, same layout
+        // (validated byte-exact on both).
+        if &magic != b"RPKN" && &magic != b"RPKL" {
             return Err(ReaPeaksError::BadMagic(magic));
         }
         let nch = b[4] as usize;
