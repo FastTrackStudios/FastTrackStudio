@@ -354,14 +354,16 @@ fn layout_from_walter(
         }
     };
 
-    // `*.color` = [fg r g b a, optional bg r g b a]. Alpha 0/absent → opaque.
+    // `*.color` = [fg r g b a, optional bg r g b a]. WALTER lists pad with
+    // zeros, so a 7-long value still carries a bg (its alpha is implied
+    // opaque); an *explicit* alpha 0 means transparent.
     let color_at = |v: &[f32], i: usize| -> Option<Color> {
         let r = *v.get(i)? as u8;
         let g = v.get(i + 1).copied().unwrap_or(0.0) as u8;
         let b = v.get(i + 2).copied().unwrap_or(0.0) as u8;
         let a = match v.get(i + 3).copied() {
-            Some(a) if a > 0.0 => a as u8,
-            _ => 255,
+            Some(a) => a as u8,
+            None => 255,
         };
         Some(Color::rgba(r, g, b, a))
     };
@@ -370,7 +372,7 @@ fn layout_from_walter(
         let fg = color_at(v, 0)?;
         Some(super::walter::ColorPair {
             fg,
-            bg: if v.len() >= 8 { color_at(v, 4) } else { None },
+            bg: color_at(v, 4),
         })
     };
 
@@ -394,12 +396,15 @@ fn layout_from_walter(
             if c.is_hidden() {
                 return None;
             }
+            // A fill colour is usable only with nonzero alpha (themes write
+            // `[0 0 0 0 …]` for a transparent fg + bg-only box).
+            let usable = |c: Color| (c.a > 0).then_some(c);
             let pair = color_pair(&format!("{n}.color"));
             Some(super::mcp::McpCustom {
                 name: n.clone(),
                 coord: c,
-                fg: pair.map(|p| p.fg),
-                bg: pair.and_then(|p| p.bg),
+                fg: pair.map(|p| p.fg).and_then(usable),
+                bg: pair.and_then(|p| p.bg).and_then(usable),
             })
         })
         .collect();

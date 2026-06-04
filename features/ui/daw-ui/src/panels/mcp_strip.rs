@@ -188,8 +188,35 @@ pub fn McpStrip(
             if !l.recmode.is_hidden() {
                 McpFlag { pos: l.recmode.css_position(nat), box_w: l.recmode.w, box_h: l.recmode.h, glyph: "REC", title: "Record mode", skin: skin.recmode.as_ref().map(|b| b.on.normal.clone()) }
             }
+            // mcp.recmon — no image in most themes (REAPER draws it
+            // built-in): a speaker icon on the standard chip.
             if !l.recmon.is_hidden() {
-                McpFlag { pos: l.recmon.css_position(nat), box_w: l.recmon.w, box_h: l.recmon.h, glyph: "MON", title: "Record monitoring" }
+                div {
+                    title: "Record monitoring",
+                    style: format!(
+                        "{pos} display:flex; align-items:center; justify-content:center; \
+                         border-radius:3px; background:{bg}; border:1px solid {bd};",
+                        pos = l.recmon.css_position(nat),
+                        bg = theme.tokens.surface_sunken.css(),
+                        bd = theme.tokens.border.css(),
+                    ),
+                    svg {
+                        width: "12",
+                        height: "12",
+                        view_box: "0 0 24 24",
+                        polygon {
+                            points: "3,9 8,9 14,4 14,20 8,15 3,15",
+                            fill: theme.tokens.text_dim.css(),
+                        }
+                        path {
+                            d: "M17 8 Q20 12 17 16",
+                            stroke: theme.tokens.text_dim.css(),
+                            stroke_width: "2",
+                            fill: "none",
+                            stroke_linecap: "round",
+                        }
+                    }
+                }
             }
             if !l.fxin.is_hidden() {
                 McpFlag { pos: l.fxin.css_position(nat), box_w: l.fxin.w, box_h: l.fxin.h, glyph: "FX", title: "Input FX", skin: skin.fxin.as_ref().map(|b| b.off.normal.clone()) }

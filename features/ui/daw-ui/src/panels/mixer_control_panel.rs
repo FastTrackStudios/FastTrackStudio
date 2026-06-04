@@ -52,33 +52,12 @@ pub fn MixerControlPanel(tracks: Vec<TrackView>) -> Element {
     }
 }
 
-/// One mixer column: a WALTER-laid-out [`McpStrip`], or a tinted vertical
-/// group header when the track is a folder parent (its children follow as
-/// their own strips).
+/// One mixer column: a WALTER-laid-out [`McpStrip`]. Folder tracks render
+/// as normal strips, exactly as REAPER does (the folder button + theme
+/// chrome carry the hierarchy cues).
 #[component]
 fn MixerCell(track: TrackView) -> Element {
-    let accent = track.hex();
-    if track.is_folder {
-        rsx! {
-            div {
-                style: format!(
-                    "align-self:stretch; display:flex; align-items:flex-end; \
-                     padding:0 6px; margin-right:6px; \
-                     border-left:3px solid {accent}; background:{accent}14;"
-                ),
-                span {
-                    style: format!(
-                        "writing-mode:vertical-rl; transform:rotate(180deg); \
-                         font-size:10px; font-weight:800; letter-spacing:0.06em; \
-                         text-transform:uppercase; color:{accent}; padding:6px 2px;"
-                    ),
-                    "{track.name}"
-                }
-            }
-        }
-    } else {
-        rsx! {
-            McpStrip { track }
-        }
+    rsx! {
+        McpStrip { track }
     }
 }
