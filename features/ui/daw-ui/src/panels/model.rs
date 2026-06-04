@@ -37,10 +37,16 @@ pub struct TrackView {
     pub solo: Signal<bool>,
     pub record_arm: Signal<bool>,
 
-    // ── metering (read-only inputs) ──
-    pub level: f32,
-    pub level_right: Option<f32>,
-    pub peak: Option<f32>,
+    // ── metering (live inputs) ──
+    /// Left/mono meter level (linear, 0–1). A `Signal` so a host can push live
+    /// levels each frame and only the meters re-render.
+    pub level: Signal<f32>,
+    /// Right meter level (linear, 0–1); only shown when `stereo` is set.
+    pub level_right: Signal<f32>,
+    /// Peak-hold marker (linear, 0–1).
+    pub peak: Signal<f32>,
+    /// Whether to render two meter columns (stereo) vs one (mono).
+    pub stereo: bool,
 
     // ── routing flags (for the mixer routing button) ──
     pub sends: bool,
@@ -72,9 +78,10 @@ impl TrackView {
             mute: Signal::new(false),
             solo: Signal::new(false),
             record_arm: Signal::new(false),
-            level: 0.0,
-            level_right: None,
-            peak: None,
+            level: Signal::new(0.0),
+            level_right: Signal::new(0.0),
+            peak: Signal::new(0.0),
+            stereo: false,
             sends: false,
             receives: false,
             depth: 0,
@@ -104,11 +111,20 @@ impl TrackView {
         self.height = h;
         self
     }
-    /// Builder: set stereo metering levels (+ peak hold).
+    /// Builder: set initial stereo metering levels (+ peak hold) and mark the
+    /// track stereo. Hosts with live metering push into the `level` signals
+    /// directly instead.
     pub fn levels(mut self, left: f32, right: f32, peak: f32) -> Self {
-        self.level = left;
-        self.level_right = Some(right);
-        self.peak = Some(peak);
+        self.level = Signal::new(left);
+        self.level_right = Signal::new(right);
+        self.peak = Signal::new(peak);
+        self.stereo = true;
+        self
+    }
+    /// Builder: mark this track as stereo (two meter columns) without setting
+    /// initial levels — for hosts that push live levels into the signals.
+    pub fn stereo(mut self) -> Self {
+        self.stereo = true;
         self
     }
     /// Builder: attach arrangement clips.

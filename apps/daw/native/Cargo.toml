@@ -1,0 +1,46 @@
+[package]
+name = "daw-native"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "daw-native"
+path = "src/main.rs"
+
+[features]
+default = ["native"]
+# Deliberately empty. `dx` autodetects the platform from a renderer-named app
+# feature (`features_that_enable_renderers` matches feature *names* only), and
+# prefers this feature over its `dioxus/native` fallback — which would drag in
+# dioxus's vendored renderer (blitz 0.2.x / stylo 0.8) and collide with our
+# DioxusLabs/blitz git pin (stylo 0.17) on `links = "servo_style_crate"`.
+# The actual renderer is the hard `dioxus-native` (blitz git) dep below, so a
+# plain `dx serve -p daw-native` just works.
+native = []
+
+[dependencies]
+# Facade — the ONLY domain surface this app sees. `ui` brings the reusable
+# vector-themeable panels (`daw::ui::panels::DawWorkspace`, …) and theming;
+# domain types + service traits (Tracks / Transport / Track / ProjectContext)
+# come through `daw::service` (re-exported `daw-proto`). No internal crate but
+# the engine is referenced directly.
+daw = { path = "../../../crates/daw", default-features = false, features = ["ui"] }
+# Engine: the standalone DAW backend that implements the service traits the UI
+# binds to. `audio` = cpal output stream + decoder + the test-tone generators,
+# so the demo tracks are audible and the per-track meter bank is populated.
+daw-standalone = { path = "../../../features/standalone/daw-standalone", features = ["audio"] }
+
+dioxus = { workspace = true }
+# Native (Blitz/GPU) renderer.
+dioxus-native = { workspace = true }
+
+# Async timer for the metering poll loop (read engine peaks → meter signals).
+tokio = { workspace = true }
+
+# Diagnostics to a file (Blitz/dioxus-native tracing + winit/wgpu log).
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

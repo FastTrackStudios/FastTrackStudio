@@ -18,7 +18,7 @@ use daw_proto::{
     ReorderTracksBehavior as ProtoReorderTracksBehavior, Track, TrackRef,
 };
 use reaper_high::{GroupingBehavior, Project, Reaper as ReaperHigh};
-use reaper_medium::{GangBehavior, ReorderTracksBehavior, TrackAttributeKey};
+use reaper_medium::{ChunkCacheHint, GangBehavior, ReorderTracksBehavior, TrackAttributeKey};
 
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};
@@ -202,6 +202,101 @@ pub fn set_folder_depth_on_main_thread(guid: &str, depth: i32) -> DawResult<()> 
             .map_err(|err| DawError::operation_failed(format!("set folder depth failed: {err}")))?;
     }
     Ok(())
+}
+
+/// Max chunk size requested when reading a track's state chunk for a surgical
+/// `BUSCOMP` edit. Track chunks (sans large embedded FX state) are small; 4 MiB
+/// is generous headroom.
+const FOLDER_CHUNK_MAX: u32 = 4 * 1024 * 1024;
+
+/// Set folder-collapse ("compact") state independently for the arrange view and
+/// the mixer.
+///
+/// - `arrange`: REAPER's `I_FOLDERCOMPACT` (0 = open, 1 = small, 2 = collapsed),
+///   applied via the track-info API.
+/// - `mixer`: the **second** field of the track's `BUSCOMP` chunk line
+///   (`BUSCOMP <arrange> <mixer> <wiring> <x> <y>`), which the track-info API
+///   does not expose — edited surgically in the state chunk so no other track
+///   state is disturbed.
+///
+/// Either argument may be `None` to leave that surface untouched. Only
+/// folder-parent tracks carry a `BUSCOMP` line, so the mixer edit is a logged
+/// no-op on non-folder tracks.
+pub fn set_folder_compact_on_main_thread(
+    guid: &str,
+    arrange: Option<i32>,
+    mixer: Option<i32>,
+) -> DawResult<()> {
+    let proj = ReaperHigh::get().current_project();
+    let track =
+        resolve_track(&proj, &TrackRef::Guid(guid.to_string())).ok_or_else(not_found_track)?;
+    let raw = track.raw().map_err(|_| not_found_track())?;
+
+    if let Some(arrange) = arrange {
+        unsafe {
+            ReaperHigh::get()
+                .medium_reaper()
+                .set_media_track_info_value(
+                    raw,
+                    TrackAttributeKey::FolderCompact,
+                    arrange as f64,
+                )
+                .map_err(|err| {
+                    DawError::operation_failed(format!("set folder compact (arrange) failed: {err}"))
+                })?;
+        }
+    }
+
+    if let Some(mixer) = mixer {
+        let chunk = track
+            .chunk(FOLDER_CHUNK_MAX, ChunkCacheHint::NormalMode)
+            .map_err(|e| DawError::operation_failed(format!("get track chunk: {e}")))?;
+        let chunk_str = chunk.to_string();
+        match rewrite_buscomp_mixer(&chunk_str, mixer) {
+            Some(new_str) => {
+                let new_chunk = reaper_high::Chunk::new(new_str);
+                track
+                    .set_chunk(new_chunk)
+                    .map_err(|e| DawError::operation_failed(format!("set track chunk: {e}")))?;
+            }
+            None => {
+                tracing::debug!(
+                    guid,
+                    "no BUSCOMP line in track chunk; skipped mixer folder-compact"
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Return a copy of `chunk_str` with the `BUSCOMP` line's mixer-collapse field
+/// (2nd token) set to `mixer`, preserving the line's indentation and the other
+/// fields. Returns `None` if the chunk has no `BUSCOMP` line.
+fn rewrite_buscomp_mixer(chunk_str: &str, mixer: i32) -> Option<String> {
+    let line = chunk_str
+        .lines()
+        .find(|l| l.trim_start().starts_with("BUSCOMP "))?;
+    let trimmed = line.trim_start();
+    let indent = &line[..line.len() - trimmed.len()];
+    let rest = trimmed.strip_prefix("BUSCOMP ")?;
+    let new_tokens: Vec<String> = rest
+        .split_whitespace()
+        .enumerate()
+        .map(|(i, tok)| {
+            if i == 1 {
+                mixer.to_string()
+            } else {
+                tok.to_string()
+            }
+        })
+        .collect();
+    if new_tokens.len() < 2 {
+        return None;
+    }
+    let new_line = format!("{indent}BUSCOMP {}", new_tokens.join(" "));
+    Some(chunk_str.replacen(line, &new_line, 1))
 }
 
 /// Set track visibility in the current project.

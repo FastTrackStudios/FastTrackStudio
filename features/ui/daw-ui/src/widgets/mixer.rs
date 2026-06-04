@@ -218,16 +218,24 @@ pub fn ChannelFader(
     let cap_bottom = f.cap_bottom.css();
 
     // Meter columns: stereo (two) or mono (one). Zone colour comes from the theme.
+    // A silent (or non-finite) level renders nothing: a zero-height rounded rect
+    // would make vello's path flattener emit NaN-path warnings every frame.
     let meter = |lvl: f32, left: f32, w: f32| {
-        let lvl = lvl.clamp(0.0, 1.0);
+        let lvl = if lvl.is_finite() {
+            lvl.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         rsx! {
-            div {
-                style: format!(
-                    "position:absolute; bottom:0; left:{left}%; width:{w}%; height:{h}%; \
-                     background:{c}; opacity:0.9; pointer-events:none; border-radius:1px;",
-                    h = lvl * 100.0,
-                    c = theme.meter_zone(lvl).css(),
-                ),
+            if lvl > 0.0 {
+                div {
+                    style: format!(
+                        "position:absolute; bottom:0; left:{left}%; width:{w}%; height:{h}%; \
+                         background:{c}; opacity:0.9; pointer-events:none; border-radius:1px;",
+                        h = lvl * 100.0,
+                        c = theme.meter_zone(lvl).css(),
+                    ),
+                }
             }
         }
     };

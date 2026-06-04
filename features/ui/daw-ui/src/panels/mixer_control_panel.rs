@@ -82,9 +82,11 @@ fn MixerCell(track: TrackView) -> Element {
                 pan: Some(track.pan),
                 name: track.name.clone(),
                 color: track.color.clone(),
-                level: track.level,
-                level_right: track.level_right,
-                peak: track.peak,
+                // Read the live signals here so this strip re-renders when the
+                // host pushes new levels; mono tracks collapse to one column.
+                level: (track.level)(),
+                level_right: track.stereo.then(|| (track.level_right)()),
+                peak: Some((track.peak)()),
                 sends: track.sends,
                 receives: track.receives,
                 on_routing: move |_| {},
