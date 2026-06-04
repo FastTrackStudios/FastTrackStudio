@@ -100,6 +100,17 @@ pub struct McpLayout {
     pub colors: McpColors,
 }
 
+/// A knob filmstrip skin: `frames` square frames stacked vertically in one
+/// image; renderers pick the frame for the current value via
+/// `background-position`.
+#[derive(Clone, PartialEq, Debug)]
+pub struct KnobSkin {
+    pub url: String,
+    pub frames: u32,
+    pub frame_w: u32,
+    pub frame_h: u32,
+}
+
 /// One `mcp.custom.*` element: a positioned, colour-filled box. Colours may
 /// be the [`Color::TRACK`] sentinel (substituted with the live track accent).
 #[derive(Clone, PartialEq, Debug)]
@@ -286,6 +297,9 @@ pub struct McpSkin {
     pub fxin: Option<ButtonSkin>,
     /// `mcp_recinput` — the record-input selector background.
     pub recinput_bg: Option<SkinImage>,
+    /// `*_pan_knob_stack` — the pan knob filmstrip (square frames stacked
+    /// vertically; the frame index maps the knob position).
+    pub pan_knob: Option<KnobSkin>,
     /// `mcp_volbg` — the fader well.
     pub volbg: Option<SkinImage>,
     /// `mcp_volthumb` — the fader cap.

@@ -16,7 +16,6 @@ use crate::core::sensitivity::{DragSensitivity, ModifierKeys};
 use crate::panels::model::TrackView;
 use crate::prelude::*;
 use crate::theming::{Color, FaderMode, McpLayout, ThemeState, ToggleKind, use_theme};
-use crate::widgets::knob::{Knob, KnobVariant};
 use crate::widgets::mixer::RoutingButton;
 
 /// One mixer strip, laid out by the theme's MCP context.
@@ -30,7 +29,21 @@ pub fn McpStrip(
 ) -> Element {
     let theme = use_theme().theme;
     let mcp = theme.mcp.clone();
-    let l = mcp.layout(layout.as_deref()).clone();
+    // Track-state layout variants: themes resize/show elements per state, so
+    // armed tracks switch to the `@armed` bake when the theme provides one.
+    let l = {
+        let base = mcp.layout(layout.as_deref()).clone();
+        if (track.record_arm)() {
+            let armed = format!("{}@armed", base.name);
+            mcp.layouts
+                .iter()
+                .find(|x| x.name == armed)
+                .cloned()
+                .unwrap_or(base)
+        } else {
+            base
+        }
+    };
     let nat = l.size;
 
     let st = ThemeState::new().track(track.color.as_deref().and_then(Color::hex));
@@ -179,20 +192,14 @@ pub fn McpStrip(
                         disabled,
                     }
                 } else {
-                    div {
-                        style: format!(
-                            "{pos} display:flex; align-items:center; justify-content:center;",
-                            pos = l.pan.css_position(nat),
-                        ),
-                        Knob {
-                            value: track.pan,
-                            min: 0.0,
-                            max: 1.0,
-                            default: 0.5,
-                            variant: KnobVariant::ArcBipolar,
-                            size: l.pan.w.min(l.pan.h) as u32,
-                            disabled,
-                        }
+                    McpKnob {
+                        pos: l.pan.css_position(nat),
+                        box_w: l.pan.w,
+                        box_h: l.pan.h,
+                        value: track.pan,
+                        skin: skin.pan_knob.clone(),
+                        accent: mcp.colors.pan.unwrap_or(accent).resolve_track(accent),
+                        disabled,
                     }
                 }
             }
@@ -319,6 +326,99 @@ pub fn McpStrip(
                     ),
                     "{track.name}"
                 }
+            }
+        }
+    }
+}
+
+/// A small rotary knob. With a theme filmstrip ([`KnobSkin`]) the frame for
+/// the current value renders via `background-position`; otherwise a plain
+/// inline-styled vector knob (circle + value dot — no CSS transforms, which
+/// keeps it renderer-safe). Vertical drag adjusts; double-click recentres.
+#[component]
+fn McpKnob(
+    pos: String,
+    box_w: f32,
+    box_h: f32,
+    value: Signal<f32>,
+    #[props(default)] skin: Option<crate::theming::KnobSkin>,
+    accent: Color,
+    disabled: bool,
+) -> Element {
+    let mut is_dragging = use_signal(|| false);
+    let mut drag_start = use_signal(|| 0.0f32);
+    let mut drag_start_value = use_signal(|| 0.0f32);
+    let sensitivity = DragSensitivity::new(180.0, 0.1);
+
+    let v = value().clamp(0.0, 1.0);
+    let cursor = if disabled { "not-allowed" } else { "ns-resize" };
+
+    let face = if let Some(skin) = &skin {
+        // Filmstrip frame for the value (frames stack vertically).
+        let frame = ((v * (skin.frames.saturating_sub(1)) as f32).round()) as u32;
+        format!(
+            "background-image:url({url}); background-repeat:no-repeat; \
+             background-size:{bw}px {th}px; background-position:0px -{off}px;",
+            url = skin.url,
+            bw = box_w,
+            th = box_h * skin.frames as f32,
+            off = frame as f32 * box_h,
+        )
+    } else {
+        let theme = use_theme().theme;
+        format!(
+            "background:{bg}; border:1px solid {border}; border-radius:{r}px;",
+            bg = theme.tokens.surface_sunken.css(),
+            border = theme.tokens.border.css(),
+            r = box_w.min(box_h) / 2.0,
+        )
+    };
+
+    // Vector fallback indicator: a dot on the knob circumference at the
+    // value angle (-135°..+135°), positioned in Rust — no CSS transforms.
+    let dot = (skin.is_none()).then(|| {
+        let angle = (-135.0 + v * 270.0_f32).to_radians();
+        let r = box_w.min(box_h) / 2.0 - 3.5;
+        let cx = box_w / 2.0 + r * angle.sin();
+        let cy = box_h / 2.0 - r * angle.cos();
+        format!(
+            "position:absolute; left:{x:.1}px; top:{y:.1}px; width:4px; height:4px; \
+             border-radius:2px; background:{c}; pointer-events:none;",
+            x = cx - 2.0,
+            y = cy - 2.0,
+            c = accent.css(),
+        )
+    });
+
+    rsx! {
+        div {
+            style: format!("{pos} cursor:{cursor}; {face}"),
+            if let Some(dot) = dot {
+                div { style: dot }
+            }
+            div {
+                style: "position:absolute; inset:0;",
+                onmousedown: move |evt: MouseEvent| {
+                    if disabled { return; }
+                    is_dragging.set(true);
+                    drag_start.set(evt.client_coordinates().y as f32);
+                    drag_start_value.set(value().clamp(0.0, 1.0));
+                },
+                onmousemove: move |evt: MouseEvent| {
+                    if !*is_dragging.read() || disabled { return; }
+                    let delta_px = evt.client_coordinates().y as f32 - drag_start();
+                    let modifiers = ModifierKeys::new(
+                        evt.modifiers().shift(), evt.modifiers().ctrl(), evt.modifiers().alt(),
+                    );
+                    let delta = sensitivity.calculate_delta(delta_px, modifiers);
+                    value.set((drag_start_value() + delta).clamp(0.0, 1.0));
+                },
+                onmouseup: move |_| { is_dragging.set(false); },
+                onmouseleave: move |_| { is_dragging.set(false); },
+                ondoubleclick: move |_| {
+                    if disabled { return; }
+                    value.set(0.5);
+                },
             }
         }
     }

@@ -51,6 +51,17 @@ pub struct Slice3 {
     pub pressed: RgbaImage,
 }
 
+/// A knob filmstrip: `frames` square-ish frames stacked along the long axis.
+#[derive(Clone, Debug)]
+pub struct KnobStack {
+    pub image: RgbaImage,
+    pub frames: u32,
+    pub frame_w: u32,
+    pub frame_h: u32,
+    /// Frames run vertically (true) or horizontally.
+    pub vertical: bool,
+}
+
 /// The theme folder's PNG vocabulary, by image name (file stem).
 pub struct ImageCatalog {
     dir: PathBuf,
@@ -136,6 +147,33 @@ impl ImageCatalog {
             normal: crop(0),
             hover: crop(1),
             pressed: crop(2),
+        })
+    }
+
+    /// Decode a knob filmstrip: frames are square, stacked along the long
+    /// axis (`tcp_pan_knob_stack` 20×820 → 41 frames of 20×20).
+    pub fn knob_stack(&self, name: &str) -> Result<KnobStack, ThemeError> {
+        let sliced = self.load(name)?;
+        let img = sliced.image;
+        let (w, h) = img.dimensions();
+        let (frames, frame_w, frame_h, vertical) = if h >= w && w > 0 && h % w == 0 {
+            (h / w, w, w, true)
+        } else if w > h && h > 0 && w % h == 0 {
+            (w / h, h, h, false)
+        } else {
+            return Err(ThemeError::BadGeometry {
+                path: self.dir.join(format!("{name}.png")),
+                geometry: "knob filmstrip",
+                width: w,
+                height: h,
+            });
+        };
+        Ok(KnobStack {
+            image: img,
+            frames,
+            frame_w,
+            frame_h,
+            vertical,
         })
     }
 

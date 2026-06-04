@@ -187,16 +187,43 @@ fn walter_mcp_layouts(rt: &ReaperTheme) -> Vec<super::mcp::McpLayout> {
         // Pass 2: natural + finite-difference evaluations. Strip width is
         // theme-driven (`mcpWidth` reads the layout's width knob, not env
         // `w`), so the +Δw pass bumps the matching `define_parameter` too.
-        let out0 = evaluate(src, Some(&name), &make_env(w0, H0));
-        let mut env_w = make_env(w0 + DW, H0);
-        let width_knob = format!("Layout{name}-mcpWidth");
-        if let Some(p) = rt.rtconfig.params.iter().find(|p| p.name == width_knob) {
-            env_w.set(&p.name, p.default + DW);
+        // Track-state variants re-run the program with the state scalar set
+        // (`@armed` = recarm 1; themes resize/show elements per state).
+        let bake = |state: &[(&str, f32)], label: &str| {
+            let with_state = |mut env: Env| -> Env {
+                for (k, v) in state {
+                    env.set(k, *v);
+                }
+                env
+            };
+            let pass1 = evaluate(src, Some(&name), &with_state(make_env(100.0, H0)));
+            let w0s = pass1
+                .get("mcpWidth")
+                .and_then(|v| v.first().copied())
+                .filter(|w| *w >= 24.0)
+                .unwrap_or(w0);
+            let out0 = evaluate(src, Some(&name), &with_state(make_env(w0s, H0)));
+            let mut env_w = with_state(make_env(w0s + DW, H0));
+            // Bump every width knob this state can select.
+            for suffix in ["", "Sel", "Recarm"] {
+                let knob = format!("Layout{name}-mcpWidth{suffix}");
+                if let Some(p) = rt.rtconfig.params.iter().find(|p| p.name == knob) {
+                    env_w.set(&p.name, p.default + DW);
+                }
+            }
+            let out_w = evaluate(src, Some(&name), &env_w);
+            let out_h = evaluate(src, Some(&name), &with_state(make_env(w0s, H0 + DH)));
+            layout_from_walter(label, w0s, H0, &out0, &out_w, &out_h, rt)
+        };
+
+        let base = bake(&[], &name);
+        let armed = bake(&[("recarm", 1.0)], &format!("{name}@armed"));
+        let differs =
+            armed.size != base.size || armed.recarm != base.recarm || armed.customs != base.customs;
+        layouts.push(base);
+        if differs {
+            layouts.push(armed);
         }
-        let out_w = evaluate(src, Some(&name), &env_w);
-        let out_h = evaluate(src, Some(&name), &make_env(w0, H0 + DH));
-        layouts.push(layout_from_walter(&name, w0, H0, &out0, &out_w, &out_h, rt));
-        let _: &Output = &out0;
     }
     layouts
 }
@@ -434,6 +461,21 @@ fn extract_skin(rt: &ReaperTheme) -> Option<McpSkin> {
             h: s.image.height(),
         })
     };
+    // A knob filmstrip along the fallback chain (`mcp_X` → `tcp_X` → `gen_X`
+    // — knob stacks commonly ship as `tcp_*` and are shared).
+    let knob = |base: &str| -> Option<super::mcp::KnobSkin> {
+        let name = ["mcp_", "tcp_", "gen_", ""]
+            .iter()
+            .map(|p| format!("{p}{base}"))
+            .find(|n| imgs.has(n))?;
+        let stack = imgs.knob_stack(&name).ok()?;
+        Some(super::mcp::KnobSkin {
+            url: ImageCatalog::data_uri(&stack.image),
+            frames: stack.frames,
+            frame_w: stack.frame_w,
+            frame_h: stack.frame_h,
+        })
+    };
 
     let skin = McpSkin {
         mute: toggle("mute_off", "mute_on"),
@@ -448,6 +490,7 @@ fn extract_skin(rt: &ReaperTheme) -> Option<McpSkin> {
         folder: toggle("folder_off", "folder_on"),
         fxin: toggle("fx_in_empty", "fx_in_norm"),
         recinput_bg: plain("mcp_recinput"),
+        pan_knob: knob("pan_knob_stack"),
         volbg: plain("mcp_volbg"),
         volthumb: plain("mcp_volthumb"),
         panbg: plain("mcp_panbg"),
