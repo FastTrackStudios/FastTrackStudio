@@ -29,6 +29,9 @@ pub fn TrackControlPanel(
 ) -> Element {
     let overflow = if scroll { "auto" } else { "visible" };
     let surface = use_theme().theme.panel().surface.css();
+    // Exclusive selection (REAPER: clicking a panel selects its track).
+    let selections: Vec<(usize, Signal<bool>)> =
+        tracks.iter().map(|t| (t.id, t.selected)).collect();
     rsx! {
         div {
             style: format!(
@@ -36,7 +39,19 @@ pub fn TrackControlPanel(
                  background:{surface}; overflow-y:{overflow}; user-select:none;"
             ),
             for track in tracks.iter() {
-                TcpRow { key: "{track.id}", track: track.clone(), panel_w: width }
+                TcpRow {
+                    key: "{track.id}",
+                    track: track.clone(),
+                    panel_w: width,
+                    on_select: {
+                        let selections = selections.clone();
+                        move |id: usize| {
+                            for (tid, mut sel) in selections.iter().copied() {
+                                sel.set(tid == id);
+                            }
+                        }
+                    },
+                }
             }
         }
     }
@@ -46,10 +61,11 @@ pub fn TrackControlPanel(
 /// with the arrange lanes) filled by the theme's TCP context, with REAPER's
 /// folder indent on the left.
 #[component]
-fn TcpRow(track: TrackView, panel_w: u32) -> Element {
+fn TcpRow(track: TrackView, panel_w: u32, on_select: EventHandler<usize>) -> Element {
     let indent = track.depth * INDENT;
     let h = track.height;
     let total = track.total_height();
+    let id = track.id;
     // The strip's actual px box — lets an imported REAPER theme re-run
     // WALTER at this exact size (flow themes rewrap/cull per width).
     let size = (panel_w.saturating_sub(indent) as f32, h as f32);
@@ -64,6 +80,7 @@ fn TcpRow(track: TrackView, panel_w: u32) -> Element {
             style: format!(
                 "flex:0 0 {total}px; height:{total}px; display:flex; align-items:stretch;"
             ),
+            onclick: move |_| on_select.call(id),
             if indent > 0 {
                 div { style: format!("flex:0 0 {indent}px;") }
             }

@@ -100,7 +100,9 @@ pub struct RegionView {
 #[derive(Clone, PartialEq)]
 pub struct TrackView {
     pub id: usize,
-    pub name: String,
+    /// Track name — a `Signal` so inline renames (TCP double-click) propagate
+    /// to every panel.
+    pub name: Signal<String>,
     /// Track colour (`#rrggbb`). Tints the strip, TCP row, and lane.
     pub color: Option<String>,
 
@@ -151,7 +153,7 @@ impl TrackView {
     pub fn new(id: usize, name: impl Into<String>, color: Option<&str>) -> Self {
         Self {
             id,
-            name: name.into(),
+            name: Signal::new(name.into()),
             color: color.map(|c| c.to_string()),
             fader: Signal::new(0.75),
             pan: Signal::new(0.5),

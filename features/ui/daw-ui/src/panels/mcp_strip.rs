@@ -48,15 +48,26 @@ pub fn McpStrip(
         theme.mcp.clone()
     };
     let armed = (track.record_arm)();
+    let selected = (track.selected)();
+    // Inline rename (REAPER: double-click the name field edits it in place).
+    let mut editing_name = use_signal(|| false);
+    let mut name_sig = track.name;
     // Layout resolution: with a runtime engine + a known px box, re-evaluate
-    // the theme at this exact size (state scalars included). Otherwise fall
-    // back to the baked layouts (`@armed` variant when the theme has one).
+    // the theme at this exact size (state scalars included — selection
+    // switches the theme's selected chrome). Otherwise fall back to the
+    // baked layouts (`@armed` variant when the theme has one).
     let runtime = match (&theme.engine, size) {
         (Some(engine), Some((w, h))) if w > 0.0 && h > 0.0 => {
             // Engine layouts are named without the `@state` suffix.
             let base = mcp.layout(layout.as_deref()).name.clone();
             let base = base.split('@').next().unwrap_or(&base).to_string();
-            engine.layout_at(ctx_name, &base, w, h, armed)
+            engine.layout_at(
+                ctx_name,
+                &base,
+                w,
+                h,
+                crate::theming::StripState { armed, selected },
+            )
         }
         _ => None,
     };
@@ -415,24 +426,53 @@ pub fn McpStrip(
                 McpFlag { pos: l.folder.css_position(nat), box_w: l.folder.w, box_h: l.folder.h, glyph: "▼", title: "Folder", skin: skin.folder.as_ref().map(|b| if track.is_folder { b.on.normal.clone() } else { b.off.normal.clone() }) }
             }
 
-            // mcp.label — track-name footer.
+            // mcp.label — the track-name field. Double-click edits in place
+            // (REAPER's rename behaviour); Enter/Escape or blur commits.
             if !l.label.is_hidden() {
-                div {
-                    style: format!(
-                        "{pos} display:flex; align-items:center; \
-                         justify-content:{justify}; padding:{pad}; \
-                         background:{bg}; color:{fg}; font-size:{fs}px; \
-                         font-weight:{fw}; letter-spacing:0.02em; \
-                         white-space:nowrap; overflow:hidden;",
-                        pos = l.label.css_position(nat),
-                        justify = flex_justify(&l.label_margin),
-                        pad = l.label_margin.css_padding(),
-                        bg = label_bg.css(),
-                        fg = label_fg.css(),
-                        fs = l.label_font.size,
-                        fw = l.label_font.weight,
-                    ),
-                    "{track.name}"
+                if editing_name() {
+                    input {
+                        r#type: "text",
+                        value: "{track.name}",
+                        autofocus: true,
+                        style: format!(
+                            "{pos} padding:{pad}; background:{bg}; color:{fg}; \
+                             font-size:{fs}px; font-weight:{fw}; \
+                             border:1px solid {bd}; border-radius:2px;",
+                            pos = l.label.css_position(nat),
+                            pad = l.label_margin.css_padding(),
+                            bg = theme.tokens.surface_sunken.css(),
+                            fg = theme.tokens.text.css(),
+                            bd = accent.css(),
+                            fs = l.label_font.size,
+                            fw = l.label_font.weight,
+                        ),
+                        oninput: move |e: FormEvent| name_sig.set(e.value()),
+                        onkeydown: move |e: KeyboardEvent| {
+                            if matches!(e.key(), Key::Enter | Key::Escape) {
+                                editing_name.set(false);
+                            }
+                        },
+                        onblur: move |_| editing_name.set(false),
+                    }
+                } else {
+                    div {
+                        style: format!(
+                            "{pos} display:flex; align-items:center; \
+                             justify-content:{justify}; padding:{pad}; \
+                             background:{bg}; color:{fg}; font-size:{fs}px; \
+                             font-weight:{fw}; letter-spacing:0.02em; \
+                             white-space:nowrap; overflow:hidden;",
+                            pos = l.label.css_position(nat),
+                            justify = flex_justify(&l.label_margin),
+                            pad = l.label_margin.css_padding(),
+                            bg = label_bg.css(),
+                            fg = label_fg.css(),
+                            fs = l.label_font.size,
+                            fw = l.label_font.weight,
+                        ),
+                        ondoubleclick: move |_| editing_name.set(true),
+                        "{track.name}"
+                    }
                 }
             }
         }

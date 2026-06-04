@@ -18,7 +18,7 @@
 use daw_theme_reaper::{ImageCatalog, Rgba};
 pub use daw_theme_reaper::{ReaperTheme, ThemeError};
 
-use super::mcp::{ButtonSkin, ButtonStateSkin, LayoutEngine, McpSkin, SkinImage};
+use super::mcp::{ButtonSkin, ButtonStateSkin, LayoutEngine, McpSkin, SkinImage, StripState};
 use super::theme::{Color, Theme};
 use super::walter::ThemeParam;
 
@@ -868,11 +868,11 @@ fn make_layout_engine(
     let probe = evaluate(&src, None, &Env::reaper_defaults(100.0, 100.0));
     let layout_names = probe.layouts;
 
-    type Key = (String, String, u32, u32, bool);
+    type Key = (String, String, u32, u32, StripState);
     let cache: Mutex<HashMap<Key, Option<super::mcp::McpLayout>>> = Mutex::new(HashMap::new());
 
-    LayoutEngine(std::sync::Arc::new(move |ctx, name, w, h, armed| {
-        let key = (ctx.to_string(), name.to_string(), w as u32, h as u32, armed);
+    LayoutEngine(std::sync::Arc::new(move |ctx, name, w, h, state| {
+        let key = (ctx.to_string(), name.to_string(), w as u32, h as u32, state);
         if let Some(hit) = cache.lock().unwrap().get(&key) {
             return hit.clone();
         }
@@ -905,8 +905,11 @@ fn make_layout_engine(
         for p in &rtc.params {
             env.set(&p.name, p.default);
         }
-        if armed {
+        if state.armed {
             env.set("recarm", 1.0);
+        }
+        if state.selected {
+            env.set("track_selected", 1.0);
         }
 
         let out = evaluate(&src, Some(&eval_name), &env);
@@ -1676,7 +1679,7 @@ mod tcp_tests {
         // Evaluated at the actual row box: geometry is exact px (no anchor
         // springing — attach scales are zero) and stays inside the box.
         let l = engine
-            .layout_at("tcp", "A", 260.0, 64.0, false)
+            .layout_at("tcp", "A", 260.0, 64.0, Default::default())
             .expect("tcp layout");
         assert_eq!(l.size, (260.0, 64.0));
         for (name, c) in [("label", &l.label), ("mute", &l.mute), ("meter", &l.meter)] {
@@ -1694,7 +1697,7 @@ mod tcp_tests {
         // are text colour — `sectionMain [0]` must NOT paint a black strip),
         // and image-backed customs carry their declared art.
         let l = engine
-            .layout_at("tcp", "A", 368.0, 72.0, false)
+            .layout_at("tcp", "A", 368.0, 72.0, Default::default())
             .expect("tcp layout");
         let main = l
             .customs
@@ -1714,7 +1717,11 @@ mod tcp_tests {
         );
 
         // Unknown layout name → None (callers fall back to bakes).
-        assert!(engine.layout_at("tcp", "row", 260.0, 64.0, false).is_none());
+        assert!(
+            engine
+                .layout_at("tcp", "row", 260.0, 64.0, Default::default())
+                .is_none()
+        );
     }
 
     /// Reapertips' TCP is a WALTER flow engine (`then`-macro chain): elements
@@ -1731,10 +1738,10 @@ mod tcp_tests {
         let engine = theme.engine.as_ref().expect("walter engine installed");
 
         let wide = engine
-            .layout_at("tcp", "A", 420.0, 60.0, false)
+            .layout_at("tcp", "A", 420.0, 60.0, Default::default())
             .expect("wide tcp layout");
         let narrow = engine
-            .layout_at("tcp", "A", 150.0, 60.0, false)
+            .layout_at("tcp", "A", 150.0, 60.0, Default::default())
             .expect("narrow tcp layout");
 
         // The label survives at both widths but the flow repacks the row.

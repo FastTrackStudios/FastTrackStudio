@@ -393,15 +393,25 @@ pub struct McpSkin {
 /// one of these; renderers that know their px size call it instead of the
 /// baked layouts. Results must be internally cached (renderers call this
 /// per frame).
+/// Track-state scalars a [`LayoutEngine`] evaluation bakes in — themes
+/// resize/show elements per state (`recarm`, `track_selected`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct StripState {
+    pub armed: bool,
+    pub selected: bool,
+}
+
+/// The engine's evaluation function: `(ctx, layout, w, h, state)`.
+pub type LayoutEngineFn =
+    dyn Fn(&str, &str, f32, f32, StripState) -> Option<McpLayout> + Send + Sync;
+
 #[derive(Clone)]
-pub struct LayoutEngine(
-    #[allow(clippy::type_complexity)]
-    pub  std::sync::Arc<dyn Fn(&str, &str, f32, f32, bool) -> Option<McpLayout> + Send + Sync>,
-);
+pub struct LayoutEngine(pub std::sync::Arc<LayoutEngineFn>);
 
 impl LayoutEngine {
     /// Evaluate `ctx.{…}` (`"mcp"`/`"tcp"`) layout `name` at an exact panel
-    /// size. `armed` re-evaluates with `recarm 1` (themes reflow per state).
+    /// size, with the track-state scalars set (themes reflow per state —
+    /// selection switches the Anti-Theme's name field to its light variant).
     /// `None` = the theme has no WALTER program for this context/layout
     /// (callers fall back to the baked layouts).
     pub fn layout_at(
@@ -410,9 +420,9 @@ impl LayoutEngine {
         name: &str,
         w: f32,
         h: f32,
-        armed: bool,
+        state: StripState,
     ) -> Option<McpLayout> {
-        (self.0)(ctx, name, w, h, armed)
+        (self.0)(ctx, name, w, h, state)
     }
 }
 
