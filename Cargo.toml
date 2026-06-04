@@ -49,6 +49,7 @@ authors = ["FastTrack Studio"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+memmap2 = "0.9"
 # Facade crate — the only public API surface for the daw domain
 daw = { path = "crates/daw" }
 # UI crate stays public (Dioxus components with feature flags)
