@@ -18,6 +18,7 @@
 pub mod images;
 pub mod palette;
 pub mod rtconfig;
+pub mod walter;
 
 pub use images::{ImageCatalog, Slice3};
 pub use palette::{Palette, Rgba};

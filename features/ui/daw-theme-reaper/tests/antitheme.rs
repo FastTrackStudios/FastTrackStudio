@@ -6,6 +6,7 @@
 //! without the theme corpus stays green.
 
 use daw_theme_reaper::ReaperTheme;
+use daw_theme_reaper::walter::{Env, evaluate};
 
 fn antitheme() -> Option<ReaperTheme> {
     let candidates = [
@@ -92,4 +93,57 @@ fn slices_anti_theme_buttons_and_faders() {
     // Meter strips (the general meter vocabulary the Anti-Theme uses).
     assert!(theme.images.has("meter_strip_v"));
     assert!(theme.images.has("meter_bg_v"));
+}
+
+/// The WALTER evaluator resolves the Anti-Theme's own `Layout "A"` program
+/// into the REAPER 7 default MCP geometry (regression-pinned for a fixed
+/// environment: 110×600 panel, plain stereo track, default params).
+#[test]
+fn walter_evaluates_anti_theme_mcp_layout() {
+    let Some(theme) = antitheme() else { return };
+    let rt = std::fs::read_to_string(theme.images.dir().join("rtconfig.txt")).unwrap();
+
+    let mut env = Env::new();
+    for (k, v) in [
+        ("w", 110.0),
+        ("h", 600.0),
+        ("trackpanmode", 3.0),
+        ("tracknch", 2.0),
+        ("trackcolor_valid", 1.0),
+        ("trackcolor_r", 200.0),
+        ("trackcolor_g", 80.0),
+        ("trackcolor_b", 40.0),
+        ("trackidx", 1.0),
+        ("ntracks", 9.0),
+        ("mixer_visible", 1.0),
+        ("tcp_sends_enabled", 1.0),
+        ("tcp_fxlist_enabled", 1.0),
+        ("reaper_version", 7.0),
+        ("os_type", 2.0),
+        // The DPI scale variable the theme's macros multiply by (1.0 = 100%;
+        // the 150%_/200%_ layout variants expect 1.5/2.0).
+        ("Scale", 1.0),
+    ] {
+        env.set(k, v);
+    }
+    for p in &theme.rtconfig.params {
+        env.set(&p.name, p.default);
+    }
+
+    let out = evaluate(&rt, Some("A"), &env);
+
+    // The "Normal" (form 3) strip at default LayoutA-mcpWidth=88:
+    // right-hand button column at x=62, fader + meter blocks, name bar.
+    let coord = |name: &str| out.coord(name).unwrap_or_else(|| panic!("missing {name}"));
+    assert_eq!(&coord("mcp.mute")[..4], &[62., 86., 20., 20.]);
+    assert_eq!(&coord("mcp.solo")[..4], &[62., 106., 20., 20.]);
+    assert_eq!(&coord("mcp.io")[..4], &[62., 132., 20., 22.]);
+    assert_eq!(&coord("mcp.volume")[..4], &[52., 86., 25., 440.]);
+    assert_eq!(&coord("mcp.meter")[..4], &[4., 86., 46., 440.]);
+    assert_eq!(&coord("mcp.label")[..4], &[0., 556., 88., 24.]);
+    assert_eq!(&coord("mcp.pan")[..4], &[34., 54., 20., 20.]);
+
+    // Layout names enumerate (A/B/C + DPI variants).
+    assert!(out.layouts.iter().any(|l| l == "A"));
+    assert!(out.layouts.iter().any(|l| l == "150%_A"));
 }
