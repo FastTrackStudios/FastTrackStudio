@@ -228,6 +228,53 @@ fn MainUi() -> Element {
         });
     }
 
+    // Background peak generation: media without a `.reapeaks` cache gets
+    // peaks computed from the PCM (REAPER builds its cache on import the
+    // same way), written back beside the media, and patched into the
+    // clip views as each file finishes.
+    if !boot.missing_peaks.is_empty() {
+        let jobs = boot.missing_peaks.clone();
+        let project_dir = boot.project_dir.clone();
+        let mut tracks = tracks;
+        use_future(move || {
+            let jobs = jobs.clone();
+            let project_dir = project_dir.clone();
+            async move {
+                // Group by source so each file is read once.
+                let mut by_src: std::collections::HashMap<String, Vec<MissingPeaks>> =
+                    std::collections::HashMap::new();
+                for j in jobs {
+                    by_src.entry(j.source.clone()).or_default().push(j);
+                }
+                tracing::info!("generating peaks for {} media files", by_src.len());
+                for (source, jobs) in by_src {
+                    let dir = project_dir.clone();
+                    let src = source.clone();
+                    let computed =
+                        tokio::task::spawn_blocking(move || generate_peaks_for(&src, &dir))
+                            .await
+                            .ok()
+                            .flatten();
+                    let Some(pk) = computed else { continue };
+                    // Patch every clip windowed from this source.
+                    let mut tv = tracks.write();
+                    for j in &jobs {
+                        let Some(track) = tv.get_mut(j.track) else {
+                            continue;
+                        };
+                        let Some(clip) = track.clips.get_mut(j.clip) else {
+                            continue;
+                        };
+                        clip.peaks = pk.columns(0, j.s0, j.s1, j.cols);
+                        if pk.channels >= 2 {
+                            clip.peaks_right = pk.columns(1, j.s0, j.s1, j.cols);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Metering poll loop: ~30 fps, read engine peaks → push into the meter
     // signals so the mixer's meters track real per-track levels.
     let meter_engine = engine.clone();
@@ -398,6 +445,24 @@ struct BootedProject {
     beats_per_measure: u32,
     /// Timeline length (s) for the arrange view.
     seconds: f64,
+    /// Project folder (media path resolution for peak generation).
+    project_dir: std::path::PathBuf,
+    /// Clips whose media had no `.reapeaks` cache — peaks get computed
+    /// from the PCM in the background and patched into the views.
+    missing_peaks: Vec<MissingPeaks>,
+}
+
+/// One pending background peak-generation job.
+#[derive(Clone)]
+struct MissingPeaks {
+    track: usize,
+    clip: usize,
+    /// Take source path as stored in the RPP.
+    source: String,
+    /// Source window (seconds) + column count, same as clip_from_item.
+    s0: f64,
+    s1: f64,
+    cols: usize,
 }
 
 /// One track's view-model ingredients (no `Signal`s — thread-safe).
@@ -481,6 +546,8 @@ fn boot_project() -> BootedProject {
                 bpm: 120.0,
                 beats_per_measure: 4,
                 seconds: 120.0,
+                project_dir: std::path::PathBuf::new(),
+                missing_peaks: Vec::new(),
             }
         }
     }
@@ -534,6 +601,7 @@ fn load_rpp_project(engine: &Standalone, rpp_path: &str) -> Option<BootedProject
     let mut specs = build_track_specs(engine, &ctx, false);
     let mut peaks_cache: std::collections::HashMap<String, Option<Rc<ReaPeaks>>> =
         std::collections::HashMap::new();
+    let mut missing_peaks: Vec<MissingPeaks> = Vec::new();
     let mut end = 0.0f64;
     for (i, spec) in specs.iter_mut().enumerate() {
         let tref = TrackRef::Index(i as u32);
@@ -543,9 +611,21 @@ fn load_rpp_project(engine: &Standalone, rpp_path: &str) -> Option<BootedProject
         let items = Items::get_items(engine, ctx.clone(), tref);
         spec.clips = items
             .iter()
-            .map(|item| {
-                let clip = clip_from_item(engine, &ctx, item, &project_dir, &mut peaks_cache);
+            .enumerate()
+            .map(|(ci, item)| {
+                let (clip, job) =
+                    clip_from_item(engine, &ctx, item, &project_dir, &mut peaks_cache);
                 end = end.max(clip.start + clip.length);
+                if let Some((source, s0, s1, cols)) = job {
+                    missing_peaks.push(MissingPeaks {
+                        track: i,
+                        clip: ci,
+                        source,
+                        s0,
+                        s1,
+                        cols,
+                    });
+                }
                 clip
             })
             .collect();
@@ -614,6 +694,8 @@ fn load_rpp_project(engine: &Standalone, rpp_path: &str) -> Option<BootedProject
         bpm: if bpm > 1.0 { bpm } else { 120.0 },
         beats_per_measure: if num > 0 { num as u32 } else { 4 },
         seconds: (end + 16.0).max(60.0),
+        project_dir,
+        missing_peaks,
     })
 }
 
@@ -626,7 +708,7 @@ fn clip_from_item(
     item: &Item,
     project_dir: &std::path::Path,
     cache: &mut std::collections::HashMap<String, Option<Rc<ReaPeaks>>>,
-) -> ClipView {
+) -> (ClipView, Option<(String, f64, f64, usize)>) {
     let take = Takes::get_active_take(engine, ctx.clone(), ItemRef::Guid(item.guid.clone()));
     let name = take
         .as_ref()
@@ -656,23 +738,80 @@ fn clip_from_item(
             .entry(src.clone())
             .or_insert_with(|| load_reapeaks_for(src, project_dir).map(Rc::new))
             .clone();
-        if let Some(peaks) = peaks {
-            let rate = if take.play_rate > 0.0 {
-                take.play_rate
-            } else {
-                1.0
-            };
-            let s0 = take.start_offset.as_seconds();
-            let s1 = s0 + length * rate;
-            let cols = ((length * 12.0) as usize).clamp(8, 2000);
-            clip.peaks = peaks.columns(0, s0, s1, cols);
-            // Stereo sources render split L/R lanes like REAPER.
-            if peaks.channels >= 2 {
-                clip.peaks_right = peaks.columns(1, s0, s1, cols);
+        let rate = if take.play_rate > 0.0 {
+            take.play_rate
+        } else {
+            1.0
+        };
+        let s0 = take.start_offset.as_seconds();
+        let s1 = s0 + length * rate;
+        let cols = ((length * 12.0) as usize).clamp(8, 2000);
+        match peaks {
+            Some(peaks) => {
+                clip.peaks = peaks.columns(0, s0, s1, cols);
+                // Stereo sources render split L/R lanes like REAPER.
+                if peaks.channels >= 2 {
+                    clip.peaks_right = peaks.columns(1, s0, s1, cols);
+                }
             }
+            // No cache anywhere — report a background generation job.
+            None => return (clip, Some((src.clone(), s0, s1, cols))),
         }
     }
-    clip
+    (clip, None)
+}
+
+/// Build peaks for media REAPER never cached: resolve the file (same
+/// search as the audio resolver — filename anchored to the project's
+/// media folders), stream the PCM through `ReaPeaks::compute`, and
+/// write the `.reapeaks` beside the media (best effort — read-only
+/// volumes keep the in-memory copy) so the next boot is instant.
+fn generate_peaks_for(source: &str, project_dir: &std::path::Path) -> Option<ReaPeaks> {
+    use daw_standalone::audio_engine::{AudioSource, PcmFile};
+    let media = resolve_media_path(source, project_dir)?;
+    let pcm = PcmFile::open(&media).ok()?;
+    let audio = AudioSource::PcmFile(pcm);
+    let frames = audio.frame_count();
+    if frames == 0 {
+        return None;
+    }
+    let pk = ReaPeaks::compute(
+        audio.channels() as usize,
+        audio.sample_rate(),
+        frames,
+        |f, ch| audio.channel_interp(f, f, 0.0, ch),
+    );
+    let cache = media.with_file_name(format!(
+        "{}.reapeaks",
+        media
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("media")
+    ));
+    if let Err(e) = pk.write(&cache) {
+        tracing::debug!("couldn't write peak cache {cache:?}: {e}");
+    }
+    Some(pk)
+}
+
+/// Resolve a take's source path to an existing media file, trying the
+/// stored path and the project's media folders (filename anchored).
+fn resolve_media_path(source: &str, project_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let src = std::path::Path::new(source);
+    if src.is_absolute() && src.exists() {
+        return Some(src.to_path_buf());
+    }
+    let file = src.file_name()?;
+    let mut candidates: Vec<std::path::PathBuf> = vec![project_dir.join(src)];
+    for sub in ["", "Audio Files", "Bounced Files", "Media"] {
+        let base = if sub.is_empty() {
+            project_dir.to_path_buf()
+        } else {
+            project_dir.join(sub)
+        };
+        candidates.push(base.join(file));
+    }
+    candidates.into_iter().find(|p| p.exists())
 }
 
 /// Find the `.reapeaks` cache for a media file: `<file>.reapeaks` beside it

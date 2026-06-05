@@ -129,6 +129,108 @@ impl ReaPeaks {
         })
     }
 
+    /// Compute peak mipmaps from raw samples — for media REAPER hasn't
+    /// cached yet. `read(frame, channel)` returns the sample (−1…1).
+    /// Levels match REAPER's stock 160 / 2400 / 48000; the coarser two
+    /// are folded from the finest, so the source is read exactly once.
+    pub fn compute(
+        channels: usize,
+        samplerate: u32,
+        frames: usize,
+        read: impl Fn(usize, usize) -> f32,
+    ) -> Self {
+        const FINE: usize = 160;
+        let nch = channels.max(1);
+        let count = frames.div_ceil(FINE);
+        let mut data: Vec<i16> = Vec::with_capacity(count * nch * 2);
+        let q = |v: f32| -> i16 { (v.clamp(-1.0, 1.0) * 32767.0) as i16 };
+        for p in 0..count {
+            let a = p * FINE;
+            let b = (a + FINE).min(frames);
+            for ch in 0..nch {
+                let (mut max, mut min) = (f32::MIN, f32::MAX);
+                for f in a..b {
+                    let v = read(f, ch);
+                    max = max.max(v);
+                    min = min.min(v);
+                }
+                if max < min {
+                    max = 0.0;
+                    min = 0.0;
+                }
+                data.push(q(max));
+                data.push(q(min));
+            }
+        }
+        let fine = PeakLevel {
+            samples_per_peak: FINE as u32,
+            count,
+            data,
+        };
+        // Fold coarser levels from the finest (2400 = 15×160,
+        // 48000 = 20×2400).
+        let fold = |src: &PeakLevel, factor: usize| -> PeakLevel {
+            let count = src.count.div_ceil(factor);
+            let mut data: Vec<i16> = Vec::with_capacity(count * nch * 2);
+            for p in 0..count {
+                let a = p * factor;
+                let b = (a + factor).min(src.count);
+                for ch in 0..nch {
+                    let (mut max, mut min) = (i16::MIN, i16::MAX);
+                    for s in a..b {
+                        let i = (s * nch + ch) * 2;
+                        max = max.max(src.data[i]);
+                        min = min.min(src.data[i + 1]);
+                    }
+                    if max < min {
+                        max = 0;
+                        min = 0;
+                    }
+                    data.push(max);
+                    data.push(min);
+                }
+            }
+            PeakLevel {
+                samples_per_peak: src.samples_per_peak * factor as u32,
+                count,
+                data,
+            }
+        };
+        let mid = fold(&fine, 15);
+        let coarse = fold(&mid, 20);
+        Self {
+            channels: nch,
+            samplerate,
+            source_mtime: 0,
+            levels: vec![fine, mid, coarse],
+        }
+    }
+
+    /// Serialize to REAPER's `.reapeaks` format (`RPKN`).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RPKN");
+        out.push(self.channels as u8);
+        out.push(self.levels.len() as u8);
+        out.extend_from_slice(&self.samplerate.to_le_bytes());
+        out.extend_from_slice(&self.source_mtime.to_le_bytes());
+        for l in &self.levels {
+            out.extend_from_slice(&l.samples_per_peak.to_le_bytes());
+            out.extend_from_slice(&(l.count as u32).to_le_bytes());
+        }
+        for l in &self.levels {
+            for v in &l.data {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    /// Write a `.reapeaks` cache file (best effort for read-only media).
+    pub fn write(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        std::fs::write(path, self.to_bytes())
+    }
+
     /// Source length in samples (from the finest level).
     pub fn length_samples(&self) -> u64 {
         self.levels
@@ -298,5 +400,30 @@ mod tests {
             checked += 1;
         }
         assert!(checked > 0);
+    }
+
+    #[test]
+    fn compute_and_roundtrip() {
+        // 1 kHz of ramp: frame f, mono → f/48000.
+        let frames = 48_000usize;
+        let pk = ReaPeaks::compute(1, 48_000, frames, |f, _| f as f32 / frames as f32);
+        assert_eq!(pk.levels.len(), 3);
+        assert_eq!(pk.levels[0].samples_per_peak, 160);
+        assert_eq!(pk.levels[1].samples_per_peak, 2400);
+        assert_eq!(pk.levels[2].samples_per_peak, 48000);
+        assert_eq!(pk.levels[0].count, frames.div_ceil(160));
+        // The last fine peak's max ≈ 1.0; the coarse level agrees.
+        let (fine_max, _) = pk.levels[0].pair(1, 0, pk.levels[0].count - 1);
+        assert!((fine_max - 1.0).abs() < 0.01, "{fine_max}");
+        let (coarse_max, coarse_min) = pk.levels[2].pair(1, 0, 0);
+        assert!((coarse_max - 1.0).abs() < 0.01);
+        assert!(coarse_min.abs() < 0.01);
+
+        // Bytes round-trip through the parser.
+        let parsed = ReaPeaks::parse(&pk.to_bytes()).unwrap();
+        assert_eq!(parsed.channels, 1);
+        assert_eq!(parsed.samplerate, 48_000);
+        assert_eq!(parsed.levels.len(), 3);
+        assert_eq!(parsed.levels[0].data, pk.levels[0].data);
     }
 }
