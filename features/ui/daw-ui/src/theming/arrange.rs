@@ -188,3 +188,24 @@ impl Default for ArrangeTheme {
         Self::fts_default()
     }
 }
+
+/// Image chrome for the arrange view — REAPER 7's fixed-lane art. Kept
+/// separate from [`ArrangeTheme`] (which stays `Copy`): these carry data
+/// URIs. All optional; renderers fall back to colour-drawn equivalents.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct ArrangeSkin {
+    /// `lane_solo_on/off` — the per-lane play button (normal frame of the
+    /// 3-state strip). "On" = the lane is playing (REAPER's filled dot).
+    pub lane_solo_on: Option<super::mcp::SkinImage>,
+    pub lane_solo_off: Option<super::mcp::SkinImage>,
+    /// `lane_solo_on/off_indicator` — the tiny variant drawn when the
+    /// track shows only the playing lane.
+    pub lane_solo_on_indicator: Option<super::mcp::SkinImage>,
+    pub lane_solo_off_indicator: Option<super::mcp::SkinImage>,
+    /// `fixed_lanes_one/small/big/hidden` — the lane display-mode button
+    /// (cycles: show one lane → small lanes → big lanes).
+    pub fixed_lanes_one: Option<super::mcp::SkinImage>,
+    pub fixed_lanes_small: Option<super::mcp::SkinImage>,
+    pub fixed_lanes_big: Option<super::mcp::SkinImage>,
+    pub fixed_lanes_hidden: Option<super::mcp::SkinImage>,
+}

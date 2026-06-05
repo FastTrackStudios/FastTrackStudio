@@ -7,6 +7,18 @@
 
 use dioxus::prelude::*;
 
+/// Fixed-lane display mode — mirrors REAPER 7's lane-button cycle.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum LaneDisplay {
+    /// All lanes visible, compact rows.
+    #[default]
+    Small,
+    /// All lanes visible, each at full item height (taller track row).
+    Big,
+    /// Only the playing lane shown, full height.
+    One,
+}
+
 /// One clip/item on a track's arrangement lane.
 #[derive(Clone, PartialEq)]
 pub struct ClipView {
@@ -155,6 +167,8 @@ pub struct TrackView {
     pub lane_play_mask: u64,
     /// Lane display names (chips at the lane's left edge).
     pub lane_names: Vec<String>,
+    /// REAPER's lane display cycle: one / small / big.
+    pub lane_display: LaneDisplay,
 
     // ── arrangement ──
     pub clips: Vec<ClipView>,
@@ -191,6 +205,7 @@ impl TrackView {
             lane_count: 0,
             lane_play_mask: 0,
             lane_names: Vec::new(),
+            lane_display: LaneDisplay::Small,
             clips: Vec::new(),
             envelopes: Vec::new(),
         }

@@ -434,6 +434,17 @@ fn views_from_specs(specs: &[TrackSpec]) -> Vec<TrackView> {
             view.lane_count = track.lane_count;
             view.lane_play_mask = track.lane_play_mask;
             view.lane_names = track.lane_names.clone();
+            view.lane_display = match track.lane_display {
+                daw::service::LaneDisplay::One => daw::ui::panels::LaneDisplay::One,
+                daw::service::LaneDisplay::Big => daw::ui::panels::LaneDisplay::Big,
+                daw::service::LaneDisplay::Small => daw::ui::panels::LaneDisplay::Small,
+            };
+            // Big lanes: REAPER grows the track row so each lane gets
+            // full item height (TCP row + arrange row share `height`,
+            // so alignment holds automatically).
+            if view.lane_display == daw::ui::panels::LaneDisplay::Big && track.lane_count > 1 {
+                view.height = (view.height * track.lane_count).min(400);
+            }
             view.sends = spec.sends;
             view.receives = spec.receives;
             view.parent_send = spec.parent_send;

@@ -320,6 +320,9 @@ pub struct Theme {
     /// The arrange-view context — ruler/grid/lane/item colours (REAPER themes
     /// these purely through the palette; no WALTER).
     pub arrange: super::arrange::ArrangeTheme,
+    /// Arrange image chrome (REAPER 7 fixed-lane buttons) — separate
+    /// struct so `ArrangeTheme` stays `Copy`.
+    pub arrange_skin: super::arrange::ArrangeSkin,
     /// The transport context — `trans.*` layout + transport_* images.
     pub trans: super::trans::TransTheme,
     /// The envelope-control-panel context — `envcp.*` layout + envcp_* images.
@@ -362,6 +365,7 @@ impl Theme {
             tcp: McpTheme::fts_default_tcp(),
             engine: None,
             arrange: super::arrange::ArrangeTheme::fts_default(),
+            arrange_skin: super::arrange::ArrangeSkin::default(),
             trans: super::trans::TransTheme::fts_default(),
             envcp: super::envcp::EnvcpTheme::fts_default(),
         }

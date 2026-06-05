@@ -116,6 +116,8 @@ pub struct Track {
     /// Lane display names, one per lane (may be shorter than
     /// `lane_count`; missing entries default to 1-based numbers).
     pub lane_names: Vec<String>,
+    /// How fixed lanes are displayed (REAPER's one/small/big cycle).
+    pub lane_display: LaneDisplay,
 
     // === Visibility ===
     /// Whether the track is visible in the TCP (track control panel / arrange view)
@@ -151,6 +153,7 @@ impl Track {
             lane_count: 0,
             lane_play_mask: 0,
             lane_names: Vec::new(),
+            lane_display: LaneDisplay::default(),
             visible_in_tcp: true,
             visible_in_mixer: true,
             fx_count: 0,
@@ -179,6 +182,20 @@ impl Default for Track {
     fn default() -> Self {
         Self::new(String::new(), 0, String::new())
     }
+}
+
+/// Fixed-lane display mode (REAPER 7's lane-button cycle:
+/// show-one-lane → small lanes → big lanes).
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Facet)]
+pub enum LaneDisplay {
+    /// All lanes visible, compact rows.
+    #[default]
+    Small = 0,
+    /// All lanes visible, each at full item height.
+    Big = 1,
+    /// Only the playing lane is shown, full height.
+    One = 2,
 }
 
 /// Input monitoring mode for a track.

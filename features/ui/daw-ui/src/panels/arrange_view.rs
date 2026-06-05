@@ -28,7 +28,9 @@
 //! The ruler shares the lanes' horizontal scroll: the lane scroller's
 //! `onscroll` mirrors `scroll_left` into the ruler content's offset.
 
-use crate::panels::model::{EnvelopeView, MarkerView, RegionView, TempoMarkerView, TrackView};
+use crate::panels::model::{
+    EnvelopeView, LaneDisplay, MarkerView, RegionView, TempoMarkerView, TrackView,
+};
 use crate::panels::track_control_panel::TrackControlPanel;
 use crate::prelude::*;
 use crate::theming::{Color, use_theme};
@@ -528,10 +530,17 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
     let item_edge = ar.item_edge.css();
     let track_color = track.color.as_deref().and_then(Color::hex);
 
-    // Fixed item lanes (REAPER 7 comping): subdivide the row into
-    // `lane_count` equal sub-lanes. Items land on their lane; lanes
-    // outside the play mask hold alternate takes and render dimmed.
-    let lane_count = track.lane_count.max(1);
+    // Fixed item lanes (REAPER 7 comping). Display modes mirror
+    // REAPER's lane-button cycle:
+    // - One:   only the playing lane is shown, full height — other
+    //          lanes' items don't render at all.
+    // - Small: all lanes subdivide the normal row height.
+    // - Big:   all lanes at full item height (the view-model already
+    //          multiplied `track.height`, so the math here is the
+    //          same as Small).
+    let lanes_on = track.lane_count > 1;
+    let one_lane = lanes_on && track.lane_display == LaneDisplay::One;
+    let lane_count = if one_lane { 1 } else { track.lane_count.max(1) };
     let lane_area_h = track.height.saturating_sub(4) as f64;
     let lane_h = lane_area_h / lane_count as f64;
     let item_h = if lane_count > 1 {
@@ -539,6 +548,7 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
     } else {
         lane_area_h
     };
+    let sk = theme.arrange_skin.clone();
 
     rsx! {
         div {
@@ -565,11 +575,15 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                     let x = clip.start * pps;
                     let w = (clip.length * pps).max(2.0);
                     // Lane geometry + playing state for this item.
-                    let lane = clip.lane.unwrap_or(0).min(lane_count - 1);
-                    let top = 2.0 + lane as f64 * lane_h;
-                    let lane_playing = lane_count <= 1
+                    let lane = clip.lane.unwrap_or(0);
+                    let lane_playing = !lanes_on
                         || track.lane_play_mask == 0
                         || (lane < 64 && track.lane_play_mask & (1u64 << lane) != 0);
+                    // "Show one lane": non-playing lanes are collapsed
+                    // away entirely; the playing lane fills the row.
+                    let hidden = one_lane && !lane_playing;
+                    let slot = if one_lane { 0 } else { lane.min(lane_count - 1) };
+                    let top = 2.0 + slot as f64 * lane_h;
                     let fade_in_w = (clip.fade_in * pps).min(w);
                     let fade_out_w = (clip.fade_out * pps).min(w);
                     // Waveform peaks: REAPER's asymmetric model — the top
@@ -592,6 +606,7 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                         format!("{top}{bottom}")
                     });
                     rsx! {
+                        if !hidden {
                         div {
                             key: "c{ci}",
                             title: "{clip.name}",
@@ -675,6 +690,7 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                                     c = ar.mute_overlay.css()) }
                             }
                         }
+                        }
                     }
                 }
             }
@@ -701,24 +717,90 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                             .unwrap_or_else(|| (ln + 1).to_string());
                         let playing = track.lane_play_mask == 0
                             || (ln < 64 && track.lane_play_mask & (1u64 << ln) != 0);
+                        let chip_h = (lane_h - 1.0).max(4.0);
+                        // Lane-play button art: REAPER's `lane_solo_*`
+                        // strips — the full button when the lane is
+                        // tall enough (big lanes), the tiny
+                        // `*_indicator` variant on small lanes.
+                        let art = if track.lane_display == LaneDisplay::Big && chip_h >= 18.0 {
+                            if playing { sk.lane_solo_on.as_ref() } else { sk.lane_solo_off.as_ref() }
+                        } else if playing {
+                            sk.lane_solo_on_indicator.as_ref()
+                        } else {
+                            sk.lane_solo_off_indicator.as_ref()
+                        };
                         rsx! {
                             div {
                                 key: "ln{ln}",
                                 style: format!(
                                     "position:absolute; left:0; top:{y:.1}px; height:{h:.1}px; \
-                                     display:flex; align-items:center; padding:0 3px; \
+                                     display:flex; align-items:center; gap:2px; padding:0 3px; \
                                      font-size:8px; color:{fg}; background:{bg}; \
                                      border-right:1px solid {divider}; \
                                      border-bottom:1px solid {divider}; \
                                      opacity:{op}; pointer-events:none;",
                                     y = 2.0 + ln as f64 * lane_h,
-                                    h = (lane_h - 1.0).max(4.0),
+                                    h = chip_h,
                                     fg = ar.item_label.css(),
                                     bg = ar.row_bg[i].css(),
                                     op = if playing { "0.9" } else { "0.4" },
                                 ),
+                                if let Some(img) = art {
+                                    img {
+                                        src: "{img.url}",
+                                        style: format!(
+                                            "width:{w}px; height:{h}px; flex:0 0 auto;",
+                                            w = img.w.min(chip_h as u32 * img.w / img.h.max(1)),
+                                            h = img.h.min(chip_h as u32),
+                                        ),
+                                    }
+                                }
                                 "{name}"
                             }
+                        }
+                    }
+                }
+            }
+
+            // "Show one lane" tab: a single chip naming the playing
+            // lane (REAPER shows which comp lane you're hearing).
+            if one_lane {
+                {
+                    let playing_lane = (0..track.lane_count)
+                        .find(|ln| {
+                            track.lane_play_mask == 0
+                                || (*ln < 64 && track.lane_play_mask & (1u64 << *ln) != 0)
+                        })
+                        .unwrap_or(0);
+                    let name = track
+                        .lane_names
+                        .get(playing_lane as usize)
+                        .cloned()
+                        .unwrap_or_else(|| (playing_lane + 1).to_string());
+                    let art = sk.lane_solo_on_indicator.as_ref();
+                    rsx! {
+                        div {
+                            style: format!(
+                                "position:absolute; left:0; top:2px; height:12px; \
+                                 display:flex; align-items:center; gap:2px; padding:0 3px; \
+                                 font-size:8px; color:{fg}; background:{bg}; \
+                                 border-right:1px solid {divider}; \
+                                 border-bottom:1px solid {divider}; \
+                                 opacity:0.9; pointer-events:none;",
+                                fg = ar.item_label.css(),
+                                bg = ar.row_bg[i].css(),
+                            ),
+                            if let Some(img) = art {
+                                img {
+                                    src: "{img.url}",
+                                    style: format!(
+                                        "width:{w}px; height:{h}px; flex:0 0 auto;",
+                                        w = img.w,
+                                        h = img.h,
+                                    ),
+                                }
+                            }
+                            "{name}"
                         }
                     }
                 }

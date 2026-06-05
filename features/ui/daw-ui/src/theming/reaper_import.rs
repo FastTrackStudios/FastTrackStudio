@@ -278,6 +278,29 @@ pub fn theme_from_reaper_scaled(rt: &ReaperTheme, scale: f32) -> Theme {
             &mut ar.marquee_fill,
             with_dm("marquee_fill", "marquee_drawmode"),
         );
+
+        // Fixed-lane chrome (REAPER 7): 3-state button strips; we render
+        // the normal frame (hover/pressed are interaction states the
+        // arrange renderer doesn't track yet).
+        let lane_btn = |name: &str| -> Option<SkinImage> {
+            let s = imgs.button3(name).ok()?;
+            let (w, h) = s.normal.dimensions();
+            Some(SkinImage {
+                url: ImageCatalog::data_uri(&s.normal),
+                w,
+                h,
+                slices: None,
+            })
+        };
+        let sk = &mut theme.arrange_skin;
+        sk.lane_solo_on = lane_btn("lane_solo_on");
+        sk.lane_solo_off = lane_btn("lane_solo_off");
+        sk.lane_solo_on_indicator = lane_btn("lane_solo_on_indicator");
+        sk.lane_solo_off_indicator = lane_btn("lane_solo_off_indicator");
+        sk.fixed_lanes_one = lane_btn("fixed_lanes_one");
+        sk.fixed_lanes_small = lane_btn("fixed_lanes_small");
+        sk.fixed_lanes_big = lane_btn("fixed_lanes_big");
+        sk.fixed_lanes_hidden = lane_btn("fixed_lanes_hidden");
     }
 
     // ── define_parameter knobs ──
