@@ -162,6 +162,7 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
         lane_play_mask: 0,
         lane_names: Vec::new(),
         lane_display: daw_proto::track::LaneDisplay::default(),
+        grouping: daw_proto::track::TrackGrouping::default(),
         visible_in_tcp,
         visible_in_mixer,
         fx_count,

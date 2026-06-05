@@ -409,6 +409,16 @@ pub struct Track {
     // Free item positioning
     pub free_mode: Option<FreeMode>, // FREEMODE - Free item positioning mode
 
+    /// `GROUP_FLAGS` — track grouping matrix membership, groups 1–32.
+    /// One bitmask per grouping parameter, in REAPER's documented
+    /// order (1 = Volume Master, 2 = Volume Follow, …, 21 = VCA
+    /// Master, 22 = VCA Follow, 23 = VCA pre-FX Follow, 24/25 =
+    /// Media-Edit Lead/Follow). Trailing zero fields are omitted by
+    /// REAPER, so the Vec may be short.
+    pub group_flags: Option<Vec<u32>>,
+    /// `GROUP_FLAGS_HIGH` — same layout for groups 33–64.
+    pub group_flags_high: Option<Vec<u32>>,
+
     // Fixed lanes (REAPER 7+)
     pub fixed_lanes: Option<FixedLanesSettings>, // FIXEDLANES - Fixed lanes settings
     pub lane_solo: Option<LaneSoloSettings>,     // LANESOLO - Lane solo settings
@@ -576,6 +586,8 @@ impl Default for Track {
             bus_compact: None,
             show_in_mixer: None,
             free_mode: None,
+            group_flags: None,
+            group_flags_high: None,
             fixed_lanes: None,
             lane_solo: None,
             lane_record: None,
@@ -673,6 +685,8 @@ impl Track {
                 | "BUSCOMP"
                 | "SHOWINMIX"
                 | "FREEMODE"
+                | "GROUP_FLAGS"
+                | "GROUP_FLAGS_HIGH"
                 | "FIXEDLANES"
                 | "LANEREC"
                 | "LANENAME"
@@ -828,6 +842,20 @@ impl Track {
             }
             "FREEMODE" if tokens.len() > 1 => {
                 track.free_mode = Some(FreeMode::from(Self::parse_int(&tokens[1])?));
+            }
+            "GROUP_FLAGS" | "GROUP_FLAGS_HIGH" if tokens.len() >= 2 => {
+                // Per-parameter group bitmasks (trailing zeros omitted
+                // by REAPER). Values can exceed i32 textually
+                // (4294967295) — `as u32` keeps the bits.
+                let masks: Vec<u32> = tokens[1..]
+                    .iter()
+                    .map(|t| Self::parse_int(t).map(|v| v as u32))
+                    .collect::<Result<_, _>>()?;
+                if identifier == "GROUP_FLAGS" {
+                    track.group_flags = Some(masks);
+                } else {
+                    track.group_flags_high = Some(masks);
+                }
             }
             "FIXEDLANES" if tokens.len() >= 6 => {
                 track.fixed_lanes = Some(FixedLanesSettings {
@@ -999,6 +1027,8 @@ impl Track {
             bus_compact: None,
             show_in_mixer: None,
             free_mode: None,
+            group_flags: None,
+            group_flags_high: None,
             fixed_lanes: None,
             lane_solo: None,
             lane_record: None,
@@ -1112,6 +1142,8 @@ impl Track {
             bus_compact: None,
             show_in_mixer: None,
             free_mode: None,
+            group_flags: None,
+            group_flags_high: None,
             fixed_lanes: None,
             lane_solo: None,
             lane_record: None,

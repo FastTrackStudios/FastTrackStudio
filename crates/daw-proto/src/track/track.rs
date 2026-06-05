@@ -119,6 +119,10 @@ pub struct Track {
     /// How fixed lanes are displayed (REAPER's one/small/big cycle).
     pub lane_display: LaneDisplay,
 
+    // === Grouping ===
+    /// Track-grouping matrix membership (control ganging + VCA).
+    pub grouping: TrackGrouping,
+
     // === Visibility ===
     /// Whether the track is visible in the TCP (track control panel / arrange view)
     pub visible_in_tcp: bool,
@@ -154,6 +158,7 @@ impl Track {
             lane_play_mask: 0,
             lane_names: Vec::new(),
             lane_display: LaneDisplay::default(),
+            grouping: TrackGrouping::default(),
             visible_in_tcp: true,
             visible_in_mixer: true,
             fx_count: 0,
@@ -181,6 +186,44 @@ impl Track {
 impl Default for Track {
     fn default() -> Self {
         Self::new(String::new(), 0, String::new())
+    }
+}
+
+/// Track-grouping matrix membership (REAPER's Track Grouping
+/// Parameters). Each field is a bitmask of group numbers (bit n =
+/// group n+1); groups 1–32 come from `GROUP_FLAGS`, 33–64 from
+/// `GROUP_FLAGS_HIGH`, folded into one u64 per parameter.
+///
+/// Lead/follow gangs CONTROL GESTURES (touching a lead's control moves
+/// followers' controls); VCA follow is the one that changes PLAYBACK —
+/// a follower's effective gain is its fader × every shared-group VCA
+/// lead's fader.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Facet)]
+pub struct TrackGrouping {
+    pub volume_lead: u64,
+    pub volume_follow: u64,
+    pub pan_lead: u64,
+    pub pan_follow: u64,
+    pub mute_lead: u64,
+    pub mute_follow: u64,
+    pub solo_lead: u64,
+    pub solo_follow: u64,
+    pub recarm_lead: u64,
+    pub recarm_follow: u64,
+    pub polarity_lead: u64,
+    pub polarity_follow: u64,
+    pub vca_lead: u64,
+    pub vca_follow: u64,
+    /// VCA follow applied pre-FX instead of at the fader.
+    pub vca_prefx_follow: u64,
+    pub media_edit_lead: u64,
+    pub media_edit_follow: u64,
+}
+
+impl TrackGrouping {
+    /// Whether every mask is empty (track belongs to no groups).
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
     }
 }
 

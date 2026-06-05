@@ -36,5 +36,6 @@ pub use test_utils::{
     TrackGroup, TrackStructureBuilder, assert_tracks_equal, display_tracklist, format_tracklist,
 };
 pub use track::{
-    InputMonitoringMode, LaneDisplay, RecordInput, ReorderTracksBehavior, Track, TrackRef,
+    InputMonitoringMode, LaneDisplay, RecordInput, ReorderTracksBehavior, Track, TrackGrouping,
+    TrackRef,
 };

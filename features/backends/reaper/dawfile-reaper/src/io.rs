@@ -141,6 +141,8 @@ fn parse_track_block_lenient(block: &RppBlock) -> RppTrack {
         bus_compact: None,
         show_in_mixer: None,
         free_mode: None,
+        group_flags: None,
+        group_flags_high: None,
         fixed_lanes: None,
         lane_solo: None,
         lane_record: None,

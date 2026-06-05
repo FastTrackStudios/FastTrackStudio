@@ -138,8 +138,9 @@ pub use track::TracksClient;
 pub use track::{
     AddChildren, FolderDepthChange, InputMonitoringMode, LaneDisplay, RecordInput,
     ReorderTracksBehavior, Track, TrackError, TrackEvent, TrackExtStateRequest, TrackGroup,
-    TrackHierarchy, TrackHierarchyBuilder, TrackNode, TrackRef, TrackStructureBuilder, Tracks,
-    TracksRpc, assert_tracks_equal, display_tracklist, format_tracklist,
+    TrackGrouping, TrackHierarchy, TrackHierarchyBuilder, TrackNode, TrackRef,
+    TrackStructureBuilder, Tracks, TracksRpc, assert_tracks_equal, display_tracklist,
+    format_tracklist,
 };
 pub use transport::*;
 pub use ui::*;
