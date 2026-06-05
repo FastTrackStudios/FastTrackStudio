@@ -37,7 +37,10 @@ impl BlockType {
             "REAPER_PROJECT" => BlockType::Project,
             "TRACK" => BlockType::Track,
             "ITEM" => BlockType::Item,
-            "VOLENV" | "VOLENV2" | "PANENV" | "PANENV2" | "PARMENV" => BlockType::Envelope,
+            "VOLENV" | "VOLENV2" | "VOLENV3" | "PANENV" | "PANENV2" | "MUTEENV" | "MUTEENV2"
+            | "WIDTHENV" | "WIDTHENV2" | "AUXVOLENV" | "AUXPANENV" | "AUXMUTEENV" | "PARMENV" => {
+                BlockType::Envelope
+            }
             "FXCHAIN" => BlockType::FxChain,
             "SOURCE" => BlockType::Source,
             "TAKE" => BlockType::Take,

@@ -558,14 +558,18 @@ type ParseEnvelopeResult =
     Result<(Vec<EnvelopePoint>, Vec<AutomationItem>, Vec<ExtensionData>), String>;
 
 impl Envelope {
-    /// Create a new envelope from an RPP block
+    /// Create a new envelope from an RPP block: header lines
+    /// (EGUID/ACT/VIS/LANEHEIGHT/ARM/DEFSHAPE), the `PT` point list,
+    /// and `POOLEDENVINST` automation items.
     pub fn from_block(block: &RppBlock) -> Result<Self, String> {
-        // TODO: Implement envelope parsing from RPP block
-        Ok(Envelope {
+        use crate::primitives::RppBlockContent;
+        let mut env = Envelope {
             envelope_type: block.name.clone(),
             guid: String::new(),
-            active: false,
-            visible: false,
+            // REAPER omits ACT/VIS on some old envelopes — both
+            // default to on.
+            active: true,
+            visible: true,
             show_in_lane: false,
             lane_height: 0,
             armed: false,
@@ -573,7 +577,46 @@ impl Envelope {
             points: Vec::new(),
             automation_items: Vec::new(),
             extension_data: Vec::new(),
-        })
+        };
+        for child in &block.children {
+            // Nested blocks (`<EXT …>`) carry extension data we don't
+            // decode here yet.
+            if matches!(child, RppBlockContent::Block(_)) {
+                continue;
+            }
+            let line = child.to_string();
+            let line = line.trim();
+            let mut it = line.split_whitespace();
+            let Some(key) = it.next() else { continue };
+            let mut next_i = |default: i64| -> i64 {
+                it.next()
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .unwrap_or(default)
+            };
+            match key {
+                "EGUID" => env.guid = line[5..].trim().to_string(),
+                "ACT" => env.active = next_i(1) != 0,
+                "VIS" => {
+                    env.visible = next_i(1) != 0;
+                    env.show_in_lane = next_i(0) != 0;
+                }
+                "LANEHEIGHT" => env.lane_height = next_i(0) as i32,
+                "ARM" => env.armed = next_i(0) != 0,
+                "DEFSHAPE" => env.default_shape = next_i(0) as i32,
+                "PT" => {
+                    if let Ok(pt) = EnvelopePoint::from_rpp_line(line) {
+                        env.points.push(pt);
+                    }
+                }
+                "POOLEDENVINST" => {
+                    if let Ok(ai) = AutomationItem::from_rpp_line(line) {
+                        env.automation_items.push(ai);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(env)
     }
 
     /// Parse envelope points, automation items, and extension data from a raw RPP envelope block string

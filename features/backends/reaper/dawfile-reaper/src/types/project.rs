@@ -330,11 +330,12 @@ pub struct ProjectProperties {
     pub master_track_view: Option<MasterTrackView>, // MASTERTRACKVIEW 0 0.6667 0.5 0.5 0 0 0 0 0 0 0 0 0 0
     pub master_hw_out: MasterHwOut,                 // MASTERHWOUT 0 0 1 0 0 0 0 -1
     pub master_nch: Option<(i32, i32)>,             // MASTER_NCH 2 2
-    pub master_volume: Option<(i32, i32, i32, i32, i32)>, // MASTER_VOLUME 1 0 -1 -1 1
-    pub master_pan_mode: Option<i32>,               // MASTER_PANMODE 3
-    pub master_pan_law_flags: Option<i32>,          // MASTER_PANLAWFLAGS 3
-    pub master_fx: Option<i32>,                     // MASTER_FX 1
-    pub master_sel: Option<i32>,                    // MASTER_SEL 0
+    /// `MASTER_VOLUME vol pan ? ? ?` — vol is linear gain, pan −1…1.
+    pub master_volume: Option<(f64, f64, f64, f64, f64)>,
+    pub master_pan_mode: Option<i32>,      // MASTER_PANMODE 3
+    pub master_pan_law_flags: Option<i32>, // MASTER_PANLAWFLAGS 3
+    pub master_fx: Option<i32>,            // MASTER_FX 1
+    pub master_sel: Option<i32>,           // MASTER_SEL 0
 
     // Global automation
     pub global_auto: Option<i32>, // GLOBAL_AUTO -1
@@ -1166,8 +1167,7 @@ impl ProjectProperties {
                         tokens[3].as_number(),
                         tokens[4].as_number(),
                     ) {
-                        self.master_volume =
-                            Some((a as i32, b as i32, c as i32, d as i32, e as i32));
+                        self.master_volume = Some((a, b, c, d, e));
                     }
                 }
             }
@@ -1770,7 +1770,7 @@ mod tests {
         assert_eq!(props.master_mute_solo, Some(0));
         assert_eq!(props.master_hw_out, Some((0, 0, 1, 0, 0, 0, 0, -1)));
         assert_eq!(props.master_nch, Some((2, 2)));
-        assert_eq!(props.master_volume, Some((1, 0, -1, -1, 1)));
+        assert_eq!(props.master_volume, Some((1.0, 0.0, -1.0, -1.0, 1.0)));
         assert_eq!(props.master_pan_mode, Some(3));
         assert_eq!(props.master_pan_law_flags, Some(3));
         assert_eq!(props.master_fx, Some(1));

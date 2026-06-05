@@ -143,7 +143,21 @@ fn parse_block_header(block_line: &str) -> Result<(String, Vec<Token>), String> 
 fn requires_structured_tokens(block_name: &str) -> bool {
     matches!(
         block_name,
-        "REAPER_PROJECT" | "TEMPOENVEX" | "VOLENV" | "VOLENV2" | "PANENV" | "PANENV2" | "PARMENV"
+        "REAPER_PROJECT"
+            | "TEMPOENVEX"
+            | "VOLENV"
+            | "VOLENV2"
+            | "VOLENV3"
+            | "PANENV"
+            | "PANENV2"
+            | "MUTEENV"
+            | "MUTEENV2"
+            | "WIDTHENV"
+            | "WIDTHENV2"
+            | "AUXVOLENV"
+            | "AUXPANENV"
+            | "AUXMUTEENV"
+            | "PARMENV"
     )
 }
 
