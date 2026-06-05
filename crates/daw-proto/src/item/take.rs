@@ -45,6 +45,10 @@ pub struct Take {
     pub pitch: f64,
     /// Whether to preserve pitch when changing playback rate
     pub preserve_pitch: bool,
+    /// REAPER channel mode (`CHANMODE`): 0 normal, 1 reverse stereo,
+    /// 2 mono downmix, 3 mono-left, 4 mono-right, 5–66 mono of
+    /// source channel N−2 (1-based), 67+ stereo pair at N−66.
+    pub channel_mode: u32,
     /// Offset into the source (start position)
     pub start_offset: Duration,
 
@@ -112,6 +116,7 @@ impl Default for Take {
             play_rate: 1.0,
             pitch: 0.0,
             preserve_pitch: true,
+            channel_mode: 0,
             start_offset: Duration::ZERO,
             source_type: SourceType::Empty,
             source_file_path: None,

@@ -1116,6 +1116,8 @@ impl ReaperTake {
             play_rate,
             pitch,
             preserve_pitch,
+            // I_TAKE_CHANMODE via the live API — not yet wired.
+            channel_mode: 0,
             start_offset: Duration::from_seconds(start_offset),
             source_type,
             source_file_path,
