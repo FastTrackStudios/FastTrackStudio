@@ -588,15 +588,15 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                     let fade_out_w = (clip.fade_out * pps).min(w);
                     // Waveform peaks: REAPER's asymmetric model — the top
                     // boundary follows each column's max, the bottom its min,
-                    // around the zero line at the item's vertical centre.
-                    let peaks_path = (!clip.peaks.is_empty()).then(|| {
-                        let mid = item_h / 2.0;
-                        let half = mid - 1.0;
-                        let n = clip.peaks.len().max(2) as f64;
+                    // around the zero line at the lane's vertical centre.
+                    // Stereo sources draw split L/R half-lanes
+                    // (REAPER's stereo item view).
+                    let wave_poly = |peaks: &[(f32, f32)], mid: f64, half: f64| -> String {
+                        let n = peaks.len().max(2) as f64;
                         let step = w / (n - 1.0);
                         let mut top = String::new();
                         let mut bottom = String::new();
-                        for (pi, (pmax, pmin)) in clip.peaks.iter().enumerate() {
+                        for (pi, (pmax, pmin)) in peaks.iter().enumerate() {
                             let px = pi as f64 * step;
                             let up = (*pmax as f64).clamp(-1.0, 1.0) * half;
                             let dn = (*pmin as f64).clamp(-1.0, 1.0) * half;
@@ -604,7 +604,21 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                             bottom.insert_str(0, &format!("{px:.1},{:.1} ", mid - dn));
                         }
                         format!("{top}{bottom}")
-                    });
+                    };
+                    let wave_polys: Vec<String> = if !clip.peaks.is_empty()
+                        && !clip.peaks_right.is_empty()
+                        && item_h >= 12.0
+                    {
+                        let half = item_h * 0.25 - 1.0;
+                        vec![
+                            wave_poly(&clip.peaks, item_h * 0.25, half),
+                            wave_poly(&clip.peaks_right, item_h * 0.75, half),
+                        ]
+                    } else if !clip.peaks.is_empty() {
+                        vec![wave_poly(&clip.peaks, item_h / 2.0, item_h / 2.0 - 1.0)]
+                    } else {
+                        Vec::new()
+                    };
                     rsx! {
                         if !hidden {
                         div {
@@ -623,15 +637,19 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                                 dim = if lane_playing { "" } else { " opacity:0.35;" },
                             ),
 
-                            // Peaks under the label (`col_tr1/2_peaks`).
-                            if let Some(points) = peaks_path {
+                            // Peaks under the label (`col_tr1/2_peaks`);
+                            // one polygon per channel lane.
+                            if !wave_polys.is_empty() {
                                 svg {
                                     width: "{w:.0}",
                                     height: "{item_h:.0}",
                                     style: "position:absolute; left:0; top:0; pointer-events:none;",
-                                    polygon {
-                                        points,
-                                        fill: ar.peaks[i].css(),
+                                    for (wi, points) in wave_polys.into_iter().enumerate() {
+                                        polygon {
+                                            key: "w{wi}",
+                                            points,
+                                            fill: ar.peaks[i].css(),
+                                        }
                                     }
                                 }
                             }

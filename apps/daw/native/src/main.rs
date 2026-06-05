@@ -666,6 +666,10 @@ fn clip_from_item(
             let s1 = s0 + length * rate;
             let cols = ((length * 12.0) as usize).clamp(8, 2000);
             clip.peaks = peaks.columns(0, s0, s1, cols);
+            // Stereo sources render split L/R lanes like REAPER.
+            if peaks.channels >= 2 {
+                clip.peaks_right = peaks.columns(1, s0, s1, cols);
+            }
         }
     }
     clip

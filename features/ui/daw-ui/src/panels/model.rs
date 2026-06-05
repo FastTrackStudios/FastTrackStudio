@@ -33,6 +33,10 @@ pub struct ClipView {
     /// evenly spaced across the clip — REAPER's asymmetric peak model
     /// (read straight out of `.reapeaks` mipmaps). Empty = no peaks drawn.
     pub peaks: Vec<(f32, f32)>,
+    /// Right-channel peaks for stereo sources. When non-empty the item
+    /// renders split L/R waveform lanes (REAPER's stereo item view);
+    /// `peaks` then holds the left channel.
+    pub peaks_right: Vec<(f32, f32)>,
     /// Fade-in length in seconds (0 = none); drawn REAPER-style as a fade
     /// triangle at the item head.
     pub fade_in: f64,
@@ -52,6 +56,7 @@ impl ClipView {
             name: name.into(),
             color: color.map(|c| c.to_string()),
             peaks: Vec::new(),
+            peaks_right: Vec::new(),
             fade_in: 0.0,
             fade_out: 0.0,
             selected: false,
