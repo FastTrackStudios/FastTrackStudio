@@ -2568,7 +2568,7 @@ mod folder_tests {
         );
 
         // Exactly one LANENAME line, listing all three playlist names. REAPER
-        // format: `LANENAME <count> "name0" "name1" "name2"`.
+        // format: `LANENAME "name0" "name1" "name2"` (names only, no count).
         let lanename: Vec<&str> = rpp
             .lines()
             .map(str::trim)

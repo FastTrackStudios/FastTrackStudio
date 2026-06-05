@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [[bin]]
 name = "daw-native"
 path = "src/main.rs"

@@ -861,7 +861,7 @@ impl Item {
                     if !*in_take_context {
                         item.name = name.clone();
                     }
-                    if let Some(ref mut take) = current_take {
+                    if let Some(take) = current_take {
                         take.name = name;
                     }
                 }
@@ -877,7 +877,7 @@ impl Item {
                     if !*in_take_context {
                         item.volpan = Some(vp.clone());
                     }
-                    if let Some(ref mut take) = current_take {
+                    if let Some(take) = current_take {
                         take.volpan = Some(vp);
                     }
                 }
@@ -888,7 +888,7 @@ impl Item {
                     if !*in_take_context {
                         item.slip_offset = v;
                     }
-                    if let Some(ref mut take) = current_take {
+                    if let Some(take) = current_take {
                         take.slip_offset = v;
                     }
                 }
@@ -914,7 +914,7 @@ impl Item {
                     if !*in_take_context {
                         item.playrate = Some(pr.clone());
                     }
-                    if let Some(ref mut take) = current_take {
+                    if let Some(take) = current_take {
                         take.playrate = Some(pr);
                     }
                 }
@@ -925,7 +925,7 @@ impl Item {
                     if !*in_take_context {
                         item.channel_mode = cm;
                     }
-                    if let Some(ref mut take) = current_take {
+                    if let Some(take) = current_take {
                         take.channel_mode = cm;
                     }
                 }
@@ -934,12 +934,12 @@ impl Item {
                 if tokens.len() > 1 {
                     let guid = Self::parse_string(&tokens[1])?;
                     if *in_take_context {
-                        if let Some(ref mut take) = current_take {
+                        if let Some(take) = current_take {
                             take.take_guid = Some(guid);
                         }
                     } else {
                         item.take_guid = Some(guid.clone());
-                        if let Some(ref mut take) = current_take {
+                        if let Some(take) = current_take {
                             take.take_guid = Some(guid);
                         }
                     }
@@ -970,7 +970,7 @@ impl Item {
                 if tokens.len() > 1 {
                     let rec_pass = Self::parse_int(&tokens[1])?;
                     if *in_take_context {
-                        if let Some(ref mut take) = current_take {
+                        if let Some(take) = current_take {
                             take.rec_pass = Some(rec_pass);
                         }
                     } else {
@@ -991,7 +991,7 @@ impl Item {
                 *in_take_context = true;
             }
             "TAKEVOLPAN" => {
-                if let Some(ref mut take) = current_take {
+                if let Some(take) = current_take {
                     if tokens.len() >= 4 {
                         take.volpan = Some(VolPanSettings {
                             item_trim: 0.0,
@@ -1003,7 +1003,7 @@ impl Item {
                 }
             }
             "TAKECOLOR" => {
-                if let Some(ref mut take) = current_take {
+                if let Some(take) = current_take {
                     if tokens.len() > 1 {
                         take.take_color = Some(Self::parse_int(&tokens[1])?);
                     }

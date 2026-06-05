@@ -349,8 +349,8 @@ pub struct LaneRecordSettings {
 /// Lane name settings (REAPER 7+)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaneNameSettings {
-    pub lane_count: i32,         // field 1 - number of lanes
-    pub lane_names: Vec<String>, // field 2+ - lane names
+    pub lane_count: i32, // derived: number of lanes (NOT serialized — REAPER emits names only)
+    pub lane_names: Vec<String>, // every LANENAME token is a name
 }
 
 /// MIDI hardware output settings

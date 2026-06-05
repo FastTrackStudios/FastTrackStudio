@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "Dioxus-native overlay rendering for REAPER extensions (internal — access via daw facade with reaper-ui feature)"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 daw-reaper-embed = { path = "../daw-reaper-embed" }
 

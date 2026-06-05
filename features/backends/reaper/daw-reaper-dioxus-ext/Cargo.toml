@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "REAPER extension providing daw-reaper-dioxus rendering as a service (cdylib loaded into REAPER as `reaper_daw_dioxus.so`)"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [lib]
 crate-type = ["cdylib"]
 name = "reaper_daw_dioxus"

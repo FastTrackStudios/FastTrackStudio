@@ -1,9 +1,14 @@
 [package]
 name = "dawfile-reaper"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "REAPER file parser for DawFile built on the RPP/RPPXML format"
 license = "MIT"
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 
 [dependencies]

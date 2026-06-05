@@ -4,6 +4,11 @@ description = "DAW UI — Dioxus components for DAW integration (mixer, TCP, arr
 version.workspace = true
 edition.workspace = true
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 daw-control = { path = "../../../crates/daw-control" }
 daw-proto = { path = "../../../crates/daw-proto" }

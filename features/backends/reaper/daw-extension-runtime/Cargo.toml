@@ -6,6 +6,11 @@ license.workspace = true
 authors.workspace = true
 description = "Integrated REAPER extension runtime helpers"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 # Depend on internal crates directly so `daw` can re-export this crate
 # under `daw::extension_runtime` without a dependency cycle.

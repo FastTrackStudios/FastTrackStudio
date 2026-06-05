@@ -43,11 +43,7 @@ pub trait RppSerialize {
 // ---------------------------------------------------------------------------
 
 fn b(v: bool) -> i32 {
-    if v {
-        1
-    } else {
-        0
-    }
+    if v { 1 } else { 0 }
 }
 
 fn rpp_escape(s: &str) -> String {
@@ -743,7 +739,9 @@ impl RppSerialize for Track {
             ));
         }
         if let Some(ln) = &self.lane_names {
-            out.push_str(&format!("{}LANENAME {}", inner, ln.lane_count));
+            // REAPER's format is names only — `LANENAME "Lane" C1 1 2 3` —
+            // no leading count (lane_count is derived metadata, not a field).
+            out.push_str(&format!("{}LANENAME", inner));
             for name in &ln.lane_names {
                 out.push_str(&format!(" \"{}\"", rpp_escape(name)));
             }

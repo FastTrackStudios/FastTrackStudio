@@ -5,6 +5,11 @@ edition = "2024"
 description = "Logic Pro session file parser (.logicx) — pure Rust, no C dependencies"
 license = "MIT OR Apache-2.0"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 thiserror = { workspace = true }
 daw-proto = { path = "../../../../crates/daw-proto" }

@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "Transparent overlay windows with Vello rendering for REAPER extensions (internal — access via daw facade with reaper-ui feature)"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 wgpu.workspace = true
 vello.workspace = true

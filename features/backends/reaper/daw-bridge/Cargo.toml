@@ -3,6 +3,11 @@ name = "daw-bridge"
 version.workspace = true
 edition.workspace = true
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [lib]
 crate-type = ["cdylib"]
 name = "reaper_daw_bridge"
@@ -67,7 +72,7 @@ sync = ["dep:daw-synchronization", "dep:daw-network"]
 eyre = "0.6"
 # Integration-test harness via the daw facade's `test-harness` feature
 # (replaces the former `reaper-test` crate).
-daw = { workspace = true, features = ["reaper", "test-harness"] }
+daw = { path = "../../../../crates/daw", features = ["reaper", "test-harness"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

@@ -5,6 +5,11 @@ edition.workspace = true
 publish = false
 description = "REAPER theme importer: .ReaperTheme palette, rtconfig globals/params, image-atlas slicing"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 # PNG decode + slicing for the theme image atlases.
 image = { version = "0.25", default-features = false, features = ["png"] }

@@ -5,6 +5,11 @@ edition = "2024"
 description = "DawProject file parser (.dawproject) — open exchange format by Bitwig"
 license = "MIT OR Apache-2.0"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 thiserror = { workspace = true }
 
