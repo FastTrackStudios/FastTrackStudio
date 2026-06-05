@@ -380,10 +380,8 @@ impl Interp<'_> {
                 }
                 "endlayout" => {}
                 "set" => self.exec_set(line),
-                "def" => {
-                    if line.len() >= 2 {
-                        self.defs.insert(line[1].clone(), line[2..].to_vec());
-                    }
+                "def" if line.len() >= 2 => {
+                    self.defs.insert(line[1].clone(), line[2..].to_vec());
                 }
                 "clear" => {
                     if let Some(pat) = line.get(1) {
@@ -658,10 +656,8 @@ impl Interp<'_> {
             // Bare list-valued name → slot-matched component.
             let v = if tok == "." || tok == dest {
                 current.v.get(slot).copied().unwrap_or(0.0)
-            } else if let Some(val) = self.eval_atom_slot(tok, slot) {
-                val
             } else {
-                0.0
+                self.eval_atom_slot(tok, slot).unwrap_or(0.0)
             };
             vals.push(v);
             pos += 1;
