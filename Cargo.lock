@@ -2273,7 +2273,6 @@ dependencies = [
  "eyre",
  "facet",
  "midir",
- "moire",
  "tokio",
  "tracing",
  "vox",
