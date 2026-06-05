@@ -466,6 +466,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ariadne"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8454c8a44ce2cb9cc7e7fae67fc6128465b343b92c6631e94beca3c8d1524ea5"
+dependencies = [
+ "unicode-width",
+ "yansi",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -997,6 +1007,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "btparse"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "387e80962b798815a2b5c4bcfdb6bf626fa922ffe9f74e373103b858738e9f31"
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1357,6 +1373,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "color-backtrace"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "308329d5d62e877ba02943db3a8e8c052de9fde7ab48283395ba0e6494efbabd"
+dependencies = [
+ "backtrace",
+ "btparse",
+ "termcolor",
+]
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1598,6 +1625,12 @@ checksum = "cc9504310988d938e49fff1b5f1e56e3dafe39bb1bae580c19660b58b83a191e"
 dependencies = [
  "core-foundation-sys",
 ]
+
+[[package]]
+name = "countme"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7704b5fdd17b18ae31c4c1da5a2e0305a2bf17b5249300a9ee9ed7b72114c636"
 
 [[package]]
 name = "cpal"
@@ -2272,6 +2305,7 @@ dependencies = [
  "daw-standalone",
  "eyre",
  "facet",
+ "facet-styx",
  "midir",
  "tokio",
  "tracing",
@@ -3583,6 +3617,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "facet-styx"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1632b326f6333ccaa4a1f296af05e0b3b11e3e26091b2320122b44ae3106864c"
+dependencies = [
+ "ariadne",
+ "facet",
+ "facet-core",
+ "facet-format",
+ "facet-reflect",
+ "serde_json",
+ "styx-format",
+ "styx-parse",
+ "styx-tree",
+]
+
+[[package]]
+name = "facet-testhelpers"
+version = "0.46.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c57670e26e2300e0f66b38e25a8f26e19383360844561f376ad409237e0ceb6"
+dependencies = [
+ "color-backtrace",
+ "facet-testhelpers-macros",
+ "termcolor",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "facet-testhelpers-macros"
+version = "0.46.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "764fd33552bc478506efdc5714065ca5150027e36da3b45d7d028cf183dfddf7"
+dependencies = [
+ "quote",
+ "unsynn",
+]
+
+[[package]]
 name = "facet-toml"
 version = "0.46.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4180,6 +4254,12 @@ dependencies = [
  "read-fonts 0.39.2",
  "smallvec 1.15.1",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 
 [[package]]
 name = "hashbrown"
@@ -7070,6 +7150,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rowan"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "417a3a9f582e349834051b8a10c8d71ca88da4211e4093528e36b9845f6b5f21"
+dependencies = [
+ "countme",
+ "hashbrown 0.14.5",
+ "rustc-hash 1.1.0",
+ "text-size",
+]
+
+[[package]]
 name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7890,6 +7982,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "styx-cst"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5913c79e5ee8466a7bbfe29e6697ea0ab1ef1b06fab89769c094a7e75da7776"
+dependencies = [
+ "rowan",
+ "styx-tokenizer",
+]
+
+[[package]]
+name = "styx-format"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29fef3586e6fad909b5bbab8cb85e38c96974ffdfaa57fc3ab2c81b0f7fd00be"
+dependencies = [
+ "styx-cst",
+ "styx-parse",
+ "styx-tree",
+]
+
+[[package]]
+name = "styx-parse"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b17c2ab20c37e53d88be2cacc3b2bae1fe8bdb0b10a052f032c1f842be90265c"
+dependencies = [
+ "styx-tokenizer",
+ "tracing",
+]
+
+[[package]]
+name = "styx-tokenizer"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bb4d54574c87d2e1436ecdcf316b76cc5f5ab6defad83811434b2a2be908133"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
+name = "styx-tree"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a065556559a4d24c7a5b7dc59f347f7887c9b4b083549c0b8f2b213c5025f5"
+dependencies = [
+ "ariadne",
+ "facet-testhelpers",
+ "styx-parse",
+]
+
+[[package]]
 name = "subsecond"
 version = "0.7.9"
 source = "git+https://github.com/DioxusLabs/dioxus?rev=3e43ffa6cf1488d5388c888eb5f2494a006ae6de#3e43ffa6cf1488d5388c888eb5f2494a006ae6de"
@@ -8237,6 +8380,12 @@ dependencies = [
  "thiserror 1.0.69",
  "xterm-query",
 ]
+
+[[package]]
+name = "text-size"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
 
 [[package]]
 name = "thin-vec"
@@ -10760,6 +10909,12 @@ dependencies = [
  "nix",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yeslogic-fontconfig-sys"

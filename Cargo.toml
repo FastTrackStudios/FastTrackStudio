@@ -144,6 +144,9 @@ futures = "0.3"
 
 # Hardware MIDI I/O (control surfaces — ALSA on Linux, CoreMIDI on macOS)
 midir = "0.10"
+# Styx config parsing into Facet types (surface zone definitions).
+# 3.0 pairs with facet 0.46 (same pairing as the fts `input` repo).
+facet-styx = "3.0"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
