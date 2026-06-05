@@ -2028,6 +2028,10 @@ enum AuthCmd {
     /// Org membership + selection.
     #[command(subcommand)]
     Org(AuthOrgCmd),
+    /// List every user in the active org's `auth.sqlite`.
+    /// Useful when you need a user_id to pass to
+    /// `timer reassign-user --to`.
+    Users,
 }
 
 #[derive(Subcommand)]
@@ -3590,6 +3594,47 @@ enum TimerCmd {
     Resolve {
         #[arg(long)]
         project: Option<uuid::Uuid>,
+    },
+    /// Audit which user_ids appear on sessions, with name
+    /// resolution from the org's `auth.sqlite`. Useful for
+    /// spotting detached / mis-attributed ids before
+    /// invoicing.
+    Users,
+    /// Bulk-swap every matching session's `user_id`.
+    /// Optional filters narrow the swap to a project /
+    /// date window — without them, ALL sessions for `from`
+    /// in the org are moved.
+    ReassignUser {
+        /// Source user_id (current owner of the sessions).
+        #[arg(long)]
+        from: uuid::Uuid,
+        /// Destination user_id (new owner).
+        #[arg(long)]
+        to: uuid::Uuid,
+        /// Limit to one project.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Inclusive lower bound on `start_time`.
+        #[arg(long)]
+        since: Option<chrono::DateTime<chrono::Utc>>,
+        /// Exclusive upper bound on `start_time`.
+        #[arg(long)]
+        until: Option<chrono::DateTime<chrono::Utc>>,
+        /// Limit to sessions whose description matches this
+        /// substring (case-insensitive). Useful for
+        /// untangling "video editing" vs "PNG tracking"
+        /// rows that share a user_id.
+        #[arg(long)]
+        description_contains: Option<String>,
+        /// Re-snapshot `rate_cents` + `currency` from the
+        /// rate cascade for the *new* user. Off by default
+        /// so already-billed amounts don't shift; pass when
+        /// you're correcting a fresh mistake.
+        #[arg(long, default_value_t = false)]
+        rerate: bool,
+        /// Show what would change without writing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
     /// Tag CRUD + attach to existing sessions.
     #[command(subcommand)]
@@ -5237,6 +5282,33 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             update_session_active_org(&active_entry.token, Some(org_id), &auth_db_path).await?;
             println!("Architect-auth active membership set to {org_id}");
         }
+        AuthCmd::Users => {
+            use architect_auth::db::AuthUserEntity;
+            use sea_orm::{Database, EntityTrait};
+            if !auth_db_path.exists() {
+                return Err(eyre::eyre!("no auth.sqlite at {}", auth_db_path.display()));
+            }
+            let url = format!("sqlite://{}?mode=ro", auth_db_path.display());
+            let db = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("open {url}: {e}"))?;
+            let users = AuthUserEntity::find()
+                .all(&db)
+                .await
+                .map_err(|e| eyre::eyre!("query auth_users: {e}"))?;
+            if users.is_empty() {
+                println!("(no users)");
+            }
+            println!("{:<38}  {:<24}  {}", "user_id", "name", "email");
+            for u in users {
+                println!(
+                    "{:<38}  {:<24}  {}",
+                    u.id,
+                    u.name.unwrap_or_default(),
+                    u.email.unwrap_or_default()
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -6185,6 +6257,155 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                     },
                 );
             }
+        }
+        TimerCmd::Users => {
+            // All sessions in scope; aggregate per user_id.
+            let rows = store
+                .query_sessions(&timer_proto::WorkSessionFilter::default())
+                .await
+                .map_err(|e| eyre::eyre!("list: {e}"))?;
+            let mut agg: std::collections::BTreeMap<uuid::Uuid, (usize, i64, i64)> =
+                std::collections::BTreeMap::new();
+            for s in &rows {
+                let e = agg.entry(s.user_id).or_default();
+                e.0 += 1;
+                let secs = s
+                    .end_time
+                    .unwrap_or(s.start_time)
+                    .signed_duration_since(s.start_time)
+                    .num_seconds()
+                    .max(0);
+                e.1 += secs;
+                e.2 +=
+                    i64::try_from(i128::from(secs) * i128::from(s.rate_cents) / 3600).unwrap_or(0);
+            }
+            // Resolve names from auth.sqlite — same lookup
+            // the invoice path uses.
+            let names = {
+                use architect_auth::db::{AuthUserColumn, AuthUserEntity};
+                use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
+                let mut map: std::collections::HashMap<uuid::Uuid, String> =
+                    std::collections::HashMap::new();
+                let auth_path = ctx.root.auth_db();
+                if auth_path.exists() {
+                    let url = format!("sqlite://{}?mode=ro", auth_path.display());
+                    if let Ok(db) = Database::connect(&url).await {
+                        let ids: Vec<uuid::Uuid> = agg.keys().copied().collect();
+                        if let Ok(users) = AuthUserEntity::find()
+                            .filter(AuthUserColumn::Id.is_in(ids))
+                            .all(&db)
+                            .await
+                        {
+                            for u in users {
+                                let lbl = u
+                                    .name
+                                    .filter(|s| !s.is_empty())
+                                    .or(u.email)
+                                    .unwrap_or_default();
+                                map.insert(u.id, lbl);
+                            }
+                        }
+                    }
+                }
+                map
+            };
+            if agg.is_empty() {
+                println!("(no sessions)");
+            }
+            println!(
+                "{:<38}  {:>6}  {:>9}  {:>10}  {}",
+                "user_id", "count", "hours", "cents", "name"
+            );
+            for (uid, (count, secs, cents)) in agg {
+                let hours = secs as f64 / 3600.0;
+                let name = names
+                    .get(&uid)
+                    .cloned()
+                    .unwrap_or_else(|| "(not in auth_users)".into());
+                println!(
+                    "{:<38}  {:>6}  {:>9.2}  {:>10}  {name}",
+                    uid, count, hours, cents
+                );
+            }
+        }
+        TimerCmd::ReassignUser {
+            from,
+            to,
+            project,
+            since,
+            until,
+            description_contains,
+            rerate,
+            dry_run,
+        } => {
+            let filter = timer_proto::WorkSessionFilter {
+                user_id: Some(from),
+                project_id: project,
+                since,
+                until,
+                billable: None,
+                open: None,
+            };
+            let rows = store
+                .query_sessions(&filter)
+                .await
+                .map_err(|e| eyre::eyre!("list: {e}"))?;
+            let needle = description_contains.map(|s| s.to_lowercase());
+            let matched: Vec<_> = rows
+                .into_iter()
+                .filter(|s| {
+                    needle
+                        .as_ref()
+                        .is_none_or(|n| s.description.to_lowercase().contains(n.as_str()))
+                })
+                .collect();
+            println!(
+                "{} session(s) match (from={from}, to={to}, rerate={rerate}, dry_run={dry_run})",
+                matched.len()
+            );
+            for s in &matched {
+                println!(
+                    "  {}  {}  {}",
+                    s.start_time.format("%Y-%m-%d %H:%M"),
+                    s.id,
+                    s.description
+                );
+            }
+            if dry_run || matched.is_empty() {
+                return Ok(());
+            }
+            let mut updated = 0_usize;
+            for s in &matched {
+                if rerate {
+                    // Goes through `update_session`, which
+                    // re-snapshots `rate_cents` + `currency`
+                    // from the cascade for the new user.
+                    store
+                        .update_session(timer_proto::service::UpdateSessionRequest {
+                            id: s.id,
+                            user_id: Some(to),
+                            ..Default::default()
+                        })
+                        .await
+                        .map_err(|e| eyre::eyre!("reassign {}: {e}", s.id))?;
+                } else {
+                    // Preserve the historical rate snapshot
+                    // — only swap user_id. Direct SeaORM
+                    // update bypasses cascade re-resolution.
+                    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+                    use timer::entity::{WorkSessionActive, WorkSessionEntity};
+                    let row = WorkSessionEntity::find_by_id(s.id)
+                        .one(store.conn())
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("session {} disappeared", s.id))?;
+                    let mut active: WorkSessionActive = row.into();
+                    active.user_id = Set(to);
+                    active.updated_at = Set(chrono::Utc::now());
+                    active.update(store.conn()).await?;
+                }
+                updated += 1;
+            }
+            println!("Updated {updated} session(s).");
         }
         TimerCmd::Resolve { project } => {
             let resolved = store
