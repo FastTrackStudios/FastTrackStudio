@@ -275,6 +275,14 @@ impl OrgRoot {
         self.path.join("vault")
     }
 
+    /// `<org>/issuer.toml` — billing identity for invoices.
+    /// Sibling of `org.toml`; see [`crate::issuer`] for why
+    /// it's not part of the federated manifest.
+    #[must_use]
+    pub fn issuer_path(&self) -> PathBuf {
+        self.path.join("issuer.toml")
+    }
+
     /// `<org>/wiki/` — sibling of `vault/`. The wiki is its
     /// own tree so highly-curated knowledge (Knowledge/) and
     /// loose LLM scratch space (LLM/) don't pollute the

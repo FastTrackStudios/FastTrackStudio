@@ -12,10 +12,12 @@
 //! database, no server, no CLI. Downstream crates (server,
 //! CLI) use [`OrgRoot`] to find where their files belong.
 
+pub mod issuer;
 pub mod manifest;
 pub mod root;
 pub mod service;
 
+pub use issuer::{IssuerError, IssuerProfile};
 pub use manifest::{OrgManifest, ParseError};
 pub use root::{DataRoot, OrgRoot, RootError, default_client_vault_root};
 pub use service::{

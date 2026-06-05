@@ -3560,11 +3560,17 @@ enum TimerCmd {
         /// Session id (uuid).
         id: uuid::Uuid,
     },
-    /// List sessions. Defaults to the last 7 days.
+    /// List sessions. Defaults to the last 7 days, all
+    /// users (matching the `finance project` rollup —
+    /// the per-org DB is already the scope).
     List {
         /// Only sessions on this project (frontmatter uuid).
         #[arg(long)]
         project: Option<uuid::Uuid>,
+        /// Only sessions logged by this user id. Omit for
+        /// all users in the org.
+        #[arg(long)]
+        user: Option<uuid::Uuid>,
         /// Inclusive since-date. Defaults to 7 days ago.
         #[arg(long)]
         since: Option<chrono::DateTime<chrono::Utc>>,
@@ -5333,6 +5339,13 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
         .await
         .map_err(|e| eyre::eyre!("connect timer db `{db_url}`: {e}"))?;
     timer::Migrator::up(&timer_conn, None).await.ok();
+    // `TASK_VAULT_ROOT` is a fixture override; the real
+    // default is the active org's vault. (Was a cwd-relative
+    // `examples/vault` fallback in the invoice arm, which
+    // silently exported invoices into whatever repo you
+    // happened to run from.)
+    let vault_root = std::env::var("TASK_VAULT_ROOT")
+        .map_or_else(|_| ctx.root.vault_dir(), std::path::PathBuf::from);
 
     match cmd {
         FinanceCmd::Weekly { week_of } => {
@@ -5344,10 +5357,15 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
         }
         FinanceCmd::Project { since, until } => {
             use finance::reports::DateRange;
-            let range = if let (Some(s), Some(u)) = (since, until) {
+            // Each bound defaults independently: missing
+            // `--until` means "now", missing `--since` means
+            // 7 days before until. Previously `--since`
+            // alone was silently ignored (full fallback to
+            // last-7-days).
+            let range = {
+                let u = until.unwrap_or_else(chrono::Utc::now);
+                let s = since.unwrap_or(u - chrono::Duration::days(7));
                 DateRange { since: s, until: u }
-            } else {
-                DateRange::last_7_days()
             };
             let rows = finance::reports::hours_by_project(&timer_conn, None, range)
                 .await
@@ -5356,10 +5374,22 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 println!("(no closed sessions in range)");
             }
             for r in rows {
-                let project = if r.project_path.is_empty() {
-                    "(unscoped)".to_string()
-                } else {
+                // Older sessions may carry a project_id but
+                // an empty project_path (the path resolver
+                // used to miss nested project folders), so
+                // fall back to a vault lookup before
+                // declaring the bucket unscoped.
+                let project = if !r.project_path.is_empty() {
                     r.project_path.clone()
+                } else if let Some(pid) = r.project_id {
+                    let resolved = project_path_for(&vault_root, Some(pid));
+                    if resolved.is_empty() {
+                        format!("(project {pid})")
+                    } else {
+                        resolved
+                    }
+                } else {
+                    "(unscoped)".to_string()
                 };
                 println!(
                     "{project}\n  sessions: {}\n  total:    {}\n  billable: {} ({} {})",
@@ -5429,20 +5459,66 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             .await
             .map_err(|e| eyre::eyre!("build invoice: {e}"))?;
 
-            let issuer = finance::pdf_adapter::IssuerProfile {
-                name: std::env::var("TASK_ISSUER_NAME").unwrap_or_else(|_| "Your Name".into()),
-                address: std::env::var("TASK_ISSUER_ADDRESS").unwrap_or_default(),
-                email: std::env::var("TASK_ISSUER_EMAIL").unwrap_or_default(),
-                phone: String::new(),
-                tax_id: String::new(),
+            // Issuer ("From" block): `<org>/issuer.toml` is
+            // the durable source; `TASK_ISSUER_*` env vars
+            // override per-field for fixtures. "Your Name"
+            // placeholder only when neither is set.
+            let stored = org_proto::IssuerProfile::load(&ctx.root.issuer_path())
+                .map_err(|e| eyre::eyre!("issuer.toml: {e}"))?
+                .unwrap_or_default();
+            let field = |env: &str, file: String, default: &str| {
+                std::env::var(env).unwrap_or(if file.is_empty() {
+                    default.to_string()
+                } else {
+                    file
+                })
             };
-            let ifp = finance::pdf_adapter::invoice_for_pdf(&build.invoice, &issuer, &party);
+            let issuer = finance::pdf_adapter::IssuerProfile {
+                name: field("TASK_ISSUER_NAME", stored.name, "Your Name"),
+                address: field("TASK_ISSUER_ADDRESS", stored.address, ""),
+                email: field("TASK_ISSUER_EMAIL", stored.email, ""),
+                phone: field("TASK_ISSUER_PHONE", stored.phone, ""),
+                tax_id: field("TASK_ISSUER_TAX_ID", stored.tax_id, ""),
+            };
+            let mut ifp = finance::pdf_adapter::invoice_for_pdf(&build.invoice, &issuer, &party);
+            // Resolve user_id → display name from the org's
+            // auth.sqlite. Missing rows fall back to a
+            // short-id label so a stranded id still reads.
+            let names_by_id = {
+                use architect_auth::db::{AuthUserColumn, AuthUserEntity};
+                use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
+                let auth_path = ctx.root.auth_db();
+                let mut map: std::collections::HashMap<uuid::Uuid, String> =
+                    std::collections::HashMap::new();
+                let ids: Vec<uuid::Uuid> = build.line_meta.iter().map(|m| m.user_id).collect();
+                if !ids.is_empty() && auth_path.exists() {
+                    let url = format!("sqlite://{}?mode=ro", auth_path.display());
+                    if let Ok(db) = Database::connect(&url).await {
+                        if let Ok(rows) = AuthUserEntity::find()
+                            .filter(AuthUserColumn::Id.is_in(ids.clone()))
+                            .all(&db)
+                            .await
+                        {
+                            for r in rows {
+                                let label = r
+                                    .name
+                                    .filter(|s| !s.is_empty())
+                                    .or(r.email)
+                                    .unwrap_or_else(|| r.id.simple().to_string());
+                                map.insert(r.id, label);
+                            }
+                        }
+                    }
+                }
+                map
+            };
+            enrich_invoice_with_assignees(&mut ifp, &build.line_meta, &names_by_id);
+            // User asked to drop the due-date row; keep
+            // `Invoice.due_date` in the proto for accounting
+            // semantics, just hide it on the PDF.
+            ifp.due_date.clear();
             // Decide PDF path: explicit --out wins; else vault-export under
             // `<vault>/Reports/Invoices/pdfs/<num>.pdf`.
-            let vault_root = std::env::var("TASK_VAULT_ROOT").map_or_else(
-                |_| std::path::PathBuf::from("examples/vault"),
-                std::path::PathBuf::from,
-            );
             let do_vault_export = out.is_none();
             let pdf_path: std::path::PathBuf = if let Some(p) = out {
                 p
@@ -5541,6 +5617,202 @@ fn fmt_minor(c: i64) -> String {
         if neg { "-" } else { "" },
         abs / 100,
         abs % 100
+    )
+}
+
+/// Stitch assignee labels onto every line, sort by
+/// (assignee → date), and synthesize the per-assignee
+/// summary block + the two chart SVGs that the template
+/// embeds verbatim.
+///
+/// Single-assignee invoices are left untouched (no column,
+/// no summary, no charts) — the breakdown is only useful
+/// when the work is split across people.
+fn enrich_invoice_with_assignees(
+    ifp: &mut finance::pdf_adapter::InvoiceForPdf,
+    line_meta: &[finance::invoice_from_sessions::LineMeta],
+    names_by_id: &std::collections::HashMap<uuid::Uuid, String>,
+) {
+    if ifp.lines.len() != line_meta.len() || line_meta.is_empty() {
+        return;
+    }
+    // Distinct chart-friendly palette. Reused mod-N for
+    // unusually large teams.
+    const PALETTE: &[&str] = &[
+        "#3b82f6", "#f97316", "#10b981", "#a855f7", "#ef4444", "#eab308", "#0ea5e9", "#ec4899",
+    ];
+    let label_for = |uid: uuid::Uuid| -> String {
+        names_by_id
+            .get(&uid)
+            .cloned()
+            .unwrap_or_else(|| format!("user {}", &uid.simple().to_string()[..8]))
+    };
+
+    // Tag each line with its assignee name. Preserve the
+    // original date-sorted order *within* an assignee by
+    // remembering the input index.
+    let mut tagged: Vec<(usize, String, finance::pdf_adapter::InvoiceLineForPdf)> = ifp
+        .lines
+        .drain(..)
+        .zip(line_meta.iter())
+        .enumerate()
+        .map(|(i, (mut line, meta))| {
+            let name = label_for(meta.user_id);
+            line.assignee = name.clone();
+            (i, name, line)
+        })
+        .collect();
+    tagged.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+
+    // Single assignee → skip summary + charts, but keep
+    // the per-line assignee column blank-suppressed by
+    // clearing the values.
+    let distinct: std::collections::BTreeSet<&str> =
+        tagged.iter().map(|(_, n, _)| n.as_str()).collect();
+    if distinct.len() <= 1 {
+        for (_, _, line) in &mut tagged {
+            line.assignee.clear();
+        }
+        ifp.lines = tagged.into_iter().map(|(_, _, l)| l).collect();
+        return;
+    }
+    ifp.lines = tagged.into_iter().map(|(_, _, l)| l).collect();
+
+    // Aggregate seconds + cents per user_id, in the same
+    // order names first appear sorted alphabetically so the
+    // palette mapping is stable across re-renders.
+    let mut totals: std::collections::BTreeMap<String, (i64, i64)> =
+        std::collections::BTreeMap::new();
+    for (line, meta) in ifp.lines.iter().zip(line_meta.iter()) {
+        // Re-derive name from the line so sort + aggregate
+        // stay in lockstep (line.assignee was set above).
+        let entry = totals.entry(line.assignee.clone()).or_insert((0, 0));
+        entry.0 += meta.secs;
+        entry.1 += meta.cents;
+        let _ = meta; // silence unused if proto changes
+    }
+    let total_secs: i64 = totals.values().map(|(s, _)| *s).sum();
+    let total_secs_f = total_secs.max(1) as f64;
+
+    let assignees: Vec<finance::pdf_adapter::AssigneeSummary> = totals
+        .iter()
+        .enumerate()
+        .map(|(i, (name, (secs, cents)))| {
+            let hours = *secs as f64 / 3600.0;
+            let pct = (*secs as f64) * 100.0 / total_secs_f;
+            finance::pdf_adapter::AssigneeSummary {
+                name: name.clone(),
+                hours: format!("{hours:.2}"),
+                amount: fmt_minor(*cents),
+                pct: format!("{pct:.1}"),
+                color: PALETTE[i % PALETTE.len()].to_string(),
+            }
+        })
+        .collect();
+
+    ifp.donut_svg = build_donut_svg(&assignees, &totals, total_secs);
+    ifp.bars_svg = build_bars_svg(&assignees, &totals);
+    ifp.assignees = assignees;
+}
+
+/// SVG donut showing each assignee's share of total hours.
+/// Inline + self-contained — fulgur fetches no externals.
+fn build_donut_svg(
+    summaries: &[finance::pdf_adapter::AssigneeSummary],
+    totals: &std::collections::BTreeMap<String, (i64, i64)>,
+    total_secs: i64,
+) -> String {
+    const SIZE: f64 = 110.0;
+    const CX: f64 = SIZE / 2.0;
+    const CY: f64 = SIZE / 2.0;
+    const R_OUTER: f64 = 48.0;
+    const R_INNER: f64 = 28.0;
+    let total = total_secs.max(1) as f64;
+    let mut start = -std::f64::consts::FRAC_PI_2; // 12 o'clock
+    let mut paths = String::new();
+    for s in summaries {
+        let secs = totals.get(&s.name).map(|(sec, _)| *sec).unwrap_or(0) as f64;
+        let frac = secs / total;
+        let sweep = frac * std::f64::consts::TAU;
+        let end = start + sweep;
+        // Single-slice (100%) needs a full-circle path
+        // rather than two arcs that share both endpoints.
+        let path = if (frac - 1.0).abs() < 1e-6 {
+            format!(
+                "M {x1:.3} {y1:.3} A {ro} {ro} 0 1 1 {x2:.3} {y2:.3} \
+                 M {x3:.3} {y3:.3} A {ri} {ri} 0 1 0 {x4:.3} {y4:.3} Z",
+                x1 = CX + R_OUTER,
+                y1 = CY,
+                x2 = CX + R_OUTER - 0.001,
+                y2 = CY,
+                x3 = CX + R_INNER,
+                y3 = CY,
+                x4 = CX + R_INNER - 0.001,
+                y4 = CY,
+                ro = R_OUTER,
+                ri = R_INNER,
+            )
+        } else {
+            let large = if sweep > std::f64::consts::PI { 1 } else { 0 };
+            let (sx, sy) = (CX + R_OUTER * start.cos(), CY + R_OUTER * start.sin());
+            let (ex, ey) = (CX + R_OUTER * end.cos(), CY + R_OUTER * end.sin());
+            let (isx, isy) = (CX + R_INNER * end.cos(), CY + R_INNER * end.sin());
+            let (iex, iey) = (CX + R_INNER * start.cos(), CY + R_INNER * start.sin());
+            format!(
+                "M {sx:.3} {sy:.3} A {ro} {ro} 0 {large} 1 {ex:.3} {ey:.3} \
+                 L {isx:.3} {isy:.3} A {ri} {ri} 0 {large} 0 {iex:.3} {iey:.3} Z",
+                ro = R_OUTER,
+                ri = R_INNER,
+            )
+        };
+        paths.push_str(&format!("<path d=\"{path}\" fill=\"{}\" />", s.color));
+        start = end;
+    }
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{SIZE}\" height=\"{SIZE}\" viewBox=\"0 0 {SIZE} {SIZE}\">{paths}</svg>"
+    )
+}
+
+/// Horizontal bars — amount billed per assignee, ranked
+/// high-to-low. Pairs with the donut (hours share) so the
+/// reader sees rate-weighted contribution too.
+fn build_bars_svg(
+    summaries: &[finance::pdf_adapter::AssigneeSummary],
+    totals: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> String {
+    const ROW_H: f64 = 16.0;
+    const PAD_X: f64 = 4.0;
+    const BAR_AREA_W: f64 = 110.0;
+    let mut ranked: Vec<_> = summaries.iter().collect();
+    ranked.sort_by(|a, b| {
+        let av = totals.get(&a.name).map(|(_, c)| *c).unwrap_or(0);
+        let bv = totals.get(&b.name).map(|(_, c)| *c).unwrap_or(0);
+        bv.cmp(&av)
+    });
+    let max_cents = ranked
+        .iter()
+        .map(|a| totals.get(&a.name).map(|(_, c)| *c).unwrap_or(0))
+        .max()
+        .unwrap_or(0)
+        .max(1) as f64;
+    let h = ROW_H * ranked.len() as f64 + 4.0;
+    let w = BAR_AREA_W + PAD_X * 2.0;
+    let mut bars = String::new();
+    for (i, s) in ranked.iter().enumerate() {
+        let cents = totals.get(&s.name).map(|(_, c)| *c).unwrap_or(0) as f64;
+        let bar_w = (cents / max_cents) * BAR_AREA_W;
+        let y = i as f64 * ROW_H + 4.0;
+        bars.push_str(&format!(
+            "<rect x=\"{PAD_X}\" y=\"{y:.2}\" width=\"{bar_w:.2}\" height=\"8\" rx=\"2\" fill=\"{}\" />\
+             <text x=\"{tx:.2}\" y=\"{ty:.2}\" font-size=\"6.5\" font-family=\"Helvetica,Arial,sans-serif\" fill=\"#222\">${}</text>",
+            s.color,
+            s.amount,
+            tx = PAD_X + bar_w + 3.0,
+            ty = y + 7.0,
+        ));
+    }
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h:.2}\" viewBox=\"0 0 {w} {h:.2}\">{bars}</svg>"
     )
 }
 
@@ -5863,13 +6135,20 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
         }
         TimerCmd::List {
             project,
+            user,
             since,
             until,
             open,
             billable,
         } => {
+            // No default user filter: sessions land in this
+            // DB from several surfaces (CLI, web UI) whose
+            // identity derivations have drifted, and a
+            // silent owner filter made `list` undercount vs
+            // the finance rollup (which has always been
+            // org-wide).
             let filter = timer_proto::WorkSessionFilter {
-                user_id: Some(user_id),
+                user_id: user,
                 project_id: project,
                 since: Some(
                     since.unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::days(7)),
@@ -6072,33 +6351,43 @@ async fn attach_tags_by_name(
 }
 
 /// Resolve the project markdown path from its frontmatter
-/// id by scanning `Projects/*.md`. `None` project_id → empty.
+/// id by scanning `Projects/**/*.md` recursively (projects
+/// conventionally live in their own folder, e.g.
+/// `Projects/<Name>/<Name>.md` — a flat scan misses them and
+/// every session then stores an empty `project_path`).
+/// `None` project_id → empty.
 fn project_path_for(vault_root: &std::path::Path, project_id: Option<uuid::Uuid>) -> String {
     let Some(pid) = project_id else {
         return String::new();
     };
-    let dir = vault_root.join("Projects");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return String::new();
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("md") {
-            continue;
-        }
-        let Ok(raw) = std::fs::read_to_string(&path) else {
+    let mut dirs = vec![vault_root.join("Projects")];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
-        let rel = path
-            .strip_prefix(vault_root)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let basename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        let Ok(p) = project::parse_str(&rel, basename, &raw) else {
-            continue;
-        };
-        if p.id == pid {
-            return rel;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let rel = path
+                .strip_prefix(vault_root)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let basename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let Ok(p) = project::parse_str(&rel, basename, &raw) else {
+                continue;
+            };
+            if p.id == pid {
+                return rel;
+            }
         }
     }
     String::new()

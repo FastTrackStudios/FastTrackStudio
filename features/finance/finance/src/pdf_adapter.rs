@@ -17,7 +17,7 @@ use finance_proto::invoice::Invoice;
 use finance_proto::party::Party;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct InvoiceForPdf {
     pub number: String,
     pub currency: String,
@@ -35,9 +35,19 @@ pub struct InvoiceForPdf {
     pub notes: String,
     pub terms: String,
     pub footer: String,
+    /// Per-assignee aggregate rows for the summary block +
+    /// charts. Empty = caller didn't bother computing them
+    /// (single-assignee invoices generally skip this).
+    pub assignees: Vec<AssigneeSummary>,
+    /// Pre-rendered donut SVG (hours share). Empty string
+    /// suppresses the chart container in the template.
+    pub donut_svg: String,
+    /// Pre-rendered horizontal bar SVG (amount per
+    /// assignee). Same suppression rule.
+    pub bars_svg: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct PartyForPdf {
     pub name: String,
     pub address: String,
@@ -46,13 +56,30 @@ pub struct PartyForPdf {
     pub tax_id: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct InvoiceLineForPdf {
     pub description: String,
     pub quantity: String,
     pub unit: String,
     pub unit_price: String,
     pub amount: String,
+    /// Display name of the team member who logged this line.
+    /// Empty = single-assignee invoice (column hidden).
+    pub assignee: String,
+}
+
+/// One row of the per-assignee summary table — also the
+/// data the donut + bar charts consume.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct AssigneeSummary {
+    pub name: String,
+    pub hours: String,
+    pub amount: String,
+    /// `0.0..=100.0`, pre-formatted as a string like
+    /// `"34.5"`.
+    pub pct: String,
+    /// Hex colour matching the chart slice / bar.
+    pub color: String,
 }
 
 /// The issuer side ("From" header) — your business identity.
@@ -89,6 +116,7 @@ pub fn invoice_for_pdf(
             },
             unit_price: format_minor(li.unit_price_minor),
             amount: format_minor(li.line_total_minor),
+            assignee: String::new(),
         })
         .collect();
     InvoiceForPdf {
@@ -132,6 +160,9 @@ pub fn invoice_for_pdf(
         notes: invoice.notes_public.clone(),
         terms: invoice.terms.clone(),
         footer: invoice.footer.clone(),
+        assignees: Vec::new(),
+        donut_svg: String::new(),
+        bars_svg: String::new(),
     }
 }
 
