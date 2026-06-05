@@ -128,7 +128,10 @@ fn App() -> Element {
     let mut booted: Signal<Option<Rc<BootedProject>>> = use_signal(|| None);
     use_future(move || async move {
         match tokio::task::spawn_blocking(boot_project).await {
-            Ok(data) => booted.set(Some(Rc::new(data))),
+            Ok(data) => {
+                start_csi(&data.engine);
+                booted.set(Some(Rc::new(data)));
+            }
             Err(e) => tracing::error!("project boot failed: {e}"),
         }
     });
@@ -522,6 +525,42 @@ fn views_from_specs(specs: &[TrackSpec]) -> Vec<TrackView> {
             view
         })
         .collect()
+}
+
+/// Connect a hardware control surface when `FTS_CSI` is set: `1` =
+/// the default X-Touch match, any other value = a case-insensitive
+/// MIDI-port-name substring. The driver runs on an in-process `Daw`
+/// client, fed by the event bus — see `daw::csi`.
+fn start_csi(engine: &Standalone) {
+    let device = match std::env::var("FTS_CSI") {
+        Ok(v) if !v.is_empty() && v != "0" => {
+            if v == "1" {
+                None
+            } else {
+                Some(v)
+            }
+        }
+        _ => return,
+    };
+    let engine = engine.clone();
+    moire::task::spawn(async move {
+        let ipd = match daw_standalone::bootstrap::build_in_process_daw(engine).await {
+            Ok(ipd) => ipd,
+            Err(e) => {
+                tracing::error!("csi: in-process daw failed: {e}");
+                return;
+            }
+        };
+        let mut config = daw::csi::CsiConfig::default();
+        if let Some(device) = device {
+            config.device_match = device;
+        }
+        tracing::info!(device = %config.device_match, "csi: starting surface driver");
+        if let Err(e) = daw::csi::run(ipd.daw.clone(), config).await {
+            tracing::error!("csi: surface driver exited: {e}");
+        }
+        drop(ipd); // keep the in-proc link alive for the driver's lifetime
+    });
 }
 
 /// Boot the engine: open the real RPP (`FTS_RPP`, default the converted PT

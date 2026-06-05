@@ -34,11 +34,16 @@ daw = { path = "../../../crates/daw", default-features = false, features = [
     "ui",
     # REAPER theme import: point FTS_REAPER_THEME at an unpacked theme dir.
     "ui-reaper-theme",
+    # Hardware control surfaces (X-Touch / Mackie Control) — set FTS_CSI=1.
+    "csi",
 ] }
 # Engine: the standalone DAW backend that implements the service traits the UI
 # binds to. `audio` = cpal output stream + decoder + the test-tone generators,
 # so the demo tracks are audible and the per-track meter bank is populated.
-daw-standalone = { path = "../../../features/standalone/daw-standalone", features = ["audio", "reapeaks", "rpp-loader"] }
+# `bootstrap` = in-process Daw client (feeds the CSI surface driver).
+daw-standalone = { path = "../../../features/standalone/daw-standalone", features = ["audio", "reapeaks", "rpp-loader", "bootstrap"] }
+# Structured task spawn for the CSI driver (repo rule: moire over tokio::spawn).
+moire = { workspace = true }
 
 dioxus = { workspace = true }
 # Native (Blitz/GPU) renderer.

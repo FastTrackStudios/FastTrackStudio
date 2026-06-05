@@ -33,6 +33,7 @@ members = [
     "features/sync/daw-synchronization",
     "features/sync/daw-network",
     "features/sync/daw-link",
+    "features/surfaces/daw-csi",
     "apps/example-extension",
     "apps/example-plugin",
     "xtask",
@@ -140,6 +141,9 @@ dioxus = "0.7.2"
 # Async runtime
 tokio = { version = "1.48", features = ["full"] }
 futures = "0.3"
+
+# Hardware MIDI I/O (control surfaces — ALSA on Linux, CoreMIDI on macOS)
+midir = "0.10"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

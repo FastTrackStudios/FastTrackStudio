@@ -53,8 +53,8 @@ pub mod track_ops;
 // Re-export the main types for convenience
 pub use envelope::Envelope;
 pub use fx_chain::{
-    parse_js_params, FxChain, FxChainNode, FxContainer, FxEnvelopePoint, FxParamEnvelope,
-    FxParamRef, FxPlugin, JsParamValue, PluginType,
+    FxChain, FxChainNode, FxContainer, FxEnvelopePoint, FxParamEnvelope, FxParamRef, FxPlugin,
+    JsParamValue, PluginType, parse_js_params,
 };
 pub use item::{
     Item, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, SourceBlock, SourceType,
@@ -70,6 +70,6 @@ pub use time_pos_utils::{
 pub use time_tempo::{TempoTimeEnvelope, TempoTimePoint};
 pub use track::{Track, TrackParseOptions};
 pub use track_ops::{
-    classify_track, group_by_names, group_by_predicate, group_into_folder,
-    move_into_existing_folder, organize_into_fts_hierarchy, wrap_in_folder, TrackRole,
+    TrackRole, classify_track, group_by_names, group_by_predicate, group_into_folder,
+    move_into_existing_folder, organize_into_fts_hierarchy, wrap_in_folder,
 };
