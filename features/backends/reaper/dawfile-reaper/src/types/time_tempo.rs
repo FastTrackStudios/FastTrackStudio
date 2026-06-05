@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::primitives::{token::parse_token_line, Token};
+use crate::primitives::{Token, token::parse_token_line};
 use daw_proto::tempo_map::TempoMapEngine;
 use daw_proto::{Position, PositionInSeconds, TempoPoint, TimeSignature};
 
@@ -75,11 +75,7 @@ impl TempoTimePoint {
 
         let time_signature_encoded = if tokens.len() > 4 {
             let encoded = tokens[4].as_number().ok_or("Invalid time signature")? as i32;
-            if encoded > 0 {
-                Some(encoded)
-            } else {
-                None
-            }
+            if encoded > 0 { Some(encoded) } else { None }
         } else {
             None
         };
@@ -105,11 +101,11 @@ impl TempoTimePoint {
         let metronome_pattern = if tokens.len() > 8 {
             let mut pattern = String::new();
             for i in (8..tokens.len()).rev() {
-                if let Some(p) = tokens[i].as_string() {
-                    if !p.is_empty() {
-                        pattern = p.to_string();
-                        break;
-                    }
+                if let Some(p) = tokens[i].as_string()
+                    && !p.is_empty()
+                {
+                    pattern = p.to_string();
+                    break;
                 }
             }
             pattern

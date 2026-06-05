@@ -10,7 +10,7 @@
 //! changes to the setlist.
 
 use dawfile_reaper::builder::{MarkerBuilder, ReaperProjectBuilder};
-use dawfile_reaper::diff::{diff_projects_with_options, ChangeKind, DiffOptions};
+use dawfile_reaper::diff::{ChangeKind, DiffOptions, diff_projects_with_options};
 use dawfile_reaper::setlist_rpp::{
     build_song_infos_from_projects, concatenate_projects, measures_to_seconds,
 };
@@ -423,15 +423,15 @@ fn song_b_item_length_changed_detected() {
     let mut fix = setup_setlist();
 
     // Lengthen the first item on the first content track of Song B
-    if let Some(track) = fix.song_b.tracks.iter_mut().find(|t| !t.items.is_empty()) {
-        if let Some(item) = track.items.first_mut() {
-            let old_len = item.length;
-            item.length += 2.0; // Add 2 seconds
-            println!(
-                "Modified item '{}' length: {:.1} → {:.1}",
-                item.name, old_len, item.length
-            );
-        }
+    if let Some(track) = fix.song_b.tracks.iter_mut().find(|t| !t.items.is_empty())
+        && let Some(item) = track.items.first_mut()
+    {
+        let old_len = item.length;
+        item.length += 2.0; // Add 2 seconds
+        println!(
+            "Modified item '{}' length: {:.1} → {:.1}",
+            item.name, old_len, item.length
+        );
     }
 
     let options = DiffOptions {

@@ -653,10 +653,10 @@ impl Item {
     }
 
     fn fast_classify_item_token(raw: &str) -> Token {
-        if let Some(hex) = raw.strip_prefix("0x") {
-            if let Ok(v) = u64::from_str_radix(hex, 16) {
-                return Token::HexInteger(v);
-            }
+        if let Some(hex) = raw.strip_prefix("0x")
+            && let Ok(v) = u64::from_str_radix(hex, 16)
+        {
+            return Token::HexInteger(v);
         }
 
         if let Ok(v) = raw.parse::<i64>() {
@@ -726,222 +726,184 @@ impl Item {
         };
 
         match identifier {
-            "POSITION" => {
-                if tokens.len() > 1 {
-                    item.position = Self::parse_float(&tokens[1])?;
-                }
+            "POSITION" if tokens.len() > 1 => {
+                item.position = Self::parse_float(&tokens[1])?;
             }
-            "SNAPOFFS" => {
-                if tokens.len() > 1 {
-                    item.snap_offset = Self::parse_float(&tokens[1])?;
-                }
+            "SNAPOFFS" if tokens.len() > 1 => {
+                item.snap_offset = Self::parse_float(&tokens[1])?;
             }
-            "LENGTH" => {
-                if tokens.len() > 1 {
-                    item.length = Self::parse_float(&tokens[1])?;
-                }
+            "LENGTH" if tokens.len() > 1 => {
+                item.length = Self::parse_float(&tokens[1])?;
             }
-            "LOOP" => {
-                if tokens.len() > 1 {
-                    item.loop_source = Self::parse_bool(&tokens[1])?;
-                }
+            "LOOP" if tokens.len() > 1 => {
+                item.loop_source = Self::parse_bool(&tokens[1])?;
             }
-            "ALLTAKES" => {
-                if tokens.len() > 1 {
-                    item.play_all_takes = Self::parse_bool(&tokens[1])?;
-                }
+            "ALLTAKES" if tokens.len() > 1 => {
+                item.play_all_takes = Self::parse_bool(&tokens[1])?;
             }
-            "COLOR" => {
-                if tokens.len() > 1 {
-                    item.color = Some(Self::parse_int(&tokens[1])?);
-                }
+            "COLOR" if tokens.len() > 1 => {
+                item.color = Some(Self::parse_int(&tokens[1])?);
             }
-            "BEAT" => {
-                if tokens.len() > 1 {
-                    item.beat = Some(ItemTimebase::from(Self::parse_int(&tokens[1])?));
-                }
+            "BEAT" if tokens.len() > 1 => {
+                item.beat = Some(ItemTimebase::from(Self::parse_int(&tokens[1])?));
             }
-            "SEL" => {
-                if tokens.len() > 1 {
-                    item.selected = Self::parse_bool(&tokens[1])?;
-                }
+            "SEL" if tokens.len() > 1 => {
+                item.selected = Self::parse_bool(&tokens[1])?;
             }
-            "FADEIN" => {
-                if tokens.len() >= 3 {
-                    item.fade_in = Some(FadeSettings {
-                        curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
-                        time: Self::parse_float(&tokens[2])?,
-                        unknown_field_3: if tokens.len() > 3 {
-                            Self::parse_float(&tokens[3])?
-                        } else {
-                            0.0
-                        },
-                        unknown_field_4: if tokens.len() > 4 {
-                            Self::parse_int(&tokens[4])?
-                        } else {
-                            0
-                        },
-                        unknown_field_5: if tokens.len() > 5 {
-                            Self::parse_int(&tokens[5])?
-                        } else {
-                            0
-                        },
-                        unknown_field_6: if tokens.len() > 6 {
-                            Self::parse_int(&tokens[6])?
-                        } else {
-                            0
-                        },
-                        unknown_field_7: if tokens.len() > 7 {
-                            Self::parse_int(&tokens[7])?
-                        } else {
-                            0
-                        },
-                    });
-                }
+            "FADEIN" if tokens.len() >= 3 => {
+                item.fade_in = Some(FadeSettings {
+                    curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
+                    time: Self::parse_float(&tokens[2])?,
+                    unknown_field_3: if tokens.len() > 3 {
+                        Self::parse_float(&tokens[3])?
+                    } else {
+                        0.0
+                    },
+                    unknown_field_4: if tokens.len() > 4 {
+                        Self::parse_int(&tokens[4])?
+                    } else {
+                        0
+                    },
+                    unknown_field_5: if tokens.len() > 5 {
+                        Self::parse_int(&tokens[5])?
+                    } else {
+                        0
+                    },
+                    unknown_field_6: if tokens.len() > 6 {
+                        Self::parse_int(&tokens[6])?
+                    } else {
+                        0
+                    },
+                    unknown_field_7: if tokens.len() > 7 {
+                        Self::parse_int(&tokens[7])?
+                    } else {
+                        0
+                    },
+                });
             }
-            "FADEOUT" => {
-                if tokens.len() >= 3 {
-                    item.fade_out = Some(FadeSettings {
-                        curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
-                        time: Self::parse_float(&tokens[2])?,
-                        unknown_field_3: if tokens.len() > 3 {
-                            Self::parse_float(&tokens[3])?
-                        } else {
-                            0.0
-                        },
-                        unknown_field_4: if tokens.len() > 4 {
-                            Self::parse_int(&tokens[4])?
-                        } else {
-                            0
-                        },
-                        unknown_field_5: if tokens.len() > 5 {
-                            Self::parse_int(&tokens[5])?
-                        } else {
-                            0
-                        },
-                        unknown_field_6: if tokens.len() > 6 {
-                            Self::parse_int(&tokens[6])?
-                        } else {
-                            0
-                        },
-                        unknown_field_7: if tokens.len() > 7 {
-                            Self::parse_int(&tokens[7])?
-                        } else {
-                            0
-                        },
-                    });
-                }
+            "FADEOUT" if tokens.len() >= 3 => {
+                item.fade_out = Some(FadeSettings {
+                    curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
+                    time: Self::parse_float(&tokens[2])?,
+                    unknown_field_3: if tokens.len() > 3 {
+                        Self::parse_float(&tokens[3])?
+                    } else {
+                        0.0
+                    },
+                    unknown_field_4: if tokens.len() > 4 {
+                        Self::parse_int(&tokens[4])?
+                    } else {
+                        0
+                    },
+                    unknown_field_5: if tokens.len() > 5 {
+                        Self::parse_int(&tokens[5])?
+                    } else {
+                        0
+                    },
+                    unknown_field_6: if tokens.len() > 6 {
+                        Self::parse_int(&tokens[6])?
+                    } else {
+                        0
+                    },
+                    unknown_field_7: if tokens.len() > 7 {
+                        Self::parse_int(&tokens[7])?
+                    } else {
+                        0
+                    },
+                });
             }
-            "MUTE" => {
-                if tokens.len() >= 3 {
-                    item.mute = Some(MuteSettings {
-                        muted: Self::parse_bool(&tokens[1])?,
-                        solo_state: SoloState::from(Self::parse_int(&tokens[2])?),
-                    });
-                }
+            "MUTE" if tokens.len() >= 3 => {
+                item.mute = Some(MuteSettings {
+                    muted: Self::parse_bool(&tokens[1])?,
+                    solo_state: SoloState::from(Self::parse_int(&tokens[2])?),
+                });
             }
-            "IGUID" => {
-                if tokens.len() > 1 {
-                    item.item_guid = Some(Self::parse_string(&tokens[1])?);
-                }
+            "IGUID" if tokens.len() > 1 => {
+                item.item_guid = Some(Self::parse_string(&tokens[1])?);
             }
-            "IID" => {
-                if tokens.len() > 1 {
-                    item.item_id = Some(Self::parse_int(&tokens[1])?);
-                }
+            "IID" if tokens.len() > 1 => {
+                item.item_id = Some(Self::parse_int(&tokens[1])?);
             }
             // REAPER writes the FIRST take's attributes at item level (the
             // implicit take before any `TAKE` statement); later takes carry
             // theirs after their `TAKE` line. These arms therefore route to
             // the current take always, and mirror onto the item fields
             // outside take context (compatibility with existing readers).
-            "NAME" => {
-                if tokens.len() > 1 {
-                    let name = Self::parse_string(&tokens[1])?;
-                    if !*in_take_context {
-                        item.name = name.clone();
-                    }
-                    if let Some(take) = current_take {
-                        take.name = name;
-                    }
+            "NAME" if tokens.len() > 1 => {
+                let name = Self::parse_string(&tokens[1])?;
+                if !*in_take_context {
+                    item.name = name.clone();
+                }
+                if let Some(take) = current_take {
+                    take.name = name;
                 }
             }
-            "VOLPAN" => {
-                if tokens.len() >= 5 {
-                    let vp = VolPanSettings {
-                        item_trim: Self::parse_float(&tokens[1])?,
-                        take_pan: Self::parse_float(&tokens[2])?,
-                        take_volume: Self::parse_float(&tokens[3])?,
-                        take_pan_law: Self::parse_float(&tokens[4])?,
-                    };
-                    if !*in_take_context {
-                        item.volpan = Some(vp.clone());
-                    }
-                    if let Some(take) = current_take {
-                        take.volpan = Some(vp);
-                    }
+            "VOLPAN" if tokens.len() >= 5 => {
+                let vp = VolPanSettings {
+                    item_trim: Self::parse_float(&tokens[1])?,
+                    take_pan: Self::parse_float(&tokens[2])?,
+                    take_volume: Self::parse_float(&tokens[3])?,
+                    take_pan_law: Self::parse_float(&tokens[4])?,
+                };
+                if !*in_take_context {
+                    item.volpan = Some(vp.clone());
+                }
+                if let Some(take) = current_take {
+                    take.volpan = Some(vp);
                 }
             }
-            "SOFFS" => {
-                if tokens.len() > 1 {
-                    let v = Self::parse_float(&tokens[1])?;
-                    if !*in_take_context {
-                        item.slip_offset = v;
-                    }
-                    if let Some(take) = current_take {
-                        take.slip_offset = v;
-                    }
+            "SOFFS" if tokens.len() > 1 => {
+                let v = Self::parse_float(&tokens[1])?;
+                if !*in_take_context {
+                    item.slip_offset = v;
+                }
+                if let Some(take) = current_take {
+                    take.slip_offset = v;
                 }
             }
-            "PLAYRATE" => {
-                if tokens.len() >= 4 {
-                    let pr = PlayRateSettings {
-                        rate: Self::parse_float(&tokens[1])?,
-                        preserve_pitch: Self::parse_bool(&tokens[2])?,
-                        pitch_adjust: Self::parse_float(&tokens[3])?,
-                        pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
-                        unknown_field_5: if tokens.len() > 5 {
-                            Self::parse_int(&tokens[5])?
-                        } else {
-                            0
-                        },
-                        unknown_field_6: if tokens.len() > 6 {
-                            Self::parse_float(&tokens[6])?
-                        } else {
-                            0.0
-                        },
-                    };
-                    if !*in_take_context {
-                        item.playrate = Some(pr.clone());
-                    }
-                    if let Some(take) = current_take {
-                        take.playrate = Some(pr);
-                    }
-                }
-            }
-            "CHANMODE" => {
-                if tokens.len() > 1 {
-                    let cm = ChannelMode::from(Self::parse_int(&tokens[1])?);
-                    if !*in_take_context {
-                        item.channel_mode = cm;
-                    }
-                    if let Some(take) = current_take {
-                        take.channel_mode = cm;
-                    }
-                }
-            }
-            "GUID" => {
-                if tokens.len() > 1 {
-                    let guid = Self::parse_string(&tokens[1])?;
-                    if *in_take_context {
-                        if let Some(take) = current_take {
-                            take.take_guid = Some(guid);
-                        }
+            "PLAYRATE" if tokens.len() >= 4 => {
+                let pr = PlayRateSettings {
+                    rate: Self::parse_float(&tokens[1])?,
+                    preserve_pitch: Self::parse_bool(&tokens[2])?,
+                    pitch_adjust: Self::parse_float(&tokens[3])?,
+                    pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
+                    unknown_field_5: if tokens.len() > 5 {
+                        Self::parse_int(&tokens[5])?
                     } else {
-                        item.take_guid = Some(guid.clone());
-                        if let Some(take) = current_take {
-                            take.take_guid = Some(guid);
-                        }
+                        0
+                    },
+                    unknown_field_6: if tokens.len() > 6 {
+                        Self::parse_float(&tokens[6])?
+                    } else {
+                        0.0
+                    },
+                };
+                if !*in_take_context {
+                    item.playrate = Some(pr.clone());
+                }
+                if let Some(take) = current_take {
+                    take.playrate = Some(pr);
+                }
+            }
+            "CHANMODE" if tokens.len() > 1 => {
+                let cm = ChannelMode::from(Self::parse_int(&tokens[1])?);
+                if !*in_take_context {
+                    item.channel_mode = cm;
+                }
+                if let Some(take) = current_take {
+                    take.channel_mode = cm;
+                }
+            }
+            "GUID" if tokens.len() > 1 => {
+                let guid = Self::parse_string(&tokens[1])?;
+                if *in_take_context {
+                    if let Some(take) = current_take {
+                        take.take_guid = Some(guid);
+                    }
+                } else {
+                    item.take_guid = Some(guid.clone());
+                    if let Some(take) = current_take {
+                        take.take_guid = Some(guid);
                     }
                 }
             }
@@ -966,16 +928,14 @@ impl Item {
                     item.lane = Some((y / height).round() as i32);
                 }
             }
-            "RECPASS" => {
-                if tokens.len() > 1 {
-                    let rec_pass = Self::parse_int(&tokens[1])?;
-                    if *in_take_context {
-                        if let Some(take) = current_take {
-                            take.rec_pass = Some(rec_pass);
-                        }
-                    } else {
-                        item.rec_pass = Some(rec_pass);
+            "RECPASS" if tokens.len() > 1 => {
+                let rec_pass = Self::parse_int(&tokens[1])?;
+                if *in_take_context {
+                    if let Some(take) = current_take {
+                        take.rec_pass = Some(rec_pass);
                     }
+                } else {
+                    item.rec_pass = Some(rec_pass);
                 }
             }
             "TAKE" => {
@@ -991,36 +951,34 @@ impl Item {
                 *in_take_context = true;
             }
             "TAKEVOLPAN" => {
-                if let Some(take) = current_take {
-                    if tokens.len() >= 4 {
-                        take.volpan = Some(VolPanSettings {
-                            item_trim: 0.0,
-                            take_pan: Self::parse_float(&tokens[1])?,
-                            take_volume: Self::parse_float(&tokens[2])?,
-                            take_pan_law: Self::parse_float(&tokens[3])?,
-                        });
-                    }
+                if let Some(take) = current_take
+                    && tokens.len() >= 4
+                {
+                    take.volpan = Some(VolPanSettings {
+                        item_trim: 0.0,
+                        take_pan: Self::parse_float(&tokens[1])?,
+                        take_volume: Self::parse_float(&tokens[2])?,
+                        take_pan_law: Self::parse_float(&tokens[3])?,
+                    });
                 }
             }
             "TAKECOLOR" => {
-                if let Some(take) = current_take {
-                    if tokens.len() > 1 {
-                        take.take_color = Some(Self::parse_int(&tokens[1])?);
-                    }
+                if let Some(take) = current_take
+                    && tokens.len() > 1
+                {
+                    take.take_color = Some(Self::parse_int(&tokens[1])?);
                 }
             }
-            "SM" => {
-                if tokens.len() >= 3 {
-                    item.stretch_markers.push(StretchMarker {
-                        position: Self::parse_float(&tokens[1])?,
-                        source_position: Self::parse_float(&tokens[2])?,
-                        rate: if tokens.len() > 3 {
-                            Some(Self::parse_float(&tokens[3])?)
-                        } else {
-                            None
-                        },
-                    });
-                }
+            "SM" if tokens.len() >= 3 => {
+                item.stretch_markers.push(StretchMarker {
+                    position: Self::parse_float(&tokens[1])?,
+                    source_position: Self::parse_float(&tokens[2])?,
+                    rate: if tokens.len() > 3 {
+                        Some(Self::parse_float(&tokens[3])?)
+                    } else {
+                        None
+                    },
+                });
             }
             _ => {}
         }

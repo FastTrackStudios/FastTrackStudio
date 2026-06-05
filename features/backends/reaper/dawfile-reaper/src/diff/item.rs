@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use super::f64_eq;
 use super::midi;
 use super::types::*;
-use crate::types::item::Take;
 use crate::types::Item;
+use crate::types::item::Take;
 
 /// Diff two lists of items, matched by `item_guid` (IGUID).
 ///
@@ -30,10 +30,8 @@ pub(crate) fn diff_items(old: &[Item], new: &[Item], options: &DiffOptions) -> V
 
     // Item key: GUID if available and not matching by name, otherwise name+offset-adjusted-position
     let item_key = |item: &Item, apply_offset: bool| -> String {
-        if !by_name {
-            if let Some(ref guid) = item.item_guid {
-                return guid.clone();
-            }
+        if !by_name && let Some(ref guid) = item.item_guid {
+            return guid.clone();
         }
         let pos = if apply_offset {
             item.position - offset

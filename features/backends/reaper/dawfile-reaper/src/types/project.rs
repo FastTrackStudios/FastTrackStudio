@@ -453,12 +453,11 @@ impl ProjectProperties {
                 _ => {
                     // Look for content lines in blocks that represent project properties
                     for content in &block.children {
-                        if let RppBlockContent::Content(tokens) = content {
-                            if let Some(property_name) = tokens.first() {
-                                if let Some(name) = property_name.as_string() {
-                                    properties.parse_property(name, &tokens[1..]);
-                                }
-                            }
+                        if let RppBlockContent::Content(tokens) = content
+                            && let Some(property_name) = tokens.first()
+                            && let Some(name) = property_name.as_string()
+                        {
+                            properties.parse_property(name, &tokens[1..]);
                         }
                     }
                 }
@@ -488,96 +487,79 @@ impl ProjectProperties {
         };
 
         for content in &block.children {
-            if let RppBlockContent::Content(tokens) = content {
-                if let Some(property_name) = tokens.first() {
-                    if let Some(name) = property_name.as_string() {
-                        match name {
-                            "VOL" if tokens.len() >= 3 => {
-                                if let (Some(a), Some(b)) =
-                                    (tokens[1].as_number(), tokens[2].as_number())
-                                {
-                                    metronome.volume = (a, b);
-                                }
-                            }
-                            "BEATLEN" => {
-                                if let Some(val) = tokens.get(1).and_then(|t| t.as_number()) {
-                                    metronome.beat_length = val as i32;
-                                }
-                            }
-                            "FREQ" if tokens.len() >= 4 => {
-                                if let (Some(a), Some(b), Some(c)) = (
-                                    tokens[1].as_number(),
-                                    tokens[2].as_number(),
-                                    tokens[3].as_number(),
-                                ) {
-                                    metronome.frequency = (a as i32, b as i32, c as i32);
-                                }
-                            }
-                            "SAMPLES" if tokens.len() >= 5 => {
-                                if let (Some(a), Some(b), Some(c), Some(d)) = (
-                                    tokens[1].as_string(),
-                                    tokens[2].as_string(),
-                                    tokens[3].as_string(),
-                                    tokens[4].as_string(),
-                                ) {
-                                    metronome.samples = (
-                                        a.to_string(),
-                                        b.to_string(),
-                                        c.to_string(),
-                                        d.to_string(),
-                                    );
-                                }
-                            }
-                            "SPLIGNORE" if tokens.len() >= 3 => {
-                                if let (Some(a), Some(b)) =
-                                    (tokens[1].as_number(), tokens[2].as_number())
-                                {
-                                    metronome.split_ignore = (a as i32, b as i32);
-                                }
-                            }
-                            "SPLDEF" if tokens.len() >= 6 => {
-                                if let (
-                                    Some(index),
-                                    Some(freq),
-                                    Some(sample),
-                                    Some(flags),
-                                    Some(name),
-                                ) = (
-                                    tokens[1].as_number(),
-                                    tokens[2].as_number(),
-                                    tokens[3].as_string(),
-                                    tokens[4].as_number(),
-                                    tokens[5].as_string(),
-                                ) {
-                                    metronome.split_def.push(SplitDefinition {
-                                        index: index as i32,
-                                        frequency: freq as i32,
-                                        sample_path: sample.to_string(),
-                                        flags: flags as i32,
-                                        name: name.to_string(),
-                                    });
-                                }
-                            }
-                            "PATTERN" if tokens.len() >= 3 => {
-                                if let (Some(a), Some(b)) =
-                                    (tokens[1].as_number(), tokens[2].as_number())
-                                {
-                                    metronome.pattern = (a as i32, b as i32);
-                                }
-                            }
-                            "PATTERNSTR" => {
-                                if let Some(val) = tokens.get(1).and_then(|t| t.as_string()) {
-                                    metronome.pattern_string = val.to_string();
-                                }
-                            }
-                            "MULT" => {
-                                if let Some(val) = tokens.get(1).and_then(|t| t.as_number()) {
-                                    metronome.mult = val as i32;
-                                }
-                            }
-                            _ => {}
+            if let RppBlockContent::Content(tokens) = content
+                && let Some(property_name) = tokens.first()
+                && let Some(name) = property_name.as_string()
+            {
+                match name {
+                    "VOL" if tokens.len() >= 3 => {
+                        if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                            metronome.volume = (a, b);
                         }
                     }
+                    "BEATLEN" => {
+                        if let Some(val) = tokens.get(1).and_then(|t| t.as_number()) {
+                            metronome.beat_length = val as i32;
+                        }
+                    }
+                    "FREQ" if tokens.len() >= 4 => {
+                        if let (Some(a), Some(b), Some(c)) = (
+                            tokens[1].as_number(),
+                            tokens[2].as_number(),
+                            tokens[3].as_number(),
+                        ) {
+                            metronome.frequency = (a as i32, b as i32, c as i32);
+                        }
+                    }
+                    "SAMPLES" if tokens.len() >= 5 => {
+                        if let (Some(a), Some(b), Some(c), Some(d)) = (
+                            tokens[1].as_string(),
+                            tokens[2].as_string(),
+                            tokens[3].as_string(),
+                            tokens[4].as_string(),
+                        ) {
+                            metronome.samples =
+                                (a.to_string(), b.to_string(), c.to_string(), d.to_string());
+                        }
+                    }
+                    "SPLIGNORE" if tokens.len() >= 3 => {
+                        if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                            metronome.split_ignore = (a as i32, b as i32);
+                        }
+                    }
+                    "SPLDEF" if tokens.len() >= 6 => {
+                        if let (Some(index), Some(freq), Some(sample), Some(flags), Some(name)) = (
+                            tokens[1].as_number(),
+                            tokens[2].as_number(),
+                            tokens[3].as_string(),
+                            tokens[4].as_number(),
+                            tokens[5].as_string(),
+                        ) {
+                            metronome.split_def.push(SplitDefinition {
+                                index: index as i32,
+                                frequency: freq as i32,
+                                sample_path: sample.to_string(),
+                                flags: flags as i32,
+                                name: name.to_string(),
+                            });
+                        }
+                    }
+                    "PATTERN" if tokens.len() >= 3 => {
+                        if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                            metronome.pattern = (a as i32, b as i32);
+                        }
+                    }
+                    "PATTERNSTR" => {
+                        if let Some(val) = tokens.get(1).and_then(|t| t.as_string()) {
+                            metronome.pattern_string = val.to_string();
+                        }
+                    }
+                    "MULT" => {
+                        if let Some(val) = tokens.get(1).and_then(|t| t.as_number()) {
+                            metronome.mult = val as i32;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -597,59 +579,54 @@ impl ProjectProperties {
         };
 
         for content in &block.children {
-            if let RppBlockContent::Content(tokens) = content {
-                if let Some(property_name) = tokens.first() {
-                    if let Some(name) = property_name.as_string() {
-                        match name {
-                            "EGUID" => {
-                                if let Some(val) = tokens.get(1).and_then(|t| t.as_string()) {
-                                    envelope.guid = Some(val.to_string());
-                                }
-                            }
-                            "ACT" if tokens.len() >= 3 => {
-                                if let (Some(a), Some(b)) =
-                                    (tokens[1].as_number(), tokens[2].as_number())
-                                {
-                                    envelope.active = (a as i32, b as i32);
-                                }
-                            }
-                            "VIS" if tokens.len() >= 4 => {
-                                if let (Some(a), Some(b), Some(c)) = (
-                                    tokens[1].as_number(),
-                                    tokens[2].as_number(),
-                                    tokens[3].as_number(),
-                                ) {
-                                    envelope.visible = (a as i32, b as i32, c);
-                                }
-                            }
-                            "LANEHEIGHT" if tokens.len() >= 3 => {
-                                if let (Some(a), Some(b)) =
-                                    (tokens[1].as_number(), tokens[2].as_number())
-                                {
-                                    envelope.lane_height = (a as i32, b as i32);
-                                }
-                            }
-                            "ARM" => {
-                                if let Some(val) = tokens.get(1).and_then(|t| t.as_number()) {
-                                    envelope.armed = val as i32;
-                                }
-                            }
-                            "DEFSHAPE" if tokens.len() >= 4 => {
-                                if let (Some(shape), Some(range), Some(snap)) = (
-                                    tokens[1].as_number(),
-                                    tokens[2].as_number(),
-                                    tokens[3].as_number(),
-                                ) {
-                                    envelope.default_shape = (
-                                        EnvelopeShape::from_value(shape as i32),
-                                        range as i32,
-                                        snap as i32,
-                                    );
-                                }
-                            }
-                            _ => {}
+            if let RppBlockContent::Content(tokens) = content
+                && let Some(property_name) = tokens.first()
+                && let Some(name) = property_name.as_string()
+            {
+                match name {
+                    "EGUID" => {
+                        if let Some(val) = tokens.get(1).and_then(|t| t.as_string()) {
+                            envelope.guid = Some(val.to_string());
                         }
                     }
+                    "ACT" if tokens.len() >= 3 => {
+                        if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                            envelope.active = (a as i32, b as i32);
+                        }
+                    }
+                    "VIS" if tokens.len() >= 4 => {
+                        if let (Some(a), Some(b), Some(c)) = (
+                            tokens[1].as_number(),
+                            tokens[2].as_number(),
+                            tokens[3].as_number(),
+                        ) {
+                            envelope.visible = (a as i32, b as i32, c);
+                        }
+                    }
+                    "LANEHEIGHT" if tokens.len() >= 3 => {
+                        if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                            envelope.lane_height = (a as i32, b as i32);
+                        }
+                    }
+                    "ARM" => {
+                        if let Some(val) = tokens.get(1).and_then(|t| t.as_number()) {
+                            envelope.armed = val as i32;
+                        }
+                    }
+                    "DEFSHAPE" if tokens.len() >= 4 => {
+                        if let (Some(shape), Some(range), Some(snap)) = (
+                            tokens[1].as_number(),
+                            tokens[2].as_number(),
+                            tokens[3].as_number(),
+                        ) {
+                            envelope.default_shape = (
+                                EnvelopeShape::from_value(shape as i32),
+                                range as i32,
+                                snap as i32,
+                            );
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -661,21 +638,21 @@ impl ProjectProperties {
     fn parse_property(&mut self, name: &str, tokens: &[Token]) {
         match name {
             "RIPPLE" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.ripple = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.ripple = Some((a as i32, b as i32));
                 }
             }
             "GROUPOVERRIDE" => {
-                if tokens.len() >= 3 {
-                    if let (Some(a), Some(b), Some(c)) = (
+                if tokens.len() >= 3
+                    && let (Some(a), Some(b), Some(c)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
-                    ) {
-                        self.group_override = Some((a as i32, b as i32, c as i32));
-                    }
+                    )
+                {
+                    self.group_override = Some((a as i32, b as i32, c as i32));
                 }
             }
             "AUTOXFADE" => {
@@ -694,10 +671,10 @@ impl ProjectProperties {
                 }
             }
             "MIXERUIFLAGS" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.mixer_ui_flags = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.mixer_ui_flags = Some((a as i32, b as i32));
                 }
             }
             "ENVFADESZ10" => {
@@ -721,35 +698,26 @@ impl ProjectProperties {
                 }
             }
             "PROJOFFS" => {
-                if tokens.len() >= 3 {
-                    if let (Some(a), Some(b), Some(c)) = (
+                if tokens.len() >= 3
+                    && let (Some(a), Some(b), Some(c)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
-                    ) {
-                        self.proj_offs = Some((a as i32, b as i32, c as i32));
-                    }
+                    )
+                {
+                    self.proj_offs = Some((a as i32, b as i32, c as i32));
                 }
             }
             "MAXPROJLEN" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.max_proj_len = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.max_proj_len = Some((a as i32, b as i32));
                 }
             }
             "GRID" => {
-                if tokens.len() >= 8 {
-                    if let (
-                        Some(a),
-                        Some(b),
-                        Some(c),
-                        Some(d),
-                        Some(e),
-                        Some(f),
-                        Some(g),
-                        Some(h),
-                    ) = (
+                if tokens.len() >= 8
+                    && let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g), Some(h)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
@@ -758,17 +726,17 @@ impl ProjectProperties {
                         tokens[5].as_number(),
                         tokens[6].as_number(),
                         tokens[7].as_number(),
-                    ) {
-                        self.grid = Some((
-                            a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
-                            h as i32,
-                        ));
-                    }
+                    )
+                {
+                    self.grid = Some((
+                        a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
+                        h as i32,
+                    ));
                 }
             }
             "TIMEMODE" => {
-                if tokens.len() >= 7 {
-                    if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g)) = (
+                if tokens.len() >= 7
+                    && let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
@@ -776,22 +744,22 @@ impl ProjectProperties {
                         tokens[4].as_number(),
                         tokens[5].as_number(),
                         tokens[6].as_number(),
-                    ) {
-                        self.time_mode = Some((
-                            a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
-                        ));
-                    }
+                    )
+                {
+                    self.time_mode = Some((
+                        a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
+                    ));
                 }
             }
             "VIDEO_CONFIG" => {
-                if tokens.len() >= 3 {
-                    if let (Some(a), Some(b), Some(c)) = (
+                if tokens.len() >= 3
+                    && let (Some(a), Some(b), Some(c)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
-                    ) {
-                        self.video_config = Some((a as i32, b as i32, c as i32));
-                    }
+                    )
+                {
+                    self.video_config = Some((a as i32, b as i32, c as i32));
                 }
             }
             "PANMODE" => {
@@ -810,21 +778,21 @@ impl ProjectProperties {
                 }
             }
             "ZOOM" => {
-                if tokens.len() >= 3 {
-                    if let (Some(a), Some(b), Some(c)) = (
+                if tokens.len() >= 3
+                    && let (Some(a), Some(b), Some(c)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
-                    ) {
-                        self.zoom = Some((a as i32, b as i32, c as i32));
-                    }
+                    )
+                {
+                    self.zoom = Some((a as i32, b as i32, c as i32));
                 }
             }
             "VZOOMEX" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.v_zoom_ex = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.v_zoom_ex = Some((a as i32, b as i32));
                 }
             }
             "USE_REC_CFG" => {
@@ -838,8 +806,8 @@ impl ProjectProperties {
                 }
             }
             "SMPTESYNC" => {
-                if tokens.len() >= 11 {
-                    if let (
+                if tokens.len() >= 11
+                    && let (
                         Some(a),
                         Some(b),
                         Some(c),
@@ -863,12 +831,12 @@ impl ProjectProperties {
                         tokens[8].as_number(),
                         tokens[9].as_number(),
                         tokens[10].as_number(),
-                    ) {
-                        self.smpte_sync = Some((
-                            a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
-                            h as i32, i as i32, j as i32, k as i32,
-                        ));
-                    }
+                    )
+                {
+                    self.smpte_sync = Some((
+                        a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
+                        h as i32, i as i32, j as i32, k as i32,
+                    ));
                 }
             }
             "LOOP" => {
@@ -877,17 +845,17 @@ impl ProjectProperties {
                 }
             }
             "LOOPGRAN" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.loop_gran = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.loop_gran = Some((a as i32, b as i32));
                 }
             }
             "RECORD_PATH" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_string(), tokens[1].as_string()) {
-                        self.record_path = Some((a.to_string(), b.to_string()));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_string(), tokens[1].as_string())
+                {
+                    self.record_path = Some((a.to_string(), b.to_string()));
                 }
             }
             "RENDER_FILE" => {
@@ -901,14 +869,14 @@ impl ProjectProperties {
                 }
             }
             "RENDER_FMT" => {
-                if tokens.len() >= 3 {
-                    if let (Some(a), Some(b), Some(c)) = (
+                if tokens.len() >= 3
+                    && let (Some(a), Some(b), Some(c)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
-                    ) {
-                        self.render_fmt = Some((a as i32, b as i32, c as i32));
-                    }
+                    )
+                {
+                    self.render_fmt = Some((a as i32, b as i32, c as i32));
                 }
             }
             "RENDER_1X" => {
@@ -917,28 +885,27 @@ impl ProjectProperties {
                 }
             }
             "RENDER_RANGE" => {
-                if tokens.len() >= 5 {
-                    if let (Some(a), Some(b), Some(c), Some(d), Some(e)) = (
+                if tokens.len() >= 5
+                    && let (Some(a), Some(b), Some(c), Some(d), Some(e)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
                         tokens[3].as_number(),
                         tokens[4].as_number(),
-                    ) {
-                        self.render_range =
-                            Some((a as i32, b as i32, c as i32, d as i32, e as i32));
-                    }
+                    )
+                {
+                    self.render_range = Some((a as i32, b as i32, c as i32, d as i32, e as i32));
                 }
             }
             "RENDER_RESAMPLE" => {
-                if tokens.len() >= 3 {
-                    if let (Some(a), Some(b), Some(c)) = (
+                if tokens.len() >= 3
+                    && let (Some(a), Some(b), Some(c)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
-                    ) {
-                        self.render_resample = Some((a as i32, b as i32, c as i32));
-                    }
+                    )
+                {
+                    self.render_resample = Some((a as i32, b as i32, c as i32));
                 }
             }
             "RENDER_ADDTOPROJ" => {
@@ -957,15 +924,15 @@ impl ProjectProperties {
                 }
             }
             "RENDER_TRIM" => {
-                if tokens.len() >= 4 {
-                    if let (Some(a), Some(b), Some(c), Some(d)) = (
+                if tokens.len() >= 4
+                    && let (Some(a), Some(b), Some(c), Some(d)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
                         tokens[3].as_number(),
-                    ) {
-                        self.render_trim = Some((a as i32, b as i32, c as i32, d as i32));
-                    }
+                    )
+                {
+                    self.render_trim = Some((a as i32, b as i32, c as i32, d as i32));
                 }
             }
             "TIMELOCKMODE" => {
@@ -984,10 +951,10 @@ impl ProjectProperties {
                 }
             }
             "DEFPITCHMODE" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.def_pitch_mode = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.def_pitch_mode = Some((a as i32, b as i32));
                 }
             }
             "TAKELANE" => {
@@ -996,14 +963,14 @@ impl ProjectProperties {
                 }
             }
             "SAMPLERATE" => {
-                if tokens.len() >= 3 {
-                    if let (Some(a), Some(b), Some(c)) = (
+                if tokens.len() >= 3
+                    && let (Some(a), Some(b), Some(c)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
-                    ) {
-                        self.sample_rate = Some((a as i32, b as i32, c as i32));
-                    }
+                    )
+                {
+                    self.sample_rate = Some((a as i32, b as i32, c as i32));
                 }
             }
             "LOCK" => {
@@ -1012,41 +979,41 @@ impl ProjectProperties {
                 }
             }
             "TEMPO" => {
-                if tokens.len() >= 4 {
-                    if let (Some(a), Some(b), Some(c), Some(d)) = (
+                if tokens.len() >= 4
+                    && let (Some(a), Some(b), Some(c), Some(d)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
                         tokens[3].as_number(),
-                    ) {
-                        self.tempo = Some((a as i32, b as i32, c as i32, d as i32));
-                    }
+                    )
+                {
+                    self.tempo = Some((a as i32, b as i32, c as i32, d as i32));
                 }
             }
             "PLAYRATE" => {
-                if tokens.len() >= 4 {
-                    if let (Some(a), Some(b), Some(c), Some(d)) = (
+                if tokens.len() >= 4
+                    && let (Some(a), Some(b), Some(c), Some(d)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
                         tokens[3].as_number(),
-                    ) {
-                        self.play_rate = Some((a as i32, b as i32, c as i32, d as i32));
-                    }
+                    )
+                {
+                    self.play_rate = Some((a as i32, b as i32, c as i32, d as i32));
                 }
             }
             "SELECTION" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.selection = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.selection = Some((a as i32, b as i32));
                 }
             }
             "SELECTION2" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.selection2 = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.selection2 = Some((a as i32, b as i32));
                 }
             }
             "MASTERAUTOMODE" => {
@@ -1055,10 +1022,10 @@ impl ProjectProperties {
                 }
             }
             "MASTERTRACKHEIGHT" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.master_track_height = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.master_track_height = Some((a as i32, b as i32));
                 }
             }
             "MASTERPEAKCOL" => {
@@ -1072,8 +1039,8 @@ impl ProjectProperties {
                 }
             }
             "MASTERTRACKVIEW" => {
-                if tokens.len() >= 14 {
-                    if let (
+                if tokens.len() >= 14
+                    && let (
                         Some(a),
                         Some(b),
                         Some(c),
@@ -1103,38 +1070,29 @@ impl ProjectProperties {
                         tokens[11].as_number(),
                         tokens[12].as_number(),
                         tokens[13].as_number(),
-                    ) {
-                        self.master_track_view = Some(MasterTrackView {
-                            field1: a as i32,
-                            field2: b,
-                            field3: c,
-                            field4: d,
-                            field5: e as i32,
-                            field6: f as i32,
-                            field7: g as i32,
-                            field8: h as i32,
-                            field9: i as i32,
-                            field10: j as i32,
-                            field11: k as i32,
-                            field12: l as i32,
-                            field13: m as i32,
-                            field14: n as i32,
-                        });
-                    }
+                    )
+                {
+                    self.master_track_view = Some(MasterTrackView {
+                        field1: a as i32,
+                        field2: b,
+                        field3: c,
+                        field4: d,
+                        field5: e as i32,
+                        field6: f as i32,
+                        field7: g as i32,
+                        field8: h as i32,
+                        field9: i as i32,
+                        field10: j as i32,
+                        field11: k as i32,
+                        field12: l as i32,
+                        field13: m as i32,
+                        field14: n as i32,
+                    });
                 }
             }
             "MASTERHWOUT" => {
-                if tokens.len() >= 8 {
-                    if let (
-                        Some(a),
-                        Some(b),
-                        Some(c),
-                        Some(d),
-                        Some(e),
-                        Some(f),
-                        Some(g),
-                        Some(h),
-                    ) = (
+                if tokens.len() >= 8
+                    && let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g), Some(h)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
@@ -1143,32 +1101,32 @@ impl ProjectProperties {
                         tokens[5].as_number(),
                         tokens[6].as_number(),
                         tokens[7].as_number(),
-                    ) {
-                        self.master_hw_out = Some((
-                            a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
-                            h as i32,
-                        ));
-                    }
+                    )
+                {
+                    self.master_hw_out = Some((
+                        a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
+                        h as i32,
+                    ));
                 }
             }
             "MASTER_NCH" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.master_nch = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.master_nch = Some((a as i32, b as i32));
                 }
             }
             "MASTER_VOLUME" => {
-                if tokens.len() >= 5 {
-                    if let (Some(a), Some(b), Some(c), Some(d), Some(e)) = (
+                if tokens.len() >= 5
+                    && let (Some(a), Some(b), Some(c), Some(d), Some(e)) = (
                         tokens[0].as_number(),
                         tokens[1].as_number(),
                         tokens[2].as_number(),
                         tokens[3].as_number(),
                         tokens[4].as_number(),
-                    ) {
-                        self.master_volume = Some((a, b, c, d, e));
-                    }
+                    )
+                {
+                    self.master_volume = Some((a, b, c, d, e));
                 }
             }
             "MASTER_PANMODE" => {
@@ -1218,10 +1176,10 @@ impl ProjectProperties {
                 }
             }
             "RULERHEIGHT" => {
-                if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
-                        self.ruler_height = Some((a as i32, b as i32));
-                    }
+                if tokens.len() >= 2
+                    && let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number())
+                {
+                    self.ruler_height = Some((a as i32, b as i32));
                 }
             }
             _ => {
@@ -1286,24 +1244,23 @@ impl ReaperProject {
         for block in &rpp_project.blocks {
             if block.block_type == BlockType::Project && options.parse_markers_regions {
                 for child in &block.children {
-                    if let RppBlockContent::Content(tokens) = child {
-                        if let Some(Token::Identifier(kind)) = tokens.first() {
-                            if kind == "MARKER" {
-                                match super::marker_region::MarkerRegion::from_marker_tokens(tokens)
-                                {
-                                    Ok(marker_region) => project.markers_regions.add(marker_region),
-                                    Err(e) => eprintln!("Warning: Failed to parse marker: {}", e),
-                                }
-                            }
+                    if let RppBlockContent::Content(tokens) = child
+                        && let Some(Token::Identifier(kind)) = tokens.first()
+                        && kind == "MARKER"
+                    {
+                        match super::marker_region::MarkerRegion::from_marker_tokens(tokens) {
+                            Ok(marker_region) => project.markers_regions.add(marker_region),
+                            Err(e) => eprintln!("Warning: Failed to parse marker: {}", e),
                         }
                     }
                 }
             }
 
-            if block.block_type == BlockType::TempoEnvEx && options.parse_tempo_envelope {
-                if let Some(tempo_envelope) = Self::parse_tempo_envelope_block(block) {
-                    project.tempo_envelope = Some(tempo_envelope);
-                }
+            if block.block_type == BlockType::TempoEnvEx
+                && options.parse_tempo_envelope
+                && let Some(tempo_envelope) = Self::parse_tempo_envelope_block(block)
+            {
+                project.tempo_envelope = Some(tempo_envelope);
             }
         }
 
@@ -1464,14 +1421,12 @@ impl ReaperProject {
 
         // Parse the block content to extract tempo points
         for child in &block.children {
-            if let crate::primitives::RppBlockContent::Content(tokens) = child {
-                if let Some(Token::Identifier(kind)) = tokens.first() {
-                    if kind == "PT" {
-                        if let Ok(point) = TempoTimePoint::from_tokens(tokens) {
-                            points.push(point);
-                        }
-                    }
-                }
+            if let crate::primitives::RppBlockContent::Content(tokens) = child
+                && let Some(Token::Identifier(kind)) = tokens.first()
+                && kind == "PT"
+                && let Ok(point) = TempoTimePoint::from_tokens(tokens)
+            {
+                points.push(point);
             }
         }
 

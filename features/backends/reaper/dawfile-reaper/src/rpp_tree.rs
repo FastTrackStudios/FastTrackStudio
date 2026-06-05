@@ -221,15 +221,15 @@ impl RChunk {
         start_index: Option<usize>,
         end_index: Option<usize>,
     ) -> bool {
-        if let Some(start) = start_index {
-            if index_1_based < start {
-                return false;
-            }
+        if let Some(start) = start_index
+            && index_1_based < start
+        {
+            return false;
         }
-        if let Some(end) = end_index {
-            if index_1_based > end {
-                return false;
-            }
+        if let Some(end) = end_index
+            && index_1_based > end
+        {
+            return false;
         }
         true
     }
@@ -430,11 +430,7 @@ impl RChunk {
                 if !Self::in_lua_range(i, start_index, end_index) {
                     return None;
                 }
-                if filter(child) {
-                    Some(child)
-                } else {
-                    None
-                }
+                if filter(child) { Some(child) } else { None }
             })
             .collect()
     }
@@ -1065,11 +1061,11 @@ mod tests {
             })
             .expect("notes path");
 
-        if let RNodeTree::Chunk(track_chunk) = &mut root.children[notes_idx.0] {
-            if let RNodeTree::Chunk(notes_chunk) = &mut track_chunk.children[notes_idx.1] {
-                assert_eq!(notes_chunk.get_text_notes(), "line one\nline two");
-                notes_chunk.set_text_notes("updated a\nupdated b");
-            }
+        if let RNodeTree::Chunk(track_chunk) = &mut root.children[notes_idx.0]
+            && let RNodeTree::Chunk(notes_chunk) = &mut track_chunk.children[notes_idx.1]
+        {
+            assert_eq!(notes_chunk.get_text_notes(), "line one\nline two");
+            notes_chunk.set_text_notes("updated a\nupdated b");
         }
 
         let out = stringify_root(&root);

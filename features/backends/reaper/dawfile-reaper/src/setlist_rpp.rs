@@ -125,21 +125,21 @@ fn project_content_extent(project: &ReaperProject) -> f64 {
 /// Uses the last tempo envelope point (which represents the tempo at the end
 /// of the song). Falls back to the TEMPO header if no envelope exists.
 fn extract_ending_tempo(project: &ReaperProject) -> (f64, u32) {
-    if let Some(ref te) = project.tempo_envelope {
-        if let Some(pt) = te.points.last() {
-            let beats = pt
-                .time_signature_encoded
-                .map(|ts| (ts & 0xFFFF) as u32)
-                .unwrap_or_else(|| {
-                    // No time sig on last point — walk backwards to find most recent
-                    te.points
-                        .iter()
-                        .rev()
-                        .find_map(|p| p.time_signature_encoded.map(|ts| (ts & 0xFFFF) as u32))
-                        .unwrap_or(4)
-                });
-            return (pt.tempo, beats.max(1));
-        }
+    if let Some(ref te) = project.tempo_envelope
+        && let Some(pt) = te.points.last()
+    {
+        let beats = pt
+            .time_signature_encoded
+            .map(|ts| (ts & 0xFFFF) as u32)
+            .unwrap_or_else(|| {
+                // No time sig on last point — walk backwards to find most recent
+                te.points
+                    .iter()
+                    .rev()
+                    .find_map(|p| p.time_signature_encoded.map(|ts| (ts & 0xFFFF) as u32))
+                    .unwrap_or(4)
+            });
+        return (pt.tempo, beats.max(1));
     }
     if let Some((bpm, num, _denom, _flags)) = project.properties.tempo {
         return (bpm as f64, (num as u32).max(1));
@@ -153,14 +153,14 @@ fn extract_ending_tempo(project: &ReaperProject) -> (f64, u32) {
 /// to the TEMPO project property.
 fn extract_project_tempo(project: &ReaperProject) -> (f64, u32) {
     // Try tempo envelope first point
-    if let Some(ref te) = project.tempo_envelope {
-        if let Some(pt) = te.points.first() {
-            let beats = pt
-                .time_signature_encoded
-                .map(|ts| (ts & 0xFFFF) as u32) // numerator in low bits
-                .unwrap_or(4);
-            return (pt.tempo, beats.max(1));
-        }
+    if let Some(ref te) = project.tempo_envelope
+        && let Some(pt) = te.points.first()
+    {
+        let beats = pt
+            .time_signature_encoded
+            .map(|ts| (ts & 0xFFFF) as u32) // numerator in low bits
+            .unwrap_or(4);
+        return (pt.tempo, beats.max(1));
     }
     // Fall back to TEMPO property: (bpm, numerator, denominator, flags)
     if let Some((bpm, num, _denom, _flags)) = project.properties.tempo {
@@ -376,10 +376,10 @@ pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
                     if first_section_start.is_none() || m.position < first_section_start.unwrap() {
                         first_section_start = Some(m.position);
                     }
-                    if let Some(end) = m.end_position {
-                        if last_section_end.is_none() || end > last_section_end.unwrap() {
-                            last_section_end = Some(end);
-                        }
+                    if let Some(end) = m.end_position
+                        && (last_section_end.is_none() || end > last_section_end.unwrap())
+                    {
+                        last_section_end = Some(end);
                     }
                 }
             }
@@ -875,13 +875,12 @@ fn clone_track_with_offset(
         if let Some(dir) = source_dir {
             // Resolve relative file paths in parsed take sources
             for take in &mut item.takes {
-                if let Some(ref mut source) = take.source {
-                    if !source.file_path.is_empty()
-                        && !PathBuf::from(&source.file_path).is_absolute()
-                    {
-                        let absolute = dir.join(&source.file_path);
-                        source.file_path = absolute.to_string_lossy().to_string();
-                    }
+                if let Some(ref mut source) = take.source
+                    && !source.file_path.is_empty()
+                    && !PathBuf::from(&source.file_path).is_absolute()
+                {
+                    let absolute = dir.join(&source.file_path);
+                    source.file_path = absolute.to_string_lossy().to_string();
                 }
             }
 
@@ -1480,19 +1479,19 @@ fn write_item_rpp(out: &mut String, item: &Item, indent: usize, item_source_dir:
                 continue;
             }
             // Patch relative FILE paths to absolute
-            if trimmed.starts_with("FILE ") {
-                if let Some(source_dir) = item_source_dir {
-                    // Extract the path (may be quoted)
-                    let file_path = trimmed.trim_start_matches("FILE ").trim_matches('"');
-                    if !PathBuf::from(file_path).is_absolute() {
-                        let absolute = source_dir.join(file_path);
-                        out.push_str(&format!(
-                            "{}  FILE {:?}\n",
-                            prefix,
-                            absolute.to_string_lossy()
-                        ));
-                        continue;
-                    }
+            if trimmed.starts_with("FILE ")
+                && let Some(source_dir) = item_source_dir
+            {
+                // Extract the path (may be quoted)
+                let file_path = trimmed.trim_start_matches("FILE ").trim_matches('"');
+                if !PathBuf::from(file_path).is_absolute() {
+                    let absolute = source_dir.join(file_path);
+                    out.push_str(&format!(
+                        "{}  FILE {:?}\n",
+                        prefix,
+                        absolute.to_string_lossy()
+                    ));
+                    continue;
                 }
             }
             out.push_str(&format!("{}  {}\n", prefix, trimmed));
@@ -1591,29 +1590,29 @@ fn extract_tempo_points_raw(
         if in_tempoenvex && trimmed.starts_with("PT ") {
             // PT <position> <tempo> <shape> [optional fields...]
             let parts: Vec<&str> = trimmed.splitn(4, ' ').collect();
-            if parts.len() >= 3 {
-                if let Ok(pos) = parts[1].parse::<f64>() {
-                    // Skip points before the song's start bound
-                    if pos < local_start {
-                        continue;
-                    }
-                    // Skip points beyond the song's end bound
-                    if let Some(end) = local_end {
-                        if pos >= end {
-                            continue;
-                        }
-                    }
-                    let new_pos = pos + offset;
-                    let rest = if parts.len() > 3 {
-                        format!(" {}", parts[3])
-                    } else {
-                        String::new()
-                    };
-                    points.push(RawTempoPoint {
-                        line: format!("    PT {:.12} {}{}", new_pos, parts[2], rest),
-                        tempo: parts[2].to_string(),
-                    });
+            if parts.len() >= 3
+                && let Ok(pos) = parts[1].parse::<f64>()
+            {
+                // Skip points before the song's start bound
+                if pos < local_start {
+                    continue;
                 }
+                // Skip points beyond the song's end bound
+                if let Some(end) = local_end
+                    && pos >= end
+                {
+                    continue;
+                }
+                let new_pos = pos + offset;
+                let rest = if parts.len() > 3 {
+                    format!(" {}", parts[3])
+                } else {
+                    String::new()
+                };
+                points.push(RawTempoPoint {
+                    line: format!("    PT {:.12} {}{}", new_pos, parts[2], rest),
+                    tempo: parts[2].to_string(),
+                });
             }
         }
     }
@@ -1891,12 +1890,12 @@ pub fn concatenate_rpp_files_raw(rpp_paths: &[PathBuf], song_infos: &[SongInfo])
         // Write offset markers from this project
         for line in rpp_text.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("MARKER ") {
-                if let Some(patched) = offset_marker_line(trimmed, offset) {
-                    let lane = classify_marker_lane_from_line(trimmed);
-                    // Rewrite with lane
-                    out.push_str(&format!("  {} {}\n", patched, lane));
-                }
+            if trimmed.starts_with("MARKER ")
+                && let Some(patched) = offset_marker_line(trimmed, offset)
+            {
+                let lane = classify_marker_lane_from_line(trimmed);
+                // Rewrite with lane
+                out.push_str(&format!("  {} {}\n", patched, lane));
             }
         }
 
@@ -2004,19 +2003,19 @@ fn patch_track_block(block: &str, offset: f64, source_dir: &Path) -> String {
 
         if trimmed.starts_with("POSITION ") {
             // Offset the position
-            if let Some(pos_str) = trimmed.strip_prefix("POSITION ") {
-                if let Ok(pos) = pos_str.trim().parse::<f64>() {
-                    let new_pos = pos + offset;
-                    if new_pos < -0.01 {
-                        // Item before song bounds — skip entire item
-                        // (we'd need to skip until matching >, but for now just set to 0)
-                    }
-                    // Preserve indentation
-                    let indent = line.len() - line.trim_start().len();
-                    result.push_str(&" ".repeat(indent));
-                    result.push_str(&format!("POSITION {}\n", new_pos));
-                    continue;
+            if let Some(pos_str) = trimmed.strip_prefix("POSITION ")
+                && let Ok(pos) = pos_str.trim().parse::<f64>()
+            {
+                let new_pos = pos + offset;
+                if new_pos < -0.01 {
+                    // Item before song bounds — skip entire item
+                    // (we'd need to skip until matching >, but for now just set to 0)
                 }
+                // Preserve indentation
+                let indent = line.len() - line.trim_start().len();
+                result.push_str(&" ".repeat(indent));
+                result.push_str(&format!("POSITION {}\n", new_pos));
+                continue;
             }
         }
 
@@ -2024,19 +2023,20 @@ fn patch_track_block(block: &str, offset: f64, source_dir: &Path) -> String {
             // Resolve relative paths to absolute.
             // FILE lines can be: FILE "path" or FILE "path" 1 (with trailing flags)
             let after_file = trimmed.strip_prefix("FILE ").unwrap_or("");
-            if let Some((file_path, trailing)) = parse_quoted_file_path(after_file) {
-                if !file_path.is_empty() && !PathBuf::from(&file_path).is_absolute() {
-                    let absolute = source_dir.join(&file_path);
-                    let indent = line.len() - line.trim_start().len();
-                    result.push_str(&" ".repeat(indent));
-                    result.push_str(&format!("FILE \"{}\"", absolute.to_string_lossy()));
-                    if !trailing.is_empty() {
-                        result.push(' ');
-                        result.push_str(trailing);
-                    }
-                    result.push('\n');
-                    continue;
+            if let Some((file_path, trailing)) = parse_quoted_file_path(after_file)
+                && !file_path.is_empty()
+                && !PathBuf::from(&file_path).is_absolute()
+            {
+                let absolute = source_dir.join(&file_path);
+                let indent = line.len() - line.trim_start().len();
+                result.push_str(&" ".repeat(indent));
+                result.push_str(&format!("FILE \"{}\"", absolute.to_string_lossy()));
+                if !trailing.is_empty() {
+                    result.push(' ');
+                    result.push_str(trailing);
                 }
+                result.push('\n');
+                continue;
             }
         }
 
@@ -2252,10 +2252,10 @@ fn classify_marker_lane_for_raw(marker_line: &str) -> u32 {
 /// Extract the marker name from a MARKER line.
 fn extract_marker_name(line: &str) -> String {
     // Find quoted name: MARKER id pos "name" ...
-    if let Some(quote_start) = line.find('"') {
-        if let Some(quote_end) = line[quote_start + 1..].find('"') {
-            return line[quote_start + 1..quote_start + 1 + quote_end].to_string();
-        }
+    if let Some(quote_start) = line.find('"')
+        && let Some(quote_end) = line[quote_start + 1..].find('"')
+    {
+        return line[quote_start + 1..quote_start + 1 + quote_end].to_string();
     }
     // Unquoted name: MARKER id pos name ...
     let parts: Vec<&str> = line.split_whitespace().collect();

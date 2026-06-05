@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use dawfile_reaper::{parse_rpp_file, ReaperProject, SourceType};
+use dawfile_reaper::{ReaperProject, SourceType, parse_rpp_file};
 
 fn audit_path() -> PathBuf {
     if let Ok(path) = std::env::var("RPP_AUDIT_PATH") {
@@ -27,11 +27,7 @@ fn chunk_tag(line: &str) -> Option<String> {
         }
         out.push(ch);
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn line_tag(line: &str) -> Option<String> {
@@ -90,10 +86,10 @@ fn audit_large_rpp_fixture() {
         if let Some(tag) = chunk_tag(line) {
             *chunk_counts.entry(tag).or_insert(0) += 1;
         }
-        if let Some(tag) = line_tag(line) {
-            if is_interesting_line_tag(&tag) {
-                *line_counts.entry(tag).or_insert(0) += 1;
-            }
+        if let Some(tag) = line_tag(line)
+            && is_interesting_line_tag(&tag)
+        {
+            *line_counts.entry(tag).or_insert(0) += 1;
         }
     }
 

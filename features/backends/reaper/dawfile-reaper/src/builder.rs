@@ -1027,12 +1027,11 @@ impl TrackBuilder {
     /// Add a VST plugin to the track's FX chain.
     pub fn vst(self, name: impl Into<String>, file: impl Into<String>) -> Self {
         self.fx(|fx| {
-            let mut b = FxBuilder::new(
+            FxBuilder::new(
                 format!("VST: {}", name.into()),
                 PluginType::Vst,
                 file.into(),
-            );
-            b
+            )
         })
     }
 
@@ -2110,7 +2109,7 @@ mod tests {
         assert_eq!(midi.events[1].bytes, vec![0xB0, 7, 100]);
         // Pitch bend center at tick 480
         assert_eq!(midi.events[2].bytes, vec![0xE0, 0, 64]); // 8192 = 0x2000
-                                                             // Pitch bend max at tick 960
+        // Pitch bend max at tick 960
         assert_eq!(midi.events[3].bytes, vec![0xE0, 127, 127]); // 16383 = 0x3FFF
     }
 

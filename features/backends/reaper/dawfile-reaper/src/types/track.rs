@@ -621,10 +621,10 @@ impl Default for Track {
 
 impl Track {
     fn fast_classify_track_token(raw: &str) -> Token {
-        if let Some(hex) = raw.strip_prefix("0x") {
-            if let Ok(v) = u64::from_str_radix(hex, 16) {
-                return Token::HexInteger(v);
-            }
+        if let Some(hex) = raw.strip_prefix("0x")
+            && let Ok(v) = u64::from_str_radix(hex, 16)
+        {
+            return Token::HexInteger(v);
         }
 
         if let Ok(v) = raw.parse::<i64>() {
@@ -1214,10 +1214,10 @@ impl Track {
                     let item_content = item_lines.join("\n");
 
                     // Parse the item (optional in summary mode)
-                    if options.parse_items {
-                        if let Ok(item) = Item::from_rpp_block(&item_content) {
-                            track.items.push(item);
-                        }
+                    if options.parse_items
+                        && let Ok(item) = Item::from_rpp_block(&item_content)
+                    {
+                        track.items.push(item);
                     }
                     continue;
                 } else if line.starts_with("<VOLENV")
@@ -1244,13 +1244,11 @@ impl Track {
                     let env_content = env_lines.join("\n");
 
                     // Parse the envelope (optional in summary mode)
-                    if options.parse_envelopes {
-                        if let Ok((_, block)) = crate::primitives::block::parse_block(&env_content)
-                        {
-                            if let Ok(envelope) = Envelope::from_block(&block) {
-                                track.envelopes.push(envelope);
-                            }
-                        }
+                    if options.parse_envelopes
+                        && let Ok((_, block)) = crate::primitives::block::parse_block(&env_content)
+                        && let Ok(envelope) = Envelope::from_block(&block)
+                    {
+                        track.envelopes.push(envelope);
                     }
                     continue;
                 } else if line.starts_with("<FXCHAIN") {

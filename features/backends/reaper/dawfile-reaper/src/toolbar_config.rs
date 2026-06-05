@@ -47,13 +47,13 @@ pub fn parse_toolbar_config_text(content: &str) -> Vec<ToolbarSnapshot> {
                 .entry(section.clone())
                 .or_default()
                 .insert(index, value.to_string());
-        } else if let Some(index) = key.strip_prefix("tbf_").and_then(|n| n.parse::<u32>().ok()) {
-            if let Ok(value) = value.parse::<u32>() {
-                flags
-                    .entry(section.clone())
-                    .or_default()
-                    .insert(index, value);
-            }
+        } else if let Some(index) = key.strip_prefix("tbf_").and_then(|n| n.parse::<u32>().ok())
+            && let Ok(value) = value.parse::<u32>()
+        {
+            flags
+                .entry(section.clone())
+                .or_default()
+                .insert(index, value);
         }
     }
 

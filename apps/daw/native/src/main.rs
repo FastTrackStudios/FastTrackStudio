@@ -339,7 +339,7 @@ fn MainUi() -> Element {
             loop {
                 tokio::time::sleep(METER_INTERVAL).await;
                 let pos = engine.get_position(pos_ctx.clone());
-                if (playhead.peek().clone() - pos).abs() > 1e-3 {
+                if (*playhead.peek() - pos).abs() > 1e-3 {
                     playhead.set(pos);
                 }
             }

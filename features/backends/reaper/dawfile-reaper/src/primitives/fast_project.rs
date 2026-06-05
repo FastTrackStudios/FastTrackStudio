@@ -5,7 +5,7 @@
 
 use super::block::{BlockType, RppBlock, RppBlockContent};
 use super::project::RppProject;
-use super::token::{parse_token_line, Token};
+use super::token::{Token, parse_token_line};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -32,17 +32,15 @@ fn numeric_shape_flags(raw: &str) -> (bool, bool) {
 }
 
 fn fast_classify_token(raw: &str) -> Token {
-    if let Some(hex) = raw.strip_prefix("0x") {
-        if let Ok(v) = u64::from_str_radix(hex, 16) {
-            return Token::HexInteger(v);
-        }
+    if let Some(hex) = raw.strip_prefix("0x")
+        && let Ok(v) = u64::from_str_radix(hex, 16)
+    {
+        return Token::HexInteger(v);
     }
 
     let (has_float_marker, has_comma_decimal) = numeric_shape_flags(raw);
-    if !has_float_marker {
-        if let Ok(v) = raw.parse::<i64>() {
-            return Token::Integer(v);
-        }
+    if !has_float_marker && let Ok(v) = raw.parse::<i64>() {
+        return Token::Integer(v);
     }
 
     if has_comma_decimal {

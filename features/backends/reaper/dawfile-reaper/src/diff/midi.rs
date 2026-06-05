@@ -30,10 +30,9 @@ pub(crate) fn diff_midi_sources(
             // If pooled and same GUID, no event-level diff needed
             if let (Some(old_guid), Some(new_guid)) =
                 (&old_midi.pooled_evts_guid, &new_midi.pooled_evts_guid)
+                && old_guid == new_guid
             {
-                if old_guid == new_guid {
-                    return None;
-                }
+                return None;
             }
 
             let mut prop_changes = Vec::new();

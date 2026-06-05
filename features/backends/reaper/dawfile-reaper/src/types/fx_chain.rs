@@ -802,10 +802,10 @@ fn parse_container_name(header: &str) -> String {
     // The first token after "CONTAINER" is typically "Container" (the FX name).
     // The actual user-visible name may be the second token (quoted or unquoted).
     let quoted = extract_quoted_strings(rest);
-    if let Some(q) = quoted.first() {
-        if !q.is_empty() {
-            return q.clone();
-        }
+    if let Some(q) = quoted.first()
+        && !q.is_empty()
+    {
+        return q.clone();
     }
 
     // Fallback: split on whitespace, take first meaningful token
@@ -2661,10 +2661,12 @@ mod tests {
         let serialized = chain.to_rpp_string();
         let reparsed = FxChain::parse(&serialized).unwrap();
         assert_eq!(reparsed.nodes.len(), 3);
-        assert!(reparsed
-            .nodes
-            .iter()
-            .all(|n| matches!(n, FxChainNode::Plugin(_))));
+        assert!(
+            reparsed
+                .nodes
+                .iter()
+                .all(|n| matches!(n, FxChainNode::Plugin(_)))
+        );
     }
 
     /// Test: enclose then explode is a no-op (structurally).

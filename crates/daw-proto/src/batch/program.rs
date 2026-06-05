@@ -47,6 +47,10 @@ pub struct StepResult {
 }
 
 /// Outcome of a single batch step.
+// Wire/domain type: variant size asymmetry is inherent (the success
+// payload dwarfs the error string) and boxing would ripple through
+// every constructor/match across the workspace.
+#[allow(clippy::large_enum_variant)]
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum StepOutcome {

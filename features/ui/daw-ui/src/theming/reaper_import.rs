@@ -411,9 +411,7 @@ fn walter_envcp_layouts(
             &name,
             (w0, h0),
             size[2].max(60.0),
-            &out0,
-            &out_w,
-            &out_h,
+            (&out0, &out_w, &out_h),
             (DW, DH),
             imgs,
         ));
@@ -426,9 +424,13 @@ fn envcp_layout_from_walter(
     name: &str,
     size: (f32, f32),
     min_w: f32,
-    out0: &daw_theme_reaper::walter::Output,
-    out_w: &daw_theme_reaper::walter::Output,
-    out_h: &daw_theme_reaper::walter::Output,
+    // Base evaluation plus the +DW / +DH probes used to derive edge
+    // attachment factors.
+    (out0, out_w, out_h): (
+        &daw_theme_reaper::walter::Output,
+        &daw_theme_reaper::walter::Output,
+        &daw_theme_reaper::walter::Output,
+    ),
     (dw, dh): (f32, f32),
     imgs: Option<&ImageCatalog>,
 ) -> super::envcp::EnvcpLayout {

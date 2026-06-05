@@ -4,6 +4,9 @@ use super::Track;
 use facet::Facet;
 
 /// Events emitted when track state changes
+// Wire/domain type: `Added` carries a whole Track by design; boxing the
+// event payload would ripple through every subscriber match arm.
+#[allow(clippy::large_enum_variant)]
 #[repr(u8)]
 #[derive(Debug, Clone, Facet)]
 pub enum TrackEvent {
