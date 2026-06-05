@@ -153,6 +153,7 @@ mod mode_toolbars;
 mod reaper_utils;
 mod sync_settings;
 mod tempo;
+mod volume_balancer;
 #[cfg(feature = "ui-dock")]
 mod ui_test_panel;
 
@@ -193,6 +194,8 @@ extern "C" fn timer_callback() {
             "process_tasks",
             std::panic::AssertUnwindSafe(|| app.process_tasks()),
         );
+        // Constant-sum fader linking (Parallel drum tracks, user groups).
+        catch_panic("volume_balancer_poll", crate::volume_balancer::poll);
         // Deferred, paced prewarm: wait ~2s for REAPER's main HWND, then
         // enqueue the prefix list and build a handful of overlays per tick.
         // Each overlay build now only allocates its own surface + Vello
@@ -456,7 +459,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     info!("FTS Extensions starting…");
     info!(
-        "=== FTS BUILD MARKER: slip-drag-v3 — quick-edit drives its own split+slip drag (FTS slip, no native pass-through) ==="
+        "=== FTS BUILD MARKER: daw-api-v1 — chunk/track primitives moved into daw_reaper::track (pinned daw workspace); dynamic-template free-standing reaper_low helpers deleted ==="
     );
 
     // Kick off the wgpu Instance/Adapter/Device build on a worker thread
@@ -541,6 +544,12 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         fts_launcher::daw_module::module(),
         #[cfg(feature = "mod-session")]
         session::daw_module::module_with_daw(daw_reaper::Reaper),
+        // Registered directly (session embeds it for FTS_SESSION_* dispatch but
+        // never chains its action defs) so the FTS_VISIBILITY_MANAGER_* /
+        // FTS_DYNAMIC_TEMPLATE_* / FTS_AUTO_COLOR_* actions land in REAPER's
+        // action list — bindable, and resolvable by named_command_lookup.
+        #[cfg(feature = "mod-session")]
+        dynamic_template::daw_module::module(),
         #[cfg(feature = "mod-sync")]
         daw_synchronization::daw_module::module(),
         #[cfg(feature = "mod-input")]

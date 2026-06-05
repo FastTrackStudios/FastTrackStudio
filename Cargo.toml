@@ -31,6 +31,10 @@ daw-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", br
 daw-extension-runtime = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 daw-synchronization = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 keyflow-daw-analysis = { git = "https://git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
+# Direct dep so the extension can register the visibility-manager actions and
+# call the per-mode visibility entry point straight from the mode bridge.
+# Redirected to the local pinned clone by the [patch] below.
+dynamic-template = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
 fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", branch = "main" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
 tracing = "0.1"
@@ -47,6 +51,50 @@ reaper-config = { git = "https://git.starcommand.live/FastTrackStudios/reaper-fi
 # ── Version-unification patches (git only; no local sibling paths) ─────────
 # Everything is a git dep now; these patches just pin shared revs across the
 # whole graph. See FastTrackStudios/fts-extensions#2.
+
+# dynamic-template: TEMPORARY local clone at the pinned main rev
+# (bfd7a151) carrying the rule-based per-mode visibility manager (visibility_rules
+# + FTS_VISIBILITY_MANAGER_MODE_* actions). Same rev as the git dep, additive
+# changes only. Revert to the git dep once these land upstream (Codeberg).
+[patch."https://git.starcommand.live/FastTrackStudios/dynamic-template.git"]
+dynamic-template = { path = "/home/cody/Development/FastTrackStudio/.pinned/dynamic-template/crates/dynamic-template" }
+dynamic-template-proto = { path = "/home/cody/Development/FastTrackStudio/.pinned/dynamic-template/crates/dynamic-template-proto" }
+music-catalog = { path = "/home/cody/Development/FastTrackStudio/.pinned/dynamic-template/crates/music-catalog" }
+color-palette = { path = "/home/cody/Development/FastTrackStudio/.pinned/dynamic-template/crates/color-palette" }
+
+# session: TEMPORARY local clone at the pinned dev rev (98139cb) carrying the
+# auto-color fix: ensure_reactive_updates spawned its recv-loop via
+# daw::block_on, which panics (and silently kills the subscribe task) when
+# called from inside the DAW runtime — auto-color never applied on startup or
+# track-add. Now spawns on the ambient handle when already in the runtime.
+# Revert to the git dep once this lands upstream.
+[patch."https://git.starcommand.live/FastTrackStudios/session.git"]
+session = { path = "/home/cody/Development/FastTrackStudio/.pinned/session/crates/session" }
+session-proto = { path = "/home/cody/Development/FastTrackStudio/.pinned/session/crates/session-proto" }
+
+# daw: TEMPORARY local clone at the pinned main rev (a2c9e763) carrying the
+# folder-compact track primitives (set_folder_compact_on_main_thread's BUSCOMP
+# chunk edit + set_track_info_value_on_main_thread). The whole workspace is
+# path-patched because daw-reaper's siblings are path deps — mixing sources
+# would duplicate daw-proto. Additive changes only; upstream later.
+[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
+daw = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw" }
+daw-audio-sync = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-audio-sync" }
+daw-control = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-control" }
+daw-extension-runtime = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-extension-runtime" }
+dawfile-aaf = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-aaf" }
+dawfile-ableton = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-ableton" }
+dawfile-dawproject = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-dawproject" }
+dawfile-protools = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-protools" }
+dawfile-reaper = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-reaper" }
+daw-module = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-module" }
+daw-proto = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-proto" }
+daw-reaper = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-reaper" }
+daw-reaper-dioxus = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-reaper-dioxus" }
+daw-reaper-embed = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-reaper-embed" }
+daw-synchronization = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-synchronization" }
+daw-test-macro = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-test-macro" }
+reaper-launcher = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/reaper-launcher" }
 
 # moire: FTS fork (NixOS frame-pointer tolerance + facet 0.46 alignment).
 [patch."https://github.com/bearcove/moire"]

@@ -264,6 +264,53 @@ pub fn build_action_defs() -> ActionDefs {
             ));
         }),
     ];
+    let mut defs = defs;
+
+    // ── Tempo — time signatures ─────────────────────────────────────────────
+    // Two insert actions per signature, both targeting the start of the
+    // measure under the edit cursor (flooring — 99% through measure 4 is
+    // still measure 4):
+    //  - plain: sets the signature (hold Shift while firing for single-measure)
+    //  - _SINGLE: always a single measure, restoring the previous signature on
+    //    the next downbeat — for key sequences (`T 2 4`) where Shift can't be
+    //    held through the whole chord sequence.
+    for &(num, denom) in crate::tempo::TIME_SIGNATURES {
+        defs.push(action(
+            &format!("FTS_TEMPO_INSERT_TIMESIG_{num}_{denom}"),
+            &format!("Insert {num}/{denom} time signature at measure (hold Shift: single measure)"),
+            move || crate::tempo::insert_time_signature_at_cursor(num, denom),
+        ));
+        defs.push(action(
+            &format!("FTS_TEMPO_INSERT_TIMESIG_{num}_{denom}_SINGLE"),
+            &format!("Insert single measure of {num}/{denom} (restores previous signature)"),
+            move || crate::tempo::insert_single_measure_time_signature(num, denom),
+        ));
+    }
+
+    // ── Volume balancer — constant-sum fader linking ────────────────────────
+    defs.push(action(
+        "FTS_VOLBAL_TOGGLE",
+        "Volume Balancer: toggle constant-sum fader linking",
+        || {
+            let on = !crate::volume_balancer::is_enabled();
+            crate::volume_balancer::set_enabled(on);
+            sync_toggle_state("FTS_VOLBAL_TOGGLE", on);
+            show(format!(
+                "FTS Volume Balancer: {}\n",
+                if on { "enabled" } else { "disabled" }
+            ));
+        },
+    ));
+    defs.push(action(
+        "FTS_VOLBAL_LINK_SELECTED",
+        "Volume Balancer: link selected tracks (constant total volume)",
+        crate::volume_balancer::link_selected_tracks,
+    ));
+    defs.push(action(
+        "FTS_VOLBAL_UNLINK_SELECTED",
+        "Volume Balancer: unlink groups containing selected tracks",
+        crate::volume_balancer::unlink_selected_tracks,
+    ));
 
     // Module actions (launcher, session-owned template/keyflow, sync, input)
     // are collected via daw::module::collect_actions() in lib.rs — not here.

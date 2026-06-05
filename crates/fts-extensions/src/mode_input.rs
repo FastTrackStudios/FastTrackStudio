@@ -47,6 +47,19 @@ fn on_mode_changed(mode: Mode) {
             "[mode-input] Failed to activate workflow (skeleton file may be missing or empty)"
         ),
     }
+
+    apply_mode_visibility(mode);
+}
+
+/// Apply the visibility manager's rule-based per-surface visibility for the
+/// mode. Calls dynamic-template directly (same handler the
+/// `FTS_VISIBILITY_MANAGER_MODE_<SLUG>` actions dispatch to) rather than firing
+/// the action through REAPER's registry — `install()` runs before
+/// `register_actions_sync`, so a named-command lookup would miss the startup
+/// application. Modes without a rule set are a logged no-op on that side.
+fn apply_mode_visibility(mode: Mode) {
+    dynamic_template::daw_module::apply_mode_visibility_by_slug(mode.slug());
+    tracing::info!(mode = %mode, "[mode-visibility] applied mode visibility rules");
 }
 
 /// Register the mode→workflow bridge and activate the workflow for the
