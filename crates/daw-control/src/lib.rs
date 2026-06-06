@@ -129,6 +129,7 @@ pub(crate) use daw_proto::ItemsClient;
 pub(crate) use daw_proto::LiveMidiClient;
 pub(crate) use daw_proto::MarkersClient;
 pub(crate) use daw_proto::MidiClient;
+pub(crate) use daw_proto::PeaksClient;
 pub(crate) use daw_proto::PositionConversionClient;
 pub(crate) use daw_proto::ProjectsClient;
 pub(crate) use daw_proto::RegionsClient;
@@ -230,6 +231,7 @@ pub struct DawClients {
     pub(crate) automation: AutomationClient,
     pub(crate) live_midi: LiveMidiClient,
     pub(crate) midi: MidiClient,
+    pub(crate) peaks: PeaksClient,
     pub(crate) audio_engine: AudioEngineClient,
     pub(crate) ext_state: ExtStateClient,
     pub(crate) health: HealthClient,
@@ -269,6 +271,7 @@ impl DawClients {
             automation: AutomationClient::new(handle.clone()),
             live_midi: LiveMidiClient::new(handle.clone()),
             midi: MidiClient::new(handle.clone()),
+            peaks: PeaksClient::new(handle.clone()),
             audio_engine: AudioEngineClient::new(handle.clone()),
             ext_state: ExtStateClient::new(handle.clone()),
             health: HealthClient::new(handle.clone()),

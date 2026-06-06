@@ -457,6 +457,15 @@ impl TrackHandle {
         Ok(())
     }
 
+    /// Set polarity / phase invert.
+    pub async fn set_phase_inverted(&self, inverted: bool) -> Result<()> {
+        self.clients
+            .track
+            .set_phase_inverted(self.context(), self.track_ref(), inverted)
+            .await??;
+        Ok(())
+    }
+
     /// Get track pan (-1.0 = left, 0.0 = center, 1.0 = right)
     pub async fn pan(&self) -> Result<f64> {
         Ok(self.info().await?.pan)

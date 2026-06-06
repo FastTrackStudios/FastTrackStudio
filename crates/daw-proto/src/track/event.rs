@@ -34,6 +34,8 @@ pub enum TrackEvent {
     TcpVisibilityChanged { guid: String, visible: bool },
     /// Track mixer visibility changed
     MixerVisibilityChanged { guid: String, visible: bool },
+    /// Polarity / phase invert toggled
+    PhaseInvertedChanged { guid: String, inverted: bool },
     /// Track was moved (index changed)
     Moved {
         guid: String,

@@ -204,6 +204,25 @@ impl Project {
         self.tracks().count().await
     }
 
+    /// Live post-fader peak level for one track channel (0 = left,
+    /// 1 = right). dB values, −150 = silence. Drives hardware meter
+    /// bridges and UI meters.
+    pub async fn track_peak(
+        &self,
+        track: daw_proto::TrackRef,
+        channel: u32,
+    ) -> crate::Result<daw_proto::TrackPeak> {
+        Ok(self
+            .clients
+            .peaks
+            .track_peak(
+                daw_proto::ProjectContext::project(&self.guid),
+                track,
+                channel,
+            )
+            .await?)
+    }
+
     /// Get a track by index.
     ///
     /// Equivalent to `project.tracks().by_index(index)`.
