@@ -5533,7 +5533,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                         number: number.clone(),
                         notes_public: "".into(),
                         notes_private: String::new(),
-                        terms: format!("Net {net_days} from issue date."),
+                        terms: String::new(),
                     },
                 )
                 .await
@@ -5556,9 +5556,9 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                     sessions,
                     net_days,
                     number.clone(),
-                    "".into(),
                     String::new(),
-                    format!("Net {net_days} from issue date."),
+                    String::new(),
+                    String::new(),
                 )
                 .map_err(|e| eyre::eyre!("build invoice: {e}"))?
             };
