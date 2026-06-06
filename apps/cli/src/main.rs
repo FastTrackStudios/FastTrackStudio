@@ -5531,7 +5531,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                         until,
                         net_days,
                         number: number.clone(),
-                        notes_public: "Thank you for your business.".into(),
+                        notes_public: "".into(),
                         notes_private: String::new(),
                         terms: format!("Net {net_days} from issue date."),
                     },
@@ -5556,7 +5556,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                     sessions,
                     net_days,
                     number.clone(),
-                    "Thank you for your business.".into(),
+                    "".into(),
                     String::new(),
                     format!("Net {net_days} from issue date."),
                 )
@@ -5621,6 +5621,11 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             // `Invoice.due_date` in the proto for accounting
             // semantics, just hide it on the PDF.
             ifp.due_date.clear();
+            // Same idea for the status pill — the proto
+            // still says "Draft" until we mount a real
+            // posting flow, but the PDF doesn't need to
+            // shout that at the recipient.
+            ifp.status.clear();
             // Decide PDF path: explicit --out wins; else vault-export under
             // `<vault>/Reports/Invoices/pdfs/<num>.pdf`.
             let do_vault_export = out.is_none();
@@ -5768,37 +5773,38 @@ fn enrich_invoice_with_assignees(
         .collect();
     tagged.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
 
-    // Single assignee → skip summary + charts, but keep
-    // the per-line assignee column blank-suppressed by
-    // clearing the values.
+    // Hide the per-line assignee column on
+    // single-assignee invoices (no useful signal), but
+    // still produce the per-task breakdown below.
     let distinct: std::collections::BTreeSet<&str> =
         tagged.iter().map(|(_, n, _)| n.as_str()).collect();
     if distinct.len() <= 1 {
         for (_, _, line) in &mut tagged {
             line.assignee.clear();
         }
-        ifp.lines = tagged.into_iter().map(|(_, _, l)| l).collect();
-        return;
     }
     ifp.lines = tagged.into_iter().map(|(_, _, l)| l).collect();
 
-    // Aggregate seconds + cents per user_id, in the same
-    // order names first appear sorted alphabetically so the
-    // palette mapping is stable across re-renders.
+    // Aggregate by task (the work description with the
+    // date prefix stripped) — so the same task done by
+    // multiple members rolls up into one slice/bar. Case
+    // folded so "Video editing" and "Video Editing" merge.
+    let line_secs_cents: Vec<(i64, i64)> = line_meta.iter().map(|m| (m.secs, m.cents)).collect();
     let mut totals: std::collections::BTreeMap<String, (i64, i64)> =
         std::collections::BTreeMap::new();
-    for (line, meta) in ifp.lines.iter().zip(line_meta.iter()) {
-        // Re-derive name from the line so sort + aggregate
-        // stay in lockstep (line.assignee was set above).
-        let entry = totals.entry(line.assignee.clone()).or_insert((0, 0));
-        entry.0 += meta.secs;
-        entry.1 += meta.cents;
-        let _ = meta; // silence unused if proto changes
+    for (line, (secs, cents)) in ifp.lines.iter().zip(line_secs_cents.iter()) {
+        let key = canonical_task_label(&line.description);
+        let entry = totals.entry(key).or_insert((0, 0));
+        entry.0 += *secs;
+        entry.1 += *cents;
+    }
+    if totals.len() <= 1 {
+        return;
     }
     let total_secs: i64 = totals.values().map(|(s, _)| *s).sum();
     let total_secs_f = total_secs.max(1) as f64;
 
-    let assignees: Vec<finance::pdf_adapter::AssigneeSummary> = totals
+    let tasks: Vec<finance::pdf_adapter::AssigneeSummary> = totals
         .iter()
         .enumerate()
         .map(|(i, (name, (secs, cents)))| {
@@ -5814,9 +5820,89 @@ fn enrich_invoice_with_assignees(
         })
         .collect();
 
-    ifp.donut_svg = build_donut_svg(&assignees, &totals, total_secs);
-    ifp.bars_svg = build_bars_svg(&assignees, &totals);
-    ifp.assignees = assignees;
+    ifp.donut_svg = build_donut_svg(&tasks, &totals, total_secs);
+    ifp.bars_svg = build_bars_svg(&tasks, &totals);
+    ifp.assignees = tasks;
+
+    // Per-person concise roll-up. Same palette so a
+    // chart-curious reader can colour-match if they want,
+    // but its own slot in the document.
+    let mut by_person: std::collections::BTreeMap<String, (i64, i64)> =
+        std::collections::BTreeMap::new();
+    for (line, (secs, cents)) in ifp.lines.iter().zip(line_secs_cents.iter()) {
+        let name = if line.assignee.is_empty() {
+            // Single-assignee invoice — we cleared the
+            // column label earlier; recover from line_meta.
+            let idx = ifp
+                .lines
+                .iter()
+                .position(|l| std::ptr::eq(l, line))
+                .unwrap_or(0);
+            line_meta
+                .get(idx)
+                .and_then(|m| names_by_id.get(&m.user_id))
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            line.assignee.clone()
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let entry = by_person.entry(name).or_insert((0, 0));
+        entry.0 += *secs;
+        entry.1 += *cents;
+    }
+    let total_p_secs = by_person.values().map(|(s, _)| *s).sum::<i64>().max(1) as f64;
+    ifp.people = by_person
+        .into_iter()
+        .enumerate()
+        .map(
+            |(i, (name, (secs, cents)))| finance::pdf_adapter::AssigneeSummary {
+                name,
+                hours: format!("{:.2}", secs as f64 / 3600.0),
+                amount: fmt_minor(cents),
+                pct: format!("{:.1}", (secs as f64) * 100.0 / total_p_secs),
+                color: PALETTE[i % PALETTE.len()].to_string(),
+            },
+        )
+        .collect();
+}
+
+/// Pull a stable task label out of a line description.
+/// Lines are formatted as `"{date_prefix}  {description}"`
+/// — the date prefix is either `YYYY-MM-DD` or
+/// `YYYY-MM-DD – MM-DD`. Strip it, normalise the
+/// remainder, and case-fold for grouping.
+fn canonical_task_label(line_desc: &str) -> String {
+    let trimmed = line_desc.trim_start();
+    // Date prefix always starts with 10 chars of date —
+    // skip until the first run of two spaces, which is
+    // how the prefix is separated from the description.
+    let body = trimmed.split_once("  ").map_or(trimmed, |(_, rest)| rest);
+    let body = body.trim().trim_end_matches(" (mixed rates)");
+    let mut out = String::with_capacity(body.len());
+    let mut prev_was_space = false;
+    for ch in body.chars() {
+        if ch.is_whitespace() {
+            if !prev_was_space {
+                out.push(' ');
+            }
+            prev_was_space = true;
+        } else {
+            for c in ch.to_lowercase() {
+                out.push(c);
+            }
+            prev_was_space = false;
+        }
+    }
+    // Title-case the first letter so the legend reads
+    // naturally ("Video editing" vs "video editing").
+    let mut chars = out.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => "Untitled".to_string(),
+    }
 }
 
 /// SVG donut showing each assignee's share of total hours.

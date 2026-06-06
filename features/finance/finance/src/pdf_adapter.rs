@@ -39,6 +39,10 @@ pub struct InvoiceForPdf {
     /// charts. Empty = caller didn't bother computing them
     /// (single-assignee invoices generally skip this).
     pub assignees: Vec<AssigneeSummary>,
+    /// Per-person concise summary block (hours + amount),
+    /// rendered between the overview and the line-item
+    /// detail. Empty list hides the block.
+    pub people: Vec<AssigneeSummary>,
     /// Pre-rendered donut SVG (hours share). Empty string
     /// suppresses the chart container in the template.
     pub donut_svg: String,
@@ -161,6 +165,7 @@ pub fn invoice_for_pdf(
         terms: invoice.terms.clone(),
         footer: invoice.footer.clone(),
         assignees: Vec::new(),
+        people: Vec::new(),
         donut_svg: String::new(),
         bars_svg: String::new(),
     }
