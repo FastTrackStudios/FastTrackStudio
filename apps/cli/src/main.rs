@@ -3698,9 +3698,11 @@ enum FinanceCmd {
     /// Use `--out` to override the PDF location and skip the
     /// vault export.
     Invoice {
-        /// Project frontmatter uuid.
+        /// Project frontmatter uuid. Omit to bill every
+        /// billable session in the range regardless of
+        /// project (including unscoped time).
         #[arg(long)]
-        project: uuid::Uuid,
+        project: Option<uuid::Uuid>,
         /// Inclusive lower bound on `start_time`.
         #[arg(long)]
         since: chrono::DateTime<chrono::Utc>,
@@ -5513,23 +5515,53 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
-            let build = finance::invoice_from_sessions::build_invoice_from_sessions(
-                &timer_conn,
-                finance::invoice_from_sessions::BuildInvoiceArgs {
-                    book,
-                    party: party.clone(),
-                    project_id: project,
-                    since,
-                    until,
+            // When `--project` is set we delegate to the
+            // pipeline's per-engagement query. Without it,
+            // load every billable + uninvoiced session in
+            // the window and hand the list to
+            // `build_from_models`.
+            let build = if let Some(pid) = project {
+                finance::invoice_from_sessions::build_invoice_from_sessions(
+                    &timer_conn,
+                    finance::invoice_from_sessions::BuildInvoiceArgs {
+                        book: book.clone(),
+                        party: party.clone(),
+                        project_id: pid,
+                        since,
+                        until,
+                        net_days,
+                        number: number.clone(),
+                        notes_public: "Thank you for your business.".into(),
+                        notes_private: String::new(),
+                        terms: format!("Net {net_days} from issue date."),
+                    },
+                )
+                .await
+                .map_err(|e| eyre::eyre!("build invoice: {e}"))?
+            } else {
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+                let sessions = WorkSessionEntity::find()
+                    .filter(WorkSessionColumn::Billable.eq(true))
+                    .filter(WorkSessionColumn::EndTime.is_not_null())
+                    .filter(WorkSessionColumn::InvoiceId.is_null())
+                    .filter(WorkSessionColumn::StartTime.gte(since))
+                    .filter(WorkSessionColumn::StartTime.lt(until))
+                    .all(&timer_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("query sessions: {e}"))?;
+                finance::invoice_from_sessions::build_from_models(
+                    book.clone(),
+                    party.clone(),
+                    sessions,
                     net_days,
-                    number,
-                    notes_public: "Thank you for your business.".into(),
-                    notes_private: String::new(),
-                    terms: format!("Net {net_days} from issue date."),
-                },
-            )
-            .await
-            .map_err(|e| eyre::eyre!("build invoice: {e}"))?;
+                    number.clone(),
+                    "Thank you for your business.".into(),
+                    String::new(),
+                    format!("Net {net_days} from issue date."),
+                )
+                .map_err(|e| eyre::eyre!("build invoice: {e}"))?
+            };
 
             // Issuer ("From" block): `<org>/issuer.toml` is
             // the durable source; `TASK_ISSUER_*` env vars
