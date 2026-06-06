@@ -3709,9 +3709,19 @@ enum FinanceCmd {
         /// Exclusive upper bound on `start_time`.
         #[arg(long)]
         until: chrono::DateTime<chrono::Utc>,
-        /// Invoice number, e.g. `INV-2026-0042`.
+        /// Explicit invoice number, e.g. `INV-2026-0042`.
+        /// Mutually exclusive with `--prefix`.
+        #[arg(long, conflicts_with = "prefix")]
+        number: Option<String>,
+        /// Auto-increment from the highest existing
+        /// `<prefix>NNN` (zero-padded `--pad` digits, default
+        /// 3). Example: `--prefix TBM-2026-` → finds the
+        /// next free `TBM-2026-001`, `TBM-2026-002`…
         #[arg(long)]
-        number: String,
+        prefix: Option<String>,
+        /// Width of the numeric suffix when using `--prefix`.
+        #[arg(long, default_value_t = 3)]
+        pad: usize,
         /// Net N days for due date. Default 30.
         #[arg(long, default_value_t = 30)]
         net_days: i64,
@@ -3737,6 +3747,54 @@ enum FinanceCmd {
         /// hours on a later run.
         #[arg(long, default_value_t = false)]
         no_commit: bool,
+    },
+    /// List persisted invoices in `finance.sqlite`.
+    Invoices {
+        /// Filter by status slug (draft / sent / paid /
+        /// void / etc). Case-insensitive.
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by party id.
+        #[arg(long)]
+        party: Option<uuid::Uuid>,
+        /// Cap the output at this many rows (newest issued
+        /// first).
+        #[arg(long, default_value_t = 50)]
+        limit: u64,
+    },
+    /// Show one persisted invoice in detail — header,
+    /// totals, line items, and the contributing session
+    /// ids stamped to it.
+    InvoiceShow {
+        /// Invoice number.
+        number: String,
+    },
+    /// Record a payment and update the invoice's balance.
+    /// `--amount` is in minor units (cents). Sets the
+    /// invoice to Paid if balance reaches zero,
+    /// PartiallyPaid otherwise.
+    InvoiceMarkPaid {
+        /// Invoice number.
+        number: String,
+        /// Payment amount in minor units (cents). Omit to
+        /// pay the full outstanding balance.
+        #[arg(long)]
+        amount: Option<i64>,
+        /// ISO 8601 date (YYYY-MM-DD) the payment landed.
+        /// Defaults to today.
+        #[arg(long)]
+        on: Option<chrono::NaiveDate>,
+        /// Free-text note (cheque #, wire ref, …).
+        #[arg(long, default_value = "")]
+        memo: String,
+    },
+    /// Cancel an invoice + un-stamp the contributing
+    /// sessions so they can be re-billed. Idempotent on a
+    /// missing invoice; refuses if the invoice already has
+    /// payments against it (use a credit note instead).
+    InvoiceVoid {
+        /// Invoice number.
+        number: String,
     },
 }
 
@@ -5492,11 +5550,18 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             since,
             until,
             number,
+            prefix,
+            pad,
             net_days,
             client_name,
             out,
             no_commit,
         } => {
+            if number.is_none() && prefix.is_none() {
+                return Err(eyre::eyre!(
+                    "pass either --number <explicit> or --prefix <auto>"
+                ));
+            }
             // Stable per-org / per-client UUIDv5 ids so
             // repeated invoices share a single Book and
             // Party row in finance.sqlite. Avoids the
@@ -5554,20 +5619,26 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                     .map_err(|e| eyre::eyre!("finance migrations: {e}"))?;
                 conn
             };
-            {
+            // Resolve the final invoice number: explicit
+            // --number, or auto-incremented from --prefix.
+            let final_number: String = if let Some(n) = number.clone() {
                 use finance_db::entity::{InvoiceColumn, InvoiceEntity};
                 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
                 let existing = InvoiceEntity::find()
-                    .filter(InvoiceColumn::Number.eq(number.clone()))
+                    .filter(InvoiceColumn::Number.eq(n.clone()))
                     .one(&finance_conn)
                     .await
                     .map_err(|e| eyre::eyre!("check invoice number: {e}"))?;
                 if existing.is_some() {
                     return Err(eyre::eyre!(
-                        "invoice number `{number}` is already in finance.sqlite. Pick a new --number, or pass --no-commit to render-only."
+                        "invoice number `{n}` is already in finance.sqlite. Pick a new --number, or pass --no-commit to render-only."
                     ));
                 }
-            }
+                n
+            } else {
+                let p = prefix.clone().expect("validated above");
+                next_invoice_number(&finance_conn, &p, pad).await?
+            };
 
             // When `--project` is set we delegate to the
             // pipeline's per-engagement query. Without it,
@@ -5584,7 +5655,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                         since,
                         until,
                         net_days,
-                        number: number.clone(),
+                        number: final_number.clone(),
                         notes_public: "".into(),
                         notes_private: String::new(),
                         terms: String::new(),
@@ -5609,7 +5680,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                     party.clone(),
                     sessions,
                     net_days,
-                    number.clone(),
+                    final_number.clone(),
                     String::new(),
                     String::new(),
                     String::new(),
@@ -5680,6 +5751,11 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             // posting flow, but the PDF doesn't need to
             // shout that at the recipient.
             ifp.status.clear();
+            // Period the invoice spans — drives the
+            // "Period:" row in the header so a reader
+            // doesn't have to scan line dates.
+            ifp.period_start = since.format("%Y-%m-%d").to_string();
+            ifp.period_end = until.format("%Y-%m-%d").to_string();
             // Decide PDF path: explicit --out wins; else vault-export under
             // `<vault>/Reports/Invoices/pdfs/<num>.pdf`.
             let do_vault_export = out.is_none();
@@ -5745,6 +5821,10 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                     &party,
                     &rel_pdf,
                     build.source_session_ids.len(),
+                    since,
+                    until,
+                    &ifp.people,
+                    &ifp.assignees,
                 );
                 std::fs::write(&md_path, md)
                     .map_err(|e| eyre::eyre!("write {}: {e}", md_path.display()))?;
@@ -5815,6 +5895,241 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 build.invoice.currency,
             );
         }
+        FinanceCmd::Invoices {
+            status,
+            party,
+            limit,
+        } => {
+            use finance_db::entity::{InvoiceColumn, InvoiceEntity};
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+            use sea_orm_migration::MigratorTrait;
+            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+            let conn = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
+            finance_db::Migrator::up(&conn, None).await.ok();
+            let mut q = InvoiceEntity::find()
+                .order_by_desc(InvoiceColumn::IssueDate)
+                .order_by_desc(InvoiceColumn::CreatedAt)
+                .limit(limit);
+            if let Some(p) = party {
+                q = q.filter(InvoiceColumn::PartyId.eq(p));
+            }
+            let rows = q
+                .all(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("list invoices: {e}"))?;
+            let status_needle = status.map(|s| s.to_lowercase());
+            let filtered: Vec<_> = rows
+                .into_iter()
+                .filter(|r| {
+                    status_needle
+                        .as_ref()
+                        .is_none_or(|n| format!("{:?}", r.status).to_lowercase() == *n)
+                })
+                .collect();
+            if filtered.is_empty() {
+                println!("(no invoices)");
+            }
+            println!(
+                "{:<24}  {:<11}  {:>12}  {:>12}  {:<10}",
+                "number", "issued", "total", "balance", "status"
+            );
+            for r in filtered {
+                println!(
+                    "{:<24}  {:<11}  {:>12}  {:>12}  {:<10}",
+                    r.number,
+                    r.issue_date,
+                    fmt_minor(r.total_minor),
+                    fmt_minor(r.balance_minor),
+                    format!("{:?}", r.status).to_lowercase(),
+                );
+            }
+        }
+        FinanceCmd::InvoiceShow { number } => {
+            use finance_db::entity::{InvoiceColumn, InvoiceEntity};
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            use sea_orm_migration::MigratorTrait;
+            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+            let conn = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
+            finance_db::Migrator::up(&conn, None).await.ok();
+            let row = InvoiceEntity::find()
+                .filter(InvoiceColumn::Number.eq(number.clone()))
+                .one(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
+            println!("Invoice {}", row.number);
+            println!("  id:          {}", row.id);
+            println!("  status:      {:?}", row.status);
+            println!("  issued:      {}", row.issue_date);
+            println!("  due:         {}", row.due_date);
+            println!("  currency:    {}", row.currency);
+            println!("  subtotal:    {}", fmt_minor(row.subtotal_minor));
+            println!("  total:       {}", fmt_minor(row.total_minor));
+            println!("  paid:        {}", fmt_minor(row.amount_paid_minor));
+            println!("  balance:     {}", fmt_minor(row.balance_minor));
+            println!("  party_id:    {}", row.party_id);
+            println!("  book_id:     {}", row.book_id);
+            println!("  line items:  {}", row.line_items.0.len());
+            for li in &row.line_items.0 {
+                println!(
+                    "    - {}  qty={:.2}h  amount={}",
+                    li.description,
+                    (li.quantity_milli as f64) / 1000.0,
+                    fmt_minor(li.line_total_minor),
+                );
+            }
+            // Sessions stamped to this invoice.
+            use sea_orm::Database;
+            let timer_url = std::env::var("TASK_TIMER_DB")
+                .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
+            if let Ok(tc) = Database::connect(&timer_url).await {
+                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+                let sessions = WorkSessionEntity::find()
+                    .filter(WorkSessionColumn::InvoiceId.eq(row.id))
+                    .all(&tc)
+                    .await
+                    .unwrap_or_default();
+                println!("  sessions:    {}", sessions.len());
+                for s in sessions {
+                    println!(
+                        "    - {}  {}",
+                        s.start_time.format("%Y-%m-%d %H:%M"),
+                        s.description
+                    );
+                }
+            }
+        }
+        FinanceCmd::InvoiceMarkPaid {
+            number,
+            amount,
+            on,
+            memo,
+        } => {
+            use finance_db::entity::{InvoiceActive, InvoiceColumn, InvoiceEntity};
+            use sea_orm::{
+                ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+            };
+            use sea_orm_migration::MigratorTrait;
+            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+            let conn = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
+            finance_db::Migrator::up(&conn, None).await.ok();
+            let row = InvoiceEntity::find()
+                .filter(InvoiceColumn::Number.eq(number.clone()))
+                .one(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
+            let outstanding = row.balance_minor;
+            if outstanding <= 0 {
+                return Err(eyre::eyre!(
+                    "invoice `{number}` already has zero balance ({})",
+                    fmt_minor(row.amount_paid_minor)
+                ));
+            }
+            let pay = amount.unwrap_or(outstanding);
+            if pay <= 0 {
+                return Err(eyre::eyre!("--amount must be positive"));
+            }
+            if pay > outstanding {
+                return Err(eyre::eyre!(
+                    "--amount {} exceeds outstanding balance {}",
+                    fmt_minor(pay),
+                    fmt_minor(outstanding)
+                ));
+            }
+            let new_paid = row.amount_paid_minor + pay;
+            let new_balance = outstanding - pay;
+            let new_status = if new_balance == 0 {
+                finance_proto::invoice::InvoiceStatus::Paid
+            } else {
+                finance_proto::invoice::InvoiceStatus::PartiallyPaid
+            };
+            let on_date = on.unwrap_or_else(|| chrono::Utc::now().date_naive());
+            let id = row.id;
+            let mut active: InvoiceActive = row.into();
+            active.amount_paid_minor = Set(new_paid);
+            active.balance_minor = Set(new_balance);
+            active.status = Set(new_status.clone());
+            active.updated_at = Set(chrono::Utc::now());
+            active
+                .update(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("update invoice: {e}"))?;
+            println!(
+                "Recorded payment of {} on {} ({}). status={:?}, paid={}, balance={}",
+                fmt_minor(pay),
+                on_date,
+                if memo.is_empty() { "no memo" } else { &memo },
+                new_status,
+                fmt_minor(new_paid),
+                fmt_minor(new_balance),
+            );
+            let _ = id;
+        }
+        FinanceCmd::InvoiceVoid { number } => {
+            use finance_db::entity::{InvoiceActive, InvoiceColumn, InvoiceEntity};
+            use sea_orm::{
+                ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+            };
+            use sea_orm_migration::MigratorTrait;
+            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+            let conn = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
+            finance_db::Migrator::up(&conn, None).await.ok();
+            let row = InvoiceEntity::find()
+                .filter(InvoiceColumn::Number.eq(number.clone()))
+                .one(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
+            if row.amount_paid_minor > 0 {
+                return Err(eyre::eyre!(
+                    "invoice `{number}` has payments against it ({}). Issue a credit note instead.",
+                    fmt_minor(row.amount_paid_minor)
+                ));
+            }
+            let invoice_id = row.id;
+            let mut active: InvoiceActive = row.into();
+            active.status = Set(finance_proto::invoice::InvoiceStatus::Cancelled);
+            active.updated_at = Set(chrono::Utc::now());
+            active
+                .update(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("update invoice: {e}"))?;
+            // Un-stamp the contributing sessions so they
+            // become re-billable.
+            use sea_orm::Database;
+            let timer_url = std::env::var("TASK_TIMER_DB")
+                .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
+            let tc = Database::connect(&timer_url)
+                .await
+                .map_err(|e| eyre::eyre!("connect timer db: {e}"))?;
+            use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+            let cleared = WorkSessionEntity::update_many()
+                .col_expr(
+                    WorkSessionColumn::InvoiceId,
+                    sea_orm::sea_query::Expr::value(Option::<uuid::Uuid>::None),
+                )
+                .col_expr(
+                    WorkSessionColumn::UpdatedAt,
+                    sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+                )
+                .filter(WorkSessionColumn::InvoiceId.eq(invoice_id))
+                .exec(&tc)
+                .await
+                .map_err(|e| eyre::eyre!("un-stamp sessions: {e}"))?;
+            println!(
+                "Voided `{number}` and un-stamped {} session(s).",
+                cleared.rows_affected
+            );
+        }
     }
     Ok(())
 }
@@ -5848,6 +6163,35 @@ fn fmt_minor(c: i64) -> String {
 /// Single-assignee invoices are left untouched (no column,
 /// no summary, no charts) — the breakdown is only useful
 /// when the work is split across people.
+/// Scan `finance_invoices.number` for rows whose number
+/// starts with `prefix` and whose suffix parses as an
+/// integer; return `<prefix><next>` zero-padded to `pad`.
+/// Starts at 1 if no match exists.
+async fn next_invoice_number(
+    conn: &sea_orm::DatabaseConnection,
+    prefix: &str,
+    pad: usize,
+) -> eyre::Result<String> {
+    use finance_db::entity::{InvoiceColumn, InvoiceEntity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    let rows = InvoiceEntity::find()
+        .filter(InvoiceColumn::Number.starts_with(prefix))
+        .all(conn)
+        .await
+        .map_err(|e| eyre::eyre!("scan invoice numbers: {e}"))?;
+    let highest = rows
+        .iter()
+        .filter_map(|r| {
+            r.number
+                .strip_prefix(prefix)
+                .and_then(|s| s.parse::<u64>().ok())
+        })
+        .max()
+        .unwrap_or(0);
+    let next = highest + 1;
+    Ok(format!("{prefix}{next:0>width$}", width = pad))
+}
+
 fn enrich_invoice_with_assignees(
     ifp: &mut finance::pdf_adapter::InvoiceForPdf,
     line_meta: &[finance::invoice_from_sessions::LineMeta],
@@ -6108,11 +6452,16 @@ fn build_bars_svg(
 /// PDF (Obsidian-style `![[pdfs/INV-...pdf]]` embed) so a
 /// vault viewer can open the file inline. Frontmatter makes
 /// the page queryable in `Reports/Invoices/*.base`.
+#[allow(clippy::too_many_arguments)]
 fn render_invoice_markdown(
     invoice: &finance_proto::invoice::Invoice,
     party: &finance_proto::party::Party,
     rel_pdf_path: &str,
     session_count: usize,
+    period_start: chrono::DateTime<chrono::Utc>,
+    period_end: chrono::DateTime<chrono::Utc>,
+    people: &[finance::pdf_adapter::AssigneeSummary],
+    tasks: &[finance::pdf_adapter::AssigneeSummary],
 ) -> String {
     let mut out = String::new();
     out.push_str("---\n");
@@ -6121,6 +6470,11 @@ fn render_invoice_markdown(
     out.push_str(&format!("status: {:?}\n", invoice.status).to_lowercase());
     out.push_str(&format!("issueDate: {}\n", invoice.issue_date));
     out.push_str(&format!("dueDate: {}\n", invoice.due_date));
+    out.push_str(&format!(
+        "periodStart: {}\n",
+        period_start.format("%Y-%m-%d")
+    ));
+    out.push_str(&format!("periodEnd: {}\n", period_end.format("%Y-%m-%d")));
     out.push_str(&format!("currency: {}\n", invoice.currency));
     out.push_str(&format!("totalMinor: {}\n", invoice.total_minor));
     out.push_str(&format!("balanceMinor: {}\n", invoice.balance_minor));
@@ -6131,15 +6485,40 @@ fn render_invoice_markdown(
     out.push_str("---\n\n");
     out.push_str(&format!("# Invoice {}\n\n", invoice.number));
     out.push_str(&format!(
-        "**To:** {}  \n**Issued:** {}  \n**Due:** {}  \n**Total:** {} {}\n\n",
+        "**To:** {}  \n**Issued:** {}  \n**Period:** {} → {}  \n**Total:** {} {}\n\n",
         party.display_name,
         invoice.issue_date,
-        invoice.due_date,
+        period_start.format("%Y-%m-%d"),
+        period_end.format("%Y-%m-%d"),
         fmt_minor(invoice.total_minor),
         invoice.currency,
     ));
     out.push_str("## PDF\n\n");
     out.push_str(&format!("![[{rel_pdf_path}]]\n\n"));
+    if !people.is_empty() {
+        out.push_str("## Per person\n\n");
+        out.push_str("| Member | Hours | Share | Amount |\n");
+        out.push_str("|---|---:|---:|---:|\n");
+        for p in people {
+            out.push_str(&format!(
+                "| {} | {} | {}% | {} |\n",
+                p.name, p.hours, p.pct, p.amount
+            ));
+        }
+        out.push('\n');
+    }
+    if !tasks.is_empty() {
+        out.push_str("## Time by task\n\n");
+        out.push_str("| Task | Hours | Share | Amount |\n");
+        out.push_str("|---|---:|---:|---:|\n");
+        for t in tasks {
+            out.push_str(&format!(
+                "| {} | {} | {}% | {} |\n",
+                t.name, t.hours, t.pct, t.amount
+            ));
+        }
+        out.push('\n');
+    }
     out.push_str("## Line items\n\n");
     out.push_str("| Description | Quantity | Unit price | Amount |\n");
     out.push_str("|---|---:|---:|---:|\n");

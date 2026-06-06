@@ -24,6 +24,8 @@ pub struct InvoiceForPdf {
     pub currency_symbol: String,
     pub issue_date: String,
     pub due_date: String,
+    pub period_start: String,
+    pub period_end: String,
     pub status: String,
     pub from: PartyForPdf,
     pub to: PartyForPdf,
@@ -129,6 +131,8 @@ pub fn invoice_for_pdf(
         currency_symbol: currency_symbol(&invoice.currency).into(),
         issue_date: invoice.issue_date.clone(),
         due_date: invoice.due_date.clone(),
+        period_start: String::new(),
+        period_end: String::new(),
         status: status_slug(&invoice.status).into(),
         from: PartyForPdf {
             name: issuer.name.clone(),
