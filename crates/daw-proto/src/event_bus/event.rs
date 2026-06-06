@@ -11,6 +11,7 @@
 //! traits remain — they're the right surface when a consumer cares
 //! about exactly one domain.
 
+use crate::fx::FxStreamEvent;
 use crate::marker::MarkerStreamEvent;
 use crate::project::ProjectStreamEvent;
 use crate::region::RegionStreamEvent;
@@ -26,6 +27,7 @@ use facet::Facet;
 #[repr(u8)]
 pub enum DawEvent {
     Track(TrackStreamEvent),
+    Fx(FxStreamEvent),
     Marker(MarkerStreamEvent),
     Region(RegionStreamEvent),
     TempoMap(TempoMapStreamEvent),
@@ -48,6 +50,7 @@ pub enum DawEvent {
 #[derive(Clone, Debug, Default, Facet)]
 pub struct BusFilter {
     pub tracks: bool,
+    pub fx: bool,
     pub markers: bool,
     pub regions: bool,
     pub tempo_map: bool,
@@ -61,6 +64,7 @@ impl BusFilter {
     pub const fn all() -> Self {
         Self {
             tracks: true,
+            fx: true,
             markers: true,
             regions: true,
             tempo_map: true,
@@ -74,6 +78,7 @@ impl BusFilter {
     pub const fn everything_but_position() -> Self {
         Self {
             tracks: true,
+            fx: true,
             markers: true,
             regions: true,
             tempo_map: true,
@@ -104,6 +109,7 @@ impl BusFilter {
     /// True when at least one domain is enabled.
     pub fn any(&self) -> bool {
         self.tracks
+            || self.fx
             || self.markers
             || self.regions
             || self.tempo_map

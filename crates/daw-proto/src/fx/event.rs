@@ -90,8 +90,21 @@ pub enum FxEvent {
     TreeStructureChanged { context: FxChainContext },
 }
 
+/// An [`FxEvent`] stamped with the project it belongs to — the wire
+/// shape for streaming subscriptions (mirrors `TrackStreamEvent`).
+#[derive(Debug, Clone, Facet)]
+pub struct FxStreamEvent {
+    pub project_guid: String,
+    pub event: FxEvent,
+}
+
 // FxEvent has no lifetime parameters, so Ref<'a> = Self is trivially sound.
 #[allow(unsafe_code)]
 unsafe impl vox_types::Reborrow for FxEvent {
     type Ref<'a> = FxEvent;
+}
+
+#[allow(unsafe_code)]
+unsafe impl vox_types::Reborrow for FxStreamEvent {
+    type Ref<'a> = FxStreamEvent;
 }
