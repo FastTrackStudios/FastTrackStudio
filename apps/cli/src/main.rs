@@ -5757,18 +5757,23 @@ fn enrich_invoice_with_assignees(
             .unwrap_or_else(|| format!("user {}", &uid.simple().to_string()[..8]))
     };
 
-    // Tag each line with its assignee name. Preserve the
-    // original date-sorted order *within* an assignee by
-    // remembering the input index.
-    let mut tagged: Vec<(usize, String, finance::pdf_adapter::InvoiceLineForPdf)> = ifp
+    // Tag each line with its assignee name + carry the
+    // matching meta through the sort so downstream
+    // aggregations stay aligned with the rendered lines.
+    let mut tagged: Vec<(
+        usize,
+        String,
+        finance::pdf_adapter::InvoiceLineForPdf,
+        finance::invoice_from_sessions::LineMeta,
+    )> = ifp
         .lines
         .drain(..)
-        .zip(line_meta.iter())
+        .zip(line_meta.iter().copied())
         .enumerate()
         .map(|(i, (mut line, meta))| {
             let name = label_for(meta.user_id);
             line.assignee = name.clone();
-            (i, name, line)
+            (i, name, line, meta)
         })
         .collect();
     tagged.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
@@ -5777,27 +5782,36 @@ fn enrich_invoice_with_assignees(
     // single-assignee invoices (no useful signal), but
     // still produce the per-task breakdown below.
     let distinct: std::collections::BTreeSet<&str> =
-        tagged.iter().map(|(_, n, _)| n.as_str()).collect();
-    if distinct.len() <= 1 {
-        for (_, _, line) in &mut tagged {
+        tagged.iter().map(|(_, n, _, _)| n.as_str()).collect();
+    let single_assignee = distinct.len() <= 1;
+    if single_assignee {
+        for (_, _, line, _) in &mut tagged {
             line.assignee.clear();
         }
     }
-    ifp.lines = tagged.into_iter().map(|(_, _, l)| l).collect();
 
-    // Aggregate by task (the work description with the
-    // date prefix stripped) — so the same task done by
-    // multiple members rolls up into one slice/bar. Case
-    // folded so "Video editing" and "Video Editing" merge.
-    let line_secs_cents: Vec<(i64, i64)> = line_meta.iter().map(|m| (m.secs, m.cents)).collect();
+    // Aggregate by task (case-folded description) AND by
+    // person from the sorted tuples — meta is paired with
+    // its line so totals can't drift if sort order changes.
     let mut totals: std::collections::BTreeMap<String, (i64, i64)> =
         std::collections::BTreeMap::new();
-    for (line, (secs, cents)) in ifp.lines.iter().zip(line_secs_cents.iter()) {
+    let mut by_person_raw: std::collections::BTreeMap<String, (i64, i64)> =
+        std::collections::BTreeMap::new();
+    for (_, _name, line, meta) in &tagged {
         let key = canonical_task_label(&line.description);
-        let entry = totals.entry(key).or_insert((0, 0));
-        entry.0 += *secs;
-        entry.1 += *cents;
+        let t = totals.entry(key).or_insert((0, 0));
+        t.0 += meta.secs;
+        t.1 += meta.cents;
+        // Use the user-id directly so the per-person split
+        // is correct even when we've hidden the column.
+        let person = label_for(meta.user_id);
+        if !person.is_empty() {
+            let p = by_person_raw.entry(person).or_insert((0, 0));
+            p.0 += meta.secs;
+            p.1 += meta.cents;
+        }
     }
+    ifp.lines = tagged.into_iter().map(|(_, _, l, _)| l).collect();
     if totals.len() <= 1 {
         return;
     }
@@ -5824,37 +5838,10 @@ fn enrich_invoice_with_assignees(
     ifp.bars_svg = build_bars_svg(&tasks, &totals);
     ifp.assignees = tasks;
 
-    // Per-person concise roll-up. Same palette so a
-    // chart-curious reader can colour-match if they want,
-    // but its own slot in the document.
-    let mut by_person: std::collections::BTreeMap<String, (i64, i64)> =
-        std::collections::BTreeMap::new();
-    for (line, (secs, cents)) in ifp.lines.iter().zip(line_secs_cents.iter()) {
-        let name = if line.assignee.is_empty() {
-            // Single-assignee invoice — we cleared the
-            // column label earlier; recover from line_meta.
-            let idx = ifp
-                .lines
-                .iter()
-                .position(|l| std::ptr::eq(l, line))
-                .unwrap_or(0);
-            line_meta
-                .get(idx)
-                .and_then(|m| names_by_id.get(&m.user_id))
-                .cloned()
-                .unwrap_or_default()
-        } else {
-            line.assignee.clone()
-        };
-        if name.is_empty() {
-            continue;
-        }
-        let entry = by_person.entry(name).or_insert((0, 0));
-        entry.0 += *secs;
-        entry.1 += *cents;
-    }
-    let total_p_secs = by_person.values().map(|(s, _)| *s).sum::<i64>().max(1) as f64;
-    ifp.people = by_person
+    // Per-person concise roll-up, computed above from the
+    // sorted (line, meta) tuples — guaranteed aligned.
+    let total_p_secs = by_person_raw.values().map(|(s, _)| *s).sum::<i64>().max(1) as f64;
+    ifp.people = by_person_raw
         .into_iter()
         .enumerate()
         .map(
