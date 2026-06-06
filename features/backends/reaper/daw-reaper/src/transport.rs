@@ -124,6 +124,12 @@ pub(crate) fn read_transport_state_for_project(
         play_state,
         record_mode: daw_proto::RecordMode::Normal,
         looping,
+        metronome: reaper_high::Reaper::get()
+            .main_section()
+            .action_by_command_id(reaper_medium::CommandId::new(40364))
+            .is_on()
+            .unwrap_or(None)
+            .unwrap_or(false),
         loop_region,
         time_selection,
         tempo: daw_proto::primitives::Tempo::from_bpm(tempo_bpm),
@@ -177,6 +183,29 @@ fn run_command(cmd: u32) {
 // ── Transport impl ────────────────────────────────────────────────────
 
 impl Transport for crate::Reaper {
+    fn set_metronome(&self, project: ProjectContext, enabled: bool) -> DawResult<()> {
+        // Toggle command 40364 ("Options: Toggle metronome") when the
+        // current state differs.
+        if Transport::metronome_enabled(self, project) != enabled {
+            let reaper = reaper_high::Reaper::get();
+            let _ = reaper
+                .main_section()
+                .action_by_command_id(reaper_medium::CommandId::new(40364))
+                .invoke_as_trigger(None, None);
+        }
+        Ok(())
+    }
+
+    fn metronome_enabled(&self, _project: ProjectContext) -> bool {
+        let reaper = reaper_high::Reaper::get();
+        reaper
+            .main_section()
+            .action_by_command_id(reaper_medium::CommandId::new(40364))
+            .is_on()
+            .unwrap_or(None)
+            .unwrap_or(false)
+    }
+
     fn play(&self, _project: ProjectContext) -> DawResult<()> {
         // 1007: Transport: Play
         run_command(1007);

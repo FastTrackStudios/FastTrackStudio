@@ -153,6 +153,29 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
         volume,
         pan,
         phase_inverted: track.phase_is_inverted(),
+        automation_mode: {
+            use daw_proto::primitives::AutomationMode as P;
+            use reaper_medium::AutomationMode as R;
+            match track.automation_mode() {
+                R::TrimRead => P::TrimRead,
+                R::Read => P::Read,
+                R::Touch => P::Touch,
+                R::Write => P::Write,
+                R::Latch => P::Latch,
+                R::LatchPreview => P::LatchPreview,
+                R::Unknown(_) => P::TrimRead,
+            }
+        },
+        input_monitor: {
+            use daw_proto::track::InputMonitoringMode as P;
+            use reaper_medium::InputMonitoringMode as R;
+            match track.input_monitoring_mode() {
+                R::Off => P::Off,
+                R::Normal => P::Normal,
+                R::NotWhenPlaying => P::NotWhenPlaying,
+                _ => P::Off,
+            }
+        },
         parent_guid: None,
         folder_depth,
         is_folder,
@@ -436,6 +459,51 @@ impl Tracks for crate::Reaper {
     fn master(&self, project: ProjectContext) -> Option<Track> {
         let proj = resolve_project(&project)?;
         proj.master_track().ok().as_ref().map(build_track_info)
+    }
+
+    fn set_automation_mode(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        mode: daw_proto::primitives::AutomationMode,
+    ) -> DawResult<()> {
+        use daw_proto::primitives::AutomationMode as P;
+        use reaper_medium::AutomationMode as R;
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let mode = match mode {
+            P::Off | P::TrimRead => R::TrimRead,
+            P::Read => R::Read,
+            P::Touch => R::Touch,
+            P::Write => R::Write,
+            P::Latch => R::Latch,
+            P::LatchPreview => R::LatchPreview,
+        };
+        t.set_automation_mode(mode);
+        Ok(())
+    }
+
+    fn set_input_monitor(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        monitor: daw_proto::track::InputMonitoringMode,
+    ) -> DawResult<()> {
+        use daw_proto::track::InputMonitoringMode as P;
+        use reaper_medium::InputMonitoringMode as R;
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let mode = match monitor {
+            P::Off => R::Off,
+            P::Normal => R::Normal,
+            P::NotWhenPlaying => R::NotWhenPlaying,
+        };
+        t.set_input_monitoring_mode(
+            mode,
+            GangBehavior::DenyGang,
+            GroupingBehavior::PreventGrouping,
+        );
+        Ok(())
     }
 
     fn set_phase_inverted(

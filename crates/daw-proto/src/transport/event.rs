@@ -41,6 +41,8 @@ pub enum TransportEvent {
     },
     /// Loop on/off toggled.
     LoopingChanged { project_guid: String, looping: bool },
+    /// Metronome / click toggled.
+    MetronomeChanged { project_guid: String, enabled: bool },
     /// Loop region edited.
     LoopRegionChanged {
         project_guid: String,

@@ -245,6 +245,7 @@ impl DawMainThread {
             play_state,
             record_mode: daw_proto::RecordMode::Normal,
             looping,
+            metronome: false,
             loop_region: None,
             time_selection: None,
             tempo: daw_proto::primitives::Tempo::from_bpm(tempo_bpm),
@@ -537,6 +538,29 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
         volume,
         pan,
         phase_inverted: track.phase_is_inverted(),
+        automation_mode: {
+            use daw_proto::primitives::AutomationMode as P;
+            use reaper_medium::AutomationMode as R;
+            match track.automation_mode() {
+                R::TrimRead => P::TrimRead,
+                R::Read => P::Read,
+                R::Touch => P::Touch,
+                R::Write => P::Write,
+                R::Latch => P::Latch,
+                R::LatchPreview => P::LatchPreview,
+                R::Unknown(_) => P::TrimRead,
+            }
+        },
+        input_monitor: {
+            use daw_proto::track::InputMonitoringMode as P;
+            use reaper_medium::InputMonitoringMode as R;
+            match track.input_monitoring_mode() {
+                R::Off => P::Off,
+                R::Normal => P::Normal,
+                R::NotWhenPlaying => P::NotWhenPlaying,
+                _ => P::Off,
+            }
+        },
         parent_guid: None,
         folder_depth,
         is_folder,

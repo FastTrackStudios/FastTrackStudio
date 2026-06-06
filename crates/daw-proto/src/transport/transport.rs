@@ -63,6 +63,8 @@ pub struct Transport {
     pub play_state: PlayState,
     pub record_mode: RecordMode,
     pub looping: bool,
+    /// Metronome / click enabled.
+    pub metronome: bool,
     /// Loop region (start/end positions). Only meaningful when looping is true.
     pub loop_region: Option<LoopRegion>,
     /// REAPER-style time selection range, independent from loop points.
@@ -81,6 +83,7 @@ impl Transport {
             play_state: PlayState::default(),
             record_mode: RecordMode::default(),
             looping: false,
+            metronome: false,
             loop_region: None,
             time_selection: None,
             tempo: Tempo::default(),

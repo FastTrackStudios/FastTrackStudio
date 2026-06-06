@@ -173,6 +173,37 @@ impl EnvelopeHandle {
     // State
     // =========================================================================
 
+    /// Mark this parameter's control as touched (Touch/Latch
+    /// automation gating) — surfaces call this from fader-touch
+    /// sensors.
+    pub async fn touch(&self) -> Result<()> {
+        self.clients
+            .automation
+            .touch_param(self.context(), self.location())
+            .await??;
+        Ok(())
+    }
+
+    /// Release a touched parameter.
+    pub async fn release(&self) -> Result<()> {
+        self.clients
+            .automation
+            .release_param(self.context(), self.location())
+            .await??;
+        Ok(())
+    }
+
+    /// Write a value through the automation engine: updates the
+    /// static value AND records an envelope point when the mode +
+    /// touch state + transport allow.
+    pub async fn write(&self, value: f64) -> Result<()> {
+        self.clients
+            .automation
+            .write_param(self.context(), self.location(), value)
+            .await??;
+        Ok(())
+    }
+
     /// Set envelope visibility
     pub async fn set_visible(&self, visible: bool) -> Result<()> {
         self.clients

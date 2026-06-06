@@ -65,6 +65,22 @@ pub trait Tracks {
     fn set_pan(&self, project: ProjectContext, track: TrackRef, pan: f64) -> DawResult<()>;
 
     /// Set polarity/phase inversion (flip the signal's sign).
+    /// Set the track automation mode (trim/read/touch/write/latch).
+    fn set_automation_mode(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        mode: crate::primitives::AutomationMode,
+    ) -> DawResult<()>;
+
+    /// Set record-input monitoring (off / on / tape-auto).
+    fn set_input_monitor(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        monitor: super::InputMonitoringMode,
+    ) -> DawResult<()>;
+
     fn set_phase_inverted(
         &self,
         project: ProjectContext,

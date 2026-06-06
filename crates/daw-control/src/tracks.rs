@@ -457,6 +457,27 @@ impl TrackHandle {
         Ok(())
     }
 
+    /// Set the track automation mode (trim/read/touch/write/latch).
+    pub async fn set_automation_mode(&self, mode: daw_proto::AutomationMode) -> Result<()> {
+        self.clients
+            .track
+            .set_automation_mode(self.context(), self.track_ref(), mode)
+            .await??;
+        Ok(())
+    }
+
+    /// Set record-input monitoring (off / on / tape-auto).
+    pub async fn set_input_monitor(
+        &self,
+        monitor: daw_proto::track::InputMonitoringMode,
+    ) -> Result<()> {
+        self.clients
+            .track
+            .set_input_monitor(self.context(), self.track_ref(), monitor)
+            .await??;
+        Ok(())
+    }
+
     /// Set polarity / phase invert.
     pub async fn set_phase_inverted(&self, inverted: bool) -> Result<()> {
         self.clients

@@ -60,6 +60,10 @@ pub trait Transport {
     // ── Loop / time selection ───────────────────────────────────────
 
     fn toggle_loop(&self, project: ProjectContext) -> DawResult<()>;
+
+    /// Metronome / click on or off.
+    fn set_metronome(&self, project: ProjectContext, enabled: bool) -> DawResult<()>;
+    fn metronome_enabled(&self, project: ProjectContext) -> bool;
     fn is_looping(&self, project: ProjectContext) -> bool;
     fn set_loop(&self, project: ProjectContext, enabled: bool) -> DawResult<()>;
     fn get_time_selection(&self, project: ProjectContext) -> Option<LoopRegion>;

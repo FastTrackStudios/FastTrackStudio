@@ -212,6 +212,24 @@ impl Transport {
     // =========================================================================
 
     /// Toggle loop mode on/off
+    /// Metronome / click on or off.
+    pub async fn set_metronome(&self, enabled: bool) -> Result<()> {
+        self.clients
+            .transport
+            .set_metronome(self.context(), enabled)
+            .await??;
+        Ok(())
+    }
+
+    /// Whether the metronome is enabled.
+    pub async fn metronome_enabled(&self) -> Result<bool> {
+        Ok(self
+            .clients
+            .transport
+            .metronome_enabled(self.context())
+            .await?)
+    }
+
     pub async fn toggle_loop(&self) -> Result<()> {
         self.clients.transport.toggle_loop(self.context()).await??;
         Ok(())

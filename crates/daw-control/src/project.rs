@@ -223,6 +223,47 @@ impl Project {
             .await?)
     }
 
+    /// Touch / release / write a parameter through the automation
+    /// engine (surfaces: fader-touch sensors + automated writes that
+    /// record envelope points in touch/latch/write modes).
+    pub async fn automation_touch(
+        &self,
+        location: daw_proto::automation::EnvelopeLocation,
+    ) -> crate::Result<()> {
+        self.clients
+            .automation
+            .touch_param(daw_proto::ProjectContext::project(&self.guid), location)
+            .await??;
+        Ok(())
+    }
+
+    pub async fn automation_release(
+        &self,
+        location: daw_proto::automation::EnvelopeLocation,
+    ) -> crate::Result<()> {
+        self.clients
+            .automation
+            .release_param(daw_proto::ProjectContext::project(&self.guid), location)
+            .await??;
+        Ok(())
+    }
+
+    pub async fn automation_write(
+        &self,
+        location: daw_proto::automation::EnvelopeLocation,
+        value: f64,
+    ) -> crate::Result<()> {
+        self.clients
+            .automation
+            .write_param(
+                daw_proto::ProjectContext::project(&self.guid),
+                location,
+                value,
+            )
+            .await??;
+        Ok(())
+    }
+
     /// Get a track by index.
     ///
     /// Equivalent to `project.tracks().by_index(index)`.

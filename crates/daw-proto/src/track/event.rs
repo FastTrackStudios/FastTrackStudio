@@ -36,6 +36,16 @@ pub enum TrackEvent {
     MixerVisibilityChanged { guid: String, visible: bool },
     /// Polarity / phase invert toggled
     PhaseInvertedChanged { guid: String, inverted: bool },
+    /// Track automation mode changed
+    AutomationModeChanged {
+        guid: String,
+        mode: crate::primitives::AutomationMode,
+    },
+    /// Record-input monitoring changed
+    InputMonitorChanged {
+        guid: String,
+        monitor: super::InputMonitoringMode,
+    },
     /// Track was moved (index changed)
     Moved {
         guid: String,

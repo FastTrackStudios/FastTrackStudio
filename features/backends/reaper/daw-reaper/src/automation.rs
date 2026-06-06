@@ -165,6 +165,36 @@ fn collect_points(env: *mut TrackEnvelope) -> Vec<EnvelopePoint> {
 }
 
 impl Automation for crate::Reaper {
+    // REAPER owns its own touch/write automation engine (CSurf touch
+    // + native automation modes); these are accepted as no-ops so
+    // surface drivers can call them uniformly across backends.
+    fn touch_param(
+        &self,
+        _project: daw_proto::ProjectContext,
+        _location: EnvelopeLocation,
+    ) -> daw_proto::DawResult<()> {
+        Ok(())
+    }
+
+    fn release_param(
+        &self,
+        _project: daw_proto::ProjectContext,
+        _location: EnvelopeLocation,
+    ) -> daw_proto::DawResult<()> {
+        Ok(())
+    }
+
+    fn write_param(
+        &self,
+        _project: daw_proto::ProjectContext,
+        _location: EnvelopeLocation,
+        _value: f64,
+    ) -> daw_proto::DawResult<()> {
+        Err(daw_proto::DawError::operation_failed(
+            "write_param: REAPER backend writes through native setters",
+        ))
+    }
+
     fn envelopes(&self, project: ProjectContext, track: TrackRef) -> Vec<Envelope> {
         debug!("Reaper::envelopes");
         (|| -> Option<Vec<Envelope>> {

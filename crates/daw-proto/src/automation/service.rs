@@ -1,6 +1,7 @@
 //! Automation service — envelopes and points.
 
 use super::{Envelope, EnvelopeLocation, EnvelopePoint, EnvelopeShape};
+use crate::DawResult;
 use crate::primitives::{AutomationMode, PositionInSeconds};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
@@ -84,6 +85,23 @@ pub trait Automation {
     ) -> f64;
 
     /// Add a point. Returns the point index.
+    /// Mark a parameter's control as touched (Touch/Latch automation
+    /// gating). Surfaces call this from fader-touch sensors.
+    fn touch_param(&self, project: ProjectContext, location: EnvelopeLocation) -> DawResult<()>;
+
+    /// Release a touched parameter.
+    fn release_param(&self, project: ProjectContext, location: EnvelopeLocation) -> DawResult<()>;
+
+    /// Write a parameter value through the automation engine: updates
+    /// the static value AND records an envelope point when the mode +
+    /// touch state + transport allow (REAPER's touch/latch/write).
+    fn write_param(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        value: f64,
+    ) -> DawResult<()>;
+
     fn add_point(
         &self,
         project: ProjectContext,

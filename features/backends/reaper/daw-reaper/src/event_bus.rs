@@ -121,6 +121,7 @@ fn transport_guid(e: &TransportEvent) -> &str {
         TransportEvent::PlayStateChanged { project_guid, .. }
         | TransportEvent::RecordModeChanged { project_guid, .. }
         | TransportEvent::LoopingChanged { project_guid, .. }
+        | TransportEvent::MetronomeChanged { project_guid, .. }
         | TransportEvent::LoopRegionChanged { project_guid, .. }
         | TransportEvent::TimeSelectionChanged { project_guid, .. }
         | TransportEvent::TempoChanged { project_guid, .. }

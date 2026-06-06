@@ -98,6 +98,12 @@ pub struct Track {
     pub pan: f64,
     /// Polarity/phase invert (REAPER `IPHASE`): flip the signal's sign.
     pub phase_inverted: bool,
+    /// Track automation mode (REAPER `I_AUTOMODE`): trim/read/touch/
+    /// write/latch. Governs whether control moves record envelope
+    /// points during playback.
+    pub automation_mode: crate::primitives::AutomationMode,
+    /// Record input monitoring (REAPER `I_RECMON`).
+    pub input_monitor: InputMonitoringMode,
 
     // === Structure ===
     /// GUID of the parent folder track, if any
@@ -151,6 +157,8 @@ impl Track {
             volume: 1.0,
             pan: 0.0,
             phase_inverted: false,
+            automation_mode: crate::primitives::AutomationMode::TrimRead,
+            input_monitor: InputMonitoringMode::Off,
             parent_guid: None,
             folder_depth: 0,
             is_folder: false,
