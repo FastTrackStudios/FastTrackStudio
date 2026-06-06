@@ -3189,6 +3189,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]

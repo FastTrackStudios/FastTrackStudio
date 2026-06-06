@@ -196,6 +196,9 @@ extern "C" fn timer_callback() {
         );
         // Constant-sum fader linking (Parallel drum tracks, user groups).
         catch_panic("volume_balancer_poll", crate::volume_balancer::poll);
+        // Project-tab switches are handled by dynamic-template's event-hub
+        // subscription (ProjectEvent::CurrentChanged via
+        // poll_and_broadcast_transport below) — no watcher needed here.
         // Deferred, paced prewarm: wait ~2s for REAPER's main HWND, then
         // enqueue the prefix list and build a handful of overlays per tick.
         // Each overlay build now only allocates its own surface + Vello
@@ -459,7 +462,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     info!("FTS Extensions starting…");
     info!(
-        "=== FTS BUILD MARKER: daw-api-v1 — chunk/track primitives moved into daw_reaper::track (pinned daw workspace); dynamic-template free-standing reaper_low helpers deleted ==="
+        "=== FTS BUILD MARKER: vis-audit-v1 — ancestor-qualified classification (bare In/Top/L names), mic-stem grouping (T1-T4 distinct, Kick In/Out/Sub one), bus skeleton TCP-hidden in BALANCE, Parallel mixer-only in POLISH ==="
     );
 
     // Kick off the wgpu Instance/Adapter/Device build on a worker thread
