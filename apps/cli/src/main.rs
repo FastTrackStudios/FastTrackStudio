@@ -3729,6 +3729,14 @@ enum FinanceCmd {
         /// `<vault>/Reports/Invoices/<num>.md`.
         #[arg(long, short)]
         out: Option<std::path::PathBuf>,
+        /// Render the PDF without persisting the invoice to
+        /// `finance.sqlite` or stamping
+        /// `work_sessions.invoice_id`. Use for previews.
+        /// Without this flag (the default), the same
+        /// `--since/--until` window won't re-bill the same
+        /// hours on a later run.
+        #[arg(long, default_value_t = false)]
+        no_commit: bool,
     },
 }
 
@@ -5487,10 +5495,26 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             net_days,
             client_name,
             out,
+            no_commit,
         } => {
+            // Stable per-org / per-client UUIDv5 ids so
+            // repeated invoices share a single Book and
+            // Party row in finance.sqlite. Avoids the
+            // FK-constraint failure that hits when book_id /
+            // party_id are nil, and keeps the schema sane
+            // until a real CLI surface for Books + Parties
+            // lands.
+            let book_id = uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_DNS,
+                format!("task-finance-book/{}", ctx.root.slug()).as_bytes(),
+            );
+            let party_id = uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_DNS,
+                format!("task-finance-party/{}/{}", ctx.root.slug(), client_name).as_bytes(),
+            );
             let book = finance_proto::book::Book {
-                id: uuid::Uuid::nil(),
-                name: "CLI Book".into(),
+                id: book_id,
+                name: format!("{} Book", ctx.root.slug()),
                 kind: finance_proto::book::BookKind::Personal,
                 base_currency: "USD".into(),
                 settings_json: "{}".into(),
@@ -5498,7 +5522,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 updated_at: chrono::Utc::now(),
             };
             let party = finance_proto::party::Party {
-                id: uuid::Uuid::nil(),
+                id: party_id,
                 book_id: book.id,
                 kind: finance_proto::party::PartyKind::Client,
                 display_name: client_name.clone(),
@@ -5515,6 +5539,36 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
+            // Open the org's finance.sqlite up-front (even
+            // for --no-commit) so we can pre-check the
+            // invoice number against the unique index and
+            // fail before spending render time on a dupe.
+            let finance_conn = {
+                use sea_orm_migration::MigratorTrait;
+                let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+                let conn = Database::connect(&url)
+                    .await
+                    .map_err(|e| eyre::eyre!("connect finance db `{url}`: {e}"))?;
+                finance_db::Migrator::up(&conn, None)
+                    .await
+                    .map_err(|e| eyre::eyre!("finance migrations: {e}"))?;
+                conn
+            };
+            {
+                use finance_db::entity::{InvoiceColumn, InvoiceEntity};
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                let existing = InvoiceEntity::find()
+                    .filter(InvoiceColumn::Number.eq(number.clone()))
+                    .one(&finance_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("check invoice number: {e}"))?;
+                if existing.is_some() {
+                    return Err(eyre::eyre!(
+                        "invoice number `{number}` is already in finance.sqlite. Pick a new --number, or pass --no-commit to render-only."
+                    ));
+                }
+            }
+
             // When `--project` is set we delegate to the
             // pipeline's per-engagement query. Without it,
             // load every billable + uninvoiced session in
@@ -5695,6 +5749,63 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 std::fs::write(&md_path, md)
                     .map_err(|e| eyre::eyre!("write {}: {e}", md_path.display()))?;
                 println!("Wrote {}", md_path.display());
+            }
+            // Persist to finance.sqlite + stamp the
+            // contributing sessions so the same range can't
+            // re-bill the same hours. SQLite-per-DB means
+            // we can't span a tx across the two; finance
+            // first (atomic insert), then timer stamp. If
+            // the stamp fails mid-way the worst case is a
+            // partial set of sessions linked to a real
+            // invoice — re-running `--no-commit=false` will
+            // pick up the leftovers next time because the
+            // invoice number now collides.
+            if no_commit {
+                println!("Skipped commit (--no-commit). Sessions remain unbilled.");
+            } else {
+                use finance_db::entity::{
+                    BookColumn, BookEntity, InvoiceEntity, PartyColumn, PartyEntity,
+                };
+                use sea_orm::sea_query::OnConflict;
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+                // Insert-if-missing book + party (do-nothing
+                // on conflict). The first invoice in a fresh
+                // finance.sqlite is what creates these.
+                BookEntity::insert(finance::billing::book_to_active(&book))
+                    .on_conflict(OnConflict::column(BookColumn::Id).do_nothing().to_owned())
+                    .do_nothing()
+                    .exec(&finance_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("upsert book: {e}"))?;
+                PartyEntity::insert(finance::billing::party_to_active(&party))
+                    .on_conflict(OnConflict::column(PartyColumn::Id).do_nothing().to_owned())
+                    .do_nothing()
+                    .exec(&finance_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("upsert party: {e}"))?;
+                let active = finance::billing::invoice_to_active(&build.invoice);
+                InvoiceEntity::insert(active)
+                    .exec(&finance_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("insert invoice: {e}"))?;
+                let stamped = WorkSessionEntity::update_many()
+                    .col_expr(
+                        WorkSessionColumn::InvoiceId,
+                        sea_orm::sea_query::Expr::value(build.invoice.id),
+                    )
+                    .col_expr(
+                        WorkSessionColumn::UpdatedAt,
+                        sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+                    )
+                    .filter(WorkSessionColumn::Id.is_in(build.source_session_ids.clone()))
+                    .exec(&timer_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("stamp sessions: {e}"))?;
+                println!(
+                    "Persisted invoice {} + stamped {} session(s).",
+                    build.invoice.id, stamped.rows_affected
+                );
             }
             println!(
                 "Wrote {} ({bytes_len} bytes, {} sessions, {} {})",

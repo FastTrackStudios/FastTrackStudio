@@ -589,7 +589,7 @@ fn model_to_book(m: BookModel) -> Book {
     }
 }
 
-fn book_to_active(b: &Book) -> BookActive {
+pub fn book_to_active(b: &Book) -> BookActive {
     BookActive {
         id: Set(b.id),
         name: Set(b.name.clone()),
@@ -622,7 +622,7 @@ fn model_to_party(m: PartyModel) -> Party {
     }
 }
 
-fn party_to_active(p: &Party) -> PartyActive {
+pub fn party_to_active(p: &Party) -> PartyActive {
     PartyActive {
         id: Set(p.id),
         book_id: Set(p.book_id),
@@ -674,7 +674,13 @@ fn model_to_invoice(m: InvoiceModel) -> Invoice {
     }
 }
 
-fn invoice_to_active(i: &Invoice) -> InvoiceActive {
+/// Marshal a [`finance_proto::invoice::Invoice`] into its
+/// SeaORM active model. Used internally by the billing
+/// pipeline and re-exported for external callers (the CLI
+/// invoice-render flow) that need to insert an
+/// already-built draft straight into `finance.sqlite`
+/// without going through the full billing service.
+pub fn invoice_to_active(i: &Invoice) -> InvoiceActive {
     InvoiceActive {
         id: Set(i.id),
         book_id: Set(i.book_id),
