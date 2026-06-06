@@ -462,7 +462,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     info!("FTS Extensions starting…");
     info!(
-        "=== FTS BUILD MARKER: vis-audit-v1 — ancestor-qualified classification (bare In/Top/L names), mic-stem grouping (T1-T4 distinct, Kick In/Out/Sub one), bus skeleton TCP-hidden in BALANCE, Parallel mixer-only in POLISH ==="
+        "=== FTS BUILD MARKER: all-modes-v1 — full mode coverage: Organize/Write/Produce/Record/Edit/Mix-phases/Master/Live/Video/Minimal, 19-test visibility matrix ==="
     );
 
     // Kick off the wgpu Instance/Adapter/Device build on a worker thread
