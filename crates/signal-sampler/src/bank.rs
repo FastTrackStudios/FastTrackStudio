@@ -1126,6 +1126,79 @@ impl SamplerBank {
         }
     }
 
+    // ── Drum mixer (send-based mic routing) ──────────────────────────────
+
+    /// Snapshot the drum mixer layout for a loaded preset (engines → close-mic
+    /// channels + bus sends, plus shared bus tracks). `None` if the preset
+    /// isn't a send-routed drum preset.
+    pub fn preset_mixer_layout(&self, prefix: &str) -> Option<crate::mixer::MixerLayout> {
+        self.presets.get(prefix)?.mixer().map(|m| m.layout())
+    }
+
+    /// Clone the lock-free peak-meter handle for a loaded preset's mixer.
+    pub fn preset_mixer_meters(
+        &self,
+        prefix: &str,
+    ) -> Option<std::sync::Arc<crate::mixer::MixerMeters>> {
+        self.presets.get(prefix)?.mixer().map(|m| m.meters.clone())
+    }
+
+    pub fn set_mixer_channel_gain_db(&mut self, prefix: &str, i: usize, db: f32) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_channel_gain_db(i, db);
+        }
+    }
+    pub fn set_mixer_channel_mute(&mut self, prefix: &str, i: usize, muted: bool) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_channel_mute(i, muted);
+        }
+    }
+    pub fn set_mixer_channel_solo(&mut self, prefix: &str, i: usize, soloed: bool) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_channel_solo(i, soloed);
+        }
+    }
+    pub fn set_mixer_send_level_db(&mut self, prefix: &str, i: usize, db: f32) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_send_level_db(i, db);
+        }
+    }
+    pub fn set_mixer_send_mute(&mut self, prefix: &str, i: usize, muted: bool) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_send_mute(i, muted);
+        }
+    }
+    pub fn set_mixer_send_solo(&mut self, prefix: &str, i: usize, soloed: bool) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_send_solo(i, soloed);
+        }
+    }
+    pub fn set_mixer_bus_gain_db(&mut self, prefix: &str, i: usize, db: f32) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_bus_gain_db(i, db);
+        }
+    }
+    pub fn set_mixer_bus_mute(&mut self, prefix: &str, i: usize, muted: bool) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_bus_mute(i, muted);
+        }
+    }
+    pub fn set_mixer_bus_solo(&mut self, prefix: &str, i: usize, soloed: bool) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_bus_solo(i, soloed);
+        }
+    }
+    pub fn set_mixer_master_gain_db(&mut self, prefix: &str, db: f32) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_master_gain_db(db);
+        }
+    }
+    pub fn set_mixer_master_mute(&mut self, prefix: &str, muted: bool) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_master_mute(muted);
+        }
+    }
+
     /// Render a loaded preset into per-mic buses (keyed by mic id). See
     /// [`PresetRuntime::render_buses`]. `None` if no preset under `prefix`.
     pub fn render_preset_buses(

@@ -24,6 +24,9 @@ use signal_audio::MidiInput;
 use signal_sampler::{PreloadProfile, SamplerPlayer};
 use signal_ui::components::Piano;
 
+mod mixer_view;
+use mixer_view::MixerPanel;
+
 /// Single instrument slot — whatever we load plays under this id, and the
 /// piano / MIDI route note events to it.
 const INSTRUMENT_ID: &str = "native";
@@ -102,6 +105,10 @@ fn PlayerPanel() -> Element {
     let mut pending = use_signal(|| 0usize);
     let mut loading = use_signal(|| false);
     let mut favorites = use_signal(default_favorites);
+    // Bumped after each successful load so the mixer panel re-fetches its
+    // layout; `show_mixer` toggles the stage between the mixer and the splash.
+    let mut reload = use_signal(|| 0u64);
+    let mut show_mixer = use_signal(|| true);
     // Background-load result slot: the worker thread deposits `(name, result)`
     // here; the poll future below picks it up and updates the UI. Keeps the
     // heavy load_preset (spec parse + engine build) OFF the dx event loop.
@@ -122,6 +129,7 @@ fn PlayerPanel() -> Element {
                             Ok(()) => {
                                 loaded.set(Some(name.clone()));
                                 status.set(format!("Loaded {name}"));
+                                reload.set(reload() + 1);
                             }
                             Err(e) => status.set(format!("Load failed: {e}")),
                         }
@@ -210,7 +218,18 @@ fn PlayerPanel() -> Element {
                         background:#1c1c1e; border-bottom:1px solid #3a3a3c;",
                 strong { style: "color:#e8813a;", "Signal Native — Player" }
                 span { "{status}" }
-                span { style: "margin-left:auto; color:#777;", "voices: {voices} · pending: {pending}" }
+                button {
+                    style: if show_mixer() {
+                        "margin-left:auto; padding:4px 12px; background:#e8813a; color:#111; \
+                         border:none; border-radius:4px; cursor:pointer; font-weight:600;"
+                    } else {
+                        "margin-left:auto; padding:4px 12px; background:#2a2a2e; color:#ddd; \
+                         border:1px solid #3a3a3c; border-radius:4px; cursor:pointer;"
+                    },
+                    onclick: move |_| { let v = !show_mixer(); show_mixer.set(v); },
+                    "Mixer"
+                }
+                span { style: "margin-left:12px; color:#777;", "voices: {voices} · pending: {pending}" }
             }
 
             // Favorites — quick-load (background, off the UI thread).
@@ -309,16 +328,22 @@ fn PlayerPanel() -> Element {
 
                 // Stage: loaded instrument + piano
                 div { style: "display:flex; flex:1; flex-direction:column; min-width:0;",
-                    div {
-                        style: "flex:1; display:flex; align-items:center; justify-content:center; color:#555;",
-                        if let Some(n) = loaded.read().clone() {
-                            div { style: "text-align:center;",
-                                div { style: "font-size:18px; color:#e8813a;", "{n}" }
-                                div { style: "margin-top:6px; color:#777;",
-                                    "Play with the piano below or a MIDI controller" }
+                    if show_mixer() {
+                        div { style: "flex:1; min-height:0;",
+                            MixerPanel { reload: reload() }
+                        }
+                    } else {
+                        div {
+                            style: "flex:1; display:flex; align-items:center; justify-content:center; color:#555;",
+                            if let Some(n) = loaded.read().clone() {
+                                div { style: "text-align:center;",
+                                    div { style: "font-size:18px; color:#e8813a;", "{n}" }
+                                    div { style: "margin-top:6px; color:#777;",
+                                        "Play with the piano below or a MIDI controller" }
+                                }
+                            } else {
+                                "No instrument loaded"
                             }
-                        } else {
-                            "No instrument loaded"
                         }
                     }
                     div {

@@ -65,6 +65,27 @@ enum AudioEvent {
         data1: u8,
         data2: u8,
     },
+    MixerSet {
+        id: InstrumentId,
+        target: MixerTarget,
+    },
+}
+
+/// A single drum-mixer fader/mute change, applied by the audio thread between
+/// renders so UI fader drags never contend on the bank lock.
+#[derive(Clone, Copy, Debug)]
+enum MixerTarget {
+    ChannelGain { idx: usize, db: f32 },
+    ChannelMute { idx: usize, muted: bool },
+    ChannelSolo { idx: usize, soloed: bool },
+    SendLevel { idx: usize, db: f32 },
+    SendMute { idx: usize, muted: bool },
+    SendSolo { idx: usize, soloed: bool },
+    BusGain { idx: usize, db: f32 },
+    BusMute { idx: usize, muted: bool },
+    BusSolo { idx: usize, soloed: bool },
+    MasterGain { db: f32 },
+    MasterMute { muted: bool },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -532,6 +553,89 @@ impl SamplerPlayer {
         });
     }
 
+    // ── Drum mixer ───────────────────────────────────────────────────────
+
+    /// Snapshot the drum mixer layout for a loaded preset (`id` = the prefix
+    /// passed to `load_preset`). `None` if it isn't a send-routed drum preset.
+    /// Read once after load; the structure is stable for the preset's life.
+    pub fn drum_mixer_layout(&self, id: &str) -> Option<crate::mixer::MixerLayout> {
+        self.bank.lock().ok()?.preset_mixer_layout(id)
+    }
+
+    /// Clone the lock-free peak-meter handle for a loaded preset's mixer. Poll
+    /// `channel_peak`/`send_peak`/`bus_peak` on it from the UI thread without
+    /// touching the bank lock.
+    pub fn drum_mixer_meters(&self, id: &str) -> Option<std::sync::Arc<crate::mixer::MixerMeters>> {
+        self.bank.lock().ok()?.preset_mixer_meters(id)
+    }
+
+    pub fn set_mixer_channel_gain_db(&self, id: &str, idx: usize, db: f32) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::ChannelGain { idx, db },
+        });
+    }
+    pub fn set_mixer_channel_mute(&self, id: &str, idx: usize, muted: bool) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::ChannelMute { idx, muted },
+        });
+    }
+    pub fn set_mixer_channel_solo(&self, id: &str, idx: usize, soloed: bool) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::ChannelSolo { idx, soloed },
+        });
+    }
+    pub fn set_mixer_send_level_db(&self, id: &str, idx: usize, db: f32) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::SendLevel { idx, db },
+        });
+    }
+    pub fn set_mixer_send_mute(&self, id: &str, idx: usize, muted: bool) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::SendMute { idx, muted },
+        });
+    }
+    pub fn set_mixer_send_solo(&self, id: &str, idx: usize, soloed: bool) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::SendSolo { idx, soloed },
+        });
+    }
+    pub fn set_mixer_bus_gain_db(&self, id: &str, idx: usize, db: f32) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::BusGain { idx, db },
+        });
+    }
+    pub fn set_mixer_bus_mute(&self, id: &str, idx: usize, muted: bool) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::BusMute { idx, muted },
+        });
+    }
+    pub fn set_mixer_bus_solo(&self, id: &str, idx: usize, soloed: bool) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::BusSolo { idx, soloed },
+        });
+    }
+    pub fn set_mixer_master_gain_db(&self, id: &str, db: f32) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::MasterGain { db },
+        });
+    }
+    pub fn set_mixer_master_mute(&self, id: &str, muted: bool) {
+        self.enqueue(AudioEvent::MixerSet {
+            id: id.into(),
+            target: MixerTarget::MasterMute { muted },
+        });
+    }
+
     /// Dispatch a raw MIDI message, routed by channel assignment.
     pub fn midi_message(&self, channel: u8, status: u8, data1: u8, data2: u8) {
         // Same rationale as `note_on`: don't hold `bank.lock()` here
@@ -804,6 +908,21 @@ fn apply_audio_event(bank: &mut SamplerBank, event: AudioEvent) {
             data1,
             data2,
         } => bank.midi_message(channel, status, data1, data2),
+        AudioEvent::MixerSet { id, target } => match target {
+            MixerTarget::ChannelGain { idx, db } => bank.set_mixer_channel_gain_db(&id, idx, db),
+            MixerTarget::ChannelMute { idx, muted } => bank.set_mixer_channel_mute(&id, idx, muted),
+            MixerTarget::ChannelSolo { idx, soloed } => {
+                bank.set_mixer_channel_solo(&id, idx, soloed)
+            }
+            MixerTarget::SendLevel { idx, db } => bank.set_mixer_send_level_db(&id, idx, db),
+            MixerTarget::SendMute { idx, muted } => bank.set_mixer_send_mute(&id, idx, muted),
+            MixerTarget::SendSolo { idx, soloed } => bank.set_mixer_send_solo(&id, idx, soloed),
+            MixerTarget::BusGain { idx, db } => bank.set_mixer_bus_gain_db(&id, idx, db),
+            MixerTarget::BusMute { idx, muted } => bank.set_mixer_bus_mute(&id, idx, muted),
+            MixerTarget::BusSolo { idx, soloed } => bank.set_mixer_bus_solo(&id, idx, soloed),
+            MixerTarget::MasterGain { db } => bank.set_mixer_master_gain_db(&id, db),
+            MixerTarget::MasterMute { muted } => bank.set_mixer_master_mute(&id, muted),
+        },
     }
 }
 

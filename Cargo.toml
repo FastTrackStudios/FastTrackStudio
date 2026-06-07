@@ -12,7 +12,10 @@ members = [
     "crates/signal-browser",
     "crates/signal-controller",
     "crates/signal-daw-bridge",
-    "crates/signal-daw",
+    # signal-daw is parked: it depends on daw-standalone extensions (Block
+    # plugin format / per-mic bus output) that aren't upstream on Codeberg yet.
+    # Re-add once those land in the codeberg daw. See [[project_signal_on_daw]].
+    # "crates/signal-daw",
     "crates/signal-extension",
     "crates/fts-signal-controller",
     "crates/signal-import",
@@ -67,42 +70,44 @@ facet = { version = "0.46" }
 facet-styx = { version = "4.0" }
 facet-toml = { version = "0.46" }
 
-# ── ROAM service framework (upstream bearcove) ───────────────────────
-# MUST match the exact vox rev daw pins so the graph contains a single
-# vox/facet source. Migrated bearcove 0.5 → starcommand/vox f31f104 (0.8)
-# to match the local daw/architect/input_actions path deps below.
-vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+# ── ROAM service framework ───────────────────────────────────────────
+# vox 0.8.2 fork, direct from Codeberg @ f31f104 — the exact rev daw +
+# architect pin, so the graph contains a single vox/facet source.
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # ── DAW facade crate (sibling repo — single public API surface) ──────
-daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-cli = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-extension-runtime = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+# Source is Codeberg, but currently [patch]ed to the local checkout below:
+# daw's vox-0.8.2 alignment (f431088) is NOT yet pushed to codeberg (cb/main
+# daw still uses bearcove vox 0.5). Drop the local patch once it lands.
+daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-cli = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
 # ── Shared infrastructure ────────────────────────────────────────────
-audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+audio-controls = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
 # NOTE: the standalone `reaper-test` crate was removed from daw main and folded
 # into the `daw` facade behind the `test-harness` feature, re-exported as
 # `daw::test` (alias `ReaperTestContext`, `#[reaper_test]` macro). Test crates
 # now enable `daw[test-harness]` and `use daw::test::*` instead.
 
 # ── Sibling repos ────────────────────────────────────────────────────
-actions-proto = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
-dock-dioxus = { git = "https://git.starcommand.live/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
-dock-proto = { git = "https://git.starcommand.live/FastTrackStudios/dock-dioxus.git", branch = "main" }
+actions-proto = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
+dock-dioxus = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
+dock-proto = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
 
 # Utils from FastTrackStudio monorepo
-utils = { git = "https://git.starcommand.live/FastTrackStudios/FastTrackStudio.git", branch = "main" }
+utils = { git = "https://codeberg.org/FastTrackStudios/FastTrackStudio.git", branch = "main" }
 
 # ── Plugin framework ───────────────────────────────────────────────────
-nih_plug = { git = "https://git.starcommand.live/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+nih_plug = { git = "https://codeberg.org/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
 # Blitz-based Dioxus renderer — used by ALL GUI contexts (desktop standalone,
 # REAPER embedded, VST3/CLAP plugin). Guarantees the same rendering pipeline
 # everywhere. Use open_standalone_with_state() in signal-desktop and
 # create_dioxus_editor_with_state() in fts-signal-plugin.
-nih_plug_dioxus = { git = "https://git.starcommand.live/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+nih_plug_dioxus = { git = "https://codeberg.org/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
 fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core", default-features = false }
 audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
 atomic_float = "1"
@@ -111,7 +116,7 @@ midir = "0.10"
 
 # ── UI ────────────────────────────────────────────────────────────────
 dioxus = "=0.7.9"
-fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", branch = "main" }
+fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 
 # ── Async runtime ────────────────────────────────────────────────────
@@ -138,49 +143,21 @@ uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 clap = { version = "4", features = ["derive"] }
 
 # ── Local development overrides ──────────────────────────────────────
-# Uncomment the sections below to use local checkouts instead of GitHub.
-# This gives you instant rebuilds when iterating across repos.
+# All external deps now resolve DIRECT from Codeberg / GitHub — no local path
+# patches. daw cb/main (74e84e3) pins codeberg vox f31f104; architect cb/main
+# (afbb663) pins codeberg vox f31f104 with the macro `::vox`-path fix;
+# input_actions main is aligned. To iterate locally on a sibling repo, add a
+# `[patch."https://codeberg.org/FastTrackStudios/<repo>.git"]` block pointing at
+# its checkout (mind the daw `features/`-layout paths).
 #
-# ── Local daw + deps (DEV path deps; revert once vox-0.8 is pushed everywhere) ──
-# signal pulls the full daw crate so external consumers can script it via daw's
-# vox RPC services. The git@main daw is on the old vox; use the local checkout
-# (already vox-0.8 / f31f104) + its transitive architect/input_actions checkouts.
-[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
-audio-controls = { path = "../daw/crates/audio-controls" }
-daw = { path = "../daw/crates/daw" }
-daw-audio-sync = { path = "../daw/crates/daw-audio-sync" }
-daw-cli = { path = "../daw/apps/daw" }
-daw-control = { path = "../daw/crates/daw-control" }
-daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
-daw-module = { path = "../daw/crates/daw-module" }
-daw-proto = { path = "../daw/crates/daw-proto" }
-daw-reaper = { path = "../daw/crates/daw-reaper" }
-daw-standalone = { path = "../daw/crates/daw-standalone" }
-daw-test-macro = { path = "../daw/crates/daw-test-macro" }
-dawfile-aaf = { path = "../daw/crates/dawfile-aaf" }
-dawfile-ableton = { path = "../daw/crates/dawfile-ableton" }
-dawfile-dawproject = { path = "../daw/crates/dawfile-dawproject" }
-dawfile-protools = { path = "../daw/crates/dawfile-protools" }
-dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
-fts-devtools = { path = "../daw/crates/fts-devtools" }
-reaper-launcher = { path = "../daw/crates/reaper-launcher" }
-
-[patch."https://git.starcommand.live/FastTrackStudios/architect.git"]
-architect = { path = "../../architect/macros/architect" }
-architect-derive = { path = "../../architect/macros/architect-derive" }
-architect-rpc-derive = { path = "../../architect/macros/architect-rpc-derive" }
-
-[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "../input_actions/crates/actions-proto" }
-#
-# [patch."https://git.starcommand.live/FastTrackStudios/dock-dioxus.git"]
+# [patch."https://codeberg.org/FastTrackStudios/dock-dioxus.git"]
 # dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 #
-# [patch."https://git.starcommand.live/FastTrackStudios/FastTrackStudio.git"]
+# [patch."https://codeberg.org/FastTrackStudios/FastTrackStudio.git"]
 # utils = { path = "../FastTrackStudio/crates/shared/utils" }
 #
-# [patch."https://git.starcommand.live/FastTrackStudios/fts-ui.git"]
+# [patch."https://codeberg.org/FastTrackStudios/fts-ui.git"]
 # fts-ui = { path = "../fts-ui/crates/fts-ui" }
 #
 # ── Split FTS plugin repo local overrides ───────────────────────────────
@@ -207,7 +184,7 @@ fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }
 # nih_plug_dioxus to current DioxusLabs/blitz. Both the starcommand origin and
 # the github mirror (pulled by FTS-Audiocore plugin crates) redirect here, so
 # the whole graph shares one editable nih_plug / nih_plug_dioxus.
-[patch."https://git.starcommand.live/FastTrackStudios/nih-plug.git"]
+[patch."https://codeberg.org/FastTrackStudios/nih-plug.git"]
 nih_plug = { path = "../forks/nih-plug-port" }
 nih_plug_dioxus = { path = "../forks/nih-plug-port/nih_plug_dioxus" }
 
@@ -225,15 +202,15 @@ nih_plug_dioxus = { path = "../forks/nih-plug-port/nih_plug_dioxus" }
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid type mismatches.
 [patch."https://github.com/bearcove/moire"]
-moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
 # Blitz crates — upstream DioxusLabs/blitz, pinned to one rev so nih_plug_dioxus,
@@ -250,15 +227,15 @@ blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab
 stylo_taffy = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
 # moire: unify crates.io moire with the FTS fork (includes NixOS frame-pointer fix)
 # All crates must be listed to prevent duplicate moire-runtime #[ctor] crash.
-moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [workspace.lints.rust]
 dead_code = "allow"
