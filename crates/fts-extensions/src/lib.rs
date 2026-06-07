@@ -462,7 +462,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     info!("FTS Extensions starting…");
     info!(
-        "=== FTS BUILD MARKER: all-modes-v1 — full mode coverage: Organize/Write/Produce/Record/Edit/Mix-phases/Master/Live/Video/Minimal, 19-test visibility matrix ==="
+        "=== FTS BUILD MARKER: demo-action-v1 — FTS_DYNAMIC_TEMPLATE_INSERT_FULL_DEMO: one action builds the matrix demo session through the create machinery ==="
     );
 
     // Kick off the wgpu Instance/Adapter/Device build on a worker thread

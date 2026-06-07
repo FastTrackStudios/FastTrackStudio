@@ -12780,6 +12780,11 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "vox-websocket"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+
+[[patch.unused]]
 name = "dioxus"
 version = "0.7.6"
 source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
@@ -12893,8 +12898,3 @@ source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124
 name = "manganis-macro"
 version = "0.7.6"
 source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
-
-[[patch.unused]]
-name = "vox-websocket"
-version = "0.5.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
