@@ -10240,6 +10240,7 @@ dependencies = [
  "hound",
  "memmap2",
  "rayon",
+ "signal-plugin-host",
  "signal-proto",
  "symphonia",
  "symphonia-bundle-flac",

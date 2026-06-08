@@ -1199,6 +1199,94 @@ impl SamplerBank {
         }
     }
 
+    // ── FX-chain plugin hosting ──────────────────────────────────────────
+
+    /// Install a hosted plugin into a slot on the loaded preset's drum mixer
+    /// (channel / bus / master). Returns the new slot index.
+    pub fn install_mixer_plugin(
+        &mut self,
+        prefix: &str,
+        target: crate::mixer::FxTarget,
+        plugin: signal_plugin_host::HostedPlugin,
+    ) -> Result<usize, signal_plugin_host::PluginError> {
+        let mixer = self
+            .presets
+            .get_mut(prefix)
+            .and_then(|p| p.mixer_mut())
+            .ok_or_else(|| {
+                signal_plugin_host::PluginError::LoadFailed(format!(
+                    "no drum mixer for preset {prefix:?}"
+                ))
+            })?;
+        mixer.install_plugin(target, plugin)
+    }
+
+    /// Install a hosted plugin on the preset's master FX chain (works for
+    /// drum and non-drum presets — for drum presets this chain runs after
+    /// the drum mixer's own master_fx).
+    pub fn install_preset_master_plugin(
+        &mut self,
+        prefix: &str,
+        plugin: signal_plugin_host::HostedPlugin,
+    ) -> Result<usize, signal_plugin_host::PluginError> {
+        let preset = self.presets.get_mut(prefix).ok_or_else(|| {
+            signal_plugin_host::PluginError::LoadFailed(format!("no preset {prefix:?}"))
+        })?;
+        preset.install_master_plugin(plugin)
+    }
+
+    pub fn remove_mixer_plugin(
+        &mut self,
+        prefix: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+    ) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.remove_plugin(target, slot_idx);
+        }
+    }
+
+    pub fn remove_preset_master_plugin(&mut self, prefix: &str, slot_idx: usize) {
+        if let Some(p) = self.presets.get_mut(prefix) {
+            p.remove_master_plugin(slot_idx);
+        }
+    }
+
+    pub fn set_mixer_slot_bypass(
+        &mut self,
+        prefix: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+        bypassed: bool,
+    ) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_slot_bypass(target, slot_idx, bypassed);
+        }
+    }
+
+    pub fn set_mixer_slot_param(
+        &self,
+        prefix: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+        param_id: u32,
+        value: f64,
+    ) {
+        if let Some(m) = self.presets.get(prefix).and_then(|p| p.mixer.as_ref()) {
+            m.set_slot_param(target, slot_idx, param_id, value);
+        }
+    }
+
+    pub fn mixer_slot_params(
+        &mut self,
+        prefix: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+    ) -> Option<Vec<signal_plugin_host::PluginParamInfo>> {
+        let m = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut())?;
+        m.slot_params(target, slot_idx)
+    }
+
     /// Render a loaded preset into per-mic buses (keyed by mic id). See
     /// [`PresetRuntime::render_buses`]. `None` if no preset under `prefix`.
     pub fn render_preset_buses(

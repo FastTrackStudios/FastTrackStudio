@@ -636,6 +636,105 @@ impl SamplerPlayer {
         });
     }
 
+    // ── Hosted FX plugins (CLAP / VST3) ──────────────────────────────────
+
+    /// Load a plugin from `path` (`.clap` / `.vst3`) and install it at the
+    /// tail of an FX chain on the loaded preset's drum mixer. The slow part
+    /// (open bundle + activate) happens on the calling thread BEFORE the
+    /// bank lock is acquired, so the audio thread is only blocked for the
+    /// final `prepare` + `Vec::push` while installing.
+    ///
+    /// Returns the slot index on success. `Ok(None)` if the path resolves
+    /// to the synthetic backend (no DSP) — callers fall back accordingly.
+    pub fn load_mixer_plugin(
+        &self,
+        id: &str,
+        target: crate::mixer::FxTarget,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Option<usize>, signal_plugin_host::PluginError> {
+        let plugin = match signal_plugin_host::HostedPlugin::load(path)? {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        let mut bank = self.bank.lock().map_err(|_| {
+            signal_plugin_host::PluginError::LoadFailed("bank mutex poisoned".into())
+        })?;
+        let slot = bank.install_mixer_plugin(id, target, plugin)?;
+        Ok(Some(slot))
+    }
+
+    /// Load + install on the preset's master FX chain (works for non-drum
+    /// presets too — the chain runs after the engine/edge graph).
+    pub fn load_preset_master_plugin(
+        &self,
+        id: &str,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Option<usize>, signal_plugin_host::PluginError> {
+        let plugin = match signal_plugin_host::HostedPlugin::load(path)? {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        let mut bank = self.bank.lock().map_err(|_| {
+            signal_plugin_host::PluginError::LoadFailed("bank mutex poisoned".into())
+        })?;
+        let slot = bank.install_preset_master_plugin(id, plugin)?;
+        Ok(Some(slot))
+    }
+
+    pub fn remove_mixer_plugin(&self, id: &str, target: crate::mixer::FxTarget, slot_idx: usize) {
+        if let Ok(mut bank) = self.bank.lock() {
+            bank.remove_mixer_plugin(id, target, slot_idx);
+        }
+    }
+
+    pub fn remove_preset_master_plugin(&self, id: &str, slot_idx: usize) {
+        if let Ok(mut bank) = self.bank.lock() {
+            bank.remove_preset_master_plugin(id, slot_idx);
+        }
+    }
+
+    pub fn set_mixer_slot_bypass(
+        &self,
+        id: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+        bypassed: bool,
+    ) {
+        if let Ok(mut bank) = self.bank.lock() {
+            bank.set_mixer_slot_bypass(id, target, slot_idx, bypassed);
+        }
+    }
+
+    /// Queue a param write on a hosted plugin slot. The plugin's internal
+    /// queue drains on the next audio block, so this is a fast UI-thread
+    /// call — bank lock held only long enough to walk to the slot.
+    pub fn set_mixer_slot_param(
+        &self,
+        id: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+        param_id: u32,
+        value: f64,
+    ) {
+        if let Ok(bank) = self.bank.lock() {
+            bank.set_mixer_slot_param(id, target, slot_idx, param_id, value);
+        }
+    }
+
+    /// Snapshot the parameter list of a hosted plugin slot. UI calls once
+    /// per (re)load to build a slider grid.
+    pub fn mixer_slot_params(
+        &self,
+        id: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+    ) -> Option<Vec<signal_plugin_host::PluginParamInfo>> {
+        self.bank
+            .lock()
+            .ok()?
+            .mixer_slot_params(id, target, slot_idx)
+    }
+
     /// Dispatch a raw MIDI message, routed by channel assignment.
     pub fn midi_message(&self, channel: u8, status: u8, data1: u8, data2: u8) {
         // Same rationale as `note_on`: don't hold `bank.lock()` here

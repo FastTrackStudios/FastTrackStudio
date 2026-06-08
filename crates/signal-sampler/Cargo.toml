@@ -15,6 +15,11 @@ facet-toml  = { workspace = true }
 # Tagging schema reuse (TagSet / TagCategory / StructuredTag)
 signal-proto = { path = "../signal-proto" }
 
+# Plugin host (CLAP / VST3) — used to insert hosted plugins into mixer
+# strips and preset master chains. CLAP-only build keeps the dep surface
+# small; flip on `vst3-host` in apps/native to enable .vst3 loading too.
+signal-plugin-host = { workspace = true, features = ["clap-host"] }
+
 # Audio I/O
 cpal        = { workspace = true }
 crossbeam-channel = { workspace = true }

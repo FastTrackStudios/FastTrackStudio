@@ -18,9 +18,66 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use signal_plugin_host::HostedPlugin;
+
 /// Per-block peak-meter decay (peak-hold). Applied once per audio block so the
 /// UI sees a smooth fall even when it polls slowly.
 const METER_DECAY: f32 = 0.85;
+
+/// Max block size (in frames) we prepare hosted plugins for at install time.
+/// The cpal callback's actual block is normally 256–1024 frames; preparing
+/// for 8192 keeps us safe against larger upstream buffers + future variable-
+/// block-size paths without re-preparing per block.
+pub const FX_PREPARE_BLOCK: u32 = 8192;
+
+// ── FX chain (REAPER-style track FX) ────────────────────────────────────────
+
+/// One slot in a track-style FX chain — a hosted plugin (CLAP / VST3) plus
+/// a per-slot bypass and a cached display name for the UI. The plugin is
+/// owned by the slot and dropped (deactivated) when the slot is removed.
+pub struct FxSlot {
+    pub plugin: HostedPlugin,
+    pub bypassed: bool,
+    /// Cached `descriptor.name` — read once at install time so the UI doesn't
+    /// have to lock the audio thread to label the slot.
+    pub display_name: String,
+}
+
+impl std::fmt::Debug for FxSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FxSlot")
+            .field("display_name", &self.display_name)
+            .field("bypassed", &self.bypassed)
+            .finish()
+    }
+}
+
+/// A serial FX chain that processes its slots in order, in place on an
+/// interleaved-stereo buffer. Modeled after a REAPER track FX chain: each
+/// slot is a hosted plugin, bypassable per-slot. An empty chain is a no-op.
+#[derive(Debug, Default)]
+pub struct FxChain {
+    pub slots: Vec<FxSlot>,
+}
+
+impl FxChain {
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+
+    /// Process `inout` (interleaved stereo) through each non-bypassed slot
+    /// in order. Errors from `process_interleaved` are swallowed — the UI
+    /// surface reports load/prepare failures separately; the audio thread
+    /// must never panic on a misbehaving plugin.
+    pub fn process(&mut self, inout: &mut [f32]) {
+        for slot in &mut self.slots {
+            if slot.bypassed {
+                continue;
+            }
+            let _ = slot.plugin.process_interleaved(inout, &[], &[]);
+        }
+    }
+}
 
 fn db_to_lin(db: f32) -> f32 {
     10f32.powf(db / 20.0)
@@ -120,6 +177,8 @@ pub struct DirectChannel {
     pub gain_lin: f32,
     pub muted: bool,
     pub soloed: bool,
+    /// Pre-fader FX chain (REAPER convention): mic source → FX → gain → master.
+    pub fx: FxChain,
 }
 
 /// A bus-mic send from one piece into a shared bus.
@@ -145,6 +204,8 @@ pub struct Bus {
     pub gain_lin: f32,
     pub muted: bool,
     pub soloed: bool,
+    /// Pre-fader FX chain: bus sum → FX → bus gain → master.
+    pub fx: FxChain,
     /// Interleaved-stereo accumulator, re-sized to the current block.
     pub(crate) acc: Vec<f32>,
 }
@@ -158,17 +219,29 @@ pub struct DrumMixer {
     pub master_gain_db: f32,
     pub master_gain_lin: f32,
     pub master_muted: bool,
+    /// FX chain on the master sum (master_scratch → FX → master gain → output).
+    pub master_fx: FxChain,
     pub meters: Arc<MixerMeters>,
+    /// Sample rate this mixer is running at — passed at construction so
+    /// `install_*_plugin` can `prepare` the hosted plugin without the audio
+    /// thread blocking on a UI-side lookup.
+    pub(crate) sample_rate: u32,
     /// Scratch the whole kit mix is summed into (so master gain + meter apply
     /// to this preset's output alone, then it's added to the host buffer).
     pub(crate) master_scratch: Vec<f32>,
+    /// Per-block scratch used to run each direct channel's FX chain in
+    /// isolation before mixing into `master_scratch`. Re-sized to the
+    /// current block size on first render of each block.
+    pub(crate) channel_scratch: Vec<f32>,
 }
 
 impl DrumMixer {
-    /// Build a mixer from each engine's `(label, mic_ids)`. Close mics become
-    /// direct channels; overhead/room mics become sends into shared buses
-    /// (one bus per distinct bus-mic id, in first-seen order).
-    pub fn build(engine_mics: &[(String, Vec<String>)]) -> Self {
+    /// Build a mixer from each engine's `(label, mic_ids)` at the host's
+    /// `sample_rate`. Close mics become direct channels; overhead/room mics
+    /// become sends into shared buses (one bus per distinct bus-mic id, in
+    /// first-seen order). `sample_rate` is stored so installed FX slots can
+    /// be `prepare`d without a callback to the audio backend.
+    pub fn build(engine_mics: &[(String, Vec<String>)], sample_rate: u32) -> Self {
         let mut channels = Vec::new();
         let mut sends = Vec::new();
         let mut buses: Vec<Bus> = Vec::new();
@@ -186,6 +259,7 @@ impl DrumMixer {
                             gain_lin: 1.0,
                             muted: false,
                             soloed: false,
+                            fx: FxChain::default(),
                             acc: Vec::new(),
                         });
                         buses.len() - 1
@@ -211,6 +285,7 @@ impl DrumMixer {
                         gain_lin: 1.0,
                         muted: false,
                         soloed: false,
+                        fx: FxChain::default(),
                     });
                 }
             }
@@ -224,8 +299,11 @@ impl DrumMixer {
             master_gain_db: 0.0,
             master_gain_lin: 1.0,
             master_muted: false,
+            master_fx: FxChain::default(),
             meters,
+            sample_rate,
             master_scratch: Vec::new(),
+            channel_scratch: Vec::new(),
         }
     }
 
@@ -296,6 +374,100 @@ impl DrumMixer {
     pub fn set_master_mute(&mut self, muted: bool) {
         self.master_muted = muted;
     }
+
+    // ── FX-chain mutation ───────────────────────────────────────────────
+
+    /// Install a hosted plugin at the tail of an FX chain. Prepares the
+    /// plugin for this mixer's sample rate + a generous max block size, then
+    /// appends. Returns the new slot index, or the underlying plugin error.
+    pub fn install_plugin(
+        &mut self,
+        target: FxTarget,
+        mut plugin: HostedPlugin,
+    ) -> Result<usize, signal_plugin_host::PluginError> {
+        plugin.prepare(self.sample_rate as f64, FX_PREPARE_BLOCK)?;
+        let display_name = plugin.descriptor().name.clone();
+        let slot = FxSlot {
+            plugin,
+            bypassed: false,
+            display_name,
+        };
+        let chain = match self.chain_mut(target) {
+            Some(c) => c,
+            None => {
+                return Err(signal_plugin_host::PluginError::LoadFailed(
+                    "FX target not found".into(),
+                ));
+            }
+        };
+        chain.slots.push(slot);
+        Ok(chain.slots.len() - 1)
+    }
+
+    /// Remove a slot and deactivate the plugin it held.
+    pub fn remove_plugin(&mut self, target: FxTarget, slot_idx: usize) {
+        if let Some(chain) = self.chain_mut(target) {
+            if slot_idx < chain.slots.len() {
+                let mut slot = chain.slots.remove(slot_idx);
+                slot.plugin.deactivate();
+            }
+        }
+    }
+
+    pub fn set_slot_bypass(&mut self, target: FxTarget, slot_idx: usize, bypassed: bool) {
+        if let Some(chain) = self.chain_mut(target) {
+            if let Some(slot) = chain.slots.get_mut(slot_idx) {
+                slot.bypassed = bypassed;
+            }
+        }
+    }
+
+    /// Queue a param write to a hosted plugin. The plugin's internal queue
+    /// drains at the top of the next audio block.
+    pub fn set_slot_param(&self, target: FxTarget, slot_idx: usize, param_id: u32, value: f64) {
+        if let Some(chain) = self.chain_ref(target) {
+            if let Some(slot) = chain.slots.get(slot_idx) {
+                slot.plugin.set_param(param_id, value);
+            }
+        }
+    }
+
+    /// Snapshot a hosted plugin's parameter list (for slider grids).
+    /// `&mut self` because the underlying `PluginInstance::params` takes
+    /// `&mut self`. Callers (the bank) serialize through the bank mutex.
+    pub fn slot_params(
+        &mut self,
+        target: FxTarget,
+        slot_idx: usize,
+    ) -> Option<Vec<signal_plugin_host::PluginParamInfo>> {
+        let chain = self.chain_mut(target)?;
+        let slot = chain.slots.get_mut(slot_idx)?;
+        Some(slot.plugin.params())
+    }
+
+    fn chain_mut(&mut self, target: FxTarget) -> Option<&mut FxChain> {
+        match target {
+            FxTarget::Channel(i) => self.channels.get_mut(i).map(|c| &mut c.fx),
+            FxTarget::Bus(i) => self.buses.get_mut(i).map(|b| &mut b.fx),
+            FxTarget::Master => Some(&mut self.master_fx),
+        }
+    }
+
+    fn chain_ref(&self, target: FxTarget) -> Option<&FxChain> {
+        match target {
+            FxTarget::Channel(i) => self.channels.get(i).map(|c| &c.fx),
+            FxTarget::Bus(i) => self.buses.get(i).map(|b| &b.fx),
+            FxTarget::Master => Some(&self.master_fx),
+        }
+    }
+}
+
+/// Addresses an FX chain on a drum mixer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FxTarget {
+    Channel(usize),
+    Bus(usize),
+    Master,
 }
 
 // ── Cloneable layout snapshot for the UI ────────────────────────────────────
@@ -309,6 +481,7 @@ pub struct MixerLayout {
     pub buses: Vec<BusStrip>,
     pub master_gain_db: f32,
     pub master_muted: bool,
+    pub master_fx: Vec<FxSlotStrip>,
 }
 
 #[derive(Clone, Debug)]
@@ -326,6 +499,7 @@ pub struct ChannelStrip {
     pub gain_db: f32,
     pub muted: bool,
     pub soloed: bool,
+    pub fx: Vec<FxSlotStrip>,
 }
 
 #[derive(Clone, Debug)]
@@ -346,6 +520,31 @@ pub struct BusStrip {
     pub gain_db: f32,
     pub muted: bool,
     pub soloed: bool,
+    pub fx: Vec<FxSlotStrip>,
+}
+
+/// UI snapshot of one FX-chain slot. `slot_idx` matches the index taken by
+/// `SamplerBank::set_mixer_slot_bypass` / `set_mixer_slot_param`.
+#[derive(Clone, Debug)]
+pub struct FxSlotStrip {
+    pub slot_idx: usize,
+    pub display_name: String,
+    pub bypassed: bool,
+}
+
+impl FxChain {
+    /// Snapshot the chain for the UI.
+    pub fn strip(&self) -> Vec<FxSlotStrip> {
+        self.slots
+            .iter()
+            .enumerate()
+            .map(|(slot_idx, s)| FxSlotStrip {
+                slot_idx,
+                display_name: s.display_name.clone(),
+                bypassed: s.bypassed,
+            })
+            .collect()
+    }
 }
 
 impl DrumMixer {
@@ -383,6 +582,7 @@ impl DrumMixer {
                 gain_db: ch.gain_db,
                 muted: ch.muted,
                 soloed: ch.soloed,
+                fx: ch.fx.strip(),
             });
         }
         for (send_idx, s) in self.sends.iter().enumerate() {
@@ -418,6 +618,7 @@ impl DrumMixer {
                 gain_db: b.gain_db,
                 muted: b.muted,
                 soloed: b.soloed,
+                fx: b.fx.strip(),
             })
             .collect();
 
@@ -426,6 +627,7 @@ impl DrumMixer {
             buses,
             master_gain_db: self.master_gain_db,
             master_muted: self.master_muted,
+            master_fx: self.master_fx.strip(),
         }
     }
 }
@@ -461,7 +663,7 @@ mod tests {
 
     #[test]
     fn builds_direct_channels_sends_and_shared_buses() {
-        let m = DrumMixer::build(&mm2_like());
+        let m = DrumMixer::build(&mm2_like(), 48_000);
         assert_eq!(m.channels.len(), 4);
         assert_eq!(m.sends.len(), 6);
         assert_eq!(m.buses.len(), 3);
@@ -477,7 +679,7 @@ mod tests {
 
     #[test]
     fn layout_groups_by_engine() {
-        let m = DrumMixer::build(&mm2_like());
+        let m = DrumMixer::build(&mm2_like(), 48_000);
         let layout = m.layout();
         assert_eq!(layout.engines.len(), 2);
         assert_eq!(layout.engines[0].label, "kick");
@@ -488,7 +690,7 @@ mod tests {
 
     #[test]
     fn setters_update_gain_mute_solo_master() {
-        let mut m = DrumMixer::build(&mm2_like());
+        let mut m = DrumMixer::build(&mm2_like(), 48_000);
         m.set_channel_gain_db(0, -6.0);
         assert!((m.channels[0].gain_lin - db_to_lin(-6.0)).abs() < 1e-6);
         m.set_send_mute(0, true);

@@ -485,6 +485,14 @@ pub struct PresetRuntime {
     /// buses). Built only for presets with no authored master edges (the drum
     /// fallback path); `None` keeps the original graph render.
     pub mixer: Option<crate::mixer::DrumMixer>,
+    /// Master FX chain applied to the preset's master sum after the engine /
+    /// edge graph (or after the drum mixer's own master_fx). Used by
+    /// non-drum presets (orchestral, synth, …) for a REAPER-style master
+    /// FX bus when there is no per-strip mixer. Mutated by the bank API.
+    pub master_fx: crate::mixer::FxChain,
+    /// Sample rate this runtime is rendering at — needed so `install_plugin`
+    /// can `prepare` the hosted plugin without a callback.
+    pub sample_rate: u32,
 }
 
 impl PresetRuntime {
@@ -498,7 +506,8 @@ impl PresetRuntime {
         sample_rate: u32,
         engines: Vec<(String, EngineSpec, SamplerBlock)>,
     ) -> Result<Self, crate::SamplerError> {
-        let _ = sample_rate; // engines come pre-built; sample_rate is bookkeeping
+        // Engines come pre-built; sample_rate is forwarded to the drum mixer
+        // so hosted FX plugins can be `prepare`d at install time.
         let mut engine_instances: Vec<EngineInstance> = Vec::new();
         let mut engine_id_to_idx: HashMap<String, usize> = HashMap::new();
         for (id, spec, block) in engines {
@@ -623,7 +632,7 @@ impl PresetRuntime {
                     (label, eng.mic_ids())
                 })
                 .collect();
-            let m = crate::mixer::DrumMixer::build(&engine_mics);
+            let m = crate::mixer::DrumMixer::build(&engine_mics, sample_rate);
             if m.is_empty() { None } else { Some(m) }
         };
 
@@ -637,7 +646,34 @@ impl PresetRuntime {
             edges,
             note_routing,
             mixer,
+            master_fx: crate::mixer::FxChain::default(),
+            sample_rate,
         })
+    }
+
+    /// Install a hosted plugin in the preset's master FX chain (the chain
+    /// applied after engine/edge render or after the drum mixer's master).
+    /// Returns the new slot index.
+    pub fn install_master_plugin(
+        &mut self,
+        plugin: signal_plugin_host::HostedPlugin,
+    ) -> Result<usize, signal_plugin_host::PluginError> {
+        let mut plugin = plugin;
+        plugin.prepare(self.sample_rate as f64, crate::mixer::FX_PREPARE_BLOCK)?;
+        let display_name = plugin.descriptor().name.clone();
+        self.master_fx.slots.push(crate::mixer::FxSlot {
+            plugin,
+            bypassed: false,
+            display_name,
+        });
+        Ok(self.master_fx.slots.len() - 1)
+    }
+
+    pub fn remove_master_plugin(&mut self, slot_idx: usize) {
+        if slot_idx < self.master_fx.slots.len() {
+            let mut slot = self.master_fx.slots.remove(slot_idx);
+            slot.plugin.deactivate();
+        }
     }
 
     /// Render the preset into per-mic **buses** (interleaved stereo each),
@@ -754,6 +790,14 @@ impl PresetRuntime {
                 }
             }
         }
+
+        // 6. Master FX chain — applied after the entire preset master has
+        //    been summed. Non-drum presets use this for REAPER-style master
+        //    bus FX (the drum-mixer path applies its own master_fx earlier).
+        if !self.master_fx.is_empty() {
+            let len = master.len();
+            self.master_fx.process(&mut master[..len]);
+        }
     }
 
     /// Send-based drum render: each engine's close mics go direct to master;
@@ -768,8 +812,14 @@ impl PresetRuntime {
     /// is soloed — so soloing a bus (or a send into it) is audible.
     fn render_drum_mix(&mut self, master: &mut [f32]) {
         let block_frames = master.len() / 2;
-        // Split-borrow: engines (mut, to render) and mixer (mut, to route).
-        let Self { engines, mixer, .. } = self;
+        // Split-borrow: engines (mut, to render), mixer (mut, to route), and
+        // master_fx (mut, applied after the mixer's master sum).
+        let Self {
+            engines,
+            mixer,
+            master_fx,
+            ..
+        } = self;
         for eng in engines.iter_mut() {
             eng.render(block_frames);
         }
@@ -783,8 +833,10 @@ impl PresetRuntime {
             buses,
             master_gain_lin,
             master_muted,
+            master_fx: drum_master_fx,
             meters,
             master_scratch,
+            channel_scratch,
             ..
         } = mixer;
 
@@ -794,6 +846,12 @@ impl PresetRuntime {
         }
         for s in master_scratch.iter_mut() {
             *s = 0.0;
+        }
+
+        // Channel-scratch sized to one full block; re-used across each direct
+        // channel's FX-chain run (REAPER-style pre-fader FX).
+        if channel_scratch.len() != master.len() {
+            channel_scratch.resize(master.len(), 0.0);
         }
 
         // Size + zero bus accumulators for this block.
@@ -806,8 +864,8 @@ impl PresetRuntime {
             }
         }
 
-        // Direct close-mic channels → scratch.
-        for (ci, ch) in channels.iter().enumerate() {
+        // Direct close-mic channels → channel scratch → FX → * gain → master.
+        for (ci, ch) in channels.iter_mut().enumerate() {
             let active = !ch.muted && (!any_solo || ch.soloed);
             let mut peak = 0.0f32;
             if active {
@@ -815,10 +873,19 @@ impl PresetRuntime {
                     .get(ch.engine_idx)
                     .and_then(|e| e.mic_scratches().get(ch.mic_idx))
                 {
+                    let n = channel_scratch.len().min(src.len());
+                    // Copy mic source into the channel scratch and run any FX
+                    // in place. Empty chain = single copy + zero work.
+                    channel_scratch[..n].copy_from_slice(&src[..n]);
+                    for s in &mut channel_scratch[n..] {
+                        *s = 0.0;
+                    }
+                    if !ch.fx.is_empty() {
+                        ch.fx.process(&mut channel_scratch[..n]);
+                    }
                     let g = ch.gain_lin;
-                    let n = master_scratch.len().min(src.len());
                     for k in 0..n {
-                        let v = src[k] * g;
+                        let v = channel_scratch[k] * g;
                         master_scratch[k] += v;
                         let a = v.abs();
                         if a > peak {
@@ -858,13 +925,17 @@ impl PresetRuntime {
             meters.set_send_peak(si, peak);
         }
 
-        // Shared bus tracks → scratch. A bus reaches master if it or any send
-        // feeding it is soloed.
-        for (bi, bus) in buses.iter().enumerate() {
+        // Shared bus tracks: bus.acc → FX → * bus gain → master. A bus reaches
+        // master if it or any send feeding it is soloed.
+        for (bi, bus) in buses.iter_mut().enumerate() {
             let pulled = bus.soloed || sends.iter().any(|s| s.bus_idx == bi && s.soloed);
             let active = !bus.muted && (!any_solo || pulled);
             let mut peak = 0.0f32;
             if active {
+                if !bus.fx.is_empty() {
+                    let len = bus.acc.len();
+                    bus.fx.process(&mut bus.acc[..len]);
+                }
                 let g = bus.gain_lin;
                 let n = master_scratch.len().min(bus.acc.len());
                 for k in 0..n {
@@ -879,7 +950,18 @@ impl PresetRuntime {
             meters.set_bus_peak(bi, peak);
         }
 
-        // Master fader + meter, then add into the host buffer.
+        // Drum-mixer master FX → preset master FX → master fader + meter.
+        // Two chains so a drum preset can have its own per-kit master FX
+        // separate from a higher-level preset chain.
+        if !drum_master_fx.is_empty() {
+            let len = master_scratch.len();
+            drum_master_fx.process(&mut master_scratch[..len]);
+        }
+        if !master_fx.is_empty() {
+            let len = master_scratch.len();
+            master_fx.process(&mut master_scratch[..len]);
+        }
+
         let mg = if *master_muted { 0.0 } else { *master_gain_lin };
         let mut master_peak = 0.0f32;
         let n = master.len().min(master_scratch.len());
