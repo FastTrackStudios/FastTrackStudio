@@ -329,7 +329,111 @@ fn MainUi() -> Element {
     }
 
     let mut playing = use_signal(|| false);
-    let playhead = use_signal(|| 0.0f64);
+    let mut playhead = use_signal(|| 0.0f64);
+    // Edit cursor (the static line a ruler/empty click drops); also where
+    // playback resumes from.
+    let mut edit_cursor = use_signal(|| 0.0f64);
+
+    // Arrange-view edit gestures → engine + view-model. Selection/positions
+    // update the local `tracks` signal for immediate feedback, and the engine
+    // is driven so playback honours the edit.
+    let on_arrange_edit = {
+        let engine = engine.clone();
+        let ctx = ctx.clone();
+        let mut tracks = tracks;
+        use_callback(move |edit: daw::ui::panels::ArrangeEdit| {
+            use daw::service::PositionInSeconds;
+            use daw::ui::panels::ArrangeEdit;
+            // The engine item for a (track index, clip index) pair — clips are
+            // built in item order, so the index maps directly.
+            let item_ref = |track: usize, clip: usize| -> Option<ItemRef> {
+                let items = Items::get_items(&engine, ctx.clone(), TrackRef::Index(track as u32));
+                items.get(clip).map(|it| ItemRef::Guid(it.guid.clone()))
+            };
+            match edit {
+                ArrangeEdit::Seek(t) => {
+                    let t = t.max(0.0);
+                    edit_cursor.set(t);
+                    playhead.set(t);
+                    let _ = Transport::set_position(&engine, ctx.clone(), t);
+                }
+                ArrangeEdit::ClearSelection => {
+                    let _ = Items::select_all_items(&engine, ctx.clone(), false);
+                    let mut tv = tracks.write();
+                    for tk in tv.iter_mut() {
+                        for c in tk.clips.iter_mut() {
+                            c.selected = false;
+                        }
+                    }
+                }
+                ArrangeEdit::SelectClip {
+                    track,
+                    clip,
+                    additive,
+                } => {
+                    if let Some(iref) = item_ref(track, clip) {
+                        let _ = Items::set_selected(&engine, ctx.clone(), iref, true);
+                    }
+                    let mut tv = tracks.write();
+                    for (ti, tk) in tv.iter_mut().enumerate() {
+                        for (ci, c) in tk.clips.iter_mut().enumerate() {
+                            if ti == track && ci == clip {
+                                c.selected = true;
+                            } else if !additive {
+                                c.selected = false;
+                            }
+                        }
+                    }
+                }
+                ArrangeEdit::MoveClip { track, clip, start } => {
+                    if let Some(iref) = item_ref(track, clip) {
+                        let _ = Items::set_position(
+                            &engine,
+                            ctx.clone(),
+                            iref,
+                            PositionInSeconds::from_seconds(start),
+                        );
+                    }
+                    if let Some(c) = tracks
+                        .write()
+                        .get_mut(track)
+                        .and_then(|t| t.clips.get_mut(clip))
+                    {
+                        c.start = start;
+                    }
+                }
+                ArrangeEdit::ResizeClip {
+                    track,
+                    clip,
+                    start,
+                    length,
+                } => {
+                    if let Some(iref) = item_ref(track, clip) {
+                        let _ = Items::set_position(
+                            &engine,
+                            ctx.clone(),
+                            iref.clone(),
+                            PositionInSeconds::from_seconds(start),
+                        );
+                        let _ = Items::set_length(
+                            &engine,
+                            ctx.clone(),
+                            iref,
+                            daw::service::Duration::from_seconds(length.max(0.0)),
+                        );
+                    }
+                    if let Some(c) = tracks
+                        .write()
+                        .get_mut(track)
+                        .and_then(|t| t.clips.get_mut(clip))
+                    {
+                        c.start = start;
+                        c.length = length;
+                    }
+                }
+            }
+        })
+    };
 
     // Playhead poll: track the transport clock at the metering rate.
     let pos_engine = engine.clone();
@@ -351,7 +455,8 @@ fn MainUi() -> Element {
 
     // Theme tokens drive the shell chrome (MainUi mounts inside the
     // provider, so read them from context).
-    let tk = daw::ui::theming::use_theme().theme.tokens;
+    let theme = daw::ui::theming::use_theme().theme;
+    let tk = theme.tokens;
     let bg = tk.surface.css();
     let header_bg = tk.surface_raised.css();
     let border = tk.border.css();
@@ -359,6 +464,21 @@ fn MainUi() -> Element {
     let text_strong = tk.text.lighten(0.2).css();
     let text_dim = tk.text_faint.css();
     let accent = tk.accent.css();
+
+    // Remount key for the themed subtree. Blitz's incremental reconciler can't
+    // diff the `if image.is_some()` conditionals that flip when a skinned
+    // REAPER theme replaces a token theme (it panics with "invalid key"), but
+    // every theme mounts cleanly from scratch. Keying the themed content on the
+    // active palette forces dioxus to unmount + recreate it on a swap — the
+    // working cold-mount path — instead of an in-place diff.
+    let theme_key = format!(
+        "{}|{}|{}|{}|{}",
+        tk.surface.css(),
+        tk.surface_raised.css(),
+        tk.accent.css(),
+        tk.meter_safe.css(),
+        theme.engine.is_some(),
+    );
 
     let is_playing = playing();
 
@@ -381,7 +501,23 @@ fn MainUi() -> Element {
                 span { style: format!("color:{text_dim}; font-weight:500;"), "Native" }
 
                 div { style: "flex:1 1 0;" }
+
+                // Live theme switcher — swaps the active `Theme` at runtime.
+                // Lives OUTSIDE the keyed boundary below so its cache + warm
+                // state survive a theme remount.
+                ThemePicker {}
             }
+
+            // Themed content, remounted as a unit on theme change. A single-item
+            // keyed `for` (not a lone keyed element — dioxus ignores keys
+            // outside list diffing) makes dioxus remove the old subtree and
+            // create a fresh one when `theme_key` changes, taking the working
+            // cold-mount path instead of an in-place structural diff Blitz
+            // can't follow. The picker above stays mounted across swaps.
+            for tkey in std::iter::once(theme_key.clone()) {
+            div {
+                key: "{tkey}",
+                style: "flex:1 1 0; min-height:0; display:flex; flex-direction:column;",
 
             // ── Transport (themed `trans.*` context) ──
             TransportBar {
@@ -422,10 +558,343 @@ fn MainUi() -> Element {
                     bpm: boot.bpm,
                     beats_per_measure: boot.beats_per_measure,
                     seconds: boot.seconds,
-                    cursor: 0.0,
+                    cursor: edit_cursor(),
                     playhead: is_playing.then_some(playhead),
+                    on_edit: move |e| on_arrange_edit.call(e),
                 }
             }
+            } // themed-content keyed wrapper div
+            } // single-item keyed for (remount-on-theme-change)
+        }
+    }
+}
+
+/// One switchable theme: a display label and where to load it from
+/// (`None` = the built-in FTS dark theme; `Some(dir)` = an unpacked REAPER
+/// theme directory).
+#[derive(Clone, PartialEq)]
+struct ThemeChoice {
+    label: String,
+    dir: Option<std::path::PathBuf>,
+}
+
+/// Runtime theme switcher: a row of pill buttons in the title bar. Selecting a
+/// theme rebuilds the [`ThemeContext`] on a worker thread (REAPER imports
+/// decode image atlases — too slow for the UI thread) and pushes it into the
+/// reactive theme [`Signal`], so every panel re-themes live. Built themes are
+/// cached so switching back is instant.
+#[component]
+fn ThemePicker() -> Element {
+    use daw::ui::theming::{ThemeContext, use_theme_signal};
+
+    // Resolve the choice list + active index + DPI scale once.
+    let (choices, init_selected, scale) = use_hook(|| {
+        let scale = theme_scale();
+        let active = resolve_active_theme_dir();
+        let choices = discover_themes(active.as_deref());
+        let selected = active
+            .as_deref()
+            .and_then(|a| choices.iter().position(|c| c.dir.as_deref() == Some(a)))
+            .unwrap_or(0);
+        (choices, selected, scale)
+    });
+
+    let theme_sig = use_theme_signal();
+    let mut selected = use_signal(|| init_selected);
+    let mut loading = use_signal(|| false);
+    // Per-choice cache of built contexts. Seed index 0 (FTS dark, cheap) and
+    // the already-applied boot theme so switching back to either is instant;
+    // the rest warm in the background below.
+    let n = choices.len();
+    let mut cache: Signal<Vec<Option<ThemeContext>>> = use_signal(move || {
+        let mut v = vec![None; n];
+        if !v.is_empty() {
+            v[0] = Some(ThemeContext::new());
+        }
+        if let Some(sig) = theme_sig
+            && let Some(slot) = v.get_mut(init_selected)
+        {
+            *slot = Some(sig.peek().clone());
+        }
+        v
+    });
+
+    // Warm the rest of the themes into the cache a few seconds after mount, so
+    // later switches are instant. REAPER imports decode image atlases (seconds
+    // each, even in release), so this runs sequentially on the blocking pool.
+    {
+        let choices = choices.clone();
+        use_future(move || {
+            let choices = choices.clone();
+            async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                for (i, choice) in choices.iter().enumerate() {
+                    if cache.peek().get(i).is_some_and(Option::is_some) {
+                        continue;
+                    }
+                    let dir = choice.dir.clone();
+                    let built =
+                        tokio::task::spawn_blocking(move || build_theme_ctx(dir.as_deref(), scale))
+                            .await;
+                    if let Ok(ctx) = built
+                        && let Some(slot) = cache.write().get_mut(i)
+                        && slot.is_none()
+                    {
+                        *slot = Some(ctx);
+                    }
+                }
+                tracing::info!("theme cache warmed ({} themes)", choices.len());
+            }
+        });
+    }
+
+    // Showcase auto-cycle: `FTS_THEME_CYCLE=<secs>` advances through the themes
+    // on a timer (off by default). Exercises the same live-swap path a click
+    // takes — handy for demos and for verifying the reactive theming wiring.
+    if let Some(secs) = std::env::var("FTS_THEME_CYCLE")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        && secs > 0.0
+        && choices.len() > 1
+    {
+        let count = choices.len();
+        let dirs: Vec<Option<std::path::PathBuf>> = choices.iter().map(|c| c.dir.clone()).collect();
+        use_future(move || {
+            let dirs = dirs.clone();
+            async move {
+                let Some(sig) = theme_sig else { return };
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs_f64(secs)).await;
+                    if *loading.peek() {
+                        continue;
+                    }
+                    let next = (*selected.peek() + 1) % count;
+                    apply_theme_index(
+                        next,
+                        dirs[next].clone(),
+                        scale,
+                        sig,
+                        selected,
+                        loading,
+                        cache,
+                    )
+                    .await;
+                }
+            }
+        });
+    }
+
+    let tk = daw::ui::theming::use_theme().theme.tokens;
+    let bar_bg = tk.surface_sunken.css();
+    let idle_fg = tk.text_dim.css();
+    let active_bg = tk.accent.css();
+    let active_fg = tk.accent.on().css();
+    let border = tk.border.css();
+
+    rsx! {
+        div {
+            style: format!(
+                "display:flex; align-items:center; gap:2px; padding:2px; border-radius:6px; \
+                 background:{bar_bg}; border:1px solid {border};"
+            ),
+            for (i, choice) in choices.iter().enumerate() {
+                {
+                    let is_active = selected() == i;
+                    let (bg, fg, weight) = if is_active {
+                        (active_bg.clone(), active_fg.clone(), "600")
+                    } else {
+                        ("transparent".to_string(), idle_fg.clone(), "500")
+                    };
+                    let dir = choice.dir.clone();
+                    rsx! {
+                        button {
+                            key: "{i}",
+                            style: format!(
+                                "appearance:none; border:none; cursor:pointer; \
+                                 padding:3px 9px; border-radius:4px; font-size:11px; \
+                                 letter-spacing:0.03em; font-weight:{weight}; \
+                                 background:{bg}; color:{fg};"
+                            ),
+                            onclick: move |_| {
+                                if *selected.peek() == i || *loading.peek() {
+                                    return;
+                                }
+                                let Some(sig) = theme_sig else { return };
+                                let dir = dir.clone();
+                                spawn(apply_theme_index(
+                                    i, dir, scale, sig, selected, loading, cache,
+                                ));
+                            },
+                            "{choice.label}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The DPI scale for theme imports (`FTS_THEME_SCALE`, default 1.0) — matches
+/// the boot-time resolution in [`App`].
+fn theme_scale() -> f32 {
+    std::env::var("FTS_THEME_SCALE")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(1.0)
+}
+
+/// The REAPER theme directory the app booted with (`FTS_REAPER_THEME` or the
+/// default), resolved to the dir that actually holds a `.ReaperTheme` file.
+fn resolve_active_theme_dir() -> Option<std::path::PathBuf> {
+    let dir =
+        std::env::var("FTS_REAPER_THEME").unwrap_or_else(|_| DEFAULT_REAPER_THEME.to_string());
+    resolve_theme_dir(std::path::Path::new(&dir))
+}
+
+/// Build the switchable theme list: FTS dark first, then every unpacked REAPER
+/// theme found beside the active one (siblings under the same `extracted/`
+/// base). `active` seeds the base directory to scan.
+fn discover_themes(active: Option<&std::path::Path>) -> Vec<ThemeChoice> {
+    let mut choices = vec![ThemeChoice {
+        label: "FTS Dark".to_string(),
+        dir: None,
+    }];
+
+    // Scan the parent of the active theme dir (the `extracted/` base) for
+    // sibling theme directories.
+    let base = active
+        .and_then(|a| a.parent())
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| {
+            std::path::Path::new(DEFAULT_REAPER_THEME)
+                .parent()
+                .map(std::path::Path::to_path_buf)
+        });
+    if let Some(base) = base
+        && let Ok(entries) = std::fs::read_dir(&base)
+    {
+        let mut dirs: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .filter_map(|p| resolve_theme_dir(&p))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        for dir in dirs {
+            // Label from the top-level theme folder name (under `base`), so
+            // nested layouts (e.g. reapertips) still read cleanly.
+            let name = dir
+                .strip_prefix(&base)
+                .ok()
+                .and_then(|rel| rel.components().next())
+                .and_then(|c| c.as_os_str().to_str())
+                .or_else(|| dir.file_name().and_then(|n| n.to_str()))
+                .unwrap_or("Theme");
+            choices.push(ThemeChoice {
+                label: pretty_theme_name(name),
+                dir: Some(dir),
+            });
+        }
+    }
+    choices
+}
+
+/// Resolve a candidate directory to the one that actually holds a
+/// `.ReaperTheme` file: the dir itself, or its first matching immediate
+/// subdirectory (some themes nest the layout one level down). `None` if none.
+fn resolve_theme_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let has_theme = |d: &std::path::Path| {
+        std::fs::read_dir(d).ok().is_some_and(|rd| {
+            rd.flatten()
+                .any(|e| e.path().extension().is_some_and(|x| x == "ReaperTheme"))
+        })
+    };
+    if has_theme(dir) {
+        return Some(dir.to_path_buf());
+    }
+    let mut subs: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir() && has_theme(p))
+        .collect();
+    subs.sort();
+    subs.into_iter().next()
+}
+
+/// Build a [`ThemeContext`] for a choice: FTS dark when `dir` is `None`,
+/// otherwise the imported REAPER theme (falling back to dark on failure).
+fn build_theme_ctx(dir: Option<&std::path::Path>, scale: f32) -> daw::ui::theming::ThemeContext {
+    let ctx = daw::ui::theming::ThemeContext::new();
+    match dir {
+        None => ctx,
+        Some(dir) => match daw::ui::theming::reaper_import::theme_from_dir_scaled(dir, scale) {
+            Ok(theme) => ctx.with_theme(theme),
+            Err(e) => {
+                tracing::warn!(
+                    "theme import failed ({}): {e} — using FTS dark",
+                    dir.display()
+                );
+                ctx
+            }
+        },
+    }
+}
+
+/// Apply the theme at index `i`: mark it selected, then swap it in from the
+/// cache (instant) or build it on the blocking pool and apply when ready
+/// (skipping the apply if the selection moved on meanwhile). Shared by the
+/// picker's click handler and the showcase auto-cycle.
+async fn apply_theme_index(
+    i: usize,
+    dir: Option<std::path::PathBuf>,
+    scale: f32,
+    mut theme_sig: Signal<daw::ui::theming::ThemeContext>,
+    mut selected: Signal<usize>,
+    mut loading: Signal<bool>,
+    mut cache: Signal<Vec<Option<daw::ui::theming::ThemeContext>>>,
+) {
+    selected.set(i);
+    if let Some(ctx) = cache.peek().get(i).and_then(Clone::clone) {
+        theme_sig.set(ctx);
+        return;
+    }
+    loading.set(true);
+    let built = tokio::task::spawn_blocking(move || build_theme_ctx(dir.as_deref(), scale)).await;
+    if let Ok(ctx) = built {
+        if let Some(slot) = cache.write().get_mut(i) {
+            *slot = Some(ctx.clone());
+        }
+        // Only apply if this is still the live selection (a fast second click
+        // may have superseded it).
+        if *selected.peek() == i {
+            theme_sig.set(ctx);
+        }
+    }
+    loading.set(false);
+}
+
+/// Prettify a theme directory name for the picker label.
+fn pretty_theme_name(name: &str) -> String {
+    match name.to_ascii_lowercase().as_str() {
+        "antitheme" => "Anti-Theme".to_string(),
+        "imperial" => "Imperial".to_string(),
+        "neptune" => "Neptune".to_string(),
+        "reapertips" => "Reapertips".to_string(),
+        _ => {
+            // Title-case, splitting on separators.
+            name.split(['_', '-', ' '])
+                .filter(|s| !s.is_empty())
+                .map(|w| {
+                    let mut ch = w.chars();
+                    match ch.next() {
+                        Some(f) => f.to_uppercase().collect::<String>() + ch.as_str(),
+                        None => String::new(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
         }
     }
 }

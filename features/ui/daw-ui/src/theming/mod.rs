@@ -23,7 +23,7 @@ pub mod trans;
 pub mod walter;
 
 pub use arrange::ArrangeTheme;
-pub use context::{ControlConfig, ThemeContext, ThemeProvider, use_theme};
+pub use context::{ControlConfig, ThemeContext, ThemeProvider, use_theme, use_theme_signal};
 pub use envcp::{EnvcpLayout, EnvcpSkin, EnvcpTheme};
 pub use mcp::{
     ButtonSkin, ButtonStateSkin, KnobSkin, McpColors, McpCustom, McpLayout, McpSkin, McpTheme,

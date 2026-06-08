@@ -7,7 +7,7 @@
 //!
 //! [`TrackControlPanel`]: super::TrackControlPanel
 
-use crate::panels::arrange_view::ArrangeView;
+use crate::panels::arrange_view::{ArrangeEdit, ArrangeView};
 use crate::panels::mixer_control_panel::MixerControlPanel;
 use crate::panels::model::{MarkerView, RegionView, TempoMarkerView, TrackView};
 use crate::prelude::*;
@@ -29,6 +29,10 @@ pub fn DawWorkspace(
     #[props(default = 12.0)] pps: f64,
     #[props(default = 120.0)] seconds: f64,
     #[props(default = 4)] beats_per_measure: u32,
+    /// Arrange-view edit gestures (seek / select / move / resize). `None` =
+    /// read-only.
+    #[props(default)]
+    on_edit: Option<EventHandler<ArrangeEdit>>,
 ) -> Element {
     let arrange_grow = ((1.0 - mixer_fraction) * 100.0).round() as u32;
     let mixer_grow = (mixer_fraction * 100.0).round() as u32;
@@ -59,6 +63,7 @@ pub fn DawWorkspace(
                     pps,
                     seconds,
                     beats_per_measure,
+                    on_edit,
                 }
             }
             // Mixer (bottom third).

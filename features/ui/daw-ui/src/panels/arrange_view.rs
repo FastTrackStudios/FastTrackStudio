@@ -35,6 +35,91 @@ use crate::panels::track_control_panel::TrackControlPanel;
 use crate::prelude::*;
 use crate::theming::{Color, use_theme};
 
+/// A user edit gesture from the arrange view, reported to the host (via
+/// [`ArrangeView`]'s `on_edit`) so it can drive the engine and update the
+/// view-model for immediate feedback. All times are seconds.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ArrangeEdit {
+    /// Move the edit cursor / transport to this time.
+    Seek(f64),
+    /// Select a clip — `additive` extends the current selection (shift/ctrl).
+    SelectClip {
+        track: usize,
+        clip: usize,
+        additive: bool,
+    },
+    /// Clear the clip selection (click on empty timeline).
+    ClearSelection,
+    /// Commit a clip move to a new start time.
+    MoveClip {
+        track: usize,
+        clip: usize,
+        start: f64,
+    },
+    /// Commit a clip trim to a new start + length.
+    ResizeClip {
+        track: usize,
+        clip: usize,
+        start: f64,
+        length: f64,
+    },
+}
+
+/// Which part of a clip a drag is manipulating.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum DragMode {
+    Move,
+    ResizeStart,
+    ResizeEnd,
+}
+
+/// In-flight clip drag (move or trim). Owned by [`ArrangeView`] in a `Signal`;
+/// clips read it to render the optimistic position, and the lanes scroller's
+/// move/up handlers advance and commit it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct DragState {
+    track: usize,
+    clip: usize,
+    mode: DragMode,
+    /// Client-space x at mousedown (px).
+    start_x: f64,
+    orig_start: f64,
+    orig_len: f64,
+    /// Current drag delta (seconds), already applied to the rendered clip.
+    delta: f64,
+    /// Whether the pointer moved past the click threshold (drag vs bare click).
+    moved: bool,
+}
+
+impl DragState {
+    /// The clip's (start, length) with the current drag delta applied.
+    fn applied(&self, min_len: f64) -> (f64, f64) {
+        match self.mode {
+            DragMode::Move => ((self.orig_start + self.delta).max(0.0), self.orig_len),
+            DragMode::ResizeEnd => (self.orig_start, (self.orig_len + self.delta).max(min_len)),
+            DragMode::ResizeStart => {
+                // Left edge moves; the right edge (end) stays put.
+                let end = self.orig_start + self.orig_len;
+                let start = (self.orig_start + self.delta).clamp(0.0, end - min_len);
+                (start, end - start)
+            }
+        }
+    }
+}
+
+/// Shared arrange interaction state, provided by [`ArrangeView`] and consumed
+/// by the [`Lane`] clips (avoids prop-drilling through `TrackLanes`).
+#[derive(Clone, Copy)]
+struct ArrangeCtx {
+    drag: Signal<Option<DragState>>,
+    on_edit: Option<EventHandler<ArrangeEdit>>,
+    pps: f64,
+    /// Min clip length (seconds) when trimming.
+    min_len: f64,
+    /// Edge grab zone (px) for trim vs move at a clip's left/right border.
+    edge_px: f64,
+}
+
 /// Adaptive tick spacing: the smallest "nice" step whose px spacing at this
 /// zoom clears `min_px`. Steps follow ruler conventions (1/2/5/10/15/30s,
 /// then minutes).
@@ -137,8 +222,51 @@ pub fn ArrangeView(
     #[props(default)] loop_range: Option<(f64, f64)>,
     #[props(default)] bpm: Option<f64>,
     #[props(default = 4)] beats_per_measure: u32,
+    /// User edit gestures (seek / select / move / resize). `None` = read-only.
+    #[props(default)]
+    on_edit: Option<EventHandler<ArrangeEdit>>,
 ) -> Element {
     let content_w = (seconds * pps).max(600.0) as u32;
+
+    // Shared clip-drag state + edit callback, provided to the lane clips.
+    let drag = use_signal(|| None::<DragState>);
+    use_context_provider(|| ArrangeCtx {
+        drag,
+        on_edit,
+        pps,
+        min_len: 0.05,
+        edge_px: 6.0,
+    });
+    let emit = move |edit: ArrangeEdit| {
+        if let Some(cb) = on_edit {
+            cb.call(edit);
+        }
+    };
+    // Commit an in-flight drag (or fire selection if it never moved), then
+    // clear it. Shared by the scroller's mouseup + mouseleave.
+    let mut commit_drag = move || {
+        let mut drag = drag;
+        let cur = *drag.peek();
+        if let Some(d) = cur {
+            if d.moved {
+                let (start, length) = d.applied(0.05);
+                match d.mode {
+                    DragMode::Move => emit(ArrangeEdit::MoveClip {
+                        track: d.track,
+                        clip: d.clip,
+                        start,
+                    }),
+                    DragMode::ResizeStart | DragMode::ResizeEnd => emit(ArrangeEdit::ResizeClip {
+                        track: d.track,
+                        clip: d.clip,
+                        start,
+                        length,
+                    }),
+                }
+            }
+            drag.set(None);
+        }
+    };
 
     let g = grid_steps(pps, bpm, beats_per_measure);
     let n_at = |step: f64| (seconds / step).ceil() as i64;
@@ -148,6 +276,14 @@ pub fn ArrangeView(
 
     // The lanes scroller owns horizontal scroll; the ruler mirrors it.
     let mut scroll_x = use_signal(|| 0.0f64);
+
+    // Convert a click's window-x to a timeline time. `element_coordinates()`
+    // is a no-op in this blitz pin (and `get_client_rect` reports x=0 for the
+    // scroller), so we use the known layout origin: the timeline starts right
+    // of the `tcp_width` control sidebar, and the arrange fills from window
+    // x=0. `time = (client_x − tcp_width + scroll_x) / pps`.
+    let origin = tcp_width as f64;
+    let seek_time = move |client_x: f64| ((client_x - origin + scroll_x()) / pps).max(0.0);
 
     let theme = use_theme().theme;
     let ar = theme.arrange;
@@ -198,9 +334,13 @@ pub fn ArrangeView(
                         // Mirrors the lane scroller's horizontal offset.
                         style: format!(
                             "position:relative; width:{content_w}px; height:100%; \
-                             left:{x:.1}px;",
+                             left:{x:.1}px; cursor:text;",
                             x = -scroll_x(),
                         ),
+                        // Click the ruler to move the edit cursor / transport.
+                        onmousedown: move |evt: MouseEvent| {
+                            emit(ArrangeEdit::Seek(seek_time(evt.client_coordinates().x)));
+                        },
 
                         // Region lane.
                         if region_lane_h > 0 {
@@ -387,6 +527,23 @@ pub fn ArrangeView(
                     onscroll: move |evt| {
                         scroll_x.set(evt.data.scroll_left());
                     },
+                    // Advance / commit an in-flight clip drag. Handlers live on
+                    // the scroller so the drag keeps tracking even when the
+                    // pointer leaves the clip it grabbed.
+                    onmousemove: move |evt: MouseEvent| {
+                        let mut drag = drag;
+                        let cur = *drag.peek();
+                        if let Some(mut d) = cur {
+                            let x = evt.client_coordinates().x;
+                            if (x - d.start_x).abs() > 3.0 {
+                                d.moved = true;
+                            }
+                            d.delta = (x - d.start_x) / pps;
+                            drag.set(Some(d));
+                        }
+                    },
+                    onmouseup: move |_| commit_drag(),
+                    onmouseleave: move |_| commit_drag(),
                     // `arrange_vgrid` shading in the empty area below the tracks.
                     for i in 0..n_at(g.major) {
                         div {
@@ -405,6 +562,13 @@ pub fn ArrangeView(
                         style: format!(
                             "position:relative; width:{content_w}px; background:{arrange_bg};"
                         ),
+                        // Empty-timeline click: move the edit cursor and drop
+                        // the clip selection. Clips stop propagation, so this
+                        // only fires off-clip.
+                        onmousedown: move |evt: MouseEvent| {
+                            emit(ArrangeEdit::Seek(seek_time(evt.client_coordinates().x)));
+                            emit(ArrangeEdit::ClearSelection);
+                        },
                         // Lane rows (the grid draws over them, like REAPER).
                         for (idx, track) in tracks.iter().enumerate() {
                             TrackLanes { key: "{track.id}", track: track.clone(), pps, alt: idx % 2 == 1 }
@@ -530,6 +694,11 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
     let item_edge = ar.item_edge.css();
     let track_color = track.color.as_deref().and_then(Color::hex);
 
+    // Interaction: the shared drag state + edit callback (provided by
+    // `ArrangeView`). `track_id` indexes the host's track list.
+    let ctx = use_context::<ArrangeCtx>();
+    let track_id = track.id;
+
     // Fixed item lanes (REAPER 7 comping). Display modes mirror
     // REAPER's lane-button cycle:
     // - One:   only the playing lane is shown, full height — other
@@ -572,8 +741,20 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                         }
                     };
                     let label = if clip.selected { ar.item_label_sel } else { ar.item_label };
-                    let x = clip.start * pps;
-                    let w = (clip.length * pps).max(2.0);
+                    // Optimistic geometry: while this clip is being dragged,
+                    // render at the live position/length from the drag state.
+                    let (clip_start, clip_len) = match *ctx.drag.read() {
+                        Some(d) if d.track == track_id && d.clip == ci => d.applied(ctx.min_len),
+                        _ => (clip.start, clip.length),
+                    };
+                    let dragging = matches!(*ctx.drag.peek(),
+                        Some(d) if d.track == track_id && d.clip == ci);
+                    let x = clip_start * pps;
+                    let w = (clip_len * pps).max(2.0);
+                    // Origin geometry for a drag started on this clip (Copy
+                    // locals — event handlers must be `'static`, no `&clip`).
+                    let c_start = clip.start;
+                    let c_len = clip.length;
                     // Lane geometry + playing state for this item.
                     let lane = clip.lane.unwrap_or(0);
                     let lane_playing = !lanes_on
@@ -628,14 +809,74 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                                 "position:absolute; top:{top:.1}px; height:{item_h}px; left:{x:.1}px; \
                                  width:{w:.1}px; background:{body}; border:1px solid {item_edge}; \
                                  border-radius:3px; overflow:hidden; box-sizing:border-box; \
-                                 font-size:10px; color:{fg}; font-weight:700; \
-                                 white-space:nowrap; text-overflow:ellipsis;{dim}",
+                                 font-size:10px; color:{fg}; font-weight:700; cursor:grab; \
+                                 white-space:nowrap; text-overflow:ellipsis;{z}{dim}",
                                 body = body.css(),
                                 fg = label.css(),
+                                z = if dragging { " z-index:5;" } else { "" },
                                 // REAPER greys out non-playing lanes —
                                 // they're alternate takes, not audible.
                                 dim = if lane_playing { "" } else { " opacity:0.35;" },
                             ),
+                            // Body drag = move; also selects the clip.
+                            onmousedown: move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                let additive = evt.modifiers().shift() || evt.modifiers().ctrl();
+                                if let Some(cb) = ctx.on_edit {
+                                    cb.call(ArrangeEdit::SelectClip { track: track_id, clip: ci, additive });
+                                }
+                                let mut drag = ctx.drag;
+                                drag.set(Some(DragState {
+                                    track: track_id,
+                                    clip: ci,
+                                    mode: DragMode::Move,
+                                    start_x: evt.client_coordinates().x,
+                                    orig_start: c_start,
+                                    orig_len: c_len,
+                                    delta: 0.0,
+                                    moved: false,
+                                }));
+                            },
+
+                            // Trim handles: thin grab zones on each edge.
+                            div {
+                                style: format!(
+                                    "position:absolute; left:0; top:0; width:{e:.0}px; height:100%; \
+                                     cursor:col-resize; z-index:3;",
+                                    e = ctx.edge_px,
+                                ),
+                                onmousedown: move |evt: MouseEvent| {
+                                    evt.stop_propagation();
+                                    if let Some(cb) = ctx.on_edit {
+                                        cb.call(ArrangeEdit::SelectClip { track: track_id, clip: ci, additive: false });
+                                    }
+                                    let mut drag = ctx.drag;
+                                    drag.set(Some(DragState {
+                                        track: track_id, clip: ci, mode: DragMode::ResizeStart,
+                                        start_x: evt.client_coordinates().x,
+                                        orig_start: c_start, orig_len: c_len, delta: 0.0, moved: false,
+                                    }));
+                                },
+                            }
+                            div {
+                                style: format!(
+                                    "position:absolute; right:0; top:0; width:{e:.0}px; height:100%; \
+                                     cursor:col-resize; z-index:3;",
+                                    e = ctx.edge_px,
+                                ),
+                                onmousedown: move |evt: MouseEvent| {
+                                    evt.stop_propagation();
+                                    if let Some(cb) = ctx.on_edit {
+                                        cb.call(ArrangeEdit::SelectClip { track: track_id, clip: ci, additive: false });
+                                    }
+                                    let mut drag = ctx.drag;
+                                    drag.set(Some(DragState {
+                                        track: track_id, clip: ci, mode: DragMode::ResizeEnd,
+                                        start_x: evt.client_coordinates().x,
+                                        orig_start: c_start, orig_len: c_len, delta: 0.0, moved: false,
+                                    }));
+                                },
+                            }
 
                             // Peaks under the label (`col_tr1/2_peaks`);
                             // one polygon per channel lane.
@@ -906,5 +1147,67 @@ fn EnvelopeLane(envelope: EnvelopeView, pps: f64, alt: bool) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod drag_tests {
+    use super::*;
+
+    fn d(mode: DragMode, orig_start: f64, orig_len: f64, delta: f64) -> DragState {
+        DragState {
+            track: 0,
+            clip: 0,
+            mode,
+            start_x: 0.0,
+            orig_start,
+            orig_len,
+            delta,
+            moved: true,
+        }
+    }
+
+    #[test]
+    fn move_shifts_start_keeps_length() {
+        let (s, l) = d(DragMode::Move, 4.0, 8.0, 2.5).applied(0.05);
+        assert!((s - 6.5).abs() < 1e-9);
+        assert!((l - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn move_clamps_start_at_zero() {
+        let (s, l) = d(DragMode::Move, 1.0, 8.0, -5.0).applied(0.05);
+        assert_eq!(s, 0.0);
+        assert!((l - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resize_end_grows_length_keeps_start() {
+        let (s, l) = d(DragMode::ResizeEnd, 4.0, 8.0, 3.0).applied(0.05);
+        assert!((s - 4.0).abs() < 1e-9);
+        assert!((l - 11.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resize_end_floors_at_min_len() {
+        let (_, l) = d(DragMode::ResizeEnd, 4.0, 8.0, -100.0).applied(0.05);
+        assert!((l - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resize_start_moves_left_edge_keeps_end() {
+        // end = 12.0; drag left edge right by 2s → start 6, len 6.
+        let (s, l) = d(DragMode::ResizeStart, 4.0, 8.0, 2.0).applied(0.05);
+        assert!((s - 6.0).abs() < 1e-9);
+        assert!((l - 6.0).abs() < 1e-9);
+        assert!((s + l - 12.0).abs() < 1e-9, "end stays put");
+    }
+
+    #[test]
+    fn resize_start_cannot_cross_end() {
+        // Dragging the left edge past the end clamps to end - min_len.
+        let (s, l) = d(DragMode::ResizeStart, 4.0, 8.0, 100.0).applied(0.05);
+        assert!((s - (12.0 - 0.05)).abs() < 1e-9);
+        assert!((l - 0.05).abs() < 1e-9);
     }
 }

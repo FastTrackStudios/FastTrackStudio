@@ -505,7 +505,17 @@ fn McpKnob(
     let mut drag_start_value = use_signal(|| 0.0f32);
     let sensitivity = DragSensitivity::new(180.0, 0.1);
 
-    let v = value().clamp(0.0, 1.0);
+    // A runtime WALTER layout can hand back a non-finite box at degenerate
+    // sizes; the derived dot/face geometry below would then emit `left:NaNpx`
+    // and poison the vello path. Coerce to a harmless 0 box.
+    let box_w = if box_w.is_finite() { box_w } else { 0.0 };
+    let box_h = if box_h.is_finite() { box_h } else { 0.0 };
+    let raw = value();
+    let v = if raw.is_finite() {
+        raw.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let cursor = if disabled { "not-allowed" } else { "ns-resize" };
 
     // Filmstrip frame for the value: the frames are pre-sliced at import, so

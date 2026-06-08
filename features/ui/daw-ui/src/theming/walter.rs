@@ -104,6 +104,13 @@ impl Coord {
     /// `width = w + (rs−ls)·(W − W₀) = (rs−ls)·100% + (w − (rs−ls)·W₀)px`.
     pub fn css_position(&self, natural: (f32, f32)) -> String {
         let term = |scale: f32, px: f32| -> String {
+            // Coerce non-finite components to 0: a runtime WALTER layout can
+            // evaluate a coord to NaN/∞ at degenerate sizes, and emitting
+            // `left:NaNpx` makes blitz hand vello a NaN path ("A path contains
+            // NaN, ignoring it"). A 0 placement is harmless; a NaN poisons the
+            // whole element's geometry.
+            let scale = if scale.is_finite() { scale } else { 0.0 };
+            let px = if px.is_finite() { px } else { 0.0 };
             if scale == 0.0 {
                 format!("{px:.1}px")
             } else {

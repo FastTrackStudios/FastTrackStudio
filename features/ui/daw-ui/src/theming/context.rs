@@ -173,7 +173,21 @@ impl std::fmt::Debug for ThemeContext {
 /// ```
 #[must_use]
 pub fn use_theme() -> ThemeContext {
+    // Prefer the reactive handle: reading it here subscribes the calling
+    // component, so a runtime theme swap (`set`) re-renders every consumer.
+    if let Some(sig) = try_use_context::<Signal<ThemeContext>>() {
+        return sig();
+    }
     try_use_context::<ThemeContext>().unwrap_or_default()
+}
+
+/// The reactive theme handle for the nearest [`ThemeProvider`], for UIs that
+/// need to *change* the theme at runtime (a theme picker). Returns `None` when
+/// rendered outside a provider. `set` it to swap themes live — every component
+/// that reads [`use_theme`] re-renders.
+#[must_use]
+pub fn use_theme_signal() -> Option<Signal<ThemeContext>> {
+    try_use_context::<Signal<ThemeContext>>()
 }
 
 /// Theme provider component.
@@ -199,7 +213,15 @@ pub fn use_theme() -> ThemeContext {
 /// ```
 #[component]
 pub fn ThemeProvider(theme: ThemeContext, children: Element) -> Element {
-    use_context_provider(|| theme);
+    // Provide the theme as a reactive `Signal` so descendants can swap it at
+    // runtime (see `use_theme_signal`). The closure runs once; if the `theme`
+    // prop later changes (e.g. a parent re-resolves it), sync it through.
+    let mut sig = use_context_provider(|| Signal::new(theme.clone()));
+    use_effect(use_reactive(&theme, move |theme| {
+        if *sig.peek() != theme {
+            sig.set(theme);
+        }
+    }));
     children
 }
 

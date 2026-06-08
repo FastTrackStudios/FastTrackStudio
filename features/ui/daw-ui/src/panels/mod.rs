@@ -17,7 +17,7 @@ pub mod track_control_panel;
 pub mod transport_bar;
 pub mod workspace;
 
-pub use arrange_view::ArrangeView;
+pub use arrange_view::{ArrangeEdit, ArrangeView};
 pub use envcp_row::EnvcpRow;
 pub use mcp_strip::McpStrip;
 pub use mixer_control_panel::MixerControlPanel;
