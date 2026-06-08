@@ -20,6 +20,7 @@ members = [
     "crates/fts-signal-controller",
     "crates/signal-import",
     "crates/signal-live",
+    "crates/signal-plugin-host",
     "crates/signal-proto",
     "crates/signal-sampler",
     "crates/signal-storage",
@@ -52,9 +53,10 @@ signal-browser = { path = "crates/signal-browser" }
 # Access them through the `signal` facade crate.
 
 # ── Local utility crates ─────────────────────────────────────────────
-macromod       = { path = "crates/macromod" }
-signal-audio   = { path = "crates/signal-audio" }
-signal-sampler = { path = "crates/signal-sampler" }
+macromod            = { path = "crates/macromod" }
+signal-audio        = { path = "crates/signal-audio" }
+signal-plugin-host  = { path = "crates/signal-plugin-host", default-features = false }
+signal-sampler      = { path = "crates/signal-sampler" }
 
 # ── DSP crates (split FTS plugin repos) ───────────────────────────────
 # Using local paths directly (same as [patch] overrides) to avoid
@@ -80,13 +82,17 @@ ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef5
 # Source is Codeberg, but currently [patch]ed to the local checkout below:
 # daw's vox-0.8.2 alignment (f431088) is NOT yet pushed to codeberg (cb/main
 # daw still uses bearcove vox 0.5). Drop the local patch once it lands.
-daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-cli = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
+daw-cli = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
+daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
 # ── Shared infrastructure ────────────────────────────────────────────
+# audio-controls was removed on feat/ui-showcase (folded into daw-ui); it
+# still lives at features/audio/audio-controls on cb/main, so pin separately.
+# Cargo treats `?branch=main` and `?branch=feat/ui-showcase` as distinct git
+# sources, so daw's other deps stay on the feat branch.
 audio-controls = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
 # NOTE: the standalone `reaper-test` crate was removed from daw main and folded
 # into the `daw` facade behind the `test-harness` feature, re-exported as
