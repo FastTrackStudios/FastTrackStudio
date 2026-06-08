@@ -10196,6 +10196,7 @@ dependencies = [
  "eyre",
  "futures-timer",
  "signal-audio",
+ "signal-plugin-host",
  "signal-sampler",
  "signal-ui",
  "tracing",
