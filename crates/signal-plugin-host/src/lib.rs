@@ -210,3 +210,155 @@ impl std::fmt::Debug for HostedPlugin {
             .finish()
     }
 }
+
+// ── Plugin scanner (standard directories) ───────────────────────────────────
+
+/// One plugin discovered on disk by [`scan_plugins`]. The display name is
+/// derived from the filename (stem) — the host doesn't open the bundle
+/// during the scan, so this is fast even with hundreds of installed plugins.
+/// Open the actual descriptor by calling [`HostedPlugin::load`] on `path`.
+#[derive(Clone, Debug)]
+pub struct PluginEntry {
+    pub display_name: String,
+    pub path: std::path::PathBuf,
+    pub format: PluginFormat,
+}
+
+/// Standard install directories for `format`, in the order they should be
+/// searched (user dirs first so per-user installs shadow system installs).
+pub fn standard_dirs(format: PluginFormat) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+
+    match format {
+        PluginFormat::Clap => {
+            // CLAP_PATH override + per-OS defaults. Linux convention: ~/.clap,
+            // /usr/lib/clap, /usr/local/lib/clap; macOS: ~/Library/Audio/Plug-Ins/CLAP
+            // + /Library/...; Windows: %COMMONPROGRAMFILES%\CLAP + %LOCALAPPDATA%\Programs\Common\CLAP.
+            if let Some(p) = std::env::var_os("CLAP_PATH") {
+                for d in std::env::split_paths(&p) {
+                    dirs.push(d);
+                }
+            }
+            if let Some(h) = home.clone() {
+                #[cfg(target_os = "linux")]
+                dirs.push(h.join(".clap"));
+                #[cfg(target_os = "macos")]
+                dirs.push(h.join("Library/Audio/Plug-Ins/CLAP"));
+            }
+            #[cfg(target_os = "linux")]
+            {
+                dirs.push("/usr/lib/clap".into());
+                dirs.push("/usr/local/lib/clap".into());
+            }
+            #[cfg(target_os = "macos")]
+            dirs.push("/Library/Audio/Plug-Ins/CLAP".into());
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(p) = std::env::var_os("COMMONPROGRAMFILES") {
+                    dirs.push(std::path::PathBuf::from(p).join("CLAP"));
+                }
+                if let Some(p) = std::env::var_os("LOCALAPPDATA") {
+                    dirs.push(std::path::PathBuf::from(p).join("Programs/Common/CLAP"));
+                }
+            }
+        }
+        PluginFormat::Vst3 => {
+            if let Some(p) = std::env::var_os("VST3_PATH") {
+                for d in std::env::split_paths(&p) {
+                    dirs.push(d);
+                }
+            }
+            if let Some(h) = home {
+                #[cfg(target_os = "linux")]
+                dirs.push(h.join(".vst3"));
+                #[cfg(target_os = "macos")]
+                dirs.push(h.join("Library/Audio/Plug-Ins/VST3"));
+            }
+            #[cfg(target_os = "linux")]
+            {
+                dirs.push("/usr/lib/vst3".into());
+                dirs.push("/usr/local/lib/vst3".into());
+            }
+            #[cfg(target_os = "macos")]
+            dirs.push("/Library/Audio/Plug-Ins/VST3".into());
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(p) = std::env::var_os("COMMONPROGRAMFILES") {
+                    dirs.push(std::path::PathBuf::from(p).join("VST3"));
+                }
+            }
+        }
+        PluginFormat::Lv2 | PluginFormat::Synthetic => {}
+    }
+    dirs
+}
+
+/// Walk `standard_dirs(fmt)` for each requested format and collect plugin
+/// entries. Recurses up to `max_depth` levels into subdirectories (CLAP
+/// vendors commonly nest plugins one level deep; VST3 is a directory
+/// bundle itself so depth 1 suffices). Duplicates by path are dropped.
+pub fn scan_plugins(formats: &[PluginFormat], max_depth: usize) -> Vec<PluginEntry> {
+    use std::collections::HashSet;
+    let mut seen: HashSet<std::path::PathBuf> = HashSet::new();
+    let mut out: Vec<PluginEntry> = Vec::new();
+    for &fmt in formats {
+        for dir in standard_dirs(fmt) {
+            if dir.exists() {
+                walk_for(&dir, fmt, max_depth, &mut seen, &mut out);
+            }
+        }
+    }
+    out.sort_by(|a, b| {
+        a.display_name
+            .to_lowercase()
+            .cmp(&b.display_name.to_lowercase())
+    });
+    out
+}
+
+fn walk_for(
+    dir: &std::path::Path,
+    fmt: PluginFormat,
+    depth: usize,
+    seen: &mut std::collections::HashSet<std::path::PathBuf>,
+    out: &mut Vec<PluginEntry>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            let matches_fmt = match (fmt, ext) {
+                (PluginFormat::Clap, "clap") => true,
+                (PluginFormat::Vst3, "vst3") => true,
+                _ => false,
+            };
+            if matches_fmt {
+                if seen.insert(path.clone()) {
+                    let display_name = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    out.push(PluginEntry {
+                        display_name,
+                        path,
+                        format: fmt,
+                    });
+                }
+                continue;
+            }
+        }
+        // Recurse into plain subdirs (vendor folders). Skip symlinks to
+        // avoid loops; cap depth.
+        if depth > 0 {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_dir() && !meta.file_type().is_symlink() {
+                    walk_for(&path, fmt, depth - 1, seen, out);
+                }
+            }
+        }
+    }
+}

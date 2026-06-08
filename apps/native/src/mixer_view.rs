@@ -16,7 +16,38 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use dioxus::prelude::*;
+use signal_plugin_host::PluginParamInfo;
+use signal_sampler::mixer::FxTarget;
 use signal_sampler::{MixerLayout, MixerMeters, SamplerPlayer};
+
+/// PartialEq-friendly mirror of [`PluginParamInfo`] (the upstream type from
+/// the `daw::plugin` trait doesn't derive `PartialEq`; Dioxus `#[component]`
+/// props require it). Same fields, populated by `from_info`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParamInfo {
+    pub id: u32,
+    pub name: String,
+    pub min: f64,
+    pub max: f64,
+    pub default: f64,
+}
+
+impl ParamInfo {
+    pub fn from_info(p: &PluginParamInfo) -> Self {
+        Self {
+            id: p.id,
+            name: p.name.clone(),
+            min: p.min,
+            max: p.max,
+            default: p.default,
+        }
+    }
+    pub fn vec_from(ps: Vec<PluginParamInfo>) -> Vec<Self> {
+        ps.iter().map(Self::from_info).collect()
+    }
+}
+
+use crate::plugin_picker::PluginPicker;
 
 const DB_MIN: f32 = -60.0;
 const DB_MAX: f32 = 12.0;
@@ -68,16 +99,26 @@ pub fn MixerPanel(reload: u64) -> Element {
     let tick = use_signal(|| 0u64);
     let mut collapsed = use_signal(HashSet::<usize>::new);
     let mut meters_live = use_signal(|| true);
+    // FX rack state: an internal version counter is bumped every time we
+    // install / remove a plugin so the layout `use_effect` re-runs without
+    // needing the parent to bump `reload`.
+    let mut picker_open = use_signal(|| false);
+    let mut fx_version = use_signal(|| 0u64);
+    // Currently-open params editor: which slot, and the param list snapshot
+    // taken when it was opened. `None` = editor closed.
+    let mut params_open = use_signal(|| Option::<(FxTarget, usize, Vec<ParamInfo>)>::None);
+    let v = fx_version();
 
     // Share meters + tick with MeterBar children (so only they animate).
     use_context_provider(|| MeterCtx { tick, meters });
 
-    // Re-fetch structure whenever a new preset loads.
-    use_effect(use_reactive((&reload,), {
+    // Re-fetch structure whenever a new preset loads OR an FX-rack mutation
+    // bumps `fx_version`.
+    use_effect(use_reactive((&reload, &v), {
         let sampler = sampler.clone();
         let mut layout = layout;
         let mut meters = meters;
-        move |(_reload,)| {
+        move |(_reload, _v)| {
             layout.set(sampler.drum_mixer_layout(super::INSTRUMENT_ID));
             meters.set(sampler.drum_mixer_meters(super::INSTRUMENT_ID));
         }
@@ -156,6 +197,84 @@ pub fn MixerPanel(reload: u64) -> Element {
                         }
                     }
                 }
+            }
+
+            // ── Master FX rack ──
+            // REAPER-style serial FX chain on the preset master. "+ FX" loads
+            // a CLAP / VST3 plugin from disk; each row gets bypass + remove +
+            // "params" to open the slider editor below.
+            div {
+                style: "display:flex; flex-direction:column; gap:6px; padding:8px; \
+                        background:#16161a; border:1px solid #2c2c2e; border-radius:6px;",
+                div {
+                    style: "display:flex; align-items:center; gap:8px;",
+                    div { style: "color:#9a7bff; font-weight:700; font-size:12px;", "MASTER FX" }
+                    span { style: "color:#666; font-size:10px;", "{lay.master_fx.len()} slot" }
+                    button {
+                        style: "margin-left:auto; padding:3px 10px; font-size:11px; \
+                                background:#9a7bff; color:#111; border:none; \
+                                border-radius:4px; cursor:pointer; font-weight:600;",
+                        onclick: move |_| picker_open.set(true),
+                        "+ FX"
+                    }
+                }
+                if lay.master_fx.is_empty() {
+                    div {
+                        style: "padding:8px 4px; color:#666; font-size:11px; \
+                                font-style:italic;",
+                        "No FX loaded. Click + FX to load a CLAP / VST3 plugin."
+                    }
+                } else {
+                    for slot in lay.master_fx.iter().cloned() {
+                        FxSlotRow {
+                            key: "{v}-master-{slot.slot_idx}",
+                            target: FxTarget::Master,
+                            slot_idx: slot.slot_idx,
+                            display_name: slot.display_name.clone(),
+                            bypassed: slot.bypassed,
+                            params_open: params_open,
+                            fx_version: fx_version,
+                        }
+                    }
+                }
+            }
+
+            // ── Params editor (visible only when a slot is open for editing) ──
+            if let Some((target, slot_idx, params)) = params_open() {
+                ParamsEditor {
+                    target,
+                    slot_idx,
+                    params,
+                    on_close: move |_| params_open.set(None),
+                }
+            }
+
+            // ── Plugin picker overlay ──
+            //
+            // Installs onto the drum mixer's master FX chain (visible via
+            // `MixerLayout::master_fx`). Non-drum presets need a different
+            // path (PresetRuntime::master_fx) — wire that in once non-drum
+            // presets get their own panel.
+            PluginPicker {
+                open: picker_open,
+                on_pick: move |path: std::path::PathBuf| {
+                    match sampler.load_mixer_plugin(
+                        super::INSTRUMENT_ID,
+                        FxTarget::Master,
+                        &path,
+                    ) {
+                        Ok(Some(_idx)) => {
+                            // Trigger layout re-fetch so the new slot appears.
+                            fx_version.set(fx_version() + 1);
+                        }
+                        Ok(None) => {
+                            tracing::warn!("plugin load returned synthetic / unknown format: {path:?}");
+                        }
+                        Err(e) => {
+                            tracing::error!("plugin load failed: {e}");
+                        }
+                    }
+                },
             }
 
             // ── Engine collapse toolbar ──
@@ -455,6 +574,228 @@ fn MeterBar(target: Target) -> Element {
         div {
             style: "position:absolute; left:3px; bottom:1px; width:11px; \
                     height:{h}px; background:{color};",
+        }
+    }
+}
+
+/// One row in the FX rack — display name, bypass toggle, "params" button to
+/// pop open the slider editor, and a remove [×]. Targets either the master
+/// FX chain or a future per-strip chain.
+#[component]
+fn FxSlotRow(
+    target: FxTarget,
+    slot_idx: usize,
+    display_name: String,
+    bypassed: bool,
+    params_open: Signal<Option<(FxTarget, usize, Vec<ParamInfo>)>>,
+    fx_version: Signal<u64>,
+) -> Element {
+    let sampler = use_context::<SamplerPlayer>();
+    let mut by = use_signal(|| bypassed);
+    let mut p_open = params_open;
+    let mut fxv = fx_version;
+    let is_open_for_edit = matches!(params_open(), Some((t, i, _)) if t == target && i == slot_idx);
+
+    let toggle_bypass = {
+        let sampler = sampler.clone();
+        move |_| {
+            let new_b = !by();
+            by.set(new_b);
+            match target {
+                FxTarget::Master => {
+                    sampler.set_mixer_slot_bypass(super::INSTRUMENT_ID, target, slot_idx, new_b);
+                }
+                FxTarget::Channel(_) | FxTarget::Bus(_) => {
+                    sampler.set_mixer_slot_bypass(super::INSTRUMENT_ID, target, slot_idx, new_b);
+                }
+            }
+        }
+    };
+    let open_params = {
+        let sampler = sampler.clone();
+        move |_| {
+            if is_open_for_edit {
+                p_open.set(None);
+                return;
+            }
+            // Master FX lives on PresetRuntime, but mixer_slot_params only
+            // covers the drum mixer. For Master we synthesize the call via
+            // the drum-mixer master path (FxTarget::Master) if a drum mixer
+            // exists; for non-drum presets this returns None today and the
+            // editor stays closed. (TODO: surface preset-master params.)
+            if let Some(params) = sampler.mixer_slot_params(super::INSTRUMENT_ID, target, slot_idx)
+            {
+                p_open.set(Some((target, slot_idx, ParamInfo::vec_from(params))));
+            }
+        }
+    };
+    let remove = {
+        let sampler = sampler.clone();
+        move |_| {
+            // The picker installs to the drum mixer's chain (see MixerPanel's
+            // on_pick), so removal routes through the same path for all
+            // targets including Master.
+            sampler.remove_mixer_plugin(super::INSTRUMENT_ID, target, slot_idx);
+            if is_open_for_edit {
+                p_open.set(None);
+            }
+            fxv.set(fxv() + 1);
+        }
+    };
+
+    let row_bg = if by() { "#1f1a1a" } else { "#1d1d22" };
+
+    rsx! {
+        div {
+            style: "display:flex; align-items:center; gap:8px; padding:5px 8px; \
+                    background:{row_bg}; border:1px solid #2c2c2e; border-radius:4px;",
+            span {
+                style: "color:#888; font-size:10px; font-weight:600; width:18px;",
+                "{slot_idx + 1}"
+            }
+            span {
+                style: "flex:1; min-width:0; color:#e0e0e0; font-size:12px; \
+                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
+                "{display_name}"
+            }
+            button {
+                style: if by() {
+                    "padding:3px 8px; font-size:10px; background:#e5484d; color:#fff; \
+                     border:none; border-radius:3px; cursor:pointer; font-weight:600;"
+                } else {
+                    "padding:3px 8px; font-size:10px; background:#2a2a2e; color:#aaa; \
+                     border:1px solid #444; border-radius:3px; cursor:pointer;"
+                },
+                onclick: toggle_bypass,
+                "BYP"
+            }
+            button {
+                style: if is_open_for_edit {
+                    "padding:3px 10px; font-size:10px; background:#9a7bff; color:#111; \
+                     border:none; border-radius:3px; cursor:pointer; font-weight:600;"
+                } else {
+                    "padding:3px 10px; font-size:10px; background:#2a2a2e; color:#ccc; \
+                     border:1px solid #444; border-radius:3px; cursor:pointer;"
+                },
+                onclick: open_params,
+                "Params"
+            }
+            button {
+                style: "padding:3px 8px; font-size:10px; background:#2a2a2e; \
+                        color:#999; border:1px solid #444; border-radius:3px; cursor:pointer;",
+                onclick: remove,
+                "×"
+            }
+        }
+    }
+}
+
+/// Slider grid for one open FX slot. One horizontal slider per
+/// `PluginParamInfo`. Values are linear in `[min, max]` (the host trait's
+/// "plain value" — backends convert to internal normalized form). Slider
+/// drag → `set_mixer_slot_param` (queued by HostedPlugin and applied at the
+/// top of the next audio block).
+#[component]
+fn ParamsEditor(
+    target: FxTarget,
+    slot_idx: usize,
+    params: Vec<ParamInfo>,
+    on_close: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div {
+            style: "display:flex; flex-direction:column; gap:6px; padding:10px; \
+                    background:#13131a; border:1px solid #9a7bff; border-radius:6px;",
+            div {
+                style: "display:flex; align-items:center; gap:8px;",
+                div { style: "color:#9a7bff; font-weight:700; font-size:12px;",
+                    "PARAMS — slot {slot_idx + 1}"
+                }
+                span { style: "color:#666; font-size:10px;", "{params.len()} param" }
+                button {
+                    style: "margin-left:auto; padding:3px 10px; font-size:11px; \
+                            background:#2a2a2e; color:#ccc; border:1px solid #444; \
+                            border-radius:4px; cursor:pointer;",
+                    onclick: move |_| on_close.call(()),
+                    "Close"
+                }
+            }
+            div {
+                style: "display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; \
+                        max-height:280px; overflow:auto; padding:6px 2px;",
+                for p in params.iter().cloned() {
+                    ParamSlider {
+                        key: "{slot_idx}-{p.id}",
+                        target,
+                        slot_idx,
+                        info: p,
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ParamSlider(target: FxTarget, slot_idx: usize, info: ParamInfo) -> Element {
+    let sampler = use_context::<SamplerPlayer>();
+    let mut value = use_signal(|| info.default);
+    let min = info.min;
+    let max = info.max;
+    let span = (max - min).max(1e-9);
+    let frac = (((value() - min) / span) as f32).clamp(0.0, 1.0);
+    let fill_w = (frac * 100.0).round() as i32;
+    let name = info.name.clone();
+    let id = info.id;
+    let display = format!("{:.3}", value());
+
+    let apply = {
+        let sampler = sampler.clone();
+        move |new_val: f64| {
+            let v = new_val.clamp(min, max);
+            value.set(v);
+            sampler.set_mixer_slot_param(super::INSTRUMENT_ID, target, slot_idx, id, v);
+        }
+    };
+    let mut apply_for_move = apply.clone();
+    let mut drag = use_signal(|| Option::<(f32, f64)>::None);
+
+    rsx! {
+        div {
+            style: "display:flex; flex-direction:column; gap:2px;",
+            div {
+                style: "display:flex; align-items:center; gap:6px;",
+                div {
+                    style: "flex:1; min-width:0; color:#ccc; font-size:11px; \
+                            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
+                    "{name}"
+                }
+                div { style: "color:#888; font-size:10px;", "{display}" }
+            }
+            div {
+                style: "position:relative; height:14px; background:#0e0e10; \
+                        border:1px solid #333; border-radius:3px; \
+                        touch-action:none; cursor:ew-resize;",
+                onpointerdown: move |e| {
+                    drag.set(Some((e.client_coordinates().x as f32, value())));
+                },
+                onpointermove: move |e| {
+                    if let Some((start_x, start_v)) = drag() {
+                        // Rough: assume the slider track is ~150px wide;
+                        // a full traversal moves through full param range.
+                        let dx = e.client_coordinates().x as f32 - start_x;
+                        let delta = (dx / 150.0) as f64 * span;
+                        apply_for_move(start_v + delta);
+                    }
+                },
+                onpointerup: move |_| drag.set(None),
+                onpointerleave: move |_| drag.set(None),
+
+                div {
+                    style: "position:absolute; left:0; top:0; bottom:0; \
+                            width:{fill_w}%; background:#9a7bff; border-radius:2px;",
+                }
+            }
         }
     }
 }

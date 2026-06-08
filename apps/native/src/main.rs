@@ -25,6 +25,7 @@ use signal_sampler::{PreloadProfile, SamplerPlayer};
 use signal_ui::components::Piano;
 
 mod mixer_view;
+mod plugin_picker;
 use mixer_view::MixerPanel;
 
 /// Single instrument slot — whatever we load plays under this id, and the

@@ -22,6 +22,9 @@ signal-ui = { workspace = true, default-features = false, features = ["desktop"]
 # The sampler player under test + MIDI input.
 signal-sampler.workspace = true
 signal-audio.workspace = true
+# CLAP plugin host (re-exported through signal-sampler too — direct dep here
+# only for the picker UI types: PluginEntry / PluginParamInfo / scan_plugins).
+signal-plugin-host = { workspace = true, features = ["clap-host"] }
 # Runtime-agnostic timer for the MIDI / readout poll loops (dioxus-native
 # doesn't necessarily run a tokio reactor, so avoid tokio::time here).
 futures-timer = "3"
