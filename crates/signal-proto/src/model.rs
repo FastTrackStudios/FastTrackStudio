@@ -77,6 +77,13 @@ pub struct Block {
     /// Optional modulation routing for this block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modulation: Option<macromod::ModulationRouteSet>,
+    /// How this block's DSP is realized at runtime — orthogonal to
+    /// `BlockType`. `Native` = built-in DSP for this block role; `Nam`
+    /// loads a `.nam` neural model; `HostedPlugin` proxies a CLAP/VST3.
+    /// Defaults to `Native` so presets predating this field round-trip
+    /// unchanged. See [`crate::block_kind::BlockKind`].
+    #[serde(default)]
+    pub kind: crate::block_kind::BlockKind,
 }
 
 impl Block {
@@ -100,6 +107,7 @@ impl Block {
             macro_bank: None,
             param_curation: None,
             modulation: None,
+            kind: crate::block_kind::BlockKind::Native,
         }
     }
 

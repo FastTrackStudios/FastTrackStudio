@@ -662,7 +662,26 @@ impl PresetRuntime {
         plugin.prepare(self.sample_rate as f64, crate::mixer::FX_PREPARE_BLOCK)?;
         let display_name = plugin.descriptor().name.clone();
         self.master_fx.slots.push(crate::mixer::FxSlot {
-            plugin,
+            backend: crate::mixer::FxBackend::Hosted(plugin),
+            bypassed: false,
+            display_name,
+        });
+        Ok(self.master_fx.slots.len() - 1)
+    }
+
+    /// Install a NAM model on the preset's master FX chain.
+    pub fn install_master_nam(
+        &mut self,
+        model_path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, String> {
+        let nam = crate::nam::NamProcessor::load(
+            model_path,
+            self.sample_rate as f64,
+            crate::mixer::FX_PREPARE_BLOCK as usize,
+        )?;
+        let display_name = nam.display_name.clone();
+        self.master_fx.slots.push(crate::mixer::FxSlot {
+            backend: crate::mixer::FxBackend::Nam(nam),
             bypassed: false,
             display_name,
         });
@@ -672,7 +691,7 @@ impl PresetRuntime {
     pub fn remove_master_plugin(&mut self, slot_idx: usize) {
         if slot_idx < self.master_fx.slots.len() {
             let mut slot = self.master_fx.slots.remove(slot_idx);
-            slot.plugin.deactivate();
+            slot.backend.deactivate();
         }
     }
 

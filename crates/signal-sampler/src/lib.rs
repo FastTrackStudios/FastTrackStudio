@@ -51,6 +51,7 @@ pub mod engine_spec;
 pub mod midi;
 pub mod mixer;
 pub mod module_spec;
+pub mod nam;
 pub mod pack_rewrite;
 pub mod player;
 pub mod preset_spec;
@@ -65,10 +66,11 @@ pub use engine::SampleEngine;
 pub use engine::cache::SignalPcmPack;
 pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
 pub use mixer::{
-    Bus, BusStrip, ChannelStrip, DirectChannel, DrumMixer, EngineStrip, MixerLayout, MixerMeters,
-    Send as MixerSend, SendStrip,
+    Bus, BusStrip, ChannelStrip, DirectChannel, DrumMixer, EngineStrip, FxBackend, FxSlotStrip,
+    MixerLayout, MixerMeters, Send as MixerSend, SendStrip,
 };
 pub use module_spec::{ModulePort, ModuleSpec};
+pub use nam::NamProcessor;
 pub use player::{AudioStatsSnapshot, SamplerPlayer};
 pub use preset_spec::{
     MacroDef, MacroTarget, MasterFxSlot, NoteRoute, PresetEngineRef, PresetModuleRef, PresetSpec,

@@ -63,6 +63,11 @@ signal-sampler      = { path = "crates/signal-sampler" }
 # git submodule fetch issues with stale nih-plug submodule rev.
 eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
 fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
+# Neural Amp Modeler — safe Rust bindings to NeuralAmpModelerCore. Drives
+# the built-in `FxBackend::Nam` slot in signal-sampler's FX chain so any
+# block (Amp / Drive / Cabinet) can opt into a NAM kind by loading a
+# `.nam` model file at runtime.
+neural-amp-modeler = { path = "../neural-amp-modeler-rs" }
 cpal = "0.17"
 
 # ── Facet reflection ─────────────────────────────────────────────────

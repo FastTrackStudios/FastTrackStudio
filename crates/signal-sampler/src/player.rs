@@ -722,7 +722,8 @@ impl SamplerPlayer {
     }
 
     /// Snapshot the parameter list of a hosted plugin slot. UI calls once
-    /// per (re)load to build a slider grid.
+    /// per (re)load to build a slider grid. NAM slots return `None` —
+    /// they expose only input/output gain trims (see `set_mixer_nam_gain`).
     pub fn mixer_slot_params(
         &self,
         id: &str,
@@ -733,6 +734,57 @@ impl SamplerPlayer {
             .lock()
             .ok()?
             .mixer_slot_params(id, target, slot_idx)
+    }
+
+    /// Load a `.nam` model from disk and install it at the tail of an FX
+    /// chain on the loaded preset's drum mixer. The model file is read +
+    /// the weights uploaded on the calling thread BEFORE the bank lock
+    /// is acquired (NamModel::load is the slow part); the bank lock is
+    /// then held only for a single Vec::push to install the prepared
+    /// processor. Returns the new slot index.
+    pub fn load_mixer_nam(
+        &self,
+        id: &str,
+        target: crate::mixer::FxTarget,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, String> {
+        let path = path.as_ref().to_path_buf();
+        let mut bank = self
+            .bank
+            .lock()
+            .map_err(|_| String::from("bank mutex poisoned"))?;
+        bank.install_mixer_nam(id, target, &path)
+    }
+
+    /// Same as [`load_mixer_nam`] but installs on the preset's master FX
+    /// chain (so non-drum presets get NAM support too).
+    pub fn load_preset_master_nam(
+        &self,
+        id: &str,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, String> {
+        let path = path.as_ref().to_path_buf();
+        let mut bank = self
+            .bank
+            .lock()
+            .map_err(|_| String::from("bank mutex poisoned"))?;
+        bank.install_preset_master_nam(id, &path)
+    }
+
+    /// Set a NAM slot's input or output gain (dB). `input=true` is the
+    /// pre-model trim, `false` is the post-model trim. No-op for non-NAM
+    /// slots.
+    pub fn set_mixer_nam_gain(
+        &self,
+        id: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+        input: bool,
+        gain_db: f32,
+    ) {
+        if let Ok(mut bank) = self.bank.lock() {
+            bank.set_mixer_nam_gain(id, target, slot_idx, input, gain_db);
+        }
     }
 
     /// Dispatch a raw MIDI message, routed by channel assignment.

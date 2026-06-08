@@ -20,6 +20,10 @@ signal-proto = { path = "../signal-proto" }
 # small; flip on `vst3-host` in apps/native to enable .vst3 loading too.
 signal-plugin-host = { workspace = true, features = ["clap-host"] }
 
+# Neural Amp Modeler — backs `FxBackend::Nam` slots. The NAM C++ core is
+# vendored into the bindings crate's build.rs, so no system dep is needed.
+neural-amp-modeler = { workspace = true }
+
 # Audio I/O
 cpal        = { workspace = true }
 crossbeam-channel = { workspace = true }

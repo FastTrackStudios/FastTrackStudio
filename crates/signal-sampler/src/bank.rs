@@ -1287,6 +1287,53 @@ impl SamplerBank {
         m.slot_params(target, slot_idx)
     }
 
+    /// Install a NAM model on the drum mixer at `target`. The model is
+    /// loaded from disk + prepared at the mixer's sample rate before the
+    /// audio thread sees the slot — so the slot is render-ready the
+    /// instant `install_nam` returns.
+    pub fn install_mixer_nam(
+        &mut self,
+        prefix: &str,
+        target: crate::mixer::FxTarget,
+        model_path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, String> {
+        let mixer = self
+            .presets
+            .get_mut(prefix)
+            .and_then(|p| p.mixer_mut())
+            .ok_or_else(|| format!("no drum mixer for preset {prefix:?}"))?;
+        mixer.install_nam(target, model_path)
+    }
+
+    /// Install a NAM model on the preset's master FX chain (works for
+    /// non-drum presets too).
+    pub fn install_preset_master_nam(
+        &mut self,
+        prefix: &str,
+        model_path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, String> {
+        let preset = self
+            .presets
+            .get_mut(prefix)
+            .ok_or_else(|| format!("no preset {prefix:?}"))?;
+        preset.install_master_nam(model_path)
+    }
+
+    /// Set the input or output gain (dB) of a NAM slot. No-op for non-NAM
+    /// backends and missing slots.
+    pub fn set_mixer_nam_gain(
+        &mut self,
+        prefix: &str,
+        target: crate::mixer::FxTarget,
+        slot_idx: usize,
+        input: bool,
+        gain_db: f32,
+    ) {
+        if let Some(m) = self.presets.get_mut(prefix).and_then(|p| p.mixer_mut()) {
+            m.set_nam_gain(target, slot_idx, input, gain_db);
+        }
+    }
+
     /// Render a loaded preset into per-mic buses (keyed by mic id). See
     /// [`PresetRuntime::render_buses`]. `None` if no preset under `prefix`.
     pub fn render_preset_buses(

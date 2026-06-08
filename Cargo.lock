@@ -7014,6 +7014,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "neural-amp-modeler"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10240,6 +10247,7 @@ dependencies = [
  "flacenc",
  "hound",
  "memmap2",
+ "neural-amp-modeler",
  "rayon",
  "signal-plugin-host",
  "signal-proto",

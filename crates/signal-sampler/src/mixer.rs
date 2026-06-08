@@ -20,6 +20,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use signal_plugin_host::HostedPlugin;
 
+use crate::nam::NamProcessor;
+
 /// Per-block peak-meter decay (peak-hold). Applied once per audio block so the
 /// UI sees a smooth fall even when it polls slowly.
 const METER_DECAY: f32 = 0.85;
@@ -32,13 +34,71 @@ pub const FX_PREPARE_BLOCK: u32 = 8192;
 
 // ── FX chain (REAPER-style track FX) ────────────────────────────────────────
 
-/// One slot in a track-style FX chain — a hosted plugin (CLAP / VST3) plus
-/// a per-slot bypass and a cached display name for the UI. The plugin is
-/// owned by the slot and dropped (deactivated) when the slot is removed.
+/// One slot's DSP backend — what's actually filling the slot. Maps 1:1 to
+/// [`signal_proto::block_kind::BlockKind`]'s non-Native variants. Adding a
+/// new backend (e.g. built-in convolution reverb) is a new variant here +
+/// a matching `BlockKind` arm.
+pub enum FxBackend {
+    /// Third-party CLAP / VST3 plugin loaded via `signal-plugin-host`.
+    Hosted(HostedPlugin),
+    /// Built-in Neural Amp Modeler — works for any block role that wants
+    /// neural-net amp/pedal modeling (Amp, Drive, Cabinet, …).
+    Nam(NamProcessor),
+}
+
+impl std::fmt::Debug for FxBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Hosted(h) => f.debug_tuple("Hosted").field(h).finish(),
+            Self::Nam(n) => f.debug_tuple("Nam").field(n).finish(),
+        }
+    }
+}
+
+impl FxBackend {
+    /// Short tag for UI labels / log lines — matches `BlockKind::tag()`.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Self::Hosted(_) => "plugin",
+            Self::Nam(_) => "nam",
+        }
+    }
+
+    /// Cached display name (plugin descriptor or NAM filename).
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Hosted(h) => &h.descriptor().name,
+            Self::Nam(n) => &n.display_name,
+        }
+    }
+
+    /// Render one interleaved-stereo block in place. Each backend handles
+    /// its own buffer-shape conversion (NAM does stereo↔mono internally).
+    pub fn process_interleaved(&mut self, inout: &mut [f32]) {
+        match self {
+            Self::Hosted(h) => {
+                let _ = h.process_interleaved(inout, &[], &[]);
+            }
+            Self::Nam(n) => n.process_interleaved(inout),
+        }
+    }
+
+    /// Release any audio-thread resources before the slot is dropped.
+    pub fn deactivate(&mut self) {
+        if let Self::Hosted(h) = self {
+            h.deactivate();
+        }
+        // NamProcessor releases its model in Drop.
+    }
+}
+
+/// One slot in a track-style FX chain — a [`FxBackend`] instance plus a
+/// per-slot bypass and a cached display name for the UI. The backend is
+/// owned by the slot and deactivated when the slot is removed.
 pub struct FxSlot {
-    pub plugin: HostedPlugin,
+    pub backend: FxBackend,
     pub bypassed: bool,
-    /// Cached `descriptor.name` — read once at install time so the UI doesn't
+    /// Cached display name — read once at install time so the UI doesn't
     /// have to lock the audio thread to label the slot.
     pub display_name: String,
 }
@@ -48,13 +108,15 @@ impl std::fmt::Debug for FxSlot {
         f.debug_struct("FxSlot")
             .field("display_name", &self.display_name)
             .field("bypassed", &self.bypassed)
+            .field("backend", &self.backend)
             .finish()
     }
 }
 
 /// A serial FX chain that processes its slots in order, in place on an
 /// interleaved-stereo buffer. Modeled after a REAPER track FX chain: each
-/// slot is a hosted plugin, bypassable per-slot. An empty chain is a no-op.
+/// slot is one [`FxBackend`], bypassable per-slot. An empty chain is a
+/// no-op.
 #[derive(Debug, Default)]
 pub struct FxChain {
     pub slots: Vec<FxSlot>,
@@ -66,7 +128,7 @@ impl FxChain {
     }
 
     /// Process `inout` (interleaved stereo) through each non-bypassed slot
-    /// in order. Errors from `process_interleaved` are swallowed — the UI
+    /// in order. Errors / failures inside a backend are swallowed — the UI
     /// surface reports load/prepare failures separately; the audio thread
     /// must never panic on a misbehaving plugin.
     pub fn process(&mut self, inout: &mut [f32]) {
@@ -74,7 +136,7 @@ impl FxChain {
             if slot.bypassed {
                 continue;
             }
-            let _ = slot.plugin.process_interleaved(inout, &[], &[]);
+            slot.backend.process_interleaved(inout);
         }
     }
 }
@@ -377,9 +439,10 @@ impl DrumMixer {
 
     // ── FX-chain mutation ───────────────────────────────────────────────
 
-    /// Install a hosted plugin at the tail of an FX chain. Prepares the
-    /// plugin for this mixer's sample rate + a generous max block size, then
-    /// appends. Returns the new slot index, or the underlying plugin error.
+    /// Install a hosted CLAP/VST3 plugin at the tail of an FX chain.
+    /// Prepares the plugin for this mixer's sample rate + a generous max
+    /// block size, then appends. Returns the new slot index, or the
+    /// underlying plugin error.
     pub fn install_plugin(
         &mut self,
         target: FxTarget,
@@ -387,29 +450,52 @@ impl DrumMixer {
     ) -> Result<usize, signal_plugin_host::PluginError> {
         plugin.prepare(self.sample_rate as f64, FX_PREPARE_BLOCK)?;
         let display_name = plugin.descriptor().name.clone();
-        let slot = FxSlot {
-            plugin,
-            bypassed: false,
-            display_name,
-        };
+        self.push_slot(target, FxBackend::Hosted(plugin), display_name)
+            .map_err(signal_plugin_host::PluginError::LoadFailed)
+    }
+
+    /// Install a Neural Amp Modeler at the tail of an FX chain. Loads the
+    /// `.nam` model file from disk and prepares it for this mixer's
+    /// sample rate. The load is fast (file IO + on-stack network parse);
+    /// no further activation step is needed.
+    pub fn install_nam(
+        &mut self,
+        target: FxTarget,
+        model_path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, String> {
+        let nam = NamProcessor::load(
+            model_path,
+            self.sample_rate as f64,
+            FX_PREPARE_BLOCK as usize,
+        )?;
+        let display_name = nam.display_name.clone();
+        self.push_slot(target, FxBackend::Nam(nam), display_name)
+    }
+
+    fn push_slot(
+        &mut self,
+        target: FxTarget,
+        backend: FxBackend,
+        display_name: String,
+    ) -> Result<usize, String> {
         let chain = match self.chain_mut(target) {
             Some(c) => c,
-            None => {
-                return Err(signal_plugin_host::PluginError::LoadFailed(
-                    "FX target not found".into(),
-                ));
-            }
+            None => return Err("FX target not found".into()),
         };
-        chain.slots.push(slot);
+        chain.slots.push(FxSlot {
+            backend,
+            bypassed: false,
+            display_name,
+        });
         Ok(chain.slots.len() - 1)
     }
 
-    /// Remove a slot and deactivate the plugin it held.
+    /// Remove a slot and deactivate the backend it held.
     pub fn remove_plugin(&mut self, target: FxTarget, slot_idx: usize) {
         if let Some(chain) = self.chain_mut(target) {
             if slot_idx < chain.slots.len() {
                 let mut slot = chain.slots.remove(slot_idx);
-                slot.plugin.deactivate();
+                slot.backend.deactivate();
             }
         }
     }
@@ -422,19 +508,38 @@ impl DrumMixer {
         }
     }
 
-    /// Queue a param write to a hosted plugin. The plugin's internal queue
-    /// drains at the top of the next audio block.
+    /// Queue a param write to a hosted plugin (no-op for non-Hosted
+    /// backends — NAM slots use `set_nam_gain` instead).
     pub fn set_slot_param(&self, target: FxTarget, slot_idx: usize, param_id: u32, value: f64) {
         if let Some(chain) = self.chain_ref(target) {
             if let Some(slot) = chain.slots.get(slot_idx) {
-                slot.plugin.set_param(param_id, value);
+                if let FxBackend::Hosted(h) = &slot.backend {
+                    h.set_param(param_id, value);
+                }
+            }
+        }
+    }
+
+    /// Set NAM input / output gain (dB) for the slot. No-op for non-NAM
+    /// backends. `which = true` ⇒ input gain, `false` ⇒ output gain.
+    pub fn set_nam_gain(&mut self, target: FxTarget, slot_idx: usize, input: bool, gain_db: f32) {
+        if let Some(chain) = self.chain_mut(target) {
+            if let Some(slot) = chain.slots.get_mut(slot_idx) {
+                if let FxBackend::Nam(n) = &mut slot.backend {
+                    if input {
+                        n.input_gain_db = gain_db;
+                    } else {
+                        n.output_gain_db = gain_db;
+                    }
+                }
             }
         }
     }
 
     /// Snapshot a hosted plugin's parameter list (for slider grids).
     /// `&mut self` because the underlying `PluginInstance::params` takes
-    /// `&mut self`. Callers (the bank) serialize through the bank mutex.
+    /// `&mut self`. NAM slots return `None` — they expose input/output
+    /// gain trims through `set_nam_gain` instead.
     pub fn slot_params(
         &mut self,
         target: FxTarget,
@@ -442,7 +547,11 @@ impl DrumMixer {
     ) -> Option<Vec<signal_plugin_host::PluginParamInfo>> {
         let chain = self.chain_mut(target)?;
         let slot = chain.slots.get_mut(slot_idx)?;
-        Some(slot.plugin.params())
+        if let FxBackend::Hosted(h) = &mut slot.backend {
+            Some(h.params())
+        } else {
+            None
+        }
     }
 
     fn chain_mut(&mut self, target: FxTarget) -> Option<&mut FxChain> {

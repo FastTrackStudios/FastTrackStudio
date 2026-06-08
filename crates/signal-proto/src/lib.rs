@@ -61,6 +61,7 @@ pub mod services;
 pub mod actions;
 pub mod automation;
 pub mod block;
+pub mod block_kind;
 pub mod builder;
 pub mod catalog;
 pub mod defaults;

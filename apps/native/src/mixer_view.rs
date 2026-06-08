@@ -103,6 +103,7 @@ pub fn MixerPanel(reload: u64) -> Element {
     // install / remove a plugin so the layout `use_effect` re-runs without
     // needing the parent to bump `reload`.
     let mut picker_open = use_signal(|| false);
+    let mut nam_picker_open = use_signal(|| false);
     let mut fx_version = use_signal(|| 0u64);
     // Currently-open params editor: which slot, and the param list snapshot
     // taken when it was opened. `None` = editor closed.
@@ -212,6 +213,13 @@ pub fn MixerPanel(reload: u64) -> Element {
                     span { style: "color:#666; font-size:10px;", "{lay.master_fx.len()} slot" }
                     button {
                         style: "margin-left:auto; padding:3px 10px; font-size:11px; \
+                                background:#3abe5a; color:#111; border:none; \
+                                border-radius:4px; cursor:pointer; font-weight:600;",
+                        onclick: move |_| nam_picker_open.set(true),
+                        "+ NAM"
+                    }
+                    button {
+                        style: "padding:3px 10px; font-size:11px; \
                                 background:#9a7bff; color:#111; border:none; \
                                 border-radius:4px; cursor:pointer; font-weight:600;",
                         onclick: move |_| picker_open.set(true),
@@ -247,6 +255,24 @@ pub fn MixerPanel(reload: u64) -> Element {
                     params,
                     on_close: move |_| params_open.set(None),
                 }
+            }
+
+            // ── NAM picker overlay (browse-only — no registry scan) ──
+            NamPicker {
+                open: nam_picker_open,
+                on_pick: {
+                    let sampler = sampler.clone();
+                    move |path: std::path::PathBuf| {
+                        match sampler.load_mixer_nam(
+                            super::INSTRUMENT_ID,
+                            FxTarget::Master,
+                            &path,
+                        ) {
+                            Ok(_idx) => fx_version.set(fx_version() + 1),
+                            Err(e) => tracing::error!("NAM load failed: {e}"),
+                        }
+                    }
+                },
             }
 
             // ── Plugin picker overlay ──
@@ -794,6 +820,83 @@ fn ParamSlider(target: FxTarget, slot_idx: usize, info: ParamInfo) -> Element {
                 div {
                     style: "position:absolute; left:0; top:0; bottom:0; \
                             width:{fill_w}%; background:#9a7bff; border-radius:2px;",
+                }
+            }
+        }
+    }
+}
+
+/// Browse-only picker for `.nam` model files. Same overlay shape as
+/// [`PluginPicker`] but without the registry scan (NAM models live
+/// anywhere on disk and have no standard install path).
+#[component]
+fn NamPicker(open: Signal<bool>, on_pick: EventHandler<std::path::PathBuf>) -> Element {
+    let mut path_input = use_signal(String::new);
+
+    if !open() {
+        return rsx! { div {} };
+    }
+    rsx! {
+        div {
+            style: "position:fixed; inset:0; background:rgba(0,0,0,0.55); \
+                    display:flex; align-items:center; justify-content:center; z-index:1000;",
+            onclick: move |_| open.set(false),
+            div {
+                style: "min-width:480px; display:flex; flex-direction:column; \
+                        background:#181a1f; border:1px solid #3abe5a; border-radius:8px; overflow:hidden;",
+                onclick: move |e| e.stop_propagation(),
+
+                div {
+                    style: "display:flex; align-items:center; gap:10px; padding:10px 14px; \
+                            background:#1c1c1e; border-bottom:1px solid #2c2c2e;",
+                    strong { style: "color:#3abe5a; font-size:13px;", "Load NAM model" }
+                    span { style: "color:#888; font-size:11px;", "Neural Amp Modeler (.nam)" }
+                    button {
+                        style: "margin-left:auto; padding:2px 10px; font-size:11px; \
+                                background:#2a2a2e; color:#ccc; border:1px solid #444; \
+                                border-radius:4px; cursor:pointer;",
+                        onclick: move |_| open.set(false),
+                        "Close"
+                    }
+                }
+                div {
+                    style: "padding:14px; display:flex; flex-direction:column; gap:8px;",
+                    div { style: "color:#aaa; font-size:11px;",
+                        "NAM models have no standard install path. Paste a path to a `.nam` file."
+                    }
+                    div {
+                        style: "display:flex; gap:8px; align-items:center;",
+                        input {
+                            style: "flex:1; padding:6px 8px; font-size:12px; \
+                                    background:#0e0e10; color:#e0e0e0; \
+                                    border:1px solid #3a3a3c; border-radius:4px; outline:none;",
+                            placeholder: "/path/to/dumble.nam",
+                            value: "{path_input}",
+                            oninput: move |e| path_input.set(e.value()),
+                            onkeypress: move |e| {
+                                if e.key() == Key::Enter {
+                                    let p = path_input();
+                                    if !p.is_empty() {
+                                        on_pick.call(std::path::PathBuf::from(p));
+                                        open.set(false);
+                                    }
+                                }
+                            },
+                        }
+                        button {
+                            style: "padding:5px 14px; font-size:11px; \
+                                    background:#3abe5a; color:#111; border:none; \
+                                    border-radius:4px; cursor:pointer; font-weight:600;",
+                            onclick: move |_| {
+                                let p = path_input();
+                                if !p.is_empty() {
+                                    on_pick.call(std::path::PathBuf::from(p));
+                                    open.set(false);
+                                }
+                            },
+                            "Load"
+                        }
+                    }
                 }
             }
         }
