@@ -292,8 +292,7 @@ impl FinanceBackend {
 
         let since = parse_day(&req.since).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
         let until = parse_day(&req.until)
-            .map(|d| d + Duration::days(1))
-            .unwrap_or_else(|| Utc::now() + Duration::days(1));
+            .map_or_else(|| Utc::now() + Duration::days(1), |d| d + Duration::days(1));
         let net_days = req.net_days;
         let terms = format!("Net {net_days} days from issue date.");
 
@@ -593,7 +592,7 @@ pub fn book_to_active(b: &Book) -> BookActive {
     BookActive {
         id: Set(b.id),
         name: Set(b.name.clone()),
-        kind: Set(b.kind.clone()),
+        kind: Set(b.kind),
         base_currency: Set(b.base_currency.clone()),
         settings_json: Set(b.settings_json.clone()),
         created_at: Set(b.created_at),
@@ -626,7 +625,7 @@ pub fn party_to_active(p: &Party) -> PartyActive {
     PartyActive {
         id: Set(p.id),
         book_id: Set(p.book_id),
-        kind: Set(p.kind.clone()),
+        kind: Set(p.kind),
         display_name: Set(p.display_name.clone()),
         legal_name: Set(p.legal_name.clone()),
         email: Set(p.email.clone()),
@@ -685,9 +684,9 @@ pub fn invoice_to_active(i: &Invoice) -> InvoiceActive {
         id: Set(i.id),
         book_id: Set(i.book_id),
         party_id: Set(i.party_id),
-        kind: Set(i.kind.clone()),
+        kind: Set(i.kind),
         number: Set(i.number.clone()),
-        status: Set(i.status.clone()),
+        status: Set(i.status),
         issue_date: Set(i.issue_date.clone()),
         due_date: Set(i.due_date.clone()),
         currency: Set(i.currency.clone()),

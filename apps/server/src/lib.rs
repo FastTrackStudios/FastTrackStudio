@@ -543,8 +543,7 @@ pub(crate) async fn build_org_state(
             timer.conn().clone(),
             org_root
                 .manifest()
-                .map(|m| m.display_name)
-                .unwrap_or_else(|_| "Business".into()),
+                .map_or_else(|_| "Business".into(), |m| m.display_name),
             ledger_backend.clone(),
         )
         .map_err(|e| eyre::eyre!("finance backend: {e}"))?;

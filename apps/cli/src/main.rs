@@ -5367,7 +5367,7 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             if users.is_empty() {
                 println!("(no users)");
             }
-            println!("{:<38}  {:<24}  {}", "user_id", "name", "email");
+            println!("{:<38}  {:<24}  email", "user_id", "name");
             for u in users {
                 println!(
                     "{:<38}  {:<24}  {}",
@@ -5656,7 +5656,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                         until,
                         net_days,
                         number: final_number.clone(),
-                        notes_public: "".into(),
+                        notes_public: String::new(),
                         notes_private: String::new(),
                         terms: String::new(),
                     },
@@ -6055,7 +6055,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             let mut active: InvoiceActive = row.into();
             active.amount_paid_minor = Set(new_paid);
             active.balance_minor = Set(new_balance);
-            active.status = Set(new_status.clone());
+            active.status = Set(new_status);
             active.updated_at = Set(chrono::Utc::now());
             active
                 .update(&conn)
@@ -6189,7 +6189,7 @@ async fn next_invoice_number(
         .max()
         .unwrap_or(0);
     let next = highest + 1;
-    Ok(format!("{prefix}{next:0>width$}", width = pad))
+    Ok(format!("{prefix}{next:0>pad$}"))
 }
 
 fn enrich_invoice_with_assignees(
@@ -6363,7 +6363,7 @@ fn build_donut_svg(
     let mut start = -std::f64::consts::FRAC_PI_2; // 12 o'clock
     let mut paths = String::new();
     for s in summaries {
-        let secs = totals.get(&s.name).map(|(sec, _)| *sec).unwrap_or(0) as f64;
+        let secs = totals.get(&s.name).map_or(0, |(sec, _)| *sec) as f64;
         let frac = secs / total;
         let sweep = frac * std::f64::consts::TAU;
         let end = start + sweep;
@@ -6385,16 +6385,14 @@ fn build_donut_svg(
                 ri = R_INNER,
             )
         } else {
-            let large = if sweep > std::f64::consts::PI { 1 } else { 0 };
+            let large = i32::from(sweep > std::f64::consts::PI);
             let (sx, sy) = (CX + R_OUTER * start.cos(), CY + R_OUTER * start.sin());
             let (ex, ey) = (CX + R_OUTER * end.cos(), CY + R_OUTER * end.sin());
             let (isx, isy) = (CX + R_INNER * end.cos(), CY + R_INNER * end.sin());
             let (iex, iey) = (CX + R_INNER * start.cos(), CY + R_INNER * start.sin());
             format!(
-                "M {sx:.3} {sy:.3} A {ro} {ro} 0 {large} 1 {ex:.3} {ey:.3} \
-                 L {isx:.3} {isy:.3} A {ri} {ri} 0 {large} 0 {iex:.3} {iey:.3} Z",
-                ro = R_OUTER,
-                ri = R_INNER,
+                "M {sx:.3} {sy:.3} A {R_OUTER} {R_OUTER} 0 {large} 1 {ex:.3} {ey:.3} \
+                 L {isx:.3} {isy:.3} A {R_INNER} {R_INNER} 0 {large} 0 {iex:.3} {iey:.3} Z",
             )
         };
         paths.push_str(&format!("<path d=\"{path}\" fill=\"{}\" />", s.color));
@@ -6417,13 +6415,13 @@ fn build_bars_svg(
     const BAR_AREA_W: f64 = 110.0;
     let mut ranked: Vec<_> = summaries.iter().collect();
     ranked.sort_by(|a, b| {
-        let av = totals.get(&a.name).map(|(_, c)| *c).unwrap_or(0);
-        let bv = totals.get(&b.name).map(|(_, c)| *c).unwrap_or(0);
+        let av = totals.get(&a.name).map_or(0, |(_, c)| *c);
+        let bv = totals.get(&b.name).map_or(0, |(_, c)| *c);
         bv.cmp(&av)
     });
     let max_cents = ranked
         .iter()
-        .map(|a| totals.get(&a.name).map(|(_, c)| *c).unwrap_or(0))
+        .map(|a| totals.get(&a.name).map_or(0, |(_, c)| *c))
         .max()
         .unwrap_or(0)
         .max(1) as f64;
@@ -6431,7 +6429,7 @@ fn build_bars_svg(
     let w = BAR_AREA_W + PAD_X * 2.0;
     let mut bars = String::new();
     for (i, s) in ranked.iter().enumerate() {
-        let cents = totals.get(&s.name).map(|(_, c)| *c).unwrap_or(0) as f64;
+        let cents = totals.get(&s.name).map_or(0, |(_, c)| *c) as f64;
         let bar_w = (cents / max_cents) * BAR_AREA_W;
         let y = i as f64 * ROW_H + 4.0;
         bars.push_str(&format!(
@@ -6908,8 +6906,8 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 println!("(no sessions)");
             }
             println!(
-                "{:<38}  {:>6}  {:>9}  {:>10}  {}",
-                "user_id", "count", "hours", "cents", "name"
+                "{:<38}  {:>6}  {:>9}  {:>10}  name",
+                "user_id", "count", "hours", "cents"
             );
             for (uid, (count, secs, cents)) in agg {
                 let hours = secs as f64 / 3600.0;
@@ -6917,10 +6915,7 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                     .get(&uid)
                     .cloned()
                     .unwrap_or_else(|| "(not in auth_users)".into());
-                println!(
-                    "{:<38}  {:>6}  {:>9.2}  {:>10}  {name}",
-                    uid, count, hours, cents
-                );
+                println!("{uid:<38}  {count:>6}  {hours:>9.2}  {cents:>10}  {name}");
             }
         }
         TimerCmd::ReassignUser {

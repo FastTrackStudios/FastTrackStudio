@@ -192,15 +192,15 @@ fn EnvelopeRow(
 /// Display name for an envelope's first sender: their name if present,
 /// else their email, else a placeholder.
 fn sender_label(env: &Envelope) -> String {
-    env.from
-        .first()
-        .map(|a| {
+    env.from.first().map_or_else(
+        || "(unknown sender)".to_owned(),
+        |a| {
             a.name
                 .clone()
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| a.email.clone())
-        })
-        .unwrap_or_else(|| "(unknown sender)".to_owned())
+        },
+    )
 }
 
 /// Format a unix-ms timestamp as a short local date. Falls back to an

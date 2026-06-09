@@ -26,7 +26,7 @@ mod m20260601_000002_add_invoice_id {
     // collide on `seaql_migrations.version`. Give this one an explicit
     // unique version.
     impl MigrationName for Migration {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "m20260601_000002_add_invoice_id"
         }
     }
