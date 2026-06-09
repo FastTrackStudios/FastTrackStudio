@@ -19,6 +19,7 @@
 
 pub mod attachments;
 pub mod capability;
+pub mod forge_sync;
 pub mod server_mgmt;
 pub mod webhooks;
 
@@ -156,6 +157,17 @@ pub struct OrgAppState {
     /// forge calls degrade to auth/forge errors the UI tolerates
     /// (empty list) rather than blocking server startup.
     pub forge: git_forgejo::Backend,
+    /// Forge backend authenticated as the agent/bot identity
+    /// (`TASK_FORGEJO_BOT_TOKEN`). The forge-sync path routes
+    /// agent-owned tasks through this so their issues are
+    /// attributed to the bot account, distinct from human work.
+    /// Falls back to [`Self::forge`] when no bot token is set.
+    pub forge_agent: git_forgejo::Backend,
+    /// Path to this org's `issue-links.json` (the `git_config`
+    /// `FileStore` shared with the CLI). Held so the forge-sync
+    /// decorator + poll loop can open it without re-deriving the
+    /// org dir from the data root.
+    pub issue_links_path: PathBuf,
 }
 
 /// Top-level server state. Scans `<data_root>/orgs/` at
@@ -303,12 +315,17 @@ impl AppState {
             orgs.insert(slug, org_state);
         }
 
-        Ok(Self {
+        let state = Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
             scope,
-        })
+        };
+        // Background forge-sync: pull codeberg/Forgejo issue changes
+        // back into linked tasks on an interval (outbound push is
+        // handled inline by the `ForgeSyncTaskService` decorator).
+        forge_sync::spawn_poll_loop(state.clone());
+        Ok(state)
     }
 
     /// Test helper. Build a one-org `AppState` from an
@@ -576,8 +593,24 @@ pub(crate) async fn build_org_state(
             .filter(|t| !t.is_empty())
             .or_else(|| std::env::var("FORGEJO_TOKEN").ok())
             .unwrap_or_default();
-        let forge = git_forgejo::Backend::from_token(forgejo_base, forgejo_token)
+        let forge = git_forgejo::Backend::from_token(forgejo_base.clone(), forgejo_token)
             .map_err(|e| eyre::eyre!("forge backend: {e}"))?;
+        // Agent/bot identity for forge-sync attribution. Token from
+        // `TASK_FORGEJO_BOT_TOKEN`, or `FTS_CODEBERG_ACCESS_TOKEN`
+        // (the var name the sops-rendered `fts-codeberg.env` carries,
+        // so a service `EnvironmentFile=` works without remapping).
+        // When neither is set we reuse the human backend, so
+        // agent-owned tasks still sync — just under the human
+        // identity until the bot token is configured.
+        let forge_agent = match std::env::var("TASK_FORGEJO_BOT_TOKEN")
+            .ok()
+            .or_else(|| std::env::var("FTS_CODEBERG_ACCESS_TOKEN").ok())
+            .filter(|t| !t.is_empty())
+        {
+            Some(bot_token) => git_forgejo::Backend::from_token(forgejo_base, bot_token)
+                .map_err(|e| eyre::eyre!("forge agent backend: {e}"))?,
+            None => forge.clone(),
+        };
 
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
@@ -690,6 +723,8 @@ pub(crate) async fn build_org_state(
             ledger_backend,
             email,
             forge,
+            forge_agent,
+            issue_links_path: org_root.path().join("issue-links.json"),
         })
     }
 }
@@ -1114,7 +1149,13 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         )
         .with(
             task::task_service_descriptor(),
-            task::serve_task_service(org.tasks.clone()),
+            task::serve_task_service(forge_sync::ForgeSyncTaskService::new(
+                org.tasks.clone(),
+                org.forge.clone(),
+                org.forge_agent.clone(),
+                org.slug.clone(),
+                org.issue_links_path.clone(),
+            )),
         );
 
     // Entity-CRUD services: locations + the mealplan trio.
