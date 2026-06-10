@@ -1,0 +1,12 @@
+[package]
+name = "auth-native-tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+auth = { workspace = true, features = ["backend-db"] }
+chrono.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+tokio.workspace = true
