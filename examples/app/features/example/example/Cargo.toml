@@ -34,6 +34,11 @@ default = []
 
 # ── Axis features (forward to the underlying crates) ──
 vox = ["example-proto/vox"]
+# Client-only optimistic-store binding (`StoreEntity for Example`). Pulls
+# Dioxus via architect-atom — enable only in UI crates.
+atom = ["example-proto/atom"]
+# Client-only typed form bindings over Create/Update payloads.
+form = ["example-proto/form"]
 server-seaorm = ["example-proto/server"]
 server-axum = ["dep:architect", "architect/server-axum"]
 

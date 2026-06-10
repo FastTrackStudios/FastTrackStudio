@@ -6,7 +6,7 @@
 //! so here we mount the whole thing in a VirtualDom and render the
 //! initial frame. That proves the route table, layout, and the
 //! pre-connection state all build and render without a server present
-//! (it should show the shell + the "connecting" banner).
+//! (it should show the shell + the home composer + the loading phase).
 
 use app_ui::App;
 use dioxus::prelude::*;
@@ -23,10 +23,15 @@ fn app_mounts_and_renders_initial_frame() {
         html.contains("reference example"),
         "tagline missing: {html}"
     );
-    // Home is the index route; before the socket is up it shows the
-    // connecting banner (no server in this test).
+    // Home is the index route: the create composer is always present, and
+    // before the socket is up the list is in its loading phase (no server
+    // in this test).
     assert!(
-        html.to_lowercase().contains("connecting"),
-        "expected connecting banner on the index route: {html}"
+        html.contains("composer"),
+        "expected the create composer on the index route: {html}"
+    );
+    assert!(
+        html.to_lowercase().contains("loading"),
+        "expected the loading phase on the index route: {html}"
     );
 }

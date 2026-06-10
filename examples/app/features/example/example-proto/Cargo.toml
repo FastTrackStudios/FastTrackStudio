@@ -46,6 +46,17 @@ server = ["architect/server-seaorm", "dep:sea-orm"]
 # struct family is fakeable for tests + db seeding.
 fake = ["dep:fake", "architect/fake"]
 
+# Client-only: binds `Example` into the optimistic store
+# (`impl architect::StoreEntity`) + adds `Example::draft`. Pulls Dioxus
+# (via `architect/atom`), so enable it only in UI crates — never on the
+# server.
+atom = ["architect/atom"]
+
+# Client-only: typed form bindings over the Create/Update payloads
+# (`ExampleCreateFields` / `ExampleUpdateFields`). Pulls Dioxus via
+# `architect/form`; UI crates only.
+form = ["architect/form"]
+
 # Convenience bundle — vox + SeaORM emission + fake-rs together.
 # Matches tokio's `full` convention.
 full = ["vox", "server", "fake"]

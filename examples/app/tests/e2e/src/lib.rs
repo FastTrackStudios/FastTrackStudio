@@ -243,6 +243,104 @@ async fn local_transport_round_trip() {
     scope.close().await;
 }
 
+/// Live events over the real WebSocket: subscribe with a vox channel,
+/// mutate through a *different* client connection, and assert the
+/// broadcast arrives — the current row set as `Snapshot` **first**
+/// (effect-`SubscriptionRef` semantics), then create/update as
+/// `Upserted` and delete as `Deleted`. This is the wire proof for
+/// `architect::PubSub` + the streaming sibling-trait pattern (and what
+/// the Dioxus `use_store_stream` hook rides in the browser).
+#[tokio::test]
+async fn events_stream_broadcasts_writes() {
+    use example::architect::vox;
+    use example::{ExampleEvent, ExampleEventsClient};
+    use tokio::time::{Duration, timeout};
+
+    let (ws_url, shutdown) = spawn().await;
+
+    // A row that exists *before* anyone subscribes — it must arrive in
+    // the snapshot, not as a change event.
+    let repo = repo_client(&ws_url).await;
+    let pre_existing = repo
+        .create(ExampleCreate {
+            name: "pre-existing".into(),
+            description: "before subscribe".into(),
+        })
+        .await
+        .expect("create pre-existing");
+
+    // The subscriber is a *view over the writer's own socket* — every
+    // typed client is `Client::new(caller)` over one shared connection
+    // (the single-socket model the app shell uses). A second socket works
+    // identically; this proves multiplexing.
+    let events = ExampleEventsClient::new(repo.caller.clone());
+    let (tx, mut rx) = vox::channel::<ExampleEvent>();
+    events.subscribe(tx).await.expect("subscribe");
+
+    // Writes on the same connection still broadcast back to it.
+    let created = repo
+        .create(ExampleCreate {
+            name: "streamed".into(),
+            description: "live".into(),
+        })
+        .await
+        .expect("create");
+
+    async fn recv_owned(rx: &mut vox::Rx<ExampleEvent>) -> ExampleEvent {
+        let item = timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("event within 5s")
+            .expect("stream healthy")
+            .expect("stream open");
+        let mut owned: Option<ExampleEvent> = None;
+        let _ = item.map(|e| owned = Some(e.clone()));
+        owned.expect("owned event")
+    }
+
+    // First event: the snapshot, containing the pre-existing row (and
+    // possibly the just-created one — the create raced the snapshot read;
+    // either way the *next* delivery of `created` is the Upserted).
+    match recv_owned(&mut rx).await {
+        ExampleEvent::Snapshot(rows) => {
+            assert!(
+                rows.iter().any(|r| r.id == pre_existing.id),
+                "snapshot must contain the pre-existing row: {rows:?}"
+            );
+        }
+        other => panic!("expected Snapshot first, got {other:?}"),
+    }
+
+    match recv_owned(&mut rx).await {
+        ExampleEvent::Upserted(row) => {
+            assert_eq!(row.id, created.id);
+            assert_eq!(row.name, "streamed");
+        }
+        other => panic!("expected Upserted after create, got {other:?}"),
+    }
+
+    repo.update(
+        created.id,
+        ExampleUpdate {
+            name: Some("streamed-2".into()),
+            description: None,
+        },
+    )
+    .await
+    .expect("update");
+    match recv_owned(&mut rx).await {
+        ExampleEvent::Upserted(row) => assert_eq!(row.name, "streamed-2"),
+        other => panic!("expected Upserted after update, got {other:?}"),
+    }
+
+    repo.delete(created.id).await.expect("delete");
+    match recv_owned(&mut rx).await {
+        ExampleEvent::Deleted(id) => assert_eq!(id, created.id),
+        other => panic!("expected Deleted after delete, got {other:?}"),
+    }
+
+    let _ = shutdown.send(());
+}
+
 // Tiny stdlib HTTP client to avoid pulling reqwest in for one GET.
 async fn reqwest_health(url: &str) -> String {
     let (host_port, path) = url.trim_start_matches("http://").split_once('/').unwrap();

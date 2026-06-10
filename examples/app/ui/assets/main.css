@@ -196,15 +196,22 @@ button:active,
     background: var(--panel-hover);
     transform: translateX(2px);
 }
-.example-link-row a {
+.row {
     display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
+    align-items: center;
+    gap: 0.75rem;
     padding: 0.85rem 1rem;
     color: var(--fg);
 }
-.example-link-row a:hover {
+.example-link-row a.row:hover {
     text-decoration: none;
+}
+.row__content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    flex: 1;
 }
 .example-row__name {
     font-weight: 600;
@@ -215,6 +222,18 @@ button:active,
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+.chevron {
+    color: var(--muted);
+    font-size: 1.4rem;
+    line-height: 1;
+    transition:
+        transform 0.15s ease,
+        color 0.15s ease;
+}
+.example-link-row:hover .chevron {
+    color: var(--accent-strong);
+    transform: translateX(3px);
 }
 
 /* ── Forms ──────────────────────────────────────────────────────────── */
@@ -340,4 +359,141 @@ code {
 /* A small inline loading shimmer for the "Loading…" states. */
 .status::after {
     content: "";
+}
+
+/* ── Inline composer (Home) ─────────────────────────────────────────────
+   The create form lives on the list page, not a separate route. Submitting
+   drops an optimistic row into the list right below it. */
+.composer {
+    margin-bottom: 1.5rem;
+}
+.composer__title {
+    margin: 0 0 0.85rem;
+    font-size: 1.5rem;
+    letter-spacing: -0.02em;
+}
+/* The shared `.example-form` (also used full-page) goes edge-to-edge and
+   horizontal inside the composer card. */
+.composer .example-form {
+    max-width: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+.composer .example-form label {
+    flex: 1 1 12rem;
+}
+.composer .example-form button {
+    align-self: stretch;
+    margin-top: 1.15rem; /* line the button up with the inputs, past labels */
+}
+
+/* ── Toolbar count badge ────────────────────────────────────────────── */
+.count {
+    min-width: 1.5rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+/* ── Optimistic state (architect-atom) ──────────────────────────────────
+   A row whose mutation hasn't been confirmed by the server yet (an
+   optimistic insert/duplicate in flight): dimmed, with a spinner, until it
+   reconciles to a real row — or vanishes on rollback. See
+   docs/.../optimistic.md. */
+/* Pending = a clearly distinct state (not just dimmed): accent-tinted
+   card, dashed accent border, spinner + "Saving…" label. */
+.example-link-row.is-pending {
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+    cursor: default;
+}
+.row__status {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.row__status-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-strong);
+}
+.spinner {
+    flex: none;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-top-color: var(--accent-strong);
+    animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Per-field validation error (architect-form). */
+.field-error {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--danger);
+    font-size: 0.8rem;
+}
+
+/* ── Notification tray (architect-atom Notifications) ──────────────────
+   App-wide notice strip under the header. Rolled-back mutations that
+   navigated away from their page report failures here. */
+.notice-tray {
+    position: sticky;
+    top: 3.4rem;
+    z-index: 9;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-width: 720px;
+    margin: 0.5rem auto 0;
+    padding: 0 1.25rem;
+}
+.notice {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    font-size: 0.9rem;
+}
+.notice--error {
+    border-color: color-mix(in srgb, var(--danger) 45%, var(--border-strong));
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+.notice__message {
+    flex: 1;
+    min-width: 0;
+}
+.notice__dismiss {
+    flex: none;
+    padding: 0 0.45rem;
+    line-height: 1.4;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 1rem;
+}
+.notice__dismiss:hover {
+    background: color-mix(in srgb, currentColor 12%, transparent);
+    border: none;
 }

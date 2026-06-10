@@ -13,22 +13,25 @@ license = "MIT OR Apache-2.0"
 # mount as their root component.
 
 [dependencies]
-# Single dep root — facade re-exports the wire types + vox client.
-example = { path = "../features/example/example", features = ["vox"] }
+# Single dep root — facade re-exports the wire types + vox client. The
+# `atom` feature binds `Example` into the optimistic store (`StoreEntity`).
+example = { path = "../features/example/example", features = ["vox", "atom"] }
 # Feature-scoped Dioxus components.
 example-ui = { path = "../features/example/example-ui" }
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
 # v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server so
 # the wire schema agrees.
-vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 uuid = { version = "1", features = ["v4", "js"] }
 # architect's `schedule` policies wrap the (flaky) remote connect in
 # exponential backoff — see `client.rs`. Cross-target: `schedule`'s clock
 # is wasm-clean (browser timers), so the web build gets resilient connect
 # too. The native target below layers `local` on top for `Transport::Local`.
-architect = { path = "../../../macros/architect", default-features = false, features = ["schedule"] }
+# `atom` + `form` bring the client-state primitives (`architect::Store`,
+# `architect::form::Field`) the screens + feature-ui drive.
+architect = { path = "../../../macros/architect", default-features = false, features = ["schedule", "atom", "form"] }
 
 # Native (desktop/CLI/tests) only: architect's in-process transport, so
 # `Transport::Local` can serve a backend over a vox in-memory link. Not
@@ -42,3 +45,9 @@ architect = { path = "../../../macros/architect", default-features = false, feat
 # Headless smoke test: mount the full App (router + connection lifecycle)
 # in a VirtualDom and render it without a window.
 dioxus-ssr = "0.7"
+# The live-loop integration test mounts the real App over the in-process
+# transport (the real service graph from app-server, in-memory backend)
+# and pumps the VirtualDom under tokio.
+app-server = { path = "../server", default-features = false, features = ["backend-memory"] }
+example = { path = "../features/example/example", features = ["vox", "atom", "backend-memory"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

@@ -1,151 +1,37 @@
-//! Example feature UI — components scoped to the `example` feature.
+//! Example feature UI — what's left to hand-write once the entity derives
+//! its own client state layer.
 //!
-//! Renders + drives the wire types from `example_proto` against the
-//! auto-generated `ExampleRepoClient`. Backend-agnostic: works the same
-//! whether the server's pulling from sqlite or in-memory storage.
+//! `#[architect(store)]` on `Example` (in `example-proto`) already emits
+//! the CRUD-shaped state: the optimistic `ExampleStore` + its hooks, the
+//! typed data hooks (`use_example`, `use_example_list`), and the
+//! optimistic `ExampleMutations` — re-exported here so pages have one
+//! import root. This crate adds only what the derive can't know:
 //!
-//! `apps/ui` composes these components into the runtime shell that
-//! `apps/web` and `apps/desktop` mount.
+//! - [`data`] — the search-aware list ([`use_examples`]) and the
+//!   refreshable live read ([`use_example_live`]).
+//! - [`mutations`] — the service-specific verb ([`ExampleActions`] /
+//!   `duplicate`).
+//! - [`components`] — dumb presentation: `ExampleCard`, `ExampleRow`,
+//!   `ExampleList`, `SearchBar`, and the `forms`.
+//!
+//! Navigation is *not* here — the shell composes these with normal Dioxus
+//! `Link` / `nav`. State management is the `AtomResult` phases the hooks
+//! return; the shell `match`es them.
 
-use dioxus::prelude::*;
-use example::Example;
+pub mod components;
+pub mod data;
+pub mod mutations;
 
-/// Renders a list of examples. Caller fetches the data and hands it in;
-/// keeps this component testable in isolation without an open socket.
-#[component]
-pub fn ExampleList(items: Vec<Example>) -> Element {
-    if items.is_empty() {
-        return rsx! {
-            div { class: "example-list empty",
-                p { "No examples yet." }
-            }
-        };
-    }
-    rsx! {
-        ul { class: "example-list",
-            for ex in items {
-                ExampleRow { key: "{ex.id}", example: ex }
-            }
-        }
-    }
-}
+pub use components::{
+    ExampleCard, ExampleCreateForm, ExampleEditForm, ExampleList, ExampleRow, SearchBar,
+};
+pub use data::{use_example_live, use_examples};
+pub use mutations::{ExampleActions, use_example_actions};
 
-/// Single-row presentation. Composable into list views, search results,
-/// detail panes, etc.
-#[component]
-pub fn ExampleRow(example: Example) -> Element {
-    rsx! {
-        li { class: "example-row",
-            span { class: "example-row__name", "{example.name}" }
-            span { class: "example-row__description", "{example.description}" }
-        }
-    }
-}
-
-/// Minimal create form. Emits the input pair via `on_submit`; the
-/// caller decides whether to call `ExampleRepoClient::create` or stub
-/// it for tests/storybook.
-#[component]
-pub fn ExampleCreateForm(on_submit: EventHandler<(String, String)>) -> Element {
-    let mut name = use_signal(String::new);
-    let mut description = use_signal(String::new);
-    rsx! {
-        form {
-            class: "example-form",
-            onsubmit: move |evt| {
-                evt.prevent_default();
-                on_submit.call((name(), description()));
-                name.set(String::new());
-                description.set(String::new());
-            },
-            label {
-                "Name"
-                input {
-                    placeholder: "e.g. Quarterly report",
-                    value: "{name}",
-                    oninput: move |evt| name.set(evt.value()),
-                }
-            }
-            label {
-                "Description"
-                input {
-                    placeholder: "optional",
-                    value: "{description}",
-                    oninput: move |evt| description.set(evt.value()),
-                }
-            }
-            button { class: "btn primary", r#type: "submit", "Add example" }
-        }
-    }
-}
-
-/// Edit form, pre-filled from an existing row. Emits the edited pair via
-/// `on_submit`; the caller calls `ExampleRepoClient::update`. Mounted
-/// fresh per detail route, so seeding the signals from the props once is
-/// the intended behaviour.
-#[component]
-pub fn ExampleEditForm(
-    initial_name: String,
-    initial_description: String,
-    on_submit: EventHandler<(String, String)>,
-) -> Element {
-    let mut name = use_signal(|| initial_name.clone());
-    let mut description = use_signal(|| initial_description.clone());
-    rsx! {
-        form {
-            class: "example-form",
-            onsubmit: move |evt| {
-                evt.prevent_default();
-                on_submit.call((name(), description()));
-            },
-            label {
-                "Name"
-                input {
-                    placeholder: "name",
-                    value: "{name}",
-                    oninput: move |evt| name.set(evt.value()),
-                }
-            }
-            label {
-                "Description"
-                input {
-                    placeholder: "description",
-                    value: "{description}",
-                    oninput: move |evt| description.set(evt.value()),
-                }
-            }
-            button { class: "btn primary", r#type: "submit", "Save changes" }
-        }
-    }
-}
-
-/// Search box. Emits the query string via `on_search` on submit; emits
-/// an empty string when cleared so the caller can fall back to the full
-/// list. Backend-agnostic: the caller routes the query to
-/// `ExampleServiceClient::search`.
-#[component]
-pub fn SearchBar(on_search: EventHandler<String>) -> Element {
-    let mut query = use_signal(String::new);
-    rsx! {
-        form {
-            class: "search-bar",
-            onsubmit: move |evt| {
-                evt.prevent_default();
-                on_search.call(query());
-            },
-            input {
-                r#type: "search",
-                placeholder: "search name or description…",
-                value: "{query}",
-                oninput: move |evt| {
-                    let v = evt.value();
-                    query.set(v.clone());
-                    if v.is_empty() {
-                        on_search.call(String::new());
-                    }
-                },
-            }
-            button { r#type: "submit", "Search" }
-        }
-    }
-}
+// The derived client-state layer, re-exported from the proto crate so
+// shells import everything example-shaped from one place.
+pub use example::{
+    EXAMPLE_REACTIVITY_KEY, ExampleClientError, ExampleMutations, ExampleStore, provide_example,
+    provide_example_store, use_example, use_example_events, use_example_list,
+    use_example_mutations, use_example_store,
+};

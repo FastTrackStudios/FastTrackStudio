@@ -51,8 +51,9 @@ full = ["backend-db", "backend-memory"]
 example = { workspace = true, features = ["vox", "server-axum"] }
 
 axum.workspace = true
-# `signal` for Ctrl-C graceful shutdown (so the scope's finalizers run).
-tokio = { workspace = true, features = ["signal"] }
+# `signal` for Ctrl-C graceful shutdown (so the scope's finalizers run);
+# `time` for the test-only `LatencyRepo` sleep (EXAMPLE_LATENCY_MS).
+tokio = { workspace = true, features = ["signal", "time"] }
 tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

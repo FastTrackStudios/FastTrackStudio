@@ -1,52 +1,57 @@
 //! Runtime UI shell — the full example app, shared verbatim by the web
 //! (wasm) and desktop targets.
 //!
-//! Architecture:
-//! - [`App`] establishes the vox clients once (see [`client`]) and
-//!   provides them to the tree as a `Signal<ConnState>`, then mounts the
-//!   router. Data never flows through Dioxus server functions — every
-//!   read/write is a typed vox call. See `docs/.../idioms.md`.
-//! - [`Route`] is the typed route table; [`AppShell`] is the layout that
-//!   wraps every page with the header + nav.
-//! - The screens live in [`screens`]; the feature-scoped presentational
-//!   components (list, row, forms, search) come from `example_ui`.
+//! The shell owns three things and nothing else:
+//! - **Transport** ([`transport`]) — *where* the clients connect (remote
+//!   WebSocket vs in-process), chosen once at the root.
+//! - **Context provision** — `App` provides the app-wide registries
+//!   (notifications, reactivity), the entity's derived store, and one
+//!   `architect::Connection<C>` per typed client; the feature hooks
+//!   consume them.
+//! - **Routing + composition** ([`Route`], [`pages`]) — the typed route
+//!   table and pages that `match` the feature hooks' `AtomResult` phases
+//!   and navigate with normal Dioxus `Link` / `nav`.
 //!
-//! A real project pulls in more feature-ui crates here (timeline_ui,
-//! mixing_ui, …) and adds their routes; the shell shape is the same.
+//! Data never flows through Dioxus server functions — every read/write is a
+//! typed vox call. See `docs/.../idioms.md`.
 
-mod client;
-mod screens;
+mod pages;
+mod status;
+mod transport;
 
+use architect::use_app;
 use dioxus::prelude::*;
+use example_ui::provide_example;
 
-pub use client::{ConnState, DEFAULT_SERVER_URL, ExampleClients, Transport};
+pub use transport::{DEFAULT_SERVER_URL, Transport};
 
-use screens::{EditExample, ExampleDetail, Home, NewExample, NotFound};
+use pages::{EditExample, ExampleDetail, Home, InspectExample, NotFound};
+use status::NotificationTray;
 
 /// Bundled stylesheet. `dx` collects it for both web and desktop.
 static MAIN_CSS: Asset = asset!("/assets/main.css");
 
-/// Typed route table. `AppShell` wraps the four content routes; anything
-/// else falls through to `NotFound`.
+/// Typed route table. `AppShell` wraps the content routes; anything else
+/// falls through to `NotFound`.
 #[derive(Routable, Clone, PartialEq)]
 #[rustfmt::skip]
 pub enum Route {
     #[layout(AppShell)]
         #[route("/")]
         Home {},
-        #[route("/new")]
-        NewExample {},
         #[route("/example/:id")]
         ExampleDetail { id: String },
         #[route("/example/:id/edit")]
         EditExample { id: String },
+        #[route("/example/:id/inspect")]
+        InspectExample { id: String },
     #[end_layout]
     #[route("/:..route")]
     NotFound { route: Vec<String> },
 }
 
-/// App root. Establishes the vox clients once, hands them to the tree,
-/// and mounts the router.
+/// App root. Picks the transport, provides the app-wide registries + the
+/// derived store + one connection per typed client, and mounts the router.
 #[component]
 pub fn App() -> Element {
     // The transport is chosen at the app root (web → Remote, desktop →
@@ -56,20 +61,17 @@ pub fn App() -> Element {
             .unwrap_or_else(|| Transport::Remote(DEFAULT_SERVER_URL.to_string()))
     });
 
-    // Provided unconditionally so every screen's `use_conn()` is stable.
-    let conn = use_context_provider(|| Signal::new(ConnState::Connecting));
+    // App-wide registries (notifications + reactivity) and the app's
+    // **single** connection — every feature's typed clients are cheap
+    // views over the shared `Caller`, so adding a feature adds zero
+    // connections.
+    let connect_transport = transport.clone();
+    use_app(move || async move { transport::connect(&connect_transport).await });
 
-    // One-shot connect on mount. Screens react when this flips to Ready.
-    use_future(move || {
-        let transport = transport.clone();
-        async move {
-            let mut conn = conn;
-            match ExampleClients::connect(&transport).await {
-                Ok(clients) => conn.set(ConnState::Ready(clients)),
-                Err(e) => conn.set(ConnState::Failed(e)),
-            }
-        }
-    });
+    // The example feature's whole client layer: the derived store plus
+    // the live event subscription that keeps it fed (all pages stay in
+    // sync with other clients without polling). One line per feature.
+    provide_example();
 
     rsx! {
         document::Stylesheet { href: MAIN_CSS }
@@ -77,7 +79,9 @@ pub fn App() -> Element {
     }
 }
 
-/// Layout shared by every content route: header/brand + the page outlet.
+/// Layout shared by every content route: header/brand + the page outlet,
+/// plus the app-wide notification tray (where rolled-back mutations that
+/// navigated away report their failures).
 #[component]
 fn AppShell() -> Element {
     rsx! {
@@ -85,6 +89,7 @@ fn AppShell() -> Element {
             Link { class: "brand", to: Route::Home {}, "architect" }
             span { class: "tagline", "reference example" }
         }
+        NotificationTray {}
         main { class: "app-main",
             Outlet::<Route> {}
         }

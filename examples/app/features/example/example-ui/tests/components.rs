@@ -4,7 +4,7 @@
 
 use chrono::Utc;
 use dioxus::prelude::*;
-use example::Example;
+use example::{Example, ExampleCreate, ExampleUpdate};
 use example_ui::{ExampleCreateForm, ExampleEditForm, ExampleList, ExampleRow, SearchBar};
 use uuid::Uuid;
 
@@ -63,11 +63,12 @@ fn row_renders_name_and_description() {
 #[test]
 fn create_form_has_inputs_and_submit() {
     fn app() -> Element {
-        rsx! { ExampleCreateForm { on_submit: move |_: (String, String)| {} } }
+        rsx! { ExampleCreateForm { on_submit: move |_: ExampleCreate| {} } }
     }
     let html = render(app);
     assert!(html.matches("<input").count() >= 2, "two inputs: {html}");
     assert!(html.contains("<button"));
+    // Labels come from the derive (Title Case of the payload fields).
     assert!(html.contains("Name"), "labeled name field: {html}");
     assert!(
         html.contains("Description"),
@@ -76,13 +77,12 @@ fn create_form_has_inputs_and_submit() {
 }
 
 #[test]
-fn edit_form_prefills_initial_values() {
+fn edit_form_prefills_from_the_row() {
     fn app() -> Element {
         rsx! {
             ExampleEditForm {
-                initial_name: "preset-name".to_string(),
-                initial_description: "preset-desc".to_string(),
-                on_submit: move |_: (String, String)| {},
+                example: sample("preset-name", "preset-desc"),
+                on_submit: move |_: ExampleUpdate| {},
             }
         }
     }
