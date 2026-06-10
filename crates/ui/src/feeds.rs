@@ -8,16 +8,13 @@
 //! doesn't blank the whole view); an error only surfaces if *nothing*
 //! came back.
 
-#[cfg(target_arch = "wasm32")]
 use project::ProjectInfo;
-#[cfg(target_arch = "wasm32")]
 use task::TaskInfo as DbTask;
 
 /// Active projects across the selected orgs (concurrent fan-out).
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_projects(slugs: &[String]) -> Result<Vec<ProjectInfo>, String> {
-    let futs = slugs.iter().cloned().map(|slug| async move {
-        match crate::vox_clients::establish_for::<project::ProjectServiceClient>(&slug).await {
+    let futs = slugs.iter().map(|slug| async move {
+        match crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await {
             Ok(client) => client
                 .list()
                 .await
@@ -29,7 +26,6 @@ pub async fn fetch_projects(slugs: &[String]) -> Result<Vec<ProjectInfo>, String
 }
 
 /// Tasks across the selected orgs (concurrent fan-out).
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_tasks(slugs: &[String]) -> Result<Vec<DbTask>, String> {
     Ok(fetch_tasks_tagged(slugs)
         .await?
@@ -41,10 +37,9 @@ pub async fn fetch_tasks(slugs: &[String]) -> Result<Vec<DbTask>, String> {
 /// Tasks across the selected orgs, each paired with the slug of the org
 /// it came from — so mutations can be routed back to the right org's
 /// `TaskService` when viewing "All".
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)>, String> {
-    let futs = slugs.iter().cloned().map(|slug| async move {
-        match crate::vox_clients::establish_for::<task::TaskServiceClient>(&slug).await {
+    let futs = slugs.iter().map(|slug| async move {
+        match crate::vox_clients::establish_for::<task::TaskServiceClient>(slug).await {
             Ok(client) => client
                 .list()
                 .await
@@ -62,7 +57,6 @@ pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)
 
 /// Fetch one org's day-plan templates (drives the calendar schedule
 /// overlay), in the order the backend lists them.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_day_templates(slug: &str) -> Result<Vec<scheduling_proto::DayTemplate>, String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::DayTemplatesClient>(slug).await?;
@@ -74,7 +68,6 @@ pub async fn fetch_day_templates(slug: &str) -> Result<Vec<scheduling_proto::Day
 
 /// The saved per-date plan for `date` (ISO `YYYY-MM-DD`), or `None`
 /// when the date hasn't been edited (caller materializes a default).
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_day_plan(
     slug: &str,
     date: &str,
@@ -88,7 +81,6 @@ pub async fn fetch_day_plan(
 }
 
 /// Save (replacing) a per-date plan.
-#[cfg(target_arch = "wasm32")]
 pub async fn save_day_plan(slug: &str, plan: scheduling_proto::DayPlan) -> Result<(), String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::DayPlansClient>(slug).await?;
@@ -99,7 +91,6 @@ pub async fn save_day_plan(slug: &str, plan: scheduling_proto::DayPlan) -> Resul
 }
 
 /// Delete a per-date plan, reverting that date to the template.
-#[cfg(target_arch = "wasm32")]
 pub async fn delete_day_plan(slug: &str, date: &str) -> Result<(), String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::DayPlansClient>(slug).await?;
@@ -110,7 +101,6 @@ pub async fn delete_day_plan(slug: &str, date: &str) -> Result<(), String> {
 }
 
 /// All persisted calendar events for the org.
-#[cfg(target_arch = "wasm32")]
 pub async fn list_events(slug: &str) -> Result<Vec<scheduling_proto::CalEvent>, String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
@@ -121,7 +111,6 @@ pub async fn list_events(slug: &str) -> Result<Vec<scheduling_proto::CalEvent>, 
 }
 
 /// Save (replacing) one calendar event.
-#[cfg(target_arch = "wasm32")]
 pub async fn upsert_event(slug: &str, event: scheduling_proto::CalEvent) -> Result<(), String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
@@ -132,7 +121,6 @@ pub async fn upsert_event(slug: &str, event: scheduling_proto::CalEvent) -> Resu
 }
 
 /// Delete one calendar event.
-#[cfg(target_arch = "wasm32")]
 pub async fn delete_event(slug: &str, id: &str) -> Result<(), String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
@@ -145,7 +133,6 @@ pub async fn delete_event(slug: &str, id: &str) -> Result<(), String> {
 // ── Bookings (Cal.com-style booking half) ───────────────────────────
 
 /// All bookable event types for the org (30-min consults, etc.).
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_event_types(slug: &str) -> Result<Vec<scheduling_proto::EventType>, String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::EventTypesClient>(slug).await?;
@@ -157,7 +144,6 @@ pub async fn fetch_event_types(slug: &str) -> Result<Vec<scheduling_proto::Event
 
 /// Create (upsert) a bookable event type. The backend derives the
 /// vault `path` from the slug/id, so we leave it empty here.
-#[cfg(target_arch = "wasm32")]
 pub async fn create_event_type(slug: &str, title: &str, duration_min: u16) -> Result<(), String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::EventTypesClient>(slug).await?;
@@ -182,7 +168,6 @@ pub async fn create_event_type(slug: &str, title: &str, duration_min: u16) -> Re
 }
 
 /// All bookings for the org (every status), oldest start first.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_bookings(slug: &str) -> Result<Vec<scheduling_proto::Booking>, String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::BookingsClient>(slug).await?;
@@ -193,7 +178,6 @@ pub async fn fetch_bookings(slug: &str) -> Result<Vec<scheduling_proto::Booking>
 }
 
 /// Cancel a booking by id (sets status to `Cancelled`).
-#[cfg(target_arch = "wasm32")]
 pub async fn cancel_booking(slug: &str, id: &str) -> Result<(), String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::BookingsClient>(slug).await?;
@@ -207,7 +191,6 @@ pub async fn cancel_booking(slug: &str, id: &str) -> Result<(), String> {
 }
 
 /// Lowercase, hyphenate, strip non-url-safe chars for an event-type slug.
-#[cfg(target_arch = "wasm32")]
 fn slugify(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev_dash = false;
@@ -225,7 +208,6 @@ fn slugify(s: &str) -> String {
 
 /// Every inbox item (open + processed + archived), oldest first.
 /// Consumers filter by `status` / `resurface_on` for the daily queue.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_inbox(slug: &str) -> Result<Vec<inbox_proto::InboxItem>, String> {
     let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
     client
@@ -236,7 +218,6 @@ pub async fn fetch_inbox(slug: &str) -> Result<Vec<inbox_proto::InboxItem>, Stri
 
 /// Capture or update one inbox item (keyed by id). Capture, snooze,
 /// process, and archive all flow through here.
-#[cfg(target_arch = "wasm32")]
 pub async fn upsert_inbox_item(slug: &str, item: inbox_proto::InboxItem) -> Result<(), String> {
     let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
     client
@@ -246,7 +227,6 @@ pub async fn upsert_inbox_item(slug: &str, item: inbox_proto::InboxItem) -> Resu
 }
 
 /// Delete one inbox item.
-#[cfg(target_arch = "wasm32")]
 pub async fn delete_inbox_item(slug: &str, id: &str) -> Result<(), String> {
     let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
     client
@@ -255,10 +235,195 @@ pub async fn delete_inbox_item(slug: &str, id: &str) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete inbox item: {e:?}"))
 }
 
+// ── Threads (conversations on tasks/projects) ────────────────────────
+//
+// Single cross-target impl — the architect-generated `ThreadsServiceClient`
+// is one API, established via `vox_clients::establish_for` (which already
+// compiles for both wasm + native). No per-target duplication.
+
+/// Threads anchored to `(entity_type, entity_id)`, newest first.
+pub async fn fetch_threads(
+    slug: &str,
+    entity_type: &str,
+    entity_id: uuid::Uuid,
+) -> Result<Vec<threads::Thread>, String> {
+    let client = crate::vox_clients::establish_for::<threads::ThreadsServiceClient>(slug).await?;
+    client
+        .list_threads(entity_type.to_string(), entity_id)
+        .await
+        .map_err(|e| format!("{slug}: list threads: {e:?}"))
+}
+
+/// Messages of one thread, oldest first.
+pub async fn fetch_thread_messages(
+    slug: &str,
+    thread_id: uuid::Uuid,
+) -> Result<Vec<threads::Message>, String> {
+    let client = crate::vox_clients::establish_for::<threads::ThreadsServiceClient>(slug).await?;
+    client
+        .list_messages(thread_id)
+        .await
+        .map_err(|e| format!("{slug}: list messages: {e:?}"))
+}
+
+/// Open a new thread.
+pub async fn create_thread(
+    slug: &str,
+    req: threads::CreateThreadRequest,
+) -> Result<threads::Thread, String> {
+    let client = crate::vox_clients::establish_for::<threads::ThreadsServiceClient>(slug).await?;
+    client
+        .create_thread(req)
+        .await
+        .map_err(|e| format!("{slug}: create thread: {e:?}"))
+}
+
+/// Post a message to a thread.
+pub async fn post_thread_message(
+    slug: &str,
+    req: threads::PostMessageRequest,
+) -> Result<threads::Message, String> {
+    let client = crate::vox_clients::establish_for::<threads::ThreadsServiceClient>(slug).await?;
+    client
+        .post_message(req)
+        .await
+        .map_err(|e| format!("{slug}: post message: {e:?}"))
+}
+
+/// Repos *connected* (project-bound) in this org — the `/repos`
+/// "connected" view, distinct from the raw forge catalog.
+pub async fn fetch_connected_repos(slug: &str) -> Result<Vec<git_proto::RepoId>, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::connections::RepoConnectionsClient>(slug)
+            .await?;
+    client
+        .list_connected_repos()
+        .await
+        .map_err(|e| format!("{slug}: list connected repos: {e:?}"))
+}
+
+/// Comments on a forge issue — the issue's conversation, rendered under
+/// it in the `/repos` view. Works for PRs too (Gitea shares the index).
+pub async fn fetch_issue_comments(
+    slug: &str,
+    repo: git_proto::RepoId,
+    number: u64,
+) -> Result<Vec<git_proto::Comment>, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::issues::IssueTrackerClient>(slug).await?;
+    client
+        .list_comments(repo, git_proto::IssueId(number))
+        .await
+        .map_err(|e| format!("{slug}: list comments #{number}: {e:?}"))
+}
+
+/// Repos bound to a specific project (its connected repos).
+pub async fn fetch_repos_for_project(
+    slug: &str,
+    project_id: uuid::Uuid,
+) -> Result<Vec<git_proto::RepoId>, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::connections::RepoConnectionsClient>(slug)
+            .await?;
+    client
+        .repos_for_project(project_id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: repos for project: {e:?}"))
+}
+
+/// Update a project (write-through to its markdown). Used to change the
+/// project type from the detail page.
+pub async fn update_project(
+    slug: &str,
+    project: project::ProjectInfo,
+) -> Result<project::ProjectInfo, String> {
+    let client = crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await?;
+    client
+        .update(project)
+        .await
+        .map_err(|e| format!("{slug}: update project: {e:?}"))
+}
+
+/// Pull requests on a connected repo.
+pub async fn fetch_pull_requests(
+    slug: &str,
+    repo: git_proto::RepoId,
+) -> Result<Vec<git_proto::PullRequest>, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::reviews::ReviewSurfaceClient>(slug).await?;
+    client
+        .list_pull_requests(repo)
+        .await
+        .map_err(|e| format!("{slug}: list pull requests: {e:?}"))
+}
+
+/// Reviews on a PR (summary state + body per reviewer).
+pub async fn fetch_pr_reviews(
+    slug: &str,
+    repo: git_proto::RepoId,
+    pr: u64,
+) -> Result<Vec<git_proto::Review>, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::reviews::ReviewSurfaceClient>(slug).await?;
+    client
+        .list_reviews(repo, git_proto::PullRequestId(pr))
+        .await
+        .map_err(|e| format!("{slug}: list reviews #{pr}: {e:?}"))
+}
+
+/// Post a comment to an issue or PR conversation (PRs share the issue
+/// index). Authored as the server's configured forge identity.
+pub async fn post_issue_comment(
+    slug: &str,
+    repo: git_proto::RepoId,
+    number: u64,
+    body: String,
+) -> Result<git_proto::Comment, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::issues::IssueTrackerClient>(slug).await?;
+    client
+        .add_comment(repo, git_proto::IssueId(number), body)
+        .await
+        .map_err(|e| format!("{slug}: add comment #{number}: {e:?}"))
+}
+
+/// Open or close an issue (state-only update).
+pub async fn set_issue_state(
+    slug: &str,
+    repo: git_proto::RepoId,
+    number: u64,
+    state: git_proto::IssueState,
+) -> Result<git_proto::Issue, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::issues::IssueTrackerClient>(slug).await?;
+    let update = git_proto::IssueUpdate {
+        state: Some(state),
+        ..Default::default()
+    };
+    client
+        .update_issue(repo, git_proto::IssueId(number), update)
+        .await
+        .map_err(|e| format!("{slug}: set state #{number}: {e:?}"))
+}
+
+/// Merge a pull request.
+pub async fn merge_pull_request(
+    slug: &str,
+    repo: git_proto::RepoId,
+    number: u64,
+    method: git_proto::MergeMethod,
+) -> Result<Option<String>, String> {
+    let client =
+        crate::vox_clients::establish_for::<git_proto::reviews::ReviewSurfaceClient>(slug).await?;
+    client
+        .merge_pull_request(repo, git_proto::PullRequestId(number), method)
+        .await
+        .map_err(|e| format!("{slug}: merge PR #{number}: {e:?}"))
+}
+
 /// Promote an inbox item into a Task — `title` is the headline, `details`
 /// the markdown body. Returns the created task (its `path` is the
 /// provenance back-link to store in `processed_into`).
-#[cfg(target_arch = "wasm32")]
 pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task::TaskInfo, String> {
     let client = crate::vox_clients::establish_for::<task::TaskServiceClient>(slug).await?;
     let t = task::TaskInfo {
@@ -296,7 +461,6 @@ pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task:
 /// Promote an inbox item into an atomic note: write `markdown` to
 /// `path` (vault-relative, e.g. `Wiki/Atomic/<slug>.md`) in the org's
 /// `"default"` vault. `CreateOnly` so a re-promote doesn't clobber.
-#[cfg(target_arch = "wasm32")]
 pub async fn create_wiki_note(slug: &str, path: &str, markdown: &str) -> Result<(), String> {
     let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
     client
@@ -315,7 +479,6 @@ pub async fn create_wiki_note(slug: &str, path: &str, markdown: &str) -> Result<
 
 /// Every location in the org's vault (studios / rooms / storage /
 /// venues / homes), in the order the backend lists them.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_locations(slug: &str) -> Result<Vec<locations_proto::Location>, String> {
     let client =
         crate::vox_clients::establish_for::<locations_proto::LocationsServiceClient>(slug).await?;
@@ -328,7 +491,6 @@ pub async fn fetch_locations(slug: &str) -> Result<Vec<locations_proto::Location
 /// Create one location. The backend assigns the `id` (nil here) and
 /// the vault `path` (empty here, defaulting to `locations/<slug>.md`).
 /// Returns the persisted location.
-#[cfg(target_arch = "wasm32")]
 pub async fn create_location(
     slug: &str,
     name: &str,
@@ -360,7 +522,6 @@ pub async fn create_location(
 
 /// Every inventory item in the org's vault (`type: item` gear /
 /// equipment pages), in the order the backend lists them.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_inventory(slug: &str) -> Result<Vec<inventory_proto::Item>, String> {
     let client =
         crate::vox_clients::establish_for::<inventory_proto::InventoryServiceClient>(slug).await?;
@@ -373,7 +534,6 @@ pub async fn fetch_inventory(slug: &str) -> Result<Vec<inventory_proto::Item>, S
 /// Create one inventory item. The backend assigns the `id` (nil here)
 /// and the vault `path` (empty here, defaulting to `inventory/<slug>.md`).
 /// Returns the persisted item.
-#[cfg(target_arch = "wasm32")]
 pub async fn create_item(
     slug: &str,
     name: &str,
@@ -409,7 +569,6 @@ pub async fn create_item(
 
 /// Move an item along its lifecycle (in-use / stored / loaned /
 /// in-repair / missing / retired). Returns the updated item.
-#[cfg(target_arch = "wasm32")]
 pub async fn set_item_status(
     slug: &str,
     id: &str,
@@ -428,7 +587,6 @@ pub async fn set_item_status(
 /// Every milestone in the org's vault (project-scoped checkpoints),
 /// in the order the backend lists them. Filter client-side by
 /// `project_id` / `status` as needed.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_milestones(slug: &str) -> Result<Vec<milestone_proto::Milestone>, String> {
     let client =
         crate::vox_clients::establish_for::<milestone_proto::MilestoneServiceClient>(slug).await?;
@@ -442,7 +600,6 @@ pub async fn fetch_milestones(slug: &str) -> Result<Vec<milestone_proto::Milesto
 /// always lives inside a project); the backend derives the vault
 /// `path` (empty here) and assigns the `id` (nil here). Returns
 /// the persisted milestone.
-#[cfg(target_arch = "wasm32")]
 pub async fn create_milestone(
     slug: &str,
     title: &str,
@@ -476,7 +633,6 @@ pub async fn create_milestone(
 /// Every tracked body metric (weight / body-fat / measurements)
 /// in the org's vault, in the order the backend lists them. Each
 /// carries its full entry time series inline.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_body_metrics(
     slug: &str,
 ) -> Result<Vec<fitness_proto::body::BodyMetric>, String> {
@@ -491,7 +647,6 @@ pub async fn fetch_body_metrics(
 /// Create one body metric (e.g. a "Weight" series tracked in
 /// kg). The backend assigns the `id` (nil here) and the vault
 /// `path` (empty here). Returns the persisted metric.
-#[cfg(target_arch = "wasm32")]
 pub async fn create_body_metric(
     slug: &str,
     name: &str,
@@ -522,7 +677,6 @@ pub async fn create_body_metric(
 /// Log a single reading against an existing metric. `value` is
 /// in the metric's default unit; `date` is the calendar day of
 /// the reading. Returns the updated metric.
-#[cfg(target_arch = "wasm32")]
 pub async fn log_body_entry(
     slug: &str,
     metric_id: uuid::Uuid,
@@ -546,7 +700,6 @@ pub async fn log_body_entry(
 
 /// Every exercise in the org's catalog, in the order the
 /// backend lists them.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_exercises(
     slug: &str,
 ) -> Result<Vec<fitness_proto::exercises::Exercise>, String> {
@@ -562,7 +715,6 @@ pub async fn fetch_exercises(
 /// Add one exercise to the catalog (name + movement category).
 /// The backend assigns the `id` (nil here) and the vault `path`
 /// (empty here). Returns the persisted exercise.
-#[cfg(target_arch = "wasm32")]
 pub async fn create_exercise(
     slug: &str,
     name: &str,
@@ -599,7 +751,6 @@ pub async fn create_exercise(
 
 /// Every logged workout session in the org's vault, in the order
 /// the backend lists them.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_workouts(
     slug: &str,
 ) -> Result<Vec<fitness_proto::workouts::WorkoutSession>, String> {
@@ -614,7 +765,6 @@ pub async fn fetch_workouts(
 
 /// Every daily intake log in the org's vault, in the order the
 /// backend lists them. Each carries its consumed entries inline.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_intake(slug: &str) -> Result<Vec<fitness_proto::intake::IntakeLog>, String> {
     let client =
         crate::vox_clients::establish_for::<fitness_proto::intake::IntakeServiceClient>(slug)
@@ -629,7 +779,6 @@ pub async fn fetch_intake(slug: &str) -> Result<Vec<fitness_proto::intake::Intak
 
 /// Every recipe in the org's cookbook (`<wiki>/Cookbook/*.cook`),
 /// in the order the backend lists them.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_recipes(slug: &str) -> Result<Vec<cookbook_proto::Recipe>, String> {
     let client =
         crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
@@ -642,7 +791,6 @@ pub async fn fetch_recipes(slug: &str) -> Result<Vec<cookbook_proto::Recipe>, St
 /// Create one recipe from a name. Identity is the vault-relative
 /// `path`; the backend fills `path` from the name + parses the
 /// `source`. We seed a minimal cooklang source (`>> title:`).
-#[cfg(target_arch = "wasm32")]
 pub async fn create_recipe(slug: &str, name: &str) -> Result<cookbook_proto::Recipe, String> {
     let client =
         crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
@@ -672,7 +820,6 @@ pub async fn create_recipe(slug: &str, name: &str) -> Result<cookbook_proto::Rec
 
 /// Every pantry item in the org's vault (food-on-hand pages), in
 /// the order the backend lists them.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_pantry(slug: &str) -> Result<Vec<pantry_proto::PantryItem>, String> {
     let client =
         crate::vox_clients::establish_for::<pantry_proto::PantryServiceClient>(slug).await?;
@@ -685,7 +832,6 @@ pub async fn fetch_pantry(slug: &str) -> Result<Vec<pantry_proto::PantryItem>, S
 /// Create one pantry item (name + qty + unit). The backend
 /// assigns the `id` (nil here) and the vault `path` (empty here).
 /// Returns the persisted item.
-#[cfg(target_arch = "wasm32")]
 pub async fn create_pantry_item(
     slug: &str,
     name: &str,
@@ -736,7 +882,6 @@ pub async fn create_pantry_item(
 
 /// Every planned meal in the org's vault, in the order the
 /// backend lists them.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_meal_plans(slug: &str) -> Result<Vec<mealplan_proto::Meal>, String> {
     let client =
         crate::vox_clients::establish_for::<mealplan_proto::MealplanServiceClient>(slug).await?;
@@ -749,7 +894,6 @@ pub async fn fetch_meal_plans(slug: &str) -> Result<Vec<mealplan_proto::Meal>, S
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_active_timer(
     slug: &str,
     user_id: uuid::Uuid,
@@ -762,7 +906,6 @@ pub async fn fetch_active_timer(
 }
 
 /// Recent sessions for `user_id`, newest first.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_recent_sessions(
     slug: &str,
     user_id: uuid::Uuid,
@@ -782,7 +925,6 @@ pub async fn fetch_recent_sessions(
 
 /// Sessions across several orgs, each tagged with its org slug, newest
 /// first. Powers the multi-org timer / finances / invoices views.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_sessions_multi(slugs: &[String]) -> Vec<(String, timer_proto::WorkSession)> {
     let mut out = Vec::new();
     for slug in slugs {
@@ -797,7 +939,6 @@ pub async fn fetch_sessions_multi(slugs: &[String]) -> Vec<(String, timer_proto:
 /// Every session in the org (all members), newest first — the time-log
 /// view. Lets the operator see contractors' logged time too, not just
 /// their own.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_org_sessions(slug: &str) -> Result<Vec<timer_proto::WorkSession>, String> {
     let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
     let mut sessions = client
@@ -809,7 +950,6 @@ pub async fn fetch_org_sessions(slug: &str) -> Result<Vec<timer_proto::WorkSessi
 }
 
 /// Start a timer; returns the new open session.
-#[cfg(target_arch = "wasm32")]
 pub async fn start_timer(
     slug: &str,
     req: timer_proto::StartTimerRequest,
@@ -822,7 +962,6 @@ pub async fn start_timer(
 }
 
 /// Stop `user_id`'s running timer; returns the closed session.
-#[cfg(target_arch = "wasm32")]
 pub async fn stop_timer(
     slug: &str,
     user_id: uuid::Uuid,
@@ -836,7 +975,6 @@ pub async fn stop_timer(
 
 /// Edit an existing session — only the `Some(_)` fields change. The
 /// backend re-snapshots the rate afterward.
-#[cfg(target_arch = "wasm32")]
 pub async fn update_session(
     slug: &str,
     req: timer_proto::service::UpdateSessionRequest,
@@ -849,7 +987,6 @@ pub async fn update_session(
 }
 
 /// Permanently delete a session.
-#[cfg(target_arch = "wasm32")]
 pub async fn delete_session(slug: &str, id: uuid::Uuid) -> Result<(), String> {
     let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
     client
@@ -860,13 +997,11 @@ pub async fn delete_session(slug: &str, id: uuid::Uuid) -> Result<(), String> {
 
 // ── finance / invoicing ─────────────────────────────────────────────
 
-#[cfg(target_arch = "wasm32")]
 async fn invoicing(slug: &str) -> Result<finance_proto::InvoicingClient, String> {
     crate::vox_clients::establish_for::<finance_proto::InvoicingClient>(slug).await
 }
 
 /// All invoices in an org, newest first.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_invoices(slug: &str) -> Result<Vec<finance_proto::Invoice>, String> {
     invoicing(slug)
         .await?
@@ -876,7 +1011,6 @@ pub async fn fetch_invoices(slug: &str) -> Result<Vec<finance_proto::Invoice>, S
 }
 
 /// Per-project billable time not yet invoiced, in an org.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_uninvoiced(slug: &str) -> Result<Vec<finance_proto::UninvoicedGroup>, String> {
     invoicing(slug)
         .await?
@@ -886,7 +1020,6 @@ pub async fn fetch_uninvoiced(slug: &str) -> Result<Vec<finance_proto::Uninvoice
 }
 
 /// Generate + persist a draft invoice from a project's billable time.
-#[cfg(target_arch = "wasm32")]
 pub async fn generate_invoice(
     slug: &str,
     req: finance_proto::GenerateInvoice,
@@ -899,7 +1032,6 @@ pub async fn generate_invoice(
 }
 
 /// Issue an invoice (assign number, lock).
-#[cfg(target_arch = "wasm32")]
 pub async fn invoice_mark_sent(
     slug: &str,
     id: uuid::Uuid,
@@ -912,7 +1044,6 @@ pub async fn invoice_mark_sent(
 }
 
 /// Record a payment against an invoice.
-#[cfg(target_arch = "wasm32")]
 pub async fn invoice_record_payment(
     slug: &str,
     id: uuid::Uuid,
@@ -927,7 +1058,6 @@ pub async fn invoice_record_payment(
 }
 
 /// Delete a draft invoice (un-bills its sessions).
-#[cfg(target_arch = "wasm32")]
 pub async fn invoice_delete(slug: &str, id: uuid::Uuid) -> Result<(), String> {
     invoicing(slug)
         .await?
@@ -938,13 +1068,11 @@ pub async fn invoice_delete(slug: &str, id: uuid::Uuid) -> Result<(), String> {
 
 // ── finance / ledger ────────────────────────────────────────────────
 
-#[cfg(target_arch = "wasm32")]
 async fn ledger(slug: &str) -> Result<finance_proto::LedgerClient, String> {
     crate::vox_clients::establish_for::<finance_proto::LedgerClient>(slug).await
 }
 
 /// Resolve the org's (single) finance book id, if one exists yet.
-#[cfg(target_arch = "wasm32")]
 async fn ledger_book_id(
     client: &finance_proto::LedgerClient,
     slug: &str,
@@ -959,7 +1087,6 @@ async fn ledger_book_id(
 /// Every account in an org's (single) book, paired with its current
 /// balance. Returns `(account, balance)` rows. Empty when the org has
 /// no book / accounts yet.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_ledger_accounts(
     slug: &str,
 ) -> Result<Vec<(finance_proto::Account, finance_proto::AccountBalance)>, String> {
@@ -996,7 +1123,6 @@ pub async fn fetch_ledger_accounts(
 /// Recent ledger transactions across every account in an org's book,
 /// newest first. Pulls each account's history and de-dupes by
 /// transaction id (a double-entry txn touches ≥2 accounts).
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_ledger_transactions(
     slug: &str,
 ) -> Result<Vec<finance_proto::Transaction>, String> {
@@ -1026,7 +1152,6 @@ pub async fn fetch_ledger_transactions(
 }
 
 /// Invoices across several orgs, slug-tagged, newest first.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_invoices_multi(slugs: &[String]) -> Vec<(String, finance_proto::Invoice)> {
     let mut out = Vec::new();
     for slug in slugs {
@@ -1039,7 +1164,6 @@ pub async fn fetch_invoices_multi(slugs: &[String]) -> Vec<(String, finance_prot
 }
 
 /// Uninvoiced groups across several orgs, slug-tagged.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_uninvoiced_multi(
     slugs: &[String],
 ) -> Vec<(String, finance_proto::UninvoicedGroup)> {
@@ -1055,7 +1179,6 @@ pub async fn fetch_uninvoiced_multi(
 /// Fetch one org's vault markdown as `WikiFile`s for the knowledge
 /// graph: pull the manifest, then read every `.md` file concurrently
 /// over the one socket. Pure graph-building happens caller-side.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
     use view_knowledge_graph::WikiFile;
 
@@ -1068,7 +1191,11 @@ pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::Wi
         .files
         .into_iter()
         .map(|f| f.path)
-        .filter(|p| p.ends_with(".md"))
+        .filter(|p| {
+            std::path::Path::new(p)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        })
         .collect();
 
     let futs = md_paths.into_iter().map(|path| {
@@ -1094,15 +1221,9 @@ pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::Wi
         .collect())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_wiki_files(_slug: &str) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
 /// Locate a single project by id across the selected orgs, returning it
 /// together with the slug of the org that owns it. Used by the project
 /// detail page so it works regardless of which org is in view.
-#[cfg(target_arch = "wasm32")]
 pub async fn find_project(id: &str, slugs: &[String]) -> Result<(ProjectInfo, String), String> {
     let uuid = uuid::Uuid::parse_str(id).map_err(|_| "invalid project id".to_owned())?;
     let mut last_err = None;
@@ -1120,7 +1241,6 @@ pub async fn find_project(id: &str, slugs: &[String]) -> Result<(ProjectInfo, St
 
 /// Flatten per-org results: concat the successes; surface an error only
 /// if every org failed *and* nothing came back.
-#[cfg(target_arch = "wasm32")]
 fn collect<T>(results: Vec<Result<Vec<T>, String>>) -> Result<Vec<T>, String> {
     let mut out = Vec::new();
     let mut last_err = None;
@@ -1138,379 +1258,9 @@ fn collect<T>(results: Vec<Result<Vec<T>, String>>) -> Result<Vec<T>, String> {
     Ok(out)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_projects(_slugs: &[String]) -> Result<Vec<project::ProjectInfo>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_tasks(_slugs: &[String]) -> Result<Vec<task::TaskInfo>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_tasks_tagged(
-    _slugs: &[String],
-) -> Result<Vec<(String, task::TaskInfo)>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_day_templates(
-    _slug: &str,
-) -> Result<Vec<scheduling_proto::DayTemplate>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_day_plan(
-    _slug: &str,
-    _date: &str,
-) -> Result<Option<scheduling_proto::DayPlan>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn save_day_plan(_slug: &str, _plan: scheduling_proto::DayPlan) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn delete_day_plan(_slug: &str, _date: &str) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn list_events(_slug: &str) -> Result<Vec<scheduling_proto::CalEvent>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn upsert_event(_slug: &str, _event: scheduling_proto::CalEvent) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn delete_event(_slug: &str, _id: &str) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_event_types(_slug: &str) -> Result<Vec<scheduling_proto::EventType>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_event_type(
-    _slug: &str,
-    _title: &str,
-    _duration_min: u16,
-) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_bookings(_slug: &str) -> Result<Vec<scheduling_proto::Booking>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn cancel_booking(_slug: &str, _id: &str) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_inbox(_slug: &str) -> Result<Vec<inbox_proto::InboxItem>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn upsert_inbox_item(_slug: &str, _item: inbox_proto::InboxItem) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn delete_inbox_item(_slug: &str, _id: &str) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_task(
-    _slug: &str,
-    _title: &str,
-    _details: &str,
-) -> Result<task::TaskInfo, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_wiki_note(_slug: &str, _path: &str, _markdown: &str) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_locations(_slug: &str) -> Result<Vec<locations_proto::Location>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_location(
-    _slug: &str,
-    _name: &str,
-    _kind: &str,
-    _address: Option<String>,
-) -> Result<locations_proto::Location, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_inventory(_slug: &str) -> Result<Vec<inventory_proto::Item>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_item(
-    _slug: &str,
-    _name: &str,
-    _category: &str,
-    _location_id: Option<uuid::Uuid>,
-) -> Result<inventory_proto::Item, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn set_item_status(
-    _slug: &str,
-    _id: &str,
-    _status: &str,
-) -> Result<inventory_proto::Item, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_milestones(_slug: &str) -> Result<Vec<milestone_proto::Milestone>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_milestone(
-    _slug: &str,
-    _title: &str,
-    _project_id: uuid::Uuid,
-    _due_date: Option<chrono::NaiveDate>,
-) -> Result<milestone_proto::Milestone, String> {
-    Err("native client not wired yet".to_owned())
-}
-
 // ── Fitness (native stubs) ──────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_body_metrics(
-    _slug: &str,
-) -> Result<Vec<fitness_proto::body::BodyMetric>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_body_metric(
-    _slug: &str,
-    _name: &str,
-    _kind: &str,
-    _unit: &str,
-) -> Result<fitness_proto::body::BodyMetric, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn log_body_entry(
-    _slug: &str,
-    _metric_id: uuid::Uuid,
-    _value: f64,
-    _date: chrono::NaiveDate,
-) -> Result<fitness_proto::body::BodyMetric, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_exercises(
-    _slug: &str,
-) -> Result<Vec<fitness_proto::exercises::Exercise>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_exercise(
-    _slug: &str,
-    _name: &str,
-    _category: &str,
-) -> Result<fitness_proto::exercises::Exercise, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_workouts(
-    _slug: &str,
-) -> Result<Vec<fitness_proto::workouts::WorkoutSession>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_intake(_slug: &str) -> Result<Vec<fitness_proto::intake::IntakeLog>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
 // ── Mealplan (native stubs) ─────────────────────────────────────────
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_recipes(_slug: &str) -> Result<Vec<cookbook_proto::Recipe>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_recipe(_slug: &str, _name: &str) -> Result<cookbook_proto::Recipe, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_pantry(_slug: &str) -> Result<Vec<pantry_proto::PantryItem>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn create_pantry_item(
-    _slug: &str,
-    _name: &str,
-    _qty: Option<f64>,
-    _unit: &str,
-) -> Result<pantry_proto::PantryItem, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_meal_plans(_slug: &str) -> Result<Vec<mealplan_proto::Meal>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_active_timer(
-    _slug: &str,
-    _user_id: uuid::Uuid,
-) -> Result<Option<timer_proto::WorkSession>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_recent_sessions(
-    _slug: &str,
-    _user_id: uuid::Uuid,
-) -> Result<Vec<timer_proto::WorkSession>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_org_sessions(_slug: &str) -> Result<Vec<timer_proto::WorkSession>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_sessions_multi(_slugs: &[String]) -> Vec<(String, timer_proto::WorkSession)> {
-    Vec::new()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn start_timer(
-    _slug: &str,
-    _req: timer_proto::StartTimerRequest,
-) -> Result<timer_proto::WorkSession, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn stop_timer(
-    _slug: &str,
-    _user_id: uuid::Uuid,
-) -> Result<timer_proto::WorkSession, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn update_session(
-    _slug: &str,
-    _req: timer_proto::service::UpdateSessionRequest,
-) -> Result<timer_proto::WorkSession, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn delete_session(_slug: &str, _id: uuid::Uuid) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_invoices(_slug: &str) -> Result<Vec<finance_proto::Invoice>, String> {
-    Err("native client not wired yet".to_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_uninvoiced(_slug: &str) -> Result<Vec<finance_proto::UninvoicedGroup>, String> {
-    Err("native client not wired yet".to_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn generate_invoice(
-    _slug: &str,
-    _req: finance_proto::GenerateInvoice,
-) -> Result<finance_proto::Invoice, String> {
-    Err("native client not wired yet".to_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn invoice_mark_sent(
-    _slug: &str,
-    _id: uuid::Uuid,
-) -> Result<finance_proto::Invoice, String> {
-    Err("native client not wired yet".to_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn invoice_record_payment(
-    _slug: &str,
-    _id: uuid::Uuid,
-    _amount_minor: i64,
-    _date: String,
-) -> Result<finance_proto::Invoice, String> {
-    Err("native client not wired yet".to_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn invoice_delete(_slug: &str, _id: uuid::Uuid) -> Result<(), String> {
-    Err("native client not wired yet".to_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_ledger_accounts(
-    _slug: &str,
-) -> Result<Vec<(finance_proto::Account, finance_proto::AccountBalance)>, String> {
-    Err("native client not wired yet".to_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_ledger_transactions(
-    _slug: &str,
-) -> Result<Vec<finance_proto::Transaction>, String> {
-    Err("native client not wired yet".to_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_invoices_multi(_slugs: &[String]) -> Vec<(String, finance_proto::Invoice)> {
-    Vec::new()
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_uninvoiced_multi(
-    _slugs: &[String],
-) -> Vec<(String, finance_proto::UninvoicedGroup)> {
-    Vec::new()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn find_project(
-    _id: &str,
-    _slugs: &[String],
-) -> Result<(project::ProjectInfo, String), String> {
-    Err("native client not wired yet".to_owned())
-}
 
 // ── Agents ────────────────────────────────────────────────────────
 
@@ -1519,14 +1269,13 @@ pub async fn find_project(
 /// Each session carries its owning org slug so the `/agents` page can
 /// show provenance in multi-org "All" mode. Archived sessions are
 /// included so the listing is a faithful mirror of the backend.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_agent_sessions(
     slugs: &[String],
 ) -> Result<Vec<(String, agent_proto::session::Session)>, String> {
-    let futs = slugs.iter().cloned().map(|slug| async move {
+    let futs = slugs.iter().map(|slug| async move {
         let client = crate::vox_clients::establish_for::<
             agent_proto::service::sessions::SessionsClient,
-        >(&slug)
+        >(slug)
         .await?;
         let filter = agent_proto::service::sessions::SessionFilter {
             project_id: String::new(),
@@ -1551,20 +1300,12 @@ pub async fn fetch_agent_sessions(
     collect(futures_util::future::join_all(futs).await)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_agent_sessions(
-    _slugs: &[String],
-) -> Result<Vec<(String, agent_proto::session::Session)>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
 // ── Email ───────────────────────────────────────────────────────────
 
 /// Every mail account the org's `EmailSync` backend serves. An org
 /// with no configured mailbox returns an empty list (operational but
 /// unconfigured) — the `/email` page renders that as an empty state
 /// rather than an error.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_email_accounts(slug: &str) -> Result<Vec<email_proto::Account>, String> {
     let client = crate::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
     client
@@ -1577,7 +1318,6 @@ pub async fn fetch_email_accounts(slug: &str) -> Result<Vec<email_proto::Account
 /// newest first. `count` caps the slice. Returns an empty list for an
 /// empty mailbox; surfaces backend errors verbatim so the page can show
 /// them inline.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_email_envelopes(
     slug: &str,
     account: &str,
@@ -1598,27 +1338,12 @@ pub async fn fetch_email_envelopes(
     Ok(envelopes)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_email_accounts(_slug: &str) -> Result<Vec<email_proto::Account>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_email_envelopes(
-    _slug: &str,
-    _account: &str,
-    _count: u32,
-) -> Result<Vec<email_proto::Envelope>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
 // ── Git / forge ─────────────────────────────────────────────────────
 
 /// Every repo the org's forge backend can address, in the order the
 /// catalog lists them. Backed by `RepoCatalog::list_repos`; when the
 /// forge is unconfigured (no token) the backend returns an
 /// auth/forge error the caller renders as an empty list.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_repos(slug: &str) -> Result<Vec<git_proto::Repo>, String> {
     let client =
         crate::vox_clients::establish_for::<git_proto::repo::RepoCatalogClient>(slug).await?;
@@ -1631,7 +1356,6 @@ pub async fn fetch_repos(slug: &str) -> Result<Vec<git_proto::Repo>, String> {
 /// Issues for one repo (all states), via `IssueTracker::list_issues`
 /// with a default (unfiltered) filter. The `/repos` page calls this
 /// per repo to show each repo's open work inline.
-#[cfg(target_arch = "wasm32")]
 pub async fn fetch_issues(
     slug: &str,
     repo: git_proto::RepoId,
@@ -1642,17 +1366,4 @@ pub async fn fetch_issues(
         .list_issues(repo, git_proto::issues::IssueFilter::default())
         .await
         .map_err(|e| format!("{slug}: list issues: {e:?}"))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_repos(_slug: &str) -> Result<Vec<git_proto::Repo>, String> {
-    Err("native client not wired yet".to_owned())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_issues(
-    _slug: &str,
-    _repo: git_proto::RepoId,
-) -> Result<Vec<git_proto::issues::Issue>, String> {
-    Err("native client not wired yet".to_owned())
 }

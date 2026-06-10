@@ -14989,6 +14989,7 @@ dependencies = [
  "sha2",
  "task",
  "task-server",
+ "threads",
  "timer",
  "timer-proto",
  "tokio",
@@ -15068,6 +15069,7 @@ dependencies = [
  "task",
  "tempfile",
  "thiserror 2.0.18",
+ "threads",
  "timer",
  "timer-proto",
  "tokio",
@@ -15236,6 +15238,62 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "threads"
+version = "0.1.0"
+dependencies = [
+ "threads-db",
+ "threads-proto",
+ "threads-ui",
+]
+
+[[package]]
+name = "threads-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "threads-proto",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "threads-proto"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "threads-ui"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dioxus",
+ "fts-ui",
+ "serde",
+ "threads-proto",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -16206,6 +16264,7 @@ dependencies = [
  "serde_json",
  "task",
  "task-ui",
+ "threads",
  "timer-proto",
  "tracing",
  "uuid",
@@ -18721,10 +18780,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "daw-proto"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "moire-macros"
 version = "1.0.0"
 source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
+
+[[patch.unused]]
+name = "daw-proto"
+version = "0.1.0"

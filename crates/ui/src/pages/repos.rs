@@ -18,7 +18,7 @@
 
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use git_proto::{Repo, RepoId};
+use git_proto::RepoId;
 
 use crate::orgs::{OrgMeta, OrgSelection};
 
@@ -35,21 +35,32 @@ pub fn ReposView() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
 
-    // The org whose forge we list (first selected, or home).
-    let slug = use_memo(move || {
-        crate::orgs::selected_slugs(&selection.read(), &org_list.read())
-            .into_iter()
-            .next()
-    });
+    // Every selected org (All mode fans out over all of them, so a
+    // repo connected in any org shows up — not just the home org).
+    let slugs = use_memo(move || crate::orgs::selected_slugs(&selection.read(), &org_list.read()));
 
-    let repos = use_resource(move || async move {
-        match slug() {
-            Some(s) => crate::feeds::fetch_repos(&s).await,
-            None => Ok(Vec::new()),
+    // Connected repos across the selected orgs, each tagged with its
+    // org slug (needed to fetch that repo's issues from the right org).
+    let repos = use_resource(move || {
+        let slugs = slugs();
+        async move {
+            let mut out: Vec<(String, RepoId)> = Vec::new();
+            for s in slugs {
+                // Per-org failures are tolerated — a down/empty org
+                // doesn't blank the whole view.
+                if let Ok(rids) = crate::feeds::fetch_connected_repos(&s).await {
+                    for rid in rids {
+                        if !out.iter().any(|(os, orid)| os == &s && orid == &rid) {
+                            out.push((s.clone(), rid));
+                        }
+                    }
+                }
+            }
+            Ok::<Vec<(String, RepoId)>, String>(out)
         }
     });
 
-    let (rows, load_err): (Vec<Repo>, Option<String>) = match &*repos.read() {
+    let (rows, load_err): (Vec<(String, RepoId)>, Option<String>) = match &*repos.read() {
         Some(Ok(all)) => (all.clone(), None),
         Some(Err(e)) => (Vec::new(), Some(e.clone())),
         None => (Vec::new(), None),
@@ -64,7 +75,7 @@ pub fn ReposView() -> Element {
             Text {
                 variant: TextVariant::Muted,
                 class: "text-sm -mt-2",
-                "Forge repositories this org can address, with their issues.",
+                "Repos connected to a project, with their issues.",
             }
 
             if let Some(err) = load_err {
@@ -77,21 +88,21 @@ pub fn ReposView() -> Element {
                 div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
                     Text {
                         variant: TextVariant::Muted,
-                        "No repos — connect a forge token (TASK_FORGEJO_TOKEN) to populate this view.",
+                        "No connected repos — bind a project to a repo to populate this view.",
                     }
                 }
             } else {
                 div { class: "flex flex-col gap-3",
-                    for repo in rows {
+                    for (rslug , rid) in rows {
                         RepoCard {
-                            key: "{repo.id.owner}/{repo.id.repo}",
-                            slug: slug().unwrap_or_default(),
-                            repo_id: repo.id.clone(),
-                            owner: repo.id.owner.clone(),
-                            name: repo.id.repo.clone(),
-                            description: repo.description.clone().unwrap_or_default(),
-                            private: repo.private,
-                            archived: repo.archived,
+                            key: "{rslug}:{rid.owner}/{rid.repo}",
+                            slug: rslug.clone(),
+                            repo_id: rid.clone(),
+                            owner: rid.owner.clone(),
+                            name: rid.repo.clone(),
+                            description: String::new(),
+                            private: false,
+                            archived: false,
                         }
                     }
                 }
@@ -120,19 +131,25 @@ fn RepoCard(
     // loads independently. Returns `(number, title, state)` tuples —
     // all `PartialEq`-clean — so the rendered rows don't need the
     // non-`PartialEq` `Issue` struct.
-    let issues = use_resource(move || {
-        let s = slug.clone();
-        let rid = repo_id.clone();
-        async move {
-            if s.is_empty() {
-                Ok(Vec::new())
-            } else {
-                crate::feeds::fetch_issues(&s, rid).await.map(|issues| {
-                    issues
-                        .into_iter()
-                        .map(|i| (i.id.0, i.title, i.state))
-                        .collect::<Vec<(u64, String, git_proto::IssueState)>>()
-                })
+    let issues = use_resource({
+        // Capture clones so the `slug` / `repo_id` props stay available
+        // for the per-issue `IssueRow` children below.
+        let slug = slug.clone();
+        let repo_id = repo_id.clone();
+        move || {
+            let s = slug.clone();
+            let rid = repo_id.clone();
+            async move {
+                if s.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    crate::feeds::fetch_issues(&s, rid).await.map(|issues| {
+                        issues
+                            .into_iter()
+                            .map(|i| (i.id.0, i.title, i.state))
+                            .collect::<Vec<(u64, String, git_proto::IssueState)>>()
+                    })
+                }
             }
         }
     });
@@ -170,15 +187,70 @@ fn RepoCard(
             } else {
                 div { class: "mt-1 flex flex-col gap-1",
                     for (number , title , state) in issue_rows {
-                        div {
+                        IssueRow {
                             key: "{number}",
-                            class: "flex items-center gap-2 rounded-lg border border-border bg-background/40 px-2 py-1",
-                            Text { variant: TextVariant::Muted, class: "shrink-0 text-[11px] font-mono", "#{number}" }
-                            Text { class: "min-w-0 flex-1 truncate text-xs", "{title}" }
-                            StatusBadge {
-                                variant: issue_variant(state),
-                                label: if state == git_proto::IssueState::Open { "open".to_string() } else { "closed".to_string() },
-                            }
+                            slug: slug.clone(),
+                            repo_id: repo_id.clone(),
+                            number,
+                            title,
+                            state,
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One issue row + its forge comments (the conversation), loaded lazily
+/// from `IssueTracker::list_comments`. Comments map to `(author, body)`
+/// tuples so the rendered rows stay `PartialEq`-clean.
+#[component]
+fn IssueRow(
+    slug: String,
+    repo_id: RepoId,
+    number: u64,
+    title: String,
+    state: git_proto::IssueState,
+) -> Element {
+    let comments = use_resource(move || {
+        let s = slug.clone();
+        let rid = repo_id.clone();
+        async move {
+            if s.is_empty() {
+                Ok(Vec::new())
+            } else {
+                crate::feeds::fetch_issue_comments(&s, rid, number)
+                    .await
+                    .map(|cs| {
+                        cs.into_iter()
+                            .map(|c| (c.author.login, c.body))
+                            .collect::<Vec<(String, String)>>()
+                    })
+            }
+        }
+    });
+    let comment_rows: Vec<(String, String)> = match &*comments.read() {
+        Some(Ok(c)) => c.clone(),
+        _ => Vec::new(),
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-1 rounded-lg border border-border bg-background/40 px-2 py-1",
+            div { class: "flex items-center gap-2",
+                Text { variant: TextVariant::Muted, class: "shrink-0 text-[11px] font-mono", "#{number}" }
+                Text { class: "min-w-0 flex-1 truncate text-xs", "{title}" }
+                StatusBadge {
+                    variant: issue_variant(state),
+                    label: if state == git_proto::IssueState::Open { "open".to_string() } else { "closed".to_string() },
+                }
+            }
+            if !comment_rows.is_empty() {
+                div { class: "ml-3 flex flex-col gap-1 border-l border-border pl-3",
+                    for (author , body) in comment_rows {
+                        div { class: "flex flex-col",
+                            Text { variant: TextVariant::Muted, class: "text-[11px] font-medium", "{author}" }
+                            Text { class: "text-xs", "{body}" }
                         }
                     }
                 }

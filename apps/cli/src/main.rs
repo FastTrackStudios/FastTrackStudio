@@ -162,6 +162,9 @@ enum Commands {
     /// Inbox — capture fleeting notes and triage the daily queue.
     #[command(subcommand)]
     Inbox(InboxCmd),
+    /// Threads — log conversations & topics on a task or project.
+    #[command(subcommand)]
+    Threads(ThreadsCmd),
     /// Cookbook recipes (cooklang `.cook` files under
     /// `Wiki/Cookbook/`).
     #[command(subcommand)]
@@ -476,6 +479,93 @@ enum IntakeCmd {
         target: String,
         #[arg(long, short = 'y')]
         yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+/// Log conversations & topics against a task or project. `new` opens a
+/// thread (topic); `post` adds a message; `list`/`show` read them.
+/// Anchored by `(entity_type, entity_id)` so the same primitive works
+/// for any entity later (forge issues, chats, ingested comms).
+enum ThreadsCmd {
+    /// Open a new thread (topic) on a task or project.
+    New {
+        /// Host entity kind: `task` | `project`.
+        #[arg(long)]
+        entity_type: String,
+        /// Host entity id (the task/project frontmatter `id`).
+        #[arg(long)]
+        entity_id: uuid::Uuid,
+        /// Topic / title. Quote multi-word.
+        title: Vec<String>,
+        /// Kind: `discussion` (default) | `question` | `decision` | `action` | `praise`.
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Post a message to a thread.
+    Post {
+        /// Target thread id.
+        thread_id: uuid::Uuid,
+        /// Message text. Quote multi-word.
+        text: Vec<String>,
+        /// Reply to another message in the thread.
+        #[arg(long)]
+        reply_to: Option<uuid::Uuid>,
+        /// Source label: `native` (default) | `agent` | …
+        #[arg(long)]
+        source: Option<String>,
+        /// Author display label. Defaults to `cli` (or `agent` when `--source agent`).
+        #[arg(long)]
+        author: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// List threads on a task or project.
+    List {
+        #[arg(long)]
+        entity_type: String,
+        #[arg(long)]
+        entity_id: uuid::Uuid,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Show a thread's messages.
+    Show {
+        thread_id: uuid::Uuid,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark a thread resolved (or `--unresolve` to reopen).
+    Resolve {
+        thread_id: uuid::Uuid,
+        #[arg(long)]
+        unresolve: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Delete a thread and its messages.
+    Rm {
+        id: uuid::Uuid,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -919,6 +1009,10 @@ enum ProjectCmd {
         /// `normal`.
         #[arg(long)]
         priority: Option<String>,
+        /// Project type / template — `code` | `general` | `personal`.
+        /// Drives the overview layout. Default `general`.
+        #[arg(long = "type")]
+        project_type: Option<String>,
         /// Comma-separated tag list.
         #[arg(long, value_delimiter = ',')]
         tags: Vec<String>,
@@ -3874,6 +3968,9 @@ async fn main() -> eyre::Result<()> {
         Commands::Inbox(cmd) => {
             return Box::pin(run_inbox(cmd)).await;
         }
+        Commands::Threads(cmd) => {
+            return Box::pin(run_threads(cmd)).await;
+        }
         Commands::Recipe(cmd) => {
             return Box::pin(run_recipe(cmd)).await;
         }
@@ -4093,6 +4190,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             parent,
             status,
             priority,
+            project_type,
             tags,
             details,
             org,
@@ -4114,6 +4212,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 title,
                 status: status.unwrap_or_else(|| "active".into()),
                 priority: priority.unwrap_or_else(|| "normal".into()),
+                project_type: project_type.unwrap_or_else(|| "general".into()),
                 lead: String::new(),
                 tags: project::model::Tags(tags),
                 parent_id,
@@ -13728,6 +13827,185 @@ where
 }
 
 // ── Location (locations::Store) ──────────────────────────────────────
+
+async fn connect_threads_client(url: &str) -> eyre::Result<threads::ThreadsServiceClient> {
+    establish_for_url(url).await
+}
+
+/// Resolve `(org_id, local_user_id)` for CLI-authored threads, matching
+/// the timer CLI's identity derivation so UI + CLI share a keyspace.
+fn threads_local_ids(org_override: Option<&str>) -> (uuid::Uuid, uuid::Uuid) {
+    let org_id = org_ctx::resolve_active(org_override)
+        .ok()
+        .and_then(|ctx| ctx.root.manifest().ok().map(|m| m.id))
+        .unwrap_or_else(uuid::Uuid::nil);
+    (org_id, timer_owner_id(org_id))
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_threads(cmd: ThreadsCmd) -> eyre::Result<()> {
+    match cmd {
+        ThreadsCmd::New {
+            entity_type,
+            entity_id,
+            title,
+            kind,
+            org,
+            server,
+        } => {
+            let title = title.join(" ");
+            if title.trim().is_empty() {
+                eyre::bail!("a thread needs a title — pass some text");
+            }
+            let slug = resolve_active_org(org.clone())?;
+            let (org_id, user_id) = threads_local_ids(org.as_deref());
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_threads_client(&u).await?;
+            let t = client
+                .create_thread(threads::CreateThreadRequest {
+                    org_id,
+                    entity_type,
+                    entity_id,
+                    title,
+                    kind: kind.unwrap_or_default(),
+                    created_by: user_id,
+                    source_kind: "native".into(),
+                    source_ref: None,
+                    source_url: None,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("create_thread: {e:?}"))?;
+            println!("created thread {}  {}", t.id, t.title);
+        }
+        ThreadsCmd::Post {
+            thread_id,
+            text,
+            reply_to,
+            source,
+            author,
+            org,
+            server,
+        } => {
+            let body = text.join(" ");
+            if body.trim().is_empty() {
+                eyre::bail!("nothing to post — pass some message text");
+            }
+            let slug = resolve_active_org(org.clone())?;
+            let (org_id, user_id) = threads_local_ids(org.as_deref());
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_threads_client(&u).await?;
+            let source_kind = source.unwrap_or_else(|| "native".into());
+            let author_label = author.unwrap_or_else(|| {
+                if source_kind == "agent" {
+                    "agent".into()
+                } else {
+                    "cli".into()
+                }
+            });
+            let m = client
+                .post_message(threads::PostMessageRequest {
+                    thread_id,
+                    org_id,
+                    author_id: Some(user_id),
+                    author_label,
+                    body,
+                    reply_to,
+                    source_kind,
+                    external_id: None,
+                    original_text: None,
+                    source_url: None,
+                    posted_at: None,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("post_message: {e:?}"))?;
+            println!("posted {}", m.id);
+        }
+        ThreadsCmd::List {
+            entity_type,
+            entity_id,
+            json,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_threads_client(&u).await?;
+            let rows = client
+                .list_threads(entity_type, entity_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_threads: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} threads", rows.len());
+            for t in rows {
+                let r = if t.resolved { " (resolved)" } else { "" };
+                println!("  {}  [{}]{}  {}", t.id, t.kind, r, t.title);
+            }
+        }
+        ThreadsCmd::Show {
+            thread_id,
+            json,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_threads_client(&u).await?;
+            let msgs = client
+                .list_messages(thread_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_messages: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&msgs).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} messages", msgs.len());
+            for m in msgs {
+                println!(
+                    "  [{}] {}: {}",
+                    m.posted_at.format("%Y-%m-%d %H:%M"),
+                    m.author_label,
+                    m.body
+                );
+            }
+        }
+        ThreadsCmd::Resolve {
+            thread_id,
+            unresolve,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let (_org_id, user_id) = threads_local_ids(org.as_deref());
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_threads_client(&u).await?;
+            let t = client
+                .set_resolved(thread_id, !unresolve, Some(user_id))
+                .await
+                .map_err(|e| eyre::eyre!("set_resolved: {e:?}"))?;
+            println!("thread {} resolved={}", t.id, t.resolved);
+        }
+        ThreadsCmd::Rm { id, org, server } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_threads_client(&u).await?;
+            client
+                .delete_thread(id)
+                .await
+                .map_err(|e| eyre::eyre!("delete_thread: {e:?}"))?;
+            println!("deleted thread {id}");
+        }
+    }
+    Ok(())
+}
 
 async fn connect_inbox_client(url: &str) -> eyre::Result<inbox_proto::InboxClient> {
     establish_for_url(url).await

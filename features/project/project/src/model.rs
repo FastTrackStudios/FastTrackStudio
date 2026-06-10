@@ -81,6 +81,19 @@ pub struct ProjectInfo {
     #[architect(filterable, sortable)]
     pub priority: String,
 
+    /// Project type / template — `code` | `general` (default) |
+    /// `personal`. Drives the overview layout: code projects lead with
+    /// issues & PRs, personal projects hide the repo, general is the
+    /// neutral default. Free-form so more types slot in without a
+    /// schema bump; empty is treated as `general`.
+    #[serde(
+        default,
+        rename = "projectType",
+        skip_serializing_if = "String::is_empty"
+    )]
+    #[architect(filterable)]
+    pub project_type: String,
+
     /// Project lead / responsible party. Free-text (often a
     /// `[[User Name]]` wikilink). Multiple leads → join with
     /// `, ` in the frontmatter.

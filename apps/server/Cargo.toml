@@ -81,6 +81,7 @@ intake = { workspace = true, features = ["vox"] }
 org-proto = { workspace = true }
 timer-proto = { workspace = true, features = ["server", "vox"] }
 timer = { workspace = true }
+threads = { workspace = true, features = ["server", "vox"] }
 # Scheduling: day-template service mounted over vox so the app can
 # overlay the daily plan on the calendar. Read-mostly; bookings/slots
 # use in-memory stores until they're surfaced.

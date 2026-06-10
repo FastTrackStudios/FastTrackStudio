@@ -19,6 +19,7 @@
 
 pub mod attachments;
 pub mod capability;
+pub mod connections;
 pub mod forge_sync;
 pub mod server_mgmt;
 pub mod webhooks;
@@ -125,6 +126,10 @@ pub struct OrgAppState {
     pub agent_codex: agent_codex::CodexBackend,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
+    /// Threads backend — conversations/topics anchored to any entity
+    /// (`(entity_type, entity_id)`); SeaORM-backed. Mounted for the
+    /// `ThreadsService` RPC surface.
+    pub threads: threads::Store,
     /// Scheduling backend — day templates / availability under
     /// `vault/Projects/Scheduling/`. Mounted for `DayTemplates` so
     /// the app can overlay the daily plan on the calendar.
@@ -515,6 +520,17 @@ pub(crate) async fn build_org_state(
         });
         let timer = timer::Store::new(timer_conn, timer_defaults);
 
+        // Threads — conversations/topics anchored to tasks/projects.
+        // SeaORM-backed (DB swappable); migrations run on open. Override
+        // via `TASK_SERVER_THREADS_URL`.
+        let threads_url = std::env::var("TASK_SERVER_THREADS_URL")
+            .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.threads_db().display()));
+        let threads_conn = open_sqlite_pool(scope, threads_url, "threads", |db| {
+            Box::pin(async move { threads::Migrator::up(&db, None).await.map(|()| db) })
+        })
+        .await?;
+        let threads = threads::Store::new(threads_conn);
+
         // Scheduling backend rooted at the same vault. Day templates
         // live under `Projects/Scheduling/templates/`; the kv/log
         // stores back bookings + slot caches we don't surface yet, so
@@ -716,6 +732,7 @@ pub(crate) async fn build_org_state(
             agent_codex,
             agent_dispatch_vault_root: vault_root,
             timer,
+            threads,
             scheduling,
             inbox,
             finance_conn,
@@ -1043,6 +1060,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             timer_proto::service::timer_service_rpc_service_descriptor(),
             timer_proto::service::serve(org.timer.clone()),
         )
+        .with(
+            threads::service::threads_service_rpc_service_descriptor(),
+            threads::service::serve(org.threads.clone()),
+        )
         // Scheduling — day templates (drives the calendar overlay)
         // + per-date day plans (the day-by-day editor).
         .with(
@@ -1232,6 +1253,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             git_proto::reviews::review_surface_rpc_service_descriptor(),
             git_proto::reviews::serve(org.forge.clone()),
+        )
+        .with(
+            git_proto::connections::repo_connections_rpc_service_descriptor(),
+            git_proto::connections::serve(connections::ConnectionsBackend::new(
+                org.issue_links_path.clone(),
+            )),
         )
 }
 

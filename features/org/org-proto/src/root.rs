@@ -271,6 +271,11 @@ impl OrgRoot {
     }
 
     #[must_use]
+    pub fn threads_db(&self) -> PathBuf {
+        self.path.join("threads.sqlite")
+    }
+
+    #[must_use]
     pub fn vault_dir(&self) -> PathBuf {
         self.path.join("vault")
     }

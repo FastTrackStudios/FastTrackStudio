@@ -55,6 +55,7 @@ milestone = { workspace = true, features = ["vox"] }
 # milestone. Each provides a `task <verb> …` surface.
 locations = { workspace = true, features = ["vox"] }
 inbox-proto = { workspace = true, features = ["vox"] }
+threads = { workspace = true, features = ["vox"] }
 cookbook = { workspace = true, features = ["vox"] }
 mealplan = { workspace = true, features = ["vox"] }
 pantry = { workspace = true, features = ["vox"] }

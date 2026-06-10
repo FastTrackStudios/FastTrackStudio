@@ -26,6 +26,7 @@
 //!
 //! Mirrors the shape of `email-proto` / `vault-proto`.
 
+pub mod connections;
 pub mod error;
 pub mod event;
 pub mod issues;

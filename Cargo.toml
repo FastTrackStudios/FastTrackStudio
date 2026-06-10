@@ -285,6 +285,13 @@ org-proto = { path = "features/org/org-proto" }
 # truth for the project metadata.
 timer-proto = { path = "features/timer/timer-proto" }
 timer = { path = "features/timer/timer" }
+# Threads feature — universal conversation primitive (topics +
+# messages anchored to any entity via (entity_type, entity_id)),
+# SeaORM-backed so the DB is swappable.
+threads-proto = { path = "features/threads/threads-proto" }
+threads-db = { path = "features/threads/threads-db" }
+threads = { path = "features/threads/threads" }
+threads-ui = { path = "features/threads/threads-ui" }
 # Finance feature — double-entry ledger + invoicing + expenses.
 # `finance-proto` is the wire contract (Book/Account/Transaction/
 # Split/Party/Invoice/Payment/Expense entities, plus the

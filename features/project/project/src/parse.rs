@@ -100,12 +100,17 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
         .and_then(|s| Uuid::from_str(&s).ok())
         .unwrap_or_else(Uuid::nil);
 
+    let project_type = take_str(&map, "projectType")
+        .or_else(|| take_str(&map, "project_type"))
+        .unwrap_or_default();
+
     Ok(ProjectInfo {
         path: rel_path.to_string(),
         id,
         title,
         status,
         priority,
+        project_type,
         lead,
         tags: crate::model::Tags(tags),
         same_as,
