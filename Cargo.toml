@@ -18,6 +18,13 @@ members = [
     "examples/external-stub",
     "examples/custom-server",
     "examples/layered-services",
+    "features/atom",
+    "features/form",
+    "features/auth/architect-auth",
+    "features/auth/auth",
+    "features/auth/auth-proto",
+    "features/auth/auth-db",
+    "features/auth/tests/native",
     "crates/architect-cli",
     "libs/crdt",
     "libs/crdt-seaorm",
@@ -45,6 +52,13 @@ default-members = [
     "macros/crdt-derive",
     "examples/external-stub",
     "examples/custom-server",
+    "features/atom",
+    "features/form",
+    "features/auth/architect-auth",
+    "features/auth/auth",
+    "features/auth/auth-proto",
+    "features/auth/auth-db",
+    "features/auth/tests/native",
     "libs/crdt",
     "libs/crdt-seaorm",
 ]
@@ -77,7 +91,12 @@ eyre = "0.6"
 thiserror = "2"
 
 # Time + IDs
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# `wasmbind` makes chrono's clock (`Utc::now()`) work in the browser —
+# without it `now()` hits `SystemTime::now()` and panics on wasm32
+# ("unreachable executed"). The feature is target-gated, so native builds
+# are unaffected. Needed because the optimistic store's `Example::draft`
+# stamps a client-side timestamp on wasm.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
 uuid = { version = "1", features = ["v4"] }
 
 # Serialization: vox uses facet for wire encoding.
@@ -144,6 +163,44 @@ wasm-bindgen-futures = "0.4"
 # struct + the SeaORM Model + the auto-generated vox repo trait,
 # all from one source struct. Every entity crate depends on this.
 architect = { path = "macros/architect" }
+
+# Client-side optimistic / stale-while-revalidate state for Dioxus —
+# the client twin of the server-side Layer/Resource DI. Entity-agnostic
+# and wasm-safe (Dioxus core only). Pulled by the UI crates, never the
+# server.
+architect-atom = { path = "features/atom" }
+
+# Typed, validated form state for Dioxus (effect-form analog). Builds on
+# architect-atom (submit result is an `AtomResult`). Wasm-safe; UI-only.
+architect-form = { path = "features/form" }
+
+# ── Auth feature (folded in from FastTrackStudios/architect-auth) ──────
+#
+# Unlike atom/form (primitives *below* the architect crate), auth is built
+# *on* architect — auth-proto uses the Entity derive, the engine mounts on
+# vox/axum — so there's no `architect::auth` re-export (it would be a
+# dependency cycle). Consumers depend on `architect-auth` directly; it
+# re-exports the engine, `proto`, and (under `db`) the SeaORM storage.
+architect-auth = { path = "features/auth/architect-auth" }
+auth = { path = "features/auth/auth" }
+auth-proto = { path = "features/auth/auth-proto" }
+auth-db = { path = "features/auth/auth-db" }
+
+# Auth's crypto + token stack.
+argon2 = "0.5"
+base64 = "0.22"
+chacha20poly1305 = "0.10"
+cookie = "0.18"
+hkdf = "0.12"
+jsonwebtoken = "9"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+# Property tests for the auth boundary (dev-dependency).
+proptest = "1"
 
 # Proto crate — referenced by everything else as a path dep so
 # entity changes flow uniformly to every surface.

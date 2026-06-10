@@ -27,6 +27,19 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 default = []
 vox = ["dep:vox"]
 
+# Client-side optimistic / stale-while-revalidate state for Dioxus,
+# re-exported as `architect::atom`. Pulls Dioxus (via architect-atom), so
+# it's off by default and left out of `full` — server builds never see it.
+# UI crates may also depend on `architect-atom` directly. See
+# `docs/content/architecture/optimistic.md`.
+atom = ["dep:architect-atom"]
+
+# Typed, validated form state for Dioxus, re-exported as `architect::form`
+# (effect-form analog). Pulls Dioxus via architect-form + architect-atom;
+# off by default, left out of `full`. See
+# `docs/content/architecture/forms.md`.
+form = ["dep:architect-form", "atom"]
+
 # Adds #[derive(fake::Dummy)] to every architect-emitted struct
 # (Create/Update/List/Model). Pure test-data scaffolding; enable it
 # in your proto crate and the wire structs become trivially seedable.
@@ -107,6 +120,13 @@ architect-derive = { path = "../architect-derive" }
 architect-rpc-derive = { path = "../architect-rpc-derive" }
 facet.workspace = true
 thiserror.workspace = true
+
+# Optional client-state primitive, re-exported as `architect::atom` under
+# the `atom` feature. Pulls Dioxus, so it stays optional + off by default.
+architect-atom = { workspace = true, optional = true }
+# Optional form-state primitive, re-exported as `architect::form` under the
+# `form` feature.
+architect-form = { workspace = true, optional = true }
 
 # Construction layer (`architect::resource`): the default error type for
 # `Resource<T, E = eyre::Report>`, and a `sync`-only tokio for the async

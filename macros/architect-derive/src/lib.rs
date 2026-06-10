@@ -5,7 +5,7 @@
 //! container + field attributes, then synthesise the wire types, the
 //! repo trait, and (under `--features server`) the SeaORM bridge.
 
-use heck::{ToPascalCase, ToSnakeCase};
+use heck::{ToPascalCase, ToSnakeCase, ToTitleCase};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
@@ -19,6 +19,22 @@ use syn::{
 struct ContainerAttrs {
     table_name: Option<String>,
     emit_repo: bool,
+    /// Also emit the client-side state layer (store binding, data hooks,
+    /// optimistic mutations), gated on the user crate's `atom` + `vox`
+    /// features. Requires `repo`.
+    emit_store: bool,
+    /// Also emit typed form-field bindings (`<E>CreateFields` /
+    /// `<E>UpdateFields` + hooks) over the Create/Update payloads, gated
+    /// on the user crate's `form` feature.
+    emit_form: bool,
+    /// Also emit the live-event story: the `<E>Event` enum, the
+    /// `<E>Events` subscribe trait, the `<E>Evented<R>` publish-through
+    /// wrapper whose `Services` bundle mounts repo + events together, and
+    /// (with `store`) the client subscription hook. Requires `repo`.
+    emit_events: bool,
+    /// `#[architect(page_size = N)]` — rows per page for the derived list
+    /// hook (default 100).
+    page_size: Option<u32>,
 }
 
 #[derive(Default)]
@@ -40,6 +56,12 @@ struct FieldAttrs {
     /// DeserializeOwned`; sea-orm's `with-json` feature handles the
     /// rest. No-op when the `server` feature isn't active.
     json: bool,
+    /// `#[architect(form(optional))]` — the generated form field accepts
+    /// an empty value (String fields only; the default is required).
+    form_optional: bool,
+    /// `#[architect(form(label = "…"))]` — display label for the
+    /// generated form field (default: Title Case of the field name).
+    form_label: Option<String>,
 }
 
 fn parse_container_attrs(attrs: &[syn::Attribute]) -> Result<ContainerAttrs> {
@@ -54,6 +76,15 @@ fn parse_container_attrs(attrs: &[syn::Attribute]) -> Result<ContainerAttrs> {
                 out.table_name = Some(s.value());
             } else if meta.path.is_ident("repo") {
                 out.emit_repo = true;
+            } else if meta.path.is_ident("store") {
+                out.emit_store = true;
+            } else if meta.path.is_ident("form") {
+                out.emit_form = true;
+            } else if meta.path.is_ident("events") {
+                out.emit_events = true;
+            } else if meta.path.is_ident("page_size") {
+                let n: syn::LitInt = meta.value()?.parse()?;
+                out.page_size = Some(n.base10_parse()?);
             } else {
                 return Err(meta.error("unknown architect container attribute"));
             }
@@ -90,6 +121,18 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
                 out.fulltext = true;
             } else if p.is_ident("json") {
                 out.json = true;
+            } else if p.is_ident("form") {
+                meta.parse_nested_meta(|inner| {
+                    if inner.path.is_ident("optional") {
+                        out.form_optional = true;
+                    } else if inner.path.is_ident("label") {
+                        let s: LitStr = inner.value()?.parse()?;
+                        out.form_label = Some(s.value());
+                    } else {
+                        return Err(inner.error("unknown architect form attribute"));
+                    }
+                    Ok(())
+                })?;
             } else if p.is_ident("exclude") {
                 meta.parse_nested_meta(|inner| {
                     if inner.path.is_ident("create") {
@@ -196,6 +239,21 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     })?;
     let pk_ident = pk.ident;
     let pk_ty = pk.ty;
+
+    if container.emit_store && !container.emit_repo {
+        return Err(syn::Error::new_spanned(
+            &ident,
+            "#[architect(store)] requires #[architect(repo)] — the generated \
+             data hooks call the <Entity>Repo vox client",
+        ));
+    }
+    if container.emit_events && !container.emit_repo {
+        return Err(syn::Error::new_spanned(
+            &ident,
+            "#[architect(events)] requires #[architect(repo)] — the \
+             <Entity>Evented wrapper publishes through the repo trait",
+        ));
+    }
 
     let create_ident = format_ident!("{}Create", ident);
     let update_ident = format_ident!("{}Update", ident);
@@ -436,6 +494,43 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         &update_fields,
     );
 
+    // ── Client-state emission (`store`) ──
+    let store_block = build_store_block(
+        &ident,
+        &vis,
+        &container,
+        &parsed,
+        pk_ident,
+        pk_ty,
+        &create_ident,
+        &update_ident,
+        &repo_ident,
+        &update_fields,
+    );
+
+    // ── Typed form emission (`form`) ──
+    let form_block = build_form_block(
+        &ident,
+        &vis,
+        &container,
+        &create_ident,
+        &update_ident,
+        &create_fields,
+        &update_fields,
+    );
+
+    // ── Live-event emission (`events`) ──
+    let events_block = build_events_block(
+        &ident,
+        &vis,
+        &container,
+        pk_ty,
+        &create_ident,
+        &update_ident,
+        &list_ident,
+        &repo_ident,
+    );
+
     Ok(quote! {
         #wire_struct
         #create_struct
@@ -445,7 +540,876 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         #repo_layer
         #seed_fn
         #server_block
+        #store_block
+        #form_block
+        #events_block
     })
+}
+
+/// Emit the entity's live-event story:
+///
+/// ```ignore
+/// enum ExampleEvent { Upserted(Example), Deleted(Uuid) }      // wire type
+/// #[vox::service] trait ExampleEvents { async fn subscribe(&self, sink: Tx<ExampleEvent>) … }
+/// struct ExampleEvented<R> { … }   // publish-through repo wrapper + subscribe host
+/// struct ExampleEventsLayer;       // Layer token for the subscribe service
+/// impl Services for ExampleEvented<R>   // bundles repo + events: into_router() mounts both
+/// fn use_example_events()          // (with `store`) client hook: events → the optimistic store
+/// ```
+///
+/// The server wraps its backend **once** (`ExampleEvented::new(repo)`) and
+/// every successful `create`/`update`/`delete` broadcasts to every
+/// subscriber; `hub()` exposes the `architect::PubSub` so hosts can
+/// publish from outside the repo too (pollers, CRDT change hooks). The
+/// client hook folds events into the derived store, making every
+/// store-rendered page live.
+#[allow(clippy::too_many_arguments)]
+fn build_events_block(
+    ident: &Ident,
+    vis: &syn::Visibility,
+    container: &ContainerAttrs,
+    pk_ty: &Type,
+    create_ident: &Ident,
+    update_ident: &Ident,
+    list_ident: &Ident,
+    repo_ident: &Ident,
+) -> TokenStream2 {
+    if !container.emit_events {
+        return quote! {};
+    }
+
+    let snake = ident.to_string().to_snake_case();
+    let event_ident = format_ident!("{}Event", ident);
+    let events_trait = format_ident!("{}Events", ident);
+    let evented_ident = format_ident!("{}Evented", ident);
+    let events_layer_token = format_ident!("{}Layer", events_trait);
+    let events_client = format_ident!("{}Client", events_trait);
+    let events_dispatcher = format_ident!("{}Dispatcher", events_trait);
+    let events_descriptor_fn = format_ident!(
+        "{}_service_descriptor",
+        events_trait.to_string().to_snake_case()
+    );
+    let repo_layer_token = format_ident!("{}Layer", repo_ident);
+    let use_events_fn = format_ident!("use_{}_events", snake);
+    let apply_fn = format_ident!("__apply_{}_event", snake);
+    let use_store_fn = format_ident!("use_{}_store", snake);
+    let store_alias = format_ident!("{}Store", ident);
+
+    let doc_event = format!(
+        "One change to the [`{ident}`] set. `Upserted` covers create *and* \
+         update — the client folds it with a single authoritative \
+         `Store::put`."
+    );
+    let doc_evented = format!(
+        "Publish-through wrapper over any [`{repo_ident}`] backend: every \
+         successful write broadcasts an [`{event_ident}`] to every \
+         [`{events_trait}::subscribe`] sink. Its `Services` bundle mounts \
+         the repo **and** the subscribe service, so \
+         `{evented_ident}::new(backend).into_router()` serves both. Wrap \
+         **once** per process — the hub lives inside, and per-connection \
+         routers must share it."
+    );
+
+    // The client hook only exists when the store layer is also emitted.
+    let client_hook = if container.emit_store {
+        quote! {
+            /// Live entity events → the derived store. Mount once (at the
+            /// app root): subscribes for the app's lifetime, folds every
+            /// server-pushed change into the optimistic store — making
+            /// every store-rendered page **live** — and re-subscribes
+            /// when the connection reconnects.
+            #[cfg(all(feature = "atom", feature = "vox"))]
+            #vis fn #use_events_fn() {
+                let conn = ::architect::use_connection::<::architect::vox::Caller>();
+                let store = #use_store_fn();
+                ::architect::use_store_stream(
+                    store,
+                    move |sink| async move {
+                        match conn.state() {
+                            ::architect::ConnectionState::Ready(caller) => {
+                                #events_client::new(caller).subscribe(sink).await.is_ok()
+                            }
+                            _ => false,
+                        }
+                    },
+                    #apply_fn,
+                );
+            }
+
+            #[cfg(all(feature = "atom", feature = "vox"))]
+            #[doc(hidden)]
+            fn #apply_fn(store: &#store_alias, event: #event_ident) {
+                match event {
+                    #event_ident::Snapshot(rows) => store.hydrate(rows),
+                    #event_ident::Upserted(row) => store.put(row),
+                    #event_ident::Deleted(id) => store.remove_real(&id),
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    quote! {
+        #[doc = #doc_event]
+        #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
+        #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
+        #[repr(u8)]
+        #vis enum #event_ident {
+            /// The current full row set — the **first** event every
+            /// subscriber receives (effect-`SubscriptionRef` semantics:
+            /// current state, then changes), so subscribing alone fully
+            /// hydrates a client store.
+            Snapshot(::std::vec::Vec<#ident>),
+            /// A row was created or updated; here is its authoritative state.
+            Upserted(#ident),
+            /// A row was deleted.
+            Deleted(#pk_ty),
+        }
+
+        /// Streaming sibling trait: pass a channel sink in, receive every
+        /// subsequent change on it until the connection closes.
+        #[cfg(feature = "vox")]
+        #[::vox::service]
+        #vis trait #events_trait {
+            /// Attach `sink` to the event feed. Returns once attached;
+            /// events flow on the channel.
+            async fn subscribe(
+                &self,
+                sink: ::vox::Tx<#event_ident>,
+            ) -> ::core::result::Result<(), ::architect::RepoError>;
+        }
+
+        #[doc = #doc_evented]
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        #[derive(Clone)]
+        #vis struct #evented_ident<R> {
+            inner: R,
+            hub: ::architect::PubSub<#event_ident>,
+        }
+
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl<R> #evented_ident<R> {
+            #vis fn new(inner: R) -> Self {
+                Self {
+                    inner,
+                    hub: ::architect::PubSub::sliding(256),
+                }
+            }
+
+            /// The shared fan-out hub — for publishing changes that don't
+            /// come through the repo (host pollers, CRDT merge hooks, …).
+            #vis fn hub(&self) -> ::architect::PubSub<#event_ident> {
+                self.hub.clone()
+            }
+        }
+
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl<R> #repo_ident for #evented_ident<R>
+        where
+            R: #repo_ident + ::core::marker::Send + ::core::marker::Sync + 'static,
+        {
+            async fn get(
+                &self,
+                id: #pk_ty,
+            ) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                self.inner.get(id).await
+            }
+            async fn list(
+                &self,
+                page: ::architect::Page,
+                sort: ::core::option::Option<::architect::Sort>,
+                filter: ::core::option::Option<::architect::Filter>,
+            ) -> ::core::result::Result<#list_ident, ::architect::RepoError> {
+                self.inner.list(page, sort, filter).await
+            }
+            async fn create(
+                &self,
+                input: #create_ident,
+            ) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                let row = self.inner.create(input).await?;
+                self.hub.publish(#event_ident::Upserted(row.clone()));
+                ::core::result::Result::Ok(row)
+            }
+            async fn update(
+                &self,
+                id: #pk_ty,
+                input: #update_ident,
+            ) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                let row = self.inner.update(id, input).await?;
+                self.hub.publish(#event_ident::Upserted(row.clone()));
+                ::core::result::Result::Ok(row)
+            }
+            async fn delete(
+                &self,
+                id: #pk_ty,
+            ) -> ::core::result::Result<(), ::architect::RepoError> {
+                self.inner.delete(id).await?;
+                self.hub.publish(#event_ident::Deleted(id));
+                ::core::result::Result::Ok(())
+            }
+        }
+
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl<R> #events_trait for #evented_ident<R>
+        where
+            R: #repo_ident
+                + ::core::clone::Clone
+                + ::core::marker::Send
+                + ::core::marker::Sync
+                + 'static,
+        {
+            async fn subscribe(
+                &self,
+                sink: ::vox::Tx<#event_ident>,
+            ) -> ::core::result::Result<(), ::architect::RepoError> {
+                // effect-SubscriptionRef semantics: park the subscriber
+                // (its mailbox collects every change from this instant),
+                // read the current row set with no lock held, then deliver
+                // the snapshot ahead of the collected changes.
+                let pending = self.hub.begin_attach(sink);
+                let snapshot = self
+                    .inner
+                    .list(
+                        ::architect::Page { index: 0, size: u32::MAX },
+                        ::core::option::Option::None,
+                        ::core::option::Option::None,
+                    )
+                    .await;
+                match snapshot {
+                    ::core::result::Result::Ok(list) => {
+                        self.hub.complete_attach(
+                            pending,
+                            ::core::option::Option::Some(#event_ident::Snapshot(list.items)),
+                        );
+                        ::core::result::Result::Ok(())
+                    }
+                    ::core::result::Result::Err(e) => {
+                        self.hub.abort_attach(pending);
+                        ::core::result::Result::Err(e)
+                    }
+                }
+            }
+        }
+
+        /// Deferred-bind Layer token for the subscribe service — composes
+        /// through `layers![…]` exactly like the repo's token.
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        #[derive(Debug, Default, Clone, Copy)]
+        #vis struct #events_layer_token;
+
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl ::architect::BindAny for #events_layer_token {
+            fn descriptor(&self) -> &'static ::architect::vox::ServiceDescriptor {
+                #events_descriptor_fn()
+            }
+        }
+
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl<B> ::architect::Bind<B> for #events_layer_token
+        where
+            B: #events_trait
+                + ::core::clone::Clone
+                + ::core::marker::Send
+                + ::core::marker::Sync
+                + 'static,
+        {
+            fn bind_into(self, backend: &B, router: &mut ::architect::LayerRouter) {
+                use ::architect::LayerSink as _;
+                router.add_mounted(::architect::Mounted::new(
+                    #events_descriptor_fn(),
+                    #events_dispatcher::new(backend.clone()),
+                ));
+            }
+        }
+
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl<R> ::architect::Append<R> for #events_layer_token {
+            type Output = ::architect::Cons<#events_layer_token, R>;
+            fn append(self, rhs: R) -> Self::Output {
+                ::architect::Cons::new(self, rhs)
+            }
+        }
+
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl ::architect::Descriptors for #events_layer_token {
+            fn collect(
+                &self,
+                out: &mut ::std::vec::Vec<&'static ::architect::vox::ServiceDescriptor>,
+            ) {
+                out.push(::architect::BindAny::descriptor(self));
+            }
+        }
+
+        /// The wrapper provides both services: CRUD + the event feed.
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl<R> ::architect::Services for #evented_ident<R>
+        where
+            R: #repo_ident
+                + ::core::clone::Clone
+                + ::core::marker::Send
+                + ::core::marker::Sync
+                + 'static,
+        {
+            fn layers() -> impl ::architect::Layer<Self> {
+                ::architect::layers![#repo_layer_token, #events_layer_token]
+            }
+        }
+
+        #client_hook
+    }
+}
+
+/// True when the field's type is a bare `String` (path's last segment).
+fn is_string_type(ty: &Type) -> bool {
+    matches!(ty, Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == "String"))
+}
+
+/// Emit typed form-field bindings over the Create/Update payloads, gated
+/// on the user crate's `form` feature (`form = ["architect/form"]`).
+///
+/// For `Example` this emits, roughly:
+///
+/// ```ignore
+/// struct ExampleCreateFields { name: Field<String>, description: Field<String> }
+/// fn use_example_create_fields() -> ExampleCreateFields;     // empty fields
+/// impl ExampleCreateFields {
+///     fn submit(&self) -> Option<ExampleCreate>;  // validate all → typed payload
+///     fn is_dirty(&self) -> bool;  fn reset(&self);
+/// }
+/// struct ExampleUpdateFields { … }                            // same, seeded
+/// fn use_example_update_fields(initial: &Example) -> ExampleUpdateFields;
+/// impl ExampleUpdateFields { fn submit(&self) -> Option<ExampleUpdate>; … }
+/// ```
+///
+/// Validation comes from the field's **type** plus the
+/// `#[architect(form(…))]` attributes: `String` fields are required
+/// (Title-Case label) unless `form(optional)`; any other type goes
+/// through `validate::parse::<T>` (so it must be `FromStr + Display`).
+/// The struct produced by `submit()` is the same wire payload the derived
+/// mutations take — form → payload → optimistic write, typed throughout.
+fn build_form_block(
+    ident: &Ident,
+    vis: &syn::Visibility,
+    container: &ContainerAttrs,
+    create_ident: &Ident,
+    update_ident: &Ident,
+    create_fields: &[&ParsedField],
+    update_fields: &[&ParsedField],
+) -> TokenStream2 {
+    if !container.emit_form {
+        return quote! {};
+    }
+
+    let snake = ident.to_string().to_snake_case();
+
+    // One generated block per payload kind. `seed` is how a field's
+    // initial string value is produced: empty for create, from the
+    // current entity row for update.
+    let build = |fields: &[&ParsedField],
+                 payload_ident: &Ident,
+                 fields_ident: Ident,
+                 hook_ident: Ident,
+                 seeded: bool,
+                 wrap_some: bool| {
+        let field_defs = fields.iter().map(|f| {
+            let id = f.ident;
+            let ty = f.ty;
+            if is_string_type(ty) {
+                quote! { pub #id: ::architect::form::Field<::std::string::String> }
+            } else {
+                quote! { pub #id: ::architect::form::Field<#ty> }
+            }
+        });
+
+        let field_inits = fields.iter().map(|f| {
+            let id = f.ident;
+            let ty = f.ty;
+            let label = f
+                .attrs
+                .form_label
+                .clone()
+                .unwrap_or_else(|| id.to_string().to_title_case());
+            let validator = if is_string_type(ty) {
+                if f.attrs.form_optional {
+                    quote! { ::architect::form::validate::optional() }
+                } else {
+                    quote! { ::architect::form::validate::required(#label) }
+                }
+            } else {
+                quote! { ::architect::form::validate::parse::<#ty>(#label) }
+            };
+            let initial = if !seeded {
+                quote! { ::std::string::String::new() }
+            } else if is_string_type(ty) {
+                quote! { initial.#id.clone() }
+            } else {
+                quote! { ::std::string::ToString::to_string(&initial.#id) }
+            };
+            quote! { #id: ::architect::form::use_field(#initial, #validator) }
+        });
+
+        let validate_binds = fields.iter().map(|f| {
+            let id = f.ident;
+            quote! { let #id = self.#id.validate().ok(); }
+        });
+        let payload_assigns = fields.iter().map(|f| {
+            let id = f.ident;
+            if wrap_some {
+                quote! { #id: ::core::option::Option::Some(#id?) }
+            } else {
+                quote! { #id: #id? }
+            }
+        });
+        let dirty_checks = fields.iter().map(|f| {
+            let id = f.ident;
+            quote! { self.#id.is_dirty() }
+        });
+        let resets = fields.iter().map(|f| {
+            let id = f.ident;
+            quote! { self.#id.reset(); }
+        });
+
+        let hook_params = if seeded {
+            quote! { initial: &#ident }
+        } else {
+            quote! {}
+        };
+        let doc_fields = format!(
+            "Typed form fields over [`{payload_ident}`] — one \
+             [`Field`](::architect::form::Field) per payload field, \
+             validation derived from the entity declaration."
+        );
+        let doc_submit = format!(
+            "Validate every field (revealing errors on the untouched \
+             ones), and return the typed [`{payload_ident}`] when the \
+             whole form passes — ready to hand to the derived mutations."
+        );
+
+        quote! {
+            #[doc = #doc_fields]
+            #[cfg(feature = "form")]
+            #[derive(Clone, Copy, PartialEq)]
+            #vis struct #fields_ident {
+                #(#field_defs,)*
+            }
+
+            #[doc = #doc_fields]
+            #[cfg(feature = "form")]
+            #vis fn #hook_ident(#hook_params) -> #fields_ident {
+                #fields_ident {
+                    #(#field_inits,)*
+                }
+            }
+
+            #[cfg(feature = "form")]
+            impl #fields_ident {
+                #[doc = #doc_submit]
+                #vis fn submit(&self) -> ::core::option::Option<#payload_ident> {
+                    #(#validate_binds)*
+                    ::core::option::Option::Some(#payload_ident {
+                        #(#payload_assigns,)*
+                    })
+                }
+
+                /// True once any field differs from its initial value.
+                #vis fn is_dirty(&self) -> bool {
+                    false #(|| #dirty_checks)*
+                }
+
+                /// Reset every field to its initial value, clearing
+                /// errors and touched state.
+                #vis fn reset(&self) {
+                    #(#resets)*
+                }
+            }
+        }
+    };
+
+    let create_block = build(
+        create_fields,
+        create_ident,
+        format_ident!("{}CreateFields", ident),
+        format_ident!("use_{}_create_fields", snake),
+        false,
+        false,
+    );
+    let update_block = build(
+        update_fields,
+        update_ident,
+        format_ident!("{}UpdateFields", ident),
+        format_ident!("use_{}_update_fields", snake),
+        true,
+        true,
+    );
+
+    quote! {
+        #create_block
+        #update_block
+    }
+}
+
+/// Emit the client-side state layer for the entity — the optimistic store
+/// binding, typed data hooks, and optimistic mutations — gated on the user
+/// crate's `atom` + `vox` features (the same convention as `server` /
+/// `fake`: the consumer declares `atom = ["architect/atom"]`).
+///
+/// For `Example` this emits, roughly:
+///
+/// ```ignore
+/// type ExampleClientError = ClientError<RepoError>;
+/// type ExampleStore = Store<Example, ExampleClientError>;
+/// impl StoreEntity for Example { type Key = Uuid; … }
+/// impl Example { fn draft(input: &ExampleCreate) -> Example { … } }
+/// fn provide_example_store() -> ExampleStore;             // app root
+/// fn use_example_store() -> ExampleStore;
+/// fn use_example(id: String) -> AtomResult<Example, ExampleClientError>;
+/// fn use_example_list() -> AtomResult<Vec<(Id<Uuid>, Example)>, ExampleClientError>;
+/// struct ExampleMutations { … }                            // create/update/delete
+/// fn use_example_mutations() -> ExampleMutations;
+/// ```
+///
+/// Requirements: the primary key must be `Copy + FromStr` (`Uuid`,
+/// integer ids); the hooks read a `Connection<<Entity>RepoClient>` from
+/// context, provided at the app root with `architect::use_connect`.
+#[allow(clippy::too_many_arguments)]
+fn build_store_block(
+    ident: &Ident,
+    vis: &syn::Visibility,
+    container: &ContainerAttrs,
+    parsed: &[ParsedField],
+    _pk_ident: &Ident,
+    pk_ty: &Type,
+    create_ident: &Ident,
+    update_ident: &Ident,
+    repo_ident: &Ident,
+    update_fields: &[&ParsedField],
+) -> TokenStream2 {
+    if !container.emit_store {
+        return quote! {};
+    }
+
+    let snake = ident.to_string().to_snake_case();
+    let invalidate_key = container
+        .table_name
+        .clone()
+        .unwrap_or_else(|| snake.clone());
+
+    let client_error_alias = format_ident!("{}ClientError", ident);
+    let store_alias = format_ident!("{}Store", ident);
+    let mutations_ident = format_ident!("{}Mutations", ident);
+    let repo_client = format_ident!("{}Client", repo_ident);
+    let provide_store_fn = format_ident!("provide_{}_store", snake);
+    let use_store_fn = format_ident!("use_{}_store", snake);
+    let use_one_fn = format_ident!("use_{}", snake);
+    let use_list_fn = format_ident!("use_{}_list", snake);
+    let use_muts_fn = format_ident!("use_{}_mutations", snake);
+    let parse_fn = format_ident!("__parse_{}_id", snake);
+    let provide_fn = format_ident!("provide_{}", snake);
+    let key_const = format_ident!("{}_REACTIVITY_KEY", snake.to_uppercase());
+    let page_size = container.page_size.unwrap_or(100);
+    // The feature's whole client-side provision in one root call: the
+    // store, plus (with `events`) the live subscription that keeps it fed.
+    let provide_events = if container.emit_events {
+        let use_events_fn = format_ident!("use_{}_events", snake);
+        quote! { #use_events_fn(); }
+    } else {
+        quote! {}
+    };
+    let doc_provide = format!(
+        "Provide the whole `{ident}` client layer at the app root: the \
+         shared optimistic store{}. Call once, after `architect::use_app`.",
+        if container.emit_events {
+            " plus the live event subscription that keeps it fed"
+        } else {
+            ""
+        }
+    );
+
+    // The primary-key accessor for `StoreEntity::key`.
+    let pk_field = _pk_ident;
+
+    // `draft` field assignments: a client-side placeholder row built from
+    // the Create payload. `on_create` expressions are evaluated locally as
+    // previews (the reconcile replaces the row with the server's truth);
+    // excluded fields without an expression fall back to `Default`.
+    let draft_assigns = parsed.iter().map(|f| {
+        let id = f.ident;
+        if let Some(e) = &f.attrs.on_create {
+            quote! { #id: #e }
+        } else if f.attrs.exclude_create {
+            quote! { #id: ::core::default::Default::default() }
+        } else {
+            quote! { #id: input.#id.clone() }
+        }
+    });
+
+    // Optimistic update patch: apply each `Some` field of the Update
+    // payload, then preview the `on_update` expressions (e.g. a touched
+    // `updated_at`) the server will set authoritatively.
+    let patch_assigns = update_fields.iter().map(|f| {
+        let id = f.ident;
+        quote! {
+            if let ::core::option::Option::Some(v) = patch_input.#id {
+                row.#id = v;
+            }
+        }
+    });
+    let patch_touches = parsed
+        .iter()
+        .filter(|f| f.attrs.on_update.is_some())
+        .map(|f| {
+            let id = f.ident;
+            let e = f.attrs.on_update.as_ref().unwrap();
+            quote! { row.#id = #e; }
+        });
+
+    let doc_store = format!(
+        "The shared optimistic cache of [`{ident}`] rows \
+         (stale-while-revalidate reads, optimistic writes)."
+    );
+    let doc_use_one = format!(
+        "One [`{ident}`] by id — cache-first: `Success` straight from the \
+         store when the row is cached (instant after a list visit, and it \
+         reflects optimistic edits), else the fallback fetch's phase. \
+         `match` the returned phase in the page."
+    );
+    let doc_use_list = format!(
+        "The [`{ident}`] list as one `AtomResult` (rows are the value, the \
+         backing fetch the phase). Tracks the `\"{invalidate_key}\"` \
+         reactivity key when a `Reactivity` registry is provided, so \
+         settled mutations re-fetch it."
+    );
+    let doc_muts = format!(
+        "Optimistic write actions for [`{ident}`]: each patches the store \
+         instantly, then reconciles against the server — rolling back (and \
+         reporting to the app's `Notifications`, when provided) on failure."
+    );
+
+    quote! {
+        /// What this entity's client hooks fail with: the typed repo error
+        /// (`App(RepoError::NotFound)`, …) or an infrastructure failure.
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #vis type #client_error_alias = ::architect::ClientError<::architect::RepoError>;
+
+        #[doc = #doc_store]
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #vis type #store_alias = ::architect::Store<#ident, #client_error_alias>;
+
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        impl ::architect::StoreEntity for #ident {
+            type Key = #pk_ty;
+            fn key(&self) -> #pk_ty {
+                self.#pk_field.clone()
+            }
+        }
+
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        impl #ident {
+            /// Build an unsaved placeholder row from a Create payload, for
+            /// an optimistic insert. `on_create` expressions are evaluated
+            /// client-side as previews; the store keys the row by a temp
+            /// id and swaps in the server's authoritative row on
+            /// reconcile, so none of this is persisted.
+            #vis fn draft(input: &#create_ident) -> Self {
+                Self {
+                    #(#draft_assigns,)*
+                }
+            }
+        }
+
+        /// Create the entity's store once at the app root and provide it
+        /// as context (alongside `architect::use_connect` for the repo
+        /// client).
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #vis fn #provide_store_fn() -> #store_alias {
+            let store = ::architect::use_store::<#ident, #client_error_alias>();
+            ::architect::dioxus::prelude::use_context_provider(move || store)
+        }
+
+        #[doc = #doc_store]
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #vis fn #use_store_fn() -> #store_alias {
+            ::architect::dioxus::prelude::use_context()
+        }
+
+        #[doc = #doc_provide]
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #vis fn #provide_fn() -> #store_alias {
+            let store = #provide_store_fn();
+            #provide_events
+            store
+        }
+
+        /// The entity's reactivity key — track it in custom list-shaped
+        /// hooks; the derived mutations invalidate it after settling.
+        #vis const #key_const: &'static str = #invalidate_key;
+
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #[doc(hidden)]
+        fn #parse_fn(raw: &str) -> ::core::result::Result<#pk_ty, #client_error_alias> {
+            raw.parse::<#pk_ty>().map_err(|e| {
+                ::architect::ClientError::App(::architect::RepoError::InvalidInput(
+                    ::std::format!("bad id `{raw}`: {e}"),
+                ))
+            })
+        }
+
+        #[doc = #doc_use_one]
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #vis fn #use_one_fn(
+            id: ::std::string::String,
+        ) -> ::architect::AtomResult<#ident, #client_error_alias> {
+            let conn = ::architect::use_connection::<::architect::vox::Caller>();
+            let store = #use_store_fn();
+            ::architect::use_store_entry(store, id, #parse_fn, move |key| async move {
+                let caller = ::architect::ready_or_pending!(conn);
+                let client = #repo_client::new(caller);
+                ::core::option::Option::Some(
+                    client.get(key).await.map_err(::architect::ClientError::from),
+                )
+            })
+        }
+
+        #[doc = #doc_use_list]
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #[allow(clippy::type_complexity)]
+        #vis fn #use_list_fn() -> ::architect::AtomResult<
+            ::std::vec::Vec<(::architect::Id<#pk_ty>, #ident)>,
+            #client_error_alias,
+        > {
+            let conn = ::architect::use_connection::<::architect::vox::Caller>();
+            let store = #use_store_fn();
+            let reactivity = ::architect::try_use_reactivity();
+            ::architect::use_store_list(store, move || async move {
+                if let ::core::option::Option::Some(r) = reactivity {
+                    r.track(#invalidate_key);
+                }
+                let caller = ::architect::ready_or_pending!(conn);
+                let client = #repo_client::new(caller);
+                ::core::option::Option::Some(
+                    client
+                        .list(
+                            ::architect::Page { index: 0, size: #page_size },
+                            ::core::option::Option::None,
+                            ::core::option::Option::None,
+                        )
+                        .await
+                        .map(|l| l.items)
+                        .map_err(::architect::ClientError::from),
+                )
+            })
+        }
+
+        #[doc = #doc_muts]
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #[derive(Clone, Copy)]
+        #vis struct #mutations_ident {
+            conn: ::architect::Connection<::architect::vox::Caller>,
+            store: #store_alias,
+            create_m: ::architect::Mutation<#client_error_alias>,
+            write_m: ::architect::Mutation<#client_error_alias>,
+        }
+
+        #[doc = #doc_muts]
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        #vis fn #use_muts_fn() -> #mutations_ident {
+            #mutations_ident {
+                conn: ::architect::use_connection::<::architect::vox::Caller>(),
+                store: #use_store_fn(),
+                create_m: ::architect::use_mutation().invalidating(&[#invalidate_key]),
+                write_m: ::architect::use_mutation().invalidating(&[#invalidate_key]),
+            }
+        }
+
+        #[cfg(all(feature = "atom", feature = "vox"))]
+        impl #mutations_ident {
+            /// Optimistically add a row: a draft appears instantly, then
+            /// reconciles to the server's row (or rolls back on failure).
+            /// No-op while the connection isn't up.
+            #vis fn create(&self, input: #create_ident) {
+                let ::core::option::Option::Some(caller) = self.conn.ready() else {
+                    return;
+                };
+                let client = #repo_client::new(caller);
+                let draft = #ident::draft(&input);
+                self.create_m.run(
+                    self.store,
+                    move |s| s.insert_optimistic(draft).0,
+                    move || async move {
+                        client
+                            .create(input)
+                            .await
+                            .map(::core::option::Option::Some)
+                            .map_err(::architect::ClientError::from)
+                    },
+                );
+            }
+
+            /// Optimistically patch a row in place (each `Some` field of
+            /// the Update payload, plus `on_update` previews), then
+            /// reconcile against the server's row.
+            #vis fn update(&self, id: #pk_ty, input: #update_ident) {
+                let ::core::option::Option::Some(caller) = self.conn.ready() else {
+                    return;
+                };
+                let client = #repo_client::new(caller);
+                let patch_input = input.clone();
+                self.write_m.run(
+                    self.store,
+                    move |s| {
+                        s.update_optimistic(::architect::Id::Real(id), move |row| {
+                            #(#patch_assigns)*
+                            #(#patch_touches)*
+                        })
+                    },
+                    move || async move {
+                        client
+                            .update(id, input)
+                            .await
+                            .map(::core::option::Option::Some)
+                            .map_err(::architect::ClientError::from)
+                    },
+                );
+            }
+
+            /// Optimistically remove a row (it vanishes now; restored —
+            /// and reported — if the server rejects it).
+            #vis fn delete(&self, id: #pk_ty) {
+                let ::core::option::Option::Some(caller) = self.conn.ready() else {
+                    return;
+                };
+                let client = #repo_client::new(caller);
+                self.write_m.run(
+                    self.store,
+                    move |s| s.remove_optimistic(::architect::Id::Real(id)),
+                    move || async move {
+                        client
+                            .delete(id)
+                            .await
+                            .map(|()| ::core::option::Option::None)
+                            .map_err(::architect::ClientError::from)
+                    },
+                );
+            }
+
+            /// The last create failure (a create form usually stays
+            /// on-screen, so this is worth rendering inline).
+            #vis fn create_error(&self) -> ::core::option::Option<#client_error_alias> {
+                self.create_m.error()
+            }
+
+            /// The last update/delete failure.
+            #vis fn write_error(&self) -> ::core::option::Option<#client_error_alias> {
+                self.write_m.error()
+            }
+
+            /// True while any of this handle's calls is in flight.
+            #vis fn is_pending(&self) -> bool {
+                self.create_m.is_pending() || self.write_m.is_pending()
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -47,6 +47,121 @@ pub use architect_rpc_derive::rpc;
 // uses it for wire encoding regardless of whether RPC is in play.
 pub use facet;
 
+// Client-side optimistic / stale-while-revalidate state for Dioxus, under
+// the `atom` feature — flattened to the crate root, so consumers write
+// `architect::Store` / `architect::AtomResult` / `architect::use_mutation`.
+// The client twin of the server-side Layer/Resource DI. Pulls Dioxus, so
+// it's gated. See `docs/content/architecture/optimistic.md`.
+#[cfg(feature = "atom")]
+pub use architect_atom::*;
+
+/// The app-root bundle: provide the app-wide registries (notifications +
+/// reactivity) and establish the app's **single** connection, returning
+/// (and providing) its `Connection<C>`. With vox, `C` is `vox::Caller` —
+/// every feature builds its typed clients from the shared caller, so
+/// adding a feature adds zero connections:
+///
+/// ```ignore
+/// // app root
+/// let t = transport.clone();
+/// use_app(move || async move { transport::connect(&t).await });   // Connection<Caller>
+/// provide_example();                                              // derived, per feature
+/// ```
+#[cfg(feature = "atom")]
+pub fn use_app<C, F, Fut>(connect: F) -> Connection<C>
+where
+    C: Clone + 'static,
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<C, String>> + 'static,
+{
+    provide_notifications();
+    provide_reactivity();
+    use_connect(connect)
+}
+
+/// Loader-side connection guard: yields the connected value, or early-
+/// returns the loader's pending/failed shape. For use inside fetch
+/// closures that return `Option<Result<T, ClientError<E>>>` (the shape
+/// `use_store_list` / `use_store_entry` take): `Connecting` returns
+/// `None` (phase stays `Loading`; the loader re-runs on `Ready`),
+/// `Failed` returns the typed connect error.
+///
+/// ```ignore
+/// use_store_list(store, move || async move {
+///     let caller = ready_or_pending!(conn);
+///     let client = ExampleRepoClient::new(caller);
+///     Some(client.list(…).await.map(|l| l.items).map_err(ClientError::from))
+/// })
+/// ```
+#[cfg(feature = "atom")]
+#[macro_export]
+macro_rules! ready_or_pending {
+    ($conn:expr) => {
+        match $conn.state() {
+            $crate::ConnectionState::Ready(c) => c,
+            $crate::ConnectionState::Connecting => return ::core::option::Option::None,
+            $crate::ConnectionState::Failed(e) => {
+                return ::core::option::Option::Some(::core::result::Result::Err(
+                    $crate::ClientError::Connect(e).into(),
+                ));
+            }
+        }
+    };
+}
+
+/// A ticking signal — read it in a data hook's loader to re-fetch every
+/// `period` ("live-ish" reads by polling, until vox subscriptions land).
+/// Built on the platform clock, so the same hook ticks on tokio natively
+/// and browser timers on wasm. Requires the `atom` + `platform` features.
+///
+/// ```ignore
+/// let tick = use_interval(Duration::from_secs(30));
+/// let rows = use_store_list(store, move || {
+///     let _ = tick();                      // subscribe: refetch every 30s
+///     async move { /* fetch */ }
+/// });
+/// ```
+#[cfg(all(feature = "atom", feature = "platform"))]
+pub fn use_interval(period: Duration) -> architect_atom::dioxus::prelude::Signal<u64> {
+    use architect_atom::dioxus::prelude::*;
+    let mut tick = use_signal(|| 0u64);
+    // The loop is owned by the calling component's scope — it stops when
+    // the component unmounts.
+    use_future(move || async move {
+        loop {
+            platform::sleep(period).await;
+            tick += 1;
+        }
+    });
+    tick
+}
+
+// Typed, validated form state for Dioxus, under the `form` feature. Kept
+// as a module (it's a coherent group), so consumers write
+// `architect::form::Field` / `architect::form::Form` /
+// `architect::form::use_field` / `architect::form::validate`. effect-form
+// analog; builds on `atom`. See `docs/content/architecture/forms.md`.
+#[cfg(feature = "form")]
+pub use architect_form as form;
+
+// Server-side stream fan-out (`PubSub<T>`, modelled on effect's PubSub +
+// SubscriptionRef): attach vox `Tx` sinks, publish events to all of them,
+// with overflow strategies, replay, and snapshot-then-changes attach. The
+// hub behind every streaming "sibling trait"'s subscribe method.
+#[cfg(feature = "vox")]
+pub mod pubsub;
+#[cfg(feature = "vox")]
+pub use pubsub::{PendingAttach, PubSub};
+
+// Client-side stream consumption (`use_stream` / `use_store_stream`):
+// subscribe a component to a server event stream and fold events into
+// state — the optimistic Store goes live. Needs both halves: `atom` for
+// the hooks/store, `vox` for the channel types.
+#[cfg(all(feature = "atom", feature = "vox"))]
+pub mod stream;
+#[cfg(all(feature = "atom", feature = "vox"))]
+pub use stream::{use_store_stream, use_stream};
+
 // Vox re-export only when the `vox` feature is on. Consumers that
 // want in-process trait use (no dispatcher, no client, no RPC at all)
 // can disable the vox feature on their proto crate to drop the
@@ -93,7 +208,8 @@ pub use local::{LocalServer, serve_local};
 pub mod platform;
 #[cfg(feature = "platform")]
 pub use platform::{
-    CancellationToken, Clock, JoinHandle, SystemClock, TestClock, now, sleep, spawn, timeout,
+    CancellationToken, Clock, Duration, Instant, JoinHandle, SystemClock, TestClock, now, sleep,
+    spawn, timeout,
 };
 
 // Schedule layer — composable retry/repeat policies (exponential backoff,
@@ -134,6 +250,70 @@ pub enum RepoError {
     Conflict(String),
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+// ── Client-side error envelope ──────────────────────────────────────────
+
+/// What a client-side data hook can fail with — the **typed** app error
+/// kept distinct from infrastructure failures, so a page can `match` on
+/// `App(RepoError::NotFound)` while rendering connectivity problems as a
+/// shared "reconnecting…" treatment.
+///
+/// - `App(E)` — the handler ran and returned the service's typed error
+///   (vox's `VoxError::User`). This is the arm feature pages branch on.
+/// - `Connect` — establishing the connection failed (after the transport's
+///   retry policy gave up).
+/// - `Transport` — the call itself failed in flight (connection closed,
+///   send failed, payload mismatch); `retryable` is vox's verdict on
+///   whether a fresh connection could succeed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ClientError<E = String> {
+    #[error("{0}")]
+    App(E),
+    #[error("could not connect: {0}")]
+    Connect(String),
+    #[error("transport failure: {detail}")]
+    Transport { detail: String, retryable: bool },
+}
+
+impl<E> ClientError<E> {
+    /// The typed app error, if this is one.
+    pub fn app(&self) -> Option<&E> {
+        match self {
+            Self::App(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    /// True for infrastructure failures (connect / transport) as opposed
+    /// to typed app errors — the "show the reconnecting banner" test.
+    pub fn is_infrastructure(&self) -> bool {
+        !matches!(self, Self::App(_))
+    }
+
+    /// True if retrying on a fresh connection may succeed.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::App(_) => false,
+            Self::Connect(_) => true,
+            Self::Transport { retryable, .. } => *retryable,
+        }
+    }
+}
+
+/// Fold a vox call error into the client envelope: `User` stays typed,
+/// everything else becomes `Transport` with vox's retryability verdict.
+#[cfg(feature = "vox")]
+impl<E: std::fmt::Display> From<vox::VoxError<E>> for ClientError<E> {
+    fn from(e: vox::VoxError<E>) -> Self {
+        match e {
+            vox::VoxError::User(e) => Self::App(e),
+            other => Self::Transport {
+                retryable: other.is_retryable(),
+                detail: other.to_string(),
+            },
+        }
+    }
 }
 
 // ── Pagination + sort + filter primitives (wire-safe) ──────────────────
