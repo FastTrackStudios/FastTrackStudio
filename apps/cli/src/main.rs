@@ -17,6 +17,7 @@
 //! 2. `TASK_VOX_URL` env var (loaded from `.env` if present).
 //! 3. `ws://127.0.0.1:9090/vox` default.
 
+mod json_out;
 mod org_ctx;
 mod session_store;
 mod shared;
@@ -1679,7 +1680,11 @@ enum CodeCmd {
         server: Option<String>,
     },
     /// List active `task code` worktrees (parallel work dirs).
-    Worktrees,
+    Worktrees {
+        /// Emit `{branch, path}` rows as a JSON array.
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove the worktree for a task branch once it's merged
     /// (or to abandon it). Accepts the task short-id or branch.
     Cleanup {
@@ -1725,6 +1730,9 @@ enum CodeCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit `{branch, task, links}` as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Park the current branch's task — record a "where I left
     /// off" handoff, release the claim so another agent can pick
@@ -1772,6 +1780,9 @@ enum CodeCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the open handoffs as a JSON array.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1967,7 +1978,12 @@ enum CycleCmd {
     /// year / quarter / cycle ordinal + cycle bounds + how
     /// far through it we are. Returns "(reset / bonus week)"
     /// when today is between cycles.
-    Current,
+    Current {
+        /// Emit the cycle (+ derived progress) as JSON.
+        /// `{"cycle": null, …}` between cycles.
+        #[arg(long)]
+        json: bool,
+    },
     /// List every quarter + cycle for a given cyclic year.
     /// Defaults to the current calendar year.
     List {
@@ -1976,6 +1992,9 @@ enum CycleCmd {
         /// Week-start day. Default: Monday.
         #[arg(long, default_value = "mon")]
         week_start: String,
+        /// Emit the year's quarters + cycles as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Capture a reflection note for a cycle. Writes a
     /// templated page at
@@ -3565,11 +3584,22 @@ enum TimerCmd {
     /// session is already open.
     Start {
         /// Free-text description. Quoted to allow spaces.
-        description: String,
-        /// Project frontmatter id (uuid) the session is
-        /// logged against. Empty = uncategorized.
+        /// Optional when `--task` is given (defaults to the
+        /// task's title).
+        #[arg(required_unless_present = "task")]
+        description: Option<String>,
+        /// Task to track against — full UUID, unique id
+        /// prefix, or vault-relative path. Validates the
+        /// task exists and fills description (title),
+        /// project (the task's project), and task-note
+        /// (the task's path); explicit flags still win.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        task: Option<String>,
+        /// Project the session is logged against — uuid,
+        /// title, vault path, or a unique prefix of either.
+        /// Empty = uncategorized.
+        #[arg(long)]
+        project: Option<String>,
         /// Vault-relative path to the task note this
         /// session is for.
         #[arg(long, default_value = "")]
@@ -3580,34 +3610,62 @@ enum TimerCmd {
         /// to attach two.
         #[arg(long = "tag")]
         tags: Vec<String>,
+        /// Emit the started session as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Stop the current session. Snapshots `rate_cents` +
     /// `currency` via the rate cascade and writes the closed
     /// row.
-    Stop,
+    Stop {
+        /// Emit the closed session as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Show the active session, if any.
-    Active,
+    Active {
+        /// Emit the session as JSON (plus derived
+        /// `seconds_elapsed` and joined task / project
+        /// titles where resolvable). `null` when idle.
+        #[arg(long)]
+        json: bool,
+    },
     /// Atomic stop-then-start. Same args as `start`.
     Switch {
-        description: String,
+        #[arg(required_unless_present = "task")]
+        description: Option<String>,
+        /// Task to track against (id / prefix / path) —
+        /// same semantics as `start --task`.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        task: Option<String>,
+        /// Project — uuid, title, path, or unique prefix.
+        #[arg(long)]
+        project: Option<String>,
         #[arg(long, default_value = "")]
         task_note: String,
         #[arg(long = "tag")]
         tags: Vec<String>,
+        /// Emit `{stopped, started}` sessions as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Retro-log a past session: `--from` / `--to` ISO 8601
     /// timestamps + description. Skips the active-timer
     /// invariant.
     Log {
-        description: String,
+        #[arg(required_unless_present = "task")]
+        description: Option<String>,
         #[arg(long)]
         from: chrono::DateTime<chrono::Utc>,
         #[arg(long)]
         to: chrono::DateTime<chrono::Utc>,
+        /// Task to log against (id / prefix / path) — same
+        /// semantics as `start --task`.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        task: Option<String>,
+        /// Project — uuid, title, path, or unique prefix.
+        #[arg(long)]
+        project: Option<String>,
         #[arg(long, default_value = "")]
         task_note: String,
         /// `true` / `false` to override the project default.
@@ -3616,6 +3674,9 @@ enum TimerCmd {
         billable: Option<bool>,
         #[arg(long = "tag")]
         tags: Vec<String>,
+        /// Emit the logged session as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set an org-level member hourly rate (cascade level 3) for a
     /// user. New sessions logged for that user snapshot this rate at
@@ -3629,6 +3690,9 @@ enum TimerCmd {
         cents: i64,
         #[arg(long, default_value = "USD")]
         currency: String,
+        /// Emit the stored rate as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Edit an existing session. Only the flags you pass change; the
     /// billable rate is re-snapshotted from the cascade afterward
@@ -3642,9 +3706,10 @@ enum TimerCmd {
         from: Option<chrono::DateTime<chrono::Utc>>,
         #[arg(long)]
         to: Option<chrono::DateTime<chrono::Utc>>,
-        /// Reassign to a project (frontmatter uuid).
+        /// Reassign to a project — uuid, title, path, or a
+        /// unique prefix of either.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Reassign to a different member.
         #[arg(long)]
         user_id: Option<uuid::Uuid>,
@@ -3652,19 +3717,26 @@ enum TimerCmd {
         billable: Option<bool>,
         #[arg(long)]
         task_note: Option<String>,
+        /// Emit the updated session as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Delete a session by id. Permanent.
     Delete {
         /// Session id (uuid).
         id: uuid::Uuid,
+        /// Emit `{"deleted": <id>}` as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// List sessions. Defaults to the last 7 days, all
     /// users (matching the `finance project` rollup —
     /// the per-org DB is already the scope).
     List {
-        /// Only sessions on this project (frontmatter uuid).
+        /// Only sessions on this project — uuid, title,
+        /// path, or a unique prefix of either.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Only sessions logged by this user id. Omit for
         /// all users in the org.
         #[arg(long)]
@@ -3681,19 +3753,30 @@ enum TimerCmd {
         /// Filter billable / non-billable; omit for both.
         #[arg(long)]
         billable: Option<bool>,
+        /// Emit the sessions as a JSON array.
+        #[arg(long)]
+        json: bool,
     },
     /// Resolve the rate cascade for the configured user +
     /// project. Useful to preview "what will this session
     /// bill at" before stopping.
     Resolve {
+        /// Project — uuid, title, path, or unique prefix.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
+        /// Emit the resolution as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Audit which user_ids appear on sessions, with name
     /// resolution from the org's `auth.sqlite`. Useful for
     /// spotting detached / mis-attributed ids before
     /// invoicing.
-    Users,
+    Users {
+        /// Emit the per-user aggregates as a JSON array.
+        #[arg(long)]
+        json: bool,
+    },
     /// Bulk-swap every matching session's `user_id`.
     /// Optional filters narrow the swap to a project /
     /// date window — without them, ALL sessions for `from`
@@ -3705,9 +3788,10 @@ enum TimerCmd {
         /// Destination user_id (new owner).
         #[arg(long)]
         to: uuid::Uuid,
-        /// Limit to one project.
+        /// Limit to one project — uuid, title, path, or a
+        /// unique prefix of either.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Inclusive lower bound on `start_time`.
         #[arg(long)]
         since: Option<chrono::DateTime<chrono::Utc>>,
@@ -3729,6 +3813,9 @@ enum TimerCmd {
         /// Show what would change without writing.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
+        /// Emit the match/update summary as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Tag CRUD + attach to existing sessions.
     #[command(subcommand)]
@@ -3738,7 +3825,11 @@ enum TimerCmd {
 #[derive(Subcommand)]
 enum TimerTagCmd {
     /// List tags in the calling user's org.
-    List,
+    List {
+        /// Emit the tags as a JSON array.
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a tag. Idempotent — no-op if a tag with that
     /// name already exists.
     Create {
@@ -3746,15 +3837,26 @@ enum TimerTagCmd {
         /// Hex `#RRGGBB` (UI hint). Empty = auto-pick.
         #[arg(long, default_value = "")]
         color: String,
+        /// Emit the tag as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Delete a tag by name. Removes the join rows on every
     /// session via FK cascade.
-    Rm { name: String },
+    Rm {
+        name: String,
+        /// Emit the deleted tag as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Attach tags to an existing session.
     Attach {
         session_id: uuid::Uuid,
         #[arg(long = "tag", required = true)]
         tags: Vec<String>,
+        /// Emit `{session_id, attached}` as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Detach tags from a session. `--tag <name>` removes
     /// that tag; `--all` removes every tag.
@@ -3764,6 +3866,9 @@ enum TimerTagCmd {
         tags: Vec<String>,
         #[arg(long)]
         all: bool,
+        /// Emit `{session_id, detached}` as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -3775,6 +3880,9 @@ enum FinanceCmd {
         /// Any date inside the target week. Defaults to today.
         #[arg(long)]
         week_of: Option<chrono::NaiveDate>,
+        /// Emit the summary as JSON instead of markdown.
+        #[arg(long)]
+        json: bool,
     },
     /// Per-project hours rollup for a range. Defaults to
     /// the last 7 days.
@@ -3783,6 +3891,9 @@ enum FinanceCmd {
         since: Option<chrono::DateTime<chrono::Utc>>,
         #[arg(long)]
         until: Option<chrono::DateTime<chrono::Utc>>,
+        /// Emit the rollup rows as a JSON array.
+        #[arg(long)]
+        json: bool,
     },
     /// Build + render an invoice from billable sessions on
     /// one project. By default writes both a PDF and a
@@ -3841,6 +3952,9 @@ enum FinanceCmd {
         /// hours on a later run.
         #[arg(long, default_value_t = false)]
         no_commit: bool,
+        /// Emit the build/persist outcome as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// List persisted invoices in `finance.sqlite`.
     Invoices {
@@ -3855,6 +3969,9 @@ enum FinanceCmd {
         /// first).
         #[arg(long, default_value_t = 50)]
         limit: u64,
+        /// Emit the invoices as a JSON array.
+        #[arg(long)]
+        json: bool,
     },
     /// Show one persisted invoice in detail — header,
     /// totals, line items, and the contributing session
@@ -3862,6 +3979,9 @@ enum FinanceCmd {
     InvoiceShow {
         /// Invoice number.
         number: String,
+        /// Emit the invoice (+ stamped sessions) as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Record a payment and update the invoice's balance.
     /// `--amount` is in minor units (cents). Sets the
@@ -3881,6 +4001,9 @@ enum FinanceCmd {
         /// Free-text note (cheque #, wire ref, …).
         #[arg(long, default_value = "")]
         memo: String,
+        /// Emit the payment outcome as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Cancel an invoice + un-stamp the contributing
     /// sessions so they can be re-billed. Idempotent on a
@@ -3889,6 +4012,9 @@ enum FinanceCmd {
     InvoiceVoid {
         /// Invoice number.
         number: String,
+        /// Emit the void outcome as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -4873,11 +4999,15 @@ fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
     use chrono::Datelike;
     let rule = cycle::FirstWeekRule::AtLeastFourDaysInYear;
     match cmd {
-        CycleCmd::Current => {
+        CycleCmd::Current { json } => {
             let today = chrono::Local::now().date_naive();
             // Walk the year (and its neighbors) to find whether
             // we're inside a cycle or in a reset / bonus week.
             if let Some(c) = cycle::cycle_for_date(today, chrono::Weekday::Mon, rule) {
+                if json {
+                    json_out::print_json(&json_out::cycle_json(&c, today))?;
+                    return Ok(());
+                }
                 let total = (c.end_date - c.start_date).num_days() + 1;
                 let elapsed = (today - c.start_date).num_days() + 1;
                 let pct = (elapsed as f64) * 100.0 / (total as f64);
@@ -4888,16 +5018,35 @@ fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
                 println!("today:   {today}");
                 println!("day {elapsed} of {total}   ({pct:.0}%)");
                 println!("id:      {}", c.id);
+            } else if json {
+                json_out::print_json(&serde_json::json!({
+                    "cycle": null,
+                    "today": today,
+                    "between_cycles": true,
+                }))?;
             } else {
                 println!("today ({today}) is between cycles — reset or bonus week");
             }
         }
-        CycleCmd::List { year, week_start } => {
+        CycleCmd::List {
+            year,
+            week_start,
+            json,
+        } => {
             let year = year.unwrap_or_else(|| chrono::Local::now().year());
             let wd = cycle::weekday_from_short(&week_start)
                 .ok_or_else(|| eyre::eyre!("bad --week-start `{week_start}`"))?;
             let qs = cycle::generate_year(year, wd, rule);
             let bonus = cycle::has_bonus_week(year, wd, rule);
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "year": year,
+                    "week_start": week_start,
+                    "bonus_week": bonus,
+                    "quarters": qs,
+                }))?;
+                return Ok(());
+            }
             println!(
                 "Cyclic year {year}  week-start={week_start}  {}",
                 if bonus { "[cyclic-leap]" } else { "" }
@@ -5587,14 +5736,18 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
         .map_or_else(|_| ctx.root.vault_dir(), std::path::PathBuf::from);
 
     match cmd {
-        FinanceCmd::Weekly { week_of } => {
+        FinanceCmd::Weekly { week_of, json } => {
             let day = week_of.unwrap_or_else(|| chrono::Utc::now().date_naive());
             let summary = finance::reports::weekly_summary(&timer_conn, None, day)
                 .await
                 .map_err(|e| eyre::eyre!("weekly: {e}"))?;
-            print!("{}", summary.to_markdown());
+            if json {
+                json_out::print_json(&summary)?;
+            } else {
+                print!("{}", summary.to_markdown());
+            }
         }
-        FinanceCmd::Project { since, until } => {
+        FinanceCmd::Project { since, until, json } => {
             use finance::reports::DateRange;
             // Each bound defaults independently: missing
             // `--until` means "now", missing `--since` means
@@ -5609,6 +5762,34 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             let rows = finance::reports::hours_by_project(&timer_conn, None, range)
                 .await
                 .map_err(|e| eyre::eyre!("project: {e}"))?;
+            if json {
+                // Rollup rows + the same resolved display label
+                // the human rendering computes.
+                let out: Vec<serde_json::Value> = rows
+                    .iter()
+                    .map(|r| {
+                        let mut v = serde_json::to_value(r).unwrap_or(serde_json::Value::Null);
+                        if let serde_json::Value::Object(map) = &mut v {
+                            let label = if !r.project_path.is_empty() {
+                                r.project_path.clone()
+                            } else if let Some(pid) = r.project_id {
+                                let resolved = project_path_for(&vault_root, Some(pid));
+                                if resolved.is_empty() {
+                                    format!("(project {pid})")
+                                } else {
+                                    resolved
+                                }
+                            } else {
+                                "(unscoped)".to_string()
+                            };
+                            map.insert("project".into(), label.into());
+                        }
+                        v
+                    })
+                    .collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
             if rows.is_empty() {
                 println!("(no closed sessions in range)");
             }
@@ -5655,6 +5836,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             client_name,
             out,
             no_commit,
+            json,
         } => {
             if number.is_none() && prefix.is_none() {
                 return Err(eyre::eyre!(
@@ -5905,6 +6087,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             // Vault export: companion markdown stub at
             // `Reports/Invoices/<num>.md` wikilinking the
             // PDF. Skipped when caller passes --out.
+            let mut md_out: Option<std::path::PathBuf> = None;
             if do_vault_export {
                 let md_path = vault_root
                     .join("Reports")
@@ -5927,7 +6110,10 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 );
                 std::fs::write(&md_path, md)
                     .map_err(|e| eyre::eyre!("write {}: {e}", md_path.display()))?;
-                println!("Wrote {}", md_path.display());
+                if !json {
+                    println!("Wrote {}", md_path.display());
+                }
+                md_out = Some(md_path);
             }
             // Persist to finance.sqlite + stamp the
             // contributing sessions so the same range can't
@@ -5939,8 +6125,11 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             // invoice — re-running `--no-commit=false` will
             // pick up the leftovers next time because the
             // invoice number now collides.
+            let mut stamped_sessions: u64 = 0;
             if no_commit {
-                println!("Skipped commit (--no-commit). Sessions remain unbilled.");
+                if !json {
+                    println!("Skipped commit (--no-commit). Sessions remain unbilled.");
+                }
             } else {
                 use finance_db::entity::{
                     BookColumn, BookEntity, InvoiceEntity, PartyColumn, PartyEntity,
@@ -5981,23 +6170,43 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                     .exec(&timer_conn)
                     .await
                     .map_err(|e| eyre::eyre!("stamp sessions: {e}"))?;
+                stamped_sessions = stamped.rows_affected;
+                if !json {
+                    println!(
+                        "Persisted invoice {} + stamped {} session(s).",
+                        build.invoice.id, stamped.rows_affected
+                    );
+                }
+            }
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "id": build.invoice.id,
+                    "number": build.invoice.number,
+                    "currency": build.invoice.currency,
+                    "subtotal_minor": build.invoice.subtotal_minor,
+                    "total_minor": build.invoice.total_minor,
+                    "sessions": build.source_session_ids,
+                    "pdf_path": pdf_path,
+                    "pdf_bytes": bytes_len,
+                    "markdown_path": md_out,
+                    "committed": !no_commit,
+                    "stamped_sessions": stamped_sessions,
+                }))?;
+            } else {
                 println!(
-                    "Persisted invoice {} + stamped {} session(s).",
-                    build.invoice.id, stamped.rows_affected
+                    "Wrote {} ({bytes_len} bytes, {} sessions, {} {})",
+                    pdf_path.display(),
+                    build.source_session_ids.len(),
+                    fmt_minor(build.invoice.total_minor),
+                    build.invoice.currency,
                 );
             }
-            println!(
-                "Wrote {} ({bytes_len} bytes, {} sessions, {} {})",
-                pdf_path.display(),
-                build.source_session_ids.len(),
-                fmt_minor(build.invoice.total_minor),
-                build.invoice.currency,
-            );
         }
         FinanceCmd::Invoices {
             status,
             party,
             limit,
+            json,
         } => {
             use finance_db::entity::{InvoiceColumn, InvoiceEntity};
             use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
@@ -6027,6 +6236,11 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                         .is_none_or(|n| format!("{:?}", r.status).to_lowercase() == *n)
                 })
                 .collect();
+            if json {
+                let out: Vec<serde_json::Value> = filtered.iter().map(json_out::invoice_json).collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
             if filtered.is_empty() {
                 println!("(no invoices)");
             }
@@ -6045,7 +6259,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 );
             }
         }
-        FinanceCmd::InvoiceShow { number } => {
+        FinanceCmd::InvoiceShow { number, json } => {
             use finance_db::entity::{InvoiceColumn, InvoiceEntity};
             use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
             use sea_orm_migration::MigratorTrait;
@@ -6060,6 +6274,27 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 .await
                 .map_err(|e| eyre::eyre!("query: {e}"))?
                 .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
+            // Sessions stamped to this invoice (best-effort).
+            let sessions = {
+                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+                WorkSessionEntity::find()
+                    .filter(WorkSessionColumn::InvoiceId.eq(row.id))
+                    .all(&timer_conn)
+                    .await
+                    .unwrap_or_default()
+            };
+            if json {
+                let mut v = json_out::invoice_json(&row);
+                if let serde_json::Value::Object(map) = &mut v {
+                    let rows: Vec<serde_json::Value> = sessions
+                        .into_iter()
+                        .map(|m| json_out::session_json(&timer_proto::WorkSession::from(m)))
+                        .collect();
+                    map.insert("sessions".into(), serde_json::Value::Array(rows));
+                }
+                json_out::print_json(&v)?;
+                return Ok(());
+            }
             println!("Invoice {}", row.number);
             println!("  id:          {}", row.id);
             println!("  status:      {:?}", row.status);
@@ -6081,25 +6316,13 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                     fmt_minor(li.line_total_minor),
                 );
             }
-            // Sessions stamped to this invoice.
-            use sea_orm::Database;
-            let timer_url = std::env::var("TASK_TIMER_DB")
-                .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
-            if let Ok(tc) = Database::connect(&timer_url).await {
-                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
-                let sessions = WorkSessionEntity::find()
-                    .filter(WorkSessionColumn::InvoiceId.eq(row.id))
-                    .all(&tc)
-                    .await
-                    .unwrap_or_default();
-                println!("  sessions:    {}", sessions.len());
-                for s in sessions {
-                    println!(
-                        "    - {}  {}",
-                        s.start_time.format("%Y-%m-%d %H:%M"),
-                        s.description
-                    );
-                }
+            println!("  sessions:    {}", sessions.len());
+            for s in sessions {
+                println!(
+                    "    - {}  {}",
+                    s.start_time.format("%Y-%m-%d %H:%M"),
+                    s.description
+                );
             }
         }
         FinanceCmd::InvoiceMarkPaid {
@@ -6107,6 +6330,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             amount,
             on,
             memo,
+            json,
         } => {
             use finance_db::entity::{InvoiceActive, InvoiceColumn, InvoiceEntity};
             use sea_orm::{
@@ -6160,18 +6384,30 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 .update(&conn)
                 .await
                 .map_err(|e| eyre::eyre!("update invoice: {e}"))?;
-            println!(
-                "Recorded payment of {} on {} ({}). status={:?}, paid={}, balance={}",
-                fmt_minor(pay),
-                on_date,
-                if memo.is_empty() { "no memo" } else { &memo },
-                new_status,
-                fmt_minor(new_paid),
-                fmt_minor(new_balance),
-            );
-            let _ = id;
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "id": id,
+                    "number": number,
+                    "payment_minor": pay,
+                    "on": on_date,
+                    "memo": memo,
+                    "status": format!("{new_status:?}").to_lowercase(),
+                    "amount_paid_minor": new_paid,
+                    "balance_minor": new_balance,
+                }))?;
+            } else {
+                println!(
+                    "Recorded payment of {} on {} ({}). status={:?}, paid={}, balance={}",
+                    fmt_minor(pay),
+                    on_date,
+                    if memo.is_empty() { "no memo" } else { &memo },
+                    new_status,
+                    fmt_minor(new_paid),
+                    fmt_minor(new_balance),
+                );
+            }
         }
-        FinanceCmd::InvoiceVoid { number } => {
+        FinanceCmd::InvoiceVoid { number, json } => {
             use finance_db::entity::{InvoiceActive, InvoiceColumn, InvoiceEntity};
             use sea_orm::{
                 ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
@@ -6224,10 +6460,19 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 .exec(&tc)
                 .await
                 .map_err(|e| eyre::eyre!("un-stamp sessions: {e}"))?;
-            println!(
-                "Voided `{number}` and un-stamped {} session(s).",
-                cleared.rows_affected
-            );
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "id": invoice_id,
+                    "number": number,
+                    "status": "cancelled",
+                    "sessions_unstamped": cleared.rows_affected,
+                }))?;
+            } else {
+                println!(
+                    "Voided `{number}` and un-stamped {} session(s).",
+                    cleared.rows_affected
+                );
+            }
         }
     }
     Ok(())
@@ -6708,19 +6953,67 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
     });
     let store = Store::new(conn, defaults);
 
+    // Per-org vox URL for `--task` / `--project` reference
+    // resolution. `establish_for_url` honors `TASK_EMBED` (in-process
+    // backend) vs a running server; the URL is only dialed when a
+    // flag actually needs resolving, so plain local timer use (raw
+    // uuids / no flags) keeps working fully offline.
+    let vox_url = resolve_org_vox_url(None, ctx.root.slug());
+    // `--task <id|prefix|path>` → TaskInfo, used to default the
+    // description / project / task-note on start | switch | log.
+    let resolve_task_flag = |flag: Option<String>| {
+        let vox_url = vox_url.clone();
+        async move {
+            match flag {
+                None => Ok::<_, eyre::Report>(None),
+                Some(t) => {
+                    let tc: task::TaskServiceClient = establish_for_url(&vox_url).await?;
+                    Ok(Some(json_out::resolve_task_flexible(&tc, &t).await?))
+                }
+            }
+        }
+    };
+    // `--project <uuid|title|path|prefix>` → (id, known-path).
+    let resolve_project_flag = |flag: Option<String>| {
+        let vox_url = vox_url.clone();
+        async move {
+            json_out::resolve_project_arg(flag.as_deref(), || async {
+                establish_for_url::<project::ProjectServiceClient>(&vox_url).await
+            })
+            .await
+        }
+    };
+
     match cmd {
         TimerCmd::Start {
             description,
+            task,
             project,
             task_note,
             tags,
+            json,
         } => {
-            let project_path = project_path_for(&vault_root, project);
+            let task_info = resolve_task_flag(task).await?;
+            let (mut project_id, resolved_path) = resolve_project_flag(project).await?;
+            // --task fills the gaps; explicit flags win.
+            if project_id.is_none() {
+                project_id = task_info.as_ref().and_then(|t| t.project_id);
+            }
+            let description = description
+                .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
+                .unwrap_or_default();
+            let task_note = if task_note.is_empty() {
+                task_info.as_ref().map(|t| t.path.clone()).unwrap_or_default()
+            } else {
+                task_note
+            };
+            let project_path =
+                resolved_path.unwrap_or_else(|| project_path_for(&vault_root, project_id));
             let session = store
                 .start_timer(StartTimerRequest {
                     user_id,
                     org_id,
-                    project_id: project,
+                    project_id,
                     project_path,
                     task_note_path: task_note,
                     description,
@@ -6728,72 +7021,139 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .await
                 .map_err(|e| eyre::eyre!("start: {e}"))?;
             attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
-            println!("Started {} at {}", session.id, session.start_time);
-            println!("  description: {}", session.description);
-            if !session.project_path.is_empty() {
-                println!("  project:     {}", session.project_path);
-            }
-            println!("  billable:    {}", session.billable);
-            if !tags.is_empty() {
-                println!("  tags:        {}", tags.join(", "));
+            if json {
+                json_out::print_json(&json_out::session_json(&session))?;
+            } else {
+                println!("Started {} at {}", session.id, session.start_time);
+                println!("  description: {}", session.description);
+                if !session.project_path.is_empty() {
+                    println!("  project:     {}", session.project_path);
+                }
+                if !session.task_note_path.is_empty() {
+                    println!("  task:        {}", session.task_note_path);
+                }
+                println!("  billable:    {}", session.billable);
+                if !tags.is_empty() {
+                    println!("  tags:        {}", tags.join(", "));
+                }
             }
         }
-        TimerCmd::Stop => {
+        TimerCmd::Stop { json } => {
             let session = store
                 .stop_timer(user_id)
                 .await
                 .map_err(|e| eyre::eyre!("stop: {e}"))?;
-            let elapsed = session
-                .end_time
-                .unwrap_or_else(chrono::Utc::now)
-                .signed_duration_since(session.start_time);
-            println!("Stopped {}", session.id);
-            println!("  description: {}", session.description);
-            println!("  elapsed:     {}", fmt_duration(elapsed));
-            if session.billable {
-                println!(
-                    "  billed:      {} {} (rate: {} {}/h)",
-                    fmt_money(billed_cents(&session, elapsed)),
-                    session.currency,
-                    fmt_money(session.rate_cents),
-                    session.currency,
-                );
+            if json {
+                json_out::print_json(&json_out::session_json(&session))?;
+            } else {
+                let elapsed = session
+                    .end_time
+                    .unwrap_or_else(chrono::Utc::now)
+                    .signed_duration_since(session.start_time);
+                println!("Stopped {}", session.id);
+                println!("  description: {}", session.description);
+                println!("  elapsed:     {}", fmt_duration(elapsed));
+                if session.billable {
+                    println!(
+                        "  billed:      {} {} (rate: {} {}/h)",
+                        fmt_money(billed_cents(&session, elapsed)),
+                        session.currency,
+                        fmt_money(session.rate_cents),
+                        session.currency,
+                    );
+                }
             }
         }
-        TimerCmd::Active => {
+        TimerCmd::Active { json } => {
             match store
                 .active_timer(user_id)
                 .await
                 .map_err(|e| eyre::eyre!("{e}"))?
             {
                 Some(s) => {
-                    let elapsed = chrono::Utc::now().signed_duration_since(s.start_time);
-                    println!("Running for {} ({})", fmt_duration(elapsed), s.id);
-                    if !s.description.is_empty() {
-                        println!("  description: {}", s.description);
-                    }
-                    if !s.project_path.is_empty() {
-                        println!("  project:     {}", s.project_path);
-                    }
-                    if !s.task_note_path.is_empty() {
-                        println!("  task:        {}", s.task_note_path);
+                    if json {
+                        // Joined titles are best-effort: vox being
+                        // down shouldn't break `active --json` —
+                        // the entity + derived seconds still print.
+                        let task_title = if s.task_note_path.is_empty() {
+                            None
+                        } else {
+                            match establish_for_url::<task::TaskServiceClient>(&vox_url).await {
+                                Ok(tc) => tc
+                                    .get_by_path(s.task_note_path.clone())
+                                    .await
+                                    .ok()
+                                    .map(|t| t.title),
+                                Err(_) => None,
+                            }
+                        };
+                        let project_title = match s.project_id {
+                            None => None,
+                            Some(pid) => {
+                                match establish_for_url::<project::ProjectServiceClient>(&vox_url)
+                                    .await
+                                {
+                                    Ok(pc) => pc.get(pid).await.ok().map(|p| p.title),
+                                    Err(_) => None,
+                                }
+                            }
+                        };
+                        json_out::print_json(&json_out::session_json_joined(
+                            &s,
+                            task_title,
+                            project_title,
+                        ))?;
+                    } else {
+                        let elapsed = chrono::Utc::now().signed_duration_since(s.start_time);
+                        println!("Running for {} ({})", fmt_duration(elapsed), s.id);
+                        if !s.description.is_empty() {
+                            println!("  description: {}", s.description);
+                        }
+                        if !s.project_path.is_empty() {
+                            println!("  project:     {}", s.project_path);
+                        }
+                        if !s.task_note_path.is_empty() {
+                            println!("  task:        {}", s.task_note_path);
+                        }
                     }
                 }
-                None => println!("No active timer."),
+                None => {
+                    if json {
+                        println!("null");
+                    } else {
+                        println!("No active timer.");
+                    }
+                }
             }
         }
         TimerCmd::Switch {
             description,
+            task,
             project,
             task_note,
             tags,
+            json,
         } => {
-            let project_path = project_path_for(&vault_root, project);
+            let task_info = resolve_task_flag(task).await?;
+            let (mut project_id, resolved_path) = resolve_project_flag(project).await?;
+            if project_id.is_none() {
+                project_id = task_info.as_ref().and_then(|t| t.project_id);
+            }
+            let description = description
+                .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
+                .unwrap_or_default();
+            let task_note = if task_note.is_empty() {
+                task_info.as_ref().map(|t| t.path.clone()).unwrap_or_default()
+            } else {
+                task_note
+            };
+            let project_path =
+                resolved_path.unwrap_or_else(|| project_path_for(&vault_root, project_id));
             let (closed, started) = store
                 .switch_timer(StartTimerRequest {
                     user_id,
                     org_id,
-                    project_id: project,
+                    project_id,
                     project_path,
                     task_note_path: task_note,
                     description,
@@ -6801,33 +7161,56 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .await
                 .map_err(|e| eyre::eyre!("switch: {e}"))?;
             attach_tags_by_name(store.conn(), org_id, started.id, &tags).await?;
-            if let Some(prev) = closed {
-                let elapsed = prev
-                    .end_time
-                    .unwrap_or_else(chrono::Utc::now)
-                    .signed_duration_since(prev.start_time);
-                println!("Stopped {} after {}", prev.id, fmt_duration(elapsed));
-            }
-            println!("Started {} at {}", started.id, started.start_time);
-            if !tags.is_empty() {
-                println!("  tags: {}", tags.join(", "));
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "stopped": closed.as_ref().map(json_out::session_json),
+                    "started": json_out::session_json(&started),
+                }))?;
+            } else {
+                if let Some(prev) = closed {
+                    let elapsed = prev
+                        .end_time
+                        .unwrap_or_else(chrono::Utc::now)
+                        .signed_duration_since(prev.start_time);
+                    println!("Stopped {} after {}", prev.id, fmt_duration(elapsed));
+                }
+                println!("Started {} at {}", started.id, started.start_time);
+                if !tags.is_empty() {
+                    println!("  tags: {}", tags.join(", "));
+                }
             }
         }
         TimerCmd::Log {
             description,
             from,
             to,
+            task,
             project,
             task_note,
             billable,
             tags,
+            json,
         } => {
-            let project_path = project_path_for(&vault_root, project);
+            let task_info = resolve_task_flag(task).await?;
+            let (mut project_id, resolved_path) = resolve_project_flag(project).await?;
+            if project_id.is_none() {
+                project_id = task_info.as_ref().and_then(|t| t.project_id);
+            }
+            let description = description
+                .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
+                .unwrap_or_default();
+            let task_note = if task_note.is_empty() {
+                task_info.as_ref().map(|t| t.path.clone()).unwrap_or_default()
+            } else {
+                task_note
+            };
+            let project_path =
+                resolved_path.unwrap_or_else(|| project_path_for(&vault_root, project_id));
             let session = store
                 .log_session(LogSessionRequest {
                     user_id,
                     org_id,
-                    project_id: project,
+                    project_id,
                     project_path,
                     task_note_path: task_note,
                     description,
@@ -6838,21 +7221,35 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .await
                 .map_err(|e| eyre::eyre!("log: {e}"))?;
             attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
-            println!("Logged {} ({})", session.id, fmt_duration(to - from));
+            if json {
+                json_out::print_json(&json_out::session_json(&session))?;
+            } else {
+                println!("Logged {} ({})", session.id, fmt_duration(to - from));
+            }
         }
         TimerCmd::SetRate {
             user_id,
             cents,
             currency,
+            json,
         } => {
             store
                 .set_org_member_rate(org_id, user_id, cents, &currency)
                 .await
                 .map_err(|e| eyre::eyre!("set rate: {e}"))?;
-            println!(
-                "Set org rate for {user_id}: {} {currency}/hr",
-                fmt_money(cents)
-            );
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "hourly_cents": cents,
+                    "currency": currency,
+                }))?;
+            } else {
+                println!(
+                    "Set org rate for {user_id}: {} {currency}/hr",
+                    fmt_money(cents)
+                );
+            }
         }
         TimerCmd::Edit {
             id,
@@ -6863,13 +7260,19 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
             user_id: edit_user,
             billable,
             task_note,
+            json,
         } => {
+            let (project_id, resolved_path) = resolve_project_flag(project).await?;
+            // Reassigning the project also refreshes the cached
+            // path (resolver-known path first, vault scan second).
+            let project_path = project_id
+                .map(|pid| resolved_path.unwrap_or_else(|| project_path_for(&vault_root, Some(pid))));
             let session = store
                 .update_session(timer_proto::service::UpdateSessionRequest {
                     id,
                     user_id: edit_user,
-                    project_id: project,
-                    project_path: None,
+                    project_id,
+                    project_path,
                     task_note_path: task_note,
                     description,
                     start_time: from,
@@ -6878,24 +7281,32 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 })
                 .await
                 .map_err(|e| eyre::eyre!("edit: {e}"))?;
-            println!(
-                "Updated {} — \"{}\" [{}] {}/hr",
-                session.id,
-                session.description,
-                if session.billable {
-                    "billable"
-                } else {
-                    "non-billable"
-                },
-                fmt_money(session.rate_cents),
-            );
+            if json {
+                json_out::print_json(&json_out::session_json(&session))?;
+            } else {
+                println!(
+                    "Updated {} — \"{}\" [{}] {}/hr",
+                    session.id,
+                    session.description,
+                    if session.billable {
+                        "billable"
+                    } else {
+                        "non-billable"
+                    },
+                    fmt_money(session.rate_cents),
+                );
+            }
         }
-        TimerCmd::Delete { id } => {
+        TimerCmd::Delete { id, json } => {
             store
                 .delete_session(id)
                 .await
                 .map_err(|e| eyre::eyre!("delete: {e}"))?;
-            println!("Deleted {id}");
+            if json {
+                json_out::print_json(&serde_json::json!({ "deleted": id }))?;
+            } else {
+                println!("Deleted {id}");
+            }
         }
         TimerCmd::List {
             project,
@@ -6904,7 +7315,9 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
             until,
             open,
             billable,
+            json,
         } => {
+            let (project_id, _) = resolve_project_flag(project).await?;
             // No default user filter: sessions land in this
             // DB from several surfaces (CLI, web UI) whose
             // identity derivations have drifted, and a
@@ -6913,7 +7326,7 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
             // org-wide).
             let filter = timer_proto::WorkSessionFilter {
                 user_id: user,
-                project_id: project,
+                project_id,
                 since: Some(
                     since.unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::days(7)),
                 ),
@@ -6925,6 +7338,11 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .query_sessions(&filter)
                 .await
                 .map_err(|e| eyre::eyre!("list: {e}"))?;
+            if json {
+                let out: Vec<serde_json::Value> = rows.iter().map(json_out::session_json).collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
             if rows.is_empty() {
                 println!("(no sessions)");
             }
@@ -6950,7 +7368,7 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 );
             }
         }
-        TimerCmd::Users => {
+        TimerCmd::Users { json } => {
             // All sessions in scope; aggregate per user_id.
             let rows = store
                 .query_sessions(&timer_proto::WorkSessionFilter::default())
@@ -7001,6 +7419,22 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 }
                 map
             };
+            if json {
+                let out: Vec<serde_json::Value> = agg
+                    .iter()
+                    .map(|(uid, (count, secs, cents))| {
+                        serde_json::json!({
+                            "user_id": uid,
+                            "sessions": count,
+                            "seconds": secs,
+                            "cents": cents,
+                            "name": names.get(uid),
+                        })
+                    })
+                    .collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
             if agg.is_empty() {
                 println!("(no sessions)");
             }
@@ -7026,10 +7460,12 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
             description_contains,
             rerate,
             dry_run,
+            json,
         } => {
+            let (project_id, _) = resolve_project_flag(project).await?;
             let filter = timer_proto::WorkSessionFilter {
                 user_id: Some(from),
-                project_id: project,
+                project_id,
                 since,
                 until,
                 billable: None,
@@ -7048,19 +7484,32 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                         .is_none_or(|n| s.description.to_lowercase().contains(n.as_str()))
                 })
                 .collect();
-            println!(
-                "{} session(s) match (from={from}, to={to}, rerate={rerate}, dry_run={dry_run})",
-                matched.len()
-            );
-            for s in &matched {
+            if !json {
                 println!(
-                    "  {}  {}  {}",
-                    s.start_time.format("%Y-%m-%d %H:%M"),
-                    s.id,
-                    s.description
+                    "{} session(s) match (from={from}, to={to}, rerate={rerate}, dry_run={dry_run})",
+                    matched.len()
                 );
+                for s in &matched {
+                    println!(
+                        "  {}  {}  {}",
+                        s.start_time.format("%Y-%m-%d %H:%M"),
+                        s.id,
+                        s.description
+                    );
+                }
             }
             if dry_run || matched.is_empty() {
+                if json {
+                    json_out::print_json(&serde_json::json!({
+                        "from": from,
+                        "to": to,
+                        "rerate": rerate,
+                        "dry_run": dry_run,
+                        "matched": matched.len(),
+                        "updated": 0,
+                        "session_ids": matched.iter().map(|s| s.id).collect::<Vec<_>>(),
+                    }))?;
+                }
                 return Ok(());
             }
             let mut updated = 0_usize;
@@ -7094,31 +7543,56 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 }
                 updated += 1;
             }
-            println!("Updated {updated} session(s).");
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "from": from,
+                    "to": to,
+                    "rerate": rerate,
+                    "dry_run": false,
+                    "matched": matched.len(),
+                    "updated": updated,
+                    "session_ids": matched.iter().map(|s| s.id).collect::<Vec<_>>(),
+                }))?;
+            } else {
+                println!("Updated {updated} session(s).");
+            }
         }
-        TimerCmd::Resolve { project } => {
+        TimerCmd::Resolve { project, json } => {
+            let (project_id, _) = resolve_project_flag(project).await?;
             let resolved = store
-                .resolve_rate(user_id, project)
+                .resolve_rate(user_id, project_id)
                 .await
                 .map_err(|e| eyre::eyre!("resolve: {e}"))?;
-            println!(
-                "rate: {} {}/h  source: {:?}",
-                fmt_money(resolved.hourly_cents),
-                if resolved.currency.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    resolved.currency
-                },
-                resolved.source,
-            );
+            if json {
+                json_out::print_json(&resolved)?;
+            } else {
+                println!(
+                    "rate: {} {}/h  source: {:?}",
+                    fmt_money(resolved.hourly_cents),
+                    if resolved.currency.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        resolved.currency
+                    },
+                    resolved.source,
+                );
+            }
         }
         TimerCmd::Tag(sub) => match sub {
-            TimerTagCmd::List => {
+            TimerTagCmd::List { json } => {
                 let rows = TagEntity::find()
                     .filter(TagColumn::OrgId.eq(org_id))
                     .all(store.conn())
                     .await
                     .map_err(|e| eyre::eyre!("list tags: {e}"))?;
+                if json {
+                    let out: Vec<serde_json::Value> = rows
+                        .into_iter()
+                        .map(|t| json_out::tag_json(&timer_proto::Tag::from(t)))
+                        .collect();
+                    json_out::print_json(&out)?;
+                    return Ok(());
+                }
                 if rows.is_empty() {
                     println!("(no tags)");
                 }
@@ -7131,11 +7605,15 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                     println!("{}  {}  {}", t.id, t.name, color);
                 }
             }
-            TimerTagCmd::Create { name, color } => {
+            TimerTagCmd::Create { name, color, json } => {
                 let tag = ensure_tag(store.conn(), org_id, &name, &color).await?;
-                println!("{}  {}", tag.id, tag.name);
+                if json {
+                    json_out::print_json(&json_out::tag_json(&timer_proto::Tag::from(tag)))?;
+                } else {
+                    println!("{}  {}", tag.id, tag.name);
+                }
             }
-            TimerTagCmd::Rm { name } => {
+            TimerTagCmd::Rm { name, json } => {
                 let existing = TagEntity::find()
                     .filter(TagColumn::OrgId.eq(org_id))
                     .filter(TagColumn::Name.eq(name.clone()))
@@ -7149,16 +7627,34 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                     .exec(store.conn())
                     .await
                     .map_err(|e| eyre::eyre!("delete tag: {e}"))?;
-                println!("Deleted tag {} ({})", tag.name, tag.id);
+                if json {
+                    json_out::print_json(&serde_json::json!({
+                        "deleted": json_out::tag_json(&timer_proto::Tag::from(tag)),
+                    }))?;
+                } else {
+                    println!("Deleted tag {} ({})", tag.name, tag.id);
+                }
             }
-            TimerTagCmd::Attach { session_id, tags } => {
+            TimerTagCmd::Attach {
+                session_id,
+                tags,
+                json,
+            } => {
                 attach_tags_by_name(store.conn(), org_id, session_id, &tags).await?;
-                println!("Attached {} to {session_id}", tags.join(", "));
+                if json {
+                    json_out::print_json(&serde_json::json!({
+                        "session_id": session_id,
+                        "attached": tags,
+                    }))?;
+                } else {
+                    println!("Attached {} to {session_id}", tags.join(", "));
+                }
             }
             TimerTagCmd::Detach {
                 session_id,
                 tags,
                 all,
+                json,
             } => {
                 if all {
                     WorkSessionTagEntity::delete_many()
@@ -7166,7 +7662,14 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                         .exec(store.conn())
                         .await
                         .map_err(|e| eyre::eyre!("detach all: {e}"))?;
-                    println!("Detached all tags from {session_id}");
+                    if json {
+                        json_out::print_json(&serde_json::json!({
+                            "session_id": session_id,
+                            "detached": "all",
+                        }))?;
+                    } else {
+                        println!("Detached all tags from {session_id}");
+                    }
                 } else if tags.is_empty() {
                     return Err(eyre::eyre!("pass --tag <name> or --all"));
                 } else {
@@ -7186,7 +7689,14 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                         .exec(store.conn())
                         .await
                         .map_err(|e| eyre::eyre!("detach: {e}"))?;
-                    println!("Detached {} from {session_id}", tags.join(", "));
+                    if json {
+                        json_out::print_json(&serde_json::json!({
+                            "session_id": session_id,
+                            "detached": tags,
+                        }))?;
+                    } else {
+                        println!("Detached {} from {session_id}", tags.join(", "));
+                    }
                 }
             }
         },
@@ -12850,24 +13360,34 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
         }
-        CodeCmd::Worktrees => {
+        CodeCmd::Worktrees { json } => {
             // `git worktree list --porcelain` → show the task ones.
             let out = git(&["worktree", "list", "--porcelain"])?;
             let mut path = String::new();
-            let mut found = false;
+            let mut rows: Vec<(String, String)> = Vec::new();
             for line in out.lines() {
                 if let Some(p) = line.strip_prefix("worktree ") {
                     path = p.to_string();
                 } else if let Some(b) = line.strip_prefix("branch ") {
                     let b = b.trim_start_matches("refs/heads/");
                     if b.starts_with("task/") {
-                        println!("{b}\n  {path}");
-                        found = true;
+                        rows.push((b.to_string(), path.clone()));
                     }
                 }
             }
-            if !found {
+            if json {
+                let out: Vec<serde_json::Value> = rows
+                    .iter()
+                    .map(|(branch, path)| serde_json::json!({ "branch": branch, "path": path }))
+                    .collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
+            if rows.is_empty() {
                 println!("(no task worktrees)");
+            }
+            for (branch, path) in rows {
+                println!("{branch}\n  {path}");
             }
         }
         CodeCmd::Cleanup { id } => {
@@ -12999,22 +13519,61 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                 eprintln!("  note: task has no linked forge issue — PR won't auto-close one");
             }
         }
-        CodeCmd::Status { org, server } => {
+        CodeCmd::Status { org, server, json } => {
             let branch = current_branch()?;
-            println!("branch:  {branch}");
+            if !json {
+                println!("branch:  {branch}");
+            }
             let Some(short) = task_short_from_branch(&branch) else {
-                println!("task:    (branch isn't a task/<id>-… branch)");
+                if json {
+                    json_out::print_json(&serde_json::json!({
+                        "branch": branch,
+                        "task": null,
+                        "links": [],
+                    }))?;
+                } else {
+                    println!("task:    (branch isn't a task/<id>-… branch)");
+                }
                 return Ok(());
             };
             let slug = resolve_active_org(org)?;
             let vox = resolve_org_vox_url(server, &slug);
             let client = connect_task_client(&vox).await?;
             let t = resolve_issue_id(&client, &short).await?;
-            println!("task:    {} [{}]  {}", short, t.status, t.title);
             let store = forge_link_store(&slug)?;
             let links = store
                 .issues_for_task(&t.id.to_string())
                 .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            if json {
+                let link_rows: Vec<serde_json::Value> = links
+                    .iter()
+                    .map(|l| {
+                        let kind = match l.kind {
+                            git_config::LinkKind::Issue => "issue",
+                            git_config::LinkKind::Pull => "pr",
+                        };
+                        serde_json::json!({
+                            "kind": kind,
+                            "owner": l.repo.owner,
+                            "repo": l.repo.repo,
+                            "number": l.number,
+                        })
+                    })
+                    .collect();
+                json_out::print_json(&serde_json::json!({
+                    "branch": branch,
+                    "task": {
+                        "id": t.id,
+                        "short": short,
+                        "status": t.status,
+                        "title": t.title,
+                        "path": t.path,
+                    },
+                    "links": link_rows,
+                }))?;
+                return Ok(());
+            }
+            println!("task:    {} [{}]  {}", short, t.status, t.title);
             for l in links {
                 let kind = match l.kind {
                     git_config::LinkKind::Issue => "issue",
@@ -13158,6 +13717,7 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
             as_agent,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let vox = resolve_org_vox_url(server, &slug);
@@ -13176,8 +13736,28 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                     _ => true,
                 })
                 .collect();
-            if open.is_empty() {
+            if open.is_empty() && !json {
                 println!("(no parked tasks)");
+                return Ok(());
+            }
+            if json {
+                // Handoff entities + the joined task title.
+                let mut rows: Vec<serde_json::Value> = Vec::with_capacity(open.len());
+                for h in open {
+                    let title = client.get(h.session_id).await.ok().map(|t| t.title);
+                    let mut v = serde_json::to_value(h).unwrap_or(serde_json::Value::Null);
+                    if let serde_json::Value::Object(map) = &mut v {
+                        map.insert(
+                            "task_short".into(),
+                            h.session_id.simple().to_string()[..8].into(),
+                        );
+                        if let Some(t) = title {
+                            map.insert("task_title".into(), t.into());
+                        }
+                    }
+                    rows.push(v);
+                }
+                json_out::print_json(&rows)?;
                 return Ok(());
             }
             println!("{} parked task(s):", open.len());
