@@ -18,7 +18,7 @@ import { join } from "node:path";
 
 const PAGE_URL =
   process.argv[2] ?? "http://localhost:5173/projects?debug=vox";
-const PAINT_TIMEOUT_MS = 40_000;
+const PAINT_TIMEOUT_MS = Number(process.env.PAINT_TIMEOUT_MS ?? 40_000);
 
 interface CdpMessage {
   id?: number;
@@ -201,6 +201,12 @@ async function dumpTelemetry(cdp: Cdp, sessionId: string, label: string): Promis
       `  nav: fetchStart=${nav.fetchStart?.toFixed(0)}ms responseEnd=${nav.responseEnd?.toFixed(0)}ms DCL=${nav.domContentLoaded?.toFixed(0)}ms load=${nav.loadEvent?.toFixed(0)}ms resources=${nav.resources}`,
     );
   }
+  const overlay = await evalJson<boolean>(
+    cdp,
+    sessionId,
+    `!!document.getElementById('vox-perf-overlay')`,
+  );
+  console.log(`  debug overlay (?debug=vox): ${overlay ? "mounted" : "absent"}`);
 }
 
 async function main(): Promise<void> {
