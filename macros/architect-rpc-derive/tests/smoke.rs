@@ -343,6 +343,32 @@ mod subscriptions {
     }
 }
 
+// ── #[rpc(sync_client)] opt-in ──────────────────────────────────────
+
+mod sync_client_arg {
+    use super::rpc;
+
+    // The facade itself is vox-gated (absent in this build); this
+    // proves the argument parses and the trait still works.
+    #[rpc(sync_client)]
+    pub trait Adder {
+        fn add(&self, a: u32, b: u32) -> u32;
+    }
+
+    struct Backend;
+
+    impl Adder for Backend {
+        fn add(&self, a: u32, b: u32) -> u32 {
+            a + b
+        }
+    }
+
+    #[test]
+    fn sync_client_arg_parses_and_trait_remains_callable() {
+        assert_eq!(Backend.add(2, 3), 5);
+    }
+}
+
 // ── Empty trait ─────────────────────────────────────────────────────
 
 mod empty {

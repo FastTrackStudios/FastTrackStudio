@@ -74,23 +74,40 @@ use syn::{
 /// snapshot-then-changes (`PubSub::begin_attach`) stay backend-owned.
 #[proc_macro_attribute]
 pub fn rpc(args: TokenStream, input: TokenStream) -> TokenStream {
-    if !args.is_empty() {
-        let span = proc_macro2::TokenStream::from(args);
-        return syn::Error::new_spanned(
-            span,
-            "#[architect::rpc] takes no arguments — requirements are \
-             declared per backend at the bundle site via \
-             `Service.needs(&[...])`, not on the trait.",
-        )
-        .to_compile_error()
-        .into();
-    }
+    let mut rpc_args = RpcArgs::default();
+    let parser = syn::meta::parser(|meta| rpc_args.parse(&meta));
+    parse_macro_input!(args with parser);
 
     let trait_item = parse_macro_input!(input as ItemTrait);
 
-    match expand(trait_item) {
+    match expand(trait_item, rpc_args) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// Arguments to `#[architect::rpc(...)]`. All optional; the bare form
+/// is the common case.
+#[derive(Default)]
+struct RpcArgs {
+    /// `sync_client` — additionally emit the `<Trait>SyncClient`
+    /// blocking facade (vox-gated, native only). Opt-in so consumers
+    /// that never block don't carry the extra surface.
+    sync_client: bool,
+}
+
+impl RpcArgs {
+    fn parse(&mut self, meta: &syn::meta::ParseNestedMeta) -> syn::Result<()> {
+        if meta.path.is_ident("sync_client") {
+            self.sync_client = true;
+            return Ok(());
+        }
+        Err(meta.error(
+            "unknown #[architect::rpc] argument — supported: `sync_client` \
+             (emit the blocking <Trait>SyncClient facade). Backend \
+             requirements are declared per backend at the bundle site, \
+             not on the trait.",
+        ))
     }
 }
 
@@ -162,7 +179,7 @@ fn expand_has_dispatcher(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
 
 /// Main expansion entry. Split out from the proc-macro shim so it can
 /// be exercised from unit tests once they exist.
-fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
+fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     let trait_name = &trait_item.ident;
     let vis = &trait_item.vis;
     let rpc_trait_name = format_ident!("{}Rpc", trait_name);
@@ -279,12 +296,21 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
         vis,
         shape,
         &subscriptions,
+        args.sync_client,
     );
 
     // Stream sibling — emitted when the trait declares `#[subscribe]`
     // methods: the `<Trait>Stream` vox service, the `<Trait>StreamSource`
     // backend contract, and the stream mount verbs.
     let stream_block = emit_stream_block(trait_name, vis, &subscriptions);
+
+    // Blocking facade over the async client — sync code talking to a
+    // remote backend. Opt-in via `#[architect::rpc(sync_client)]`.
+    let sync_client = if args.sync_client {
+        emit_sync_client(trait_name, &client_name, vis, shape, &methods)
+    } else {
+        quote! {}
+    };
 
     Ok(quote! {
         #user_trait
@@ -295,8 +321,121 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
         #serve_fn
         #layer_fn
         #stream_block
+        #sync_client
         #prelude
     })
+}
+
+/// Split a syntactically-literal `Result<O, E>` into its parts. This
+/// must MATCH vox's own caller-signature rule (vox-macros-core
+/// `as_result`): only a path whose last segment is exactly `Result`
+/// with two type arguments counts — type aliases (`DawResult<T>`) are
+/// opaque to both layers and are treated as plain payload types.
+fn as_syntactic_result(ty: &Type) -> Option<(Type, Type)> {
+    let Type::Path(p) = ty else { return None };
+    let seg = p.path.segments.last()?;
+    if seg.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
+        return None;
+    };
+    let mut types = args.args.iter().filter_map(|a| match a {
+        syn::GenericArgument::Type(t) => Some(t.clone()),
+        _ => None,
+    });
+    let ok = types.next()?;
+    let err = types.next()?;
+    if types.next().is_some() {
+        return None;
+    }
+    Some((ok, err))
+}
+
+/// Emit the `<Trait>SyncClient` blocking facade: one sync method per
+/// trait method, each driving the async vox client through a
+/// [`BlockingCaller`]. The signatures mirror what vox emits on the
+/// async client (rpc.fallible caller-signature rule): `Result<O, E>`
+/// methods return `Result<O, VoxError<E>>`, everything else returns
+/// `Result<T, VoxError>`.
+///
+/// Emitted only under `#[architect::rpc(sync_client)]`. Gated on the
+/// consumer's `vox` feature and native targets — wasm has no blocking.
+/// Requires `architect/sync-client` in the consumer's dependency
+/// (compile error names `BlockingCaller` if missing). For in-process
+/// backends skip the facade entirely: the user trait is already sync
+/// and free.
+fn emit_sync_client(
+    trait_name: &syn::Ident,
+    client_name: &syn::Ident,
+    vis: &syn::Visibility,
+    shape: Shape,
+    methods: &[Method],
+) -> TokenStream2 {
+    if matches!(shape, Shape::Empty) {
+        return quote! {};
+    }
+    let sync_client_name = format_ident!("{}SyncClient", trait_name);
+
+    let facade_methods = methods.iter().map(|m| {
+        let name = &m.decl.sig.ident;
+        let inputs = &m.mirror_inputs;
+        let arg_idents = &m.arg_idents;
+        let docs: Vec<_> = m
+            .decl
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("doc"))
+            .collect();
+        let ret = match &m.return_ty {
+            ReturnType::Default => quote! {
+                ::core::result::Result<(), ::architect::vox::VoxError>
+            },
+            ReturnType::Type(_, ty) => match as_syntactic_result(ty) {
+                Some((ok, err)) => quote! {
+                    ::core::result::Result<#ok, ::architect::vox::VoxError<#err>>
+                },
+                None => quote! {
+                    ::core::result::Result<#ty, ::architect::vox::VoxError>
+                },
+            },
+        };
+        // `mirror_inputs` includes the receiver; strip it — the facade
+        // method declares its own `&self`.
+        let typed_args = inputs.iter().filter(|a| matches!(a, FnArg::Typed(_)));
+        quote! {
+            #(#docs)*
+            pub fn #name(&self, #(#typed_args),*) -> #ret {
+                self.caller.block_on(self.inner.#name(#(#arg_idents),*))
+            }
+        }
+    });
+
+    let doc = format!(
+        "Blocking facade over [`{client_name}`]: each call drives the          async client to completion on the [`BlockingCaller`]'s          runtime. For sync code talking to a *remote* backend —          in-process callers use the [`{trait_name}`] trait directly.          Never call from inside an async context.
+
+         [`BlockingCaller`]: ::architect::BlockingCaller"
+    );
+
+    quote! {
+        #[doc = #doc]
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        #[derive(Clone)]
+        #vis struct #sync_client_name {
+            inner: #client_name,
+            caller: ::architect::BlockingCaller,
+        }
+
+        #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+        impl #sync_client_name {
+            /// Wrap an established async client with a blocking driver.
+            #vis fn new(inner: #client_name, caller: ::architect::BlockingCaller) -> Self {
+                Self { inner, caller }
+            }
+
+            #(#facade_methods)*
+        }
+    }
 }
 
 /// Emit the `prelude` module: every public item this expansion
@@ -312,6 +451,7 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
 /// The vox-only items carry the same `#[cfg(feature = "vox")]` gates
 /// as their definitions, so the glob works in non-vox builds too (it
 /// just re-exports the bare trait).
+#[allow(clippy::too_many_arguments)]
 fn emit_prelude(
     trait_name: &syn::Ident,
     client_name: &syn::Ident,
@@ -320,6 +460,7 @@ fn emit_prelude(
     vis: &syn::Visibility,
     shape: Shape,
     subs: &[Subscription],
+    sync_client: bool,
 ) -> TokenStream2 {
     let snake = to_snake_case(&trait_name.to_string());
     let service_alias = format_ident!("{}Service", trait_name);
@@ -350,6 +491,16 @@ fn emit_prelude(
                 stream_serve as #stream_serve_alias,
             };
         }
+    };
+
+    let sync_items = if sync_client && !matches!(shape, Shape::Empty) {
+        let sync_client_name = format_ident!("{}SyncClient", trait_name);
+        quote! {
+            #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+            pub use super::#sync_client_name;
+        }
+    } else {
+        quote! {}
     };
 
     let vox_items = match shape {
@@ -388,6 +539,7 @@ fn emit_prelude(
             pub use super::#trait_name;
             #vox_items
             #stream_items
+            #sync_items
         }
     }
 }

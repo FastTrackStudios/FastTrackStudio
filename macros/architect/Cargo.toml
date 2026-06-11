@@ -137,6 +137,11 @@ dispatch-tokio = ["tokio/rt-multi-thread"]
 # real-time thread — this feature is the sanctioned escape hatch.
 rt = ["dep:rtrb"]
 
+# Blocking client facade (`architect::sync_client` + the emitted
+# `<Trait>SyncClient`s): drive the async vox client from sync code over
+# a background tokio runtime. Native only — wasm has no blocking.
+sync-client = ["vox", "tokio/rt"]
+
 [dependencies]
 architect-derive = { path = "../architect-derive" }
 architect-rpc-derive = { path = "../architect-rpc-derive" }

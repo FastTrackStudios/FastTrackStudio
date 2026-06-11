@@ -196,6 +196,15 @@ pub use pubsub::{PendingAttach, PubSub};
 #[cfg(feature = "rt")]
 pub mod rt;
 
+// Blocking client facade driver (`sync-client` feature): the emitted
+// `<Trait>SyncClient`s wrap the async vox client and drive each call
+// through a `BlockingCaller` — sync code talking to a remote backend
+// without an async main. Native only.
+#[cfg(all(feature = "sync-client", not(target_arch = "wasm32")))]
+pub mod sync_client;
+#[cfg(all(feature = "sync-client", not(target_arch = "wasm32")))]
+pub use sync_client::BlockingCaller;
+
 // Client-side stream consumption (`use_stream` / `use_store_stream`):
 // subscribe a component to a server event stream and fold events into
 // state — the optimistic Store goes live. Needs both halves: `atom` for

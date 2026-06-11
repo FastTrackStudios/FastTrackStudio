@@ -33,7 +33,7 @@ default = ["vox"]
 vox = []
 
 [dependencies]
-architect = { workspace = true, features = ["vox", "local"] }
+architect = { workspace = true, features = ["vox", "local", "sync-client"] }
 vox.workspace = true
 facet.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

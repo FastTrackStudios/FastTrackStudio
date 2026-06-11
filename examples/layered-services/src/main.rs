@@ -80,7 +80,10 @@ pub mod counter {
     /// Trivial counter. Sync methods are bridged through the
     /// backend's dispatcher when invoked via the async client; called
     /// directly they cost a single virtual call.
-    #[architect::rpc]
+    // `sync_client` opts into the blocking `CounterSyncClient` facade
+    // (section 7) — emitted only on request so non-blocking consumers
+    // don't carry it.
+    #[architect::rpc(sync_client)]
     pub trait Counter {
         fn increment(&self, by: i64) -> i64;
         fn current(&self) -> i64;
@@ -374,6 +377,34 @@ fn main() {
         assert_eq!(received, vec![a, b]);
         info!(?received, "subscriber received publish-on-write events");
     });
+
+    // ── 7. Blocking facade (sync-client) ─────────────────────────────
+    //
+    // Sync code that talks to a *remote* backend (a plugin's action
+    // handler, a CLI without an async main) uses the emitted
+    // `<Trait>SyncClient`: same signatures, no .await, each call driven
+    // on a background runtime. In-process callers skip this — the user
+    // trait is already sync (section 1).
+    info!("── 7. Blocking facade (<Trait>SyncClient) ──────────────");
+    {
+        use architect::{BlockingCaller, LocalServer, Scope};
+
+        // Establish the async client on the runtime…
+        let scope = Scope::new();
+        let local = LocalServer::serve(live.clone().into_router(), scope.clone());
+        let counter_async: CounterClient =
+            rt.block_on(async { local.establish().await.expect("local establish") });
+
+        // …then drive it from plain sync code on the main thread.
+        let counter = CounterSyncClient::new(
+            counter_async,
+            BlockingCaller::from_handle(rt.handle().clone()),
+        );
+        let n = counter.increment(10).expect("increment over the wire");
+        let now = counter.current().expect("current over the wire");
+        assert_eq!(n, now);
+        info!(n, "sync facade round-tripped without an async context");
+    }
 
     // ── Introspection ────────────────────────────────────────────────
     //

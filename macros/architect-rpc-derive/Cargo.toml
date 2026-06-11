@@ -49,7 +49,7 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 # import path. `vox` feature on so `--all-features` builds resolve
 # the `::vox::service` paths the macro emits — workspace feature
 # unification turns vox on transitively under that flag.
-architect = { path = "../architect", features = ["vox"] }
+architect = { path = "../architect", features = ["vox", "sync-client"] }
 # The facet derive expands to `::facet::…` paths — the crate itself must
 # be in the test crate's extern prelude for vox-enabled smoke builds.
 facet.workspace = true
