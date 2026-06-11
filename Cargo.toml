@@ -81,9 +81,9 @@ facet-json = { version = "0.46" }
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
 # VOX service framework (pinned to FastTrackStudios fork)
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
-vox-types = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-stream = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191", default-features = false, features = ["runtime"] }
+vox-types = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-stream = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
