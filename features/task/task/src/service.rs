@@ -61,6 +61,10 @@ pub enum ClaimResult {
 /// (the new `path` is in the payload), and claim (assignees changed).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 #[repr(u8)]
+// Upserted carries the full ~600-byte TaskInfo by design (idempotent
+// full-state payloads); boxing would complicate the facet wire shape
+// for a clone-heavy but allocation-tolerant path.
+#[allow(clippy::large_enum_variant)]
 pub enum TaskEvent {
     /// A task was created or modified — the payload is the complete
     /// state after the write.
