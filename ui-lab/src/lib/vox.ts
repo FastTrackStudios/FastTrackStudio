@@ -13,13 +13,25 @@
  * `VITE_TASK_ORG`.
  */
 import {
-  connectProjectServiceRpc,
-  type ProjectServiceRpcClient,
-} from "@/generated/projectservicerpc.generated";
+  MiddlewareCaller,
+  session,
+  voxServiceMetadata,
+  type Caller,
+} from "@bearcove/vox-core";
+import { wsConnector } from "@bearcove/vox-ws";
+
+import { ProjectServiceRpcClient } from "@/generated/projectservicerpc.generated";
+import { TaskServiceRpcClient } from "@/generated/taskservicerpc.generated";
 import {
-  connectTaskServiceRpc,
-  type TaskServiceRpcClient,
-} from "@/generated/taskservicerpc.generated";
+  errorMessage,
+  installTelemetry,
+  span,
+  telemetryMiddleware,
+} from "./telemetry";
+
+// Before any WebSocket exists (idempotent; main.tsx also installs for
+// the browser, this covers node/smoke).
+installTelemetry();
 
 const SERVER: string =
   (import.meta.env.VITE_TASK_SERVER as string | undefined) ??
@@ -34,8 +46,41 @@ export const VOX_URL = `${SERVER}/org/${ORG}/vox`;
 let projectClient: Promise<ProjectServiceRpcClient> | null = null;
 let taskClient: Promise<TaskServiceRpcClient> | null = null;
 
+/**
+ * Instrumented mirror of the generated `connect*` helpers (which are
+ * two-liners over `session.initiator` + the client class). Mirrored
+ * here because the generated signature accepts SessionTransportOptions
+ * but NO client middleware and NO way to observe connect phases —
+ * that's a vox-codegen gap (connect* should take `middleware?:
+ * ClientMiddleware[]`); until then we build the caller ourselves so
+ * telemetry sees connect spans and per-RPC outcomes.
+ */
+async function connectInstrumented<T>(
+  service: string,
+  make: (caller: Caller) => T,
+): Promise<T> {
+  const end = span(`vox.connect.${service}`, VOX_URL);
+  try {
+    const established = await session.initiator(wsConnector(VOX_URL), {
+      metadata: voxServiceMetadata(service),
+    });
+    end("connected");
+    const caller = new MiddlewareCaller(
+      established.rootConnection().caller(),
+      [telemetryMiddleware],
+    );
+    return make(caller);
+  } catch (e) {
+    end(`error: ${errorMessage(e)}`);
+    throw e;
+  }
+}
+
 export function projects(): Promise<ProjectServiceRpcClient> {
-  projectClient ??= connectProjectServiceRpc(VOX_URL).catch((e) => {
+  projectClient ??= connectInstrumented(
+    "ProjectServiceRpc",
+    (caller) => new ProjectServiceRpcClient(caller),
+  ).catch((e) => {
     projectClient = null; // retry on next call instead of caching the failure
     throw e;
   });
@@ -43,7 +88,10 @@ export function projects(): Promise<ProjectServiceRpcClient> {
 }
 
 export function tasks(): Promise<TaskServiceRpcClient> {
-  taskClient ??= connectTaskServiceRpc(VOX_URL).catch((e) => {
+  taskClient ??= connectInstrumented(
+    "TaskServiceRpc",
+    (caller) => new TaskServiceRpcClient(caller),
+  ).catch((e) => {
     taskClient = null;
     throw e;
   });

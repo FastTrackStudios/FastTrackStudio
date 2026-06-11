@@ -689,12 +689,18 @@ pub(crate) async fn build_org_state(
         let cookbook = cookbook::Store::new(wiki_root.clone());
         let mealplan_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open mealplan vault: {e}"))?;
-        let mealplan = mealplan::Store::new(mealplan_vault);
+        // `with_cookbook`: meals live in the vault, but their
+        // recipe paths resolve against the wiki-rooted
+        // cookbook above — without it `can_cook` / cook
+        // deductions look for `.cook` files under the vault
+        // root and never find them.
+        let mealplan = mealplan::Store::new(mealplan_vault).with_cookbook(cookbook.clone());
         // Shopping list + substitution-rule services — sibling
         // mealplan stores, each its own vault snapshot.
         let shopping_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open shopping vault: {e}"))?;
-        let shopping = mealplan::shopping::Store::new(shopping_vault);
+        let shopping =
+            mealplan::shopping::Store::new(shopping_vault).with_cookbook(cookbook.clone());
         let substitutions_vault = vault::Vault::open(&vault_root)
             .map_err(|e| eyre::eyre!("open substitutions vault: {e}"))?;
         let substitutions = mealplan::substitutions::Store::new(substitutions_vault);

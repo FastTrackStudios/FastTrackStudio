@@ -1,3 +1,9 @@
+// First import on purpose: wraps globalThis.WebSocket and installs the
+// vox logger bridge before any socket/session exists. `?debug=vox`
+// shows the overlay; `window.voxPerf.table()` dumps the ring buffer.
+import { installTelemetry } from "./lib/telemetry";
+installTelemetry();
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

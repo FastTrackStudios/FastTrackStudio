@@ -15005,6 +15005,7 @@ dependencies = [
  "chrono",
  "clap",
  "cookbook",
+ "cooklang",
  "cycle",
  "dotenvy",
  "exercises",

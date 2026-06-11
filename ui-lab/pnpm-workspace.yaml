@@ -3,3 +3,6 @@
 # see vendor/VENDOR.md for the pinned rev and re-vendor procedure.
 packages:
   - "vendor/*"
+allowBuilds:
+  esbuild: false
+storeDir: /run/media/Development/.pnpm-store/v11

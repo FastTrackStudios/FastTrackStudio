@@ -59,8 +59,17 @@ threads = { workspace = true, features = ["vox"] }
 cookbook = { workspace = true, features = ["vox"] }
 mealplan = { workspace = true, features = ["vox"] }
 pantry = { workspace = true, features = ["vox"] }
+<<<<<<< HEAD
 # `task plan|next|brief` — day-plan / template / cal-event /
 # booking clients over the same per-org vox routing.
+=======
+# `task recipe create|update` validate cooklang before saving and
+# render parse errors with line context via the parser's report
+# (same parser config as `cookbook::parse`).
+cooklang = { workspace = true }
+# `task meal schedule` — meal → `PlannedBlock` on the date's
+# day plan over the `DayPlans` RPC client.
+>>>>>>> task/674dadfe-mealprep-cli
 scheduling-proto = { workspace = true, features = ["vox"] }
 # Fitness suite — body metrics, exercise library, workout
 # routines+sessions, food intake. RPC clients only.

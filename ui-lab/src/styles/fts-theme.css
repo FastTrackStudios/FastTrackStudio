@@ -63,6 +63,9 @@
   --signal-full: oklch(0.55 0.18 300);
 }
 
+/* Dark theme via .dark class (shadcn canonical) — also fires on
+   prefers-color-scheme so the lab works even without the class. */
+.dark,
 @media (prefers-color-scheme: dark) {
   :root {
     --background: oklch(0.145 0 0);
