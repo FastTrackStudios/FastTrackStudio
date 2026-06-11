@@ -22,6 +22,14 @@ const voxProxy = {
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // The vendored vox runtime is consumed as raw TS source (workspace
+  // links), which Vite does NOT pre-bundle by default — first page
+  // load transforms every module on demand, one request at a time.
+  // Force them through esbuild prebundling so the dev server serves
+  // one cached bundle.
+  optimizeDeps: {
+    include: ["vox-core", "vox-ws", "vox-wire", "vox-postcard"],
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
