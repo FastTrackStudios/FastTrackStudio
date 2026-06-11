@@ -575,3 +575,73 @@ async fn presence_propagates_between_peers() {
 
     let _ = shutdown.send(());
 }
+
+/// Two *different* docs sync through the registry the server mounts as
+/// one `DocSync` dispatcher: the well-known notes doc and a second doc
+/// opened on demand, each converging among its own replicas with no
+/// bleed between them.
+#[tokio::test]
+async fn two_docs_sync_through_one_registry() {
+    use example::COLLAB_DOC_ID;
+
+    let (ws_url, shutdown) = spawn().await;
+    let second_doc = uuid::Uuid::new_v4();
+
+    // One replica pair per doc, all four over the same mounted services.
+    let mut docs = Vec::new();
+    for doc_id in [COLLAB_DOC_ID, COLLAB_DOC_ID, second_doc, second_doc] {
+        let doc = crdt::CrdtDoc::ephemeral();
+        let mut synced = crdt::sync::SyncedDoc::new(doc_id, doc.clone());
+        let client = sync_client(&ws_url).await;
+        tokio::spawn(async move { synced.run(&client).await });
+        docs.push(doc);
+    }
+    let (notes_a, notes_b, second_a, second_b) = (&docs[0], &docs[1], &docs[2], &docs[3]);
+
+    notes_a
+        .loro()
+        .get_map("root")
+        .insert("notes-key", "notes-value")
+        .expect("insert on notes doc");
+    notes_a.loro().commit();
+    second_a
+        .loro()
+        .get_map("root")
+        .insert("second-key", "second-value")
+        .expect("insert on second doc");
+    second_a.loro().commit();
+
+    let value_of = |doc: &crdt::CrdtDoc, key: &str| -> Option<String> {
+        doc.loro()
+            .get_map("root")
+            .get(key)
+            .and_then(|v| v.into_value().ok())
+            .and_then(|v| v.into_string().ok())
+            .map(|s| s.to_string())
+    };
+
+    let nb = notes_b.clone();
+    eventually("notes replicas converge", move || {
+        value_of(&nb, "notes-key").as_deref() == Some("notes-value")
+    })
+    .await;
+    let sb = second_b.clone();
+    eventually("second doc replicas converge", move || {
+        value_of(&sb, "second-key").as_deref() == Some("second-value")
+    })
+    .await;
+
+    // Isolation: distinct collaboration boundaries behind one dispatcher.
+    assert_eq!(
+        value_of(notes_b, "second-key"),
+        None,
+        "notes doc saw the second doc's write"
+    );
+    assert_eq!(
+        value_of(second_b, "notes-key"),
+        None,
+        "second doc saw the notes doc's write"
+    );
+
+    let _ = shutdown.send(());
+}

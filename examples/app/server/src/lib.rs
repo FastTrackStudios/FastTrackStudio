@@ -25,9 +25,10 @@ use axum::{
     routing::get,
 };
 use crdt::CrdtDoc;
+use crdt::registry::DocRegistry;
 use crdt::sync::{
-    DocPresenceDispatcher, DocSyncDispatcher, DocSyncHost, PresenceHost,
-    doc_presence_service_descriptor, doc_sync_service_descriptor,
+    DocPresenceDispatcher, DocSyncDispatcher, doc_presence_service_descriptor,
+    doc_sync_service_descriptor,
 };
 use example::architect::{Filter, Layer, LayerRouter, Page, RepoError, Services, Sort, layers};
 use example::axum_ws;
@@ -72,57 +73,82 @@ where
 
 // ── Collaborative state (the shared notes doc) ────────────────────────
 
-/// The app's collaborative surface: one canonical notes doc
-/// ([`DocSyncHost`] — every client holds a replica, edits merge) and its
-/// presence channel ([`PresenceHost`] — who's online, ephemeral).
+/// The app's collaborative surface: a [`DocRegistry`] serving **any**
+/// doc id over one mounted `DocSync` + `DocPresence` dispatcher pair —
+/// the shared notes doc ([`COLLAB_DOC_ID`]) plus whatever other docs
+/// clients open (per-doc hosts are created on demand through the
+/// registry's factory).
 ///
 /// Like [`ExampleEvented`], build it **once per process** and share it:
-/// the fan-out hubs live inside, and the hosts are cheap clones over the
-/// same state, so per-connection routers all serve the same doc.
+/// the doc map and fan-out hubs live inside, and clones are cheap, so
+/// per-connection routers all serve the same docs.
 #[derive(Clone)]
 pub struct Collab {
-    pub sync: DocSyncHost,
-    pub presence: PresenceHost,
+    registry: DocRegistry,
 }
 
 impl Collab {
-    /// In-memory doc — for tests and the in-process desktop transport.
+    /// In-memory docs — for tests and the in-process desktop transport.
     pub fn ephemeral() -> Self {
-        Self::from_doc(CrdtDoc::ephemeral())
-    }
-
-    /// File-persisted doc under `data_dir` — the server's notes survive
-    /// restarts, and the host compacts the update log as it grows.
-    pub async fn open(data_dir: impl Into<std::path::PathBuf>) -> Result<Self, crdt::PersistError> {
-        let doc = CrdtDoc::open(COLLAB_DOC_ID, crdt::FilePersistence::new(data_dir)).await?;
-        Ok(Self::from_doc(doc))
-    }
-
-    fn from_doc(doc: CrdtDoc) -> Self {
         Self {
-            // Compact every 64 updates so storage stays bounded no
-            // matter how chatty the doc gets.
-            sync: DocSyncHost::new(COLLAB_DOC_ID, doc).with_compaction(64),
-            // Presence states expire 30s after their peer goes quiet.
-            presence: PresenceHost::new(COLLAB_DOC_ID, 30_000),
+            registry: Self::configure(DocRegistry::new(|_doc_id| {
+                Box::pin(async { Ok(CrdtDoc::ephemeral()) })
+            })),
         }
     }
 
-    /// The canonical doc (e.g. for server-side reads via `NoteRepoLoro`).
-    pub fn doc(&self) -> &CrdtDoc {
-        self.sync.doc()
+    /// File-persisted docs under `data_dir` (`FilePersistence` keeps one
+    /// subdirectory per doc id) — the server's docs survive restarts,
+    /// hosts compact their update logs as they grow, and docs idle for
+    /// 15 minutes are compacted + evicted until the next attach.
+    pub async fn open(data_dir: impl Into<std::path::PathBuf>) -> Result<Self, crdt::PersistError> {
+        let root: std::path::PathBuf = data_dir.into();
+        let registry = Self::configure(DocRegistry::new(move |doc_id| {
+            let root = root.clone();
+            Box::pin(async move { CrdtDoc::open(doc_id, crdt::FilePersistence::new(root)).await })
+        }))
+        .with_idle_eviction(std::time::Duration::from_secs(15 * 60));
+        let collab = Self { registry };
+        // Open the well-known notes doc eagerly so a bad data dir fails
+        // at startup, not on the first client attach.
+        collab
+            .doc(COLLAB_DOC_ID)
+            .await
+            .map_err(|e| crdt::PersistError::Backend(format!("open notes doc: {e}")))?;
+        Ok(collab)
     }
 
-    /// Mount both services onto a router.
+    fn configure(registry: DocRegistry) -> DocRegistry {
+        registry
+            // Compact every 64 updates so storage stays bounded no
+            // matter how chatty a doc gets.
+            .with_compaction(64)
+            // Presence states expire 30s after their peer goes quiet.
+            .with_presence_timeout(30_000)
+    }
+
+    /// A canonical doc, opened on demand (e.g. for server-side reads
+    /// via `NoteRepoLoro`).
+    pub async fn doc(&self, doc_id: Uuid) -> Result<CrdtDoc, crdt::sync::SyncError> {
+        self.registry.doc(doc_id).await
+    }
+
+    /// The underlying registry.
+    pub fn registry(&self) -> &DocRegistry {
+        &self.registry
+    }
+
+    /// Mount both services onto a router — one dispatcher pair serves
+    /// every doc.
     pub fn mount(&self, router: LayerRouter) -> LayerRouter {
         router
             .with(
                 doc_sync_service_descriptor(),
-                DocSyncDispatcher::new(self.sync.clone()),
+                DocSyncDispatcher::new(self.registry.clone()),
             )
             .with(
                 doc_presence_service_descriptor(),
-                DocPresenceDispatcher::new(self.presence.clone()),
+                DocPresenceDispatcher::new(self.registry.clone()),
             )
     }
 }
