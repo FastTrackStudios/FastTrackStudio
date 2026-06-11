@@ -14939,6 +14939,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "uuid",
  "vault",

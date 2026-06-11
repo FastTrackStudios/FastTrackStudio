@@ -13,16 +13,34 @@ use vault::Vault;
 
 use crate::model::TaskInfo;
 use crate::parse::{looks_like_task, parse_page};
-use crate::service::{ClaimResult, TaskError, TaskService};
+use crate::service::{ClaimResult, TaskError, TaskEvent, TaskService};
 use crate::write::{default_task_path, write_task};
 
-#[derive(Debug, Clone, architect::HasDispatcher)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct TaskBackend {
     vault_root: PathBuf,
     /// Serializes `try_claim` read-check-write so two concurrent
     /// claims on the same task can't both win. One server process
     /// per org, so a process-local mutex is the whole story.
     claim_lock: Arc<Mutex<()>>,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful mutation publishes the post-write state
+    /// here ([`TaskEvent::Upserted`] / [`TaskEvent::Deleted`]).
+    /// Sliding mailbox: a slow subscriber loses its *oldest*
+    /// queued events, which is correct for state-shaped payloads.
+    /// Clones share the hub (it's `Arc` inside), so the service
+    /// mount and the stream mount can each hold a backend clone.
+    #[cfg(feature = "vox")]
+    events: architect::PubSub<TaskEvent>,
+}
+
+// Manual impl: `PubSub` carries no `Debug`.
+impl std::fmt::Debug for TaskBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskBackend")
+            .field("vault_root", &self.vault_root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl TaskBackend {
@@ -31,7 +49,20 @@ impl TaskBackend {
         Self {
             vault_root: vault_root.into(),
             claim_lock: Arc::new(Mutex::new(())),
+            #[cfg(feature = "vox")]
+            events: architect::PubSub::sliding(256),
         }
+    }
+
+    /// Publish a task change to every `events` subscriber. Call only
+    /// after the write succeeded — subscribers fold these into state
+    /// fetched via `list()`, so a phantom event would desync them.
+    /// No-op without the `vox` feature (no wire, no subscribers).
+    fn publish(&self, event: TaskEvent) {
+        #[cfg(feature = "vox")]
+        self.events.publish(event);
+        #[cfg(not(feature = "vox"))]
+        let _ = event;
     }
 
     #[must_use]
@@ -100,6 +131,7 @@ impl TaskService for TaskBackend {
         }
         write_task(&self.vault_root, &mut task, false)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        self.publish(TaskEvent::Upserted(task.clone()));
         Ok(task)
     }
 
@@ -115,6 +147,7 @@ impl TaskService for TaskBackend {
         next.date_modified = Some(Utc::now());
         write_task(&self.vault_root, &mut next, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        self.publish(TaskEvent::Upserted(next.clone()));
         Ok(next)
     }
 
@@ -152,6 +185,10 @@ impl TaskService for TaskBackend {
         t.date_modified = Some(Utc::now());
         write_task(&self.vault_root, &mut t, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        // A won claim changed the assignees — that's an upsert. The
+        // `AlreadyMine` / `Lost` early returns above write nothing,
+        // so they (correctly) publish nothing.
+        self.publish(TaskEvent::Upserted(t));
         Ok(ClaimResult::Won)
     }
 
@@ -177,6 +214,7 @@ impl TaskService for TaskBackend {
         t.date_modified = Some(Utc::now());
         write_task(&self.vault_root, &mut t, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        self.publish(TaskEvent::Upserted(t.clone()));
         Ok(t)
     }
 
@@ -189,6 +227,17 @@ impl TaskService for TaskBackend {
         let abs = self.vault_root.join(&t.path);
         std::fs::remove_file(&abs)
             .map_err(|e| TaskError::Io(format!("remove {}: {e}", abs.display())))?;
+        self.publish(TaskEvent::Deleted(id));
         Ok(())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// `TaskService` impl above, on every successful mutation.
+#[cfg(feature = "vox")]
+impl crate::service::TaskServiceStreamSource for TaskBackend {
+    fn events_hub(&self) -> &architect::PubSub<TaskEvent> {
+        &self.events
     }
 }

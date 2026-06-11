@@ -41,6 +41,34 @@ pub enum ClaimResult {
     Lost { holder: String },
 }
 
+/// One task change, broadcast to every [`TaskService`] subscriber on
+/// each successful mutation.
+///
+/// ## Subscriber contract (no snapshot variant, v1)
+///
+/// The stream carries *changes only* — there is no `Snapshot`
+/// variant. A subscriber that wants the full board state fetches it
+/// once via [`TaskService::list`] (after subscribing, so nothing is
+/// missed in between) and then folds events into that local copy:
+///
+/// - [`TaskEvent::Upserted`] carries the **full post-write**
+///   [`TaskInfo`] — replace (or insert) the row with a matching `id`.
+///   Re-applying an event already reflected in the fetched list is
+///   harmless (idempotent re-application).
+/// - [`TaskEvent::Deleted`] — remove the row with that `id`.
+///
+/// `Upserted` fires for every write path: create, update, rename
+/// (the new `path` is in the payload), and claim (assignees changed).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+pub enum TaskEvent {
+    /// A task was created or modified — the payload is the complete
+    /// state after the write.
+    Upserted(TaskInfo),
+    /// The task with this id (and its backing file) was removed.
+    Deleted(Uuid),
+}
+
 #[architect::rpc]
 pub trait TaskService {
     /// Every task page under the org's vault.
@@ -72,4 +100,10 @@ pub trait TaskService {
 
     /// Remove the backing file.
     fn delete(&self, id: Uuid) -> Result<(), TaskError>;
+
+    /// Every task change, as it happens — fires on each successful
+    /// create / update / rename / claim / delete. See [`TaskEvent`]
+    /// for the fetch-once-then-fold subscriber contract.
+    #[subscribe]
+    fn events(&self) -> TaskEvent;
 }
