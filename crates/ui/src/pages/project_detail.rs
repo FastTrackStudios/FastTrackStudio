@@ -7,13 +7,16 @@
 //! [`task_ui::TasksApp`] (fully editable, write-through). Native has
 //! no client yet (offline notice).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
+use agent_proto::session::{Session as AgentSession, SessionStatus as AgentStatus};
+use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use project::ProjectInfo;
 use task::TaskInfo as DbTask;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
+use timer_proto::WorkSession;
 use uuid::Uuid;
 
 use crate::orgs::{OrgMeta, OrgSelection};
@@ -83,6 +86,121 @@ pub fn ProjectDetailView(id: String) -> Element {
         }
     });
 
+    // ── Live aux data: budget + active-now ──────────────────────────
+    // Poll-refresh every 30s — a presence channel replaces this poll
+    // in a follow-up issue; until then the tick re-runs both resources
+    // below (native parks: the chrome is web-only today).
+    let mut live_tick = use_signal(|| 0u64);
+    use_future(move || async move {
+        loop {
+            sleep_30s().await;
+            live_tick += 1;
+        }
+    });
+
+    // Budget aggregates: every session logged against the project
+    // (time spend), the org's uninvoiced groups (unbilled money), and
+    // the invoice list (invoiced / paid via the `session.invoice_id`
+    // join — one extra call, resolved in [`build_budget`]).
+    let budget = use_resource(move || {
+        let _ = live_tick.read();
+        let slug = project_slug.read().clone();
+        let pid = *project_uuid.read();
+        async move {
+            let pid = pid?;
+            if slug.is_empty() {
+                return None;
+            }
+            let (sessions, uninvoiced, invoices) = futures_util::future::join3(
+                crate::feeds::fetch_project_sessions(&slug, pid, false),
+                crate::feeds::fetch_uninvoiced(&slug),
+                crate::feeds::fetch_invoices(&slug),
+            )
+            .await;
+            // Each piece is independently non-fatal: a finance hiccup
+            // shouldn't hide the time budget (and vice versa).
+            let sessions = sessions.unwrap_or_default();
+            let uninvoiced = uninvoiced.unwrap_or_default();
+            let invoices = invoices.unwrap_or_default();
+            Some(build_budget(pid, &sessions, &uninvoiced, &invoices, Utc::now()))
+        }
+    });
+
+    // Who's on the project right now: open timer sessions + agent
+    // sessions mid-turn (Running) or blocked on a human (AwaitingUser).
+    let active_now = use_resource(move || {
+        let _ = live_tick.read();
+        let slug = project_slug.read().clone();
+        let pid = *project_uuid.read();
+        async move {
+            let pid = pid?;
+            if slug.is_empty() {
+                return None;
+            }
+            let (timers, agents) = futures_util::future::join(
+                crate::feeds::fetch_project_sessions(&slug, pid, true),
+                crate::feeds::fetch_project_agent_sessions(&slug, &pid.to_string()),
+            )
+            .await;
+            let timers = timers.unwrap_or_default();
+            let mut agents = agents.unwrap_or_default();
+            agents
+                .retain(|s| matches!(s.status, AgentStatus::Running | AgentStatus::AwaitingUser));
+            Some((timers, agents))
+        }
+    });
+
+    // ── Live task fold ──────────────────────────────────────────────
+    // Fetch-once-then-fold (the TaskService subscriber contract): the
+    // overview resource above fetched the org's task list once; from
+    // here on every change arrives as a [`task::TaskEvent`] and folds
+    // into the same `tasks` signal — no refetch, and the page never
+    // blanks because the `data` resource is left untouched. `tasks`
+    // holds the *whole org's* rows and `belongs()` filters at render
+    // time, so an Upserted task that newly matches the project joins
+    // the list and one that stops matching drops out, for free.
+    //
+    // The subscribe future reads `project_slug`, so when an org switch
+    // resolves the page to a different slug the hook re-runs and
+    // re-subscribes against the new org's stream (and the initial
+    // empty-slug run returns `false`, retried once the slug lands).
+    architect::use_stream(
+        move |tx| {
+            let slug = project_slug.read().clone();
+            async move {
+                if slug.is_empty() {
+                    return false;
+                }
+                let Ok(client) =
+                    crate::vox_clients::establish_for::<task::TaskServiceStreamClient>(&slug).await
+                else {
+                    return false;
+                };
+                client.events(tx).await.is_ok()
+            }
+        },
+        move |ev: task::TaskEvent| {
+            // `Signal` is `Copy`; rebind mutably inside the `Fn`.
+            let (mut tasks, mut org_of) = (tasks, org_of);
+            match ev {
+                task::TaskEvent::Upserted(t) => {
+                    let slug = project_slug.peek().clone();
+                    let mut list = tasks.write();
+                    if let Some(row) = list.iter_mut().find(|r| r.id == t.id) {
+                        *row = t;
+                    } else {
+                        org_of.write().insert(t.id, slug);
+                        list.push(t);
+                    }
+                }
+                task::TaskEvent::Deleted(id) => {
+                    tasks.write().retain(|r| r.id != id);
+                    org_of.write().remove(&id);
+                }
+            }
+        },
+    );
+
     // Messages of the selected thread — separate so selecting a thread
     // doesn't refetch the whole overview.
     let messages_res = use_resource(move || {
@@ -126,6 +244,50 @@ pub fn ProjectDetailView(id: String) -> Element {
             let sel = *selected_thread.read();
             let forge_slug = project_slug.read().clone();
             let kind = ProjectKind::from_str(&p.project_type);
+
+            // In-flight slice of the project's tasks: in-progress, or
+            // claimed (someone in `workflow.assignees`). Same
+            // `belongs()` membership as the full board below.
+            let active_tasks: Vec<DbTask> = all
+                .iter()
+                .filter(|t| belongs(t, &p) && is_active_task(t))
+                .cloned()
+                .collect();
+
+            // Budget + active-now snapshots; `None` while loading so
+            // the sections render quiet placeholders, never blanking.
+            let bd: Option<BudgetData> = budget.read_unchecked().as_ref().cloned().flatten();
+            let active_snapshot: Option<(Vec<WorkSession>, Vec<AgentSession>)> =
+                active_now.read_unchecked().as_ref().cloned().flatten();
+            let budget_value = if p.estimated_seconds == 0 {
+                "—".to_string()
+            } else {
+                bd.as_ref().map_or_else(
+                    || "…".to_string(),
+                    |b| budget_tile_value(b.logged_seconds, p.estimated_seconds),
+                )
+            };
+            let over_budget = p.estimated_seconds > 0
+                && bd
+                    .as_ref()
+                    .is_some_and(|b| b.logged_seconds > p.estimated_seconds);
+            // Single-user stand-in identity (matches the timer chrome)
+            // so "you" labels your own open session.
+            let you: Option<Uuid> = org_list
+                .read()
+                .iter()
+                .find(|o| o.slug == forge_slug)
+                .and_then(|o| o.id)
+                .map(crate::chrome::owner_id);
+            // Implied money budget: estimate × project default rate,
+            // when both are set.
+            let implied_budget: Option<String> = (p.estimated_seconds > 0
+                && p.default_rate_cents > 0)
+                .then(|| {
+                    let minor =
+                        (p.estimated_seconds as f64 / 3600.0 * p.default_rate_cents as f64) as i64;
+                    money_label(minor, &p.currency)
+                });
 
             rsx! {
                 Link { to: Route::ProjectsRoute {}, class: "text-xs text-muted-foreground hover:text-foreground",
@@ -180,11 +342,12 @@ pub fn ProjectDetailView(id: String) -> Element {
                 }
 
                 // ── Stat tiles ──────────────────────────────────────────
-                div { class: "grid grid-cols-2 gap-3 sm:grid-cols-4",
+                div { class: "grid grid-cols-2 gap-3 sm:grid-cols-5",
                     StatTile { label: "Tasks", value: "{total}" }
                     StatTile { label: "Done", value: "{done}" }
                     StatTile { label: "Progress", value: "{pct:.0}%" }
                     StatTile { label: "Due", value: due_label(p.target_date) }
+                    StatTile { label: "Budget", value: budget_value, warn: over_budget }
                 }
 
                 // ── Body grid: main + sidebar ───────────────────────────
@@ -218,6 +381,16 @@ pub fn ProjectDetailView(id: String) -> Element {
                         }
                         div { class: "flex flex-col gap-2",
                             Heading { level: HeadingLevel::H2, "Tasks" }
+                            if !active_tasks.is_empty() {
+                                div { class: "flex flex-col gap-1 rounded-xl border border-border bg-card/40 p-3",
+                                    span { class: "text-[11px] uppercase tracking-wide text-muted-foreground",
+                                        "Active"
+                                    }
+                                    for t in active_tasks.iter() {
+                                        ActiveTaskRow { key: "{t.id}", task: t.clone() }
+                                    }
+                                }
+                            }
                     if total == 0 {
                         Text { variant: TextVariant::Muted, "No tasks linked to this project yet." }
                     } else {
@@ -230,6 +403,7 @@ pub fn ProjectDetailView(id: String) -> Element {
                         }
                     }
                 }
+                ActiveNowSection { snapshot: active_snapshot, you }
                 ConversationsPanel {
                     threads: threads_list,
                     messages: msgs,
@@ -364,6 +538,55 @@ pub fn ProjectDetailView(id: String) -> Element {
                                 DetailRow { label: "Updated".to_string(), value: m.date_naive().to_string() }
                             }
                         }
+                        // ── Budget card ─────────────────────────────
+                        div { class: "flex flex-col gap-3 rounded-xl border border-border bg-card/40 p-4",
+                            Heading { level: HeadingLevel::H3, "Budget" }
+                            match &bd {
+                                Some(b) => rsx! {
+                                    if p.estimated_seconds > 0 {
+                                        DetailRow {
+                                            label: "Time".to_string(),
+                                            value: format!(
+                                                "{} of {}",
+                                                hours_label(b.logged_seconds),
+                                                hours_label(p.estimated_seconds),
+                                            ),
+                                        }
+                                        if b.logged_seconds > p.estimated_seconds {
+                                            div { class: "rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-600 dark:text-amber-400",
+                                                "Over the time budget by {hours_label(b.logged_seconds - p.estimated_seconds)}"
+                                            }
+                                        }
+                                    } else {
+                                        DetailRow { label: "Logged".to_string(), value: hours_label(b.logged_seconds) }
+                                    }
+                                    if let Some(budget) = implied_budget.clone() {
+                                        DetailRow { label: "Budget (est × rate)".to_string(), value: budget }
+                                    }
+                                    if let Some((minor, cur)) = &b.unbilled {
+                                        DetailRow { label: "Unbilled".to_string(), value: money_label(*minor, cur) }
+                                    }
+                                    if b.has_invoices {
+                                        DetailRow {
+                                            label: "Invoiced".to_string(),
+                                            value: money_label(b.invoiced_minor, &b.invoice_currency),
+                                        }
+                                        DetailRow {
+                                            label: "Paid".to_string(),
+                                            value: money_label(b.paid_minor, &b.invoice_currency),
+                                        }
+                                    }
+                                    if p.estimated_seconds == 0 && b.unbilled.is_none() && !b.has_invoices && b.logged_seconds == 0 {
+                                        Text { variant: TextVariant::Muted, class: "text-sm",
+                                            "No estimate, logged time, or billing yet."
+                                        }
+                                    }
+                                },
+                                None => rsx! {
+                                    Text { variant: TextVariant::Muted, class: "text-sm", "Loading budget…" }
+                                },
+                            }
+                        }
                     }
                 }
             }
@@ -394,13 +617,327 @@ fn belongs(t: &DbTask, p: &ProjectInfo) -> bool {
     t.projects.0.iter().any(|x| x == &link || x == &p.title)
 }
 
-/// A big-number overview tile (Tasks / Done / Progress / Due).
+/// A big-number overview tile (Tasks / Done / Progress / Due /
+/// Budget). `warn` renders the value amber — the over-budget signal.
 #[component]
-fn StatTile(label: String, value: String) -> Element {
+fn StatTile(label: String, value: String, #[props(default)] warn: bool) -> Element {
+    let value_class = if warn {
+        "text-2xl font-semibold tabular-nums text-amber-500"
+    } else {
+        "text-2xl font-semibold tabular-nums"
+    };
     rsx! {
         div { class: "flex flex-col gap-0.5 rounded-xl border border-border bg-card/40 p-3",
-            span { class: "text-2xl font-semibold tabular-nums", "{value}" }
+            span { class: value_class, "{value}" }
             span { class: "text-[11px] uppercase tracking-wide text-muted-foreground", "{label}" }
+        }
+    }
+}
+
+// ── Budget ──────────────────────────────────────────────────────────
+
+/// Aggregated spend for one project, assembled client-side from the
+/// timer + invoicing feeds.
+#[derive(Clone, PartialEq, Default)]
+struct BudgetData {
+    /// Σ session durations; an open timer counts up to "now".
+    logged_seconds: i64,
+    /// `(amount_minor, currency)` from the project's
+    /// [`finance_proto::UninvoicedGroup`], when one exists.
+    unbilled: Option<(i64, String)>,
+    /// Σ `total_minor` of the invoices this project's sessions were
+    /// billed on.
+    invoiced_minor: i64,
+    /// Σ `amount_paid_minor` of the same invoices.
+    paid_minor: i64,
+    /// Currency of those invoices (one project = one currency).
+    invoice_currency: String,
+    /// Whether the `session.invoice_id → invoice` join resolved any
+    /// invoice at all — gates the Invoiced / Paid rows.
+    has_invoices: bool,
+}
+
+/// Fold the project's sessions + the org's uninvoiced groups +
+/// invoice list into one [`BudgetData`]. Pure (injected `now`) so the
+/// duration math is testable.
+///
+/// The invoiced / paid join: invoices are generated per-project
+/// (`GenerateInvoice` takes a project), so summing the invoices
+/// referenced by this project's `session.invoice_id`s is exact and
+/// costs a single `list_invoices` call — cheap enough to resolve
+/// client-side rather than descope.
+fn build_budget(
+    pid: Uuid,
+    sessions: &[WorkSession],
+    uninvoiced: &[finance_proto::UninvoicedGroup],
+    invoices: &[finance_proto::Invoice],
+    now: DateTime<Utc>,
+) -> BudgetData {
+    let logged_seconds = sessions
+        .iter()
+        .map(|s| (s.end_time.unwrap_or(now) - s.start_time).num_seconds().max(0))
+        .sum();
+    let unbilled = uninvoiced
+        .iter()
+        .find(|g| g.project_id == Some(pid))
+        .map(|g| (g.amount_minor, g.currency.clone()));
+    let billed_on: BTreeSet<Uuid> = sessions.iter().filter_map(|s| s.invoice_id).collect();
+    let mut out = BudgetData {
+        logged_seconds,
+        unbilled,
+        ..Default::default()
+    };
+    for inv in invoices.iter().filter(|i| billed_on.contains(&i.id)) {
+        out.has_invoices = true;
+        out.invoiced_minor += inv.total_minor;
+        out.paid_minor += inv.amount_paid_minor;
+        if out.invoice_currency.is_empty() {
+            out.invoice_currency = inv.currency.clone();
+        }
+    }
+    out
+}
+
+/// The Budget stat-tile text: "logged / estimated" in hours. The
+/// caller renders "—" when there's no estimate at all.
+fn budget_tile_value(logged_seconds: i64, estimated_seconds: i64) -> String {
+    format!(
+        "{} / {}",
+        hours_label(logged_seconds),
+        hours_label(estimated_seconds)
+    )
+}
+
+/// `amount_minor` + ISO currency → display string. Minor units are
+/// hundredths (cents); an empty currency falls back to `$` like the
+/// finances / invoices pages.
+fn money_label(amount_minor: i64, currency: &str) -> String {
+    let amount = amount_minor as f64 / 100.0;
+    if currency.is_empty() {
+        format!("${amount:.2}")
+    } else {
+        format!("{amount:.2} {currency}")
+    }
+}
+
+// ── Active now ──────────────────────────────────────────────────────
+
+/// Open timers + in-flight agent sessions. `snapshot == None` while
+/// the first fetch is in flight (quiet placeholder, no blanking);
+/// empty lists render the nobody-active state.
+#[component]
+fn ActiveNowSection(
+    snapshot: Option<(Vec<WorkSession>, Vec<AgentSession>)>,
+    you: Option<Uuid>,
+) -> Element {
+    rsx! {
+        div { class: "flex flex-col gap-2",
+            Heading { level: HeadingLevel::H2, "Active now" }
+            match &snapshot {
+                None => rsx! {
+                    Text { variant: TextVariant::Muted, class: "text-sm", "Checking…" }
+                },
+                Some((timers, agents)) if timers.is_empty() && agents.is_empty() => rsx! {
+                    div { class: "rounded-xl border border-dashed border-border px-4 py-6 text-center",
+                        Text { variant: TextVariant::Muted, class: "text-sm",
+                            "Nobody's working on this project right now."
+                        }
+                    }
+                },
+                Some((timers, agents)) => rsx! {
+                    div { class: "flex flex-col divide-y divide-border/50 rounded-xl border border-border/60 bg-card/40",
+                        for s in timers.iter() {
+                            TimerRow { key: "{s.id}", session: s.clone(), you }
+                        }
+                        for s in agents.iter() {
+                            AgentRow { key: "{s.id}", session: s.clone() }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// One open timer session: who, what, since when, on which task.
+#[component]
+fn TimerRow(session: WorkSession, you: Option<Uuid>) -> Element {
+    let who = if Some(session.user_id) == you {
+        "you".to_string()
+    } else {
+        // No member directory yet — fall back to a short stable id.
+        session.user_id.to_string()[..8].to_string()
+    };
+    let what = if session.description.trim().is_empty() {
+        "(no description)".to_string()
+    } else {
+        session.description.clone()
+    };
+    let since = ago_label(Utc::now(), session.start_time);
+    rsx! {
+        div { class: "flex items-center justify-between gap-3 px-3 py-2.5",
+            div { class: "flex min-w-0 flex-col gap-0.5",
+                div { class: "flex items-center gap-2 text-sm",
+                    span { class: "font-medium", "{who}" }
+                    span { class: "truncate text-muted-foreground", "{what}" }
+                }
+                div { class: "flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground",
+                    span { "started {since}" }
+                    if !session.task_note_path.is_empty() {
+                        span { "·" }
+                        span { class: "truncate font-mono", "{session.task_note_path}" }
+                    }
+                }
+            }
+            StatusBadge { variant: StatusBadgeVariant::Success, label: "timer".to_string() }
+        }
+    }
+}
+
+/// One in-flight agent session: nickname / title, status, what it's
+/// chewing on, last activity.
+#[component]
+fn AgentRow(session: AgentSession) -> Element {
+    let name = if !session.subagent_nickname.is_empty() {
+        session.subagent_nickname.clone()
+    } else if !session.title.trim().is_empty() {
+        session.title.clone()
+    } else {
+        "(untitled agent)".to_string()
+    };
+    let turn = session
+        .pending
+        .as_ref()
+        .map(|pt| turn_summary(&pt.user_message));
+    let last = session
+        .last_message_at
+        .map(|t| ago_label(Utc::now(), t));
+    rsx! {
+        div { class: "flex items-center justify-between gap-3 px-3 py-2.5",
+            div { class: "flex min-w-0 flex-col gap-0.5",
+                span { class: "truncate text-sm font-medium", "{name}" }
+                div { class: "flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground",
+                    if let Some(t) = turn {
+                        span { class: "truncate", "{t}" }
+                    }
+                    if let Some(l) = last {
+                        span { "·" }
+                        span { "{l}" }
+                    }
+                }
+            }
+            StatusBadge {
+                variant: agent_status_variant(session.status),
+                label: agent_status_label(session.status).to_string(),
+            }
+        }
+    }
+}
+
+fn agent_status_label(status: AgentStatus) -> &'static str {
+    match status {
+        AgentStatus::Idle => "Idle",
+        AgentStatus::Running => "Running",
+        AgentStatus::AwaitingUser => "Awaiting user",
+        AgentStatus::Cancelled => "Cancelled",
+        AgentStatus::Errored => "Errored",
+    }
+}
+
+fn agent_status_variant(status: AgentStatus) -> StatusBadgeVariant {
+    match status {
+        AgentStatus::Running => StatusBadgeVariant::Success,
+        AgentStatus::AwaitingUser => StatusBadgeVariant::Warning,
+        AgentStatus::Errored => StatusBadgeVariant::Danger,
+        AgentStatus::Idle | AgentStatus::Cancelled => StatusBadgeVariant::Neutral,
+    }
+}
+
+/// First line of the pending user message, clipped — the "what is it
+/// doing" summary in the agent row.
+fn turn_summary(msg: &str) -> String {
+    let line = msg.lines().next().unwrap_or_default().trim();
+    let mut out: String = line.chars().take(80).collect();
+    if line.chars().count() > 80 {
+        out.push('…');
+    }
+    out
+}
+
+/// Compact relative time ("just now" / "5m ago" / "3h ago" / "2d
+/// ago"). Pure (injected `now`) so it's testable.
+fn ago_label(now: DateTime<Utc>, t: DateTime<Utc>) -> String {
+    let secs = (now - t).num_seconds().max(0);
+    match secs {
+        0..=59 => "just now".to_string(),
+        60..=3_599 => format!("{}m ago", secs / 60),
+        3_600..=86_399 => format!("{}h ago", secs / 3_600),
+        _ => format!("{}d ago", secs / 86_400),
+    }
+}
+
+/// 30-second poll cadence for the active-now / budget refresh. Native
+/// parks (no poll) — same pattern as the chrome's second tick.
+#[cfg(target_arch = "wasm32")]
+async fn sleep_30s() {
+    gloo_timers::future::TimeoutFuture::new(30_000).await;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn sleep_30s() {
+    futures_util::future::pending::<()>().await;
+}
+
+// ── Active tasks ────────────────────────────────────────────────────
+
+/// "Active" = visibly in flight: the status says in-progress, or
+/// someone (human or agent) holds the task via `workflow.assignees`
+/// (a claim).
+fn is_active_task(t: &DbTask) -> bool {
+    t.status == "in-progress"
+        || t.workflow
+            .as_ref()
+            .is_some_and(|w| !w.assignees.0.is_empty())
+}
+
+/// Comma-joined holder labels from `workflow.assignees`.
+fn assignee_labels(t: &DbTask) -> String {
+    use task::workflows_proto::AgentRef;
+    let Some(w) = &t.workflow else {
+        return String::new();
+    };
+    w.assignees
+        .0
+        .iter()
+        .map(|a| match a {
+            AgentRef::Human {
+                user_id,
+                display_name,
+            } => display_name.clone().unwrap_or_else(|| user_id.clone()),
+            AgentRef::Agent { name, .. } => format!("agent:{name}"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// One row in the "Active" slice: title (links to the task detail),
+/// holders, status badge.
+#[component]
+fn ActiveTaskRow(task: DbTask) -> Element {
+    let holders = assignee_labels(&task);
+    rsx! {
+        div { class: "flex items-center justify-between gap-3 py-1 text-sm",
+            Link {
+                to: Route::TaskDetailRoute { id: task.id },
+                class: "min-w-0 truncate font-medium hover:underline",
+                "{task.title}"
+            }
+            div { class: "flex shrink-0 items-center gap-2",
+                if !holders.is_empty() {
+                    span { class: "text-xs text-muted-foreground", "{holders}" }
+                }
+                StatusBadge { variant: status_variant(&task.status), label: task.status.clone() }
+            }
         }
     }
 }
@@ -467,5 +1004,54 @@ fn status_variant(status: &str) -> StatusBadgeVariant {
         "on_hold" | "on-hold" | "paused" => StatusBadgeVariant::Warning,
         "cancelled" | "canceled" | "archived" => StatusBadgeVariant::Danger,
         _ => StatusBadgeVariant::Neutral,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn money_label_formats_minor_units_with_currency() {
+        assert_eq!(money_label(123_456, "USD"), "1234.56 USD");
+        assert_eq!(money_label(0, "EUR"), "0.00 EUR");
+        // Empty currency falls back to `$` like the finances page.
+        assert_eq!(money_label(995, ""), "$9.95");
+        assert_eq!(money_label(-2_500, "USD"), "-25.00 USD");
+    }
+
+    #[test]
+    fn budget_tile_shows_logged_vs_estimated_hours() {
+        assert_eq!(budget_tile_value(5_400, 36_000), "1.5h / 10.0h");
+        assert_eq!(budget_tile_value(0, 3_600), "0.0h / 1.0h");
+    }
+
+    #[test]
+    fn hours_label_rounds_to_tenths() {
+        assert_eq!(hours_label(3_600), "1.0h");
+        assert_eq!(hours_label(5_430), "1.5h");
+        assert_eq!(hours_label(0), "0.0h");
+    }
+
+    #[test]
+    fn ago_label_buckets() {
+        let now = Utc::now();
+        let s = |secs: i64| now - chrono::Duration::seconds(secs);
+        assert_eq!(ago_label(now, s(10)), "just now");
+        assert_eq!(ago_label(now, s(90)), "1m ago");
+        assert_eq!(ago_label(now, s(2 * 3_600 + 60)), "2h ago");
+        assert_eq!(ago_label(now, s(3 * 86_400)), "3d ago");
+        // Clock skew (event in the future) clamps to "just now".
+        assert_eq!(ago_label(now, now + chrono::Duration::seconds(30)), "just now");
+    }
+
+    #[test]
+    fn turn_summary_first_line_clipped() {
+        assert_eq!(turn_summary("fix the build\nand then more"), "fix the build");
+        let long = "x".repeat(120);
+        let clipped = turn_summary(&long);
+        assert_eq!(clipped.chars().count(), 81); // 80 + ellipsis
+        assert!(clipped.ends_with('…'));
+        assert_eq!(turn_summary(""), "");
     }
 }

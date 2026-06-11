@@ -949,6 +949,29 @@ pub async fn fetch_org_sessions(slug: &str) -> Result<Vec<timer_proto::WorkSessi
     Ok(sessions)
 }
 
+/// Sessions logged against one project (all members), newest first.
+/// `open_only = true` narrows to running timers — the project
+/// overview's "active now" view; `false` returns the full history for
+/// budget aggregation.
+pub async fn fetch_project_sessions(
+    slug: &str,
+    project_id: uuid::Uuid,
+    open_only: bool,
+) -> Result<Vec<timer_proto::WorkSession>, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    let filter = timer_proto::WorkSessionFilter {
+        project_id: Some(project_id),
+        open: open_only.then_some(true),
+        ..Default::default()
+    };
+    let mut sessions = client
+        .list_sessions(filter)
+        .await
+        .map_err(|e| format!("{slug}: list sessions: {e:?}"))?;
+    sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+    Ok(sessions)
+}
+
 /// Start a timer; returns the new open session.
 pub async fn start_timer(
     slug: &str,
@@ -1298,6 +1321,33 @@ pub async fn fetch_agent_sessions(
         )
     });
     collect(futures_util::future::join_all(futs).await)
+}
+
+/// Agent sessions attached to one project, filtered server-side
+/// (`SessionFilter.project_id` is an exact match in the backend).
+/// Archived sessions are excluded — this powers "active now" style
+/// views, and an archived session can't be active.
+pub async fn fetch_project_agent_sessions(
+    slug: &str,
+    project_id: &str,
+) -> Result<Vec<agent_proto::session::Session>, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
+            .await?;
+    let filter = agent_proto::service::sessions::SessionFilter {
+        project_id: project_id.to_owned(),
+        backend_id: String::new(),
+        profile_id: String::new(),
+        include_archived: false,
+        only_pinned: false,
+        limit: 0,
+        cursor: String::new(),
+    };
+    let page = client
+        .list_sessions(filter)
+        .await
+        .map_err(|e| format!("{slug}: list agent sessions: {e:?}"))?;
+    Ok(page.sessions)
 }
 
 // ── Email ───────────────────────────────────────────────────────────
