@@ -5,8 +5,11 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-auth = { workspace = true, features = ["backend-db"] }
+architect = { workspace = true, features = ["vox", "local"] }
+auth = { workspace = true, features = ["backend-db", "vox"] }
+auth-client.workspace = true
 chrono.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 tokio.workspace = true
+vox.workspace = true

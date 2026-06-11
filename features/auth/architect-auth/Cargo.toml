@@ -15,6 +15,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 auth.workspace = true
 auth-proto.workspace = true
 auth-db = { workspace = true, optional = true }
+auth-client = { workspace = true, optional = true }
 
 [dev-dependencies]
 axum.workspace = true
@@ -28,7 +29,8 @@ default = []
 db = ["dep:auth-db", "auth/backend-db"]
 axum = ["auth/axum"]
 vox = ["auth/vox", "auth-proto/vox"]
-full = ["db", "axum", "vox", "auth/full"]
+client = ["dep:auth-client"]
+full = ["db", "axum", "vox", "client", "auth/full"]
 
 [[example]]
 name = "axum_http"

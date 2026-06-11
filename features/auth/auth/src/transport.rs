@@ -771,13 +771,16 @@ pub mod axum {
 pub mod vox {
     use super::CustomSessionTransport;
     use crate::{
-        ArchitectAuth, AuthStorage, CurrentSession, CustomSessionBundle, SignOut,
-        flows::bearer_tokens,
+        ArchitectAuth, AuthStorage, CreateEmailPasswordUser, CurrentSession, CustomSessionBundle,
+        RefreshSession, SignOut, flows::bearer_tokens,
     };
-    use auth_proto::{AuthFlowError, AuthService, AuthSessionBundle, SignInEmailPassword};
+    use auth_proto::{
+        AuthFlowError, AuthService, AuthSessionBundle, AuthUser, SignInEmailPassword,
+        SignUpEmailPassword,
+    };
     use uuid::Uuid;
 
-    pub const AUTHORIZATION_METADATA_KEY: &str = "authorization";
+    pub use auth_proto::AUTHORIZATION_METADATA_KEY;
 
     // r[impl auth.transport.vox-schema]
     #[derive(Clone)]
@@ -795,6 +798,24 @@ pub mod vox {
     where
         S: AuthStorage,
     {
+        async fn sign_up_email_password(
+            &self,
+            input: SignUpEmailPassword,
+        ) -> Result<AuthSessionBundle, AuthFlowError> {
+            self.auth
+                .create_email_password_user(CreateEmailPasswordUser {
+                    email: input.email,
+                    password: input.password,
+                    name: input.name,
+                    username: input.username,
+                    image: input.image,
+                    metadata_json: input.metadata_json,
+                    ip_address: input.ip_address,
+                    user_agent: input.user_agent,
+                })
+                .await
+        }
+
         async fn sign_in_email_password(
             &self,
             input: SignInEmailPassword,
@@ -804,6 +825,17 @@ pub mod vox {
 
         async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
             self.auth.current_session(CurrentSession { token }).await
+        }
+
+        async fn refresh_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
+            self.auth.refresh_session(RefreshSession { token }).await
+        }
+
+        async fn whoami(&self, token: String) -> Result<AuthUser, AuthFlowError> {
+            self.auth
+                .current_session(CurrentSession { token })
+                .await
+                .map(|bundle| bundle.user)
         }
 
         async fn sign_out(&self, token: String) -> Result<(), AuthFlowError> {
