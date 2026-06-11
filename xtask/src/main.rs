@@ -50,11 +50,9 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let out_dir = workspace_root
-        .join("integrations")
-        .join("obsidian")
-        .join("plugin")
-        .join("generated");
+    // ui-lab is the only TS consumer today. The Obsidian plugin will
+    // get its own out-dir entry here when it grows vox clients.
+    let out_dir = workspace_root.join("ui-lab").join("src").join("generated");
     std::fs::create_dir_all(&out_dir)?;
 
     for service in service_descriptors() {
@@ -71,9 +69,14 @@ fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::E
 }
 
 fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
-    // Vertical-slice reset: per-feature service descriptors will be
-    // pulled from the new features/* trios as they come online.
-    Vec::new()
+    // Per-feature service descriptors, pulled from the features/*
+    // proto crates (each #[architect::rpc] trait emits a
+    // `<snake_name>_service_descriptor()` under the `vox` feature).
+    // Add new services here as their TS clients are needed.
+    vec![
+        project::project_service_descriptor(),
+        task::task_service_descriptor(),
+    ]
 }
 
 fn build_obsidian_plugin(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
