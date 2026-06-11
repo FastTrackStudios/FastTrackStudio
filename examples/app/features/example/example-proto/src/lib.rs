@@ -33,6 +33,7 @@ pub use architect;
 
 mod entity;
 mod error;
+mod note;
 mod service;
 
 // Flat re-exports — the derive (`entity`) and `#[vox::service]` (`service`)
@@ -40,4 +41,5 @@ mod service;
 // modules; surface them all at the crate root.
 pub use entity::*;
 pub use error::ExampleServiceError;
+pub use note::*;
 pub use service::*;

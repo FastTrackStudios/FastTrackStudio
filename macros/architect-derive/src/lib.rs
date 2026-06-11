@@ -32,6 +32,11 @@ struct ContainerAttrs {
     /// wrapper whose `Services` bundle mounts repo + events together, and
     /// (with `store`) the client subscription hook. Requires `repo`.
     emit_events: bool,
+    /// Also emit the CRDT story: the `EntityCrdt` impl (field ↔ LoroMap
+    /// codec), the `<E>RepoLoro` Loro-backed repo, and (with the user
+    /// crate's `atom` feature) the replica-backed hooks + write actions.
+    /// Gated on the user crate's `crdt` feature. Requires `repo`.
+    emit_crdt: bool,
     /// `#[architect(page_size = N)]` — rows per page for the derived list
     /// hook (default 100).
     page_size: Option<u32>,
@@ -82,6 +87,8 @@ fn parse_container_attrs(attrs: &[syn::Attribute]) -> Result<ContainerAttrs> {
                 out.emit_form = true;
             } else if meta.path.is_ident("events") {
                 out.emit_events = true;
+            } else if meta.path.is_ident("crdt") {
+                out.emit_crdt = true;
             } else if meta.path.is_ident("page_size") {
                 let n: syn::LitInt = meta.value()?.parse()?;
                 out.page_size = Some(n.base10_parse()?);
@@ -252,6 +259,20 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
             &ident,
             "#[architect(events)] requires #[architect(repo)] — the \
              <Entity>Evented wrapper publishes through the repo trait",
+        ));
+    }
+    if container.emit_crdt && !container.emit_repo {
+        return Err(syn::Error::new_spanned(
+            &ident,
+            "#[architect(crdt)] requires #[architect(repo)] — the \
+             <Entity>RepoLoro newtype implements the <Entity>Repo trait",
+        ));
+    }
+    if container.emit_crdt && type_last_ident(pk_ty).as_deref() != Some("Uuid") {
+        return Err(syn::Error::new_spanned(
+            pk_ident,
+            "#[architect(crdt)] requires a `Uuid` primary key (the \
+             EntityCrdt trait keys rows by Uuid)",
         ));
     }
 
@@ -531,6 +552,20 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         &repo_ident,
     );
 
+    // ── CRDT emission (`crdt`) ──
+    let crdt_block = build_crdt_block(
+        &ident,
+        &vis,
+        &container,
+        &parsed,
+        pk_ident,
+        &create_ident,
+        &update_ident,
+        &list_ident,
+        &repo_ident,
+        &update_fields,
+    )?;
+
     Ok(quote! {
         #wire_struct
         #create_struct
@@ -543,6 +578,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         #store_block
         #form_block
         #events_block
+        #crdt_block
     })
 }
 
@@ -1760,4 +1796,473 @@ pub fn derive_json_field(input: TokenStream) -> TokenStream {
         };
     }
     .into()
+}
+
+// ── CRDT emission ─────────────────────────────────────────────────────
+
+/// Last path segment of a type, e.g. `chrono::DateTime<Utc>` → `DateTime`.
+fn type_last_ident(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
+        _ => None,
+    }
+}
+
+/// First generic argument of the last path segment (`Option<T>` → `T`).
+fn type_first_generic(ty: &Type) -> Option<&Type> {
+    let Type::Path(p) = ty else { return None };
+    let seg = p.path.segments.last()?;
+    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
+        return None;
+    };
+    args.args.iter().find_map(|a| match a {
+        syn::GenericArgument::Type(t) => Some(t),
+        _ => None,
+    })
+}
+
+/// How a field maps onto `crdt::codec`. Mirrors the kinds the hand-
+/// written `entity_crdt!` macro supports; the derive infers them from
+/// the field's Rust type instead of a declaration.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum CrdtKind {
+    Uuid,
+    Str,
+    Bool,
+    I32,
+    I64,
+    U32,
+    Dt,
+    StringList,
+}
+
+impl CrdtKind {
+    /// `(kind, optional)` for a field type, or None if unsupported.
+    fn of(ty: &Type) -> Option<(CrdtKind, bool)> {
+        let last = type_last_ident(ty)?;
+        if last == "Option" {
+            let inner = type_first_generic(ty)?;
+            return Self::base_of(inner).map(|k| (k, true));
+        }
+        Self::base_of(ty).map(|k| (k, false))
+    }
+
+    fn base_of(ty: &Type) -> Option<CrdtKind> {
+        match type_last_ident(ty)?.as_str() {
+            "Uuid" => Some(Self::Uuid),
+            "String" => Some(Self::Str),
+            "bool" => Some(Self::Bool),
+            "i32" => Some(Self::I32),
+            "i64" => Some(Self::I64),
+            "u32" => Some(Self::U32),
+            "DateTime" => Some(Self::Dt),
+            "Vec" => match type_first_generic(ty).and_then(type_last_ident)?.as_str() {
+                "String" => Some(Self::StringList),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Codec function suffix (`write_{suffix}` / `read_{suffix}`).
+    /// i32 rides the i64 codec with casts at the emit site.
+    fn suffix(self, optional: bool) -> String {
+        let base = match self {
+            Self::Uuid => "uuid",
+            Self::Str => "str",
+            Self::Bool => "bool",
+            Self::I32 | Self::I64 => "i64",
+            Self::U32 => "u32",
+            Self::Dt => "dt",
+            Self::StringList => "string_list",
+        };
+        if optional {
+            format!("opt_{base}")
+        } else {
+            base.to_string()
+        }
+    }
+
+    /// Shape a value expression for the writer's parameter type.
+    fn write_arg(self, optional: bool, value: TokenStream2) -> TokenStream2 {
+        match (self, optional) {
+            (Self::Str, false) => quote! { &#value },
+            (Self::Str, true) => quote! { #value.as_deref() },
+            (Self::StringList, false) => quote! { &#value },
+            (Self::StringList, true) => quote! { #value.as_deref() },
+            (Self::I32, false) => quote! { #value as i64 },
+            (Self::I32, true) => quote! { #value.map(|v| v as i64) },
+            _ => value,
+        }
+    }
+
+    /// Shape the reader's result back into the field type.
+    fn read_expr(self, optional: bool, call: TokenStream2) -> TokenStream2 {
+        match (self, optional) {
+            (Self::I32, false) => quote! { #call as i32 },
+            (Self::I32, true) => quote! { #call.map(|v| v as i32) },
+            _ => call,
+        }
+    }
+}
+
+/// Emit the entity's CRDT story (under the user crate's `crdt` feature,
+/// convention `crdt = ["dep:crdt"]`):
+///
+/// ```ignore
+/// impl crdt::EntityCrdt for Example { … }      // field ↔ LoroMap codec
+/// struct ExampleRepoLoro { … }                 // Loro-backed ExampleRepo
+/// // and, with the `atom` feature too (convention adds `crdt?/dioxus`):
+/// fn use_example_crdt_list() -> AtomResult<Vec<Example>, RepoError>;
+/// fn use_example_crdt(id: Uuid) -> AtomResult<Example, RepoError>;
+/// struct ExampleCrdtActions { … }              // create/update/delete, local-first
+/// fn use_example_crdt_actions() -> ExampleCrdtActions;
+/// ```
+///
+/// The hooks read the app's `use_synced_doc` replica from context and
+/// re-read on every doc revision — local writes and remote peers' edits
+/// render through the same path, no optimistic machinery, no rollback.
+#[allow(clippy::too_many_arguments)]
+fn build_crdt_block(
+    ident: &Ident,
+    vis: &syn::Visibility,
+    container: &ContainerAttrs,
+    parsed: &[ParsedField],
+    pk_ident: &Ident,
+    create_ident: &Ident,
+    update_ident: &Ident,
+    list_ident: &Ident,
+    repo_ident: &Ident,
+    update_fields: &[&ParsedField],
+) -> Result<TokenStream2> {
+    if !container.emit_crdt {
+        return Ok(quote! {});
+    }
+
+    let snake = ident.to_string().to_snake_case();
+    let root = container
+        .table_name
+        .clone()
+        .unwrap_or_else(|| snake.clone());
+    let repo_loro_ident = format_ident!("{}RepoLoro", ident);
+    let actions_ident = format_ident!("{}CrdtActions", ident);
+    let use_list_fn = format_ident!("use_{}_crdt_list", snake);
+    let use_one_fn = format_ident!("use_{}_crdt", snake);
+    let use_actions_fn = format_ident!("use_{}_crdt_actions", snake);
+
+    // Resolve every field's codec kind up front so unsupported types
+    // fail with a pointed error instead of a generated-code mismatch.
+    let mut kinds: Vec<(CrdtKind, bool)> = Vec::with_capacity(parsed.len());
+    for f in parsed {
+        let Some(kind) = CrdtKind::of(f.ty) else {
+            return Err(syn::Error::new_spanned(
+                f.ty,
+                "#[architect(crdt)]: unsupported field type for the LoroMap \
+                 codec (supported: Uuid, String, bool, i32, i64, u32, \
+                 DateTime<Utc>, Vec<String>, and Option of each)",
+            ));
+        };
+        kinds.push(kind);
+    }
+
+    // `from_create`: same policy as the SeaORM storage path — `on_create`
+    // expressions win, excluded fields fall back to Default, the rest
+    // come from the payload.
+    let from_create_assigns = parsed.iter().map(|f| {
+        let id = f.ident;
+        if let Some(e) = &f.attrs.on_create {
+            quote! { #id: #e }
+        } else if f.attrs.exclude_create {
+            quote! { #id: ::core::default::Default::default() }
+        } else {
+            quote! { #id: c.#id }
+        }
+    });
+
+    let encode_calls = parsed.iter().zip(&kinds).map(|(f, (kind, opt))| {
+        let id = f.ident;
+        let key = LitStr::new(&id.to_string(), id.span());
+        let writer = format_ident!("write_{}", kind.suffix(*opt));
+        let arg = kind.write_arg(*opt, quote! { e.#id });
+        quote! { ::crdt::codec::#writer(m, #key, #arg)?; }
+    });
+
+    let decode_assigns = parsed.iter().zip(&kinds).map(|(f, (kind, opt))| {
+        let id = f.ident;
+        let key = LitStr::new(&id.to_string(), id.span());
+        let reader = format_ident!("read_{}", kind.suffix(*opt));
+        let call = kind.read_expr(*opt, quote! { ::crdt::codec::#reader(m, #key)? });
+        quote! { #id: #call }
+    });
+
+    // `apply_update`: write each `Some` field of the Update payload …
+    let apply_update_arms = update_fields.iter().map(|f| {
+        let id = f.ident;
+        let key = LitStr::new(&id.to_string(), id.span());
+        let (kind, opt) = CrdtKind::of(f.ty).expect("validated above");
+        let writer = format_ident!("write_{}", kind.suffix(opt));
+        let arg = kind.write_arg(opt, quote! { v });
+        quote! {
+            if let ::core::option::Option::Some(v) = u.#id {
+                ::crdt::codec::#writer(m, #key, #arg)?;
+            }
+        }
+    });
+    // … then refresh the `on_update` fields (e.g. `updated_at`), exactly
+    // like the SeaORM update path does.
+    let apply_update_touches = parsed
+        .iter()
+        .zip(&kinds)
+        .filter(|(f, _)| f.attrs.on_update.is_some())
+        .map(|(f, (kind, opt))| {
+            let id = f.ident;
+            let key = LitStr::new(&id.to_string(), id.span());
+            let e = f.attrs.on_update.as_ref().unwrap();
+            let writer = format_ident!("write_{}", kind.suffix(*opt));
+            let arg = kind.write_arg(*opt, quote! { __touch });
+            quote! {
+                {
+                    let __touch = #e;
+                    ::crdt::codec::#writer(m, #key, #arg)?;
+                }
+            }
+        });
+
+    let sort_arms = parsed.iter().filter(|f| f.attrs.sortable).map(|f| {
+        let id = f.ident;
+        let key = LitStr::new(&id.to_string(), id.span());
+        quote! { #key => items.sort_by(|a, b| a.#id.cmp(&b.#id)), }
+    });
+
+    let doc_repo_loro = format!(
+        "Loro-backed [`{ident}`] repo — a typed view over a \
+         [`crdt::CrdtDoc`]'s `\"{root}\"` container. Same `{repo_ident}` \
+         surface as the SeaORM storage, but rows live in the replica: \
+         writes are local-first and merge across peers."
+    );
+    let doc_use_list = format!(
+        "Every [`{ident}`] in the app's synced doc (provided by \
+         `crdt::use_synced_doc`), re-read on every doc revision — local \
+         writes and remote peers' edits render through the same path."
+    );
+    let doc_use_one = format!(
+        "One [`{ident}`] from the synced doc by id, re-read on every doc \
+         revision. `Error(NotFound)` until a peer (or you) creates it."
+    );
+    let doc_actions = format!(
+        "Local-first write actions for [`{ident}`]: each writes the \
+         replica synchronously-fast (no server round-trip, works offline) \
+         and the change syncs + merges in the background. There is no \
+         rollback arm — concurrent edits merge instead of conflicting."
+    );
+
+    Ok(quote! {
+        #[cfg(feature = "crdt")]
+        impl ::crdt::EntityCrdt for #ident {
+            type Wire = #ident;
+            type Create = #create_ident;
+            type Update = #update_ident;
+            type List = #list_ident;
+
+            const ROOT: &'static str = #root;
+
+            fn id(e: &#ident) -> ::uuid::Uuid {
+                e.#pk_ident
+            }
+
+            fn from_create(c: #create_ident) -> #ident {
+                #ident { #(#from_create_assigns,)* }
+            }
+
+            fn encode_into(
+                m: &::crdt::loro::LoroMap,
+                e: &#ident,
+            ) -> ::core::result::Result<(), ::architect::RepoError> {
+                #(#encode_calls)*
+                ::core::result::Result::Ok(())
+            }
+
+            fn decode_from(
+                m: &::crdt::loro::LoroMap,
+            ) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                ::core::result::Result::Ok(#ident { #(#decode_assigns,)* })
+            }
+
+            fn apply_update(
+                m: &::crdt::loro::LoroMap,
+                u: #update_ident,
+            ) -> ::core::result::Result<(), ::architect::RepoError> {
+                #(#apply_update_arms)*
+                #(#apply_update_touches)*
+                ::core::result::Result::Ok(())
+            }
+
+            fn sort_items(
+                items: &mut [#ident],
+                field: &str,
+                order: ::architect::SortOrder,
+            ) -> ::core::result::Result<(), ::architect::RepoError> {
+                match field {
+                    #(#sort_arms)*
+                    other => {
+                        return ::core::result::Result::Err(::architect::RepoError::InvalidInput(
+                            ::std::format!("unknown sort field: {other}"),
+                        ));
+                    }
+                }
+                if order == ::architect::SortOrder::Desc {
+                    items.reverse();
+                }
+                ::core::result::Result::Ok(())
+            }
+
+            fn build_list(
+                items: ::std::vec::Vec<#ident>,
+                total: u32,
+                page: ::architect::Page,
+            ) -> #list_ident {
+                #list_ident { items, total, page }
+            }
+        }
+
+        #[doc = #doc_repo_loro]
+        #[cfg(feature = "crdt")]
+        #[derive(Clone)]
+        #vis struct #repo_loro_ident {
+            inner: ::crdt::LoroRepo<#ident>,
+        }
+
+        #[cfg(feature = "crdt")]
+        impl #repo_loro_ident {
+            #vis fn new(doc: &::crdt::CrdtDoc) -> Self {
+                Self { inner: doc.repo() }
+            }
+
+            /// The generic repo underneath (sync reads, text ops).
+            #vis fn inner(&self) -> &::crdt::LoroRepo<#ident> {
+                &self.inner
+            }
+        }
+
+        #[cfg(feature = "crdt")]
+        impl #repo_ident for #repo_loro_ident {
+            async fn get(
+                &self,
+                id: ::uuid::Uuid,
+            ) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                self.inner.get(id).await
+            }
+            async fn list(
+                &self,
+                page: ::architect::Page,
+                sort: ::core::option::Option<::architect::Sort>,
+                filter: ::core::option::Option<::architect::Filter>,
+            ) -> ::core::result::Result<#list_ident, ::architect::RepoError> {
+                self.inner.list(page, sort, filter).await
+            }
+            async fn create(
+                &self,
+                input: #create_ident,
+            ) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                self.inner.create(input).await
+            }
+            async fn update(
+                &self,
+                id: ::uuid::Uuid,
+                input: #update_ident,
+            ) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                self.inner.update(id, input).await
+            }
+            async fn delete(
+                &self,
+                id: ::uuid::Uuid,
+            ) -> ::core::result::Result<(), ::architect::RepoError> {
+                self.inner.delete(id).await
+            }
+        }
+
+        #[doc = #doc_use_list]
+        #[cfg(all(feature = "crdt", feature = "atom"))]
+        #vis fn #use_list_fn() -> ::architect::AtomResult<
+            ::std::vec::Vec<#ident>,
+            ::architect::RepoError,
+        > {
+            ::crdt::use_crdt_list::<#ident>()
+        }
+
+        #[doc = #doc_use_one]
+        #[cfg(all(feature = "crdt", feature = "atom"))]
+        #vis fn #use_one_fn(
+            id: ::uuid::Uuid,
+        ) -> ::architect::AtomResult<#ident, ::architect::RepoError> {
+            ::crdt::use_crdt_entry::<#ident>(id)
+        }
+
+        #[doc = #doc_actions]
+        #[cfg(all(feature = "crdt", feature = "atom"))]
+        #[derive(Clone, Copy)]
+        #vis struct #actions_ident {
+            handle: ::crdt::DocHandle,
+            notify: ::core::option::Option<::architect::Notifications>,
+        }
+
+        #[doc = #doc_actions]
+        #[cfg(all(feature = "crdt", feature = "atom"))]
+        #vis fn #use_actions_fn() -> #actions_ident {
+            #actions_ident {
+                handle: ::crdt::use_doc_handle(),
+                notify: ::architect::try_use_notifications(),
+            }
+        }
+
+        #[cfg(all(feature = "crdt", feature = "atom"))]
+        impl #actions_ident {
+            /// Add a row to the replica — applied locally now, synced +
+            /// merged in the background.
+            #vis fn create(&self, input: #create_ident) {
+                let ::core::option::Option::Some(repo) = self.handle.repo::<#ident>() else {
+                    return;
+                };
+                let notify = self.notify;
+                ::architect::dioxus::dioxus_core::spawn_forever(async move {
+                    if let ::core::result::Result::Err(e) = repo.create(input).await
+                        && let ::core::option::Option::Some(n) = notify
+                    {
+                        n.error(::std::format!("create failed: {e}"));
+                    }
+                });
+            }
+
+            /// Patch a row in the replica (each `Some` field of the
+            /// Update payload).
+            #vis fn update(&self, id: ::uuid::Uuid, input: #update_ident) {
+                let ::core::option::Option::Some(repo) = self.handle.repo::<#ident>() else {
+                    return;
+                };
+                let notify = self.notify;
+                ::architect::dioxus::dioxus_core::spawn_forever(async move {
+                    if let ::core::result::Result::Err(e) = repo.update(id, input).await
+                        && let ::core::option::Option::Some(n) = notify
+                    {
+                        n.error(::std::format!("update failed: {e}"));
+                    }
+                });
+            }
+
+            /// Remove a row from the replica.
+            #vis fn delete(&self, id: ::uuid::Uuid) {
+                let ::core::option::Option::Some(repo) = self.handle.repo::<#ident>() else {
+                    return;
+                };
+                let notify = self.notify;
+                ::architect::dioxus::dioxus_core::spawn_forever(async move {
+                    if let ::core::result::Result::Err(e) = repo.delete(id).await
+                        && let ::core::option::Option::Some(n) = notify
+                    {
+                        n.error(::std::format!("delete failed: {e}"));
+                    }
+                });
+            }
+        }
+    })
 }

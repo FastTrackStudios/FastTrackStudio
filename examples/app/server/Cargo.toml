@@ -50,6 +50,10 @@ full = ["backend-db", "backend-memory"]
 # below. Generic over the repo, so no backend dep leaks into the lib.
 example = { workspace = true, features = ["vox", "server-axum"] }
 
+# The collaborative layer the server hosts: the canonical notes doc
+# (`DocSyncHost`) + presence channel, served over the same vox socket.
+crdt = { workspace = true, features = ["vox"] }
+
 axum.workspace = true
 # `signal` for Ctrl-C graceful shutdown (so the scope's finalizers run);
 # `time` for the test-only `LatencyRepo` sleep (EXAMPLE_LATENCY_MS).

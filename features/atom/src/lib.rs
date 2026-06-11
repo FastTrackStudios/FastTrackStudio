@@ -57,7 +57,10 @@ mod store;
 pub use connection::{Connection, ConnectionState, use_connect, use_connection};
 pub use id::Id;
 pub use mutation::{Mutation, use_mutation};
-pub use notify::{Notice, NoticeLevel, Notifications, provide_notifications, use_notifications};
+pub use notify::{
+    Notice, NoticeLevel, Notifications, provide_notifications, try_use_notifications,
+    use_notifications,
+};
 pub use reactivity::{Reactivity, provide_reactivity, try_use_reactivity, use_reactivity};
 pub use resource::{Async, use_async};
 pub use result::AtomResult;

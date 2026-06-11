@@ -105,7 +105,16 @@ async fn main() -> eyre::Result<()> {
     let repo = backend::resource().build(&scope).await?;
     info!(backend = backend::LABEL, %bind_addr, "starting example server");
 
-    let app = vox_router(repo);
+    // The collaborative notes doc: file-persisted (set COLLAB_DATA_DIR
+    // to relocate), compacted as it grows, served to every replica over
+    // the same vox socket as the CRUD services.
+    let collab_dir = std::env::var("COLLAB_DATA_DIR").unwrap_or_else(|_| "./collab-data".into());
+    let collab = app_server::Collab::open(&collab_dir)
+        .await
+        .map_err(|e| eyre::eyre!("open collab doc: {e}"))?;
+    info!(dir = %collab_dir, "collab doc ready");
+
+    let app = vox_router(repo, collab);
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     info!("HTTP listening on http://{bind_addr}");
     info!("  Health:  http://{bind_addr}/api/health");

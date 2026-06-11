@@ -25,7 +25,7 @@ use example_ui::provide_example;
 
 pub use transport::{DEFAULT_SERVER_URL, Transport};
 
-use pages::{EditExample, ExampleDetail, Home, InspectExample, NotFound};
+use pages::{Collab, EditExample, ExampleDetail, Home, InspectExample, NotFound};
 use status::NotificationTray;
 
 /// Bundled stylesheet. `dx` collects it for both web and desktop.
@@ -45,6 +45,8 @@ pub enum Route {
         EditExample { id: String },
         #[route("/example/:id/inspect")]
         InspectExample { id: String },
+        #[route("/collab")]
+        Collab {},
     #[end_layout]
     #[route("/:..route")]
     NotFound { route: Vec<String> },
@@ -73,6 +75,13 @@ pub fn App() -> Element {
     // sync with other clients without polling). One line per feature.
     provide_example();
 
+    // The collaborative layer: a local replica of the shared notes doc
+    // (synced over the same connection — reconnects are version-vector
+    // deltas) and the presence channel. The replica is usable
+    // immediately, online or not.
+    crdt::use_synced_doc(example::COLLAB_DOC_ID);
+    crdt::use_presence_channel(example::COLLAB_DOC_ID, 30_000);
+
     rsx! {
         document::Stylesheet { href: MAIN_CSS }
         Router::<Route> {}
@@ -88,6 +97,10 @@ fn AppShell() -> Element {
         header { class: "app-header",
             Link { class: "brand", to: Route::Home {}, "architect" }
             span { class: "tagline", "reference example" }
+            nav { class: "app-nav",
+                Link { class: "app-nav__link", to: Route::Home {}, "Examples" }
+                Link { class: "app-nav__link", to: Route::Collab {}, "Collab" }
+            }
         }
         NotificationTray {}
         main { class: "app-main",

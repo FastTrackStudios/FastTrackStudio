@@ -41,7 +41,10 @@ async fn pump_until(dom: &mut VirtualDom, secs: u64, pred: impl Fn(&str) -> bool
 async fn external_writes_appear_live_in_the_mounted_app() {
     let scope = Scope::new();
     // The real service graph (CRUD + search + live events), in-process.
-    let local = LocalServer::serve(service_router(ExampleRepoMemory::new()), scope.clone());
+    let local = LocalServer::serve(
+        service_router(ExampleRepoMemory::new(), &app_server::Collab::ephemeral()),
+        scope.clone(),
+    );
 
     // The "other user": a plain client on its own in-process session.
     let other: ExampleRepoClient = local.establish().await.expect("other client");

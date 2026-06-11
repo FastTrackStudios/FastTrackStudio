@@ -39,6 +39,9 @@ vox = ["example-proto/vox"]
 atom = ["example-proto/atom"]
 # Client-only typed form bindings over Create/Update payloads.
 form = ["example-proto/form"]
+# The collaborative layer: `Note`'s EntityCrdt codec + NoteRepoLoro,
+# and (with `atom`) the replica-backed hooks. Wasm-clean.
+crdt = ["example-proto/crdt"]
 server-seaorm = ["example-proto/server"]
 server-axum = ["dep:architect", "architect/server-axum"]
 
@@ -60,6 +63,7 @@ diagnostics = ["dep:architect", "architect/diagnostics"]
 # Matches tokio's `full` convention.
 full = [
     "vox",
+    "crdt",
     "server-seaorm",
     "server-axum",
     "backend-db",

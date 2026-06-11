@@ -26,7 +26,7 @@ async fn spawn() -> (String, oneshot::Sender<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    let app = vox_router(ExampleRepoMemory::new());
+    let app = vox_router(ExampleRepoMemory::new(), app_server::Collab::ephemeral());
     tokio::spawn(async move {
         let _ = axum::serve(listener, app)
             .with_graceful_shutdown(async {
@@ -216,7 +216,10 @@ async fn local_transport_round_trip() {
     let scope = Scope::new();
     // Serve the full surface (repo + ExampleService) in-process — the same
     // `service_router` the axum server mounts, just over an in-memory link.
-    let local = LocalServer::serve(service_router(ExampleRepoMemory::new()), scope.clone());
+    let local = LocalServer::serve(
+        service_router(ExampleRepoMemory::new(), &app_server::Collab::ephemeral()),
+        scope.clone(),
+    );
     let repo: ExampleRepoClient = local.establish().await.expect("local repo establish");
     let service: ExampleServiceClient = local.establish().await.expect("local service establish");
 
@@ -352,4 +355,144 @@ async fn reqwest_health(url: &str) -> String {
     stream.read_to_end(&mut buf).await.unwrap();
     let s = String::from_utf8_lossy(&buf);
     s.rsplit("\r\n\r\n").next().unwrap_or("").trim().to_string()
+}
+
+// ── Real-time collaboration over the real socket ──────────────────────
+//
+// The same DocSync/DocPresence services the Collab page uses, driven by
+// two real replicas over two real WebSocket connections. Proves the
+// whole sync stack — channels through axum_ws, version-vector catch-up,
+// fan-out across connections — not just the in-process transport.
+
+async fn sync_client(ws_url: &str) -> crdt::sync::DocSyncClient {
+    let link = WsLink::connect(ws_url).await.expect("WsLink::connect");
+    initiator_on(link, TransportMode::Bare)
+        .establish::<crdt::sync::DocSyncClient>()
+        .await
+        .expect("DocSync handshake")
+}
+
+async fn presence_client(ws_url: &str) -> crdt::sync::DocPresenceClient {
+    let link = WsLink::connect(ws_url).await.expect("WsLink::connect");
+    initiator_on(link, TransportMode::Bare)
+        .establish::<crdt::sync::DocPresenceClient>()
+        .await
+        .expect("DocPresence handshake")
+}
+
+/// Poll until `pred` (or panic after 5s).
+async fn eventually(what: &str, mut pred: impl FnMut() -> bool) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !pred() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for: {what}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+}
+
+#[tokio::test]
+async fn notes_replicas_converge_over_websocket() {
+    use example::{COLLAB_DOC_ID, Note, NoteCreate, NoteRepoLoro, NoteUpdate};
+
+    let (ws_url, shutdown) = spawn().await;
+
+    // Two replicas on two sockets — the CRDT-flag derive gives each a
+    // typed repo over its local doc.
+    let doc_a = crdt::CrdtDoc::ephemeral();
+    let mut synced_a = crdt::sync::SyncedDoc::new(COLLAB_DOC_ID, doc_a.clone());
+    let client_a = sync_client(&ws_url).await;
+    tokio::spawn(async move { synced_a.run(&client_a).await });
+    let repo_a = NoteRepoLoro::new(&doc_a);
+
+    let doc_b = crdt::CrdtDoc::ephemeral();
+    let mut synced_b = crdt::sync::SyncedDoc::new(COLLAB_DOC_ID, doc_b.clone());
+    let client_b = sync_client(&ws_url).await;
+    tokio::spawn(async move { synced_b.run(&client_b).await });
+    let repo_b = NoteRepoLoro::new(&doc_b);
+
+    // A writes through its local repo — instant locally, synced out.
+    let note = repo_a
+        .inner()
+        .create(NoteCreate {
+            text: "hello from a".into(),
+            author: "a".into(),
+        })
+        .await
+        .expect("create on a");
+
+    let items_of = |repo: &NoteRepoLoro| -> Vec<Note> { repo.inner().items_now().unwrap() };
+
+    let rb = repo_b.clone();
+    eventually("b sees a's note", move || {
+        items_of(&rb).iter().any(|n| n.text == "hello from a")
+    })
+    .await;
+
+    // B edits the same row — the update merges back to A.
+    repo_b
+        .inner()
+        .update(
+            note.id,
+            NoteUpdate {
+                text: Some("edited by b".into()),
+                author: None,
+            },
+        )
+        .await
+        .expect("update on b");
+    let ra = repo_a.clone();
+    eventually("a sees b's edit", move || {
+        items_of(&ra).iter().any(|n| n.text == "edited by b")
+    })
+    .await;
+
+    // A late joiner catches the whole history by version vector.
+    let doc_c = crdt::CrdtDoc::ephemeral();
+    let mut synced_c = crdt::sync::SyncedDoc::new(COLLAB_DOC_ID, doc_c.clone());
+    let client_c = sync_client(&ws_url).await;
+    tokio::spawn(async move { synced_c.run(&client_c).await });
+    let repo_c = NoteRepoLoro::new(&doc_c);
+    eventually("late joiner has the converged note", move || {
+        items_of(&repo_c).iter().any(|n| n.text == "edited by b")
+    })
+    .await;
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn presence_propagates_between_peers() {
+    use example::COLLAB_DOC_ID;
+
+    let (ws_url, shutdown) = spawn().await;
+
+    let (peer_a, mut driver_a) = crdt::sync::PresencePeer::new(COLLAB_DOC_ID, 30_000);
+    let client_a = presence_client(&ws_url).await;
+    tokio::spawn(async move { driver_a.run(&client_a).await });
+
+    let (peer_b, mut driver_b) = crdt::sync::PresencePeer::new(COLLAB_DOC_ID, 30_000);
+    let client_b = presence_client(&ws_url).await;
+    tokio::spawn(async move { driver_b.run(&client_b).await });
+
+    peer_a.set("client-a", "alice");
+    let pb = peer_b.clone();
+    eventually("b sees a's presence", move || {
+        matches!(pb.states().get("client-a"), Some(v) if format!("{v:?}").contains("alice"))
+    })
+    .await;
+
+    // A peer that joins later gets the current picture from the
+    // server's mirror store on attach.
+    let (peer_c, mut driver_c) = crdt::sync::PresencePeer::new(COLLAB_DOC_ID, 30_000);
+    let client_c = presence_client(&ws_url).await;
+    tokio::spawn(async move { driver_c.run(&client_c).await });
+    let pc = peer_c.clone();
+    eventually("late joiner sees a's presence", move || {
+        matches!(pc.states().get("client-a"), Some(v) if format!("{v:?}").contains("alice"))
+    })
+    .await;
+
+    let _ = shutdown.send(());
 }

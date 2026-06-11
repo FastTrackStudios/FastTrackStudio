@@ -24,7 +24,7 @@ fn main() {
 fn Root() -> Element {
     let transport = use_hook(|| {
         let scope = Scope::new();
-        let router = service_router(ExampleRepoMemory::new());
+        let router = service_router(ExampleRepoMemory::new(), &app_server::Collab::ephemeral());
         Transport::Local(LocalServer::serve(router, scope))
     });
     use_context_provider(|| transport.clone());

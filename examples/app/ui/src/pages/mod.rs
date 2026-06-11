@@ -6,12 +6,14 @@
 //! `BillingView`, …); here there's just the example feature, so each page
 //! mounts one view and maps its `on_*` events to a route push.
 
+mod collab;
 mod detail;
 mod edit;
 mod home;
 mod inspect;
 mod not_found;
 
+pub use collab::Collab;
 pub use detail::ExampleDetail;
 pub use edit::EditExample;
 pub use home::Home;

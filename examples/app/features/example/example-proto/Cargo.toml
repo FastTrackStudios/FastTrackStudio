@@ -30,6 +30,11 @@ sea-orm = { workspace = true, optional = true }
 # structs when the `fake` feature is on.
 fake = { workspace = true, optional = true }
 
+# CRDT layer — referenced by the paths `#[architect(crdt)]` emits for
+# `Note` (EntityCrdt codec, NoteRepoLoro, replica hooks). Optional so
+# consumers that only want the server-owned entities never pull Loro.
+crdt = { workspace = true, optional = true }
+
 [features]
 default = ["vox"]
 
@@ -49,8 +54,14 @@ fake = ["dep:fake", "architect/fake"]
 # Client-only: binds `Example` into the optimistic store
 # (`impl architect::StoreEntity`) + adds `Example::draft`. Pulls Dioxus
 # (via `architect/atom`), so enable it only in UI crates — never on the
-# server.
-atom = ["architect/atom"]
+# server. The weak `crdt?/dioxus` edge lights up the replica-backed
+# `Note` hooks when `crdt` is also enabled.
+atom = ["architect/atom", "crdt?/dioxus"]
+
+# The collaborative layer: `Note`'s EntityCrdt codec + `NoteRepoLoro`
+# (server + native), and — together with `atom` — the replica-backed
+# hooks (`use_note_crdt_list`, `use_note_crdt_actions`). Wasm-clean.
+crdt = ["dep:crdt", "crdt/vox"]
 
 # Client-only: typed form bindings over the Create/Update payloads
 # (`ExampleCreateFields` / `ExampleUpdateFields`). Pulls Dioxus via

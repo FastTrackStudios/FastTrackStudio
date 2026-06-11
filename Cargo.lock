@@ -156,6 +156,7 @@ name = "app-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "crdt",
  "example",
  "eyre",
  "sea-orm",
@@ -174,6 +175,7 @@ dependencies = [
  "app-server",
  "architect",
  "axum",
+ "crdt",
  "example",
  "tokio",
  "uuid",
@@ -1226,13 +1228,18 @@ dependencies = [
  "crdt",
  "crdt-derive",
  "facet",
+ "idb",
+ "js-sys",
  "loro",
  "loro-internal",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
  "vox",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -2019,6 +2026,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "chrono",
+ "crdt",
  "facet",
  "fake",
  "sea-orm",
@@ -2965,6 +2973,21 @@ name = "id-arena"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
+
+[[package]]
+name = "idb"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6554f394e990a1af530a528a7fdcad6e01b29cb1b990f89df3ffd62cf15f7828"
+dependencies = [
+ "indexmap",
+ "js-sys",
+ "num-traits",
+ "thiserror 2.0.18",
+ "tokio",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "iddqd"

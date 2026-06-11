@@ -13,7 +13,7 @@ async fn spawn() -> (String, oneshot::Sender<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (tx, rx) = oneshot::channel::<()>();
-    let app = vox_router(ExampleRepoMemory::new());
+    let app = vox_router(ExampleRepoMemory::new(), app_server::Collab::ephemeral());
     tokio::spawn(async move {
         let _ = axum::serve(listener, app)
             .with_graceful_shutdown(async {

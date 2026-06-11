@@ -15,9 +15,12 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 # Single dep root — facade re-exports the wire types + vox client. The
 # `atom` feature binds `Example` into the optimistic store (`StoreEntity`).
-example = { path = "../features/example/example", features = ["vox", "atom"] }
+example = { path = "../features/example/example", features = ["vox", "atom", "form", "crdt"] }
 # Feature-scoped Dioxus components.
 example-ui = { path = "../features/example/example-ui" }
+# The collaborative layer's client side: `use_synced_doc` (the notes
+# replica + its sync driver) and `use_presence_channel` (who's here).
+crdt = { path = "../../../libs/crdt", features = ["dioxus"] }
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
 # v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server so
 # the wire schema agrees.

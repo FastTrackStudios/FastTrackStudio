@@ -106,8 +106,8 @@ pub fn use_notifications() -> Notifications {
 }
 
 /// Like [`use_notifications`] but tolerant of a missing provider —
-/// [`crate::use_mutation`] uses this so mutations work (minus auto-report)
-/// in apps that haven't opted in.
-pub(crate) fn try_use_notifications() -> Option<Notifications> {
+/// [`crate::use_mutation`] (and the derive-emitted CRDT mutations) use
+/// this so writes work (minus auto-report) in apps that haven't opted in.
+pub fn try_use_notifications() -> Option<Notifications> {
     use_hook(try_consume_context::<Notifications>)
 }

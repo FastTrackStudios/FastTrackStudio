@@ -24,11 +24,16 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
+use crdt::CrdtDoc;
+use crdt::sync::{
+    DocPresenceDispatcher, DocSyncDispatcher, DocSyncHost, PresenceHost,
+    doc_presence_service_descriptor, doc_sync_service_descriptor,
+};
 use example::architect::{Filter, Layer, LayerRouter, Page, RepoError, Services, Sort, layers};
 use example::axum_ws;
 use example::{
-    Example, ExampleCreate, ExampleEvented, ExampleList, ExampleRepo, ExampleServiceDispatcher,
-    ExampleUpdate,
+    COLLAB_DOC_ID, Example, ExampleCreate, ExampleEvented, ExampleList, ExampleRepo,
+    ExampleServiceDispatcher, ExampleUpdate,
 };
 use service_impl::ExampleServiceImpl;
 use tower_http::cors::CorsLayer;
@@ -46,22 +51,80 @@ use uuid::Uuid;
 /// WebSocket connection over the shared instance; an in-process host
 /// (`architect::LocalServer::serve(service_router(repo), …)`, see the
 /// desktop app) calls this directly — live events included, no socket.
-pub fn service_router<R>(repo: R) -> LayerRouter
+pub fn service_router<R>(repo: R, collab: &Collab) -> LayerRouter
 where
     R: ExampleRepo + Services + Clone + Send + Sync + 'static,
 {
-    evented_router(ExampleEvented::new(repo))
+    evented_router(ExampleEvented::new(repo), collab)
 }
 
 /// Build the service router over an already-wrapped (shared) repo.
-pub fn evented_router<R>(repo: ExampleEvented<R>) -> LayerRouter
+pub fn evented_router<R>(repo: ExampleEvented<R>, collab: &Collab) -> LayerRouter
 where
     R: ExampleRepo + Clone + Send + Sync + 'static,
 {
-    repo.clone().into_router().with(
+    let router = repo.clone().into_router().with(
         example::example_service_service_descriptor(),
         ExampleServiceDispatcher::new(ExampleServiceImpl::new(repo)),
-    )
+    );
+    collab.mount(router)
+}
+
+// ── Collaborative state (the shared notes doc) ────────────────────────
+
+/// The app's collaborative surface: one canonical notes doc
+/// ([`DocSyncHost`] — every client holds a replica, edits merge) and its
+/// presence channel ([`PresenceHost`] — who's online, ephemeral).
+///
+/// Like [`ExampleEvented`], build it **once per process** and share it:
+/// the fan-out hubs live inside, and the hosts are cheap clones over the
+/// same state, so per-connection routers all serve the same doc.
+#[derive(Clone)]
+pub struct Collab {
+    pub sync: DocSyncHost,
+    pub presence: PresenceHost,
+}
+
+impl Collab {
+    /// In-memory doc — for tests and the in-process desktop transport.
+    pub fn ephemeral() -> Self {
+        Self::from_doc(CrdtDoc::ephemeral())
+    }
+
+    /// File-persisted doc under `data_dir` — the server's notes survive
+    /// restarts, and the host compacts the update log as it grows.
+    pub async fn open(data_dir: impl Into<std::path::PathBuf>) -> Result<Self, crdt::PersistError> {
+        let doc = CrdtDoc::open(COLLAB_DOC_ID, crdt::FilePersistence::new(data_dir)).await?;
+        Ok(Self::from_doc(doc))
+    }
+
+    fn from_doc(doc: CrdtDoc) -> Self {
+        Self {
+            // Compact every 64 updates so storage stays bounded no
+            // matter how chatty the doc gets.
+            sync: DocSyncHost::new(COLLAB_DOC_ID, doc).with_compaction(64),
+            // Presence states expire 30s after their peer goes quiet.
+            presence: PresenceHost::new(COLLAB_DOC_ID, 30_000),
+        }
+    }
+
+    /// The canonical doc (e.g. for server-side reads via `NoteRepoLoro`).
+    pub fn doc(&self) -> &CrdtDoc {
+        self.sync.doc()
+    }
+
+    /// Mount both services onto a router.
+    pub fn mount(&self, router: LayerRouter) -> LayerRouter {
+        router
+            .with(
+                doc_sync_service_descriptor(),
+                DocSyncDispatcher::new(self.sync.clone()),
+            )
+            .with(
+                doc_presence_service_descriptor(),
+                DocPresenceDispatcher::new(self.presence.clone()),
+            )
+    }
 }
 
 /// Build the app's axum router for any `ExampleRepo` backend that also
@@ -72,7 +135,7 @@ where
 /// connection's router shares the same [`ExampleEvented`] instance, so
 /// broadcasts cross connections (a write on one socket reaches
 /// subscribers on every other).
-pub fn vox_router<R>(repo: R) -> Router
+pub fn vox_router<R>(repo: R, collab: Collab) -> Router
 where
     R: ExampleRepo + Services + Clone + Send + Sync + 'static,
 {
@@ -81,7 +144,7 @@ where
         .route("/api/health", get(health))
         .route("/vox", get(vox_ws_handler::<LatencyRepo<R>>))
         .layer(CorsLayer::permissive())
-        .with_state(Arc::new(evented))
+        .with_state(Arc::new((evented, collab)))
 }
 
 async fn health() -> &'static str {
@@ -90,13 +153,14 @@ async fn health() -> &'static str {
 
 async fn vox_ws_handler<R>(
     ws: WebSocketUpgrade,
-    State(repo): State<Arc<ExampleEvented<R>>>,
+    State(state): State<Arc<(ExampleEvented<R>, Collab)>>,
 ) -> Response
 where
     R: ExampleRepo + Clone + Send + Sync + 'static,
 {
     ws.on_upgrade(move |socket| async move {
-        let router = evented_router((*repo).clone());
+        let (repo, collab) = (*state).clone();
+        let router = evented_router(repo, &collab);
         let factory = axum_ws::acceptor_fn(move |_req, connection| {
             connection.handle_with(router.clone());
             Ok(())

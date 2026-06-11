@@ -21,8 +21,11 @@ publish = false
 # The real server wiring (vox_router + ExampleServiceImpl) — mount the
 # exact router the bin serves instead of re-deriving it here.
 app-server = { path = "../../server" }
+# Replica drivers for the realtime-sync e2e (SyncedDoc + presence over
+# the real WebSocket).
+crdt = { workspace = true, features = ["vox"] }
 # Facade for the contract types + the in-memory backend we mount.
-example = { workspace = true, features = ["backend-memory", "server-axum", "vox"] }
+example = { workspace = true, features = ["backend-memory", "server-axum", "vox", "crdt"] }
 axum.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 uuid.workspace = true
