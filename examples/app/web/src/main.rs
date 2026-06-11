@@ -7,6 +7,9 @@ use app_ui::{App, Transport};
 use dioxus::prelude::*;
 
 fn main() {
+    // Surface Rust panics as readable console.error messages (message +
+    // location) instead of a bare `RuntimeError: unreachable` trap.
+    console_error_panic_hook::set_once();
     dioxus::launch(Root);
 }
 

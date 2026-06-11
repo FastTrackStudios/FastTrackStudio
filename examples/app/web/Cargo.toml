@@ -24,3 +24,6 @@ wasm-bindgen = "=0.2.118"
 # it in this dependency graph, so enable it directly — feature unification
 # turns it on for dioxus-web too.
 web-sys = { version = "0.3.77", features = ["Location"] }
+# Panic messages in the browser console (file:line + payload) — without
+# this a panic is an opaque `RuntimeError: unreachable`.
+console_error_panic_hook = "0.1"

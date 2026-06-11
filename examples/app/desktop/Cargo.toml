@@ -21,7 +21,7 @@ architect = { path = "../../../macros/architect", default-features = false, feat
 
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
 # v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server.
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
