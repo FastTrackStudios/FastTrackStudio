@@ -92,6 +92,14 @@ pub fn App() -> Element {
             }
         });
 
+    // Org-wide presence: join the active org's `DocPresence` channel
+    // over the shared connection above (the hook reads the
+    // `Connection<vox::Caller>` context, so this must come AFTER
+    // `use_app_reactive`) and provide the identity/status contexts the
+    // publisher, roster, and picker consume. The publisher itself
+    // lives in the shell (`PresencePublisher`) — it needs the router.
+    crate::presence::provide_org_presence();
+
     rsx! {
         ThemeProvider { state: theme_state,
             div { class: "min-h-screen bg-background text-foreground",

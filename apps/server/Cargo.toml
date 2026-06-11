@@ -106,6 +106,10 @@ email-maildir = { workspace = true }
 # `FolderAliases` for the per-account Maildir registration.
 email-config = { workspace = true }
 vox = { workspace = true }
+# Org-wide presence: `crdt::sync::PresenceHost` + the `DocPresence`
+# vox service mounted per org (`vox` feature = the sync/presence
+# transport; no Dioxus, no persistence backends).
+crdt = { workspace = true, features = ["vox"] }
 chrono.workspace = true
 architect = { workspace = true, features = ["server", "local"] }
 architect-auth = { workspace = true, features = ["full"] }

@@ -21,6 +21,7 @@ pub mod attachments;
 pub mod capability;
 pub mod connections;
 pub mod forge_sync;
+pub mod presence;
 pub mod server_mgmt;
 pub mod webhooks;
 
@@ -173,6 +174,13 @@ pub struct OrgAppState {
     /// decorator + poll loop can open it without re-deriving the
     /// org dir from the data root.
     pub issue_links_path: PathBuf,
+    /// Org-wide presence channel host — the Discord-style "who's
+    /// online" roster. One per org (the fan-out hub + mirror
+    /// `EphemeralStore` live inside; per-connection routers share
+    /// it through cheap clones). Serves `DocPresence` on the fixed
+    /// [`presence::PRESENCE_DOC_ID`]; nothing is persisted —
+    /// states expire on their own when a peer goes quiet.
+    pub presence: crdt::sync::PresenceHost,
 }
 
 /// Top-level server state. Scans `<data_root>/orgs/` at
@@ -742,6 +750,10 @@ pub(crate) async fn build_org_state(
             forge,
             forge_agent,
             issue_links_path: org_root.path().join("issue-links.json"),
+            presence: crdt::sync::PresenceHost::new(
+                presence::PRESENCE_DOC_ID,
+                presence::PRESENCE_TIMEOUT_MS,
+            ),
         })
     }
 }
@@ -1266,6 +1278,14 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             git_proto::connections::serve(connections::ConnectionsBackend::new(
                 org.issue_links_path.clone(),
             )),
+        )
+        // Org-wide presence — the Discord-style "who's online" channel
+        // (`DocPresence` on the fixed `presence::PRESENCE_DOC_ID`).
+        // Ephemeral by construction: states ride Loro's
+        // `EphemeralStore` and expire when a peer goes quiet.
+        .with(
+            crdt::sync::doc_presence_service_descriptor(),
+            crdt::sync::DocPresenceDispatcher::new(org.presence.clone()),
         )
 }
 

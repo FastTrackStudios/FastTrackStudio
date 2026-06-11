@@ -39,10 +39,19 @@ pub fn DesktopSidebar(current: Route) -> Element {
                 }
             }
             SidebarSeparator {}
-            div { class: "flex-1 min-h-0 overflow-y-auto" }
+            div { class: "flex-1 min-h-0 overflow-y-auto",
+                // Org-wide presence roster: live peers + agents
+                // mid-turn + open timers, humans first.
+                crate::presence::PresenceRoster {}
+            }
             SidebarFooter {
                 div { class: "px-1 pb-2",
                     crate::chrome::FleetingButton {}
+                }
+                // Presence identity: display name + DND/Available
+                // picker, published org-wide by the shell's publisher.
+                div { class: "px-1 pb-2",
+                    crate::presence::PresenceStatusPicker {}
                 }
                 div { class: "px-1 pb-1 pt-1",
                     SectionHeader { label: "Organization", size: SectionHeaderSize::Small }
