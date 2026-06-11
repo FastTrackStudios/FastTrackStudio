@@ -28,7 +28,7 @@ pub fn App() -> Element {
     // `use_connect_reactive`'s dependency contract).
     // Multi-org data selection: which org(s) the data views load from.
     // Defaults to `All` (every hosted org); the org switcher drives it.
-    let _org_selection: Signal<OrgSelection> =
+    let org_selection: Signal<OrgSelection> =
         use_context_provider(|| Signal::new(OrgSelection::All));
     // Hosted org list, discovered from the server's well-known endpoint
     // and published for the switcher + data fetchers.
@@ -55,7 +55,7 @@ pub fn App() -> Element {
     // Theme follows the active org (the selected one, or home under
     // "All"), keyed by slug in the overrides map. Until discovery
     // resolves, the default preset holds.
-    let theme_org_slug = use_memo(move || match &*_org_selection.read() {
+    let theme_org_slug = use_memo(move || match &*org_selection.read() {
         OrgSelection::One(slug) => slug.clone(),
         OrgSelection::All => home_slug(&org_list.read()),
     });
@@ -78,7 +78,7 @@ pub fn App() -> Element {
 
     let _conn: architect::Connection<vox_core::Caller> =
         architect::use_app_reactive(move || {
-            let slug = match &*_org_selection.read() {
+            let slug = match &*org_selection.read() {
                 OrgSelection::One(slug) => slug.clone(),
                 OrgSelection::All => home_slug(&org_list.read()),
             };

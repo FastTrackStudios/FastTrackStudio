@@ -20,6 +20,7 @@ use crate::routes::Route;
 
 /// Claim identity until web auth lands: a human ref distinguishable
 /// from agent claims in the board and the CLI.
+#[cfg(target_arch = "wasm32")]
 const WEB_CLAIMANT: &str = r#"{"kind":"human","id":"web"}"#;
 
 #[component]
@@ -28,7 +29,7 @@ pub fn TaskDetailPage(id: Uuid) -> Element {
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let nav = use_navigator();
 
-    let mut rows = use_resource(move || {
+    let rows = use_resource(move || {
         let slugs = selected_slugs(&selection.read(), &org_list.read());
         async move { crate::feeds::fetch_tasks_tagged(&slugs).await }
     });
