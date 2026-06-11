@@ -145,7 +145,7 @@ thiserror.workspace = true
 # Resource handles (`architect::handle`): the id behind `RawHandle`.
 # Wasm-clean (v4 generation needs the consumer to wire getrandom's js
 # backend on wasm32, same as every other uuid-minting wire crate here).
-uuid.workspace = true
+uuid = { workspace = true, features = ["js"] }
 
 # Optional client-state primitive, re-exported as `architect::atom` under
 # the `atom` feature. Pulls Dioxus, so it stays optional + off by default.
