@@ -48,7 +48,11 @@ fake = ["dep:fake"]
 # `full` enables every architect optional — vox, SeaORM bridge, axum
 # adapter, fake. Matches tokio's `full` convention: when you just want
 # everything turned on for development or a single-binary build.
-full = ["vox", "server-seaorm", "server-axum", "fake", "diagnostics", "platform", "schedule", "rt"]
+# `diagnostics` is deliberately NOT in `full`: moire's trace capture
+# validates frame pointers at runtime and aborts unless the whole graph
+# is built with `-C force-frame-pointers=yes` — enable it explicitly in
+# binaries whose build sets that flag (see the `diagnostics` feature).
+full = ["vox", "server-seaorm", "server-axum", "fake", "platform", "schedule", "rt"]
 
 # Platform layer (`architect::platform`): a `Clock` (async `sleep` + `now`)
 # and task `spawn`, abstracted native (tokio) <-> wasm (browser timers).
