@@ -25,7 +25,7 @@ use crate::result::AtomResult;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct MutationId(u64);
 
-/// An entity that can live in a [`Store`]: cloneable, comparable, and able
+/// An entity that can live in a [`struct@Store`]: cloneable, comparable, and able
 /// to report its stable key.
 pub trait StoreEntity: Clone + PartialEq + 'static {
     /// The server-assigned identity type (e.g. `Uuid`).
@@ -413,7 +413,7 @@ where
     store.entries_result()
 }
 
-/// Cache-first single-entity read backed by a [`Store`] — the generic
+/// Cache-first single-entity read backed by a [`struct@Store`] — the generic
 /// behind a feature's `use_<entity>(id)` hook.
 ///
 /// Returns `Success` straight from the store if the keyed row is cached

@@ -1,6 +1,6 @@
 //! Dumb, presentational components for the example feature — props in,
 //! events out, no store/client/socket. They're composed by the wired
-//! [`views`](crate::views) and reusable on their own (the SSR component
+//! `views` and reusable on their own (the SSR component
 //! tests render these directly).
 
 mod example_card;

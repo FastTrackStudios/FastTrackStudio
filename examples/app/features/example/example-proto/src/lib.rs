@@ -5,12 +5,12 @@
 //! The crate is split by concern so it reads as a template for your own
 //! feature-proto crate:
 //!
-//! - [`entity`] — the `Example` struct. `#[derive(architect::Entity)]`
+//! - `entity` — the `Example` struct. `#[derive(architect::Entity)]`
 //!   emits the wire types, the `ExampleRepo` CRUD service, the layer token,
 //!   and (on server builds) the SeaORM bridge.
-//! - [`error`] — `ExampleServiceError`, the wire error for the custom
+//! - `error` — `ExampleServiceError`, the wire error for the custom
 //!   service.
-//! - [`service`] — `ExampleService`, a hand-written `#[vox::service]` for
+//! - `service` — `ExampleService`, a hand-written `#[vox::service]` for
 //!   domain operations beyond CRUD (search, duplicate). **The extension
 //!   point** — add methods or whole new services here.
 //! - `atom` (client-only, `atom` feature) — binds `Example` into the

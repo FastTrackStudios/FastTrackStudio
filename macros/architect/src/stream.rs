@@ -1,9 +1,9 @@
 //! Client-side stream consumption — **live reads**.
 //!
-//! The counterpart to [`Broadcast`](crate::Broadcast): a component
+//! The counterpart to [`PubSub`](crate::PubSub): a component
 //! subscribes to a server event stream for its lifetime, and each event
 //! folds into client state. With [`use_store_stream`] the target is the
-//! optimistic [`Store`](architect_atom::Store) — every page already
+//! optimistic [`struct@Store`] — every page already
 //! rendering from the store goes **live** (rows appear/update/vanish as
 //! other clients or the host change them) with zero page changes, and
 //! optimistic local writes overlay incoming server truth exactly as they
@@ -76,7 +76,7 @@ where
     });
 }
 
-/// [`use_stream`] aimed at the optimistic [`Store`]: each event folds into
+/// [`use_stream`] aimed at the optimistic [`struct@Store`]: each event folds into
 /// the shared cache via `apply`, so every store-rendered page is live.
 ///
 /// `apply` is a plain `fn` — typically a `match` mapping the feature's

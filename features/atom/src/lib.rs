@@ -7,7 +7,7 @@
 //! `Effect<A,E,R>` monad* (see `docs/.../idioms.md` §6); `architect-atom`
 //! does the same on the client, borrowing
 //! [effect-atom](https://github.com/tim-smart/effect-atom)'s `Result` +
-//! writable optimistic atoms — expressed as plain Dioxus [`Signal`]s.
+//! writable optimistic atoms — expressed as plain Dioxus `Signal`s.
 //!
 //! The crate is entity-agnostic and wasm-safe: its only dependency is
 //! Dioxus core. Implement [`StoreEntity`] for your own types; nothing here

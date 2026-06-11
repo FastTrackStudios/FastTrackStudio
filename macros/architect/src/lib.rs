@@ -90,7 +90,7 @@ where
 /// use_store_list(store, move || async move {
 ///     let caller = ready_or_pending!(conn);
 ///     let client = ExampleRepoClient::new(caller);
-///     Some(client.list(…).await.map(|l| l.items).map_err(ClientError::from))
+///     Some(client.list(page, None, None).await.map(|l| l.items).map_err(ClientError::from))
 /// })
 /// ```
 #[cfg(feature = "atom")]
