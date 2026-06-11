@@ -32,7 +32,7 @@ pub mod backend_db {
 /// Pure in-memory in-tree implementation. No external services needed.
 #[cfg(feature = "backend-memory")]
 pub mod backend_memory {
-    pub use example_memory::ExampleRepoMemory;
+    pub use example_memory::{ExampleRepoMemory, TagRepoMemory};
 }
 
 /// Loro-backed CRDT implementation. Source of truth lives in a

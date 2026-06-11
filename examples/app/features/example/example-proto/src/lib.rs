@@ -13,6 +13,8 @@
 //! - `service` — `ExampleService`, a hand-written `#[vox::service]` for
 //!   domain operations beyond CRUD (search, duplicate). **The extension
 //!   point** — add methods or whole new services here.
+//! - `tag` — the `Tag` entity: a **String** primary key (caller-supplied
+//!   slug), proving the derive is not Uuid-specific.
 //! - `atom` (client-only, `atom` feature) — binds `Example` into the
 //!   `architect::Store` optimistic cache (`impl StoreEntity` +
 //!   `Example::draft`).
@@ -35,6 +37,7 @@ mod entity;
 mod error;
 mod note;
 mod service;
+mod tag;
 
 // Flat re-exports — the derive (`entity`) and `#[vox::service]` (`service`)
 // macros emit their client/dispatcher/descriptor types into their own
@@ -43,3 +46,4 @@ pub use entity::*;
 pub use error::ExampleServiceError;
 pub use note::*;
 pub use service::*;
+pub use tag::*;

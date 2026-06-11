@@ -780,7 +780,9 @@ fn build_events_block(
                 &self,
                 id: #pk_ty,
             ) -> ::core::result::Result<(), ::architect::RepoError> {
-                self.inner.delete(id).await?;
+                // The pk is `Clone`, not necessarily `Copy` (String pks):
+                // the inner call consumes one copy, the broadcast the other.
+                self.inner.delete(id.clone()).await?;
                 self.hub.publish(#event_ident::Deleted(id));
                 ::core::result::Result::Ok(())
             }
@@ -1105,9 +1107,13 @@ fn build_form_block(
 /// fn use_example_mutations() -> ExampleMutations;
 /// ```
 ///
-/// Requirements: the primary key must be `Copy + FromStr` (`Uuid`,
-/// integer ids); the hooks read a `Connection<<Entity>RepoClient>` from
-/// context, provided at the app root with `architect::use_connect`.
+/// Requirements: the primary key must be `Clone + Eq + Hash + FromStr`
+/// with a `Display`able parse error (`Uuid`, `String`, integer ids all
+/// qualify — `Copy` is *not* required, so non-`Copy` keys like `String`
+/// work; the emitted code clones at the few places a key crosses an
+/// optimistic-patch closure and the server-call future). The hooks read
+/// a `Connection<<Entity>RepoClient>` from context, provided at the app
+/// root with `architect::use_connect`.
 #[allow(clippy::too_many_arguments)]
 fn build_store_block(
     ident: &Ident,
@@ -1391,10 +1397,14 @@ fn build_store_block(
                 };
                 let client = #repo_client::new(caller);
                 let patch_input = input.clone();
+                // The key is `Clone`, not necessarily `Copy` (String pks):
+                // the optimistic patch and the server call each get their
+                // own copy.
+                let patch_id = id.clone();
                 self.write_m.run(
                     self.store,
                     move |s| {
-                        s.update_optimistic(::architect::Id::Real(id), move |row| {
+                        s.update_optimistic(::architect::Id::Real(patch_id), move |row| {
                             #(#patch_assigns)*
                             #(#patch_touches)*
                         })
@@ -1416,9 +1426,10 @@ fn build_store_block(
                     return;
                 };
                 let client = #repo_client::new(caller);
+                let patch_id = id.clone();
                 self.write_m.run(
                     self.store,
-                    move |s| s.remove_optimistic(::architect::Id::Real(id)),
+                    move |s| s.remove_optimistic(::architect::Id::Real(patch_id)),
                     move || async move {
                         client
                             .delete(id)
