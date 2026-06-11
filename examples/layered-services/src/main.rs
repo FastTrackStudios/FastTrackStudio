@@ -262,6 +262,28 @@ fn main() {
         "hybrid router (live counter + mock greeter) built"
     );
 
+    // ── 5. Multi-backend app router ──────────────────────────────────
+    //
+    // An app's vox endpoint usually fronts many backends — one per
+    // feature. `router![]` is the mount registry: each entry is a
+    // backend, its whole canonical `Services` bundle mounts in one
+    // line. Adding a feature to the app = adding one expression here
+    // (the bundle itself is declared once, in the feature crate).
+    info!("── 5. Multi-backend app router (router![]) ─────────────");
+    let app_router = architect::router![
+        live.clone(),             // Counter + Greeter
+        ExampleRepoMemory::new(), // ExampleRepo
+    ];
+    assert_eq!(app_router.len(), 3, "two bundles, three services");
+    info!(
+        services = app_router.len(),
+        "app router stitched from two backends"
+    );
+
+    // Collision rule: later entries win (same as Layer::merge). A mock
+    // mounted after the live backend takes over its method ids.
+    let _overridden = architect::router![live.clone(), MockBackend];
+
     // ── Introspection ────────────────────────────────────────────────
     //
     // `Layer<B>` carries the `Descriptors` walker as a supertrait, so
