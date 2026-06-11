@@ -85,6 +85,22 @@ where
     use_connect(connect)
 }
 
+/// [`use_app`] with a **reactive** connect: the closure re-runs when a
+/// signal it reads synchronously changes (org switcher, server-URL
+/// field), re-establishing the connection. See
+/// [`use_connect_reactive`] for the dependency-tracking contract.
+#[cfg(feature = "atom")]
+pub fn use_app_reactive<C, F, Fut>(connect: F) -> Connection<C>
+where
+    C: Clone + 'static,
+    F: Fn() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<C, String>> + 'static,
+{
+    provide_notifications();
+    provide_reactivity();
+    use_connect_reactive(connect)
+}
+
 /// Loader-side connection guard: yields the connected value, or
 /// **early-returns from the enclosing function** with the loader's
 /// pending/failed shape.

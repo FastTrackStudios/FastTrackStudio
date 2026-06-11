@@ -54,7 +54,9 @@ mod resource;
 mod result;
 mod store;
 
-pub use connection::{Connection, ConnectionState, use_connect, use_connection};
+pub use connection::{
+    Connection, ConnectionState, use_connect, use_connect_reactive, use_connection,
+};
 pub use id::Id;
 pub use mutation::{Mutation, use_mutation};
 pub use notify::{

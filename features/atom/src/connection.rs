@@ -76,6 +76,44 @@ pub fn use_connection<C: 'static>() -> Connection<C> {
     use_context::<Connection<C>>()
 }
 
+/// Reactive sibling of [`use_connect`]: re-runs `connect` whenever a
+/// signal it reads **synchronously** (before its first await) changes —
+/// an org/workspace switcher, an editable server URL — resetting the
+/// connection to `Connecting` and re-establishing.
+///
+/// ```ignore
+/// // app root: reconnects when the active org changes
+/// use_connect_reactive(move || {
+///     let slug = active_org_slug();          // signal read → dependency
+///     async move { connect_org(&slug).await }
+/// });
+/// ```
+///
+/// Dependency tracking is dioxus-resource semantics: only signals read
+/// before the closure returns its future re-trigger the connect. Reads
+/// inside the future are invisible.
+pub fn use_connect_reactive<C, F, Fut>(connect: F) -> Connection<C>
+where
+    C: Clone + 'static,
+    F: Fn() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<C, String>> + 'static,
+{
+    let mut state = use_signal(|| ConnectionState::Connecting);
+    let conn = use_context_provider(|| Connection { state });
+    let _resource = use_resource(move || {
+        // Synchronous part: signal reads here register as dependencies.
+        let fut = connect();
+        async move {
+            state.set(ConnectionState::Connecting);
+            match fut.await {
+                Ok(c) => state.set(ConnectionState::Ready(c)),
+                Err(e) => state.set(ConnectionState::Failed(e)),
+            }
+        }
+    });
+    conn
+}
+
 /// Establish a client bundle once at the app root and provide it as
 /// context: starts `Connecting`, runs `connect` on mount, resolves to
 /// `Ready`/`Failed`. Call once per bundle type `C`; features pull it with
