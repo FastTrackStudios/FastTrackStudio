@@ -27,8 +27,20 @@ export default defineConfig({
   // load transforms every module on demand, one request at a time.
   // Force them through esbuild prebundling so the dev server serves
   // one cached bundle.
+  //
+  // NOTE: these MUST be the real package names (@bearcove/*). The
+  // first version of this list used bare names ("vox-core"), which
+  // vite can't resolve — it logs "Failed to resolve dependency:
+  // vox-core, present in client 'optimizeDeps.include'" once at
+  // startup and silently skips the prebundle, putting all ~54 vendor
+  // modules back on the per-request transform path.
   optimizeDeps: {
-    include: ["vox-core", "vox-ws", "vox-wire", "vox-postcard"],
+    include: [
+      "@bearcove/vox-core",
+      "@bearcove/vox-ws",
+      "@bearcove/vox-wire",
+      "@bearcove/vox-postcard",
+    ],
   },
   resolve: {
     alias: {
