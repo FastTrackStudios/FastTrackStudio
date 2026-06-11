@@ -376,8 +376,6 @@ mod ambient_context {
 
     use architect::dispatch::CurrentThreadDispatcher;
 
-    use super::rpc;
-
     // Facet: the context crosses the wire as the first argument of
     // every call, so the vox-enabled build needs it encodable.
     #[derive(Clone, Debug, PartialEq, facet::Facet)]
