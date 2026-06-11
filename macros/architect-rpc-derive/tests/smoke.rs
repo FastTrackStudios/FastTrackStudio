@@ -369,6 +369,79 @@ mod sync_client_arg {
     }
 }
 
+// ── context = Type ──────────────────────────────────────────────────
+
+mod ambient_context {
+    use std::sync::Mutex;
+
+    use architect::dispatch::CurrentThreadDispatcher;
+
+    use super::rpc;
+
+    // Facet: the context crosses the wire as the first argument of
+    // every call, so the vox-enabled build needs it encodable.
+    #[derive(Clone, Debug, PartialEq, facet::Facet)]
+    pub struct Project(pub u32);
+
+    pub mod store {
+        #[super::super::rpc(context = super::Project)]
+        pub trait Store {
+            fn put(&self, key: u32, value: String) -> bool;
+            fn get(&self, key: u32) -> Option<String>;
+        }
+    }
+
+    use store::prelude::*;
+    // Bridge + mirror are module-scoped (the prelude carries the
+    // public surface; tests reach for the internals).
+    use store::{__StoreBridge, StoreRpc};
+
+    #[derive(Default)]
+    struct Backend {
+        rows: Mutex<Vec<(u32, u32, String)>>,
+    }
+
+    // Backends receive the declared-once context as the first
+    // parameter — `&Project` on sync methods.
+    impl Store for Backend {
+        fn put(&self, ctx: &Project, key: u32, value: String) -> bool {
+            self.rows.lock().unwrap().push((ctx.0, key, value));
+            true
+        }
+
+        fn get(&self, ctx: &Project, key: u32) -> Option<String> {
+            self.rows
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(p, k, _)| *p == ctx.0 && *k == key)
+                .map(|(_, _, v)| v.clone())
+        }
+    }
+
+    #[test]
+    fn context_threads_through_the_bridge_per_call() {
+        let bridge = __StoreBridge::new(Backend::default(), CurrentThreadDispatcher);
+        futures_lite::future::block_on(async {
+            // The mirror carries the context as the first owned wire arg.
+            assert!(StoreRpc::put(&bridge, Project(1), 7, "a".into()).await);
+            assert!(StoreRpc::put(&bridge, Project(2), 7, "b".into()).await);
+            let one = StoreRpc::get(&bridge, Project(1), 7).await;
+            let two = StoreRpc::get(&bridge, Project(2), 7).await;
+            assert_eq!(one.as_deref(), Some("a"));
+            assert_eq!(two.as_deref(), Some("b"));
+        });
+    }
+
+    #[test]
+    fn direct_sync_callers_borrow_the_context() {
+        let backend = Backend::default();
+        let ctx = Project(9);
+        backend.put(&ctx, 1, "x".into());
+        assert_eq!(backend.get(&ctx, 1).as_deref(), Some("x"));
+    }
+}
+
 // ── Empty trait ─────────────────────────────────────────────────────
 
 mod empty {

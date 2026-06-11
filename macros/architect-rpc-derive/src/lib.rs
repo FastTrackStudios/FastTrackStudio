@@ -94,6 +94,12 @@ struct RpcArgs {
     /// blocking facade (vox-gated, native only). Opt-in so consumers
     /// that never block don't carry the extra surface.
     sync_client: bool,
+    /// `context = SomeType` — the ambient per-call context. Declared
+    /// once on the trait: every method receives it without repeating
+    /// the parameter (sync methods get `ctx: &T`, async and wire
+    /// surfaces get owned `T`), and the client gains a `.scoped(ctx)`
+    /// wrapper so call sites set it once per scope.
+    context: Option<Type>,
 }
 
 impl RpcArgs {
@@ -102,11 +108,16 @@ impl RpcArgs {
             self.sync_client = true;
             return Ok(());
         }
+        if meta.path.is_ident("context") {
+            self.context = Some(meta.value()?.parse()?);
+            return Ok(());
+        }
         Err(meta.error(
             "unknown #[architect::rpc] argument — supported: `sync_client` \
-             (emit the blocking <Trait>SyncClient facade). Backend \
-             requirements are declared per backend at the bundle site, \
-             not on the trait.",
+             (emit the blocking <Trait>SyncClient facade), `context = Type` \
+             (ambient per-call context threaded through every method). \
+             Backend requirements are declared per backend at the bundle \
+             site, not on the trait.",
         ))
     }
 }
@@ -211,7 +222,8 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     // the bridge. We don't mutate the input AST; we re-emit with the
     // augmented supertraits. `#[subscribe]` declarations are dropped
     // here — they materialize as the stream sibling, not as methods.
-    let user_trait = emit_user_trait(&trait_item, shape);
+    let ctx = args.context.as_ref();
+    let user_trait = emit_user_trait(&trait_item, shape, ctx);
 
     let (mirror_trait, host_struct, host_impl) = match shape {
         Shape::Empty | Shape::AllAsync => {
@@ -222,11 +234,11 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
             (
                 quote! {},
                 emit_passthrough_host(trait_name, &host_name, vis),
-                emit_passthrough_impl(trait_name, &host_name, &methods),
+                emit_passthrough_impl(trait_name, &host_name, &methods, ctx),
             )
         }
         Shape::AllSync | Shape::Mixed => (
-            emit_mirror_trait(&rpc_trait_name, vis, &methods),
+            emit_mirror_trait(&rpc_trait_name, vis, &methods, ctx),
             emit_bridge_host(trait_name, &host_name, vis),
             emit_bridge_impl(
                 trait_name,
@@ -234,6 +246,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
                 &rpc_trait_name,
                 &methods,
                 matches!(shape, Shape::AllSync),
+                ctx,
             ),
         ),
     };
@@ -297,6 +310,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         shape,
         &subscriptions,
         args.sync_client,
+        args.context.is_some(),
     );
 
     // Stream sibling — emitted when the trait declares `#[subscribe]`
@@ -307,9 +321,22 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     // Blocking facade over the async client — sync code talking to a
     // remote backend. Opt-in via `#[architect::rpc(sync_client)]`.
     let sync_client = if args.sync_client {
-        emit_sync_client(trait_name, &client_name, vis, shape, &methods)
+        emit_sync_client(trait_name, &client_name, vis, shape, &methods, ctx)
     } else {
         quote! {}
+    };
+
+    // Scoped client — emitted with `context = T`: binds the ambient
+    // context once, then every call goes context-free.
+    let scoped_client = match ctx {
+        Some(ctx_ty) if !matches!(shape, Shape::Empty) => {
+            let actual_client = match shape {
+                Shape::AllAsync => client_name.clone(),
+                _ => rpc_client_name.clone(),
+            };
+            emit_scoped_client(trait_name, &actual_client, vis, &methods, ctx_ty)
+        }
+        _ => quote! {},
     };
 
     Ok(quote! {
@@ -322,6 +349,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         #layer_fn
         #stream_block
         #sync_client
+        #scoped_client
         #prelude
     })
 }
@@ -371,11 +399,14 @@ fn emit_sync_client(
     vis: &syn::Visibility,
     shape: Shape,
     methods: &[Method],
+    ctx: Option<&Type>,
 ) -> TokenStream2 {
     if matches!(shape, Shape::Empty) {
         return quote! {};
     }
     let sync_client_name = format_ident!("{}SyncClient", trait_name);
+    let ctx_param = ctx.map(|t| quote! { ctx: #t, });
+    let ctx_arg = ctx.map(|_| quote! { ctx, });
 
     let facade_methods = methods.iter().map(|m| {
         let name = &m.decl.sig.ident;
@@ -405,8 +436,8 @@ fn emit_sync_client(
         let typed_args = inputs.iter().filter(|a| matches!(a, FnArg::Typed(_)));
         quote! {
             #(#docs)*
-            pub fn #name(&self, #(#typed_args),*) -> #ret {
-                self.caller.block_on(self.inner.#name(#(#arg_idents),*))
+            pub fn #name(&self, #ctx_param #(#typed_args),*) -> #ret {
+                self.caller.block_on(self.inner.#name(#ctx_arg #(#arg_idents),*))
             }
         }
     });
@@ -461,6 +492,7 @@ fn emit_prelude(
     shape: Shape,
     subs: &[Subscription],
     sync_client: bool,
+    has_context: bool,
 ) -> TokenStream2 {
     let snake = to_snake_case(&trait_name.to_string());
     let service_alias = format_ident!("{}Service", trait_name);
@@ -491,6 +523,16 @@ fn emit_prelude(
                 stream_serve as #stream_serve_alias,
             };
         }
+    };
+
+    let scoped_items = if has_context && !matches!(shape, Shape::Empty) {
+        let scoped_name = format_ident!("{}ScopedClient", trait_name);
+        quote! {
+            #[cfg(feature = "vox")]
+            pub use super::#scoped_name;
+        }
+    } else {
+        quote! {}
     };
 
     let sync_items = if sync_client && !matches!(shape, Shape::Empty) {
@@ -540,6 +582,7 @@ fn emit_prelude(
             #vox_items
             #stream_items
             #sync_items
+            #scoped_items
         }
     }
 }
@@ -1074,6 +1117,95 @@ fn emit_stream_block(
     }
 }
 
+/// Emit the `<Trait>ScopedClient` for `context = T` traits: binds the
+/// ambient context once, then exposes every method context-free. The
+/// raw vox client (which takes `ctx` as its first wire argument on
+/// every call) stays available for callers juggling several scopes.
+fn emit_scoped_client(
+    trait_name: &syn::Ident,
+    actual_client: &syn::Ident,
+    vis: &syn::Visibility,
+    methods: &[Method],
+    ctx_ty: &Type,
+) -> TokenStream2 {
+    let scoped_name = format_ident!("{}ScopedClient", trait_name);
+
+    let scoped_methods = methods.iter().map(|m| {
+        let name = &m.decl.sig.ident;
+        let arg_idents = &m.arg_idents;
+        let docs: Vec<_> = m
+            .decl
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("doc"))
+            .collect();
+        let ret = match &m.return_ty {
+            ReturnType::Default => quote! {
+                ::core::result::Result<(), ::architect::vox::VoxError>
+            },
+            ReturnType::Type(_, ty) => match as_syntactic_result(ty) {
+                Some((ok, err)) => quote! {
+                    ::core::result::Result<#ok, ::architect::vox::VoxError<#err>>
+                },
+                None => quote! {
+                    ::core::result::Result<#ty, ::architect::vox::VoxError>
+                },
+            },
+        };
+        let typed_args = m
+            .mirror_inputs
+            .iter()
+            .filter(|a| matches!(a, FnArg::Typed(_)));
+        quote! {
+            #(#docs)*
+            pub async fn #name(&self, #(#typed_args),*) -> #ret {
+                self.inner
+                    .#name(::core::clone::Clone::clone(&self.ctx), #(#arg_idents),*)
+                    .await
+            }
+        }
+    });
+
+    let doc = format!(
+        "Context-bound view of the `{trait_name}` client: the ambient          context set by `.scoped(ctx)` rides along on every call, so          call sites stop threading it manually. Cheap to re-scope —          `with_ctx` returns a sibling bound to a different context."
+    );
+
+    quote! {
+        #[cfg(feature = "vox")]
+        impl #actual_client {
+            /// Bind an ambient context to this client — every call on
+            /// the returned scoped client carries it automatically.
+            #vis fn scoped(self, ctx: #ctx_ty) -> #scoped_name {
+                #scoped_name { inner: self, ctx }
+            }
+        }
+
+        #[doc = #doc]
+        #[cfg(feature = "vox")]
+        #[derive(Clone)]
+        #vis struct #scoped_name {
+            inner: #actual_client,
+            ctx: #ctx_ty,
+        }
+
+        #[cfg(feature = "vox")]
+        impl #scoped_name {
+            /// The bound context.
+            #vis fn ctx(&self) -> &#ctx_ty {
+                &self.ctx
+            }
+
+            /// Rebind to a different context, keeping the connection.
+            #vis fn with_ctx(mut self, ctx: #ctx_ty) -> Self {
+                self.ctx = ctx;
+                self
+            }
+
+            #(#scoped_methods)*
+        }
+    }
+}
+
 // ── Method classification ──────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -1239,7 +1371,7 @@ fn classify_shape(methods: &[Method]) -> Shape {
 /// Sync methods are re-emitted verbatim. `Send + Sync + 'static`
 /// bounds live on the bridge's where-clauses (not the trait
 /// itself) so the trait remains impl-able by borrowed-view types.
-fn emit_user_trait(trait_item: &ItemTrait, shape: Shape) -> TokenStream2 {
+fn emit_user_trait(trait_item: &ItemTrait, shape: Shape, ctx: Option<&Type>) -> TokenStream2 {
     // AllAsync: vox::service is applied to the user trait directly
     // (no hidden mirror), so leave `async fn` intact — vox's parser
     // rewrites it to `fn -> impl Future + MaybeSend` itself. Sync/
@@ -1254,6 +1386,22 @@ fn emit_user_trait(trait_item: &ItemTrait, shape: Shape) -> TokenStream2 {
         TraitItem::Fn(f) => !has_subscribe_attr(f),
         _ => true,
     });
+    // Ambient context: declared once on the attribute, threaded here
+    // into every method — sync methods borrow it (`ctx: &T`, direct
+    // callers pay nothing), async methods own it (they're the wire
+    // face for AllAsync, and futures can't borrow from the bridge).
+    if let Some(ctx_ty) = ctx {
+        for item in &mut out.items {
+            if let TraitItem::Fn(f) = item {
+                let arg: FnArg = if f.sig.asyncness.is_some() || apply_vox {
+                    parse_quote! { ctx: #ctx_ty }
+                } else {
+                    parse_quote! { ctx: &#ctx_ty }
+                };
+                f.sig.inputs.insert(1, arg);
+            }
+        }
+    }
     if !apply_vox {
         for item in &mut out.items {
             if let syn::TraitItem::Fn(f) = item
@@ -1286,14 +1434,19 @@ fn emit_mirror_trait(
     rpc_trait_name: &syn::Ident,
     vis: &syn::Visibility,
     methods: &[Method],
+    ctx: Option<&Type>,
 ) -> TokenStream2 {
+    let ctx_param = ctx.map(|t| quote! { ctx: #t, });
     let methods_iter = methods.iter().map(|m| {
         let name = &m.decl.sig.ident;
-        let inputs = &m.mirror_inputs;
+        let mut inputs = m.mirror_inputs.iter();
+        let receiver = inputs.next();
+        let inputs: Vec<_> = inputs.collect();
         let output = &m.return_ty;
-        // Strip doc comments to keep the hidden trait clean.
+        // Strip doc comments to keep the hidden trait clean. The
+        // ambient context travels as the first wire argument.
         quote! {
-            async fn #name(#(#inputs),*) #output;
+            async fn #name(#receiver, #ctx_param #(#inputs),*) #output;
         }
     });
 
@@ -1381,10 +1534,18 @@ fn emit_bridge_impl(
     rpc_trait_name: &syn::Ident,
     methods: &[Method],
     _all_sync: bool,
+    ctx: Option<&Type>,
 ) -> TokenStream2 {
+    let ctx_param = ctx.map(|t| quote! { ctx: #t, });
+    // Sync methods receive the ambient context by reference; the owned
+    // wire value is captured into the dispatcher closure.
+    let ctx_sync_arg = ctx.map(|_| quote! { &ctx, });
+    let ctx_async_arg = ctx.map(|_| quote! { ctx, });
     let method_impls = methods.iter().map(|m| {
         let name = &m.decl.sig.ident;
-        let mirror_inputs = &m.mirror_inputs;
+        let mut mirror_iter = m.mirror_inputs.iter();
+        let receiver = mirror_iter.next();
+        let mirror_inputs: Vec<_> = mirror_iter.collect();
         let output = &m.return_ty;
         let arg_idents = &m.arg_idents;
         let arg_was_ref = &m.arg_was_ref;
@@ -1407,20 +1568,20 @@ fn emit_bridge_impl(
         if m.is_async {
             // Pass-through: backend's async method is awaited directly.
             quote! {
-                async fn #name(#(#mirror_inputs),*) #output {
-                    self.inner.#name(#(#call_args),*).await
+                async fn #name(#receiver, #ctx_param #(#mirror_inputs),*) #output {
+                    self.inner.#name(#ctx_async_arg #(#call_args),*).await
                 }
             }
         } else {
             // Marshal: clone the inner Arc, capture args by move, run
             // through the dispatcher.
             quote! {
-                async fn #name(#(#mirror_inputs),*) #output {
+                async fn #name(#receiver, #ctx_param #(#mirror_inputs),*) #output {
                     let __inner = ::std::sync::Arc::clone(&self.inner);
                     let __disp = ::std::sync::Arc::clone(&self.dispatcher);
                     ::architect::dispatch::run(
                         &*__disp,
-                        move || __inner.#name(#(#call_args2),*),
+                        move || __inner.#name(#ctx_sync_arg #(#call_args2),*),
                     )
                     .await
                     .expect("#[architect::rpc] bridge: dispatcher failed")
@@ -1489,10 +1650,15 @@ fn emit_passthrough_impl(
     trait_name: &syn::Ident,
     host_name: &syn::Ident,
     methods: &[Method],
+    ctx: Option<&Type>,
 ) -> TokenStream2 {
+    let ctx_param = ctx.map(|t| quote! { ctx: #t, });
+    let ctx_arg = ctx.map(|_| quote! { ctx, });
     let method_impls = methods.iter().map(|m| {
         let name = &m.decl.sig.ident;
-        let mirror_inputs = &m.mirror_inputs;
+        let mut mirror_iter = m.mirror_inputs.iter();
+        let receiver = mirror_iter.next();
+        let mirror_inputs: Vec<_> = mirror_iter.collect();
         let output = &m.return_ty;
         let arg_idents = &m.arg_idents;
         let arg_was_ref = &m.arg_was_ref;
@@ -1509,8 +1675,8 @@ fn emit_passthrough_impl(
             });
 
         quote! {
-            async fn #name(#(#mirror_inputs),*) #output {
-                self.inner.#name(#(#call_args),*).await
+            async fn #name(#receiver, #ctx_param #(#mirror_inputs),*) #output {
+                self.inner.#name(#ctx_arg #(#call_args),*).await
             }
         }
     });

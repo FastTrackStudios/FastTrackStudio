@@ -100,6 +100,22 @@ pub mod greeter {
     }
 }
 
+pub mod notes {
+    /// Ambient per-call context — the "which project" axis the DAW
+    /// threads through every method. Declared ONCE on the attribute;
+    /// methods don't repeat it.
+    #[derive(Clone, Debug, PartialEq, facet::Facet)]
+    pub struct Room {
+        pub id: u32,
+    }
+
+    #[architect::rpc(context = Room)]
+    pub trait Notes {
+        fn add(&self, text: String) -> usize;
+        fn all(&self) -> Vec<String>;
+    }
+}
+
 pub mod ticker {
     /// One counter change. `#[subscribe]` event payloads should carry
     /// full state (idempotent re-application), not diffs.
@@ -130,6 +146,8 @@ pub mod ticker {
 // replaces the hand-renamed five-item re-export block.
 use counter::prelude::*;
 use greeter::prelude::*;
+use notes::Room;
+use notes::prelude::*;
 use ticker::TickEvent;
 use ticker::prelude::*;
 
@@ -198,6 +216,38 @@ impl Ticker for LiveBackend {
 impl TickerStreamSource for LiveBackend {
     fn ticks_hub(&self) -> &architect::PubSub<TickEvent> {
         &self.ticks
+    }
+}
+
+/// Per-room note store. `context = Room` gave every method a leading
+/// `ctx: &Room` — declared once on the trait, not per method.
+#[derive(Clone, Default, HasDispatcher)]
+#[dispatch(CurrentThreadDispatcher)]
+pub struct NotesBackend {
+    rows: Arc<Mutex<Vec<(u32, String)>>>,
+}
+
+impl Notes for NotesBackend {
+    fn add(&self, ctx: &Room, text: String) -> usize {
+        let mut rows = self.rows.lock().expect("notes poisoned");
+        rows.push((ctx.id, text));
+        rows.iter().filter(|(r, _)| *r == ctx.id).count()
+    }
+
+    fn all(&self, ctx: &Room) -> Vec<String> {
+        self.rows
+            .lock()
+            .expect("notes poisoned")
+            .iter()
+            .filter(|(r, _)| *r == ctx.id)
+            .map(|(_, t)| t.clone())
+            .collect()
+    }
+}
+
+impl Services for NotesBackend {
+    fn layers() -> impl Layer<NotesBackend> {
+        layers![NotesService]
     }
 }
 
@@ -405,6 +455,31 @@ fn main() {
         assert_eq!(n, now);
         info!(n, "sync facade round-tripped without an async context");
     }
+
+    // ── 8. Ambient context (context = Room) ──────────────────────────
+    //
+    // The scoped client binds the context once; every call rides it.
+    // The raw client keeps the explicit first argument for callers
+    // juggling several scopes.
+    info!("── 8. Ambient context (scoped client) ──────────────────");
+    rt.block_on(async {
+        use architect::{LocalServer, Scope};
+        let scope = Scope::new();
+        let local = LocalServer::serve(NotesBackend::default().into_router(), scope.clone());
+        let raw: NotesClient = local.establish().await.expect("local establish");
+
+        let room_a = raw.clone().scoped(Room { id: 1 });
+        let room_b = raw.scoped(Room { id: 2 });
+        room_a.add("alpha".into()).await.expect("add");
+        room_b.add("beta".into()).await.expect("add");
+        room_a.add("gamma".into()).await.expect("add");
+
+        let a = room_a.all().await.expect("all");
+        let b = room_b.all().await.expect("all");
+        assert_eq!(a, vec!["alpha".to_string(), "gamma".to_string()]);
+        assert_eq!(b, vec!["beta".to_string()]);
+        info!(?a, ?b, "context bound once per scope, isolated per room");
+    });
 
     // ── Introspection ────────────────────────────────────────────────
     //
