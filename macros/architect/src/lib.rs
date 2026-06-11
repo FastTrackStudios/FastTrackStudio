@@ -159,6 +159,14 @@ pub mod pubsub;
 #[cfg(feature = "vox")]
 pub use pubsub::{PendingAttach, PubSub};
 
+// Real-time publisher bridge (`rt` feature): wait-free SPSC handoff from
+// an audio callback (or any real-time thread) to a normal thread that
+// fans events out via `PubSub`. `PubSub::publish` locks a mutex and must
+// never run on a real-time thread — `architect::rt` is the sanctioned
+// path for audio-rate `#[subscribe]` streams.
+#[cfg(feature = "rt")]
+pub mod rt;
+
 // Client-side stream consumption (`use_stream` / `use_store_stream`):
 // subscribe a component to a server event stream and fold events into
 // state — the optimistic Store goes live. Needs both halves: `atom` for

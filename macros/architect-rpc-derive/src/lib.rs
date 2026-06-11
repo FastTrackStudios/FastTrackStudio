@@ -46,6 +46,32 @@ use syn::{
 ///   marshaling each sync method through the dispatcher.
 /// - `TracksClient` — type alias for the vox-emitted `TracksRpcClient`,
 ///   so callers see a clean name.
+///
+/// # Streams: `#[subscribe]`
+///
+/// A method marked `#[subscribe]` is a stream declaration, not a
+/// callable method — it names an event type and is stripped from the
+/// trait:
+///
+/// ```ignore
+/// #[architect::rpc]
+/// pub trait Tracks {
+///     fn all(&self) -> Vec<Track>;
+///     /// Every track-set change, as it happens.
+///     #[subscribe]
+///     fn events(&self) -> TrackEvent;
+/// }
+/// ```
+///
+/// emits (vox-gated) the `TracksStream` sibling service
+/// (`async fn events(&self, sink: Tx<TrackEvent>)`), the
+/// `TracksStreamSource` backend contract (`fn events_hub(&self) ->
+/// &PubSub<TrackEvent>` — the backend owns and publishes into the
+/// hub), and `stream_serve` / `stream_layer` / `StreamService` mount
+/// verbs. Declarations with filter params (`#[subscribe] fn events(&self,
+/// filter: F) -> E`) ask the backend for `fn events_attach(&self,
+/// filter: F, sink: Tx<E>)` instead, so filtering and
+/// snapshot-then-changes (`PubSub::begin_attach`) stay backend-owned.
 #[proc_macro_attribute]
 pub fn rpc(args: TokenStream, input: TokenStream) -> TokenStream {
     if !args.is_empty() {
@@ -147,11 +173,17 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
     let rpc_client_name = format_ident!("{}RpcClient", trait_name);
     let rpc_dispatcher_name = format_ident!("{}RpcDispatcher", trait_name);
 
-    // Classify + validate each method.
+    // Classify + validate each method. `#[subscribe]` declarations are
+    // split off — they're stream declarations, not callable methods.
     let mut methods = Vec::new();
+    let mut subscriptions = Vec::new();
     for item in &trait_item.items {
         if let TraitItem::Fn(method) = item {
-            methods.push(classify_method(method)?);
+            if has_subscribe_attr(method) {
+                subscriptions.push(classify_subscription(method)?);
+            } else {
+                methods.push(classify_method(method)?);
+            }
         }
     }
 
@@ -160,7 +192,8 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
     // Always emit the user's trait — adding the `Send + Sync + 'static`
     // bound so it's safe to share through `Arc<dyn Trait>` from inside
     // the bridge. We don't mutate the input AST; we re-emit with the
-    // augmented supertraits.
+    // augmented supertraits. `#[subscribe]` declarations are dropped
+    // here — they materialize as the stream sibling, not as methods.
     let user_trait = emit_user_trait(&trait_item, shape);
 
     let (mirror_trait, host_struct, host_impl) = match shape {
@@ -245,7 +278,13 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
         &rpc_dispatcher_name,
         vis,
         shape,
+        &subscriptions,
     );
+
+    // Stream sibling — emitted when the trait declares `#[subscribe]`
+    // methods: the `<Trait>Stream` vox service, the `<Trait>StreamSource`
+    // backend contract, and the stream mount verbs.
+    let stream_block = emit_stream_block(trait_name, vis, &subscriptions);
 
     Ok(quote! {
         #user_trait
@@ -255,6 +294,7 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
         #client_alias
         #serve_fn
         #layer_fn
+        #stream_block
         #prelude
     })
 }
@@ -279,12 +319,38 @@ fn emit_prelude(
     rpc_dispatcher_name: &syn::Ident,
     vis: &syn::Visibility,
     shape: Shape,
+    subs: &[Subscription],
 ) -> TokenStream2 {
     let snake = to_snake_case(&trait_name.to_string());
     let service_alias = format_ident!("{}Service", trait_name);
     let layer_alias = format_ident!("{snake}_layer");
     let serve_alias = format_ident!("{snake}_serve");
     let descriptor_fn = format_ident!("{snake}_rpc_service_descriptor");
+
+    // Stream-sibling re-exports — names are already trait-prefixed
+    // except the module-scoped verbs/token, which get renamed here.
+    let stream_items = if subs.is_empty() {
+        quote! {}
+    } else {
+        let source_trait = format_ident!("{}StreamSource", trait_name);
+        let stream_trait = format_ident!("{}Stream", trait_name);
+        let stream_client = format_ident!("{}StreamClient", trait_name);
+        let stream_dispatcher = format_ident!("{}StreamDispatcher", trait_name);
+        let stream_service_alias = format_ident!("{}StreamService", trait_name);
+        let stream_layer_alias = format_ident!("{snake}_stream_layer");
+        let stream_serve_alias = format_ident!("{snake}_stream_serve");
+        let stream_descriptor_fn = format_ident!("{snake}_stream_service_descriptor");
+        quote! {
+            #[cfg(feature = "vox")]
+            pub use super::{
+                #source_trait, #stream_trait, #stream_client, #stream_dispatcher,
+                #stream_descriptor_fn,
+                StreamService as #stream_service_alias,
+                stream_layer as #stream_layer_alias,
+                stream_serve as #stream_serve_alias,
+            };
+        }
+    };
 
     let vox_items = match shape {
         Shape::Empty => quote! {},
@@ -321,6 +387,7 @@ fn emit_prelude(
         #vis mod prelude {
             pub use super::#trait_name;
             #vox_items
+            #stream_items
         }
     }
 }
@@ -510,6 +577,351 @@ fn emit_serve_fn(
     }
 }
 
+// ── Subscription classification + emission ─────────────────────────────
+
+/// One `#[subscribe]` declaration: `fn name(&self, filters..) -> EventTy`.
+#[derive(Debug)]
+struct Subscription {
+    name: syn::Ident,
+    event_ty: Type,
+    /// Filter params in owned form (what crosses the wire), excluding
+    /// the receiver.
+    mirror_inputs: Vec<FnArg>,
+    arg_idents: Vec<syn::Ident>,
+    arg_was_ref: Vec<bool>,
+    docs: Vec<syn::Attribute>,
+}
+
+fn has_subscribe_attr(method: &TraitItemFn) -> bool {
+    method.attrs.iter().any(|a| a.path().is_ident("subscribe"))
+}
+
+fn classify_subscription(method: &TraitItemFn) -> syn::Result<Subscription> {
+    if method.sig.asyncness.is_some() {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            "#[subscribe] declarations are sync markers — write \
+             `fn events(&self) -> EventType;`, not `async fn`. The async \
+             subscribe RPC is emitted on the `<Trait>Stream` sibling.",
+        ));
+    }
+    let event_ty = match &method.sig.output {
+        ReturnType::Type(_, ty) => (**ty).clone(),
+        ReturnType::Default => {
+            return Err(syn::Error::new_spanned(
+                &method.sig,
+                "#[subscribe] declarations name their event type as the \
+                 return type: `fn events(&self) -> EventType;`.",
+            ));
+        }
+    };
+    match method.sig.inputs.first() {
+        Some(FnArg::Receiver(rec)) if rec.reference.is_some() && rec.mutability.is_none() => {}
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &method.sig,
+                "#[subscribe] declarations must take `&self` as the first \
+                 parameter.",
+            ));
+        }
+    }
+
+    let mut mirror_inputs = Vec::new();
+    let mut arg_idents = Vec::new();
+    let mut arg_was_ref = Vec::new();
+    for (i, input) in method.sig.inputs.iter().enumerate() {
+        if let FnArg::Typed(pat_ty) = input {
+            let ident = match &*pat_ty.pat {
+                Pat::Ident(PatIdent { ident, .. }) => ident.clone(),
+                _ => format_ident!("__arg{i}"),
+            };
+            let (owned_ty, was_ref) = owned_form(&pat_ty.ty);
+            let mut mirror_pat = pat_ty.clone();
+            mirror_pat.ty = Box::new(owned_ty);
+            mirror_pat.pat = Box::new(parse_quote! { #ident });
+            mirror_inputs.push(FnArg::Typed(mirror_pat));
+            arg_idents.push(ident);
+            arg_was_ref.push(was_ref);
+        }
+    }
+
+    let docs = method
+        .attrs
+        .iter()
+        .filter(|a| a.path().is_ident("doc"))
+        .cloned()
+        .collect();
+
+    Ok(Subscription {
+        name: method.sig.ident.clone(),
+        event_ty,
+        mirror_inputs,
+        arg_idents,
+        arg_was_ref,
+        docs,
+    })
+}
+
+/// Emit the stream sibling for a trait with `#[subscribe]` declarations.
+///
+/// For `#[architect::rpc] trait Fx { #[subscribe] fn events(&self) -> FxEvent; }`:
+///
+/// - `FxStreamSource` — the backend contract. Parameterless
+///   subscriptions ask for a hub accessor (`fn events_hub(&self) ->
+///   &PubSub<FxEvent>`); the bridge attaches sinks to it, and the
+///   backend publishes into it. Subscriptions **with** filter params
+///   ask for an attach method (`fn events_attach(&self, args.., sink)`)
+///   so the backend owns the filtering.
+/// - `FxStream` — the `#[vox::service]` sibling: one
+///   `async fn events(&self, args.., sink: Tx<FxEvent>)` per
+///   declaration. Vox emits `FxStreamClient` / `FxStreamDispatcher` /
+///   `fx_stream_service_descriptor` from it.
+/// - `__FxStreamHost<S>` — hidden adapter implementing `FxStream` over
+///   any `S: FxStreamSource`.
+/// - `stream_serve` / `stream_layer` / `StreamService` — mount verbs,
+///   parallel to the base trait's `serve` / `layer` / `Service`.
+///
+/// Snapshot-then-changes: construct the hub with
+/// `PubSub::sliding(n).with_replay(1)` and publish full-state events —
+/// late subscribers get the last event on attach. Subscriptions that
+/// need a real snapshot read (the Entity-events pattern) use a filter
+/// param + `begin_attach`/`complete_attach` inside their `_attach` impl.
+fn emit_stream_block(
+    trait_name: &syn::Ident,
+    vis: &syn::Visibility,
+    subs: &[Subscription],
+) -> TokenStream2 {
+    if subs.is_empty() {
+        return quote! {};
+    }
+
+    let snake = to_snake_case(&trait_name.to_string());
+    let source_trait = format_ident!("{}StreamSource", trait_name);
+    let stream_trait = format_ident!("{}Stream", trait_name);
+    let stream_host = format_ident!("__{}StreamHost", trait_name);
+    let stream_dispatcher = format_ident!("{}StreamDispatcher", trait_name);
+    let stream_descriptor_fn = format_ident!("{snake}_stream_service_descriptor");
+
+    // Backend contract methods.
+    let source_methods = subs.iter().map(|s| {
+        let ev = &s.event_ty;
+        let docs = &s.docs;
+        if s.arg_idents.is_empty() {
+            let hub_fn = format_ident!("{}_hub", s.name);
+            let doc = format!(
+                "Fan-out hub backing the `{}` subscription. Construct it \
+                 once on the backend (e.g. `PubSub::sliding(256)`, add \
+                 `.with_replay(1)` for state-shaped events) and publish \
+                 into it; the stream host attaches every subscriber sink.",
+                s.name
+            );
+            quote! {
+                #(#docs)*
+                #[doc = #doc]
+                fn #hub_fn(&self) -> &::architect::PubSub<#ev>;
+            }
+        } else {
+            let attach_fn = format_ident!("{}_attach", s.name);
+            let inputs = &s.mirror_inputs;
+            let doc = format!(
+                "Attach `sink` to the filtered `{}` feed. The backend owns \
+                 the filter semantics — typically a per-filter `PubSub`, or \
+                 `begin_attach`/`complete_attach` for snapshot-then-changes.",
+                s.name
+            );
+            quote! {
+                #(#docs)*
+                #[doc = #doc]
+                fn #attach_fn(&self, #(#inputs,)* sink: ::architect::vox::Tx<#ev>);
+            }
+        }
+    });
+
+    // Sibling vox-service methods.
+    let stream_methods = subs.iter().map(|s| {
+        let name = &s.name;
+        let ev = &s.event_ty;
+        let inputs = &s.mirror_inputs;
+        let docs = &s.docs;
+        quote! {
+            #(#docs)*
+            async fn #name(&self, #(#inputs,)* sink: ::architect::vox::Tx<#ev>);
+        }
+    });
+
+    // Host adapter bodies.
+    let host_methods = subs.iter().map(|s| {
+        let name = &s.name;
+        let ev = &s.event_ty;
+        let inputs = &s.mirror_inputs;
+        if s.arg_idents.is_empty() {
+            let hub_fn = format_ident!("{}_hub", s.name);
+            quote! {
+                async fn #name(&self, sink: ::architect::vox::Tx<#ev>) {
+                    self.inner.#hub_fn().attach(sink);
+                }
+            }
+        } else {
+            let attach_fn = format_ident!("{}_attach", s.name);
+            let call_args = s
+                .arg_idents
+                .iter()
+                .zip(s.arg_was_ref.iter())
+                .map(|(id, &was_ref)| {
+                    if was_ref {
+                        quote! { &#id }
+                    } else {
+                        quote! { #id }
+                    }
+                });
+            quote! {
+                async fn #name(&self, #(#inputs,)* sink: ::architect::vox::Tx<#ev>) {
+                    self.inner.#attach_fn(#(#call_args,)* sink);
+                }
+            }
+        }
+    });
+
+    let source_doc = format!(
+        "Backend contract for [`{trait_name}`]'s `#[subscribe]` streams. \
+         Implement on the backend alongside `{trait_name}`; mount with \
+         `stream_layer` / `StreamService` next to the base service."
+    );
+    let stream_doc = format!(
+        "Streaming sibling of [`{trait_name}`]: pass a channel sink in, \
+         receive events on it until the connection closes. Clients use \
+         `{trait_name}StreamClient` (see `architect::use_stream`)."
+    );
+
+    quote! {
+        #[doc = #source_doc]
+        #[cfg(feature = "vox")]
+        #vis trait #source_trait {
+            #(#source_methods)*
+        }
+
+        #[doc = #stream_doc]
+        #[cfg(feature = "vox")]
+        #[::architect::vox::service]
+        #vis trait #stream_trait {
+            #(#stream_methods)*
+        }
+
+        /// Internal adapter: implements the stream sibling over any
+        /// backend that fulfills the `StreamSource` contract. Hidden —
+        /// mount via `stream_serve` / `stream_layer`.
+        #[doc(hidden)]
+        #[cfg(feature = "vox")]
+        #vis struct #stream_host<S>
+        where
+            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+        {
+            inner: ::std::sync::Arc<S>,
+        }
+
+        #[cfg(feature = "vox")]
+        impl<S> #stream_host<S>
+        where
+            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+        {
+            pub fn new(inner: S) -> Self {
+                Self { inner: ::std::sync::Arc::new(inner) }
+            }
+        }
+
+        #[cfg(feature = "vox")]
+        impl<S> ::core::clone::Clone for #stream_host<S>
+        where
+            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+        {
+            fn clone(&self) -> Self {
+                Self { inner: ::std::sync::Arc::clone(&self.inner) }
+            }
+        }
+
+        #[cfg(feature = "vox")]
+        impl<S> #stream_trait for #stream_host<S>
+        where
+            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+        {
+            #(#host_methods)*
+        }
+
+        /// Wrap a backend's stream source in the vox-emitted dispatcher
+        /// so the subscription service can be mounted on a vox router.
+        #[cfg(feature = "vox")]
+        #vis fn stream_serve<S>(backend: S) -> #stream_dispatcher<#stream_host<S>>
+        where
+            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+        {
+            #stream_dispatcher::new(#stream_host::new(backend))
+        }
+
+        /// Immediate-bind shortcut for the stream sibling — parallel to
+        /// `layer` for the base service.
+        #[cfg(feature = "vox")]
+        #vis fn stream_layer<S>(backend: S) -> ::architect::Mounted
+        where
+            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+        {
+            ::architect::Mounted::new(#stream_descriptor_fn(), stream_serve(backend))
+        }
+
+        /// Deferred-bind token for the stream sibling — slots into
+        /// `layers![Service, StreamService]` next to the base token.
+        #[cfg(feature = "vox")]
+        #[derive(Debug, Default, Clone, Copy)]
+        #vis struct StreamService;
+
+        #[cfg(feature = "vox")]
+        impl ::architect::BindAny for StreamService {
+            fn descriptor(&self) -> &'static ::architect::vox::ServiceDescriptor {
+                #stream_descriptor_fn()
+            }
+        }
+
+        #[cfg(feature = "vox")]
+        impl<S> ::architect::Bind<S> for StreamService
+        where
+            S: ::core::clone::Clone
+                + #source_trait
+                + ::core::marker::Send
+                + ::core::marker::Sync
+                + 'static,
+        {
+            fn bind_into(
+                self,
+                backend: &S,
+                router: &mut ::architect::LayerRouter,
+            ) {
+                use ::architect::LayerSink as _;
+                router.add_mounted(::architect::Mounted::new(
+                    #stream_descriptor_fn(),
+                    stream_serve(backend.clone()),
+                ));
+            }
+        }
+
+        #[cfg(feature = "vox")]
+        impl<R> ::architect::Append<R> for StreamService {
+            type Output = ::architect::Cons<StreamService, R>;
+            fn append(self, rhs: R) -> Self::Output {
+                ::architect::Cons::new(self, rhs)
+            }
+        }
+
+        #[cfg(feature = "vox")]
+        impl ::architect::Descriptors for StreamService {
+            fn collect(
+                &self,
+                out: &mut ::std::vec::Vec<&'static ::architect::vox::ServiceDescriptor>,
+            ) {
+                out.push(::architect::BindAny::descriptor(self));
+            }
+        }
+    }
+}
+
 // ── Method classification ──────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -684,6 +1096,12 @@ fn emit_user_trait(trait_item: &ItemTrait, shape: Shape) -> TokenStream2 {
     // `.await` on the inner method satisfies the mirror's Send bound.
     let apply_vox = matches!(shape, Shape::AllAsync);
     let mut out = trait_item.clone();
+    // Drop `#[subscribe]` declarations — they exist only to drive the
+    // stream-sibling emission, never as callable trait methods.
+    out.items.retain(|item| match item {
+        TraitItem::Fn(f) => !has_subscribe_attr(f),
+        _ => true,
+    });
     if !apply_vox {
         for item in &mut out.items {
             if let syn::TraitItem::Fn(f) = item

@@ -97,12 +97,38 @@ pub mod greeter {
     }
 }
 
+pub mod ticker {
+    /// One counter change. `#[subscribe]` event payloads should carry
+    /// full state (idempotent re-application), not diffs.
+    #[derive(Clone, Debug, PartialEq, facet::Facet)]
+    pub struct TickEvent {
+        pub value: i64,
+    }
+
+    /// A trait with a `#[subscribe]` declaration. The marker is
+    /// stripped from this (sync, callable) trait; the macro emits a
+    /// `TickerStream` vox sibling carrying `async fn ticks(&self,
+    /// sink: Tx<TickEvent>)`, a `TickerStreamSource` backend contract
+    /// (`fn ticks_hub(&self) -> &PubSub<TickEvent>`), and
+    /// `stream_serve` / `stream_layer` / `StreamService` mount verbs.
+    #[architect::rpc]
+    pub trait Ticker {
+        fn tick(&self) -> i64;
+
+        /// Every counter change, as it happens.
+        #[subscribe]
+        fn ticks(&self) -> TickEvent;
+    }
+}
+
 // Each `#[rpc]` expansion emits a `prelude` module with glob-safe
 // names — the trait plus `CounterService` / `counter_layer` /
 // `counter_serve` / `CounterClient` (vox-gated). One glob per service
 // replaces the hand-renamed five-item re-export block.
 use counter::prelude::*;
 use greeter::prelude::*;
+use ticker::TickEvent;
+use ticker::prelude::*;
 
 // ── Backends ──────────────────────────────────────────────────────────
 //
@@ -116,10 +142,26 @@ use greeter::prelude::*;
 /// directly against this type. The `HasDispatcher` derive points the
 /// rpc bridge at a default-constructible dispatcher — the manual
 /// four-line impl is only needed for dispatchers with runtime state.
-#[derive(Clone, Default, HasDispatcher)]
+///
+/// The `ticks` hub is the publish side of the `#[subscribe]` stream:
+/// the backend pushes into it wherever state changes; the emitted
+/// stream host attaches every subscriber sink. `with_replay(1)` hands
+/// late subscribers the last event on attach (cheap snapshot for
+/// state-shaped streams).
+#[derive(Clone, HasDispatcher)]
 #[dispatch(CurrentThreadDispatcher)]
 pub struct LiveBackend {
     counter: Arc<Mutex<i64>>,
+    ticks: architect::PubSub<TickEvent>,
+}
+
+impl Default for LiveBackend {
+    fn default() -> Self {
+        Self {
+            counter: Arc::default(),
+            ticks: architect::PubSub::sliding(64).with_replay(1),
+        }
+    }
 }
 
 impl Counter for LiveBackend {
@@ -136,6 +178,23 @@ impl Counter for LiveBackend {
 impl Greeter for LiveBackend {
     fn greet(&self, name: &str) -> String {
         format!("Hello, {name}! (from LiveBackend)")
+    }
+}
+
+impl Ticker for LiveBackend {
+    fn tick(&self) -> i64 {
+        let mut g = self.counter.lock().expect("counter poisoned");
+        *g += 1;
+        // Publish-on-write: every successful mutation broadcasts the
+        // new authoritative state to every subscriber.
+        self.ticks.publish(TickEvent { value: *g });
+        *g
+    }
+}
+
+impl TickerStreamSource for LiveBackend {
+    fn ticks_hub(&self) -> &architect::PubSub<TickEvent> {
+        &self.ticks
     }
 }
 
@@ -174,7 +233,14 @@ impl Greeter for MockBackend {
 
 impl Services for LiveBackend {
     fn layers() -> impl Layer<LiveBackend> {
-        layers![CounterService, GreeterService]
+        // The stream sibling is one more token — `layers![...]` mounts
+        // the base service and its subscription service side by side.
+        layers![
+            CounterService,
+            GreeterService,
+            TickerService,
+            TickerStreamService
+        ]
     }
 }
 
@@ -261,10 +327,10 @@ fn main() {
     // (the bundle itself is declared once, in the feature crate).
     info!("── 5. Multi-backend app router (router![]) ─────────────");
     let app_router = architect::router![
-        live.clone(),             // Counter + Greeter
+        live.clone(),             // Counter + Greeter + Ticker + TickerStream
         ExampleRepoMemory::new(), // ExampleRepo
     ];
-    assert_eq!(app_router.len(), 3, "two bundles, three services");
+    assert_eq!(app_router.len(), 5, "two bundles, five services");
     info!(
         services = app_router.len(),
         "app router stitched from two backends"
@@ -273,6 +339,41 @@ fn main() {
     // Collision rule: later entries win (same as Layer::merge). A mock
     // mounted after the live backend takes over its method ids.
     let _overridden = architect::router![live.clone(), MockBackend];
+
+    // ── 6. #[subscribe] stream sibling, end to end ───────────────────
+    //
+    // `#[subscribe] fn ticks(&self) -> TickEvent` emitted a vox sibling
+    // service (`TickerStream`, mounted above as `TickerStreamService`).
+    // Drive it the way a real client does: typed `TickerStreamClient`
+    // over the in-process transport (`architect::local`), channel pair
+    // bound by the RPC call. On the Dioxus side the same subscription
+    // is `architect::use_stream`.
+    info!("── 6. #[subscribe] stream sibling (end to end) ─────────");
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    rt.block_on(async {
+        use architect::{LocalServer, Scope};
+
+        let scope = Scope::new();
+        let local = LocalServer::serve(live.clone().into_router(), scope.clone());
+        let stream: TickerStreamClient = local.establish().await.expect("local establish");
+
+        let (tx, mut rx) = vox::channel::<TickEvent>();
+        stream.ticks(tx).await.expect("subscribe");
+
+        let a = Ticker::tick(&live); // publish-on-write
+        let b = Ticker::tick(&live);
+
+        // `SelfRef` lends the decoded event while the receive buffer is
+        // alive — copy the payload out inside `map` (same pattern as
+        // `architect::use_stream`).
+        let mut received = Vec::new();
+        while received.len() < 2 {
+            let event = rx.recv().await.expect("recv").expect("stream still open");
+            let _ = event.map(|ev| received.push(ev.value));
+        }
+        assert_eq!(received, vec![a, b]);
+        info!(?received, "subscriber received publish-on-write events");
+    });
 
     // ── Introspection ────────────────────────────────────────────────
     //

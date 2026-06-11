@@ -207,6 +207,16 @@ where
     /// Send `event` to every subscriber without blocking, applying the
     /// hub's overflow strategy per mailbox. Returns how many subscribers
     /// are live afterwards.
+    ///
+    /// # Not real-time safe
+    ///
+    /// This takes the hub's mutex (and clones the event per
+    /// subscriber). **Never call it from a real-time thread** — an
+    /// audio callback blocking on a lock held by a lower-priority
+    /// thread is a priority inversion, and the deadline miss is an
+    /// audible dropout. Real-time producers push into a wait-free
+    /// `architect::rt::rt_channel` (the `rt` feature) and a normal
+    /// thread drains it into the hub via `RtConsumer::drain_into`.
     pub fn publish(&self, event: T) -> usize {
         let mut inner = self.inner.lock().expect("pubsub lock");
         if self.replay_capacity > 0 {

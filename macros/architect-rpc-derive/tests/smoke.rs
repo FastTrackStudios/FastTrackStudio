@@ -301,6 +301,46 @@ mod prelude_reexports {
     }
 }
 
+// ── #[subscribe] declarations ───────────────────────────────────────
+
+mod subscriptions {
+    // Without vox the stream sibling isn't emitted, so the event type
+    // is only referenced from the (stripped) declaration.
+    #[allow(dead_code)]
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct TickEvent(pub u64);
+
+    pub mod ticker {
+        #[super::super::rpc]
+        pub trait Ticker {
+            fn count(&self) -> u64;
+
+            /// Stream declaration — stripped from the user trait; the
+            /// async subscribe RPC lives on the `TickerStream` sibling
+            /// (vox-gated, so absent in this no-vox test build).
+            #[subscribe]
+            fn ticks(&self) -> super::TickEvent;
+        }
+    }
+
+    use ticker::prelude::*;
+
+    struct Backend;
+
+    // Implementing only `count` proves `ticks` was removed from the
+    // user trait — a `#[subscribe]` marker is not a callable method.
+    impl Ticker for Backend {
+        fn count(&self) -> u64 {
+            7
+        }
+    }
+
+    #[test]
+    fn subscribe_declarations_are_stripped_from_the_user_trait() {
+        assert_eq!(Backend.count(), 7);
+    }
+}
+
 // ── Empty trait ─────────────────────────────────────────────────────
 
 mod empty {

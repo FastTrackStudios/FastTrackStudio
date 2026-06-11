@@ -48,7 +48,7 @@ fake = ["dep:fake"]
 # `full` enables every architect optional — vox, SeaORM bridge, axum
 # adapter, fake. Matches tokio's `full` convention: when you just want
 # everything turned on for development or a single-binary build.
-full = ["vox", "server-seaorm", "server-axum", "fake", "diagnostics", "platform", "schedule"]
+full = ["vox", "server-seaorm", "server-axum", "fake", "diagnostics", "platform", "schedule", "rt"]
 
 # Platform layer (`architect::platform`): a `Clock` (async `sleep` + `now`)
 # and task `spawn`, abstracted native (tokio) <-> wasm (browser timers).
@@ -130,6 +130,13 @@ server = ["vox", "server-seaorm", "server-axum", "dispatch-tokio"]
 #                    async service.
 dispatch-tokio = ["tokio/rt-multi-thread"]
 
+# Real-time publisher bridge (`architect::rt`): a wait-free SPSC ring
+# (rtrb) for handing events from a real-time thread (audio callback,
+# device ISR) to a normal thread that fans them out via `PubSub`.
+# `PubSub::publish` itself takes a mutex and must NEVER run on a
+# real-time thread — this feature is the sanctioned escape hatch.
+rt = ["dep:rtrb"]
+
 [dependencies]
 architect-derive = { path = "../architect-derive" }
 architect-rpc-derive = { path = "../architect-rpc-derive" }
@@ -159,6 +166,10 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 # and the dispatcher/client types simply don't exist.
 vox = { workspace = true, optional = true }
 fake = { workspace = true, optional = true }
+
+# Wait-free SPSC ring backing `architect::rt` — the audio-world standard
+# (powers cpal-adjacent stacks). Optional; only the `rt` feature pulls it.
+rtrb = { version = "0.3", optional = true }
 
 # Platform layer. `web-time` gives a monotonic `Instant` that works on
 # both native and wasm (std on native, performance.now() on wasm). The
