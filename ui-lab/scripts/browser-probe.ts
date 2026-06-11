@@ -160,18 +160,22 @@ async function waitForData(
       console.log(`!! ${label}: TIMED OUT after ${elapsed}ms without painted data`);
       return elapsed;
     }
+    // "Data painted" = at least one successful RPC recorded AND no
+    // loading skeletons left in the DOM (works for both lab routes).
     const state = await evalJson<
-      { rows: number; old: boolean; ready: string } | undefined
+      { ok: number; skeletons: number; old: boolean } | undefined
     >(
       cdp,
       sessionId,
-      `({ rows: document.querySelectorAll('a[href^="/projects/"]').length, old: !!window.__probeOldDoc, ready: document.readyState })`,
+      `({ ok: (window.voxPerf ? window.voxPerf.events() : []).filter(e => e.name === 'rpc.end' && e.detail.includes('→ ok')).length, skeletons: document.querySelectorAll('[data-slot="skeleton"]').length, old: !!window.__probeOldDoc })`,
     ).catch(() => undefined);
-    // `old` guards the reload case: don't count rows still painted by
-    // the pre-reload document.
-    if (state && !state.old && state.rows > 0) {
+    // `old` guards the reload case: don't count paint from the
+    // pre-reload document.
+    if (state && !state.old && state.ok > 0 && state.skeletons === 0) {
       const ms = Date.now() - start;
-      console.log(`${label}: data painted in ${ms}ms (${state.rows} project link(s))`);
+      console.log(
+        `${label}: data painted in ${ms}ms (${state.ok} ok RPC(s), 0 skeletons)`,
+      );
       return ms;
     }
     await new Promise((r) => setTimeout(r, 50));
