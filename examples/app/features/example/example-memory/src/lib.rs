@@ -121,3 +121,115 @@ impl ExampleRepo for ExampleRepoMemory {
         Ok(())
     }
 }
+
+// ── Tag: the String-primary-key entity ────────────────────────────────
+//
+// Same backend pattern as `ExampleRepoMemory`, but the key is a
+// caller-supplied `slug: String`. Create rejects duplicate slugs with
+// `RepoError::Conflict` — with client-supplied ids, uniqueness is the
+// backend's job.
+
+use example_proto::{Tag, TagCreate, TagList, TagRepo, TagUpdate};
+
+#[derive(Clone, Default)]
+pub struct TagRepoMemory {
+    inner: Arc<RwLock<Vec<Tag>>>,
+}
+
+impl TagRepoMemory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[cfg(feature = "vox")]
+impl architect::Services for TagRepoMemory {
+    fn layers() -> impl architect::Layer<Self> {
+        architect::layers![example_proto::TagRepoLayer]
+    }
+}
+
+impl TagRepo for TagRepoMemory {
+    async fn get(&self, id: String) -> Result<Tag, RepoError> {
+        let guard = self.inner.read().await;
+        guard
+            .iter()
+            .find(|t| t.slug == id)
+            .cloned()
+            .ok_or(RepoError::NotFound)
+    }
+
+    async fn list(
+        &self,
+        page: Page,
+        sort: Option<Sort>,
+        _filter: Option<Filter>,
+    ) -> Result<TagList, RepoError> {
+        let guard = self.inner.read().await;
+        let mut items: Vec<Tag> = guard.iter().cloned().collect();
+
+        if let Some(s) = sort {
+            match s.field.as_str() {
+                "label" => {
+                    items.sort_by(|a, b| a.label.cmp(&b.label));
+                    if matches!(s.order, SortOrder::Desc) {
+                        items.reverse();
+                    }
+                }
+                other => {
+                    return Err(RepoError::InvalidInput(format!(
+                        "unsortable field: {other}"
+                    )));
+                }
+            }
+        }
+
+        let total = items.len() as u32;
+        let size = page.size.max(1) as usize;
+        let start = (page.index as usize).saturating_mul(size);
+        let items = items.into_iter().skip(start).take(size).collect();
+        Ok(TagList { items, total, page })
+    }
+
+    async fn create(&self, input: TagCreate) -> Result<Tag, RepoError> {
+        let mut guard = self.inner.write().await;
+        if guard.iter().any(|t| t.slug == input.slug) {
+            return Err(RepoError::Conflict(format!(
+                "tag `{}` already exists",
+                input.slug
+            )));
+        }
+        let now = Utc::now();
+        let row = Tag {
+            slug: input.slug,
+            label: input.label,
+            created_at: now,
+            updated_at: now,
+        };
+        guard.push(row.clone());
+        Ok(row)
+    }
+
+    async fn update(&self, id: String, input: TagUpdate) -> Result<Tag, RepoError> {
+        let mut guard = self.inner.write().await;
+        let row = guard
+            .iter_mut()
+            .find(|t| t.slug == id)
+            .ok_or(RepoError::NotFound)?;
+        if let Some(v) = input.label {
+            row.label = v;
+        }
+        row.updated_at = Utc::now();
+        Ok(row.clone())
+    }
+
+    async fn delete(&self, id: String) -> Result<(), RepoError> {
+        let mut guard = self.inner.write().await;
+        let before = guard.len();
+        guard.retain(|t| t.slug != id);
+        if guard.len() == before {
+            return Err(RepoError::NotFound);
+        }
+        Ok(())
+    }
+}

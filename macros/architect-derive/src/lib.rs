@@ -57,12 +57,16 @@ struct FieldAttrs {
     /// for `Vec<T>` / structured types — `sea_orm::Value` has no
     /// blanket `From<Vec<T>>` impl, so without this attribute the
     /// generated DeriveEntityModel fails to compile on `server`
-    /// builds. The field type must be `serde::Serialize +
+    /// builds. Container-shaped fields (`Vec<T>` except `Vec<u8>`,
+    /// maps, sets) that lack this attribute are a **derive-time error**
+    /// so the failure points at the declaration, not at SeaORM
+    /// internals. The field type must be `serde::Serialize +
     /// DeserializeOwned`; sea-orm's `with-json` feature handles the
     /// rest. No-op when the `server` feature isn't active.
     json: bool,
     /// `#[architect(form(optional))]` — the generated form field accepts
-    /// an empty value (String fields only; the default is required).
+    /// an empty value (String fields only; the default is required.
+    /// Using it on a non-String field is a derive-time error).
     form_optional: bool,
     /// `#[architect(form(label = "…"))]` — display label for the
     /// generated form field (default: Title Case of the field name).
@@ -274,6 +278,75 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
             "#[architect(crdt)] requires a `Uuid` primary key (the \
              EntityCrdt trait keys rows by Uuid)",
         ));
+    }
+
+    // ── Field-level misuse caught at derive time ──
+    //
+    // Both of these used to surface late (a raw SeaORM rustc error the
+    // first time the consumer's `server` feature compiled) or not at all
+    // (form attributes silently doing nothing). Fail at the declaration
+    // instead, with the fix in the message.
+    for f in &parsed {
+        // Container-shaped field types (`Vec<T>`, maps, sets — and
+        // `Option` of each) have no `sea_orm::Value` impl, so the
+        // generated `DeriveEntityModel` only compiles when the column is
+        // stored as JSON. `Vec<u8>` is exempt: SeaORM handles it
+        // natively as a bytes column.
+        if !f.attrs.json
+            && let Some(container_name) = json_requiring_container(f.ty)
+        {
+            return Err(syn::Error::new_spanned(
+                f.ty,
+                format!(
+                    "`{container_name}<…>` fields need `#[architect(json)]` — \
+                     sea_orm::Value has no impl for plain container types, so \
+                     the generated SeaORM model only compiles when the column \
+                     is stored as JSON (the field type must be \
+                     serde::Serialize + DeserializeOwned)"
+                ),
+            ));
+        }
+
+        let has_form_attrs = f.attrs.form_optional || f.attrs.form_label.is_some();
+        if has_form_attrs {
+            // `form(…)` attributes only affect the emitted form bindings;
+            // without the container flag they'd be silently ignored.
+            if !container.emit_form {
+                return Err(syn::Error::new_spanned(
+                    f.ident,
+                    "#[architect(form(…))] has no effect without the \
+                     container-level `form` flag — add `form` to \
+                     `#[architect(…)]` on the struct, or remove the field \
+                     attribute",
+                ));
+            }
+            // A field excluded from both payloads never appears in either
+            // generated Fields struct.
+            let in_create_form = !f.attrs.exclude_create && f.attrs.on_create.is_none();
+            let in_update_form =
+                !f.attrs.exclude_update && !f.attrs.primary_key && f.attrs.on_update.is_none();
+            if !in_create_form && !in_update_form {
+                return Err(syn::Error::new_spanned(
+                    f.ident,
+                    "#[architect(form(…))] has no effect here — this field \
+                     appears in neither the Create nor the Update payload \
+                     (excluded / populated by on_create/on_update), so no \
+                     form field is generated for it",
+                ));
+            }
+        }
+        // `form(optional)` is implemented for String fields only: other
+        // types validate through `validate::parse::<T>` (FromStr), where
+        // an empty input is already a parse failure.
+        if f.attrs.form_optional && !is_string_type(f.ty) {
+            return Err(syn::Error::new_spanned(
+                f.ident,
+                "#[architect(form(optional))] is only supported on `String` \
+                 fields — other types validate via `FromStr`, so an empty \
+                 input can't succeed; remove `form(optional)` or change the \
+                 field type to `String`",
+            ));
+        }
     }
 
     let create_ident = format_ident!("{}Create", ident);
@@ -780,7 +853,9 @@ fn build_events_block(
                 &self,
                 id: #pk_ty,
             ) -> ::core::result::Result<(), ::architect::RepoError> {
-                self.inner.delete(id).await?;
+                // The pk is `Clone`, not necessarily `Copy` (String pks):
+                // the inner call consumes one copy, the broadcast the other.
+                self.inner.delete(id.clone()).await?;
                 self.hub.publish(#event_ident::Deleted(id));
                 ::core::result::Result::Ok(())
             }
@@ -1105,9 +1180,13 @@ fn build_form_block(
 /// fn use_example_mutations() -> ExampleMutations;
 /// ```
 ///
-/// Requirements: the primary key must be `Copy + FromStr` (`Uuid`,
-/// integer ids); the hooks read a `Connection<<Entity>RepoClient>` from
-/// context, provided at the app root with `architect::use_connect`.
+/// Requirements: the primary key must be `Clone + Eq + Hash + FromStr`
+/// with a `Display`able parse error (`Uuid`, `String`, integer ids all
+/// qualify — `Copy` is *not* required, so non-`Copy` keys like `String`
+/// work; the emitted code clones at the few places a key crosses an
+/// optimistic-patch closure and the server-call future). The hooks read
+/// a `Connection<<Entity>RepoClient>` from context, provided at the app
+/// root with `architect::use_connect`.
 #[allow(clippy::too_many_arguments)]
 fn build_store_block(
     ident: &Ident,
@@ -1391,10 +1470,14 @@ fn build_store_block(
                 };
                 let client = #repo_client::new(caller);
                 let patch_input = input.clone();
+                // The key is `Clone`, not necessarily `Copy` (String pks):
+                // the optimistic patch and the server call each get their
+                // own copy.
+                let patch_id = id.clone();
                 self.write_m.run(
                     self.store,
                     move |s| {
-                        s.update_optimistic(::architect::Id::Real(id), move |row| {
+                        s.update_optimistic(::architect::Id::Real(patch_id), move |row| {
                             #(#patch_assigns)*
                             #(#patch_touches)*
                         })
@@ -1416,9 +1499,10 @@ fn build_store_block(
                     return;
                 };
                 let client = #repo_client::new(caller);
+                let patch_id = id.clone();
                 self.write_m.run(
                     self.store,
-                    move |s| s.remove_optimistic(::architect::Id::Real(id)),
+                    move |s| s.remove_optimistic(::architect::Id::Real(patch_id)),
                     move || async move {
                         client
                             .delete(id)
@@ -1821,6 +1905,32 @@ fn type_first_generic(ty: &Type) -> Option<&Type> {
     })
 }
 
+/// The container shape (after unwrapping one `Option`) that requires
+/// `#[architect(json)]` for the SeaORM column emission, or `None` for
+/// types SeaORM maps natively. `Vec<u8>` is native (bytes column);
+/// every other `Vec<T>`, plus the std maps/sets, has no
+/// `sea_orm::Value` impl and must be stored as JSON.
+fn json_requiring_container(ty: &Type) -> Option<String> {
+    let base = if type_last_ident(ty).as_deref() == Some("Option") {
+        type_first_generic(ty)?
+    } else {
+        ty
+    };
+    let last = type_last_ident(base)?;
+    match last.as_str() {
+        "Vec" => {
+            let inner = type_first_generic(base).and_then(type_last_ident);
+            if inner.as_deref() == Some("u8") {
+                None // Vec<u8> → native bytes column.
+            } else {
+                Some(last)
+            }
+        }
+        "VecDeque" | "HashMap" | "BTreeMap" | "HashSet" | "BTreeSet" => Some(last),
+        _ => None,
+    }
+}
+
 /// How a field maps onto `crdt::codec`. Mirrors the kinds the hand-
 /// written `entity_crdt!` macro supports; the derive infers them from
 /// the field's Rust type instead of a declaration.
@@ -1865,13 +1975,13 @@ impl CrdtKind {
     }
 
     /// Codec function suffix (`write_{suffix}` / `read_{suffix}`).
-    /// i32 rides the i64 codec with casts at the emit site.
     fn suffix(self, optional: bool) -> String {
         let base = match self {
             Self::Uuid => "uuid",
             Self::Str => "str",
             Self::Bool => "bool",
-            Self::I32 | Self::I64 => "i64",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
             Self::U32 => "u32",
             Self::Dt => "dt",
             Self::StringList => "string_list",
@@ -1890,18 +2000,7 @@ impl CrdtKind {
             (Self::Str, true) => quote! { #value.as_deref() },
             (Self::StringList, false) => quote! { &#value },
             (Self::StringList, true) => quote! { #value.as_deref() },
-            (Self::I32, false) => quote! { #value as i64 },
-            (Self::I32, true) => quote! { #value.map(|v| v as i64) },
             _ => value,
-        }
-    }
-
-    /// Shape the reader's result back into the field type.
-    fn read_expr(self, optional: bool, call: TokenStream2) -> TokenStream2 {
-        match (self, optional) {
-            (Self::I32, false) => quote! { #call as i32 },
-            (Self::I32, true) => quote! { #call.map(|v| v as i32) },
-            _ => call,
         }
     }
 }
@@ -1991,8 +2090,7 @@ fn build_crdt_block(
         let id = f.ident;
         let key = LitStr::new(&id.to_string(), id.span());
         let reader = format_ident!("read_{}", kind.suffix(*opt));
-        let call = kind.read_expr(*opt, quote! { ::crdt::codec::#reader(m, #key)? });
-        quote! { #id: #call }
+        quote! { #id: ::crdt::codec::#reader(m, #key)? }
     });
 
     // `apply_update`: write each `Some` field of the Update payload …
@@ -2265,4 +2363,192 @@ fn build_crdt_block(
             }
         }
     })
+}
+
+// ── Derive-time validation tests ──────────────────────────────────────
+//
+// These drive `expand()` directly (no proc-macro harness needed): build
+// a `DeriveInput` with `parse_quote!` and assert on the `Ok`/`Err`
+// shape. Every derive-time error added to `expand` gets a test here;
+// the *behavior* of the emitted code is covered by the example app's
+// test crates (`example-tests-native`, `app-tests-e2e`).
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::parse_quote;
+
+    fn expand_err(input: DeriveInput) -> String {
+        expand(input)
+            .expect_err("expected a derive-time error")
+            .to_string()
+    }
+
+    fn expand_ok(input: DeriveInput) -> String {
+        expand(input)
+            .expect("expected the derive to expand")
+            .to_string()
+    }
+
+    // ── #[architect(json)] required on container-shaped fields ──
+
+    #[test]
+    fn vec_field_without_json_errors() {
+        let err = expand_err(parse_quote! {
+            #[architect(table_name = "things", repo)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                pub tags: Vec<String>,
+            }
+        });
+        assert!(err.contains("#[architect(json)]"), "got: {err}");
+        assert!(err.contains("Vec<…>"), "got: {err}");
+    }
+
+    #[test]
+    fn option_vec_field_without_json_errors() {
+        let err = expand_err(parse_quote! {
+            #[architect(repo)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                pub maybe_tags: Option<Vec<String>>,
+            }
+        });
+        assert!(err.contains("#[architect(json)]"), "got: {err}");
+    }
+
+    #[test]
+    fn map_field_without_json_errors() {
+        let err = expand_err(parse_quote! {
+            #[architect(repo)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                pub extras: HashMap<String, String>,
+            }
+        });
+        assert!(err.contains("HashMap<…>"), "got: {err}");
+    }
+
+    #[test]
+    fn vec_u8_field_needs_no_json() {
+        // SeaORM maps Vec<u8> natively (bytes column) — no false positive.
+        expand_ok(parse_quote! {
+            #[architect(repo)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                pub payload: Vec<u8>,
+            }
+        });
+    }
+
+    #[test]
+    fn vec_field_with_json_is_accepted() {
+        expand_ok(parse_quote! {
+            #[architect(repo)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                #[architect(json)]
+                pub tags: Vec<String>,
+            }
+        });
+    }
+
+    // ── form attribute misuse ──
+
+    #[test]
+    fn form_optional_on_non_string_errors() {
+        let err = expand_err(parse_quote! {
+            #[architect(repo, form)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                #[architect(form(optional))]
+                pub count: u32,
+            }
+        });
+        assert!(err.contains("only supported on `String`"), "got: {err}");
+    }
+
+    #[test]
+    fn form_attr_without_container_form_flag_errors() {
+        let err = expand_err(parse_quote! {
+            #[architect(repo)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                #[architect(form(label = "Name"))]
+                pub name: String,
+            }
+        });
+        assert!(err.contains("container-level `form` flag"), "got: {err}");
+    }
+
+    #[test]
+    fn form_attr_on_excluded_field_errors() {
+        // Excluded from both payloads → no form field is ever generated.
+        let err = expand_err(parse_quote! {
+            #[architect(repo, form)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                pub name: String,
+                #[architect(exclude(create, update), form(label = "Created"))]
+                pub created_at: DateTime<Utc>,
+            }
+        });
+        assert!(
+            err.contains("neither the Create nor the Update"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn form_optional_on_string_is_accepted() {
+        expand_ok(parse_quote! {
+            #[architect(repo, form)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                #[architect(form(optional, label = "Notes"))]
+                pub notes: String,
+            }
+        });
+    }
+
+    // ── pk-type threading + crdt's Uuid requirement ──
+
+    #[test]
+    fn string_pk_with_store_and_events_expands() {
+        let out = expand_ok(parse_quote! {
+            #[architect(table_name = "tags", repo, store, events, form)]
+            pub struct Tag {
+                #[architect(primary_key, auto_increment = false)]
+                pub slug: String,
+                pub label: String,
+            }
+        });
+        // The pk type is threaded through, not hardcoded to Uuid.
+        assert!(out.contains("TagEvent"), "events emission missing: {out}");
+        assert!(
+            !out.contains(":: uuid :: Uuid"),
+            "Uuid leaked into a String-pk expansion"
+        );
+    }
+
+    #[test]
+    fn crdt_requires_a_uuid_pk() {
+        let err = expand_err(parse_quote! {
+            #[architect(repo, crdt)]
+            pub struct Thing {
+                #[architect(primary_key)]
+                pub slug: String,
+            }
+        });
+        assert!(err.contains("requires a `Uuid` primary key"), "got: {err}");
+    }
 }

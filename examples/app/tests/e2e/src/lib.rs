@@ -246,6 +246,85 @@ async fn local_transport_round_trip() {
     scope.close().await;
 }
 
+// String primary keys over the wire: `Tag` is keyed by a caller-supplied
+// `slug: String` (no Uuid anywhere). Serve `TagEvented` in-process and
+// drive the generated clients — every id round-trips facet encoding, the
+// repo methods take `id: String`, and `TagEvent::Deleted` broadcasts the
+// String id (the publish happens *after* the inner delete consumed one
+// clone of the key).
+#[tokio::test]
+async fn string_pk_local_transport_and_events() {
+    use architect::{LocalServer, Scope, Services as _};
+    use example::architect::vox;
+    use example::backend_memory::TagRepoMemory;
+    use example::{TagCreate, TagEvent, TagEventsClient, TagRepoClient, TagUpdate};
+    use tokio::time::{Duration, timeout};
+
+    let scope = Scope::new();
+    // `TagEvented`'s Services bundle mounts CRUD + the event feed.
+    let evented = example::TagEvented::new(TagRepoMemory::new());
+    let local = LocalServer::serve(evented.into_router(), scope.clone());
+
+    let repo: TagRepoClient = local.establish().await.expect("local tag repo establish");
+    let events: TagEventsClient = local.establish().await.expect("local tag events establish");
+
+    let (tx, mut rx) = vox::channel::<TagEvent>();
+    events.subscribe(tx).await.expect("subscribe");
+
+    async fn recv_owned(rx: &mut vox::Rx<TagEvent>) -> TagEvent {
+        let item = timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("event within 5s")
+            .expect("stream healthy")
+            .expect("stream open");
+        let mut owned: Option<TagEvent> = None;
+        let _ = item.map(|e| owned = Some(e.clone()));
+        owned.expect("owned event")
+    }
+
+    // Snapshot first (empty repo), then the broadcasts.
+    match recv_owned(&mut rx).await {
+        TagEvent::Snapshot(rows) => assert!(rows.is_empty(), "expected empty snapshot: {rows:?}"),
+        other => panic!("expected Snapshot first, got {other:?}"),
+    }
+
+    let created = repo
+        .create(TagCreate {
+            slug: "rust-lang".into(),
+            label: "Rust".into(),
+        })
+        .await
+        .expect("create");
+    assert_eq!(created.slug, "rust-lang");
+    match recv_owned(&mut rx).await {
+        TagEvent::Upserted(row) => assert_eq!(row.slug, "rust-lang"),
+        other => panic!("expected Upserted after create, got {other:?}"),
+    }
+
+    let updated = repo
+        .update(
+            "rust-lang".into(),
+            TagUpdate {
+                label: Some("Rust (the language)".into()),
+            },
+        )
+        .await
+        .expect("update");
+    assert_eq!(updated.label, "Rust (the language)");
+    match recv_owned(&mut rx).await {
+        TagEvent::Upserted(row) => assert_eq!(row.label, "Rust (the language)"),
+        other => panic!("expected Upserted after update, got {other:?}"),
+    }
+
+    repo.delete("rust-lang".into()).await.expect("delete");
+    match recv_owned(&mut rx).await {
+        TagEvent::Deleted(id) => assert_eq!(id, "rust-lang"),
+        other => panic!("expected Deleted, got {other:?}"),
+    }
+
+    scope.close().await;
+}
+
 /// Live events over the real WebSocket: subscribe with a vox channel,
 /// mutate through a *different* client connection, and assert the
 /// broadcast arrives — the current row set as `Snapshot` **first**

@@ -446,16 +446,17 @@ pub fn use_store_entry<T, E, Fut>(
 ) -> AtomResult<T, E>
 where
     T: StoreEntity,
-    T::Key: Copy,
     E: Clone + PartialEq + 'static,
     Fut: std::future::Future<Output = Option<Result<T, E>>> + 'static,
 {
     let parsed = use_memo(use_reactive!(|id| parse(&id)));
 
     let fetched = use_resource(move || {
-        // Only fetch on a cache miss.
+        // Only fetch on a cache miss. (`T::Key` is only `Clone`, not
+        // necessarily `Copy` — String keys — so the guard probes the
+        // cache with a clone and the arm moves the key into `fetch`.)
         let pending = match parsed() {
-            Ok(key) if store.get_real(key).is_none() => Some(fetch(key)),
+            Ok(key) if store.get_real(key.clone()).is_none() => Some(fetch(key)),
             _ => None,
         };
         async move {

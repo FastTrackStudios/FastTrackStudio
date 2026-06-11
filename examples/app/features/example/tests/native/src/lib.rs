@@ -165,6 +165,94 @@ async fn unsortable_field_errors() {
     assert!(matches!(err, RepoError::InvalidInput(_)));
 }
 
+// ── String primary keys (`Tag`) ───────────────────────────────────────
+//
+// `Tag` is keyed by a caller-supplied `slug: String` — no Uuid anywhere.
+// The derive threads the pk type through every emission, so the same
+// repo contract works with a non-`Copy` key: `TagCreate` carries the
+// slug, the repo methods take `id: String`, and `TagEvent::Deleted`
+// broadcasts the String id (see app-tests-e2e for the wire round-trip).
+
+use example_proto::{TagCreate, TagRepo, TagUpdate};
+
+fn tag_repo() -> example_memory::TagRepoMemory {
+    example_memory::TagRepoMemory::new()
+}
+
+#[tokio::test]
+async fn string_pk_create_then_get_round_trip() {
+    let r = tag_repo();
+    let created = r
+        .create(TagCreate {
+            slug: "rust-lang".into(),
+            label: "Rust".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(created.slug, "rust-lang");
+
+    let got = r.get("rust-lang".into()).await.unwrap();
+    assert_eq!(got.slug, created.slug);
+    assert_eq!(got.label, "Rust");
+}
+
+#[tokio::test]
+async fn string_pk_duplicate_slug_conflicts() {
+    let r = tag_repo();
+    r.create(TagCreate {
+        slug: "dup".into(),
+        label: "first".into(),
+    })
+    .await
+    .unwrap();
+    let err = r
+        .create(TagCreate {
+            slug: "dup".into(),
+            label: "second".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(err, RepoError::Conflict(_)));
+}
+
+#[tokio::test]
+async fn string_pk_update_changes_fields() {
+    let r = tag_repo();
+    r.create(TagCreate {
+        slug: "wip".into(),
+        label: "before".into(),
+    })
+    .await
+    .unwrap();
+    let updated = r
+        .update(
+            "wip".into(),
+            TagUpdate {
+                label: Some("after".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.slug, "wip");
+    assert_eq!(updated.label, "after");
+}
+
+#[tokio::test]
+async fn string_pk_delete_removes_row() {
+    let r = tag_repo();
+    r.create(TagCreate {
+        slug: "gone".into(),
+        label: "soon".into(),
+    })
+    .await
+    .unwrap();
+    r.delete("gone".into()).await.unwrap();
+    assert!(matches!(
+        r.get("gone".into()).await,
+        Err(RepoError::NotFound)
+    ));
+}
+
 // ── External backend conformance ──────────────────────────────────────
 //
 // Same contract, different impl. Proves the third-party extension
