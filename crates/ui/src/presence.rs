@@ -50,6 +50,11 @@ use crate::routes::Route;
 /// transport-level constant today. Keep the two in sync.
 pub const PRESENCE_DOC_ID: Uuid = Uuid::from_u128(0x7461736b_2d6f_7267_2d70_726573656e63);
 
+/// Republish cadence for the heartbeat — a third of the timeout, so a
+/// healthy tab refreshes its entry well before expiry while a closed
+/// one drops within ~one timeout.
+const HEARTBEAT_MS: u64 = PRESENCE_TIMEOUT_MS as u64 / 3;
+
 /// Ephemeral timeout — mirrors the server host's. A peer that goes
 /// quiet for this long vanishes from everyone's roster.
 pub const PRESENCE_TIMEOUT_MS: i64 = 30_000;
@@ -267,7 +272,7 @@ pub fn provide_org_presence() -> crdt::Presence {
     let name = use_signal(load_saved_name);
     let manual = use_signal(|| ManualStatus::Auto);
     let idle = use_signal(|| false);
-    let client_key = use_signal(|| Uuid::new_v4().to_string());
+    let client_key = use_signal(stable_client_key);
     use_context_provider(|| PresenceLocal {
         name,
         manual,
@@ -334,8 +339,19 @@ fn PublisherEffect(
 
     // The publisher: re-runs when any read signal changes (route parts,
     // name, manual status, idle, and the channel's peer slot becoming
-    // ready — `presence.set` reads it).
+    // ready — `presence.set` reads it). `beat` is the heartbeat: an
+    // ephemeral entry expires PRESENCE_TIMEOUT_MS after its last
+    // publish, so an idle-but-open tab must republish (fresh
+    // timestamp, same content) or it falls off everyone's roster.
+    let mut beat = use_signal(|| 0u64);
+    use_future(move || async move {
+        loop {
+            architect::sleep(architect::Duration::from_millis(HEARTBEAT_MS)).await;
+            beat += 1;
+        }
+    });
     use_effect(move || {
+        let _ = beat();
         let name = display_name(&local.name.read());
         let entry = PresenceEntry {
             name,
@@ -732,6 +748,33 @@ fn save_name(name: &str) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
         let _ = storage.set_item(NAME_STORAGE_KEY, name.trim());
     }
+}
+
+/// Per-tab stable presence key. sessionStorage is exactly the right
+/// scope: survives refresh (same tab = same person, the new session
+/// overwrites its old entry in place) but is distinct per tab, so two
+/// tabs are two roster rows on purpose. A fresh tab mints + stores.
+#[cfg(target_arch = "wasm32")]
+fn stable_client_key() -> String {
+    const KEY: &str = "task.presence.client";
+    let storage = web_sys::window().and_then(|w| w.session_storage().ok().flatten());
+    if let Some(s) = &storage {
+        if let Ok(Some(existing)) = s.get_item(KEY) {
+            if !existing.is_empty() {
+                return existing;
+            }
+        }
+    }
+    let minted = Uuid::new_v4().to_string();
+    if let Some(s) = &storage {
+        let _ = s.set_item(KEY, &minted);
+    }
+    minted
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stable_client_key() -> String {
+    Uuid::new_v4().to_string()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
