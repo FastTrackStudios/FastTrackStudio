@@ -103,9 +103,24 @@ server-axum = [
 # Without this, the same primitives compile to plain tokio passthroughs
 # with zero runtime cost. Off by default.
 diagnostics = ["moire/diagnostics"]
-# Back-compat alias — older consumers that wrote `features = ["server"]`
-# get the SeaORM bridge for free. Drop after one release cycle.
-server = ["server-seaorm"]
+
+# ── Umbrella features — the two common consumer profiles ─────────────
+#
+# À la carte features stay for fine-grained builds; these are the
+# one-liners an app crate reaches for. See
+# docs/content/architecture/features.md for the full matrix.
+#
+#   client   what a UI (wasm or desktop shell) crate wants: typed RPC
+#            clients (vox) + optimistic store hooks (atom) + validated
+#            form state (form). Wasm-clean.
+#
+#   server   what a native server binary wants: RPC (vox) + the SeaORM
+#            storage bridge + the axum WS transport + the tokio
+#            blocking dispatcher. Strict superset of the old
+#            `server = ["server-seaorm"]` back-compat alias, so
+#            consumers that wrote `features = ["server"]` keep working.
+client = ["vox", "atom", "form"]
+server = ["vox", "server-seaorm", "server-axum", "dispatch-tokio"]
 
 # Dispatcher impls (see `architect::dispatch`). The current-thread
 # dispatcher is always available; runtime-specific impls are gated.
