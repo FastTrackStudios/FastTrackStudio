@@ -47,6 +47,11 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
-  server: { proxy: voxProxy },
-  preview: { proxy: voxProxy },
+  // Bind IPv4 loopback explicitly. Default binding picked [::1] only,
+  // and Firefox-family browsers (Zen) stalled ws upgrades for ~40s
+  // dialing the v4 loopback that nothing listened on, while Chromium's
+  // happy-eyeballs masked it. v4 serves both: browsers resolve
+  // localhost -> 127.0.0.1 fine, and v6-preferring stacks fall back.
+  server: { host: "127.0.0.1", proxy: voxProxy },
+  preview: { host: "127.0.0.1", proxy: voxProxy },
 });
