@@ -379,14 +379,17 @@ pub fn PresenceRoster() -> Element {
     });
 
     // Live peers (reactive — `states()` re-renders on every presence
-    // change), then merge derived rows de-duped by name.
-    let mut entries: Vec<PresenceEntry> = decode_states(&presence.states());
-    let live_names: HashSet<String> = entries.iter().map(|e| e.name.clone()).collect();
+    // change), then merge derived rows de-duped by name. Render keys:
+    // live rows use the peer's store key, derived rows a synthetic
+    // position-stable key — names are NOT unique.
+    let mut entries: Vec<(String, PresenceEntry)> = decode_states(&presence.states());
+    let live_names: HashSet<String> = entries.iter().map(|(_, e)| e.name.clone()).collect();
     if let Some(rows) = &*derived.read_unchecked() {
         entries.extend(
             rows.iter()
                 .filter(|e| !live_names.contains(&e.name))
-                .cloned(),
+                .enumerate()
+                .map(|(i, e)| (format!("derived-{i}-{}", e.name), e.clone())),
         );
     }
     sort_entries(&mut entries);
@@ -399,8 +402,8 @@ pub fn PresenceRoster() -> Element {
                 if entries.is_empty() {
                     div { class: "px-2 py-1 text-xs text-muted-foreground", "Nobody around right now" }
                 } else {
-                    for entry in entries {
-                        PresenceRow { key: "{entry.name}", entry }
+                    for (row_key, entry) in entries {
+                        PresenceRow { key: "{row_key}", entry }
                     }
                 }
             }
@@ -449,9 +452,9 @@ fn PresenceRow(entry: PresenceEntry) -> Element {
 #[component]
 pub fn ProjectPresenceStrip(project_id: Uuid) -> Element {
     let presence = crdt::use_presence();
-    let mut here: Vec<PresenceEntry> = decode_states(&presence.states())
+    let mut here: Vec<(String, PresenceEntry)> = decode_states(&presence.states())
         .into_iter()
-        .filter(|e| e.project_id == Some(project_id))
+        .filter(|(_, e)| e.project_id == Some(project_id))
         .collect();
     sort_entries(&mut here);
     if here.is_empty() {
@@ -461,8 +464,8 @@ pub fn ProjectPresenceStrip(project_id: Uuid) -> Element {
     rsx! {
         div { class: "flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/40 px-2.5 py-1 text-xs text-muted-foreground",
             span { if count == 1 { "1 person here" } else { "{count} people here" } }
-            for entry in here {
-                span { key: "{entry.name}", class: "flex items-center gap-1",
+            for (peer_key, entry) in here {
+                span { key: "{peer_key}", class: "flex items-center gap-1",
                     span { class: "h-1.5 w-1.5 rounded-full {entry.status.dot_class()}" }
                     span { class: "text-foreground", "{entry.name}" }
                 }
@@ -496,16 +499,51 @@ pub fn PresenceStatusPicker() -> Element {
         (ManualStatus::Dnd, "Do not disturb", PresenceStatus::Dnd),
     ];
 
+    // The input edits a local draft; the committed name (what the
+    // publisher effect reads and what hits localStorage) follows with
+    // a debounce. Committing per keystroke republished presence on
+    // every character — the resulting re-render storm raced the
+    // controlled input and snapped deletions back.
+    let mut draft = use_signal(|| name.peek().clone());
+    let mut commit_gen = use_signal(|| 0u64);
+    use_future(move || async move {
+        let mut seen = 0u64;
+        loop {
+            architect::sleep(architect::Duration::from_millis(400)).await;
+            let gen = *commit_gen.peek();
+            if gen != seen {
+                seen = gen;
+                let v = draft.peek().clone();
+                if v != *name.peek() {
+                    save_name(&v);
+                    name.set(v);
+                }
+            }
+        }
+    });
+    let mut commit_now = move || {
+        let v = draft.peek().clone();
+        if v != *name.peek() {
+            save_name(&v);
+            name.set(v);
+        }
+    };
+
     rsx! {
         HStack { gap: "1", class: "items-center w-full",
             input {
                 class: "min-w-0 flex-1 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring",
                 placeholder: "Your name",
-                value: "{name}",
+                value: "{draft}",
                 oninput: move |e| {
-                    let v = e.value();
-                    save_name(&v);
-                    name.set(v);
+                    draft.set(e.value());
+                    commit_gen += 1;
+                },
+                onblur: move |_| commit_now(),
+                onkeydown: move |e| {
+                    if e.key() == Key::Enter {
+                        commit_now();
+                    }
                 },
             }
             Dropdown {
@@ -635,13 +673,20 @@ async fn fetch_derived_entries(slugs: &[String]) -> Vec<PresenceEntry> {
 
 /// Decode every peer's state, skipping anything that isn't a valid
 /// [`PresenceEntry`]. Pure read — no pruning here (render path!).
-fn decode_states(states: &HashMap<String, LoroValue>) -> Vec<PresenceEntry> {
-    states.values().filter_map(PresenceEntry::decode).collect()
+/// Decode live peers, keeping each peer's store key (the per-session
+/// client uuid) — render keys MUST come from it, never from the
+/// display name: two tabs both named "anonymous" are distinct peers,
+/// and duplicate sibling keys panic the renderer.
+fn decode_states(states: &HashMap<String, LoroValue>) -> Vec<(String, PresenceEntry)> {
+    states
+        .iter()
+        .filter_map(|(k, v)| PresenceEntry::decode(v).map(|e| (k.clone(), e)))
+        .collect()
 }
 
 /// Humans before agents, then case-insensitive by name.
-fn sort_entries(entries: &mut [PresenceEntry]) {
-    entries.sort_by(|a, b| {
+fn sort_entries(entries: &mut [(String, PresenceEntry)]) {
+    entries.sort_by(|(_, a), (_, b)| {
         (a.kind != PresenceKind::Human, a.name.to_lowercase())
             .cmp(&(b.kind != PresenceKind::Human, b.name.to_lowercase()))
     });
