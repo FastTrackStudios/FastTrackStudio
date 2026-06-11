@@ -492,7 +492,7 @@ inbox-proto = { path = "features/inbox/inbox-proto", default-features = false }
 # General app-state persistence. Capability sub-traits
 # (`KvStore` / `LogStore`) so any feature can mount any backend.
 store-proto = { path = "crates/store-proto", default-features = false }
-architect-auth = { path = "../architect-auth/crates/architect-auth" }
+architect-auth = { path = "../architect/features/auth/architect-auth" }
 
 # Git feature — issue + PR workflow on top of forges
 # (GitHub now, Forgejo next). `git-proto` is the wire

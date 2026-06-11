@@ -538,6 +538,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
  "vox",
  "vox-core",
  "vox-types",
@@ -563,6 +564,7 @@ name = "architect-auth"
 version = "0.1.0"
 dependencies = [
  "auth",
+ "auth-client",
  "auth-db",
  "auth-proto",
 ]
@@ -1141,6 +1143,16 @@ dependencies = [
  "thiserror 2.0.18",
  "totp-rs",
  "uuid",
+ "vox",
+]
+
+[[package]]
+name = "auth-client"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
  "vox",
 ]
 
