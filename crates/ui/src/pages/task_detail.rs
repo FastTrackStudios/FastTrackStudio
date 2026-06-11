@@ -21,7 +21,10 @@ use crate::routes::Route;
 /// Signed-out claim identity: a human ref distinguishable from agent
 /// claims in the board and the CLI. Only the fallback — signed-in
 /// claims carry the real account via [`claimant_json`].
-const WEB_CLAIMANT: &str = r#"{"kind":"human","id":"web"}"#;
+// Serde shape must match workflows_proto::AgentRef::Human exactly —
+// the backend from_str's it. (The old {"kind":"human","id":"web"}
+// shape silently failed to parse.)
+const WEB_CLAIMANT: &str = r#"{"kind":"human","user_id":"web","display_name":"Guest (web)"}"#;
 
 /// JSON-encoded `workflows_proto::AgentRef` for `try_claim` — the
 /// server `serde_json::from_str`s it (see `TaskBackend::try_claim`).
@@ -280,5 +283,20 @@ mod tests {
     #[test]
     fn claimant_json_falls_back_to_web_claimant() {
         assert_eq!(claimant_json(None), WEB_CLAIMANT);
+    }
+}
+
+#[cfg(test)]
+mod claimant_tests {
+    use super::WEB_CLAIMANT;
+
+    #[test]
+    fn legacy_fallback_parses_as_agent_ref() {
+        let parsed: task::workflows_proto::AgentRef =
+            serde_json::from_str(WEB_CLAIMANT).expect("fallback claimant must parse");
+        match parsed {
+            task::workflows_proto::AgentRef::Human { user_id, .. } => assert_eq!(user_id, "web"),
+            other => panic!("expected human ref, got {other:?}"),
+        }
     }
 }
