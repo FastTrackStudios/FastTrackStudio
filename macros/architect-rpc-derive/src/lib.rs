@@ -235,6 +235,18 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
     // `Layer::merge` instead of writing per-service `.with(...)` calls.
     let layer_fn = emit_layer_fn(trait_name, vis, shape);
 
+    // `prelude` — crate-root-ready re-exports with the trait name baked
+    // in, so proto crates glob one module per service instead of
+    // hand-renaming five items.
+    let prelude = emit_prelude(
+        trait_name,
+        &client_name,
+        &rpc_trait_name,
+        &rpc_dispatcher_name,
+        vis,
+        shape,
+    );
+
     Ok(quote! {
         #user_trait
         #mirror_trait
@@ -243,7 +255,74 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
         #client_alias
         #serve_fn
         #layer_fn
+        #prelude
     })
+}
+
+/// Emit the `prelude` module: every public item this expansion
+/// produces, re-exported under names that stay unique after a glob —
+/// the module-scoped `Service` / `layer` / `serve` get the trait name
+/// baked in (`TracksService`, `tracks_layer`, `tracks_serve`). A proto
+/// crate's root then collapses its per-service re-export block to:
+///
+/// ```ignore
+/// pub use service::{bookings::prelude::*, slots::prelude::*};
+/// ```
+///
+/// The vox-only items carry the same `#[cfg(feature = "vox")]` gates
+/// as their definitions, so the glob works in non-vox builds too (it
+/// just re-exports the bare trait).
+fn emit_prelude(
+    trait_name: &syn::Ident,
+    client_name: &syn::Ident,
+    rpc_trait_name: &syn::Ident,
+    rpc_dispatcher_name: &syn::Ident,
+    vis: &syn::Visibility,
+    shape: Shape,
+) -> TokenStream2 {
+    let snake = to_snake_case(&trait_name.to_string());
+    let service_alias = format_ident!("{}Service", trait_name);
+    let layer_alias = format_ident!("{snake}_layer");
+    let serve_alias = format_ident!("{snake}_serve");
+    let descriptor_fn = format_ident!("{snake}_rpc_service_descriptor");
+
+    let vox_items = match shape {
+        Shape::Empty => quote! {},
+        // AllAsync: vox::service decorates the user trait directly, so
+        // the client is already `<Trait>Client` and the mirror trait
+        // doesn't exist. The dispatcher/descriptor go through the
+        // Rpc-suffixed aliases emitted alongside.
+        Shape::AllAsync => quote! {
+            #[cfg(feature = "vox")]
+            pub use super::{
+                #client_name, #rpc_dispatcher_name, #descriptor_fn,
+                Service as #service_alias,
+                layer as #layer_alias,
+                serve as #serve_alias,
+            };
+        },
+        Shape::AllSync | Shape::Mixed => quote! {
+            #[cfg(feature = "vox")]
+            pub use super::{
+                #client_name, #rpc_trait_name, #rpc_dispatcher_name, #descriptor_fn,
+                Service as #service_alias,
+                layer as #layer_alias,
+                serve as #serve_alias,
+            };
+        },
+    };
+
+    quote! {
+        /// Glob-safe re-exports for this service: the trait itself plus
+        /// (with the `vox` feature) the client, dispatcher, descriptor,
+        /// and the `Service` token / `layer` / `serve` verbs renamed
+        /// with the trait's name baked in. Intended for proto-crate
+        /// roots: `pub use my_service::prelude::*;`.
+        #vis mod prelude {
+            pub use super::#trait_name;
+            #vox_items
+        }
+    }
 }
 
 /// Snake-case an UpperCamelCase identifier. Mirrors what `#[vox::service]`

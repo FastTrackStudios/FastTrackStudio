@@ -97,8 +97,12 @@ pub mod greeter {
     }
 }
 
-use counter::Counter;
-use greeter::Greeter;
+// Each `#[rpc]` expansion emits a `prelude` module with glob-safe
+// names — the trait plus `CounterService` / `counter_layer` /
+// `counter_serve` / `CounterClient` (vox-gated). One glob per service
+// replaces the hand-renamed five-item re-export block.
+use counter::prelude::*;
+use greeter::prelude::*;
 
 // ── Backends ──────────────────────────────────────────────────────────
 //
@@ -170,13 +174,13 @@ impl Greeter for MockBackend {
 
 impl Services for LiveBackend {
     fn layers() -> impl Layer<LiveBackend> {
-        layers![counter::Service, greeter::Service]
+        layers![CounterService, GreeterService]
     }
 }
 
 impl Services for MockBackend {
     fn layers() -> impl Layer<MockBackend> {
-        layers![counter::Service, greeter::Service]
+        layers![CounterService, GreeterService]
     }
 }
 
@@ -241,12 +245,34 @@ fn main() {
     // Reaper itself doesn't impl.
     info!("── 4. Per-service override ─────────────────────────────");
     let hybrid_router = LiveBackend::layers()
-        .merge(greeter::layer(MockBackend))
+        .merge(greeter_layer(MockBackend))
         .provide(live.clone());
     info!(
         services = hybrid_router.len(),
         "hybrid router (live counter + mock greeter) built"
     );
+
+    // ── 5. Multi-backend app router ──────────────────────────────────
+    //
+    // An app's vox endpoint usually fronts many backends — one per
+    // feature. `router![]` is the mount registry: each entry is a
+    // backend, its whole canonical `Services` bundle mounts in one
+    // line. Adding a feature to the app = adding one expression here
+    // (the bundle itself is declared once, in the feature crate).
+    info!("── 5. Multi-backend app router (router![]) ─────────────");
+    let app_router = architect::router![
+        live.clone(),             // Counter + Greeter
+        ExampleRepoMemory::new(), // ExampleRepo
+    ];
+    assert_eq!(app_router.len(), 3, "two bundles, three services");
+    info!(
+        services = app_router.len(),
+        "app router stitched from two backends"
+    );
+
+    // Collision rule: later entries win (same as Layer::merge). A mock
+    // mounted after the live backend takes over its method ids.
+    let _overridden = architect::router![live.clone(), MockBackend];
 
     // ── Introspection ────────────────────────────────────────────────
     //

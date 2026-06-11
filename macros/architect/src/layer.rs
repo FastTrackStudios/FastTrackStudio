@@ -517,6 +517,42 @@ macro_rules! layers {
     }};
 }
 
+/// Build a [`LayerRouter`] from a list of backends — the app-level
+/// mount registry. Each entry is a backend implementing [`Services`];
+/// its whole canonical bundle mounts in one line, so registering a new
+/// feature backend is one added expression, not a `.with(descriptor,
+/// serve)` pair per service:
+///
+/// ```ignore
+/// let router = architect::router![
+///     org.scheduling.clone(),   // VaultScheduler: 7 services
+///     org.inbox.clone(),        // InboxBackend:   1 service
+///     org.agent_codex.clone(),  // CodexBackend:   3 services
+/// ];
+/// ```
+///
+/// Later entries win on method-id collision (same rule as
+/// [`Layer::merge`]). Bolt-ons that aren't a backend's canonical
+/// bundle — a single service on a shared backend, or a
+/// middleware-wrapped dispatcher — chain on afterwards:
+///
+/// ```ignore
+/// let router = architect::router![org.scheduling.clone()]
+///     .merge(attachments_layer(org.attachments.clone()))
+///     .with(auth_descriptor(), auth_dispatcher_with_middleware);
+/// ```
+#[macro_export]
+macro_rules! router {
+    ($($backend:expr),* $(,)?) => {{
+        let __r = $crate::LayerRouter::new();
+        $(let __r = $crate::LayerRouter::merge_router(
+            __r,
+            $crate::Services::into_router($backend),
+        );)*
+        __r
+    }};
+}
+
 // ── Services trait ────────────────────────────────────────────────────────
 
 /// "This backend provides a canonical bundle of services."
@@ -612,6 +648,21 @@ impl LayerRouter {
     pub fn merge<M: Into<Mounted>>(mut self, m: M) -> Self {
         let (descriptor, handler) = m.into().into_parts();
         self.register(descriptor, handler);
+        self
+    }
+
+    /// Absorb every handler from another built router. This is the
+    /// multi-backend composition verb: each backend mounts its own
+    /// canonical bundle (`Services::into_router`), and the app stitches
+    /// the routers together — one line per backend, see [`router!`].
+    /// `other`'s method IDs win on collision, consistent with
+    /// [`merge`](Self::merge)'s last-merge-wins.
+    pub fn merge_router(mut self, other: LayerRouter) -> Self {
+        let base = self.handlers.len();
+        self.handlers.extend(other.handlers);
+        for (id, idx) in other.method_map {
+            self.method_map.insert(id, base + idx);
+        }
         self
     }
 

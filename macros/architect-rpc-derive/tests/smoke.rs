@@ -269,6 +269,38 @@ mod derived_dispatcher {
     }
 }
 
+// ── prelude module ──────────────────────────────────────────────────
+
+mod prelude_reexports {
+    use super::rpc;
+
+    pub mod ping {
+        #[super::rpc]
+        pub trait Ping {
+            fn ping(&self) -> u32;
+        }
+    }
+
+    // Without the `vox` feature the prelude re-exports just the trait —
+    // the client/dispatcher/Service items don't exist. The glob is the
+    // whole point: proto crates write one `pub use m::prelude::*` per
+    // service instead of hand-renaming five items.
+    use ping::prelude::*;
+
+    struct Backend;
+
+    impl Ping for Backend {
+        fn ping(&self) -> u32 {
+            42
+        }
+    }
+
+    #[test]
+    fn prelude_glob_exposes_the_trait() {
+        assert_eq!(Backend.ping(), 42);
+    }
+}
+
 // ── Empty trait ─────────────────────────────────────────────────────
 
 mod empty {
