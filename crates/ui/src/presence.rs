@@ -15,10 +15,10 @@
 //!   [`crate::feeds::fetch_agent_sessions`] (sessions in
 //!   `Running` / `AwaitingUser`) and open timer sessions every 60s
 //!   and merges them in, de-duped against live entries by name.
-//! - **UI** — [`PresenceRoster`] (sidebar section),
-//!   [`PresenceStatusPicker`] (DND/Available picker + display name,
-//!   next to the org switcher), and [`ProjectPresenceStrip`] (who's
-//!   on this project, for `/projects/:id`).
+//! - **UI** — [`PresenceRoster`] (sidebar section) and
+//!   [`ProjectPresenceStrip`] (who's on this project, for
+//!   `/projects/:id`). The status picker + identity card moved into
+//!   the sidebar's account switcher ([`crate::auth::AccountSwitcher`]).
 //!
 //! Wiring order matters: [`provide_org_presence`] must run **after**
 //! the app root's `use_app_reactive` (the channel hook pulls the
@@ -65,8 +65,9 @@ pub const PRESENCE_TIMEOUT_MS: i64 = 30_000;
 /// already have.
 const IDLE_AFTER_MS: i64 = 5 * 60 * 1_000;
 
-/// localStorage key for the persisted display name (web only; native
-/// falls back to the default each launch until auth lands).
+/// localStorage key for the legacy persisted display name (web only).
+/// Account identity replaced the free-text input, but a previously
+/// saved name still serves as the signed-out fallback during boot.
 #[cfg(target_arch = "wasm32")]
 const NAME_STORAGE_KEY: &str = "task.presence.name";
 const DEFAULT_NAME: &str = "anonymous";
@@ -128,7 +129,8 @@ impl PresenceStatus {
     }
 
     /// Tailwind class for the status dot.
-    fn dot_class(self) -> &'static str {
+    #[must_use]
+    pub fn dot_class(self) -> &'static str {
         match self {
             Self::Active => "bg-emerald-500",
             Self::Idle => "bg-amber-400",
@@ -137,7 +139,8 @@ impl PresenceStatus {
         }
     }
 
-    fn label(self) -> &'static str {
+    #[must_use]
+    pub fn label(self) -> &'static str {
         match self {
             Self::Active => "Active",
             Self::Idle => "Idle",
@@ -163,6 +166,12 @@ pub struct PresenceEntry {
     pub task_id: Option<Uuid>,
     /// Unix ms when this presence began (session join / turn start).
     pub since_ms: i64,
+    /// Auth-system user id when the publisher is signed in. `None`
+    /// for derived entries, agents, and peers that predate accounts
+    /// (tolerant decode — old peers stay decodable).
+    pub user_id: Option<String>,
+    /// Account email — keys the roster avatar's gradient.
+    pub email: Option<String>,
 }
 
 impl PresenceEntry {
@@ -184,6 +193,12 @@ impl PresenceEntry {
         }
         if let Some(id) = self.task_id {
             m.push(("task_id".into(), LoroValue::from(id.to_string())));
+        }
+        if let Some(user_id) = &self.user_id {
+            m.push(("user_id".into(), LoroValue::from(user_id.clone())));
+        }
+        if let Some(email) = &self.email {
+            m.push(("email".into(), LoroValue::from(email.clone())));
         }
         LoroValue::Map(m.into())
     }
@@ -218,6 +233,8 @@ impl PresenceEntry {
             project_id: get_str("project_id").and_then(|s| Uuid::parse_str(&s).ok()),
             task_id: get_str("task_id").and_then(|s| Uuid::parse_str(&s).ok()),
             since_ms,
+            user_id: get_str("user_id").filter(|s| !s.is_empty()),
+            email: get_str("email").filter(|s| !s.is_empty()),
         })
     }
 }
@@ -237,9 +254,10 @@ pub enum ManualStatus {
 /// [`provide_org_presence`], consumed by the publisher + picker.
 #[derive(Clone, Copy)]
 pub struct PresenceLocal {
-    /// Display name, persisted to localStorage (`task.presence.name`).
+    /// Fallback display name (legacy localStorage `task.presence.name`)
+    /// — the publisher prefers the active account's name when signed in.
     pub name: Signal<String>,
-    /// Manual status override from the picker.
+    /// Manual status override from the switcher's Status section.
     pub manual: Signal<ManualStatus>,
     /// Idle flag, owned by the publisher's ticker.
     pub idle: Signal<bool>,
@@ -249,7 +267,8 @@ pub struct PresenceLocal {
 
 impl PresenceLocal {
     /// The status the publisher writes right now.
-    fn effective_status(&self) -> PresenceStatus {
+    #[must_use]
+    pub fn effective_status(&self) -> PresenceStatus {
         match *self.manual.read() {
             ManualStatus::Dnd => PresenceStatus::Dnd,
             ManualStatus::Available => PresenceStatus::Available,
@@ -310,6 +329,11 @@ fn PublisherEffect(
 ) -> Element {
     let presence = crdt::use_presence();
     let local = use_context::<PresenceLocal>();
+    // Account identity (provided at the app root by
+    // `crate::auth::provide_auth`). When signed in, the entry carries
+    // the account's name + user_id/email; the legacy localStorage name
+    // stays as the fallback for the signed-out window during boot.
+    let account = use_context::<Signal<Option<crate::auth::ActiveAccount>>>();
     let joined_ms = use_hook(now_ms);
     let mut last_nav = use_signal(now_ms);
 
@@ -352,7 +376,14 @@ fn PublisherEffect(
     });
     use_effect(move || {
         let _ = beat();
-        let name = display_name(&local.name.read());
+        let (name, user_id, email) = match &*account.read() {
+            Some(a) => (
+                a.name.clone(),
+                Some(a.user_id.to_string()),
+                Some(a.email.clone()),
+            ),
+            None => (display_name(&local.name.read()), None, None),
+        };
         let entry = PresenceEntry {
             name,
             kind: PresenceKind::Human,
@@ -361,6 +392,8 @@ fn PublisherEffect(
             project_id: *project_id.read(),
             task_id: *task_id.read(),
             since_ms: joined_ms,
+            user_id,
+            email,
         };
         let key = local.client_key.peek().clone();
         presence.set(&key, entry.encode());
@@ -427,7 +460,7 @@ pub fn PresenceRoster() -> Element {
     }
 }
 
-/// One roster row: status dot, name, muted activity line.
+/// One roster row: avatar with status dot, name, muted activity line.
 #[component]
 fn PresenceRow(entry: PresenceEntry) -> Element {
     let dot = entry.status.dot_class();
@@ -436,11 +469,17 @@ fn PresenceRow(entry: PresenceEntry) -> Element {
         PresenceKind::Human => None,
         PresenceKind::Agent => Some("bot"),
     };
+    // Avatar gradient keys on the account email; entries without one
+    // (agents, old peers) fall back to hashing the name.
+    let avatar_email = entry.email.clone().unwrap_or_default();
     rsx! {
         div { class: "flex items-center gap-2 rounded-md px-2 py-1",
-            span {
-                class: "h-2 w-2 shrink-0 rounded-full {dot}",
-                title: "{title}",
+            span { class: "relative shrink-0",
+                crate::auth::Avatar { name: entry.name.clone(), email: avatar_email, size: 22 }
+                span {
+                    class: "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-card {dot}",
+                    title: "{title}",
+                }
             }
             div { class: "flex min-w-0 flex-col",
                 div { class: "flex items-center gap-1.5",
@@ -482,6 +521,11 @@ pub fn ProjectPresenceStrip(project_id: Uuid) -> Element {
             span { if count == 1 { "1 person here" } else { "{count} people here" } }
             for (peer_key, entry) in here {
                 span { key: "{peer_key}", class: "flex items-center gap-1",
+                    crate::auth::Avatar {
+                        name: entry.name.clone(),
+                        email: entry.email.clone().unwrap_or_default(),
+                        size: 16,
+                    }
                     span { class: "h-1.5 w-1.5 rounded-full {entry.status.dot_class()}" }
                     span { class: "text-foreground", "{entry.name}" }
                 }
@@ -490,117 +534,12 @@ pub fn ProjectPresenceStrip(project_id: Uuid) -> Element {
     }
 }
 
-// ── status picker ───────────────────────────────────────────────────
-
-/// Manual status + display name, sidebar-footer sized (lives next to
-/// the org switcher). The dot on the trigger shows the *effective*
-/// status (idle wins over Auto).
-#[component]
-pub fn PresenceStatusPicker() -> Element {
-    let local = use_context::<PresenceLocal>();
-    let mut name = local.name;
-    let mut manual = local.manual;
-    let mut open = use_signal(|| false);
-
-    let effective = local.effective_status();
-    let dot = effective.dot_class();
-    let current = *manual.read();
-    let options = [
-        (ManualStatus::Auto, "Active (auto)", PresenceStatus::Active),
-        (
-            ManualStatus::Available,
-            "Available",
-            PresenceStatus::Available,
-        ),
-        (ManualStatus::Dnd, "Do not disturb", PresenceStatus::Dnd),
-    ];
-
-    // The input edits a local draft; the committed name (what the
-    // publisher effect reads and what hits localStorage) follows with
-    // a debounce. Committing per keystroke republished presence on
-    // every character — the resulting re-render storm raced the
-    // controlled input and snapped deletions back.
-    let mut draft = use_signal(|| name.peek().clone());
-    let mut commit_gen = use_signal(|| 0u64);
-    use_future(move || async move {
-        let mut seen = 0u64;
-        loop {
-            architect::sleep(architect::Duration::from_millis(400)).await;
-            let gen = *commit_gen.peek();
-            if gen != seen {
-                seen = gen;
-                let v = draft.peek().clone();
-                if v != *name.peek() {
-                    save_name(&v);
-                    name.set(v);
-                }
-            }
-        }
-    });
-    let mut commit_now = move || {
-        let v = draft.peek().clone();
-        if v != *name.peek() {
-            save_name(&v);
-            name.set(v);
-        }
-    };
-
-    rsx! {
-        HStack { gap: "1", class: "items-center w-full",
-            input {
-                class: "min-w-0 flex-1 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring",
-                placeholder: "Your name",
-                value: "{draft}",
-                oninput: move |e| {
-                    draft.set(e.value());
-                    commit_gen += 1;
-                },
-                onblur: move |_| commit_now(),
-                onkeydown: move |e| {
-                    if e.key() == Key::Enter {
-                        commit_now();
-                    }
-                },
-            }
-            Dropdown {
-                open: open(),
-                on_open_change: move |o| open.set(o),
-                DropdownTrigger {
-                    button {
-                        r#type: "button",
-                        class: "flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-accent",
-                        title: "Presence status",
-                        span { class: "h-2 w-2 rounded-full {dot}" }
-                        span { "{effective.label()}" }
-                    }
-                }
-                DropdownContent { side: "top", align: "end", width: "w-48",
-                    DropdownLabel { "Status" }
-                    for (idx, (value, label, status)) in options.into_iter().enumerate() {
-                        DropdownItem {
-                            key: "{label}",
-                            value: label.to_string(),
-                            index: idx,
-                            on_select: move |_| {
-                                manual.set(value);
-                                open.set(false);
-                            },
-                            div { class: "flex w-full items-center justify-between gap-2",
-                                span { class: "flex items-center gap-2",
-                                    span { class: "h-2 w-2 rounded-full {status.dot_class()}" }
-                                    span { "{label}" }
-                                }
-                                if current == value {
-                                    span { class: "text-xs text-primary", "●" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+// The free-text name input + status picker that used to live here
+// (`PresenceStatusPicker`) is gone: account identity replaces the
+// typed name, and the status options moved into the account
+// switcher's popover (`crate::auth::AccountSwitcher`, "Status"
+// section). `load_saved_name` stays as the signed-out fallback the
+// publisher reads while boot sign-in is still in flight.
 
 // ── derived entries (no-heartbeat participants) ─────────────────────
 
@@ -651,6 +590,8 @@ async fn fetch_derived_entries(slugs: &[String]) -> Vec<PresenceEntry> {
                 project_id: Uuid::parse_str(&s.project_id).ok(),
                 task_id: None,
                 since_ms,
+                user_id: None,
+                email: None,
             });
         }
     }
@@ -678,6 +619,8 @@ async fn fetch_derived_entries(slugs: &[String]) -> Vec<PresenceEntry> {
                 project_id: s.project_id,
                 task_id: None,
                 since_ms: s.start_time.timestamp_millis(),
+                user_id: None,
+                email: None,
             });
         }
     }
@@ -743,13 +686,6 @@ fn load_saved_name() -> String {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-fn save_name(name: &str) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(NAME_STORAGE_KEY, name.trim());
-    }
-}
-
 /// Per-tab stable presence key. sessionStorage is exactly the right
 /// scope: survives refresh (same tab = same person, the new session
 /// overwrites its old entry in place) but is distinct per tab, so two
@@ -782,12 +718,6 @@ fn load_saved_name() -> String {
     DEFAULT_NAME.to_string()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn save_name(_name: &str) {
-    // Native persistence rides the future settings store; presence
-    // still works per-launch with the default name.
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -807,6 +737,8 @@ mod tests {
             project_id: Some(Uuid::new_v4()),
             task_id: Some(Uuid::new_v4()),
             since_ms: 1_765_000_000_123,
+            user_id: Some(Uuid::new_v4().to_string()),
+            email: Some("cody@fasttrackstudios.com".into()),
         };
         let decoded = PresenceEntry::decode(&entry.encode()).expect("decodes");
         assert_eq!(decoded, entry);
@@ -822,9 +754,31 @@ mod tests {
             project_id: None,
             task_id: None,
             since_ms: 0,
+            user_id: None,
+            email: None,
         };
         let decoded = PresenceEntry::decode(&entry.encode()).expect("decodes");
         assert_eq!(decoded, entry);
+    }
+
+    /// An entry published by a peer that predates account identity
+    /// (no `user_id`/`email` keys at all) still decodes — the new
+    /// fields default to `None`, nothing else bumped.
+    #[test]
+    fn decode_tolerates_pre_account_peers() {
+        let map = LoroValue::Map(
+            vec![
+                ("name".to_string(), LoroValue::from("old peer")),
+                ("kind".to_string(), LoroValue::from("human")),
+                ("status".to_string(), LoroValue::from("active")),
+                ("since_ms".to_string(), LoroValue::from(42i64)),
+            ]
+            .into(),
+        );
+        let decoded = PresenceEntry::decode(&map).expect("decodes");
+        assert_eq!(decoded.user_id, None);
+        assert_eq!(decoded.email, None);
+        assert_eq!(decoded.since_ms, 42);
     }
 
     #[test]
@@ -856,14 +810,21 @@ mod tests {
 
     #[test]
     fn sort_puts_humans_first_then_alphabetical() {
-        let mk = |name: &str, kind| PresenceEntry {
-            name: name.into(),
-            kind,
-            status: PresenceStatus::Active,
-            activity: None,
-            project_id: None,
-            task_id: None,
-            since_ms: 0,
+        let mk = |name: &str, kind| {
+            (
+                format!("key-{name}"),
+                PresenceEntry {
+                    name: name.into(),
+                    kind,
+                    status: PresenceStatus::Active,
+                    activity: None,
+                    project_id: None,
+                    task_id: None,
+                    since_ms: 0,
+                    user_id: None,
+                    email: None,
+                },
+            )
         };
         let mut entries = vec![
             mk("zeta-agent", PresenceKind::Agent),
@@ -872,7 +833,7 @@ mod tests {
             mk("alice", PresenceKind::Human),
         ];
         sort_entries(&mut entries);
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        let names: Vec<&str> = entries.iter().map(|(_, e)| e.name.as_str()).collect();
         assert_eq!(names, vec!["alice", "Bob", "Agent alpha", "zeta-agent"]);
     }
 }

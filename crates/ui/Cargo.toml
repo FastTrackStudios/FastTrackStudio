@@ -83,6 +83,11 @@ email-proto = { workspace = true, features = ["vox"] }
 # `/repos` page binds to list repos + their issues for the
 # selected org. `vox` feature only, wasm-clean like the others.
 git-proto = { workspace = true, features = ["vox"] }
+# architect-auth wire surface — `AuthServiceClient` + the session
+# bundle types for the account switcher's real sign-in flow
+# (`src/auth.rs`). `vox` feature only (no `server`), wasm-clean
+# like the other proto clients above.
+auth-proto = { workspace = true, features = ["vox"] }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

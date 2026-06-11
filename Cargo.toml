@@ -493,6 +493,11 @@ inbox-proto = { path = "features/inbox/inbox-proto", default-features = false }
 # (`KvStore` / `LogStore`) so any feature can mount any backend.
 store-proto = { path = "crates/store-proto", default-features = false }
 architect-auth = { path = "../architect/features/auth/architect-auth" }
+# Wire contract for architect-auth — `AuthServiceClient` + the session
+# bundle types. wasm-clean with just the `vox` feature (uuid `js` flows
+# from architect), so the web UI drives the real sign-in flow over the
+# per-org endpoint.
+auth-proto = { path = "../architect/features/auth/auth-proto", default-features = false }
 
 # Git feature — issue + PR workflow on top of forges
 # (GitHub now, Forgejo next). `git-proto` is the wire

@@ -6,6 +6,7 @@
 //! product surface.
 
 pub mod app;
+pub mod auth;
 pub mod chrome;
 pub mod feeds;
 pub mod forge_views;

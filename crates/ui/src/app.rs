@@ -92,6 +92,12 @@ pub fn App() -> Element {
             }
         });
 
+    // Web auth: the active-account context + boot restore (validate
+    // the persisted session, or auto sign-in as Guest). Needs the
+    // org-list signal above (auth talks to the home org's endpoint);
+    // must precede the router so pages/presence can read the account.
+    crate::auth::provide_auth();
+
     // Org-wide presence: join the active org's `DocPresence` channel
     // over the shared connection above (the hook reads the
     // `Connection<vox::Caller>` context, so this must come AFTER

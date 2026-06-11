@@ -48,10 +48,11 @@ pub fn DesktopSidebar(current: Route) -> Element {
                 div { class: "px-1 pb-2",
                     crate::chrome::FleetingButton {}
                 }
-                // Presence identity: display name + DND/Available
-                // picker, published org-wide by the shell's publisher.
+                // Account switcher: avatar card for the signed-in
+                // account, with the account roster + presence status
+                // options + sign-out in one popover.
                 div { class: "px-1 pb-2",
-                    crate::presence::PresenceStatusPicker {}
+                    crate::auth::AccountSwitcher {}
                 }
                 div { class: "px-1 pb-1 pt-1",
                     SectionHeader { label: "Organization", size: SectionHeaderSize::Small }

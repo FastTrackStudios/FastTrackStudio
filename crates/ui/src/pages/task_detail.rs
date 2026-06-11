@@ -18,15 +18,36 @@ use uuid::Uuid;
 use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
 use crate::routes::Route;
 
-/// Claim identity until web auth lands: a human ref distinguishable
-/// from agent claims in the board and the CLI.
-#[cfg(target_arch = "wasm32")]
+/// Signed-out claim identity: a human ref distinguishable from agent
+/// claims in the board and the CLI. Only the fallback — signed-in
+/// claims carry the real account via [`claimant_json`].
 const WEB_CLAIMANT: &str = r#"{"kind":"human","id":"web"}"#;
+
+/// JSON-encoded `workflows_proto::AgentRef` for `try_claim` — the
+/// server `serde_json::from_str`s it (see `TaskBackend::try_claim`).
+/// Signed in ⇒ `Human { user_id, display_name }` serialized with
+/// workflows_proto's own serde (internally tagged, `kind`); signed
+/// out ⇒ the legacy [`WEB_CLAIMANT`] const.
+fn claimant_json(account: Option<&crate::auth::ActiveAccount>) -> String {
+    account.map_or_else(
+        || WEB_CLAIMANT.to_owned(),
+        |a| {
+            serde_json::to_string(&task::workflows_proto::AgentRef::Human {
+                user_id: a.user_id.to_string(),
+                display_name: Some(a.name.clone()),
+            })
+            .unwrap_or_else(|_| WEB_CLAIMANT.to_owned())
+        },
+    )
+}
 
 #[component]
 pub fn TaskDetailPage(id: Uuid) -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    // Claim identity — the signed-in account (Guest by default).
+    // Hoisted: hooks can't live inside the match arms below.
+    let account = use_context::<Signal<Option<crate::auth::ActiveAccount>>>();
     let nav = use_navigator();
 
     let rows = use_resource(move || {
@@ -96,9 +117,10 @@ pub fn TaskDetailPage(id: Uuid) -> Element {
             let claim_slug = slug.clone();
             let on_claim = move |()| {
                 let slug = claim_slug.clone();
+                let claimant = claimant_json(account.peek().as_ref());
                 let mut rows = rows;
                 spawn(async move {
-                    match claim_task(&slug, id).await {
+                    match claim_task(&slug, id, &claimant).await {
                         Ok(()) => {
                             status_line.set(String::new());
                             rows.restart();
@@ -175,19 +197,19 @@ fn agent_label(a: &task::workflows_proto::AgentRef) -> String {
     }
 }
 
-async fn claim_task(slug: &str, id: Uuid) -> Result<(), String> {
+async fn claim_task(slug: &str, id: Uuid, claimant: &str) -> Result<(), String> {
     #[cfg(target_arch = "wasm32")]
     {
         let client = crate::vox_clients::task_client(slug).await?;
         client
-            .try_claim(id, WEB_CLAIMANT.to_owned(), false)
+            .try_claim(id, claimant.to_owned(), false)
             .await
             .map_err(|e| format!("try_claim: {e:?}"))?;
         Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = (slug, id);
+        let _ = (slug, id, claimant);
         Err("native client not wired yet".to_owned())
     }
 }
@@ -206,5 +228,57 @@ async fn update_task(slug: &str, task: TaskInfo) -> Result<(), String> {
     {
         let _ = (slug, task);
         Err("native client not wired yet".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::ActiveAccount;
+    use task::workflows_proto::AgentRef;
+
+    fn cody() -> ActiveAccount {
+        ActiveAccount {
+            user_id: Uuid::parse_str("3f2c8a4e-1d5b-4c6f-9e7a-2b8d4f6c1a3e").unwrap(),
+            email: "cody@fasttrackstudios.com".into(),
+            name: "Cody Wright".into(),
+            token: "session-token".into(),
+        }
+    }
+
+    /// The signed-in claimant must byte-match workflows_proto's own
+    /// serde for `AgentRef::Human` — the server `from_str`s exactly
+    /// that shape in `TaskBackend::try_claim`.
+    #[test]
+    fn claimant_json_matches_workflows_proto_serde() {
+        let account = cody();
+        let expected = serde_json::to_string(&AgentRef::Human {
+            user_id: account.user_id.to_string(),
+            display_name: Some(account.name.clone()),
+        })
+        .expect("serialize AgentRef");
+        assert_eq!(claimant_json(Some(&account)), expected);
+    }
+
+    /// And it must parse back through workflows_proto's serde — the
+    /// real proof the server-side `serde_json::from_str` accepts it.
+    #[test]
+    fn claimant_json_round_trips_through_agent_ref() {
+        let account = cody();
+        let parsed: AgentRef =
+            serde_json::from_str(&claimant_json(Some(&account))).expect("server-side parse");
+        assert_eq!(
+            parsed,
+            AgentRef::Human {
+                user_id: account.user_id.to_string(),
+                display_name: Some("Cody Wright".into()),
+            }
+        );
+    }
+
+    /// Signed out falls back to the legacy const, unchanged.
+    #[test]
+    fn claimant_json_falls_back_to_web_claimant() {
+        assert_eq!(claimant_json(None), WEB_CLAIMANT);
     }
 }
