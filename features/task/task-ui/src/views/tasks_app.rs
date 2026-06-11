@@ -36,6 +36,10 @@ pub struct TasksAppProps {
     pub on_event: EventHandler<TaskMutation>,
     #[props(default)]
     pub initial_view: Option<ViewMode>,
+    /// When set, the quick-edit sheet offers "Open full view" and
+    /// emits the task id — the page layer routes it (`/tasks/:id`).
+    #[props(default)]
+    pub on_open_full: Option<EventHandler<Uuid>>,
 }
 
 #[component]
@@ -117,6 +121,7 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                     task: t,
                     on_event: props.on_event,
                     on_close: move |()| open_id.set(None),
+                    on_open_full: props.on_open_full,
                 }
             }
         }

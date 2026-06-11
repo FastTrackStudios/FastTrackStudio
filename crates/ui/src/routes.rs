@@ -36,6 +36,9 @@ pub enum Route {
         #[route("/tasks")]
         TasksRoute {},
 
+        #[route("/tasks/:id")]
+        TaskDetailRoute { id: uuid::Uuid },
+
         #[route("/vault")]
         VaultRoute {},
 
@@ -121,6 +124,11 @@ fn GoalsRoute() -> Element {
 #[component]
 fn TasksRoute() -> Element {
     rsx! { pages::tasks::TasksView {} }
+}
+
+#[component]
+fn TaskDetailRoute(id: uuid::Uuid) -> Element {
+    rsx! { pages::task_detail::TaskDetailPage { id } }
 }
 
 #[component]

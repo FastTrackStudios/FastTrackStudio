@@ -24,6 +24,7 @@ pub mod projects;
 pub mod repos;
 pub mod schedule;
 pub mod settings;
+pub mod task_detail;
 pub mod tasks;
 pub mod timer;
 pub mod vault;

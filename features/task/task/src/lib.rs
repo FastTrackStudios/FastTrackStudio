@@ -56,6 +56,9 @@ pub mod backend;
 
 pub use capture::capture;
 pub use model::{Priority, Status, TaskInfo, TimeEntry};
+// Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
+// so UI consumers don't need their own workflows-proto dep.
+pub use workflows_proto;
 pub use parse::{ParseError, parse_page, parse_str};
 pub use service::{TaskError, TaskEvent, TaskService, TaskServiceRpc};
 

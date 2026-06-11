@@ -18,6 +18,7 @@ use crate::task_wiring::{handle, to_ui};
 
 #[component]
 pub fn TasksView() -> Element {
+    let nav = use_navigator();
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let loader = use_resource(move || async move {
@@ -46,6 +47,9 @@ pub fn TasksView() -> Element {
                         let create_slug =
                             crate::orgs::create_target(&selection.read(), &org_list.read());
                         handle(&mut tasks, &mut org_of, &create_slug, mu);
+                    },
+                    on_open_full: move |id| {
+                        nav.push(crate::routes::Route::TaskDetailRoute { id });
                     },
                 }
             }

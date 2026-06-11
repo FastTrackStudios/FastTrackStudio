@@ -10,6 +10,7 @@
 //! the quick-edit path for `/tasks` today.
 
 use dioxus::prelude::*;
+use uuid::Uuid;
 use fts_ui::lucide_dioxus::Trash2;
 use fts_ui::prelude::*;
 
@@ -22,6 +23,10 @@ pub struct TaskDetailProps {
     pub task: TaskInfo,
     pub on_event: EventHandler<TaskMutation>,
     pub on_close: EventHandler<()>,
+    /// When set, the header offers "Open full view" emitting the
+    /// task id — the page layer routes it to `/tasks/:id`.
+    #[props(default)]
+    pub on_open_full: Option<EventHandler<Uuid>>,
 }
 
 #[component]
@@ -44,6 +49,18 @@ pub fn TaskDetail(props: TaskDetailProps) -> Element {
             on_close: move |()| props.on_close.call(()),
             div { class: "flex items-center justify-between pr-8",
                 span { class: "text-xs uppercase tracking-wider text-muted-foreground", "Task" }
+                if let Some(open_full) = props.on_open_full {
+                    button {
+                        r#type: "button",
+                        class: "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground",
+                        title: "Open full view",
+                        onclick: move |_| {
+                            open_full.call(id);
+                            props.on_close.call(());
+                        },
+                        "Full view"
+                    }
+                }
                 button {
                     r#type: "button",
                     class: "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",

@@ -253,6 +253,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::ProjectDetailRoute { .. } => "Project",
         Route::GoalsRoute {} => "Goals",
         Route::TasksRoute {} => "Tasks",
+        Route::TaskDetailRoute { .. } => "Task",
         Route::VaultRoute {} => "Vault",
         Route::LocationsRoute {} => "Locations",
         Route::InventoryRoute {} => "Inventory",
