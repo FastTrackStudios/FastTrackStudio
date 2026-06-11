@@ -118,7 +118,7 @@ architect-auth = { workspace = true, features = ["full"] }
 vox = { workspace = true, features = ["transport-websocket"] }
 futures = { workspace = true }
 attachments-proto = { workspace = true }
-architect = { workspace = true }
+architect = { workspace = true, features = ["local"] }
 chrono = { workspace = true }
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
