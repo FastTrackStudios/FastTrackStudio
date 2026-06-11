@@ -193,6 +193,12 @@ pub use layer::{
 pub mod resource;
 pub use resource::{Resource, Scope, SharedResource};
 
+// Resource handles — keep megabyte-scale payloads server-side behind a
+// typed, facet-serializable id (`RawHandle` on the wire, `Handle<T>` +
+// `HandleRegistry<T>` in the backend). Wasm-clean, vox-free.
+pub mod handle;
+pub use handle::{Handle, HandleRegistry, RawHandle};
+
 // Dependency planner — topologically order a declared layer graph, with
 // cycle / conflict / missing-provider diagnostics. Pure data.
 pub mod plan;
