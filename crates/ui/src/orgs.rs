@@ -71,6 +71,17 @@ pub fn create_target(sel: &OrgSelection, orgs: &[OrgMeta]) -> String {
     }
 }
 
+/// The home org's slug (falls back to the first hosted org, then to
+/// an empty string before discovery resolves).
+#[must_use]
+pub fn home_slug(orgs: &[OrgMeta]) -> String {
+    orgs.iter()
+        .find(|o| o.is_home)
+        .or_else(|| orgs.first())
+        .map(|o| o.slug.clone())
+        .unwrap_or_default()
+}
+
 // ── discovery ───────────────────────────────────────────────────────
 
 #[cfg(target_arch = "wasm32")]

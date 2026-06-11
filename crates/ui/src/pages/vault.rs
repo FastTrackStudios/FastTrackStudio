@@ -75,7 +75,14 @@ struct TreeNode {
 
 #[component]
 pub fn VaultView() -> Element {
-    let mut files = use_resource(|| async move { fetch_folder_index().await });
+    // The vault lives in the home org; resolve its slug from the
+    // discovered org list (re-runs when discovery lands).
+    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let mut files = use_resource(move || {
+        let slug = home();
+        async move { fetch_folder_index(slug).await }
+    });
 
     // Open file + its editing state.
     let mut selected = use_signal(|| None::<String>);
@@ -113,7 +120,7 @@ pub fn VaultView() -> Element {
         spawn(async move {
             status.set(String::new());
             conflict.set(None);
-            match fetch_file(meta.path.clone()).await {
+            match fetch_file(home(), meta.path.clone()).await {
                 Ok(text) => {
                     saved_text.set(text.clone());
                     state.set(EditorState::new(text));
@@ -132,7 +139,7 @@ pub fn VaultView() -> Element {
         move |(path, prev_sha, parent): (String, String, Option<String>)| {
             spawn(async move {
                 status.set("Moving…".to_owned());
-                match move_to_folder(path, parent, prev_sha).await {
+                match move_to_folder(home(), path, parent, prev_sha).await {
                     Ok(()) => {
                         status.set("Moved".to_owned());
                         move_target.set(None);
@@ -153,7 +160,7 @@ pub fn VaultView() -> Element {
         let text = state.peek().doc.to_string();
         spawn(async move {
             status.set("Saving…".to_owned());
-            match save_file(path, text.clone(), cur_sha, force).await {
+            match save_file(home(), path, text.clone(), cur_sha, force).await {
                 SaveOutcome::Saved(new_sha) => {
                     sha.set(Some(new_sha));
                     saved_text.set(text);
@@ -189,13 +196,14 @@ pub fn VaultView() -> Element {
         let parent = create_parent.peek().clone();
         spawn(async move {
             status.set("Creating…".to_owned());
-            match create_new_file(name.clone()).await {
+            match create_new_file(home(), name.clone()).await {
                 Ok(new_sha) => {
                     new_name.set(String::new());
                     create_parent.set(None);
                     let mut open_sha = new_sha;
                     if let Some(parent) = parent {
-                        match move_to_folder(name.clone(), Some(parent), open_sha.clone()).await {
+                        match move_to_folder(home(), name.clone(), Some(parent), open_sha.clone()).await
+                        {
                             Ok(()) => {}
                             Err(e) => status.set(format!("Filed, but move failed: {e}")),
                         }
@@ -591,8 +599,8 @@ fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
 }
 
 /// Frontmatter-derived page index for the folder tree.
-async fn fetch_folder_index() -> Result<Vec<PageMeta>, String> {
-    let client = crate::vox_clients::vault_client().await?;
+async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, String> {
+    let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
         let idx = client
@@ -619,8 +627,8 @@ async fn fetch_folder_index() -> Result<Vec<PageMeta>, String> {
 }
 
 /// Read one file's bytes as UTF-8 text.
-async fn fetch_file(path: String) -> Result<String, String> {
-    let client = crate::vox_clients::vault_client().await?;
+async fn fetch_file(slug: String, path: String) -> Result<String, String> {
+    let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
         let bytes = client
@@ -640,12 +648,13 @@ async fn fetch_file(path: String) -> Result<String, String> {
 /// last-known-server hash (`None` → create-only); `force`
 /// writes unconditionally.
 async fn save_file(
+    slug: String,
     path: String,
     text: String,
     prev_sha: Option<String>,
     force: bool,
 ) -> SaveOutcome {
-    let client = match crate::vox_clients::vault_client().await {
+    let client = match crate::vox_clients::vault_client(&slug).await {
         Ok(c) => c,
         Err(e) => return SaveOutcome::Failed(e),
     };
@@ -688,11 +697,12 @@ async fn save_file(
 /// via the server-side frontmatter splice. `prev_sha` empty →
 /// unconditional.
 async fn move_to_folder(
+    slug: String,
     path: String,
     parent: Option<String>,
     prev_sha: String,
 ) -> Result<(), String> {
-    let client = crate::vox_clients::vault_client().await?;
+    let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
         use vault_proto::IfMatch;
@@ -715,8 +725,8 @@ async fn move_to_folder(
 }
 
 /// Create a new empty file (create-only). Returns its sha.
-async fn create_new_file(path: String) -> Result<String, String> {
-    let client = crate::vox_clients::vault_client().await?;
+async fn create_new_file(slug: String, path: String) -> Result<String, String> {
+    let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
         use vault_proto::IfMatch;

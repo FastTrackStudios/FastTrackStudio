@@ -16,11 +16,15 @@ use goal::Goal;
 use goal::GoalServiceClient;
 use uuid::Uuid;
 
-use crate::vox_session::vox_url;
 
 #[component]
 pub fn GoalsView() -> Element {
-    let goals = use_resource(|| async move { fetch_goals().await });
+    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let goals = use_resource(move || {
+        let slug = home();
+        async move { fetch_goals(slug).await }
+    });
 
     // Current cycle highlight — drives the "you're here" pill.
     let today = chrono::Local::now().date_naive();
@@ -313,35 +317,15 @@ fn first_line(body: &str) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-async fn fetch_goals() -> Result<Vec<Goal>, String> {
-    let url = build_org_vox_url();
-    if url.is_empty() {
-        return Err("no vox URL configured".to_owned());
-    }
+async fn fetch_goals(slug: String) -> Result<Vec<Goal>, String> {
     #[cfg(target_arch = "wasm32")]
     {
-        use vox_core::acceptor_on;
-        let link = vox_websocket::WsLink::connect(&url)
-            .await
-            .map_err(|e| format!("ws connect: {e:?}"))?;
-        let client: GoalServiceClient = acceptor_on(link)
-            .on_connection(())
-            .establish::<GoalServiceClient>()
-            .await
-            .map_err(|e| format!("establish: {e:?}"))?;
+        let client: GoalServiceClient = crate::vox_clients::establish_for(&slug).await?;
         client.list().await.map_err(|e| format!("list: {e:?}"))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let _ = slug;
         Err("native client not wired yet".to_owned())
     }
-}
-
-fn build_org_vox_url() -> String {
-    let base = vox_url();
-    if base.is_empty() {
-        return String::new();
-    }
-    let trimmed = base.trim_end_matches("/vox").trim_end_matches('/');
-    format!("{trimmed}/org/codywright/vox")
 }

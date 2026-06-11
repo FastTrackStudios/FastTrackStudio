@@ -6,13 +6,12 @@ use dioxus::prelude::*;
 use dioxus_router::Navigator;
 use fts_ui::prelude::*;
 
-use crate::data::Organization;
 use crate::nav::{NavTab, nav_tabs, tabs_match};
 use crate::routes::Route;
 use crate::shell::org_switcher::OrgSwitcher;
 
 #[component]
-pub fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
+pub fn DesktopSidebar(current: Route) -> Element {
     let nav = use_navigator();
     rsx! {
         Sidebar { class: "flex h-screen w-72 flex-col overflow-hidden",
@@ -48,7 +47,7 @@ pub fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
                 div { class: "px-1 pb-1 pt-1",
                     SectionHeader { label: "Organization", size: SectionHeaderSize::Small }
                 }
-                OrgSwitcher { orgs, compact: false }
+                OrgSwitcher { compact: false }
             }
         }
     }

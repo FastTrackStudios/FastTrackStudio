@@ -10,17 +10,22 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
-use crate::data::{Organization, organizations};
-use crate::orgs::{OrgMeta, OrgSelection, fetch_orgs};
+use crate::orgs::{OrgMeta, OrgSelection, fetch_orgs, home_slug};
 use crate::routes::Route;
 use crate::theming::{OrgThemeOverrides, ProjectThemeOverrides, state_from_preset_name};
 
 #[component]
 pub fn App() -> Element {
-    let orgs = organizations();
-    let initial_org = orgs[0].clone();
-    let active_org: Signal<Organization> = use_context_provider(move || Signal::new(initial_org));
-
+    // App-wide architect registries (notifications + reactivity) and
+    // the shared per-org connection: one `Connection<vox::Caller>` for
+    // the active org (the selected one, or home under "All"),
+    // re-established when the switcher moves. Atom-pattern hooks build
+    // typed clients from this caller; multi-org fan-out keeps using
+    // `vox_clients::caller_for` per slug (same cached sockets).
+    //
+    // Note: the connect closure reads the selection + org list
+    // signals synchronously — that's what re-triggers it (see
+    // `use_connect_reactive`'s dependency contract).
     // Multi-org data selection: which org(s) the data views load from.
     // Defaults to `All` (every hosted org); the org switcher drives it.
     let _org_selection: Signal<OrgSelection> =
@@ -47,19 +52,19 @@ pub fn App() -> Element {
             map: Signal::new(HashMap::<Uuid, String>::new()),
         });
 
-    let mut theme_state = use_signal(|| {
-        let org = active_org.read().clone();
-        state_from_preset_name(org.theme_preset, ThemeMode::Dark)
+    // Theme follows the active org (the selected one, or home under
+    // "All"), keyed by slug in the overrides map. Until discovery
+    // resolves, the default preset holds.
+    let theme_org_slug = use_memo(move || match &*_org_selection.read() {
+        OrgSelection::One(slug) => slug.clone(),
+        OrgSelection::All => home_slug(&org_list.read()),
     });
 
+    let mut theme_state = use_signal(|| state_from_preset_name("", ThemeMode::Dark));
+
     use_effect(move || {
-        let org = active_org.read().clone();
-        let resolved_name: String = org_overrides
-            .map
-            .read()
-            .get(org.id)
-            .cloned()
-            .unwrap_or_else(|| org.theme_preset.to_string());
+        let slug = theme_org_slug();
+        let resolved_name: String = org_overrides.map.read().get(&slug).cloned().unwrap_or_default();
         let preset = theme_preset(&resolved_name).unwrap_or_else(default_theme_preset);
         theme_state.write().set_preset(preset);
     });
@@ -70,6 +75,22 @@ pub fn App() -> Element {
             theme_state.write().set_mode(mode);
         }
     });
+
+    let _conn: architect::Connection<vox_core::Caller> =
+        architect::use_app_reactive(move || {
+            let slug = match &*_org_selection.read() {
+                OrgSelection::One(slug) => slug.clone(),
+                OrgSelection::All => home_slug(&org_list.read()),
+            };
+            async move {
+                if slug.is_empty() {
+                    // Discovery hasn't resolved yet — stay Connecting;
+                    // the org-list signal write re-runs this closure.
+                    return Err("awaiting org discovery".to_owned());
+                }
+                crate::vox_clients::caller_for(&slug).await
+            }
+        });
 
     rsx! {
         ThemeProvider { state: theme_state,

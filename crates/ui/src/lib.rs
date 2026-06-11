@@ -7,7 +7,6 @@
 
 pub mod app;
 pub mod chrome;
-pub mod data;
 pub mod feeds;
 pub mod forge_views;
 pub mod gantt_adapt;

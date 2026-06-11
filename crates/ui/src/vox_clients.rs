@@ -55,36 +55,63 @@ fn org_ws_url(slug: &str) -> String {
     format!("{trimmed}/org/{slug}/vox")
 }
 
+/// One shared [`vox_core::Caller`] per org — the handle every typed
+/// client is built from. On wasm the connection root (a liveness-only
+/// `NoopClient`) is cached per slug: one socket per org, no matter how
+/// many services a page touches. The server's per-org `LayerRouter`
+/// dispatches every service on that one connection.
+///
+/// This also backs the app root's `Connection<Caller>`
+/// (`architect::use_app_reactive` over the active org) — pages that
+/// migrate to atom hooks build clients from the shared caller; legacy
+/// `feeds::*` fns ride the same socket through [`establish_for`].
+pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+
+        // The cached NoopClient is the connection's liveness anchor —
+        // dropping the last caller closes the socket, so the cache
+        // holds the root for the page's lifetime. Typed clients built
+        // from the caller are virtual views (no session handle).
+        thread_local! {
+            static ROOTS: RefCell<HashMap<String, vox_core::NoopClient>> =
+                RefCell::new(HashMap::new());
+        }
+        if let Some(caller) =
+            ROOTS.with(|m| m.borrow().get(slug).map(|root| root.caller.clone()))
+        {
+            return Ok(caller);
+        }
+        let root = establish_at::<vox_core::NoopClient>(&org_ws_url(slug)).await?;
+        let caller = root.caller.clone();
+        ROOTS.with(|m| m.borrow_mut().insert(slug.to_owned(), root));
+        Ok(caller)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Native has no cache (mirrors the old per-call behavior); the
+        // root is returned through the caller it carries — callers that
+        // need liveness across awaits should hold the typed client from
+        // `establish_for` instead.
+        let root = establish_at::<vox_core::NoopClient>(&org_ws_url(slug)).await?;
+        Ok(root.caller.clone())
+    }
+}
+
 /// Establish *any* service client against a specific org's vox endpoint.
-/// On wasm, cached per `(service type, slug)` so the multi-org fetchers
-/// reuse one socket per org instead of re-dialing on every render. This
-/// is what backs the org switcher's "All" mode (fan out across slugs)
-/// and single-org mode alike.
+/// Wasm: a cheap typed view over the org's one cached connection
+/// ([`caller_for`]) — previously this cached a socket per
+/// `(service, org)`. Native: per-call establish, as before.
 pub async fn establish_for<C>(slug: &str) -> Result<C, String>
 where
     C: vox_core::FromVoxSession + Clone + 'static,
 {
     #[cfg(target_arch = "wasm32")]
     {
-        use std::any::{Any, TypeId};
-        use std::cell::RefCell;
-        use std::collections::HashMap;
-
-        thread_local! {
-            static CACHE: RefCell<HashMap<(TypeId, String), Box<dyn Any>>> =
-                RefCell::new(HashMap::new());
-        }
-        let key = (TypeId::of::<C>(), slug.to_owned());
-        if let Some(c) = CACHE.with(|m| {
-            m.borrow()
-                .get(&key)
-                .and_then(|b| b.downcast_ref::<C>().cloned())
-        }) {
-            return Ok(c);
-        }
-        let client = establish_at::<C>(&org_ws_url(slug)).await?;
-        CACHE.with(|m| m.borrow_mut().insert(key, Box::new(client.clone())));
-        Ok(client)
+        let caller = caller_for(slug).await?;
+        Ok(C::from_vox_session(caller, None))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -92,20 +119,18 @@ where
     }
 }
 
-/// The home org's `TaskServiceClient`, established (and on wasm cached)
-/// via [`establish_for`]. Org is the `codywright` home org until the
-/// org-context signal threads through here.
-pub async fn task_client() -> Result<task::TaskServiceClient, String> {
-    establish_for::<task::TaskServiceClient>("codywright").await
+/// An org's `TaskServiceClient` — a view over the org's shared caller.
+pub async fn task_client(slug: &str) -> Result<task::TaskServiceClient, String> {
+    establish_for::<task::TaskServiceClient>(slug).await
 }
 
-/// The home org's `ProjectServiceClient`.
-pub async fn project_client() -> Result<project::ProjectServiceClient, String> {
-    establish_for::<project::ProjectServiceClient>("codywright").await
+/// An org's `ProjectServiceClient`.
+pub async fn project_client(slug: &str) -> Result<project::ProjectServiceClient, String> {
+    establish_for::<project::ProjectServiceClient>(slug).await
 }
 
-/// The home org's `VaultSyncClient` — backs the `/vault` route (manifest,
+/// An org's `VaultSyncClient` — backs the `/vault` route (manifest,
 /// read, conditional write over the same long-lived socket).
-pub async fn vault_client() -> Result<vault_proto::VaultSyncClient, String> {
-    establish_for::<vault_proto::VaultSyncClient>("codywright").await
+pub async fn vault_client(slug: &str) -> Result<vault_proto::VaultSyncClient, String> {
+    establish_for::<vault_proto::VaultSyncClient>(slug).await
 }
