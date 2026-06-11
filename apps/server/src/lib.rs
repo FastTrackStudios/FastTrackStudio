@@ -1177,7 +1177,14 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.slug.clone(),
                 org.issue_links_path.clone(),
             )),
-        );
+        )
+        // Live task changes — the `#[subscribe]` stream sibling of
+        // `TaskService`. The hub lives on the raw `TaskBackend`, so
+        // every write path publishes into it: vox calls through the
+        // forge-sync decorator above (it delegates to `org.tasks`),
+        // CLI/agent mutations over this same router, and the forge
+        // poll loop (it writes via `org.tasks.update`).
+        .merge(task::task_service_stream_layer(org.tasks.clone()));
 
     // Entity-CRUD services: locations + the mealplan trio.
     router = router

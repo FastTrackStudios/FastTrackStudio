@@ -48,6 +48,10 @@ vault = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+# The events-stream integration test serves the backend over the
+# in-process vox link (`architect::LocalServer`, native-only).
+architect = { workspace = true, features = ["local"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
