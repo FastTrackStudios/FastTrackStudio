@@ -249,6 +249,7 @@ name = "architect-auth"
 version = "0.1.0"
 dependencies = [
  "auth",
+ "auth-client",
  "auth-db",
  "auth-proto",
  "axum",
@@ -467,6 +468,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "auth-client"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "vox",
+]
+
+[[package]]
 name = "auth-db"
 version = "0.1.0"
 dependencies = [
@@ -480,11 +492,14 @@ dependencies = [
 name = "auth-native-tests"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "auth",
+ "auth-client",
  "chrono",
  "sea-orm",
  "sea-orm-migration",
  "tokio",
+ "vox",
 ]
 
 [[package]]

@@ -1194,8 +1194,8 @@ pub mod email_password {
     use crate::{
         ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword,
         CompletePasswordReset, CreateEmailPasswordUser, DeleteUser, ListAccounts, ListSessions,
-        RequestEmailVerification, RequestPasswordReset, RevokeOtherSessions, RevokeSession,
-        SignInEmailPassword, VerificationToken, VerifyEmail,
+        RefreshSession, RequestEmailVerification, RequestPasswordReset, RevokeOtherSessions,
+        RevokeSession, SignInEmailPassword, VerificationToken, VerifyEmail,
         commands::{CurrentSession, SignOut},
         config::CaptchaFlow,
         crypto::{generate_token, hash_password, hash_token, verify_password},
@@ -1403,6 +1403,34 @@ pub mod email_password {
             self.storage
                 .deactivate_session_by_token_hash(&token_hash)
                 .await
+        }
+
+        // r[impl auth.sessions.refresh]
+        // r[impl auth.sessions.refresh-rotation]
+        // r[impl auth.sessions.refresh-invalid]
+        pub async fn refresh_session(
+            &self,
+            input: RefreshSession,
+        ) -> Result<AuthSessionBundle, AuthFlowError> {
+            let bundle = self
+                .current_session(CurrentSession { token: input.token })
+                .await?;
+            // Issue the replacement before deactivating the old session
+            // — a crash in between leaves an extra live session, never
+            // a locked-out user.
+            let refreshed = self
+                .issue_session(
+                    bundle.user,
+                    bundle.session.ip_address.clone(),
+                    bundle.session.user_agent.clone(),
+                    bundle.session.impersonated_by,
+                    bundle.session.active_organization_id,
+                )
+                .await?;
+            self.storage
+                .deactivate_session_by_id(bundle.session.id)
+                .await?;
+            Ok(refreshed)
         }
 
         // r[impl auth.sessions.list]
@@ -1719,6 +1747,26 @@ pub mod email_password {
     where
         S: AuthStorage,
     {
+        async fn sign_up_email_password(
+            &self,
+            input: auth_proto::SignUpEmailPassword,
+        ) -> Result<AuthSessionBundle, AuthFlowError> {
+            ArchitectAuth::create_email_password_user(
+                self,
+                CreateEmailPasswordUser {
+                    email: input.email,
+                    password: input.password,
+                    name: input.name,
+                    username: input.username,
+                    image: input.image,
+                    metadata_json: input.metadata_json,
+                    ip_address: input.ip_address,
+                    user_agent: input.user_agent,
+                },
+            )
+            .await
+        }
+
         async fn sign_in_email_password(
             &self,
             input: SignInEmailPassword,
@@ -1728,6 +1776,16 @@ pub mod email_password {
 
         async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
             ArchitectAuth::current_session(self, CurrentSession { token }).await
+        }
+
+        async fn refresh_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
+            ArchitectAuth::refresh_session(self, RefreshSession { token }).await
+        }
+
+        async fn whoami(&self, token: String) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            ArchitectAuth::current_session(self, CurrentSession { token })
+                .await
+                .map(|bundle| bundle.user)
         }
 
         async fn sign_out(&self, token: String) -> Result<(), AuthFlowError> {

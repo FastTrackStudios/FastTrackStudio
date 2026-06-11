@@ -24,6 +24,7 @@ members = [
     "features/auth/auth",
     "features/auth/auth-proto",
     "features/auth/auth-db",
+    "features/auth/auth-client",
     "features/auth/tests/native",
     "crates/architect-cli",
     "libs/crdt",
@@ -58,6 +59,7 @@ default-members = [
     "features/auth/auth",
     "features/auth/auth-proto",
     "features/auth/auth-db",
+    "features/auth/auth-client",
     "features/auth/tests/native",
     "libs/crdt",
     "libs/crdt-seaorm",
@@ -185,6 +187,7 @@ architect-auth = { path = "features/auth/architect-auth" }
 auth = { path = "features/auth/auth" }
 auth-proto = { path = "features/auth/auth-proto" }
 auth-db = { path = "features/auth/auth-db" }
+auth-client = { path = "features/auth/auth-client" }
 
 # Auth's crypto + token stack.
 argon2 = "0.5"

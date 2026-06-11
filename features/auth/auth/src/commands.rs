@@ -110,6 +110,11 @@ pub struct SignOut {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefreshSession {
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListSessions {
     pub session_token: String,
 }

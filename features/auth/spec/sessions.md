@@ -38,6 +38,21 @@ r[auth.sessions.signout-idempotence]
 `sign_out` for an unknown, expired, or already inactive token MUST NOT
 reveal token existence.
 
+r[auth.sessions.refresh]
+`refresh_session` with a valid, active, unexpired token MUST issue a
+fresh session for the same user with a new expiry, preserving the
+original session's context metadata (IP address, user agent,
+impersonation, active organization).
+
+r[auth.sessions.refresh-rotation]
+`refresh_session` MUST rotate the token: the replacement session gets a
+new token, and the refreshed session MUST be deactivated so its token
+cannot be used again.
+
+r[auth.sessions.refresh-invalid]
+`refresh_session` with an unknown, expired, or inactive token MUST fail
+with the same errors as `current_session` and MUST NOT issue a session.
+
 r[auth.sessions.context]
 Session creation SHOULD persist optional IP address and user-agent
 metadata when provided by the caller.

@@ -11,6 +11,7 @@ pub mod member;
 pub mod organization;
 pub mod organization_role;
 pub mod passkey;
+pub mod service;
 pub mod session;
 pub mod team;
 pub mod team_member;
@@ -89,6 +90,20 @@ pub struct SignInEmailPassword {
     pub user_agent: Option<String>,
 }
 
+/// Wire shape of `ArchitectAuth::create_email_password_user` — the
+/// sign-up command, minus nothing: same fields, RPC-serializable.
+#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+pub struct SignUpEmailPassword {
+    pub email: String,
+    pub password: String,
+    pub name: Option<String>,
+    pub username: Option<String>,
+    pub image: Option<String>,
+    pub metadata_json: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, ::facet::Facet)]
 pub struct AuthSessionBundle {
     pub user: AuthUser,
@@ -96,14 +111,13 @@ pub struct AuthSessionBundle {
     pub token: String,
 }
 
-#[cfg_attr(feature = "vox", vox::service)]
-pub trait AuthService {
-    async fn sign_in_email_password(
-        &self,
-        input: SignInEmailPassword,
-    ) -> Result<AuthSessionBundle, AuthFlowError>;
-
-    async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError>;
-
-    async fn sign_out(&self, token: String) -> Result<(), AuthFlowError>;
-}
+// The session RPC surface. The prelude glob carries the trait plus the
+// vox-gated client/dispatcher/descriptor and the `AuthServiceService` /
+// `auth_service_layer` / `auth_service_serve` mount verbs; the explicit
+// re-exports preserve the names downstream code mounted with before the
+// trait moved into `service` (`AuthServiceDispatcher::new(..)` +
+// `auth_service_service_descriptor()`).
+pub use service::AUTHORIZATION_METADATA_KEY;
+pub use service::prelude::*;
+#[cfg(feature = "vox")]
+pub use service::{AuthServiceDispatcher, auth_service_service_descriptor};
