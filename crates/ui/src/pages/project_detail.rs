@@ -341,6 +341,10 @@ pub fn ProjectDetailView(id: String) -> Element {
                     }
                 }
 
+                // Who's in this project right now — live presence,
+                // filtered from the org-wide channel by project id.
+                crate::presence::ProjectPresenceStrip { project_id: p.id }
+
                 // ── Stat tiles ──────────────────────────────────────────
                 div { class: "grid grid-cols-2 gap-3 sm:grid-cols-5",
                     StatTile { label: "Tasks", value: "{total}" }
