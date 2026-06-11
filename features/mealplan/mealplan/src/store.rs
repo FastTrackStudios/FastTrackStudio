@@ -63,6 +63,18 @@ impl Store {
         }
     }
 
+    /// Swap in a cookbook store rooted elsewhere. The default
+    /// from [`Store::new`] walks the *vault* root, but on the
+    /// standard org layout recipes live under the wiki root
+    /// (`<org>/wiki/Knowledge/Cookbook/`) — pass the same
+    /// store the `CookbookService` mounts so `can_cook` and
+    /// cook-deductions resolve the same recipe paths.
+    #[must_use]
+    pub fn with_cookbook(mut self, cookbook: CookbookStore) -> Self {
+        self.cookbook = cookbook;
+        self
+    }
+
     #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()

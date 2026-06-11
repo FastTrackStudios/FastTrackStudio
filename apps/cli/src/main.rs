@@ -17,6 +17,7 @@
 //! 2. `TASK_VOX_URL` env var (loaded from `.env` if present).
 //! 3. `ws://127.0.0.1:9090/vox` default.
 
+mod mealprep;
 mod org_ctx;
 mod session_store;
 mod shared;
@@ -177,6 +178,10 @@ enum Commands {
     /// barcode resolution.
     #[command(subcommand)]
     Pantry(PantryCmd),
+    /// Shopping lists — auto-populate from recipe shortages /
+    /// low stock / expiry; mark-purchased restocks the pantry.
+    #[command(subcommand)]
+    Shopping(mealprep::ShoppingCmd),
     /// Body metrics — weight / body-fat / measurements log.
     #[command(subcommand)]
     Body(BodyCmd),
@@ -746,6 +751,18 @@ enum RecipeCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Author a new `.cook` recipe (validates the cooklang by
+    /// parsing before anything is written).
+    Create(mealprep::RecipeCreateArgs),
+    /// Replace an existing recipe's cooklang source (validates
+    /// by parsing first).
+    Update(mealprep::RecipeUpdateArgs),
+    /// Rendered view — ingredients / cookware / steps /
+    /// servings (`--json` for the wire shape).
+    Show(mealprep::RecipeShowArgs),
+    /// Fulfillment check against the pantry: have / missing /
+    /// substitution suggestions.
+    CanCook(mealprep::CanCookArgs),
     Delete {
         path: String,
         #[arg(long, short = 'y')]
@@ -832,6 +849,10 @@ enum MealCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Put the meal on its date's day plan as a `Meal` block
+    /// (`task meal schedule <meal> 17:30-18:30`). Overlapping
+    /// blocks are rejected unless `--force`.
+    Schedule(mealprep::MealScheduleArgs),
     Rename {
         target: String,
         new_path: String,
@@ -3979,6 +4000,9 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Pantry(cmd) => {
             return Box::pin(run_pantry(cmd)).await;
+        }
+        Commands::Shopping(cmd) => {
+            return Box::pin(mealprep::run_shopping(cmd)).await;
         }
         Commands::Body(cmd) => {
             return Box::pin(run_body(cmd)).await;
@@ -14447,6 +14471,10 @@ async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
                 }
             }
         }
+        RecipeCmd::Create(a) => return mealprep::recipe_create(a).await,
+        RecipeCmd::Update(a) => return mealprep::recipe_update(a).await,
+        RecipeCmd::Show(a) => return mealprep::recipe_show(a).await,
+        RecipeCmd::CanCook(a) => return mealprep::recipe_can_cook(a).await,
         RecipeCmd::Delete {
             path,
             yes,
@@ -14579,6 +14607,8 @@ async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
             let client = connect_mealplan_client(&u).await?;
             let scheduled_for = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
                 .map_err(|e| eyre::eyre!("--date: {e}"))?;
+            // Accept recipe display names as well as `.cook` paths.
+            let recipe = mealprep::resolve_recipe_refs(&u, recipe).await?;
             let new_meal = mealplan::Meal {
                 id: uuid::Uuid::nil(),
                 path: String::new(),
@@ -14667,6 +14697,7 @@ async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
                 .map_err(|e| eyre::eyre!("skip: {e:?}"))?;
             println!("skipped {}  ({})", skipped.name, skipped.path);
         }
+        MealCmd::Schedule(a) => return mealprep::meal_schedule(a).await,
         MealCmd::Rename {
             target,
             new_path,
