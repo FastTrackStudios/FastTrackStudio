@@ -59,6 +59,9 @@ threads = { workspace = true, features = ["vox"] }
 cookbook = { workspace = true, features = ["vox"] }
 mealplan = { workspace = true, features = ["vox"] }
 pantry = { workspace = true, features = ["vox"] }
+# `task plan|next|brief` — day-plan / template / cal-event /
+# booking clients over the same per-org vox routing.
+scheduling-proto = { workspace = true, features = ["vox"] }
 # Fitness suite — body metrics, exercise library, workout
 # routines+sessions, food intake. RPC clients only.
 body = { workspace = true, features = ["vox"] }

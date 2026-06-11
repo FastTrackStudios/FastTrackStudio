@@ -17,7 +17,9 @@
 //! 2. `TASK_VOX_URL` env var (loaded from `.env` if present).
 //! 3. `ws://127.0.0.1:9090/vox` default.
 
+mod brief;
 mod org_ctx;
+mod plan;
 mod session_store;
 mod shared;
 
@@ -190,6 +192,18 @@ enum Commands {
     /// Food intake log — daily calorie + macro tracking.
     #[command(subcommand)]
     Intake(IntakeCmd),
+    /// Day-plan schedule surface — show / edit blocks, assign
+    /// tasks, materialize from templates, plan-vs-actual diff.
+    /// All logic in `plan.rs`.
+    #[command(subcommand)]
+    Plan(plan::PlanCmd),
+    /// What should I be doing right now — current block + time
+    /// remaining + next block (falls back to the next due task).
+    Next(plan::NextArgs),
+    /// Morning digest — today's blocks + events, due/overdue +
+    /// in-progress tasks, active timer, blocked agent tasks, open
+    /// inbox, meals + bookings. All logic in `brief.rs`.
+    Brief(brief::BriefArgs),
 }
 
 #[derive(Subcommand)]
@@ -3991,6 +4005,15 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Intake(cmd) => {
             return Box::pin(run_intake(cmd)).await;
+        }
+        Commands::Plan(cmd) => {
+            return Box::pin(plan::run_plan(cmd)).await;
+        }
+        Commands::Next(args) => {
+            return Box::pin(plan::run_next(args)).await;
+        }
+        Commands::Brief(args) => {
+            return Box::pin(brief::run_brief(args)).await;
         }
     }
     Ok(())
