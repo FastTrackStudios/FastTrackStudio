@@ -5,8 +5,8 @@
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use crate::TaskInfo;
 use crate::model::{Priority, Status};
+use crate::TaskInfo;
 
 use super::palette::{priority_pill, priority_rail};
 

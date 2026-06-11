@@ -4,7 +4,7 @@
 
 use uuid::Uuid;
 
-use crate::{TaskInfo, TaskMutation, model::Status};
+use crate::{model::Status, TaskInfo, TaskMutation};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TaskState {

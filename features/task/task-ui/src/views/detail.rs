@@ -2,14 +2,20 @@
 //! due date. Save emits an `Update` mutation; per-field
 //! checkbox / status flips emit the cheaper `SetStatus` /
 //! `SetPriority` paths.
+//!
+//! Built on fts-ui's `Sheet` (overlay + escape-to-close + close
+//! button come from the primitive). The richer read surface
+//! (markdown body, workflow, subtasks, session history) lives
+//! in [`super::detail_full::TaskDetailFull`] — this sheet stays
+//! the quick-edit path for `/tasks` today.
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Trash2, X};
+use fts_ui::lucide_dioxus::Trash2;
 use fts_ui::prelude::*;
 
+use crate::model::{Priority, Status};
 use crate::TaskInfo;
 use crate::TaskMutation;
-use crate::model::{Priority, Status};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TaskDetailProps {
@@ -29,36 +35,24 @@ pub fn TaskDetail(props: TaskDetailProps) -> Element {
     let current_priority = initial.priority_enum();
 
     rsx! {
-        // Tap-to-close backdrop — essential on mobile where the sheet
-        // is full-width; a subtle scrim on desktop.
-        button {
-            r#type: "button",
-            class: "fixed inset-0 z-30 bg-foreground/20 backdrop-blur-[1px]",
-            "aria-label": "Close task detail",
-            onclick: move |_| props.on_close.call(()),
-        }
-        // Right sheet: full-width on phones (capped at 28rem), a fixed
-        // 28rem panel on larger screens. Scrolls when fields overflow.
-        aside { class: "fixed inset-y-0 right-0 z-40 flex h-screen w-full max-w-[28rem] flex-col gap-3 overflow-y-auto border-l border-border bg-background p-4 shadow-2xl sm:w-[28rem]",
-            div { class: "flex items-center justify-between",
+        Sheet {
+            open: true,
+            side: SheetSide::Right,
+            // The primitive caps at sm:max-w-sm; this sheet has
+            // always been 28rem on desktop, full-width on phones.
+            class: "w-full max-w-[28rem] sm:max-w-[28rem] gap-3 overflow-y-auto p-4",
+            on_close: move |()| props.on_close.call(()),
+            div { class: "flex items-center justify-between pr-8",
                 span { class: "text-xs uppercase tracking-wider text-muted-foreground", "Task" }
-                div { class: "flex items-center gap-1",
-                    button {
-                        r#type: "button",
-                        class: "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-                        title: "Delete",
-                        onclick: move |_| {
-                            props.on_event.call(TaskMutation::Delete { id });
-                            props.on_close.call(());
-                        },
-                        Trash2 { size: 14 }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-                        onclick: move |_| props.on_close.call(()),
-                        X { size: 14 }
-                    }
+                button {
+                    r#type: "button",
+                    class: "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+                    title: "Delete",
+                    onclick: move |_| {
+                        props.on_event.call(TaskMutation::Delete { id });
+                        props.on_close.call(());
+                    },
+                    Trash2 { size: 14 }
                 }
             }
             input {
@@ -148,13 +142,13 @@ pub fn TaskDetail(props: TaskDetailProps) -> Element {
             div { class: "flex flex-col gap-2 flex-1 min-h-0",
                 FieldLabel { label: "Notes" }
                 textarea {
-                    class: "flex-1 min-h-0 resize-none rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary",
+                    class: "flex-1 min-h-[8rem] resize-none rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary",
                     placeholder: "Notes…",
                     value: "{details}",
                     oninput: move |e| details.set(e.value()),
                 }
             }
-            div { class: "flex items-center justify-end gap-2 pt-2 border-t border-border",
+            SheetFooter { class: "border-t border-border pt-2 gap-2",
                 Button {
                     variant: ButtonVariant::Ghost,
                     size: ButtonSize::Small,
