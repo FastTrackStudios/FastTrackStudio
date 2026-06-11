@@ -15,6 +15,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use scheduling_proto::{Booking, BookingStatus, EventType};
 
+use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
@@ -39,7 +40,9 @@ pub fn BookingsView() -> Element {
 
     let mut title = use_signal(String::new);
     let mut duration = use_signal(|| 30u16);
-    // Bumped after every mutation to re-run the fetches.
+    // Bumped after every event-type mutation to re-run that fetch. Event
+    // types create via a UNIT-returning feed, so they stay on the
+    // refresh-counter pattern; bookings use the optimistic helper below.
     let mut refresh = use_signal(|| 0u32);
 
     let event_types = use_resource(move || {
@@ -52,13 +55,22 @@ pub fn BookingsView() -> Element {
         }
     });
 
-    let bookings = use_resource(move || {
-        let _ = refresh();
-        async move {
-            match slug() {
-                Some(s) => crate::feeds::fetch_bookings(&s).await,
-                None => Ok(Vec::new()),
-            }
+    // Authoritative bookings list: optimistic delete (cancel), write-through
+    // to the org's scheduler. Initial snapshot loaded below; the only
+    // mutation is cancel, so no refetch on mutate — independent of `refresh`.
+    let bookings = use_optimistic_list::<Booking, _>(|b| b.id.0.clone());
+
+    let bookings_loader = use_resource(move || async move {
+        match slug() {
+            Some(s) => crate::feeds::fetch_bookings(&s).await,
+            None => Ok(Vec::new()),
+        }
+    });
+    use_effect(move || {
+        if let Some(Ok(all)) = &*bookings_loader.read_unchecked() {
+            let mut v = all.clone();
+            v.sort_by(|a, b| a.start_utc.cmp(&b.start_utc));
+            bookings.set(v);
         }
     });
 
@@ -83,14 +95,10 @@ pub fn BookingsView() -> Element {
         None => (Vec::new(), None),
     };
 
-    let (rows, bookings_err): (Vec<Booking>, Option<String>) = match &*bookings.read() {
-        Some(Ok(all)) => {
-            let mut v = all.clone();
-            v.sort_by(|a, b| a.start_utc.cmp(&b.start_utc));
-            (v, None)
-        }
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
+    let rows = bookings.items().read().clone();
+    let bookings_err: Option<String> = match &*bookings_loader.read() {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
     };
 
     rsx! {
@@ -171,7 +179,13 @@ pub fn BookingsView() -> Element {
             } else {
                 div { class: "flex flex-col gap-2",
                     for booking in rows {
-                        BookingRow { key: "{booking.id.0}", booking }
+                        BookingRow {
+                            key: "{booking.id.0}",
+                            state: bookings.state(booking.id.0.clone()),
+                            slug: slug().unwrap_or_default(),
+                            bookings,
+                            booking,
+                        }
                     }
                 }
             }
@@ -203,12 +217,22 @@ fn EventTypeRow(event_type: EventType) -> Element {
     }
 }
 
-/// One booking: attendee + when + status badge.
+/// One booking: attendee + when + status badge + cancel.
+///
+/// `state` reflects optimistic write-through of the cancel: a cancelled
+/// row vanishes instantly; if the write fails the helper restores it and
+/// flags it `Failed` (destructive ring). `Pending` dims it.
 #[component]
-fn BookingRow(booking: Booking) -> Element {
+fn BookingRow(
+    booking: Booking,
+    state: RowState,
+    slug: String,
+    bookings: crate::optimistic::OptimisticList<Booking, String>,
+) -> Element {
     let who = booking.attendee_name.clone();
     let email = booking.attendee_email.clone();
     let when = booking.start_utc.clone();
+    let id = booking.id.0.clone();
 
     let (variant, label) = match booking.status {
         BookingStatus::Pending => (StatusBadgeVariant::Warning, "Pending"),
@@ -218,8 +242,20 @@ fn BookingRow(booking: Booking) -> Element {
         BookingStatus::Completed => (StatusBadgeVariant::Neutral, "Completed"),
     };
 
+    let state_cls = match state {
+        RowState::Settled => "border-border bg-card/40",
+        RowState::Pending => "border-border bg-card/40 opacity-60",
+        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    };
+
+    let cancel = move |_| {
+        let s = slug.clone();
+        let id = id.clone();
+        bookings.delete(id.clone(), async move { crate::feeds::cancel_booking(&s, &id).await });
+    };
+
     rsx! {
-        div { class: "flex items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
+        div { class: "flex items-center gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-1",
                 Text { class: "break-words text-sm font-medium", "{who}" }
                 span { class: "text-[11px] text-muted-foreground", "{email}" }
@@ -227,6 +263,12 @@ fn BookingRow(booking: Booking) -> Element {
             }
             div { class: "flex shrink-0 items-center gap-2",
                 StatusBadge { variant, label: label.to_string() }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: cancel,
+                    "Cancel"
+                }
             }
         }
     }

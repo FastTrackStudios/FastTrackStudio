@@ -9,9 +9,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
-
 use thiserror::Error;
 
 use scheduling_proto::{
@@ -61,7 +58,7 @@ pub enum VaultSchedulerError {
 ///
 /// `Clone` is cheap — every field is shared behind an `Arc` — so the
 /// server can hand a clone to each vox service descriptor it mounts.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct VaultScheduler {
     root: PathBuf,
     /// `Mutex` guards writes; reads grab the lock just to make
@@ -170,18 +167,6 @@ impl VaultScheduler {
             std::fs::remove_file(&abs).map_err(io)?;
         }
         Ok(())
-    }
-}
-
-// The vault scheduler's rpc traits are *sync* (`fn list_day_templates`
-// etc.), so a mounted backend must name a dispatcher that marshals
-// those blocking calls off the async transport thread. `spawn_blocking`
-// is the right choice on the tokio server — same as the task/project
-// vault backends.
-impl HasDispatcher for VaultScheduler {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

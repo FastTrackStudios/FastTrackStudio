@@ -7,8 +7,6 @@
 
 use std::path::{Path, PathBuf};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::Utc;
 use uuid::Uuid;
 use vault::Vault;
@@ -18,7 +16,7 @@ use crate::parse::{looks_like_goal, parse_page};
 use crate::service::{GoalError, GoalService};
 use crate::write::{default_goal_path, write_goal};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, architect::HasDispatcher)]
 pub struct GoalBackend {
     vault_root: PathBuf,
 }
@@ -51,13 +49,6 @@ impl GoalBackend {
             }
         }
         Ok(out)
-    }
-}
-
-impl HasDispatcher for GoalBackend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

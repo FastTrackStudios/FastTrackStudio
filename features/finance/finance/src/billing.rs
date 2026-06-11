@@ -13,8 +13,6 @@
 //! them; the four unimplemented `Invoicing` methods return a backend
 //! error for now).
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::{Datelike, Duration, NaiveDate, TimeZone, Utc};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
@@ -49,7 +47,7 @@ use crate::invoice_from_sessions::{
 };
 
 /// Disk-backed invoicing service for one org.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct FinanceBackend {
     finance: DatabaseConnection,
     timer: DatabaseConnection,
@@ -505,14 +503,6 @@ impl FinanceBackend {
             g.amount_minor += secs * s.rate_cents / 3600;
         }
         Ok(groups.into_values().collect())
-    }
-}
-
-// Sync rpc trait → needs a `spawn_blocking` dispatcher.
-impl HasDispatcher for FinanceBackend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

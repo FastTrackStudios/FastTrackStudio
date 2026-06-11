@@ -19,8 +19,6 @@
 
 use std::sync::Arc;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use org_proto::{CreateOrgRequest, OrgManagementError, OrgManagementService, OrgManifest, OrgRoot};
 
 use crate::{AppState, AuthState, DEFAULT_AUTH_SECRET, build_org_state};
@@ -29,7 +27,7 @@ use crate::{AppState, AuthState, DEFAULT_AUTH_SECRET, build_org_state};
 /// a live [`AppState`]. Holds an `Arc<AppState>` so mutations
 /// to the orgs map land on the same lock the request handlers
 /// read from.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct OrgManagementImpl {
     state: Arc<AppState>,
 }
@@ -40,13 +38,6 @@ impl OrgManagementImpl {
         Self {
             state: Arc::new(state),
         }
-    }
-}
-
-impl HasDispatcher for OrgManagementImpl {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

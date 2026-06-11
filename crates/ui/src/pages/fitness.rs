@@ -22,6 +22,7 @@ use fitness_proto::exercises::Exercise;
 use fitness_proto::intake::IntakeLog;
 use fitness_proto::workouts::WorkoutSession;
 
+use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
@@ -124,15 +125,20 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
     let mut name = use_signal(String::new);
     let mut kind = use_signal(|| "weight".to_string());
     let mut unit = use_signal(|| "kg".to_string());
-    let mut refresh = use_signal(|| 0u32);
 
-    let metrics = use_resource(move || {
-        let _ = refresh();
-        async move {
-            match slug() {
-                Some(s) => crate::feeds::fetch_body_metrics(&s).await,
-                None => Ok(Vec::new()),
-            }
+    // Authoritative list: optimistic create, write-through to the org's
+    // BodyService. Initial snapshot loaded below; no refetch on create.
+    let list = use_optimistic_list::<BodyMetric, _>(|m| m.id);
+
+    let metrics = use_resource(move || async move {
+        match slug() {
+            Some(s) => crate::feeds::fetch_body_metrics(&s).await,
+            None => Ok(Vec::new()),
+        }
+    });
+    use_effect(move || {
+        if let Some(Ok(rows)) = &*metrics.read_unchecked() {
+            list.set(rows.clone());
         }
     });
 
@@ -145,16 +151,28 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
         let k = kind.read().clone();
         let u = unit.read().trim().to_string();
         name.set(String::new());
-        spawn(async move {
-            let _ = crate::feeds::create_body_metric(&s, &n, &k, &u).await;
-            refresh += 1;
+        let provisional = BodyMetric {
+            path: String::new(),
+            id: uuid::Uuid::new_v4(),
+            name: n.clone(),
+            kind: k.clone(),
+            unit: u.clone(),
+            goal: None,
+            tags: fitness_proto::body::Tags::default(),
+            entries: fitness_proto::body::Entries::default(),
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+        };
+        list.create(provisional, async move {
+            crate::feeds::create_body_metric(&s, &n, &k, &u).await
         });
     };
 
-    let (rows, load_err): (Vec<BodyMetric>, Option<String>) = match &*metrics.read() {
-        Some(Ok(all)) => (all.clone(), None),
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
+    let rows = list.items().read().clone();
+    let load_err: Option<String> = match &*metrics.read() {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
     };
 
     rsx! {
@@ -204,7 +222,7 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
             } else {
                 div { class: "flex flex-col gap-2",
                     for m in rows {
-                        BodyRow { key: "{m.id}", metric: m }
+                        BodyRow { key: "{m.id}", state: list.state(m.id), metric: m }
                     }
                 }
             }
@@ -212,16 +230,24 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
     }
 }
 
-/// One body metric: name + kind badge + latest reading.
+/// One body metric: name + kind badge + latest reading. `state`
+/// reflects optimistic write-through: dimmed while `Pending`, a
+/// destructive ring while `Failed`.
 #[component]
-fn BodyRow(metric: BodyMetric) -> Element {
+fn BodyRow(metric: BodyMetric, state: RowState) -> Element {
     let name = metric.name.clone();
     let kind = metric.kind.clone();
     let unit = metric.unit.clone();
     let latest = metric.latest().map(|e| (e.value, e.date));
 
+    let state_cls = match state {
+        RowState::Settled => "border-border bg-card/40",
+        RowState::Pending => "border-border bg-card/40 opacity-60",
+        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    };
+
     rsx! {
-        div { class: "flex items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
+        div { class: "flex items-center gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
                 Text { class: "break-words text-sm font-medium", "{name}" }
                 if let Some((value, date)) = latest {
@@ -241,15 +267,20 @@ fn BodyRow(metric: BodyMetric) -> Element {
 fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
     let mut name = use_signal(String::new);
     let mut category = use_signal(|| "chest".to_string());
-    let mut refresh = use_signal(|| 0u32);
 
-    let exercises = use_resource(move || {
-        let _ = refresh();
-        async move {
-            match slug() {
-                Some(s) => crate::feeds::fetch_exercises(&s).await,
-                None => Ok(Vec::new()),
-            }
+    // Authoritative list: optimistic create, write-through to the org's
+    // ExercisesService. Initial snapshot loaded below; no refetch on create.
+    let list = use_optimistic_list::<Exercise, _>(|e| e.id);
+
+    let exercises = use_resource(move || async move {
+        match slug() {
+            Some(s) => crate::feeds::fetch_exercises(&s).await,
+            None => Ok(Vec::new()),
+        }
+    });
+    use_effect(move || {
+        if let Some(Ok(rows)) = &*exercises.read_unchecked() {
+            list.set(rows.clone());
         }
     });
 
@@ -261,16 +292,35 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
         let Some(s) = slug() else { return };
         let c = category.read().clone();
         name.set(String::new());
-        spawn(async move {
-            let _ = crate::feeds::create_exercise(&s, &n, &c).await;
-            refresh += 1;
+        let provisional = Exercise {
+            path: String::new(),
+            id: uuid::Uuid::new_v4(),
+            name: n.clone(),
+            aliases: fitness_proto::exercises::StringList::default(),
+            description: None,
+            category: c.clone(),
+            primary_muscles: fitness_proto::exercises::StringList::default(),
+            secondary_muscles: fitness_proto::exercises::StringList::default(),
+            equipment: fitness_proto::exercises::StringList::default(),
+            mechanics: None,
+            force: None,
+            instructions: fitness_proto::exercises::StringList::default(),
+            video_url: None,
+            image_url: None,
+            tags: fitness_proto::exercises::StringList::default(),
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+        };
+        list.create(provisional, async move {
+            crate::feeds::create_exercise(&s, &n, &c).await
         });
     };
 
-    let (rows, load_err): (Vec<Exercise>, Option<String>) = match &*exercises.read() {
-        Some(Ok(all)) => (all.clone(), None),
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
+    let rows = list.items().read().clone();
+    let load_err: Option<String> = match &*exercises.read() {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
     };
 
     rsx! {
@@ -309,7 +359,7 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
             } else {
                 div { class: "flex flex-col gap-2",
                     for ex in rows {
-                        ExerciseRow { key: "{ex.id}", exercise: ex }
+                        ExerciseRow { key: "{ex.id}", state: list.state(ex.id), exercise: ex }
                     }
                 }
             }
@@ -317,15 +367,23 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
     }
 }
 
-/// One exercise: name + category badge + equipment summary.
+/// One exercise: name + category badge + equipment summary. `state`
+/// reflects optimistic write-through: dimmed while `Pending`, a
+/// destructive ring while `Failed`.
 #[component]
-fn ExerciseRow(exercise: Exercise) -> Element {
+fn ExerciseRow(exercise: Exercise, state: RowState) -> Element {
     let name = exercise.name.clone();
     let category = exercise.category.clone();
     let equipment = exercise.equipment.join(", ");
 
+    let state_cls = match state {
+        RowState::Settled => "border-border bg-card/40",
+        RowState::Pending => "border-border bg-card/40 opacity-60",
+        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    };
+
     rsx! {
-        div { class: "flex items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
+        div { class: "flex items-center gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
                 Text { class: "break-words text-sm font-medium", "{name}" }
                 if !equipment.is_empty() {

@@ -7,8 +7,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use thiserror::Error;
 
 use inbox_proto::{Inbox, InboxError, InboxItem};
@@ -30,7 +28,7 @@ pub enum VaultInboxError {
 /// Disk-backed [`Inbox`] implementation. `Clone` is cheap — the root
 /// is a `PathBuf` and the lock is `Arc`'d — so the server can hand a
 /// clone to the mounted vox descriptor.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct VaultInbox {
     root: PathBuf,
     write_lock: Arc<Mutex<()>>,
@@ -76,13 +74,6 @@ impl VaultInbox {
             std::fs::remove_file(&abs).map_err(io)?;
         }
         Ok(())
-    }
-}
-
-impl HasDispatcher for VaultInbox {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

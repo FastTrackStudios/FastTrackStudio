@@ -60,33 +60,6 @@ pub use time_block::{
 // the ones they need into an `architect::Services` bundle.
 #[cfg(feature = "vox")]
 pub use service::{
-    bookings::{
-        BookingsClient, BookingsRpc, BookingsRpcDispatcher, Service as BookingsService,
-        layer as bookings_layer, serve as bookings_serve,
-    },
-    calendar_events::{
-        CalendarEventsClient, CalendarEventsRpc, CalendarEventsRpcDispatcher,
-        Service as CalendarEventsService, layer as calendar_events_layer,
-        serve as calendar_events_serve,
-    },
-    day_plans::{
-        DayPlansClient, DayPlansRpc, DayPlansRpcDispatcher, Service as DayPlansService,
-        layer as day_plans_layer, serve as day_plans_serve,
-    },
-    day_templates::{
-        DayTemplatesClient, DayTemplatesRpc, DayTemplatesRpcDispatcher,
-        Service as DayTemplatesService, layer as day_templates_layer, serve as day_templates_serve,
-    },
-    event_types::{
-        EventTypesClient, EventTypesRpc, EventTypesRpcDispatcher, Service as EventTypesService,
-        layer as event_types_layer, serve as event_types_serve,
-    },
-    schedules::{
-        SchedulesClient, SchedulesRpc, SchedulesRpcDispatcher, Service as SchedulesService,
-        layer as schedules_layer, serve as schedules_serve,
-    },
-    slots::{
-        Service as SlotsService, SlotsClient, SlotsRpc, SlotsRpcDispatcher, layer as slots_layer,
-        serve as slots_serve,
-    },
+    bookings::prelude::*, calendar_events::prelude::*, day_plans::prelude::*,
+    day_templates::prelude::*, event_types::prelude::*, schedules::prelude::*, slots::prelude::*,
 };

@@ -107,7 +107,7 @@ email-maildir = { workspace = true }
 email-config = { workspace = true }
 vox = { workspace = true }
 chrono.workspace = true
-architect = { workspace = true, features = ["server-axum", "dispatch-tokio", "local"] }
+architect = { workspace = true, features = ["server", "local"] }
 architect-auth = { workspace = true, features = ["full"] }
 
 [dev-dependencies]

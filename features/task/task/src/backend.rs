@@ -7,8 +7,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::Utc;
 use uuid::Uuid;
 use vault::Vault;
@@ -18,7 +16,7 @@ use crate::parse::{looks_like_task, parse_page};
 use crate::service::{ClaimResult, TaskError, TaskService};
 use crate::write::{default_task_path, write_task};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, architect::HasDispatcher)]
 pub struct TaskBackend {
     vault_root: PathBuf,
     /// Serializes `try_claim` read-check-write so two concurrent
@@ -58,13 +56,6 @@ impl TaskBackend {
             }
         }
         Ok(out)
-    }
-}
-
-impl HasDispatcher for TaskBackend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

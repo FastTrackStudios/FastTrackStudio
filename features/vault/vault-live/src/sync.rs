@@ -37,8 +37,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use architect::vox;
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
@@ -87,7 +85,7 @@ enum Layout {
 ///   `vault_id → path` registry. Unknown ids fail.
 /// - [`Backend::under_parent`]: open-ended, one subdir per
 ///   vault under a shared parent. Unknown ids auto-create.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Backend {
     layout: Layout,
     /// Coarse global write lock. Reads bypass it; writes
@@ -241,13 +239,6 @@ impl Backend {
         let (tx, _rx) = broadcast::channel::<VaultEvent>(256);
         chans.insert(vault_id.to_string(), tx.clone());
         tx
-    }
-}
-
-impl HasDispatcher for Backend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

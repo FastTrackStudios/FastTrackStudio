@@ -16,6 +16,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use inbox_proto::InboxItem;
 
+use crate::optimistic::{use_optimistic_list, OptimisticList, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
@@ -36,14 +37,20 @@ pub fn InboxView() -> Element {
 
     let mut draft = use_signal(String::new);
     let mut show_all = use_signal(|| false);
-    // Bumped after every mutation to re-run the fetch.
-    let mut refresh = use_signal(|| 0u32);
+    // Bumped to force a full refetch — used only when `ProcessReview`
+    // (which mutates the backend directly, bypassing the optimistic
+    // list) hands control back, so the list reconciles with server truth.
+    let mut reload = use_signal(|| 0u32);
     // Focused daily-review ("process") mode + its frozen work queue.
     let mut processing = use_signal(|| false);
     let mut queue = use_signal(Vec::<InboxItem>::new);
 
-    let items = use_resource(move || {
-        let _ = refresh(); // subscribe so mutations re-fetch
+    // Authoritative list: optimistic mutations write through to the org's
+    // InboxClient. Initial snapshot (and post-process reload) loaded below.
+    let list = use_optimistic_list::<InboxItem, _>(|i| i.id.clone());
+
+    let loader = use_resource(move || {
+        let _ = reload(); // subscribe so process-mode exit refetches
         async move {
             match slug() {
                 Some(s) => crate::feeds::fetch_inbox(&s).await,
@@ -51,8 +58,15 @@ pub fn InboxView() -> Element {
             }
         }
     });
+    use_effect(move || {
+        if let Some(Ok(rows)) = &*loader.read_unchecked() {
+            list.set(rows.clone());
+        }
+    });
 
-    // Capture the current draft as a fresh fleeting note.
+    // Capture the current draft as a fresh fleeting note: show it
+    // instantly, then write through (upsert returns unit, so the future
+    // hands back the provisional item it persisted).
     let mut capture = move || {
         let text = draft.read().trim().to_string();
         if text.is_empty() {
@@ -60,71 +74,59 @@ pub fn InboxView() -> Element {
         }
         let Some(s) = slug() else { return };
         draft.set(String::new());
-        spawn(async move {
-            let id = uuid::Uuid::new_v4().to_string();
-            let created = Utc::now().to_rfc3339();
-            let item = InboxItem::capture(id, text, "ui", created);
-            let _ = crate::feeds::upsert_inbox_item(&s, item).await;
-            refresh += 1;
+        let id = uuid::Uuid::new_v4().to_string();
+        let created = Utc::now().to_rfc3339();
+        let item = InboxItem::capture(id, text, "ui", created);
+        list.create(item.clone(), async move {
+            crate::feeds::upsert_inbox_item(&s, item.clone()).await.map(|()| item)
         });
     };
 
     let today = Utc::now().date_naive().to_string();
 
-    let (rows, load_err): (Vec<InboxItem>, Option<String>) = match &*items.read() {
-        Some(Ok(all)) => {
-            let show_all = show_all();
-            let today = today.clone();
-            let visible = all
-                .iter()
-                .filter(|it| {
-                    show_all
-                        || (it.is_open()
-                            && it
-                                .resurface_on
-                                .as_deref()
-                                .is_none_or(|d| d <= today.as_str()))
-                })
-                .cloned()
-                .collect();
-            (visible, None)
-        }
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
+    let all_rows = list.items().read().clone();
+    let load_err: Option<String> = match &*loader.read() {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
     };
 
-    let open_count = match &*items.read() {
-        Some(Ok(all)) => all.iter().filter(|it| it.is_open()).count(),
-        _ => 0,
-    };
+    let show_all_now = show_all();
+    let rows: Vec<InboxItem> = all_rows
+        .iter()
+        .filter(|it| {
+            show_all_now
+                || (it.is_open()
+                    && it
+                        .resurface_on
+                        .as_deref()
+                        .is_none_or(|d| d <= today.as_str()))
+        })
+        .cloned()
+        .collect();
+
+    let open_count = all_rows.iter().filter(|it| it.is_open()).count();
 
     // The daily-review work set: open items whose snooze has elapsed,
     // oldest first (the fetch already sorts). Frozen into `queue` when
     // the user enters process mode so mutations don't reshuffle it.
-    let due_open: Vec<InboxItem> = match &*items.read() {
-        Some(Ok(all)) => all
-            .iter()
-            .filter(|it| {
-                it.is_open()
-                    && it
-                        .resurface_on
-                        .as_deref()
-                        .is_none_or(|d| d <= today.as_str())
-            })
-            .cloned()
-            .collect(),
-        _ => Vec::new(),
-    };
+    let due_open: Vec<InboxItem> = all_rows
+        .iter()
+        .filter(|it| {
+            it.is_open()
+                && it
+                    .resurface_on
+                    .as_deref()
+                    .is_none_or(|d| d <= today.as_str())
+        })
+        .cloned()
+        .collect();
 
     // Agent-proposed captures awaiting one-tap accept/dismiss.
-    let suggested: Vec<InboxItem> = match &*items.read() {
-        Some(Ok(all)) => all
-            .iter()
-            .filter(|it| it.status == InboxItem::STATUS_SUGGESTED)
-            .cloned()
-            .collect(),
-        _ => Vec::new(),
-    };
+    let suggested: Vec<InboxItem> = all_rows
+        .iter()
+        .filter(|it| it.status == InboxItem::STATUS_SUGGESTED)
+        .cloned()
+        .collect();
 
     // Focused review mode takes over the whole page.
     if processing() {
@@ -134,7 +136,7 @@ pub fn InboxView() -> Element {
                 slug,
                 on_exit: move |()| {
                     processing.set(false);
-                    refresh += 1;
+                    reload += 1;
                 },
             }
         };
@@ -216,7 +218,7 @@ pub fn InboxView() -> Element {
                         }
                     }
                     for item in suggested {
-                        SuggestedRow { key: "{item.id}", item, slug, refresh }
+                        SuggestedRow { key: "{item.id}", state: list.state(item.id.clone()), item, slug, list }
                     }
                 }
             }
@@ -229,7 +231,7 @@ pub fn InboxView() -> Element {
             } else {
                 div { class: "flex flex-col gap-2",
                     for item in rows {
-                        InboxRow { key: "{item.id}", item, slug, refresh }
+                        InboxRow { key: "{item.id}", state: list.state(item.id.clone()), item, slug, list }
                     }
                 }
             }
@@ -240,10 +242,15 @@ pub fn InboxView() -> Element {
 /// One row in the review queue. Its own component so each row's action
 /// closures capture just that item by value.
 #[component]
-fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, mut refresh: Signal<u32>) -> Element {
+fn InboxRow(
+    item: InboxItem,
+    slug: Memo<Option<String>>,
+    list: OptimisticList<InboxItem, String>,
+    state: RowState,
+) -> Element {
     // Hold the item in a Copy `Signal` so each action closure captures
-    // only Copy handles (Signal / Memo) and stays cheap to clone into
-    // the multiple `on_click`s.
+    // only Copy handles (Signal / Memo / list) and stays cheap to clone
+    // into the multiple `on_click`s.
     let item = use_signal(|| item);
 
     let snap = item.read();
@@ -256,14 +263,14 @@ fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, mut refresh: Signal<u32
     let resurface = snap.resurface_on.clone();
     drop(snap);
 
-    // Mutate this item's status (process / archive / reopen), then refetch.
+    // Mutate this item's status (process / archive / reopen) optimistically,
+    // then write through (upsert returns unit → hand back the sent item).
     let set_status = move |status: &'static str| {
         let Some(s) = slug() else { return };
         let mut next = item();
         next.status = status.to_string();
-        spawn(async move {
-            let _ = crate::feeds::upsert_inbox_item(&s, next).await;
-            refresh += 1;
+        list.update(next.clone(), async move {
+            crate::feeds::upsert_inbox_item(&s, next.clone()).await.map(|()| next)
         });
     };
 
@@ -273,25 +280,29 @@ fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, mut refresh: Signal<u32
         let mut next = item();
         let until = (Utc::now().date_naive() + chrono::Duration::days(7)).to_string();
         next.resurface_on = Some(until);
-        spawn(async move {
-            let _ = crate::feeds::upsert_inbox_item(&s, next).await;
-            refresh += 1;
+        list.update(next.clone(), async move {
+            crate::feeds::upsert_inbox_item(&s, next.clone()).await.map(|()| next)
         });
     };
 
     let delete = move || {
         let Some(s) = slug() else { return };
         let id = item().id;
-        spawn(async move {
-            let _ = crate::feeds::delete_inbox_item(&s, &id).await;
-            refresh += 1;
+        list.delete(id.clone(), async move {
+            crate::feeds::delete_inbox_item(&s, &id).await
         });
     };
 
-    let dim = if open { "" } else { "opacity-60" };
+    // Closed items already read as muted; layer pending/failed on top.
+    let state_cls = match state {
+        RowState::Settled if open => "border-border bg-card/40",
+        RowState::Settled => "border-border bg-card/40 opacity-60",
+        RowState::Pending => "border-border bg-card/40 opacity-60",
+        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    };
 
     rsx! {
-        div { class: "flex items-start gap-3 rounded-lg border border-border bg-card/40 px-3 py-2 {dim}",
+        div { class: "flex items-start gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-1",
                 Text { class: "whitespace-pre-wrap break-words text-sm", "{body}" }
                 div { class: "flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground",
@@ -347,7 +358,12 @@ fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, mut refresh: Signal<u32
 /// One agent-suggested capture: the proposed text + a one-tap Accept
 /// (→ enters the open review queue) or Dismiss (→ deleted).
 #[component]
-fn SuggestedRow(item: InboxItem, slug: Memo<Option<String>>, refresh: Signal<u32>) -> Element {
+fn SuggestedRow(
+    item: InboxItem,
+    slug: Memo<Option<String>>,
+    list: OptimisticList<InboxItem, String>,
+    state: RowState,
+) -> Element {
     let item = use_signal(|| item);
     let snap = item.read();
     let body = snap.body.clone();
@@ -357,25 +373,27 @@ fn SuggestedRow(item: InboxItem, slug: Memo<Option<String>>, refresh: Signal<u32
     let accept = move |_| {
         let Some(s) = slug() else { return };
         let mut next = item();
-        let mut refresh = refresh;
         next.status = InboxItem::STATUS_OPEN.to_string();
-        spawn(async move {
-            let _ = crate::feeds::upsert_inbox_item(&s, next).await;
-            refresh += 1;
+        list.update(next.clone(), async move {
+            crate::feeds::upsert_inbox_item(&s, next.clone()).await.map(|()| next)
         });
     };
     let dismiss = move |_| {
         let Some(s) = slug() else { return };
         let id = item().id;
-        let mut refresh = refresh;
-        spawn(async move {
-            let _ = crate::feeds::delete_inbox_item(&s, &id).await;
-            refresh += 1;
+        list.delete(id.clone(), async move {
+            crate::feeds::delete_inbox_item(&s, &id).await
         });
     };
 
+    let state_cls = match state {
+        RowState::Settled => "border-border bg-card/60",
+        RowState::Pending => "border-border bg-card/60 opacity-60",
+        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    };
+
     rsx! {
-        div { class: "flex items-start gap-3 rounded-lg border border-border bg-card/60 px-3 py-2",
+        div { class: "flex items-start gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
                 Text { class: "whitespace-pre-wrap break-words text-sm", "{body}" }
                 span { class: "text-[11px] text-muted-foreground", "via {source}" }

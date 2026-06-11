@@ -2,8 +2,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use uuid::Uuid;
 use vault::Vault;
 
@@ -13,7 +11,7 @@ use crate::scan::scan_vault;
 use crate::service::{BarcodeResolution, ConsumeReceipt, EntryDebit, PantryError, PantryService};
 use crate::write::{default_pantry_path, serialize_pantry_item};
 
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
     inner: Arc<Mutex<Vault>>,
 }
@@ -44,13 +42,6 @@ fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
     vault.pages.iter().position(|p| {
         looks_like_pantry_item(p) && parse_page(p).map(|i| i.id == id).unwrap_or(false)
     })
-}
-
-impl HasDispatcher for Store {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
-    }
 }
 
 impl PantryService for Store {

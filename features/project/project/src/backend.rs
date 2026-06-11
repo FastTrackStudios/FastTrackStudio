@@ -13,8 +13,6 @@
 
 use std::path::{Path, PathBuf};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::Utc;
 use uuid::Uuid;
 use vault::Vault;
@@ -26,7 +24,7 @@ use crate::write::{default_project_path, write_project};
 
 /// File-backed `ProjectService` impl. Built once at server
 /// boot per org, cloned into the vox bridge.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, architect::HasDispatcher)]
 pub struct ProjectBackend {
     vault_root: PathBuf,
 }
@@ -50,13 +48,6 @@ impl ProjectBackend {
             ProjectError::Io(format!("open vault {}: {e}", self.vault_root.display()))
         })?;
         scan_vault(&vault).map_err(|e| ProjectError::Io(format!("scan: {e}")))
-    }
-}
-
-impl HasDispatcher for ProjectBackend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

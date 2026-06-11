@@ -12,6 +12,7 @@ pub mod feeds;
 pub mod forge_views;
 pub mod gantt_adapt;
 pub mod nav;
+pub mod optimistic;
 pub mod orgs;
 pub mod pages;
 pub mod routes;

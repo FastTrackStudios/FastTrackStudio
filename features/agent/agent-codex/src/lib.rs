@@ -84,7 +84,7 @@ pub(crate) struct SessionRow {
 /// Top-level handle to the Codex backend. Clone-friendly:
 /// the inner state lives behind `Arc`, so workers spawned
 /// from trait methods share the same session map.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct CodexBackend {
     inner: Arc<CodexInner>,
 }

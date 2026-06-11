@@ -10,8 +10,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use architect::vox;
 use email_config::{BackendKind, FolderAliases};
 use email_proto::{
@@ -30,7 +28,7 @@ struct AccountState {
 }
 
 /// JMAP backend. Cheap to `Clone` — all internals are `Arc`'d.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Backend {
     accounts: Arc<HashMap<String, AccountState>>,
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<EmailEvent>>>>,
@@ -158,13 +156,6 @@ fn map_role(role: &JmapRole) -> Option<FolderRole> {
         R::Junk => Some(FolderRole::Junk),
         R::Archive => Some(FolderRole::Archive),
         _ => None,
-    }
-}
-
-impl HasDispatcher for Backend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

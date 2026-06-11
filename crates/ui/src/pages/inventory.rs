@@ -16,6 +16,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use inventory_proto::{Item, Status};
 
+use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
@@ -54,20 +55,26 @@ pub fn InventoryView() -> Element {
 
     let mut name = use_signal(String::new);
     let mut category = use_signal(|| "other".to_string());
-    // Bumped after every mutation to re-run the fetch.
-    let mut refresh = use_signal(|| 0u32);
 
-    let inventory = use_resource(move || {
-        let _ = refresh(); // subscribe so mutations re-fetch
-        async move {
-            match slug() {
-                Some(s) => crate::feeds::fetch_inventory(&s).await,
-                None => Ok(Vec::new()),
-            }
+    // Authoritative list: optimistic create, write-through to the org's
+    // InventoryService. Initial snapshot loaded below; no refetch on create.
+    let list = use_optimistic_list::<Item, _>(|i| i.id);
+
+    let loader = use_resource(move || async move {
+        match slug() {
+            Some(s) => crate::feeds::fetch_inventory(&s).await,
+            None => Ok(Vec::new()),
+        }
+    });
+    use_effect(move || {
+        if let Some(Ok(rows)) = &*loader.read_unchecked() {
+            list.set(rows.clone());
         }
     });
 
-    // Create the drafted item, then clear the form + refetch.
+    // Create a provisional item (client-minted id; backend assigns its own
+    // on write — the whole row is replaced when it returns), show it
+    // instantly, then write through.
     let mut create = move || {
         let n = name.read().trim().to_string();
         if n.is_empty() {
@@ -76,16 +83,34 @@ pub fn InventoryView() -> Element {
         let Some(s) = slug() else { return };
         let c = category.read().clone();
         name.set(String::new());
-        spawn(async move {
-            let _ = crate::feeds::create_item(&s, &n, &c, None).await;
-            refresh += 1;
+        let provisional = Item {
+            path: String::new(),
+            id: uuid::Uuid::new_v4(),
+            name: n.clone(),
+            category: c.clone(),
+            location_id: None,
+            condition: inventory_proto::Condition::Good.as_str().to_owned(),
+            status: inventory_proto::Status::Stored.as_str().to_owned(),
+            manufacturer: None,
+            model: None,
+            serial: None,
+            purchase_date: None,
+            value: None,
+            tasks: inventory_proto::StringList::default(),
+            tags: inventory_proto::StringList::default(),
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+        };
+        list.create(provisional, async move {
+            crate::feeds::create_item(&s, &n, &c, None).await
         });
     };
 
-    let (rows, load_err): (Vec<Item>, Option<String>) = match &*inventory.read() {
-        Some(Ok(all)) => (all.clone(), None),
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
+    let rows = list.items().read().clone();
+    let load_err: Option<String> = match &*loader.read() {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
     };
 
     rsx! {
@@ -142,7 +167,7 @@ pub fn InventoryView() -> Element {
             } else {
                 div { class: "flex flex-col gap-2",
                     for item in rows {
-                        ItemRow { key: "{item.id}", item }
+                        ItemRow { key: "{item.id}", state: list.state(item.id), item }
                     }
                 }
             }
@@ -151,9 +176,11 @@ pub fn InventoryView() -> Element {
 }
 
 /// One item in the register: name + category + condition + status
-/// badge + optional value / location.
+/// badge + optional value / location. `state` reflects optimistic
+/// write-through: dimmed while `Pending`, a destructive ring while
+/// `Failed`.
 #[component]
-fn ItemRow(item: Item) -> Element {
+fn ItemRow(item: Item, state: RowState) -> Element {
     let name = item.name.clone();
     let category = item.category.clone();
     let condition = item.condition.clone();
@@ -161,8 +188,14 @@ fn ItemRow(item: Item) -> Element {
     let value = item.value;
     let located = item.location_id.is_some();
 
+    let state_cls = match state {
+        RowState::Settled => "border-border bg-card/40",
+        RowState::Pending => "border-border bg-card/40 opacity-60",
+        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    };
+
     rsx! {
-        div { class: "flex items-start gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
+        div { class: "flex items-start gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-1",
                 Text { class: "break-words text-sm font-medium", "{name}" }
                 div { class: "flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground",

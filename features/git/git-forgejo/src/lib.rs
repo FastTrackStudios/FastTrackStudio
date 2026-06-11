@@ -24,12 +24,10 @@ mod reviews;
 
 use std::sync::Arc;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use git_proto::{Forge, GitError, RepoId};
 
 /// Forgejo backend. Cheap to `Clone` — internals are `Arc`'d.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Backend {
     inner: Arc<Inner>,
 }
@@ -116,13 +114,6 @@ impl Backend {
     pub(crate) fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         req.header("Authorization", format!("token {}", self.token()))
             .header("Accept", "application/json")
-    }
-}
-
-impl HasDispatcher for Backend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

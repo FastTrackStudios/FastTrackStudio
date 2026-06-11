@@ -2827,6 +2827,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -3790,7 +3791,6 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#ede592d8f0b99442c1bb3d5547bd27f8c58bf76a"
 dependencies = [
  "actions-proto",
  "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
@@ -5496,7 +5496,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "0.3.4"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "facet",
  "facet-core",
@@ -16852,7 +16852,7 @@ checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 [[package]]
 name = "vox"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "facet",
  "facet-pretty",
@@ -16874,7 +16874,7 @@ dependencies = [
 [[package]]
 name = "vox-codegen"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "facet-cbor",
  "facet-core",
@@ -16885,7 +16885,7 @@ dependencies = [
 [[package]]
 name = "vox-core"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "facet",
  "facet-cbor",
@@ -16908,7 +16908,7 @@ dependencies = [
 [[package]]
 name = "vox-jit"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -16930,7 +16930,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-abi"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "arc-swap",
  "facet-core",
@@ -16941,7 +16941,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-cal"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "facet",
  "facet-core",
@@ -16950,7 +16950,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-core"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -16962,7 +16962,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-parse"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -16971,7 +16971,7 @@ dependencies = [
 [[package]]
 name = "vox-postcard"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "facet",
  "facet-core",
@@ -16985,7 +16985,7 @@ dependencies = [
 [[package]]
 name = "vox-schema"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "blake3",
  "facet",
@@ -16997,7 +16997,7 @@ dependencies = [
 [[package]]
 name = "vox-service-macros"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "proc-macro2",
  "vox-macros-core",
@@ -17006,7 +17006,7 @@ dependencies = [
 [[package]]
 name = "vox-types"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -17032,7 +17032,7 @@ dependencies = [
 [[package]]
 name = "vox-websocket"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=f31f10400c245740a072fa61bb96ef3a3fc2bd93#f31f10400c245740a072fa61bb96ef3a3fc2bd93"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=1db8b13904e5a74fedc22f95eb07071a24258191#1db8b13904e5a74fedc22f95eb07071a24258191"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -18783,7 +18783,3 @@ dependencies = [
 name = "moire-macros"
 version = "1.0.0"
 source = "git+https://codeberg.org/FastTrackStudios/moire?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-
-[[patch.unused]]
-name = "daw-proto"
-version = "0.1.0"

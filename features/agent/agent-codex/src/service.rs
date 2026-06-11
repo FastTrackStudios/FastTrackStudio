@@ -33,8 +33,6 @@ use agent_proto::service::subscriptions::Subscriptions;
 use agent_proto::service::threads::Threads;
 use agent_proto::service::turn_dispatch::{DispatchAck, DispatchTurn, TurnDispatch};
 use agent_proto::session::{Session, SessionStatus, SourceTag, UsageStats};
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::Utc;
 use futures::StreamExt;
 use tokio::sync::broadcast;
@@ -45,13 +43,6 @@ use crate::chat::ChatOpts;
 use crate::{CodexBackend, SessionRow};
 
 const BACKEND_ID: &str = "codex";
-
-impl HasDispatcher for CodexBackend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
-    }
-}
 
 // ────────────────────── Sessions ──────────────────────
 impl Sessions for CodexBackend {

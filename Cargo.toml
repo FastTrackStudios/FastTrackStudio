@@ -894,7 +894,7 @@ actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto"
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
 # Unify vox onto a single source. `architect` (../architect) pins vox at
-# the codeberg fork (rev f31f1040 — the uuid-opaque-scalar tip, which
+# the codeberg fork (rev 1db8b139 — matching architect's current pin, which
 # carries the Uuid/chrono opaque-scalar serialization fix), while the
 # workspace deps point at bearcove/vox. Two identical-content vox copies
 # means architect's generated `Handler` impls don't unify across them and
@@ -903,20 +903,20 @@ actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto"
 # `vox-types` — the same source+rev architect already uses (no local path
 # dep, so this is portable to fresh clones / CI).
 [patch."https://github.com/bearcove/vox"]
-vox                = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-core           = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-codegen        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit            = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit-abi        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit-cal        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-macros-core    = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-macros-parse   = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-postcard       = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-schema         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-service-macros = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-types          = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-websocket      = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-facet-cbor         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox                = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-core           = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-codegen        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-jit            = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-jit-abi        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-jit-cal        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-macros-core    = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-macros-parse   = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-postcard       = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-schema         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-service-macros = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-types          = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-websocket      = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+facet-cbor         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
 
 # daw-proto reaches actions-proto through the starcommand host (not the
 # github mirror above), so redirect that source to the same local checkout.
@@ -931,6 +931,14 @@ actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto"
 # vox profile applies — otherwise the git daw-proto requests vox's full
 # (tokio-net) features and the editor's wasm build can't link mio.
 [patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
+daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
+
+# Current keyflow main pulls daw-proto from the codeberg daw mirror,
+# whose main still pins vox @ f31f1040 — incompatible with the
+# 1db8b139 rev architect (and this workspace) now unify on. Redirect
+# to the local checkout, whose vox pins are bumped to 1db8b139, until
+# the daw repo's pins move on the remote.
+[patch."https://codeberg.org/FastTrackStudios/daw.git"]
 daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
 
 # keyflow still declares color-palette / music-catalog from the starcommand

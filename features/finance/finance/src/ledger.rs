@@ -16,8 +16,6 @@
 //! field — `sum(fx_amount_minor) == 0`. A non-zero sum is rejected
 //! with [`FinanceError::SplitsImbalanced`] and **nothing is written**.
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::{DateTime, Utc};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
@@ -41,7 +39,7 @@ const DEFAULT_TXN_LIMIT: u64 = 100;
 
 /// Concrete ledger service. Cheap to clone — the connection handle
 /// and runtime handle are both `Clone`.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct LedgerService {
     db: DatabaseConnection,
     runtime: tokio::runtime::Handle,
@@ -305,13 +303,6 @@ fn account_from_model(m: AccountModel) -> Account {
         notes: m.notes,
         created_at: m.created_at,
         updated_at: m.updated_at,
-    }
-}
-
-impl HasDispatcher for LedgerService {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

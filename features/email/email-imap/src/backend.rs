@@ -7,8 +7,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use architect::vox;
 use email_config::{BackendKind, FolderAliases, SmtpConfig, TlsMode};
 use email_proto::{
@@ -36,7 +34,7 @@ struct AccountState {
 }
 
 /// IMAP backend. Cheap to `Clone` — all internals are `Arc`'d.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Backend {
     accounts: Arc<HashMap<String, AccountState>>,
     /// Per-account broadcast sender, lazily created on first
@@ -625,13 +623,6 @@ async fn run_idle_cycle(
         .map_err(|e| EmailSyncError::Protocol(format!("idle done: {e}")))?;
     let _ = session.logout().await;
     Ok(())
-}
-
-impl HasDispatcher for Backend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
-    }
 }
 
 impl EmailSync for Backend {

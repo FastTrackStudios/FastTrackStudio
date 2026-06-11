@@ -14,6 +14,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use locations_proto::Location;
 
+use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
@@ -39,20 +40,26 @@ pub fn LocationsView() -> Element {
     let mut name = use_signal(String::new);
     let mut kind = use_signal(|| "other".to_string());
     let mut address = use_signal(String::new);
-    // Bumped after every mutation to re-run the fetch.
-    let mut refresh = use_signal(|| 0u32);
 
-    let locations = use_resource(move || {
-        let _ = refresh(); // subscribe so mutations re-fetch
-        async move {
-            match slug() {
-                Some(s) => crate::feeds::fetch_locations(&s).await,
-                None => Ok(Vec::new()),
-            }
+    // Authoritative list: optimistic create, write-through to the org's
+    // LocationsService. Initial snapshot loaded below; no refetch on create.
+    let list = use_optimistic_list::<Location, _>(|l| l.id);
+
+    let loader = use_resource(move || async move {
+        match slug() {
+            Some(s) => crate::feeds::fetch_locations(&s).await,
+            None => Ok(Vec::new()),
+        }
+    });
+    use_effect(move || {
+        if let Some(Ok(rows)) = &*loader.read_unchecked() {
+            list.set(rows.clone());
         }
     });
 
-    // Create the drafted location, then clear the form + refetch.
+    // Create a provisional location (client-minted id; backend assigns its
+    // own on write — the whole row is replaced when it returns), show it
+    // instantly, then write through.
     let mut create = move || {
         let n = name.read().trim().to_string();
         if n.is_empty() {
@@ -66,16 +73,28 @@ pub fn LocationsView() -> Element {
         };
         name.set(String::new());
         address.set(String::new());
-        spawn(async move {
-            let _ = crate::feeds::create_location(&s, &n, &k, addr).await;
-            refresh += 1;
+        let provisional = Location {
+            path: String::new(),
+            id: uuid::Uuid::new_v4(),
+            name: n.clone(),
+            kind: k.clone(),
+            parent_id: None,
+            address: addr.clone(),
+            tags: locations_proto::model::Tags::default(),
+            same_as: None,
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+        };
+        list.create(provisional, async move {
+            crate::feeds::create_location(&s, &n, &k, addr).await
         });
     };
 
-    let (rows, load_err): (Vec<Location>, Option<String>) = match &*locations.read() {
-        Some(Ok(all)) => (all.clone(), None),
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
+    let rows = list.items().read().clone();
+    let load_err: Option<String> = match &*loader.read() {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
     };
 
     rsx! {
@@ -143,7 +162,7 @@ pub fn LocationsView() -> Element {
             } else {
                 div { class: "flex flex-col gap-2",
                     for loc in rows {
-                        LocationRow { key: "{loc.id}", loc }
+                        LocationRow { key: "{loc.id}", state: list.state(loc.id), loc }
                     }
                 }
             }
@@ -152,14 +171,22 @@ pub fn LocationsView() -> Element {
 }
 
 /// One location in the register: name + kind badge + optional address.
+/// `state` reflects optimistic write-through: dimmed while `Pending`, a
+/// destructive ring + "not saved" hint while `Failed`.
 #[component]
-fn LocationRow(loc: Location) -> Element {
+fn LocationRow(loc: Location, state: RowState) -> Element {
     let name = loc.name.clone();
     let kind = loc.kind.clone();
     let address = loc.address.clone();
 
+    let state_cls = match state {
+        RowState::Settled => "border-border bg-card/40",
+        RowState::Pending => "border-border bg-card/40 opacity-60",
+        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    };
+
     rsx! {
-        div { class: "flex items-start gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
+        div { class: "flex items-start gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-1",
                 Text { class: "break-words text-sm font-medium", "{name}" }
                 if let Some(addr) = address.as_ref() {

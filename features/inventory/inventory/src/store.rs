@@ -7,8 +7,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use uuid::Uuid;
 use vault::Vault;
 
@@ -18,7 +16,7 @@ use crate::scan::scan_vault;
 use crate::service::{InventoryError, InventoryService};
 use crate::write::{default_item_path, serialize_item};
 
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
     inner: Arc<Mutex<Vault>>,
 }
@@ -43,13 +41,6 @@ impl Store {
     #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()
-    }
-}
-
-impl HasDispatcher for Store {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 
