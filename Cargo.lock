@@ -295,6 +295,7 @@ name = "architect-rpc-derive"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "facet",
  "futures-lite",
  "proc-macro2",
  "quote",

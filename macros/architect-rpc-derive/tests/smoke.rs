@@ -304,10 +304,12 @@ mod prelude_reexports {
 // ── #[subscribe] declarations ───────────────────────────────────────
 
 mod subscriptions {
-    // Without vox the stream sibling isn't emitted, so the event type
-    // is only referenced from the (stripped) declaration.
+    // Facet because the `--all-features` build enables this crate's
+    // `vox` feature, which materializes the stream sibling (PubSub
+    // bounds the event on `Clone + Facet`). In the default no-vox
+    // build only the (stripped) declaration references the type.
     #[allow(dead_code)]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, facet::Facet)]
     pub struct TickEvent(pub u64);
 
     pub mod ticker {
