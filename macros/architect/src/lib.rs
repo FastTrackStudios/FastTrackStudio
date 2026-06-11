@@ -85,15 +85,44 @@ where
     use_connect(connect)
 }
 
-/// Loader-side connection guard: yields the connected value, or early-
-/// returns the loader's pending/failed shape. For use inside fetch
-/// closures that return `Option<Result<T, ClientError<E>>>` (the shape
-/// `use_store_list` / `use_store_entry` take): `Connecting` returns
-/// `None` (phase stays `Loading`; the loader re-runs on `Ready`),
-/// `Failed` returns the typed connect error.
+/// Loader-side connection guard: yields the connected value, or
+/// **early-returns from the enclosing function** with the loader's
+/// pending/failed shape.
+///
+/// ## Required shape
+///
+/// This macro expands to `return` statements, so it only compiles inside
+/// a closure/async block whose return type is
+/// `Option<Result<T, ClientError<E>>>` — the fetch shape
+/// [`use_store_list`](architect_atom::use_store_list) /
+/// [`use_store_entry`](architect_atom::use_store_entry) / the derived
+/// `use_<entity>`/`use_<entity>_list` loaders take. Per
+/// [`ConnectionState`](architect_atom::ConnectionState):
+///
+/// - `Ready(c)` — evaluates to `c` (the connected caller); execution
+///   continues.
+/// - `Connecting` — `return None`: the loader's phase stays `Loading`,
+///   and because the loader re-runs when the connection signal changes,
+///   it retries automatically on `Ready`.
+/// - `Failed(e)` — `return Some(Err(ClientError::Connect(e).into()))`:
+///   the typed connect error becomes the loader's `Error` phase.
+///
+/// ## Don't call this outside a loader
+///
+/// In any other context the early returns are wrong: in a function
+/// returning something other than `Option<Result<…>>` it fails to
+/// compile with a confusing type mismatch on the hidden `return`s, and
+/// in one that *happens* to match the shape it silently turns
+/// "connecting" into that function's `None`. In event handlers use
+/// [`Connection::ready`](architect_atom::Connection::ready) (`let
+/// Some(caller) = conn.ready() else { return; }`) — the derived
+/// mutations do exactly that — and `match conn.state()` everywhere
+/// else.
 ///
 /// ```ignore
 /// use_store_list(store, move || async move {
+///     // The async block returns Option<Result<Vec<Example>, ExampleClientError>>:
+///     // exactly the shape the macro's early returns need.
 ///     let caller = ready_or_pending!(conn);
 ///     let client = ExampleRepoClient::new(caller);
 ///     Some(client.list(page, None, None).await.map(|l| l.items).map_err(ClientError::from))
