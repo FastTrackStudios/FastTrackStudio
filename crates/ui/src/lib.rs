@@ -14,6 +14,7 @@ pub mod nav;
 pub mod optimistic;
 pub mod orgs;
 pub mod pages;
+pub mod presence;
 pub mod routes;
 pub mod server_registry;
 pub mod shell;

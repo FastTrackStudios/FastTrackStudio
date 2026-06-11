@@ -17,6 +17,10 @@ pub fn AppShell() -> Element {
     provide_chrome_contexts();
 
     rsx! {
+        // Publishes this client's presence entry (route activity, idle,
+        // manual status) on the org channel joined at the app root.
+        // Renders nothing; lives here because it needs `use_route`.
+        crate::presence::PresencePublisher {}
         div { class: "min-h-screen bg-background text-foreground lg:grid lg:h-screen lg:grid-cols-[18rem_1fr] lg:overflow-hidden",
             div { class: "hidden lg:flex lg:h-screen lg:flex-col lg:overflow-hidden",
                 SidebarProvider {

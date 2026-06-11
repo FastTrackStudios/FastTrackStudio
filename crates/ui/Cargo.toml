@@ -126,7 +126,17 @@ vox-websocket.workspace = true
 # Client-state framework: Connection/use_connect_reactive (per-org vox
 # caller), notifications + reactivity registries, optimistic Store +
 # AtomResult as pages migrate. `client` = vox + atom + form, wasm-clean.
-architect = { workspace = true, features = ["client"] }
+# `platform` adds the cross-target `architect::sleep` the presence
+# module's idle/poll tickers use (crdt's `dioxus` feature pulls it in
+# anyway; declared explicitly so our direct uses don't lean on feature
+# unification).
+architect = { workspace = true, features = ["client", "platform"] }
+
+# Org-wide presence (`src/presence.rs`): `use_presence_channel` +
+# `Presence` over the fixed org doc id, riding the shared per-org
+# connection. `dioxus` implies the `vox` sync transport; presence is
+# ephemeral, so the `indexeddb` persistence feature is NOT needed.
+crdt = { workspace = true, features = ["dioxus"] }
 
 # Browser-only timers for the live elapsed-time tick on the timer
 # page. Wasm-only — used inside `cfg(target_arch = "wasm32")` blocks.
