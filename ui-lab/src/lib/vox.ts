@@ -61,20 +61,36 @@ const CONNECT_ATTEMPT_TIMEOUT_MS = 3_000;
 const CONNECT_MAX_ATTEMPTS = 3;
 const CONNECT_RETRY_BASE_MS = 250;
 
-function attemptTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+/**
+ * Bound an attempt and, when we abandon it, dispose whatever it later
+ * yields — a stalled ws upgrade can complete long after we've retried
+ * (observed: five queued sockets all opening at +17s when a blocked
+ * dev-server event loop flushed), and each orphan is a live session
+ * that would keepalive until tab close.
+ */
+function attemptTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  disposeLate: (v: T) => void,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`connect attempt timed out after ${ms}ms`)),
-      ms,
-    );
+    let abandoned = false;
+    const timer = setTimeout(() => {
+      abandoned = true;
+      reject(new Error(`connect attempt timed out after ${ms}ms`));
+    }, ms);
     promise.then(
       (v) => {
         clearTimeout(timer);
-        resolve(v);
+        if (abandoned) {
+          disposeLate(v);
+        } else {
+          resolve(v);
+        }
       },
       (e) => {
         clearTimeout(timer);
-        reject(e);
+        if (!abandoned) reject(e);
       },
     );
   });
@@ -98,14 +114,17 @@ async function connectInstrumented<T>(
   let lastError: unknown;
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt++) {
     try {
-      // NOTE: on timeout the underlying socket attempt is orphaned
-      // (session.initiator exposes no abort); it is dropped unused if
-      // it ever completes.
       const established = await attemptTimeout(
         session.initiator(wsConnector(VOX_URL), {
           metadata: voxServiceMetadata(service),
         }),
         CONNECT_ATTEMPT_TIMEOUT_MS,
+        // Late completion of an abandoned attempt: close the session so
+        // the socket doesn't linger as a zombie connection.
+        (late) => {
+          record("vox.connect.late-dispose", service);
+          (late as { close?: () => void }).close?.();
+        },
       );
       end(attempt === 1 ? "connected" : `connected (attempt ${attempt})`);
       const caller = new MiddlewareCaller(
