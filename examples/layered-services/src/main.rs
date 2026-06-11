@@ -97,8 +97,12 @@ pub mod greeter {
     }
 }
 
-use counter::Counter;
-use greeter::Greeter;
+// Each `#[rpc]` expansion emits a `prelude` module with glob-safe
+// names — the trait plus `CounterService` / `counter_layer` /
+// `counter_serve` / `CounterClient` (vox-gated). One glob per service
+// replaces the hand-renamed five-item re-export block.
+use counter::prelude::*;
+use greeter::prelude::*;
 
 // ── Backends ──────────────────────────────────────────────────────────
 //
@@ -180,13 +184,13 @@ impl Greeter for MockBackend {
 
 impl Services for LiveBackend {
     fn layers() -> impl Layer<LiveBackend> {
-        layers![counter::Service, greeter::Service]
+        layers![CounterService, GreeterService]
     }
 }
 
 impl Services for MockBackend {
     fn layers() -> impl Layer<MockBackend> {
-        layers![counter::Service, greeter::Service]
+        layers![CounterService, GreeterService]
     }
 }
 
@@ -251,7 +255,7 @@ fn main() {
     // Reaper itself doesn't impl.
     info!("── 4. Per-service override ─────────────────────────────");
     let hybrid_router = LiveBackend::layers()
-        .merge(greeter::layer(MockBackend))
+        .merge(greeter_layer(MockBackend))
         .provide(live.clone());
     info!(
         services = hybrid_router.len(),
