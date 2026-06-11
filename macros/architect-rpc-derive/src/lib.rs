@@ -68,6 +68,72 @@ pub fn rpc(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
+/// `#[derive(HasDispatcher)]` — emit the boilerplate `HasDispatcher`
+/// impl for a backend whose dispatcher is default-constructible.
+///
+/// Without arguments the impl points at
+/// `::architect::dispatch::DefaultDispatcher` — the build's default
+/// (`TokioBlockingDispatcher` when architect's `dispatch-tokio`
+/// feature is on, `CurrentThreadDispatcher` otherwise):
+///
+/// ```ignore
+/// #[derive(architect::HasDispatcher)]
+/// pub struct TaskBackend { /* … */ }
+/// ```
+///
+/// An explicit `#[dispatch(SomeDispatcher)]` attribute overrides the
+/// type (any path is accepted; it must implement
+/// `architect::dispatch::Dispatcher + Default`):
+///
+/// ```ignore
+/// #[derive(architect::HasDispatcher)]
+/// #[dispatch(architect::dispatch::CurrentThreadDispatcher)]
+/// pub struct TestBackend { /* … */ }
+/// ```
+///
+/// Backends whose dispatcher needs runtime state (a REAPER main-thread
+/// queue handle, etc.) keep writing the manual impl — the derive only
+/// covers the `Default`-constructible case, which is the overwhelming
+/// majority in server binaries.
+#[proc_macro_derive(HasDispatcher, attributes(dispatch))]
+pub fn derive_has_dispatcher(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    match expand_has_dispatcher(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn expand_has_dispatcher(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
+    let mut dispatcher_ty: Option<Type> = None;
+    for attr in &input.attrs {
+        if attr.path().is_ident("dispatch") {
+            if dispatcher_ty.is_some() {
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    "duplicate #[dispatch(...)] attribute — a backend has exactly one dispatcher",
+                ));
+            }
+            dispatcher_ty = Some(attr.parse_args::<Type>()?);
+        }
+    }
+    let dispatcher_ty: Type =
+        dispatcher_ty.unwrap_or_else(|| parse_quote! { ::architect::dispatch::DefaultDispatcher });
+
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    Ok(quote! {
+        impl #impl_generics ::architect::HasDispatcher for #name #ty_generics #where_clause {
+            type Dispatcher = #dispatcher_ty;
+
+            fn dispatcher(&self) -> Self::Dispatcher {
+                <#dispatcher_ty as ::core::default::Default>::default()
+            }
+        }
+    })
+}
+
 /// Main expansion entry. Split out from the proc-macro shim so it can
 /// be exercised from unit tests once they exist.
 fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {

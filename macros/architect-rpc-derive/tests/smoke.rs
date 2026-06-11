@@ -194,6 +194,81 @@ mod mixed {
     }
 }
 
+// ── #[derive(HasDispatcher)] ────────────────────────────────────────
+
+mod derived_dispatcher {
+    use std::sync::Mutex;
+
+    // One `use` pulls both namespaces: the trait (type ns) and the
+    // derive (macro ns) share the `architect::HasDispatcher` path.
+    use architect::HasDispatcher;
+    use architect::dispatch::{self, CurrentThreadDispatcher};
+
+    use super::rpc;
+
+    #[rpc]
+    pub trait Counter {
+        fn add(&self, n: u32) -> u32;
+    }
+
+    #[derive(Default, HasDispatcher)]
+    #[dispatch(CurrentThreadDispatcher)]
+    struct ExplicitBackend {
+        total: Mutex<u32>,
+    }
+
+    impl Counter for ExplicitBackend {
+        fn add(&self, n: u32) -> u32 {
+            let mut total = self.total.lock().unwrap();
+            *total += n;
+            *total
+        }
+    }
+
+    // No #[dispatch] attr → DefaultDispatcher. Which concrete type that
+    // is depends on architect's `dispatch-tokio` feature; the test only
+    // asserts the impl exists and constructs.
+    #[derive(Default, HasDispatcher)]
+    struct DefaultBackend;
+
+    impl Counter for DefaultBackend {
+        fn add(&self, n: u32) -> u32 {
+            n
+        }
+    }
+
+    #[test]
+    fn derive_with_explicit_dispatch_attr_round_trips() {
+        let backend = ExplicitBackend::default();
+        let dispatcher = backend.dispatcher();
+        let bridge = __CounterBridge::new(backend, dispatcher);
+
+        futures_lite::future::block_on(async {
+            assert_eq!(CounterRpc::add(&bridge, 2).await, 2);
+            assert_eq!(CounterRpc::add(&bridge, 3).await, 5);
+        });
+    }
+
+    #[test]
+    fn derive_without_attr_uses_default_dispatcher() {
+        let backend = DefaultBackend;
+        // Type-level assertion: the derived impl names DefaultDispatcher.
+        let _dispatcher: dispatch::DefaultDispatcher = backend.dispatcher();
+    }
+
+    #[test]
+    fn derive_works_on_generic_backends() {
+        #[derive(HasDispatcher)]
+        #[dispatch(CurrentThreadDispatcher)]
+        struct Generic<T: Send + Sync + 'static> {
+            _inner: T,
+        }
+
+        let backend = Generic { _inner: 7u8 };
+        let _dispatcher: CurrentThreadDispatcher = backend.dispatcher();
+    }
+}
+
 // ── Empty trait ─────────────────────────────────────────────────────
 
 mod empty {

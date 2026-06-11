@@ -109,17 +109,13 @@ use greeter::Greeter;
 // different impls.
 
 /// Live backend: holds real counter state. Both service traits impl
-/// directly against this type.
-#[derive(Clone, Default)]
+/// directly against this type. The `HasDispatcher` derive points the
+/// rpc bridge at a default-constructible dispatcher — the manual
+/// four-line impl is only needed for dispatchers with runtime state.
+#[derive(Clone, Default, HasDispatcher)]
+#[dispatch(CurrentThreadDispatcher)]
 pub struct LiveBackend {
     counter: Arc<Mutex<i64>>,
-}
-
-impl HasDispatcher for LiveBackend {
-    type Dispatcher = CurrentThreadDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        CurrentThreadDispatcher
-    }
 }
 
 impl Counter for LiveBackend {
@@ -144,15 +140,9 @@ impl Greeter for LiveBackend {
 /// "swap the layer" testing pattern Effect users get from
 /// `Service.DefaultWithoutDependencies` — in Rust it's just a
 /// different backend struct that impls the same traits.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, HasDispatcher)]
+#[dispatch(CurrentThreadDispatcher)]
 pub struct MockBackend;
-
-impl HasDispatcher for MockBackend {
-    type Dispatcher = CurrentThreadDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        CurrentThreadDispatcher
-    }
-}
 
 impl Counter for MockBackend {
     fn increment(&self, _by: i64) -> i64 {

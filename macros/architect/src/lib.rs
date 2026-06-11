@@ -43,6 +43,12 @@ pub use architect_derive::JsonField;
 // emitted code relies on.
 pub use architect_rpc_derive::rpc;
 
+// `#[derive(HasDispatcher)]` — kills the four-line manual impl for the
+// common case where the dispatcher is default-constructible. Shares a
+// name with the trait below on purpose (Clone-style: derive in the
+// macro namespace, trait in the type namespace).
+pub use architect_rpc_derive::HasDispatcher;
+
 // Re-export facet unconditionally — every architect-emitted struct
 // uses it for wire encoding regardless of whether RPC is in play.
 pub use facet;
@@ -454,6 +460,13 @@ pub mod seed {
 /// Tests or alternate-runtime scenarios that want a different
 /// dispatcher for the same backend type use a newtype wrapper with
 /// its own `HasDispatcher` impl.
+///
+/// When the dispatcher is default-constructible (every dispatcher
+/// shipped in this crate is), skip the manual impl:
+/// `#[derive(architect::HasDispatcher)]` points at
+/// [`dispatch::DefaultDispatcher`], and `#[dispatch(SomeDispatcher)]`
+/// overrides the type. Manual impls remain for dispatchers that need
+/// runtime state.
 pub trait HasDispatcher {
     /// The dispatcher type this backend uses. Construction must be
     /// free of side effects — `serve` calls this once per mount.
@@ -560,6 +573,23 @@ pub mod dispatch {
             Box::pin(async move { Ok(result) })
         }
     }
+
+    /// The build's default dispatcher — what
+    /// `#[derive(architect::HasDispatcher)]` resolves to when no
+    /// `#[dispatch(...)]` override is given: [`TokioBlockingDispatcher`]
+    /// when the `dispatch-tokio` feature is enabled,
+    /// [`CurrentThreadDispatcher`] otherwise. Server binaries that
+    /// enable `dispatch-tokio` get the right default for free; tests
+    /// and in-process callers get the inline dispatcher.
+    #[cfg(feature = "dispatch-tokio")]
+    pub type DefaultDispatcher = TokioBlockingDispatcher;
+
+    /// The build's default dispatcher — what
+    /// `#[derive(architect::HasDispatcher)]` resolves to when no
+    /// `#[dispatch(...)]` override is given. Without `dispatch-tokio`
+    /// this is the inline [`CurrentThreadDispatcher`].
+    #[cfg(not(feature = "dispatch-tokio"))]
+    pub type DefaultDispatcher = CurrentThreadDispatcher;
 
     // ── Standard dispatcher: tokio spawn_blocking ──────────────────────
 
