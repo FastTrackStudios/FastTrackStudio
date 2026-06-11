@@ -15029,6 +15029,7 @@ dependencies = [
  "pantry",
  "project",
  "reqwest 0.12.28",
+ "scheduling-proto",
  "sea-orm",
  "sea-orm-migration",
  "serde",
