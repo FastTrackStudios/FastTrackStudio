@@ -933,20 +933,20 @@ actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto"
 # `vox-types` — the same source+rev architect already uses (no local path
 # dep, so this is portable to fresh clones / CI).
 [patch."https://github.com/bearcove/vox"]
-vox                = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-core           = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-codegen        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-jit            = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-jit-abi        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-jit-cal        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-macros-core    = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-macros-parse   = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-postcard       = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-schema         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-service-macros = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-types          = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-websocket      = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-facet-cbor         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox                = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-core           = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-codegen        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-jit            = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-jit-abi        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-jit-cal        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-macros-core    = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-macros-parse   = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-postcard       = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-schema         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-service-macros = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-types          = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+vox-websocket      = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
+facet-cbor         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "23acdc0a4f43c9888f8ad1d5c24cc237d8170ad3" }
 
 # daw-proto reaches actions-proto through the starcommand host (not the
 # github mirror above), so redirect that source to the same local checkout.
