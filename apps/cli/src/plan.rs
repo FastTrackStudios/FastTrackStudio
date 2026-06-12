@@ -9,13 +9,46 @@
 //! 1-based index (as printed by `task plan show`) or a
 //! case-insensitive label prefix.
 //!
+//! ## Day resolution (`plan show`)
+//!
+//! A date with no saved plan — or a *sparse* one (e.g. only a
+//! scheduled meal block) — is resolved against its weekday's
+//! `DayTemplate` via [`scheduling_proto::resolve::merge_template`]:
+//! explicit blocks verbatim, template blocks filling the free time
+//! as **(soft)** rows. Meal-category blocks preview the meal
+//! planned for that date + slot (mealplan feature; slot mapped by
+//! label keyword, then start time — see
+//! [`scheduling_proto::resolve::meal_slot_for_block`]).
+//!
+//! ## Recurring + fixed events, reconcile
+//!
+//! - `plan recurring add "Church" sun 9:00-12:30` stores a
+//!   `CalEvent` with an RFC-5545 `FREQ=WEEKLY;BYDAY=SU` rule —
+//!   the calendar UI already expands those; `plan show` expands
+//!   the weekly case itself.
+//! - `plan event add <date> "Work" 10:00-18:00` drops a *fixed*
+//!   `PlannedBlock` on the date's plan and reconciles it.
+//! - `plan reconcile <date>` reflows the day around its fixed
+//!   blocks + that date's calendar events. The algorithm
+//!   ([`scheduling_proto::resolve::reconcile`]) is priority by
+//!   category, then a chronological squeeze: fixed blocks never
+//!   move; anchored routine blocks (meals/sleep/reset/…) shift up
+//!   to 2h or compress; flexible blocks (allocatable/maintenance/
+//!   other) shrink in place or drop. Every change is printed —
+//!   nothing is lost silently. Blocks crossing midnight are cut
+//!   at 24:00 for the date being reconciled.
+//!
 //! Lives in its own module so concurrent agents editing
 //! `main.rs` only collide on the two-line dispatch arm.
 
 use clap::{Args, Subcommand};
 use scheduling_proto::day_plan::PlannedBlocks;
+use scheduling_proto::resolve::{
+    ChangeAction, ReconcileChange, meal_slot_for_block, merge_template, reconcile,
+};
 use scheduling_proto::{
-    BlockAssignment, BlockCategory, CalEvent, DayPlan, PlannedBlock, TimeBlockId, TimeOfDay,
+    BlockAssignment, BlockCategory, CalEvent, DayPlan, DayTemplate, PlannedBlock, TimeBlockId,
+    TimeOfDay,
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -68,6 +101,33 @@ pub enum PlanCmd {
         /// Overwrite an existing saved plan for the date.
         #[arg(long)]
         force: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Weekly recurring fixed events ("Sundays: church 9:00-12:30,
+    /// every week"): add / list / remove. Stored as recurring
+    /// calendar events; they show on every matching day's plan.
+    #[command(subcommand)]
+    Recurring(RecurringCmd),
+    /// One-off fixed events on a specific date ("tomorrow I have
+    /// to be at work at 10"): added as an immovable block, then
+    /// the day's flexible blocks reflow around it.
+    #[command(subcommand)]
+    Event(EventCmd),
+    /// Reflow a date's plan around its fixed blocks + calendar
+    /// events. Priority by category, then a chronological squeeze:
+    /// fixed blocks never move; anchored routine blocks (meals,
+    /// sleep, reset, wind-down, …) shift up to 2h or compress;
+    /// flexible blocks (allocatable, maintenance, other) shrink in
+    /// place or drop. Every move/shrink/drop is printed. Blocks
+    /// crossing midnight are cut at 24:00 for this date.
+    Reconcile {
+        /// `today` | `tomorrow` | `YYYY-MM-DD`.
+        date: String,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -164,6 +224,76 @@ pub enum BlockCmd {
         block: String,
         #[arg(long, default_value = "today")]
         date: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RecurringCmd {
+    /// Add a weekly recurring fixed event:
+    /// `task plan recurring add "Church" sun 9:00-12:30`.
+    Add {
+        title: String,
+        /// Weekday: `mon`…`sun` (full names work too).
+        day: String,
+        /// `<start>-<end>` — e.g. `9:00-12:30`, `9am-12:30pm`.
+        range: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the weekly recurring events.
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove one — 1-based index from `recurring list`, or a
+    /// case-insensitive title prefix.
+    Remove {
+        what: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum EventCmd {
+    /// Drop a fixed (immovable) event onto a date's plan and
+    /// reconcile the day around it:
+    /// `task plan event add 2026-06-13 "Work" 10:00-18:00`.
+    /// A range crossing midnight (e.g. `23:00-0:30`) is kept on
+    /// this date and cut at 24:00 for reconcile purposes.
+    Add {
+        /// `today` | `tomorrow` | `YYYY-MM-DD`.
+        date: String,
+        title: String,
+        /// `<start>-<end>` — e.g. `10:00-18:00`, `7pm-11pm`.
+        range: String,
+        /// reset | spiritual | meal | exercise | hygiene |
+        /// allocatable | maintenance | winddown | sleep | other.
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+        /// Skip the automatic reconcile pass.
+        #[arg(long)]
+        no_reconcile: bool,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -422,6 +552,141 @@ pub(crate) fn category_name(c: BlockCategory) -> &'static str {
     }
 }
 
+/// Parse `<start>-<end>` allowing the range to cross midnight
+/// (`23:00-0:30`). Returns `(start, end, wraps)`.
+pub(crate) fn parse_time_range_wrap(s: &str) -> Result<(TimeOfDay, TimeOfDay, bool), String> {
+    let (a, b) = s
+        .split_once('-')
+        .ok_or_else(|| format!("expected `<start>-<end>` (e.g. 9:00-10:30), got `{s}`"))?;
+    let start = parse_time_of_day(a)?;
+    let mut end = parse_time_of_day(b)?;
+    // `…-24:00` and `…-0:00` both mean "to midnight".
+    if end.minutes_since_midnight == 24 * 60 {
+        end = TimeOfDay { minutes_since_midnight: 0 };
+    }
+    if start.minutes_since_midnight == end.minutes_since_midnight {
+        return Err(format!("`{s}` is zero-length"));
+    }
+    let wraps = end.minutes_since_midnight < start.minutes_since_midnight
+        || end.minutes_since_midnight == 0;
+    Ok((start, end, wraps))
+}
+
+/// `mon`/`monday`/… → `chrono::Weekday`.
+pub(crate) fn parse_weekday(s: &str) -> Result<chrono::Weekday, String> {
+    Ok(match s.trim().to_lowercase().as_str() {
+        "mon" | "monday" => chrono::Weekday::Mon,
+        "tue" | "tues" | "tuesday" => chrono::Weekday::Tue,
+        "wed" | "wednesday" => chrono::Weekday::Wed,
+        "thu" | "thur" | "thurs" | "thursday" => chrono::Weekday::Thu,
+        "fri" | "friday" => chrono::Weekday::Fri,
+        "sat" | "saturday" => chrono::Weekday::Sat,
+        "sun" | "sunday" => chrono::Weekday::Sun,
+        other => return Err(format!("unknown weekday `{other}` — use mon…sun")),
+    })
+}
+
+/// RFC-5545 BYDAY code for a weekday.
+pub(crate) fn byday_code(d: chrono::Weekday) -> &'static str {
+    match d {
+        chrono::Weekday::Mon => "MO",
+        chrono::Weekday::Tue => "TU",
+        chrono::Weekday::Wed => "WE",
+        chrono::Weekday::Thu => "TH",
+        chrono::Weekday::Fri => "FR",
+        chrono::Weekday::Sat => "SA",
+        chrono::Weekday::Sun => "SU",
+    }
+}
+
+/// Parse a weekly RRULE's BYDAY list. `Some(days)` only when the
+/// rule is `FREQ=WEEKLY` (the only kind `plan recurring` mints —
+/// other frequencies are the calendar UI's department).
+pub(crate) fn weekly_bydays(rule: &str) -> Option<Vec<chrono::Weekday>> {
+    let mut weekly = false;
+    let mut days = Vec::new();
+    for part in rule.split(';') {
+        let (k, v) = part.split_once('=')?;
+        match k.trim().to_ascii_uppercase().as_str() {
+            "FREQ" => weekly = v.trim().eq_ignore_ascii_case("WEEKLY"),
+            "BYDAY" => {
+                for code in v.split(',') {
+                    days.push(match code.trim().to_ascii_uppercase().as_str() {
+                        "MO" => chrono::Weekday::Mon,
+                        "TU" => chrono::Weekday::Tue,
+                        "WE" => chrono::Weekday::Wed,
+                        "TH" => chrono::Weekday::Thu,
+                        "FR" => chrono::Weekday::Fri,
+                        "SA" => chrono::Weekday::Sat,
+                        "SU" => chrono::Weekday::Sun,
+                        _ => return None,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    weekly.then_some(days)
+}
+
+/// Does `ev` produce an instance on local `date`? Returns the
+/// instance's local `(start_min, end_min_cut_at_24h)` window.
+/// Weekly-recurring events repeat on their BYDAY weekdays (or the
+/// master's weekday) from the master's date onward; other rules
+/// fall back to the master occurrence only.
+pub(crate) fn event_instance_on(ev: &CalEvent, date: &str) -> Option<(u16, u16)> {
+    use chrono::{Datelike as _, Timelike as _};
+    let day = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+    let start = chrono::DateTime::parse_from_rfc3339(&ev.start)
+        .ok()?
+        .with_timezone(&chrono::Local);
+    let end = chrono::DateTime::parse_from_rfc3339(&ev.end)
+        .ok()?
+        .with_timezone(&chrono::Local);
+    let start_min = (start.hour() * 60 + start.minute()) as u16;
+    let dur_min = (end - start).num_minutes().max(0);
+
+    let occurs = match ev.recurrence.as_deref().and_then(weekly_bydays) {
+        Some(days) => {
+            let wanted = if days.is_empty() {
+                vec![start.weekday()]
+            } else {
+                days
+            };
+            day >= start.date_naive() && wanted.contains(&day.weekday())
+        }
+        None => start.date_naive() == day,
+    };
+    if !occurs {
+        return None;
+    }
+    let end_min = (i64::from(start_min) + dur_min).min(24 * 60) as u16;
+    Some((start_min, end_min.max(start_min)))
+}
+
+/// The template a date defaults to: `weekend` for Sat/Sun, else
+/// `weekday`; falls back to the first template when those ids are
+/// absent. Mirrors the calendar UI's rule.
+pub(crate) fn template_for_date<'a>(
+    date: &str,
+    templates: &'a [DayTemplate],
+) -> Option<&'a DayTemplate> {
+    use chrono::Datelike as _;
+    let weekend = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|d| {
+            matches!(
+                d.weekday(),
+                chrono::Weekday::Sat | chrono::Weekday::Sun
+            )
+        })
+        .unwrap_or(false);
+    let want = if weekend { "weekend" } else { "weekday" };
+    templates
+        .iter()
+        .find(|t| t.id.0 == want)
+        .or_else(|| templates.first())
+}
+
 /// `today` / `tomorrow` / `yesterday` / `YYYY-MM-DD` → ISO date string.
 pub(crate) fn parse_date_arg(s: &str) -> eyre::Result<String> {
     let today = chrono::Local::now().date_naive();
@@ -543,12 +808,13 @@ async fn resolve_assign_spec(
 
 pub(crate) fn render_block_line(idx: usize, b: &PlannedBlock) -> String {
     let mut line = format!(
-        "{:>2}. {}–{}  {:<24} [{}]",
+        "{:>2}. {}–{}  {:<24} [{}{}]",
         idx + 1,
         fmt_tod(b.start),
         fmt_tod(b.end),
         b.label,
         category_name(b.category),
+        if b.fixed { ", fixed" } else { "" },
     );
     if let Some(a) = &b.assignment {
         line.push_str(&format!(
@@ -610,38 +876,148 @@ fn event_on_date(ev: &CalEvent, date: &str) -> bool {
 }
 
 #[derive(serde::Serialize)]
+struct ResolvedOut {
+    #[serde(flatten)]
+    block: PlannedBlock,
+    soft: bool,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct MealPreview {
+    slot: String,
+    name: String,
+    status: String,
+    recipes: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
 struct DayView {
     date: String,
+    /// The saved plan, verbatim. `None` = nothing saved (the
+    /// `resolved` list is pure template fallback).
     plan: Option<DayPlan>,
+    /// What the day actually looks like: explicit blocks plus the
+    /// weekday template's blocks reflowed into the free time
+    /// (`soft: true`).
+    resolved: Vec<ResolvedOut>,
     events: Vec<CalEvent>,
+    /// Planned meals on this date (previewed under meal blocks).
+    meals: Vec<MealPreview>,
 }
 
 async fn fetch_day_view(
     plans: &scheduling_proto::DayPlansClient,
+    templates: &[DayTemplate],
     events: &[CalEvent],
+    meals: &[MealPreviewRow],
     date: &str,
 ) -> eyre::Result<DayView> {
     let plan = load_plan(plans, date).await?;
     let evs = events
         .iter()
-        .filter(|e| event_on_date(e, date))
+        .filter(|e| {
+            if e.recurrence.is_some() {
+                event_instance_on(e, date).is_some()
+            } else {
+                event_on_date(e, date)
+            }
+        })
         .cloned()
+        .collect();
+    let tpl_blocks: &[scheduling_proto::TimeBlock] =
+        template_for_date(date, templates).map_or(&[], |t| &t.blocks.0);
+    let saved_blocks: &[PlannedBlock] = plan.as_ref().map_or(&[], |p| &p.blocks.0);
+    let resolved = merge_template(saved_blocks, tpl_blocks)
+        .into_iter()
+        .map(|rb| ResolvedOut {
+            block: rb.block,
+            soft: rb.soft,
+        })
         .collect();
     Ok(DayView {
         date: date.to_owned(),
         plan,
+        resolved,
         events: evs,
+        meals: meals
+            .iter()
+            .filter(|m| m.date == date)
+            .map(|m| m.preview.clone())
+            .collect(),
     })
 }
 
+/// A planned meal row pre-projected for the day view.
+#[derive(Clone)]
+struct MealPreviewRow {
+    date: String,
+    preview: MealPreview,
+}
+
+/// Fetch every planned meal once (graceful: orgs without the
+/// mealplan service just get no previews).
+async fn fetch_meal_rows(url: &str) -> Vec<MealPreviewRow> {
+    let Ok(client) = crate::establish_for_url::<mealplan::MealplanServiceClient>(url).await else {
+        return Vec::new();
+    };
+    let Ok(rows) = client.list().await else {
+        return Vec::new();
+    };
+    rows.into_iter()
+        .filter(|m| !matches!(m.status.as_str(), "skipped" | "eating-out"))
+        .map(|m| MealPreviewRow {
+            date: m.scheduled_for.to_string(),
+            preview: MealPreview {
+                slot: m.slot.to_ascii_lowercase(),
+                name: m.name,
+                status: m.status,
+                recipes: m.recipe_paths.0.clone(),
+            },
+        })
+        .collect()
+}
+
 fn render_day_view(v: &DayView) -> String {
-    let mut out = String::new();
+    let mut out = format!("Plan for {}", v.date);
     match &v.plan {
-        Some(p) => out.push_str(&render_plan(p)),
-        None => out.push_str(&format!(
-            "No saved plan for {} — `task plan from-template {}` materializes one\n",
-            v.date, v.date
-        )),
+        Some(p) => {
+            if let Some(t) = &p.from_template {
+                out.push_str(&format!("  (from template {})", t.0));
+            }
+        }
+        None => out.push_str("  (template fallback — nothing saved yet)"),
+    }
+    out.push('\n');
+    if v.resolved.is_empty() {
+        out.push_str("  (no blocks — no saved plan and no day template)\n");
+    }
+    for (i, rb) in v.resolved.iter().enumerate() {
+        out.push_str("  ");
+        out.push_str(&render_block_line(i, &rb.block));
+        if rb.soft {
+            out.push_str("  (soft)");
+        }
+        out.push('\n');
+        // Meal preview: what's planned for this block's slot.
+        if rb.block.category == BlockCategory::Meal {
+            let slot = meal_slot_for_block(&rb.block.label, rb.block.start);
+            for m in v.meals.iter().filter(|m| m.slot == slot) {
+                // Skip when the block is already labelled/assigned
+                // with this exact meal (mealprep-scheduled blocks).
+                if rb.block.label == m.name {
+                    continue;
+                }
+                let recipes = if m.recipes.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {}", m.recipes.join(", "))
+                };
+                out.push_str(&format!(
+                    "        meal: {} ({}, {}){recipes}\n",
+                    m.name, m.slot, m.status
+                ));
+            }
+        }
     }
     if !v.events.is_empty() {
         out.push_str("  events:\n");
@@ -658,9 +1034,10 @@ fn render_day_view(v: &DayView) -> String {
                 _ => format!("{} – {}", e.start, e.end),
             };
             out.push_str(&format!(
-                "    {span}  {}{}\n",
+                "    {span}  {}{}{}\n",
                 e.title,
-                if e.all_day { " (all day)" } else { "" }
+                if e.all_day { " (all day)" } else { "" },
+                if e.recurrence.is_some() { " (weekly)" } else { "" }
             ));
         }
     }
@@ -737,6 +1114,14 @@ pub async fn run_plan(cmd: PlanCmd) -> eyre::Result<()> {
             server,
             json,
         } => run_from_template(date, template, force, org, server, json).await,
+        PlanCmd::Recurring(cmd) => run_recurring(cmd).await,
+        PlanCmd::Event(cmd) => run_event(cmd).await,
+        PlanCmd::Reconcile {
+            date,
+            org,
+            server,
+            json,
+        } => run_reconcile(date, org, server, json).await,
         PlanCmd::Diff {
             date,
             org,
@@ -759,6 +1144,15 @@ async fn run_show(
         .list_events()
         .await
         .map_err(|e| eyre::eyre!("list_events: {e:?}"))?;
+    // Templates drive the soft fallback; meals drive the per-block
+    // previews. Both fetched once, even for `week`.
+    let templates_client: scheduling_proto::DayTemplatesClient =
+        crate::establish_for_url(&url).await?;
+    let templates = templates_client
+        .list_day_templates()
+        .await
+        .unwrap_or_default();
+    let meals = fetch_meal_rows(&url).await;
 
     if when.trim().eq_ignore_ascii_case("week") {
         let today = chrono::Local::now().date_naive();
@@ -767,7 +1161,7 @@ async fn run_show(
             let d = (today + chrono::Days::new(off))
                 .format("%Y-%m-%d")
                 .to_string();
-            days.push(fetch_day_view(&plans, &events, &d).await?);
+            days.push(fetch_day_view(&plans, &templates, &events, &meals, &d).await?);
         }
         if json {
             return print_json(&days);
@@ -779,7 +1173,7 @@ async fn run_show(
     }
 
     let date = parse_date_arg(&when)?;
-    let view = fetch_day_view(&plans, &events, &date).await?;
+    let view = fetch_day_view(&plans, &templates, &events, &meals, &date).await?;
     if json {
         return print_json(&view);
     }
@@ -800,7 +1194,9 @@ async fn finish_mutation(
         return print_json(&DayView {
             date: plan.date.clone(),
             plan: Some(plan),
+            resolved: Vec::new(),
             events: Vec::new(),
+            meals: Vec::new(),
         });
     }
     println!("{human_msg}");
@@ -872,6 +1268,7 @@ async fn run_block(cmd: BlockCmd) -> eyre::Result<()> {
                 category,
                 note,
                 assignment,
+                fixed: false,
             });
             sort_blocks(&mut plan.blocks);
             let msg = format!(
@@ -1112,6 +1509,7 @@ async fn run_from_template(
             category: tb.category,
             note: tb.note.clone(),
             assignment: None,
+            fixed: false,
         })
         .collect();
     sort_blocks(&mut blocks);
@@ -1128,7 +1526,386 @@ async fn run_from_template(
     finish_mutation(&client, plan, &msg, json).await
 }
 
+// ── task plan recurring ──────────────────────────────────────────────
+
+/// The weekly recurring events (the only kind `plan recurring`
+/// mints), sorted by title for stable list indices.
+async fn fetch_recurring(
+    cal: &scheduling_proto::CalendarEventsClient,
+) -> eyre::Result<Vec<CalEvent>> {
+    let mut evs: Vec<CalEvent> = cal
+        .list_events()
+        .await
+        .map_err(|e| eyre::eyre!("list_events: {e:?}"))?
+        .into_iter()
+        .filter(|e| e.recurrence.as_deref().and_then(weekly_bydays).is_some())
+        .collect();
+    evs.sort_by(|a, b| a.title.cmp(&b.title).then(a.start.cmp(&b.start)));
+    Ok(evs)
+}
+
+fn render_recurring_line(idx: usize, e: &CalEvent) -> String {
+    let days = e
+        .recurrence
+        .as_deref()
+        .and_then(weekly_bydays)
+        .unwrap_or_default();
+    let days = if days.is_empty() {
+        chrono::DateTime::parse_from_rfc3339(&e.start).map_or_else(
+            |_| "?".into(),
+            |d| chrono::Datelike::weekday(&d.with_timezone(&chrono::Local)).to_string(),
+        )
+    } else {
+        days.iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let span = match (
+        chrono::DateTime::parse_from_rfc3339(&e.start),
+        chrono::DateTime::parse_from_rfc3339(&e.end),
+    ) {
+        (Ok(s), Ok(en)) => format!(
+            "{}–{}",
+            s.with_timezone(&chrono::Local).format("%H:%M"),
+            en.with_timezone(&chrono::Local).format("%H:%M")
+        ),
+        _ => "?".into(),
+    };
+    format!("{:>2}. {}  {days} {span}  (weekly)", idx + 1, e.title)
+}
+
+async fn run_recurring(cmd: RecurringCmd) -> eyre::Result<()> {
+    match cmd {
+        RecurringCmd::Add {
+            title,
+            day,
+            range,
+            org,
+            server,
+            json,
+        } => {
+            let wd = parse_weekday(&day).map_err(|e| eyre::eyre!(e))?;
+            let (start, end) = parse_time_range(&range).map_err(|e| eyre::eyre!(e))?;
+            let slug = crate::resolve_active_org(org)?;
+            let url = crate::resolve_org_vox_url(server, &slug);
+            let cal: scheduling_proto::CalendarEventsClient =
+                crate::establish_for_url(&url).await?;
+            // Anchor the series at the next occurrence (today
+            // counts when the weekday matches).
+            let today = chrono::Local::now().date_naive();
+            let mut d = today;
+            while chrono::Datelike::weekday(&d) != wd {
+                d = d
+                    .succ_opt()
+                    .ok_or_else(|| eyre::eyre!("date overflow"))?;
+            }
+            let mk = |t: TimeOfDay| {
+                d.and_hms_opt(u32::from(t.hours()), u32::from(t.minutes()), 0)
+                    .and_then(|dt| dt.and_local_timezone(chrono::Local).single())
+                    .map(|dt| dt.to_rfc3339())
+                    .ok_or_else(|| eyre::eyre!("can't resolve local time on {d}"))
+            };
+            let ev = CalEvent {
+                id: uuid::Uuid::new_v4().to_string(),
+                title: title.clone(),
+                start: mk(start)?,
+                end: mk(end)?,
+                all_day: false,
+                color: "primary".into(),
+                description: Some("Weekly recurring — added via `task plan recurring add`".into()),
+                recurrence: Some(format!("FREQ=WEEKLY;BYDAY={}", byday_code(wd))),
+            };
+            cal.upsert_event(ev.clone())
+                .await
+                .map_err(|e| eyre::eyre!("upsert_event: {e:?}"))?;
+            if json {
+                return print_json(&ev);
+            }
+            println!(
+                "added weekly recurring \"{title}\" — every {wd} {}–{} (first: {d})",
+                fmt_tod(start),
+                fmt_tod(end)
+            );
+            Ok(())
+        }
+        RecurringCmd::List { org, server, json } => {
+            let slug = crate::resolve_active_org(org)?;
+            let url = crate::resolve_org_vox_url(server, &slug);
+            let cal: scheduling_proto::CalendarEventsClient =
+                crate::establish_for_url(&url).await?;
+            let evs = fetch_recurring(&cal).await?;
+            if json {
+                return print_json(&evs);
+            }
+            if evs.is_empty() {
+                println!(
+                    "no weekly recurring events — `task plan recurring add \"Church\" sun 9:00-12:30`"
+                );
+                return Ok(());
+            }
+            for (i, e) in evs.iter().enumerate() {
+                println!("{}", render_recurring_line(i, e));
+            }
+            Ok(())
+        }
+        RecurringCmd::Remove {
+            what,
+            org,
+            server,
+            json,
+        } => {
+            let slug = crate::resolve_active_org(org)?;
+            let url = crate::resolve_org_vox_url(server, &slug);
+            let cal: scheduling_proto::CalendarEventsClient =
+                crate::establish_for_url(&url).await?;
+            let evs = fetch_recurring(&cal).await?;
+            let idx = if let Ok(n) = what.parse::<usize>() {
+                if !(1..=evs.len()).contains(&n) {
+                    eyre::bail!(
+                        "index {n} out of range — {} recurring event(s); run `task plan recurring list`",
+                        evs.len()
+                    );
+                }
+                n - 1
+            } else {
+                let needle = what.to_lowercase();
+                let hits: Vec<usize> = evs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| e.title.to_lowercase().starts_with(&needle))
+                    .map(|(i, _)| i)
+                    .collect();
+                match hits.as_slice() {
+                    [one] => *one,
+                    [] => eyre::bail!("no recurring event titled `{what}…`"),
+                    many => eyre::bail!(
+                        "`{what}` is ambiguous — matches: {}",
+                        many.iter()
+                            .map(|&i| evs[i].title.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                }
+            };
+            let ev = evs[idx].clone();
+            cal.delete_event(ev.id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("delete_event: {e:?}"))?;
+            if json {
+                return print_json(&ev);
+            }
+            println!("removed weekly recurring \"{}\"", ev.title);
+            Ok(())
+        }
+    }
+}
+
+// ── task plan event add + reconcile ──────────────────────────────────
+
+fn fmt_span(span: (u16, u16)) -> String {
+    format!(
+        "{}–{}",
+        fmt_tod(TimeOfDay {
+            minutes_since_midnight: span.0
+        }),
+        fmt_tod(TimeOfDay {
+            minutes_since_midnight: span.1
+        })
+    )
+}
+
+fn fmt_change(c: &ReconcileChange) -> String {
+    match &c.action {
+        ChangeAction::Moved { from, to } => {
+            format!("moved   \"{}\" {} → {}", c.label, fmt_span(*from), fmt_span(*to))
+        }
+        ChangeAction::Shrunk { from, to } => {
+            format!("shrunk  \"{}\" {} → {}", c.label, fmt_span(*from), fmt_span(*to))
+        }
+        ChangeAction::Dropped { from, reason } => {
+            format!("dropped \"{}\" {} — {}", c.label, fmt_span(*from), reason)
+        }
+    }
+}
+
+/// The reconcile pass: materialize the date (saved blocks +
+/// template fallback), collect that date's timed calendar-event
+/// windows as immovable obstacles, reflow, persist. Returns the
+/// saved plan + the change report.
+async fn reconcile_for_date(
+    plans: &scheduling_proto::DayPlansClient,
+    url: &str,
+    date: &str,
+) -> eyre::Result<(DayPlan, Vec<ReconcileChange>, usize)> {
+    let templates_client: scheduling_proto::DayTemplatesClient =
+        crate::establish_for_url(url).await?;
+    let templates = templates_client
+        .list_day_templates()
+        .await
+        .unwrap_or_default();
+    let cal: scheduling_proto::CalendarEventsClient = crate::establish_for_url(url).await?;
+    let events = cal
+        .list_events()
+        .await
+        .map_err(|e| eyre::eyre!("list_events: {e:?}"))?;
+
+    let saved = load_plan(plans, date).await?;
+    let tpl = template_for_date(date, &templates);
+    let tpl_blocks: &[scheduling_proto::TimeBlock] = tpl.map_or(&[], |t| &t.blocks.0);
+    let saved_blocks: &[PlannedBlock] = saved.as_ref().map_or(&[], |p| &p.blocks.0);
+    let blocks: Vec<PlannedBlock> = merge_template(saved_blocks, tpl_blocks)
+        .into_iter()
+        .map(|rb| rb.block)
+        .collect();
+
+    let obstacles: Vec<(u16, u16)> = events
+        .iter()
+        .filter(|e| !e.all_day)
+        .filter_map(|e| event_instance_on(e, date))
+        .filter(|(s, e)| e > s)
+        .collect();
+
+    let outcome = reconcile(blocks, &obstacles);
+    let plan = DayPlan {
+        date: date.to_owned(),
+        from_template: saved
+            .and_then(|p| p.from_template)
+            .or_else(|| tpl.map(|t| t.id.clone())),
+        blocks: outcome.blocks.into(),
+    };
+    save_plan(plans, plan.clone()).await?;
+    Ok((plan, outcome.changes, obstacles.len()))
+}
+
+async fn run_reconcile(
+    date: String,
+    org: Option<String>,
+    server: Option<String>,
+    json: bool,
+) -> eyre::Result<()> {
+    let date = parse_date_arg(&date)?;
+    let (slug, plans) = day_plans_client(server.clone(), org).await?;
+    let url = crate::resolve_org_vox_url(server, &slug);
+    let (plan, changes, n_events) = reconcile_for_date(&plans, &url, &date).await?;
+    if json {
+        #[derive(serde::Serialize)]
+        struct Out {
+            plan: DayPlan,
+            changes: Vec<ReconcileChange>,
+        }
+        return print_json(&Out { plan, changes });
+    }
+    let fixed = plan.blocks.iter().filter(|b| b.fixed).count();
+    println!(
+        "reconciled {date} around {fixed} fixed block(s) + {n_events} event window(s)"
+    );
+    if changes.is_empty() {
+        println!("  nothing had to move");
+    }
+    for c in &changes {
+        println!("  {}", fmt_change(c));
+    }
+    print!("{}", render_plan(&plan));
+    Ok(())
+}
+
+async fn run_event(cmd: EventCmd) -> eyre::Result<()> {
+    match cmd {
+        EventCmd::Add {
+            date,
+            title,
+            range,
+            category,
+            note,
+            no_reconcile,
+            org,
+            server,
+            json,
+        } => {
+            let date = parse_date_arg(&date)?;
+            let (start, end, wraps) =
+                parse_time_range_wrap(&range).map_err(|e| eyre::eyre!(e))?;
+            let category = category
+                .as_deref()
+                .map(parse_category)
+                .transpose()
+                .map_err(|e| eyre::eyre!(e))?
+                .unwrap_or_default();
+            let (slug, plans) = day_plans_client(server.clone(), org).await?;
+            let url = crate::resolve_org_vox_url(server, &slug);
+            let mut plan = load_plan(&plans, &date).await?.unwrap_or(DayPlan {
+                date: date.clone(),
+                from_template: None,
+                blocks: PlannedBlocks::default(),
+            });
+            plan.blocks.push(PlannedBlock {
+                id: TimeBlockId(format!("event-{}", uuid::Uuid::new_v4())),
+                start,
+                end,
+                label: title.clone(),
+                category,
+                note,
+                assignment: None,
+                fixed: true,
+            });
+            sort_blocks(&mut plan.blocks);
+            save_plan(&plans, plan.clone()).await?;
+            let wrap_note = if wraps {
+                " (crosses midnight — cut at 24:00 on this date)"
+            } else {
+                ""
+            };
+            if !no_reconcile {
+                let (plan, changes, n_events) = reconcile_for_date(&plans, &url, &date).await?;
+                if json {
+                    #[derive(serde::Serialize)]
+                    struct Out {
+                        plan: DayPlan,
+                        changes: Vec<ReconcileChange>,
+                    }
+                    return print_json(&Out { plan, changes });
+                }
+                println!(
+                    "added fixed \"{title}\" {}–{} on {date}{wrap_note}",
+                    fmt_tod(start),
+                    fmt_tod(end)
+                );
+                println!(
+                    "reconciled around {} fixed block(s) + {n_events} event window(s)",
+                    plan.blocks.iter().filter(|b| b.fixed).count()
+                );
+                if changes.is_empty() {
+                    println!("  nothing had to move");
+                }
+                for c in &changes {
+                    println!("  {}", fmt_change(c));
+                }
+                print!("{}", render_plan(&plan));
+                return Ok(());
+            }
+            if json {
+                return print_json(&DayView {
+                    date: plan.date.clone(),
+                    plan: Some(plan),
+                    resolved: Vec::new(),
+                    events: Vec::new(),
+                    meals: Vec::new(),
+                });
+            }
+            println!(
+                "added fixed \"{title}\" {}–{} on {date}{wrap_note} (reconcile skipped)",
+                fmt_tod(start),
+                fmt_tod(end)
+            );
+            print!("{}", render_plan(&plan));
+            Ok(())
+        }
+    }
+}
+
 // ── task next ────────────────────────────────────────────────────────
+
 
 #[derive(serde::Serialize)]
 struct NextView {
@@ -1451,6 +2228,7 @@ async fn run_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone as _;
 
     fn tod(h: u16, m: u16) -> TimeOfDay {
         TimeOfDay {
@@ -1467,6 +2245,7 @@ mod tests {
             category: BlockCategory::Other,
             note: None,
             assignment: None,
+            fixed: false,
         }
     }
 
@@ -1512,6 +2291,119 @@ mod tests {
         assert_eq!(parse_delta_minutes("90").unwrap(), 90);
         assert!(parse_delta_minutes("0m").is_err());
         assert!(parse_delta_minutes("soon").is_err());
+    }
+
+    // ── recurring + reconcile helpers ───────────────────────────
+
+    #[test]
+    fn parses_weekdays_and_byday_codes() {
+        assert_eq!(parse_weekday("sun").unwrap(), chrono::Weekday::Sun);
+        assert_eq!(parse_weekday("Sunday").unwrap(), chrono::Weekday::Sun);
+        assert_eq!(parse_weekday("TUE").unwrap(), chrono::Weekday::Tue);
+        assert!(parse_weekday("someday").is_err());
+        assert_eq!(byday_code(chrono::Weekday::Sun), "SU");
+    }
+
+    #[test]
+    fn weekly_byday_roundtrip() {
+        assert_eq!(
+            weekly_bydays("FREQ=WEEKLY;BYDAY=SU").unwrap(),
+            vec![chrono::Weekday::Sun]
+        );
+        assert_eq!(
+            weekly_bydays("FREQ=WEEKLY;BYDAY=MO,WE,FR").unwrap(),
+            vec![
+                chrono::Weekday::Mon,
+                chrono::Weekday::Wed,
+                chrono::Weekday::Fri
+            ]
+        );
+        // Non-weekly rules are the UI's department.
+        assert!(weekly_bydays("FREQ=DAILY").is_none());
+        assert!(weekly_bydays("garbage").is_none());
+    }
+
+    #[test]
+    fn recurring_event_materializes_on_matching_weekdays() {
+        let ev = CalEvent {
+            id: "x".into(),
+            title: "Church".into(),
+            // Sunday 2026-06-14, 9:00–12:30 local.
+            start: chrono::Local
+                .with_ymd_and_hms(2026, 6, 14, 9, 0, 0)
+                .unwrap()
+                .to_rfc3339(),
+            end: chrono::Local
+                .with_ymd_and_hms(2026, 6, 14, 12, 30, 0)
+                .unwrap()
+                .to_rfc3339(),
+            all_day: false,
+            color: "primary".into(),
+            description: None,
+            recurrence: Some("FREQ=WEEKLY;BYDAY=SU".into()),
+        };
+        // Every future Sunday, with the right window.
+        assert_eq!(event_instance_on(&ev, "2026-06-14"), Some((540, 750)));
+        assert_eq!(event_instance_on(&ev, "2026-06-21"), Some((540, 750)));
+        // Not before the anchor, not on other weekdays.
+        assert_eq!(event_instance_on(&ev, "2026-06-07"), None);
+        assert_eq!(event_instance_on(&ev, "2026-06-15"), None);
+    }
+
+    #[test]
+    fn one_off_event_only_on_its_date() {
+        let ev = CalEvent {
+            id: "y".into(),
+            title: "Dentist".into(),
+            start: chrono::Local
+                .with_ymd_and_hms(2026, 6, 13, 10, 0, 0)
+                .unwrap()
+                .to_rfc3339(),
+            end: chrono::Local
+                .with_ymd_and_hms(2026, 6, 13, 11, 0, 0)
+                .unwrap()
+                .to_rfc3339(),
+            all_day: false,
+            color: "primary".into(),
+            description: None,
+            recurrence: None,
+        };
+        assert_eq!(event_instance_on(&ev, "2026-06-13"), Some((600, 660)));
+        assert_eq!(event_instance_on(&ev, "2026-06-20"), None);
+    }
+
+    #[test]
+    fn wrap_ranges_parse_and_cut() {
+        let (s, e, wraps) = parse_time_range_wrap("23:00-0:30").unwrap();
+        assert_eq!((s, e), (tod(23, 0), tod(0, 30)));
+        assert!(wraps);
+        let (s, e, wraps) = parse_time_range_wrap("10:00-18:00").unwrap();
+        assert_eq!((s, e), (tod(10, 0), tod(18, 0)));
+        assert!(!wraps);
+        // `-24:00` normalizes to a wrap-to-midnight block.
+        let (_, e, wraps) = parse_time_range_wrap("22:00-24:00").unwrap();
+        assert_eq!(e, tod(0, 0));
+        assert!(wraps);
+        assert!(parse_time_range_wrap("9:00").is_err());
+        assert!(parse_time_range_wrap("9:00-9:00").is_err());
+    }
+
+    #[test]
+    fn template_for_date_picks_weekend_on_saturdays() {
+        let mk = |id: &str| DayTemplate {
+            path: String::new(),
+            id: id.to_string().into(),
+            name: id.to_owned(),
+            description: None,
+            blocks: Vec::new().into(),
+        };
+        let tpls = vec![mk("weekday"), mk("weekend")];
+        // 2026-06-13 is a Saturday, 2026-06-12 a Friday.
+        assert_eq!(template_for_date("2026-06-13", &tpls).unwrap().id.0, "weekend");
+        assert_eq!(template_for_date("2026-06-12", &tpls).unwrap().id.0, "weekday");
+        // Falls back to the first template when ids are absent.
+        let only = vec![mk("custom")];
+        assert_eq!(template_for_date("2026-06-13", &only).unwrap().id.0, "custom");
     }
 
     // ── overlap checker ─────────────────────────────────────────

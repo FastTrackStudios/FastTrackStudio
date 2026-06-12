@@ -753,6 +753,7 @@ pub async fn meal_schedule(a: MealScheduleArgs) -> eyre::Result<()> {
             title: meal.name.clone(),
             ref_id: None,
         }),
+        fixed: false,
     };
     plan.blocks.0.push(block.clone());
     plan.blocks
@@ -798,6 +799,7 @@ mod tests {
             end,
             label: label.to_string(),
             category: BlockCategory::Meal,
+            fixed: false,
             note: None,
             assignment: None,
         }
