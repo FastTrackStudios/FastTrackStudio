@@ -31,7 +31,16 @@ use editor_state::{Changes, EditorState, Selection, TransactionSpec};
 // outer element would lose the leading group divider.
 #[allow(deprecated)]
 #[component]
-pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) -> Element {
+pub fn SlashMenu(
+    state: Signal<EditorState>,
+    slash: Signal<Option<SlashState>>,
+    /// Optional transaction sink — pass the same callback given to
+    /// `Editor`'s `on_transaction` so command picks made by *mouse*
+    /// (clicking a row) report through the host's sink exactly like
+    /// keyboard picks (which route via the editor's keydown handler).
+    #[props(default)]
+    on_transaction: Option<Callback<crate::TransactionEvent>>,
+) -> Element {
     let snapshot = slash.read().clone();
     let Some(current) = snapshot else {
         return rsx! { Fragment {} };
@@ -85,8 +94,9 @@ pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) 
                     let is_selected = row_idx == selected;
                     let idx_for_click = row_idx;
                     let entry_for_click = entry.clone();
-                    let mut state_for_click = state;
+                    let state_for_click = state;
                     let mut slash_for_click = slash;
+                    let sink_for_click = on_transaction;
                     let current_for_click = current.clone();
                     row_idx += 1;
                     rsx! {
@@ -111,7 +121,7 @@ pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) 
                                     current_for_click.slash_start..end,
                                     entry_for_click.kind,
                                 ) {
-                                    state_for_click.set(cur.update(spec));
+                                    crate::event::apply_tx(state_for_click, &cur, spec, sink_for_click);
                                 }
                                 slash_for_click.set(None);
                             },

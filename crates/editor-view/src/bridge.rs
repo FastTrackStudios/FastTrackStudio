@@ -37,6 +37,7 @@ use editor_state::{
 };
 
 use crate::editor::{DecorationSource, diff_text, push_selection};
+use crate::event::{TransactionEvent, apply_tx};
 use crate::tile::build::build_tiles;
 use crate::tile::visible::VisibleText;
 
@@ -45,6 +46,7 @@ pub(crate) fn handle_bridge_msg(
     deco_source: Option<&DecorationSource>,
     vim: Option<Signal<editor_vim::VimState>>,
     mut widget_focus: Signal<bool>,
+    sink: Option<Callback<TransactionEvent>>,
     v: &serde_json::Value,
 ) {
     let kind = v.get("kind").and_then(|k| k.as_str()).unwrap_or("");
@@ -86,7 +88,7 @@ pub(crate) fn handle_bridge_msg(
             }
             let vis_changes = diff_text(&old_visible.text, new_visible);
             if vis_changes.is_empty() {
-                push_selection(&mut state, &cur, deco_source, s_off, e_off);
+                push_selection(&mut state, &cur, deco_source, sink, s_off, e_off);
                 return;
             }
             let primary = cur.selection.primary();
@@ -142,18 +144,19 @@ pub(crate) fn handle_bridge_msg(
                 "editor.input"
             );
             let new_sel = Selection::caret(intended_caret);
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .changes(changes)
-                        .selection(new_sel)
-                        .annotate("origin", "input"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "input"),
+                sink,
             );
         }
         "sel" => {
             let cur = state.read().clone();
-            push_selection(&mut state, &cur, deco_source, s_off, e_off);
+            push_selection(&mut state, &cur, deco_source, sink, s_off, e_off);
         }
         "before-input-insert" => {
             let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
@@ -170,13 +173,14 @@ pub(crate) fn handle_bridge_msg(
             let changes = Changes::replace(from..to, text);
             let caret = from + text.len();
             let new_sel = Selection::single(Range::caret(caret));
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .changes(changes)
-                        .selection(new_sel)
-                        .annotate("origin", "before-input"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "before-input"),
+                sink,
             );
         }
         "before-input-delete-backward" => {
@@ -200,13 +204,14 @@ pub(crate) fn handle_bridge_msg(
             tracing::debug!(del_from, del_to, "editor.before_input.delete_backward");
             let changes = Changes::delete(del_from..del_to);
             let new_sel = Selection::single(Range::caret(del_from));
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .changes(changes)
-                        .selection(new_sel)
-                        .annotate("origin", "before-input"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "before-input"),
+                sink,
             );
         }
         "before-input-delete-forward" => {
@@ -230,13 +235,14 @@ pub(crate) fn handle_bridge_msg(
             tracing::debug!(del_from, del_to, "editor.before_input.delete_forward");
             let changes = Changes::delete(del_from..del_to);
             let new_sel = Selection::single(Range::caret(del_from));
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .changes(changes)
-                        .selection(new_sel)
-                        .annotate("origin", "before-input"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "before-input"),
+                sink,
             );
         }
         "composition-start" => {
@@ -258,18 +264,24 @@ pub(crate) fn handle_bridge_msg(
                 }
             };
             if let Some(spec) = editor_state::commands::insert_bracket(&cur_clone, text) {
-                state.set(cur_clone.update(spec.annotate("origin", "insert-bracket")));
+                apply_tx(
+                    state,
+                    &cur_clone,
+                    spec.annotate("origin", "insert-bracket"),
+                    sink,
+                );
             } else {
                 let p = cur_clone.selection.primary();
                 let changes = editor_state::Changes::replace(p.from()..p.to(), text);
                 let caret = p.from() + text.len();
-                state.set(
-                    cur_clone.update(
-                        editor_state::TransactionSpec::new()
-                            .changes(changes)
-                            .selection(editor_state::Selection::caret(caret))
-                            .annotate("origin", "insert-bracket-plain"),
-                    ),
+                apply_tx(
+                    state,
+                    &cur_clone,
+                    editor_state::TransactionSpec::new()
+                        .changes(changes)
+                        .selection(editor_state::Selection::caret(caret))
+                        .annotate("origin", "insert-bracket-plain"),
+                    sink,
                 );
             }
         }
@@ -285,7 +297,7 @@ pub(crate) fn handle_bridge_msg(
                 }
             };
             if let Some(spec) = editor_state::commands::enter_continue_list(&cur_clone) {
-                state.set(cur_clone.update(spec.annotate("origin", "enter")));
+                apply_tx(state, &cur_clone, spec.annotate("origin", "enter"), sink);
             }
         }
         "copy-range" => {
@@ -320,13 +332,14 @@ pub(crate) fn handle_bridge_msg(
             };
             let changes = Changes::replace(bracket_idx..bracket_idx + 1, new_char);
             let prev_sel = cur.selection.clone();
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .changes(changes)
-                        .selection(prev_sel)
-                        .annotate("origin", "task-toggle"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(prev_sel)
+                    .annotate("origin", "task-toggle"),
+                sink,
             );
         }
         "widget-focus" => {
@@ -348,7 +361,7 @@ pub(crate) fn handle_bridge_msg(
             let _ = document::eval(script);
         }
         "prop-set" => {
-            apply_property_change(state, v, |old, ty, value| {
+            apply_property_change(state, sink, v, |old, ty, value| {
                 use editor_state::markdown::PropValue;
                 match ty {
                     "text" => PropValue::Text(value.to_string()),
@@ -365,7 +378,7 @@ pub(crate) fn handle_bridge_msg(
             });
         }
         "prop-list-add" => {
-            apply_property_change(state, v, |old, _ty, value| {
+            apply_property_change(state, sink, v, |old, _ty, value| {
                 use editor_state::markdown::PropValue;
                 let mut items = match old {
                     PropValue::List(v) => v.clone(),
@@ -409,13 +422,14 @@ pub(crate) fn handle_bridge_msg(
             );
             let changes = Changes::insert(insert_at, &new_text);
             let prev_sel = cur.selection.clone();
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .changes(changes)
-                        .selection(prev_sel)
-                        .annotate("origin", "prop-add"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(prev_sel)
+                    .annotate("origin", "prop-add"),
+                sink,
             );
         }
         "prop-remove" => {
@@ -436,17 +450,18 @@ pub(crate) fn handle_bridge_msg(
             // cases (closer is at the end of the FM range), and
             // map_through handles the rest.
             let prev_sel = cur.selection.clone();
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .changes(changes)
-                        .selection(prev_sel)
-                        .annotate("origin", "prop-remove"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(prev_sel)
+                    .annotate("origin", "prop-remove"),
+                sink,
             );
         }
         "prop-list-remove" => {
-            apply_property_change(state, v, |old, _ty, value| {
+            apply_property_change(state, sink, v, |old, _ty, value| {
                 use editor_state::markdown::PropValue;
                 let items = match old {
                     PropValue::List(v) => {
@@ -464,22 +479,24 @@ pub(crate) fn handle_bridge_msg(
                 .unwrap_or(0) as usize;
             let cur = state.read().clone();
             let pos = pos.min(cur.doc.len());
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .selection(Selection::caret(pos))
-                        .annotate("origin", "focus-pos"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .selection(Selection::caret(pos))
+                    .annotate("origin", "focus-pos"),
+                sink,
             );
         }
         "link-clicked" => {
             let cur = state.read().clone();
-            state.set(
-                cur.update(
-                    TransactionSpec::new()
-                        .selection(Selection::caret(0))
-                        .annotate("origin", "link-clicked"),
-                ),
+            apply_tx(
+                state,
+                &cur,
+                TransactionSpec::new()
+                    .selection(Selection::caret(0))
+                    .annotate("origin", "link-clicked"),
+                sink,
             );
         }
         _ => {}
@@ -491,7 +508,8 @@ pub(crate) fn handle_bridge_msg(
 /// given the existing `PropValue` and the raw payload, and
 /// returns the new `PropValue`.
 fn apply_property_change(
-    mut state: Signal<EditorState>,
+    state: Signal<EditorState>,
+    sink: Option<Callback<TransactionEvent>>,
     v: &serde_json::Value,
     mutate: impl FnOnce(
         &editor_state::markdown::PropValue,
@@ -519,13 +537,14 @@ fn apply_property_change(
     let new_text = editor_state::markdown::serialize_property(key, &new_value);
     let changes = Changes::replace(prop.range.clone(), new_text);
     let prev_sel = cur.selection.clone();
-    state.set(
-        cur.update(
-            TransactionSpec::new()
-                .changes(changes)
-                .selection(prev_sel)
-                .annotate("origin", "prop-edit"),
-        ),
+    apply_tx(
+        state,
+        &cur,
+        TransactionSpec::new()
+            .changes(changes)
+            .selection(prev_sel)
+            .annotate("origin", "prop-edit"),
+        sink,
     );
 }
 

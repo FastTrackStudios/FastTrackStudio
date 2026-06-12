@@ -258,6 +258,17 @@ pub fn Editor(
     /// panel. Mirrors CM6's `hoverTooltip` — keyflow plugs `keyflow_hover` here.
     #[props(default)]
     hover: Option<editor_state::HoverSource>,
+    /// Optional transaction sink. When `Some`, every transaction the
+    /// editor itself applies — bridge input, keymap commands, vim,
+    /// slash palette, trigger completion — is mirrored out as a
+    /// [`crate::TransactionEvent`] after it lands in `state`. Built
+    /// for CRDT / persistence hosts: the event carries the `Changes`,
+    /// the `user_event` tag (echo-guard convention: hosts tag remote
+    /// applications with `"remote"`), and the doc snapshots either
+    /// side of the edit. Host-driven `state.set(..)` from outside the
+    /// editor does NOT emit.
+    #[props(default)]
+    on_transaction: Option<Callback<crate::TransactionEvent>>,
 ) -> Element {
     // True when a decoration widget cell currently has focus
     // (frontmatter property contenteditable, chip-add box, etc.).
@@ -326,6 +337,9 @@ pub fn Editor(
         let deco_source = decorations.clone();
         // Hover source + popup signal captured for the recv loop below.
         let hover_source = hover;
+        // Transaction sink mirrored to the host on every applied
+        // transaction (Callback is Copy — cheap to capture).
+        let sink = on_transaction;
         let mut hover_sig = hover_state;
         // Editing-settled flag, flipped by the recv loop on edits / `idle`.
         let mut idle_sig = idle;
@@ -1942,6 +1956,7 @@ pub fn Editor(
                                 deco_source.as_ref(),
                                 vim,
                                 widget_focus,
+                                sink,
                                 &v,
                             );
                         }
@@ -1953,6 +1968,7 @@ pub fn Editor(
 
     // ── onkeydown: vim → keymap dispatch ─────────────────────────
     let keymap_for_keys = keymap.clone();
+    let sink_for_keys = on_transaction;
     let vim_for_keys = vim;
     let slash_for_keys = slash;
     let widget_focus_for_keys = widget_focus;
@@ -2026,7 +2042,7 @@ pub fn Editor(
                                 current.slash_start..end,
                                 entry.kind,
                             ) {
-                                state.clone().set(cur.update(spec));
+                                crate::event::apply_tx(state, &cur, spec, sink_for_keys);
                             }
                         }
                         slash_sig.set(None);
@@ -2123,12 +2139,13 @@ pub fn Editor(
                                 cur_idx.saturating_sub(1)
                             };
                             let target = fm.props[next_idx].range.start;
-                            state.set(
-                                cur.update(
-                                    editor_state::TransactionSpec::new()
-                                        .selection(editor_state::Selection::caret(target))
-                                        .annotate("origin", "fm-row-nav"),
-                                ),
+                            crate::event::apply_tx(
+                                state,
+                                &cur,
+                                editor_state::TransactionSpec::new()
+                                    .selection(editor_state::Selection::caret(target))
+                                    .annotate("origin", "fm-row-nav"),
+                                sink_for_keys,
                             );
                             evt.prevent_default();
                             return;
@@ -2172,7 +2189,7 @@ pub fn Editor(
             if let Some(spec) = spec {
                 evt.prevent_default();
                 tracing::debug!(?press, "editor.vim.fire");
-                state.set(cur.update(spec));
+                crate::event::apply_tx(state, &cur, spec, sink_for_keys);
                 return;
             }
             if !vim_sig.peek().is_inserting() {
@@ -2194,13 +2211,14 @@ pub fn Editor(
                     let mut next_vim = vim_sig.peek().clone();
                     next_vim.mode = editor_vim::Mode::Insert;
                     vim_sig.set(next_vim);
-                    state.set(
-                        cur.update(
-                            TransactionSpec::new()
-                                .changes(Changes::insert(head, "/"))
-                                .selection(Selection::caret(head + 1))
-                                .annotate("origin", "slash-trigger"),
-                        ),
+                    crate::event::apply_tx(
+                        state,
+                        &cur,
+                        TransactionSpec::new()
+                            .changes(Changes::insert(head, "/"))
+                            .selection(Selection::caret(head + 1))
+                            .annotate("origin", "slash-trigger"),
+                        sink_for_keys,
                     );
                     evt.prevent_default();
                     return;
@@ -2213,7 +2231,7 @@ pub fn Editor(
             if let Some(spec) = km.dispatch(&press, &cur) {
                 evt.prevent_default();
                 tracing::debug!(?press, "editor.keymap.fire");
-                state.set(cur.update(spec));
+                crate::event::apply_tx(state, &cur, spec, sink_for_keys);
             }
         }
     };
@@ -2431,6 +2449,7 @@ pub(crate) fn push_selection(
     state: &mut Signal<EditorState>,
     cur: &EditorState,
     deco_source: Option<&DecorationSource>,
+    sink: Option<Callback<crate::TransactionEvent>>,
     s: usize,
     e: usize,
 ) {
@@ -2496,12 +2515,13 @@ pub(crate) fn push_selection(
         "editor.selection"
     );
     let new_sel = Selection::single(Range::new(s, e));
-    state.set(
-        cur.update(
-            TransactionSpec::new()
-                .selection(new_sel)
-                .annotate("origin", "input"),
-        ),
+    crate::event::apply_tx(
+        *state,
+        cur,
+        TransactionSpec::new()
+            .selection(new_sel)
+            .annotate("origin", "input"),
+        sink,
     );
 }
 
