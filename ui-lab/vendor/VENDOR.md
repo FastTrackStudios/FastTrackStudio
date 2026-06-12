@@ -16,10 +16,10 @@ import:
 
 - repo: `https://codeberg.org/FastTrackStudios/vox.git`
   (workspace `Cargo.toml` aliases it as `github.com/bearcove/vox`)
-- rev: `1db8b13904e5a74fedc22f95eb07071a24258191`
+- rev: `b3d806f868c7b1247564d0c0b27fd35d1b41cfd8`
   — the same rev the Rust workspace pins in `Cargo.lock`, so the
   vendored TS runtime and the server's vox protocol can't drift apart.
-- copied from: `~/.cargo/git/checkouts/vox-bf64c65e97a61943/1db8b13`
+- copied from: `/run/media/Development/vox` (fork checkout, fix/wasm-channel-credit)
 
 ## Why copy instead of `file:`-link into the cargo checkout?
 

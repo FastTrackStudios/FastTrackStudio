@@ -16,7 +16,7 @@
 set -euo pipefail
 
 UI_LAB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="${1:-$HOME/.cargo/git/checkouts/vox-bf64c65e97a61943/1db8b13}"
+SRC="${1:-/run/media/Development/vox}"
 PKGS=(vox-postcard vox-wire vox-core vox-ws)
 
 if [[ ! -d "$SRC/typescript/packages" ]]; then

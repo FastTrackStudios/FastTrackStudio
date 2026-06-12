@@ -32,13 +32,28 @@ export type AgentRefList = AgentRef[];
 
 export type UuidList = unknown[];
 
+export type RelationKind =
+  | { tag: 'Blocks' }
+  | { tag: 'Duplicate' }
+  | { tag: 'Implements' }
+  | { tag: 'Relates' };
+
+export interface Relation {
+  kind: RelationKind;
+  target: unknown;
+}
+
+export type RelationList = Relation[];
+
 export interface WorkflowAttrs {
   cycle: unknown | null;
+  workstream: unknown | null;
   estimate: Estimate | null;
   parent: unknown | null;
   assignees: AgentRefList;
   blockers: UuidList;
   relates_to: UuidList;
+  relations: RelationList;
   session: unknown | null;
 }
 
@@ -80,6 +95,11 @@ export type ClaimResult =
   | { tag: 'AlreadyMine' }
   | { tag: 'Lost'; holder: string };
 
+export interface ReverseRelation {
+  kind: RelationKind;
+  source: unknown;
+}
+
 // Request/Response type aliases
 export type ListRequest = [];
 export type ListResponse = { ok: true; value: TaskInfo[] } | { ok: false; error: TaskError };
@@ -103,6 +123,9 @@ export type TryClaimRequest = [
 ];
 export type TryClaimResponse = { ok: true; value: ClaimResult } | { ok: false; error: TaskError };
 
+export type ReverseRelationsRequest = [unknown];
+export type ReverseRelationsResponse = { ok: true; value: ReverseRelation[] } | { ok: false; error: TaskError };
+
 export type RenameRequest = [
   unknown, // id
   string, // new_path
@@ -120,6 +143,7 @@ export interface TaskServiceRpcCaller {
   create(task: TaskInfo): Promise<{ ok: true; value: TaskInfo } | { ok: false; error: TaskError }>;
   update(task: TaskInfo): Promise<{ ok: true; value: TaskInfo } | { ok: false; error: TaskError }>;
   tryClaim(id: unknown, agent: string, force: boolean): Promise<{ ok: true; value: ClaimResult } | { ok: false; error: TaskError }>;
+  reverseRelations(id: unknown): Promise<{ ok: true; value: ReverseRelation[] } | { ok: false; error: TaskError }>;
   rename(id: unknown, newPath: string): Promise<{ ok: true; value: TaskInfo } | { ok: false; error: TaskError }>;
   delete(id: unknown): Promise<{ ok: true; value: void } | { ok: false; error: TaskError }>;
 }
@@ -246,6 +270,25 @@ export class TaskServiceRpcClient implements TaskServiceRpcCaller {
       }
   }
 
+  async reverseRelations(id: unknown): Promise<{ ok: true; value: ReverseRelation[] } | { ok: false; error: TaskError }> {
+    const descriptor = taskServiceRpc_reverseRelations_method;
+    const sendSchemas = taskServiceRpc_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "TaskServiceRpc.reverseRelations",
+          args: { id },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: ReverseRelation[] } | { ok: false; error: TaskError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: ReverseRelation[] } | { ok: false; error: TaskError };
+        }
+        throw e;
+      }
+  }
+
   async rename(id: unknown, newPath: string): Promise<{ ok: true; value: TaskInfo } | { ok: false; error: TaskError }> {
     const descriptor = taskServiceRpc_rename_method;
     const sendSchemas = taskServiceRpc_descriptor.send_schemas;
@@ -307,6 +350,7 @@ export interface TaskServiceRpcHandler {
   create(task: TaskInfo): Promise<{ ok: true; value: TaskInfo } | { ok: false; error: TaskError }> | { ok: true; value: TaskInfo } | { ok: false; error: TaskError };
   update(task: TaskInfo): Promise<{ ok: true; value: TaskInfo } | { ok: false; error: TaskError }> | { ok: true; value: TaskInfo } | { ok: false; error: TaskError };
   tryClaim(id: unknown, agent: string, force: boolean): Promise<{ ok: true; value: ClaimResult } | { ok: false; error: TaskError }> | { ok: true; value: ClaimResult } | { ok: false; error: TaskError };
+  reverseRelations(id: unknown): Promise<{ ok: true; value: ReverseRelation[] } | { ok: false; error: TaskError }> | { ok: true; value: ReverseRelation[] } | { ok: false; error: TaskError };
   rename(id: unknown, newPath: string): Promise<{ ok: true; value: TaskInfo } | { ok: false; error: TaskError }> | { ok: true; value: TaskInfo } | { ok: false; error: TaskError };
   delete(id: unknown): Promise<{ ok: true; value: void } | { ok: false; error: TaskError }> | { ok: true; value: void } | { ok: false; error: TaskError };
 }
@@ -366,6 +410,13 @@ export class TaskServiceRpcDispatcher implements Dispatcher {
       } catch (error) {
         call.replyInternalError(error instanceof Error ? error.message : String(error));
       }
+    } else if (method.id === 0x87559ec495a7a043n) {
+      try {
+        const result = await this.handler.reverseRelations(args[0] as unknown);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
     } else if (method.id === 0xfd90d605734de986n) {
       try {
         const result = await this.handler.rename(args[0] as unknown, args[1] as string);
@@ -401,22 +452,26 @@ export const taskServiceRpc_send_schemas: import("@bearcove/vox-core").ServiceSe
     [0x2c8d54f2314d0f20n, { id: 0x2c8d54f2314d0f20n, type_params: [], kind: { tag: 'primitive', primitive_type: 'u8' } }],
     [0x6ed24f39a1066e1an, { id: 0x6ed24f39a1066e1an, type_params: [], kind: { tag: 'enum', name: 'Estimate', variants: [{ name: 'XS', index: 0, payload: { tag: 'unit' } }, { name: 'S', index: 1, payload: { tag: 'unit' } }, { name: 'M', index: 2, payload: { tag: 'unit' } }, { name: 'L', index: 3, payload: { tag: 'unit' } }, { name: 'XL', index: 4, payload: { tag: 'unit' } }, { name: 'Points', index: 5, payload: { tag: 'struct', fields: [{ name: 'value', type_ref: { tag: 'concrete', type_id: 0x2c8d54f2314d0f20n, args: [] }, required: true }] } }] } }],
     [0xf223075541ac1278n, { id: 0xf223075541ac1278n, type_params: [], kind: { tag: 'enum', name: 'AgentRef', variants: [{ name: 'Human', index: 0, payload: { tag: 'struct', fields: [{ name: 'user_id', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'display_name', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }, { name: 'Agent', index: 1, payload: { tag: 'struct', fields: [{ name: 'name', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'model_version', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }] } }],
-    [0xbc9b9939fb7ec090n, { id: 0xbc9b9939fb7ec090n, type_params: [], kind: { tag: 'struct', name: 'WorkflowAttrs', fields: [{ name: 'cycle', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'estimate', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6ed24f39a1066e1an, args: [] }] }, required: true }, { name: 'parent', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'assignees', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xf223075541ac1278n, args: [] }] }, required: true }, { name: 'blockers', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'relates_to', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'session', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
-    [0xdbef2fb656124f3cn, { id: 0xdbef2fb656124f3cn, type_params: [], kind: { tag: 'struct', name: 'TaskInfo', fields: [{ name: 'id', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'path', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'title', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'priority', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'due', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'scheduled', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'tags', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'contexts', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'projects', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'project_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'milestone_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'time_estimate', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }] }, required: true }, { name: 'time_entries', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x79f8af6e3ad75cd5n, args: [] }] }, required: true }, { name: 'recurrence', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'recurrence_anchor', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'complete_instances', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'completed_date', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'agent_profile', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'dispatched_agent_tasks', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'date_created', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'date_modified', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'details', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'workflow', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xbc9b9939fb7ec090n, args: [] }] }, required: true }] } }],
+    [0x3ee8f692cab2d0c7n, { id: 0x3ee8f692cab2d0c7n, type_params: [], kind: { tag: 'enum', name: 'RelationKind', variants: [{ name: 'Blocks', index: 0, payload: { tag: 'unit' } }, { name: 'Duplicate', index: 1, payload: { tag: 'unit' } }, { name: 'Implements', index: 2, payload: { tag: 'unit' } }, { name: 'Relates', index: 3, payload: { tag: 'unit' } }] } }],
+    [0xeca6f9505704f9cbn, { id: 0xeca6f9505704f9cbn, type_params: [], kind: { tag: 'struct', name: 'Relation', fields: [{ name: 'kind', type_ref: { tag: 'concrete', type_id: 0x3ee8f692cab2d0c7n, args: [] }, required: true }, { name: 'target', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }] } }],
+    [0x9f5dfffbc91ec60dn, { id: 0x9f5dfffbc91ec60dn, type_params: [], kind: { tag: 'struct', name: 'WorkflowAttrs', fields: [{ name: 'cycle', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'workstream', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'estimate', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6ed24f39a1066e1an, args: [] }] }, required: true }, { name: 'parent', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'assignees', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xf223075541ac1278n, args: [] }] }, required: true }, { name: 'blockers', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'relates_to', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'relations', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xeca6f9505704f9cbn, args: [] }] }, required: true }, { name: 'session', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0xcf6d694a4f07c8f3n, { id: 0xcf6d694a4f07c8f3n, type_params: [], kind: { tag: 'struct', name: 'TaskInfo', fields: [{ name: 'id', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'path', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'title', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'priority', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'due', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'scheduled', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'tags', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'contexts', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'projects', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'project_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'milestone_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'time_estimate', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }] }, required: true }, { name: 'time_entries', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x79f8af6e3ad75cd5n, args: [] }] }, required: true }, { name: 'recurrence', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'recurrence_anchor', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'complete_instances', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'completed_date', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'agent_profile', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'dispatched_agent_tasks', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'date_created', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'date_modified', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'details', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'workflow', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x9f5dfffbc91ec60dn, args: [] }] }, required: true }] } }],
     [0x5bd8a34636ebaed5n, { id: 0x5bd8a34636ebaed5n, type_params: [], kind: { tag: 'enum', name: 'TaskError', variants: [{ name: 'NotFound', index: 0, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'AlreadyExists', index: 1, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'BadRequest', index: 2, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'Io', index: 3, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }] } }],
     [0x6847ab90feda71c1n, { id: 0x6847ab90feda71c1n, type_params: ['T0'], kind: { tag: 'tuple', elements: [{ tag: 'var', name: 'T0' }] } }],
     [0xaa510ab07d34f141n, { id: 0xaa510ab07d34f141n, type_params: ['T0', 'T1', 'T2'], kind: { tag: 'tuple', elements: [{ tag: 'var', name: 'T0' }, { tag: 'var', name: 'T1' }, { tag: 'var', name: 'T2' }] } }],
     [0xf403d718ad5b5b63n, { id: 0xf403d718ad5b5b63n, type_params: [], kind: { tag: 'enum', name: 'ClaimResult', variants: [{ name: 'Won', index: 0, payload: { tag: 'unit' } }, { name: 'AlreadyMine', index: 1, payload: { tag: 'unit' } }, { name: 'Lost', index: 2, payload: { tag: 'struct', fields: [{ name: 'holder', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }] } }] } }],
+    [0x0ac348898481ab70n, { id: 0x0ac348898481ab70n, type_params: [], kind: { tag: 'struct', name: 'ReverseRelation', fields: [{ name: 'kind', type_ref: { tag: 'concrete', type_id: 0x3ee8f692cab2d0c7n, args: [] }, required: true }, { name: 'source', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }] } }],
     [0xba0496aa8cee7a4cn, { id: 0xba0496aa8cee7a4cn, type_params: ['T0', 'T1'], kind: { tag: 'tuple', elements: [{ tag: 'var', name: 'T0' }, { tag: 'var', name: 'T1' }] } }],
   ]),
   methods: new Map<bigint, import("@bearcove/vox-core").MethodSendSchemas>([
-    [0x92e6446bb69e55b5n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xdbef2fb656124f3cn, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
-    [0x06f43db670cdf88an, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdbef2fb656124f3cn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
-    [0x0a47ca1af0ca19abn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdbef2fb656124f3cn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
-    [0x331a4b795d755debn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xdbef2fb656124f3cn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdbef2fb656124f3cn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
-    [0x23bb4015aed413d0n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xdbef2fb656124f3cn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdbef2fb656124f3cn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
+    [0x92e6446bb69e55b5n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xcf6d694a4f07c8f3n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
+    [0x06f43db670cdf88an, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xcf6d694a4f07c8f3n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
+    [0x0a47ca1af0ca19abn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xcf6d694a4f07c8f3n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
+    [0x331a4b795d755debn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xcf6d694a4f07c8f3n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xcf6d694a4f07c8f3n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
+    [0x23bb4015aed413d0n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xcf6d694a4f07c8f3n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xcf6d694a4f07c8f3n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
     [0x2562a12e97fdf814n, { argsRootRef: { tag: 'concrete', type_id: 0xaa510ab07d34f141n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xf403d718ad5b5b63n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
-    [0xfd90d605734de986n, { argsRootRef: { tag: 'concrete', type_id: 0xba0496aa8cee7a4cn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdbef2fb656124f3cn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
+    [0x87559ec495a7a043n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x0ac348898481ab70n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
+    [0xfd90d605734de986n, { argsRootRef: { tag: 'concrete', type_id: 0xba0496aa8cee7a4cn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xcf6d694a4f07c8f3n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
     [0x3244596715b71236n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5bd8a34636ebaed5n, args: [] }] }] } }],
   ]),
 };
@@ -457,6 +512,12 @@ export const taskServiceRpc_tryClaim_method: MethodDescriptor = {
   retry: { persist: false, idem: false },
 };
 
+export const taskServiceRpc_reverseRelations_method: MethodDescriptor = {
+  name: 'reverseRelations',
+  id: 0x87559ec495a7a043n,
+  retry: { persist: false, idem: false },
+};
+
 export const taskServiceRpc_rename_method: MethodDescriptor = {
   name: 'rename',
   id: 0xfd90d605734de986n,
@@ -480,6 +541,7 @@ export const taskServiceRpc_descriptor: ServiceDescriptor = {
     [taskServiceRpc_create_method.id, taskServiceRpc_create_method],
     [taskServiceRpc_update_method.id, taskServiceRpc_update_method],
     [taskServiceRpc_tryClaim_method.id, taskServiceRpc_tryClaim_method],
+    [taskServiceRpc_reverseRelations_method.id, taskServiceRpc_reverseRelations_method],
     [taskServiceRpc_rename_method.id, taskServiceRpc_rename_method],
     [taskServiceRpc_delete_method.id, taskServiceRpc_delete_method],
   ]),
