@@ -8,9 +8,9 @@
 #
 # Runner assumptions (header per deploy/README.md — verify on your
 # runner before trusting a green check):
-#   * runs-on: docker matches the label deploy.yml already uses; that
-#     workflow runs bare `cargo build`, so the runner is a NixOS-based
-#     host runner with the toolchain (NOT an ephemeral node container).
+#   * runs-on: nix-host — THEBATTLESHIP's codeberg-org runner carries
+#     this HOST-mode label (a deliberate, documented relaxation of its
+#     docker-only sandbox for org repos; see the runner's nix config).
 #   * `nix` is available for the dev-shell wasm build, `docker` (with
 #     buildx/BuildKit) for image builds + pushes.
 #   * The workspace path-depends on sibling repos; the clone step
@@ -27,7 +27,7 @@ on:
 
 jobs:
   images:
-    runs-on: docker
+    runs-on: nix-host
     steps:
       - uses: actions/checkout@v4
 
