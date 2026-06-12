@@ -94,6 +94,10 @@ pub struct OrgAppState {
     /// Milestone backend — project-scoped checkpoints, walks
     /// `vault/Projects/<slug>/milestones/*.md`.
     pub milestones: milestone::MilestoneBackend,
+    /// Workstream backend — the parent-with-swarm construct,
+    /// walks `vault/Projects/<slug>/workstreams/*.md`. Also
+    /// hosts the `WorkstreamService` event-stream hub.
+    pub workstreams: workstream::WorkstreamBackend,
     /// Task backend — walks every `type: task` page in the
     /// vault.
     pub tasks: task::TaskBackend,
@@ -667,6 +671,7 @@ pub(crate) async fn build_org_state(
         let projects = project::ProjectBackend::new(vault_root.clone());
         let goals = goal::GoalBackend::new(vault_root.clone());
         let milestones = milestone::MilestoneBackend::new(vault_root.clone());
+        let workstreams = workstream::WorkstreamBackend::new(vault_root.clone());
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.
@@ -730,6 +735,7 @@ pub(crate) async fn build_org_state(
             projects,
             goals,
             milestones,
+            workstreams,
             tasks,
             locations,
             inventory,
@@ -1187,6 +1193,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             milestone::serve_milestone_service(org.milestones.clone()),
         )
         .with(
+            workstream::workstream_service_descriptor(),
+            workstream::serve_workstream_service(org.workstreams.clone()),
+        )
+        .with(
             task::task_service_descriptor(),
             task::serve_task_service(forge_sync::ForgeSyncTaskService::new(
                 org.tasks.clone(),
@@ -1202,7 +1212,14 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         // forge-sync decorator above (it delegates to `org.tasks`),
         // CLI/agent mutations over this same router, and the forge
         // poll loop (it writes via `org.tasks.update`).
-        .merge(task::task_service_stream_layer(org.tasks.clone()));
+        .merge(task::task_service_stream_layer(org.tasks.clone()))
+        // Live workstream changes — `WorkstreamService`'s
+        // `#[subscribe]` stream sibling. The hub lives on the
+        // `WorkstreamBackend` above; every CRUD path publishes
+        // into it.
+        .merge(workstream::workstream_service_stream_layer(
+            org.workstreams.clone(),
+        ));
 
     // Entity-CRUD services: locations + the mealplan trio.
     router = router

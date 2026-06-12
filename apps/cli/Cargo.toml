@@ -50,6 +50,9 @@ label-proto = { workspace = true }
 reqwest = { workspace = true }
 # `task-cli milestone …` — project-scoped checkpoints.
 milestone = { workspace = true, features = ["vox"] }
+# `task workstream …` — the parent-with-swarm construct (lead +
+# members + derived rollup) replacing the 'epic' tag.
+workstream = { workspace = true, features = ["vox"] }
 # Entity-CRUD over RPC for the four file-backed services
 # mounted by the server alongside project / goal / task /
 # milestone. Each provides a `task <verb> …` surface.

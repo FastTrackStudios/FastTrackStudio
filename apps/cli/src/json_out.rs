@@ -1,6 +1,6 @@
 //! `--json` output + flexible-reference resolution helpers shared by
 //! every CLI surface (timer / finance / cycle / task / issue /
-//! project / goal / milestone / threads / auth).
+//! project / goal / milestone / workstream / threads / auth).
 //!
 //! Lives in its own module (rather than `main.rs`) so concurrent
 //! edits to the giant command-arm file don't collide on helper code.
@@ -378,6 +378,36 @@ pub async fn resolve_milestone_flexible(
     match match_entity(&cands, target, "milestone") {
         Ok(i) => Ok(rows.into_iter().nth(i).expect("index from enumerate")),
         Err(fail) => Err(fail.into_report("milestone", target)),
+    }
+}
+
+/// Resolve a `--workstream` value — uuid, vault path, title, or a
+/// unique prefix of either — to its [`workstream::Workstream`].
+pub async fn resolve_workstream_flexible(
+    client: &workstream::WorkstreamServiceClient,
+    target: &str,
+) -> eyre::Result<workstream::Workstream> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client.get(id).await.map_err(|e| {
+            errors::not_found("resolve workstream", target)
+                .cause(format!("{e:?}"))
+                .report()
+        });
+    }
+    if let Ok(w) = client.get_by_path(target.to_owned()).await {
+        return Ok(w);
+    }
+    let rows = client
+        .list(None)
+        .await
+        .map_err(|e| eyre!("list workstreams: {e:?}"))?;
+    let cands: Vec<Candidate> = rows
+        .iter()
+        .map(|w| (w.id, w.title.clone(), w.path.clone()))
+        .collect();
+    match match_entity(&cands, target, "workstream") {
+        Ok(i) => Ok(rows.into_iter().nth(i).expect("index from enumerate")),
+        Err(fail) => Err(fail.into_report("workstream", target)),
     }
 }
 

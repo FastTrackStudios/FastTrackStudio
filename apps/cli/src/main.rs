@@ -25,6 +25,7 @@ mod org_ctx;
 mod plan;
 mod session_store;
 mod shared;
+mod workstream;
 
 use clap::{Parser, Subcommand};
 use shared::RemoteVoxConfig;
@@ -155,6 +156,12 @@ enum Commands {
     /// with Forgejo / GitHub milestones in the future.
     #[command(subcommand)]
     Milestone(MilestoneCmd),
+    /// Workstreams — the parent-with-swarm construct (lead +
+    /// members + status + dates) that replaces the 'epic' tag.
+    /// Tasks attach via `workflow.workstream`; progress is a
+    /// derived rollup (`task workstream rollup`).
+    #[command(subcommand)]
+    Workstream(workstream::WorkstreamCmd),
     /// Physical places — studios, rooms, venues, storage.
     /// Pantry + inventory reference these by id.
     #[command(subcommand)]
@@ -1223,6 +1230,10 @@ enum IssueCmd {
         /// `"none"` / `""` to clear.
         #[arg(long)]
         project: Option<String>,
+        /// Workstream reference (UUID, name, path, prefix), or
+        /// `"none"` / `""` to clear. Sets `workflow.workstream`.
+        #[arg(long)]
+        workstream: Option<String>,
         /// `xs`, `s`, `m`, `l`, `xl`, or a plain integer for
         /// `Estimate::Points`.
         #[arg(long)]
@@ -1330,6 +1341,10 @@ enum IssueCmd {
         /// this a subtask. Sets `workflow.parent`.
         #[arg(long)]
         parent: Option<String>,
+        /// Workstream (UUID, name, path, prefix). Sets
+        /// `workflow.workstream`.
+        #[arg(long)]
+        workstream: Option<String>,
         /// Estimate (`xs` / `s` / `m` / `l` / `xl` / integer).
         #[arg(long)]
         estimate: Option<String>,
@@ -4154,6 +4169,9 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         }
         Commands::Milestone(cmd) => {
             return Box::pin(run_milestone(cmd)).await;
+        }
+        Commands::Workstream(cmd) => {
+            return Box::pin(workstream::run_workstream(cmd)).await;
         }
         Commands::Location(cmd) => {
             return Box::pin(run_location(cmd)).await;
@@ -11072,6 +11090,9 @@ fn print_workflow_block(w: &task::model::WorkflowAttrs) {
     if let Some(cy) = w.cycle {
         println!("    cycle:     {cy}");
     }
+    if let Some(ws) = w.workstream {
+        println!("    workstream:{ws}");
+    }
     if let Some(est) = &w.estimate {
         let rendered = match est {
             Estimate::XS => "xs".to_string(),
@@ -11152,6 +11173,7 @@ fn apply_workflow_patch(
     t: &mut task::TaskInfo,
     cycle: Option<Option<uuid::Uuid>>,
     project: Option<Option<uuid::Uuid>>,
+    workstream: Option<Option<uuid::Uuid>>,
     estimate: Option<String>,
     add_assignee: Vec<workflows_proto::AgentRef>,
     remove_assignee: Vec<workflows_proto::AgentRef>,
@@ -11170,6 +11192,9 @@ fn apply_workflow_patch(
 
     if let Some(v) = cycle {
         w.cycle = v;
+    }
+    if let Some(v) = workstream {
+        w.workstream = v;
     }
     if let Some(v) = estimate {
         w.estimate = Some(parse_estimate(&v)?);
@@ -11205,6 +11230,24 @@ async fn resolve_project_filter(
         Some(p) => {
             let pc = connect_project_client(url).await?;
             Ok(Some(json_out::resolve_project_flexible(&pc, &p).await?.id))
+        }
+    }
+}
+
+/// Resolve an optional `--workstream` filter (uuid, id prefix,
+/// path, or name) into the workstream id, dialing the workstream
+/// service only when the flag is present.
+async fn resolve_workstream_filter(
+    url: &str,
+    workstream: Option<String>,
+) -> eyre::Result<Option<uuid::Uuid>> {
+    match workstream {
+        None => Ok(None),
+        Some(w) => {
+            let wc: ::workstream::WorkstreamServiceClient = establish_for_url(url).await?;
+            Ok(Some(
+                json_out::resolve_workstream_flexible(&wc, &w).await?.id,
+            ))
         }
     }
 }
@@ -11331,6 +11374,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             id,
             cycle,
             project,
+            workstream,
             estimate,
             add_assignee,
             remove_assignee,
@@ -11366,6 +11410,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     Some("" | "none" | "null") => Some(None),
                     Some(p) => Some(resolve_project_filter(&url, Some(p.to_owned())).await?),
                 };
+                let workstream = match workstream.as_deref() {
+                    None => None,
+                    Some("" | "none" | "null") => Some(None),
+                    Some(w) => Some(resolve_workstream_filter(&url, Some(w.to_owned())).await?),
+                };
                 let mut add_b = Vec::with_capacity(add_blocker.len());
                 for b in &add_blocker {
                     add_b.push(resolve_issue_id(&client, b).await?.id);
@@ -11374,7 +11423,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 for b in &remove_blocker {
                     rm_b.push(resolve_issue_id(&client, b).await?.id);
                 }
-                apply_workflow_patch(&mut t, cycle, project, estimate, add, rm, add_b, rm_b)?;
+                apply_workflow_patch(
+                    &mut t, cycle, project, workstream, estimate, add, rm, add_b, rm_b,
+                )?;
             }
             let updated = client
                 .update(t)
@@ -11623,6 +11674,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             cycle,
             project,
             parent,
+            workstream,
             estimate,
             assignees,
             blockers,
@@ -11639,6 +11691,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             // any issue reference.
             let cycle = resolve_cycle_arg(cycle, false)?;
             let project = resolve_project_filter(&url, project).await?;
+            let workstream = resolve_workstream_filter(&url, workstream).await?;
             let parent = match parent {
                 None => None,
                 Some(p) => Some(resolve_issue_id(&client, &p).await?.id),
@@ -11658,6 +11711,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .collect::<eyre::Result<_>>()?;
             let any_workflow = cycle.is_some()
                 || parent.is_some()
+                || workstream.is_some()
                 || estimate.is_some()
                 || !assignee_refs.is_empty()
                 || !blockers.is_empty();
@@ -11669,6 +11723,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 Some(task::model::WorkflowAttrs {
                     cycle,
                     parent,
+                    workstream,
                     estimate,
                     assignees: task::model::AgentRefList(assignee_refs),
                     blockers: task::model::UuidList(blockers),

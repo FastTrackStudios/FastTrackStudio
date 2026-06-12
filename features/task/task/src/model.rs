@@ -493,6 +493,15 @@ pub struct WorkflowAttrs {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub cycle: Option<Uuid>,
 
+    /// Owning workstream — the parent-with-swarm construct
+    /// (`workstream::Workstream`) this task rolls up into.
+    /// `None` = unattached (the default; absent in frontmatter
+    /// and on the wire, so existing pages keep round-tripping).
+    /// Orthogonal to `parent` (structural sub-task link): a
+    /// subtask can carry both.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub workstream: Option<Uuid>,
+
     // NOTE: project membership is NOT here — it lives on
     // `TaskInfo::project_id`, which already points at the
     // org-level Project (= the Linear-sense Project, now that

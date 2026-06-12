@@ -15059,6 +15059,7 @@ dependencies = [
  "workflows-orchestrator",
  "workflows-proto",
  "workouts",
+ "workstream",
 ]
 
 [[package]]
@@ -15135,6 +15136,7 @@ dependencies = [
  "wiki-live",
  "wiki-proto",
  "workouts",
+ "workstream",
 ]
 
 [[package]]
@@ -18306,6 +18308,49 @@ dependencies = [
  "vault",
  "vox",
  "vox-types",
+]
+
+[[package]]
+name = "workstream"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "task",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "vault",
+ "vault-proto",
+ "vox",
+ "vox-types",
+ "workflows-proto",
+ "workstream-proto",
+]
+
+[[package]]
+name = "workstream-proto"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
+ "workflows-proto",
 ]
 
 [[package]]

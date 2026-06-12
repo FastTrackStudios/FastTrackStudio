@@ -153,10 +153,12 @@ mod tests {
         use workflows_proto::AgentRef;
 
         let cycle = uuid::Uuid::new_v4();
+        let workstream = uuid::Uuid::new_v4();
         let blocker = uuid::Uuid::new_v4();
 
         let attrs = WorkflowAttrs {
             cycle: Some(cycle),
+            workstream: Some(workstream),
             parent: None,
             estimate: Some(Estimate::M),
             assignees: AgentRefList(vec![
@@ -210,6 +212,7 @@ mod tests {
         let parsed = crate::parse::parse_str("tasks/example.md", "example", &yaml).expect("parse");
         let parsed_attrs = parsed.workflow.expect("workflow attrs present");
         assert_eq!(parsed_attrs.cycle, Some(cycle));
+        assert_eq!(parsed_attrs.workstream, Some(workstream));
         assert_eq!(parsed_attrs.assignees.len(), 2);
         assert_eq!(parsed_attrs.blockers.0, vec![blocker]);
     }
