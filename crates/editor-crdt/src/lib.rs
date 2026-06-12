@@ -196,7 +196,10 @@ mod tests {
 
     #[test]
     fn single_insert() {
-        assert_eq!(roundtrip("hello", &Changes::insert(5, " world")), "hello world");
+        assert_eq!(
+            roundtrip("hello", &Changes::insert(5, " world")),
+            "hello world"
+        );
     }
 
     #[test]
