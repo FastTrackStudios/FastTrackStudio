@@ -27,18 +27,25 @@ pub fn GanttView() -> Element {
         crate::feeds::fetch_tasks_tagged(&slugs).await
     });
 
-    let body = match &*loader.read_unchecked() {
-        Some(Ok(rows)) => {
-            let tasks: Vec<_> = rows.iter().map(|(_, t)| t.clone()).collect();
-            let (bars, links) = crate::gantt_adapt::to_gantt(&tasks);
-            chart(bars, links)
-        }
-        Some(Err(e)) => rsx! {
-            div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                "Couldn't reach the task service: {e}"
+    // While the org list is still being discovered the fetch resolves
+    // to an empty set — show loading rather than flashing the demo
+    // seed (mirrors the projects/home gate).
+    let body = if org_list.read().is_empty() {
+        rsx! { Text { variant: TextVariant::Muted, "Loading tasks…" } }
+    } else {
+        match &*loader.read_unchecked() {
+            Some(Ok(rows)) => {
+                let tasks: Vec<_> = rows.iter().map(|(_, t)| t.clone()).collect();
+                let (bars, links) = crate::gantt_adapt::to_gantt(&tasks);
+                chart(bars, links)
             }
-        },
-        None => rsx! { Text { variant: TextVariant::Muted, "Loading tasks…" } },
+            Some(Err(e)) => rsx! {
+                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                    "Couldn't reach the task service: {e}"
+                }
+            },
+            None => rsx! { Text { variant: TextVariant::Muted, "Loading tasks…" } },
+        }
     };
 
     rsx! {

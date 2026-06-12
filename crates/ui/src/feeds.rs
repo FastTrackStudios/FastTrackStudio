@@ -25,6 +25,20 @@ pub async fn fetch_projects(slugs: &[String]) -> Result<Vec<ProjectInfo>, String
     collect(futures_util::future::join_all(futs).await)
 }
 
+/// Goals across the selected orgs (concurrent fan-out).
+pub async fn fetch_goals(slugs: &[String]) -> Result<Vec<goal::Goal>, String> {
+    let futs = slugs.iter().map(|slug| async move {
+        match crate::vox_clients::establish_for::<goal::GoalServiceClient>(slug).await {
+            Ok(client) => client
+                .list()
+                .await
+                .map_err(|e| format!("{slug}: list: {e:?}")),
+            Err(e) => Err(format!("{slug}: {e}")),
+        }
+    });
+    collect(futures_util::future::join_all(futs).await)
+}
+
 /// Tasks across the selected orgs (concurrent fan-out).
 pub async fn fetch_tasks(slugs: &[String]) -> Result<Vec<DbTask>, String> {
     Ok(fetch_tasks_tagged(slugs)
