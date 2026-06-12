@@ -54,6 +54,14 @@ pub enum Route {
     /// extraction is metadata-only unless Podcast Index
     /// resolves the show to a public RSS feed.
     SpotifyPodcast { kind: SpotifyKind, id: String },
+    /// Reddit thread (`/r/…/comments/…`). `permalink` is the
+    /// normalized path — host variants (old/np/new/m) all
+    /// collapse onto it.
+    Reddit { permalink: String },
+    /// X/Twitter post (`/status/<id>`). Phase 1 sent these to
+    /// yt-dlp as `Video`; the text-extraction ladder owns
+    /// them now (media URLs ride along in the payloads).
+    Tweet { status_id: String },
 }
 
 /// Which Spotify podcast resource a URL names.
@@ -87,6 +95,7 @@ pub fn content_type_for(route: &Route) -> &'static str {
         Route::YouTube { .. } | Route::Video => "video",
         Route::Pdf => "pdf",
         Route::ApplePodcast { .. } | Route::SpotifyPodcast { .. } => "podcast",
+        Route::Reddit { .. } | Route::Tweet { .. } => "post",
     }
 }
 
@@ -171,6 +180,29 @@ fn route_for(url: &Url) -> Route {
         }
     }
 
+    // ── Reddit threads ──────────────────────────────────
+    // reddit.com / old. / new. / np. / m. — collapse to one
+    // permalink. (redd.it short links need a fetch to
+    // resolve; they stay on the article path.)
+    if (host == "reddit.com" || host.ends_with(".reddit.com")) && path.contains("/comments/") {
+        return Route::Reddit {
+            permalink: path.trim_end_matches('/').to_string(),
+        };
+    }
+
+    // ── X/Twitter posts ─────────────────────────────────
+    if host == "x.com" || host == "twitter.com" || host == "mobile.twitter.com" {
+        if let Some(i) = path.find("/status/") {
+            let id: String = path[i + "/status/".len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if !id.is_empty() {
+                return Route::Tweet { status_id: id };
+            }
+        }
+    }
+
     // ── PDF by extension ────────────────────────────────
     if path.to_ascii_lowercase().ends_with(".pdf") {
         return Route::Pdf;
@@ -183,13 +215,8 @@ fn route_for(url: &Url) -> Route {
     if host == "tiktok.com" || host.ends_with(".tiktok.com") {
         return Route::Video;
     }
-    // X/Twitter: only `/status/` permalinks can carry video;
-    // profile/search pages stay articles (they'd fail in
-    // yt-dlp anyway). Social-post text extraction proper is
-    // phase 3.
-    if (host == "x.com" || host == "twitter.com") && path.contains("/status/") {
-        return Route::Video;
-    }
+    // X/Twitter `/status/` permalinks route to the Tweet
+    // ladder above; profile/search pages stay articles.
 
     Route::Article
 }
@@ -222,6 +249,11 @@ pub fn canonicalize(url: &Url, route: &Route) -> String {
             };
             format!("https://open.spotify.com/{seg}/{id}")
         }
+        Route::Reddit { permalink } => format!("https://www.reddit.com{permalink}"),
+        // `/i/status/` is the user-agnostic spelling — the
+        // same post shared from different handles (or after a
+        // rename) collapses onto one key.
+        Route::Tweet { status_id } => format!("https://x.com/i/status/{status_id}"),
         Route::Article | Route::Video | Route::Pdf => generic_canonical(url),
     }
 }
@@ -397,8 +429,50 @@ mod tests {
     fn video_hosts_route_to_video() {
         assert_eq!(route("https://vimeo.com/12345"), Route::Video);
         assert_eq!(route("https://www.tiktok.com/@user/video/7123"), Route::Video);
-        assert_eq!(route("https://x.com/user/status/17890"), Route::Video);
         assert_eq!(route("https://x.com/user"), Route::Article);
+    }
+
+    #[test]
+    fn reddit_spellings_collapse_to_one_permalink() {
+        let forms = [
+            "https://www.reddit.com/r/rust/comments/abc123/some_title/",
+            "https://old.reddit.com/r/rust/comments/abc123/some_title",
+            "https://np.reddit.com/r/rust/comments/abc123/some_title/?share_id=xyz",
+        ];
+        for f in forms {
+            assert_eq!(
+                route(f),
+                Route::Reddit {
+                    permalink: "/r/rust/comments/abc123/some_title".into()
+                },
+                "route for {f}"
+            );
+            assert_eq!(
+                canon(f),
+                "https://www.reddit.com/r/rust/comments/abc123/some_title",
+                "canon for {f}"
+            );
+        }
+        // Subreddit listings are not threads.
+        assert_eq!(route("https://www.reddit.com/r/rust/"), Route::Article);
+    }
+
+    #[test]
+    fn tweet_status_routes_user_agnostically() {
+        for f in [
+            "https://x.com/jane/status/1629307668568633344",
+            "https://twitter.com/jane/status/1629307668568633344?s=20",
+            "https://mobile.twitter.com/other/status/1629307668568633344/photo/1",
+        ] {
+            assert_eq!(
+                route(f),
+                Route::Tweet {
+                    status_id: "1629307668568633344".into()
+                },
+                "route for {f}"
+            );
+            assert_eq!(canon(f), "https://x.com/i/status/1629307668568633344");
+        }
     }
 
     #[test]

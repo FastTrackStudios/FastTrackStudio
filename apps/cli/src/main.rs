@@ -2663,6 +2663,37 @@ enum WikiArchiveSub {
     /// cross-service overlap) idempotent.
     #[command(subcommand)]
     Import(WikiArchiveImportCmd),
+    /// Extractor health: which archive routes currently work,
+    /// which are broken, and the last error seen — from the
+    /// per-org ledger every archive attempt records into.
+    /// The phase-3 social routes are accept-fragility by
+    /// design; this surface is how their breakage stays
+    /// honest instead of silent.
+    Health {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Re-attempt every unarchived stub (`unarchived-*.md`
+    /// under raw/sources/ — written when an accept-fragility
+    /// route was blocked). Cron-friendly: throttled per
+    /// route, always exits 0, prints a summary. A success
+    /// imports the real source and deletes the stub.
+    Retry {
+        /// Max stubs to attempt this run.
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Import retried sources but don't enqueue ingest.
+        #[arg(long)]
+        no_enqueue: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -9459,13 +9490,26 @@ async fn run_wiki_raw(cmd: WikiRawCmd) -> eyre::Result<()> {
 /// by filename scan — archived sources are named
 /// `<slug>-<canon8>.md` so the same resource reached via
 /// different links collapses to one file.
-async fn run_wiki_archive(args: WikiArchiveArgs) -> eyre::Result<()> {
+async fn run_wiki_archive(mut args: WikiArchiveArgs) -> eyre::Result<()> {
     use wiki_proto::raw::ImportRawSource;
     use wiki_proto::service::ingest::IngestClient;
     use wiki_proto::service::raw_layer::RawLayerClient;
 
-    if let Some(WikiArchiveSub::Import(cmd)) = args.cmd {
-        return run_wiki_archive_import(cmd).await;
+    match args.cmd.take() {
+        Some(WikiArchiveSub::Import(cmd)) => return run_wiki_archive_import(cmd).await,
+        Some(WikiArchiveSub::Health { org, json }) => {
+            return run_wiki_archive_health(org, json);
+        }
+        Some(WikiArchiveSub::Retry {
+            limit,
+            wiki_id,
+            org,
+            server,
+            no_enqueue,
+        }) => {
+            return run_wiki_archive_retry(limit, wiki_id, org, server, no_enqueue).await;
+        }
+        None => {}
     }
     let target = args
         .target
@@ -9491,22 +9535,56 @@ async fn run_wiki_archive(args: WikiArchiveArgs) -> eyre::Result<()> {
         let title = args.title.clone().unwrap_or_else(|| name.clone());
         (name, mime, title, std::fs::read(local)?, None)
     } else {
-        let (prov, body) = archive_extract_url(&target, &args)
-            .await
-            .map_err(|e| eyre::eyre!("archive {target}: {e}"))?;
-        let md = wiki_archive::compose_source_markdown(&prov, &body);
-        (
-            prov.filename(),
-            "text/markdown".to_string(),
-            prov.title.clone(),
-            md.into_bytes(),
-            Some(prov.canon8()),
-        )
+        // Health bookkeeping — every attempt lands in the
+        // per-org extractor ledger (`task wiki archive health`).
+        let route_label = wiki_archive::classify(&target)
+            .ok()
+            .map(|(_, r)| wiki_archive::health::route_label(&r));
+        let health_path = archive_health_path(&slug);
+        match archive_extract_url(&target, &args).await {
+            Ok((prov, body)) => {
+                if let (Some(p), Some(label)) = (&health_path, route_label) {
+                    wiki_archive::health::record(p, label, Ok(()));
+                }
+                let md = wiki_archive::compose_source_markdown(&prov, &body);
+                (
+                    prov.filename(),
+                    "text/markdown".to_string(),
+                    prov.title.clone(),
+                    md.into_bytes(),
+                    Some(prov.canon8()),
+                )
+            }
+            Err(e) => {
+                if let (Some(p), Some(label)) = (&health_path, route_label) {
+                    wiki_archive::health::record(p, label, Err(&e.to_string()));
+                }
+                // Accept-fragility routes (Reddit/X) store an
+                // honest unarchived stub instead of failing —
+                // `task wiki archive retry` sweeps them later.
+                let Some((prov, body)) = unarchived_stub(&target, &e.to_string()) else {
+                    return Err(eyre::eyre!("archive {target}: {e}"));
+                };
+                println!("could not archive {target}: {e}");
+                println!(
+                    "storing an unarchived stub — `task wiki archive retry` re-attempts later"
+                );
+                let md = wiki_archive::compose_source_markdown(&prov, &body);
+                (
+                    format!("unarchived-{}", prov.filename()),
+                    "text/markdown".to_string(),
+                    prov.title.clone(),
+                    md.into_bytes(),
+                    Some(prov.canon8()),
+                )
+            }
+        }
     };
 
     let raw: RawLayerClient = establish_for_url(&vox_url).await?;
 
     // ── Canonical-URL dedup ─────────────────────────────
+    let mut stale_stub: Option<String> = None;
     if let Some(c8) = &canon8 {
         let existing = raw
             .list_raw_sources(args.wiki_id.clone())
@@ -9518,7 +9596,19 @@ async fn run_wiki_archive(args: WikiArchiveArgs) -> eyre::Result<()> {
         )
         .map(ToString::to_string);
         if let Some(hit) = hit {
-            if args.force {
+            let importing_stub = filename.starts_with("unarchived-");
+            if importing_stub {
+                // Something (stub or real) already tracks this
+                // canonical URL — never stack stubs.
+                println!("already tracked as raw/sources/{hit} — not writing another stub");
+                return Ok(());
+            }
+            if hit.starts_with("unarchived-") {
+                // A failed earlier attempt left a stub and this
+                // run extracted successfully — replace it.
+                println!("replacing unarchived stub {hit}");
+                stale_stub = Some(hit);
+            } else if args.force {
                 println!("note: canonical URL already archived as {hit} (continuing: --force)");
             } else {
                 if args.json {
@@ -9549,6 +9639,16 @@ async fn run_wiki_archive(args: WikiArchiveArgs) -> eyre::Result<()> {
         )
         .await
         .map_err(|e| eyre::eyre!("import_raw_source: {e:?}"))?;
+
+    // The successful archive supersedes any unarchived stub.
+    if let Some(stub) = stale_stub {
+        if let Err(e) = raw
+            .delete_raw_source(args.wiki_id.clone(), format!("raw/sources/{stub}"))
+            .await
+        {
+            println!("note: could not delete stale stub {stub}: {e:?}");
+        }
+    }
 
     // ── Enqueue ingest ──────────────────────────────────
     let task_id = if args.no_enqueue {
@@ -9584,6 +9684,210 @@ async fn run_wiki_archive(args: WikiArchiveArgs) -> eyre::Result<()> {
             None => println!("ingest not enqueued (--no-enqueue)"),
         }
     }
+    Ok(())
+}
+
+/// Per-org extractor-health ledger location (best-effort —
+/// health is advisory and never blocks an archive).
+fn archive_health_path(slug: &str) -> Option<std::path::PathBuf> {
+    org_proto::DataRoot::from_env()
+        .ok()
+        .map(|root| root.org(slug).path().join("wiki-archive-health.json"))
+}
+
+/// Build the unarchived-stub `(Provenance, body)` for a
+/// failed extraction — but ONLY for accept-fragility routes
+/// (Reddit/X), where blocks are expected and a retry sweep
+/// exists. Everything else keeps fail-loud semantics.
+fn unarchived_stub(target: &str, error: &str) -> Option<(wiki_archive::Provenance, String)> {
+    let (url, route) = wiki_archive::classify(target).ok()?;
+    if !matches!(
+        route,
+        wiki_archive::Route::Reddit { .. } | wiki_archive::Route::Tweet { .. }
+    ) {
+        return None;
+    }
+    let canonical = wiki_archive::canonicalize(&url, &route);
+    let label = wiki_archive::health::route_label(&route);
+    let mut prov = wiki_archive::Provenance::new(
+        target,
+        target,
+        canonical,
+        wiki_archive::content_type_for(&route),
+        "unarchived",
+    );
+    prov.archive_status = Some("unarchived".into());
+    prov.archive_error = Some(error.to_string());
+    let body = format!(
+        "## Archive status\n\nNot archived yet — {error}\n\nThe `{label}` route is \
+         accept-fragility tier: blocks and shape drift are expected, and the content \
+         is still only a retry away. Re-run `task wiki archive retry` later \
+         (cron-friendly), or re-archive this URL directly once the block clears."
+    );
+    Some((prov, body))
+}
+
+/// `task wiki archive health` — render the per-org ledger.
+fn run_wiki_archive_health(org: Option<String>, json: bool) -> eyre::Result<()> {
+    let slug = resolve_active_org(org)?;
+    let path = archive_health_path(&slug)
+        .ok_or_else(|| eyre::eyre!("no data root — set TASK_DATA_ROOT or run `task org init`"))?;
+    let ledger = wiki_archive::health::load(&path);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&ledger)?);
+    } else {
+        println!("{}", wiki_archive::health::render(&ledger));
+    }
+    Ok(())
+}
+
+/// `task wiki archive retry` — sweep `unarchived-*` stubs and
+/// re-attempt them, throttled per route. Always exits 0 so a
+/// cron line stays quiet; the summary tells the story.
+async fn run_wiki_archive_retry(
+    limit: Option<usize>,
+    wiki_id: String,
+    org: Option<String>,
+    server: Option<String>,
+    no_enqueue: bool,
+) -> eyre::Result<()> {
+    use wiki_proto::raw::ImportRawSource;
+    use wiki_proto::service::ingest::IngestClient;
+    use wiki_proto::service::raw_layer::RawLayerClient;
+
+    let slug = resolve_active_org(org.clone())?;
+    let vox_url = resolve_org_vox_url(server.clone(), &slug);
+    let raw: RawLayerClient = establish_for_url(&vox_url).await?;
+    let health_path = archive_health_path(&slug);
+
+    let stubs: Vec<String> = raw
+        .list_raw_sources(wiki_id.clone())
+        .await
+        .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?
+        .into_iter()
+        .map(|r| r.filename)
+        .filter(|f| f.starts_with("unarchived-"))
+        .collect();
+    if stubs.is_empty() {
+        println!("no unarchived stubs — nothing to retry");
+        return Ok(());
+    }
+    let limit = limit.unwrap_or(usize::MAX);
+    println!("{} unarchived stub(s); retrying up to {limit}", stubs.len());
+
+    // Default single-shot args for re-extraction.
+    let extract_args = WikiArchiveArgs {
+        cmd: None,
+        target: None,
+        title: None,
+        force: false,
+        no_enqueue,
+        yt_dlp: std::env::var("TASK_YTDLP").unwrap_or_else(|_| "yt-dlp".into()),
+        pdftotext: std::env::var("TASK_PDFTOTEXT").unwrap_or_else(|_| "pdftotext".into()),
+        episode: None,
+        transcribe: "auto".into(),
+        whisper_model: std::env::var("TASK_WHISPER_MODEL").unwrap_or_else(|_| "small".into()),
+        ffmpeg: std::env::var("TASK_FFMPEG").unwrap_or_else(|_| "ffmpeg".into()),
+        wiki_id: wiki_id.clone(),
+        org,
+        server,
+        json: false,
+    };
+
+    let (mut recovered, mut still_blocked, mut skipped) = (0usize, 0usize, 0usize);
+    let mut first = true;
+    for stub in stubs.iter().take(limit) {
+        // Pull the original URL out of the stub frontmatter.
+        let bytes = match raw
+            .read_raw_source(wiki_id.clone(), format!("raw/sources/{stub}"))
+            .await
+        {
+            Ok(b) => b,
+            Err(e) => {
+                println!("  skip {stub}: read failed: {e:?}");
+                skipped += 1;
+                continue;
+            }
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let Some(source_url) = text
+            .lines()
+            .find_map(|l| l.strip_prefix("source_url:"))
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .filter(|v| !v.is_empty())
+        else {
+            println!("  skip {stub}: no source_url in frontmatter");
+            skipped += 1;
+            continue;
+        };
+
+        // Throttle BETWEEN requests, per route — Reddit
+        // tolerates ~10/min anonymously.
+        let route = wiki_archive::classify(&source_url).ok().map(|(_, r)| r);
+        if !first {
+            let pause = match route {
+                Some(wiki_archive::Route::Reddit { .. }) => {
+                    wiki_archive::reddit::MIN_REQUEST_INTERVAL
+                }
+                _ => std::time::Duration::from_secs(1),
+            };
+            tokio::time::sleep(pause).await;
+        }
+        first = false;
+
+        let label = route.as_ref().map(wiki_archive::health::route_label);
+        match archive_extract_url(&source_url, &extract_args).await {
+            Ok((prov, body)) => {
+                if let (Some(p), Some(label)) = (&health_path, label) {
+                    wiki_archive::health::record(p, label, Ok(()));
+                }
+                let md = wiki_archive::compose_source_markdown(&prov, &body);
+                let r = raw
+                    .import_raw_source(
+                        wiki_id.clone(),
+                        ImportRawSource {
+                            filename: prov.filename(),
+                            mime: "text/markdown".into(),
+                            title: prov.title.clone(),
+                            bytes: md.into_bytes(),
+                            auto_enqueue: false,
+                        },
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("import_raw_source {source_url}: {e:?}"))?;
+                if !no_enqueue {
+                    let ing: IngestClient = establish_for_url(&vox_url).await?;
+                    ing.enqueue_ingest(
+                        wiki_id.clone(),
+                        r.path.clone(),
+                        wiki_proto::ingest::SourceChange::Created,
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("enqueue_ingest {}: {e:?}", r.path))?;
+                }
+                if let Err(e) = raw
+                    .delete_raw_source(wiki_id.clone(), format!("raw/sources/{stub}"))
+                    .await
+                {
+                    println!("  note: stub {stub} not deleted: {e:?}");
+                }
+                println!("  ✓ {source_url} → {}", r.path);
+                recovered += 1;
+            }
+            Err(e) => {
+                if let (Some(p), Some(label)) = (&health_path, label) {
+                    wiki_archive::health::record(p, label, Err(&e.to_string()));
+                }
+                println!("  ✗ {source_url}: still blocked ({e})");
+                still_blocked += 1;
+            }
+        }
+    }
+    println!(
+        "retry sweep: {recovered} recovered, {still_blocked} still blocked, {skipped} skipped \
+         (of {})",
+        stubs.len()
+    );
     Ok(())
 }
 
@@ -9765,6 +10069,48 @@ async fn archive_extract_url(
                 "spotify-oembed",
             );
             prov.media = Some(target.to_string());
+            Ok((prov, body))
+        }
+        wiki_archive::Route::Reddit { permalink } => {
+            // Dedicated client: Reddit 403s self-identifying
+            // UAs (no loid cookie) — see reddit.rs.
+            let client = wiki_archive::reddit::client().map_err(|e| eyre::eyre!("{e}"))?;
+            let thread = wiki_archive::reddit::fetch_thread(&client, &permalink)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let body = wiki_archive::reddit::render_reddit_markdown(&thread);
+            let title = title_override.unwrap_or_else(|| thread.title.clone());
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "reddit-json",
+            );
+            Ok((prov, body))
+        }
+        wiki_archive::Route::Tweet { status_id } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let result = wiki_archive::x::fetch_tweet(&client, &status_id)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let body = wiki_archive::x::render_tweet_markdown(&result.tweet, target);
+            let title = title_override.unwrap_or_else(|| {
+                let head: String = result.tweet.text.chars().take(60).collect();
+                match &result.tweet.author_handle {
+                    Some(h) => format!("@{h}: {head}"),
+                    None => head,
+                }
+            });
+            // `extractor:` records which ladder rung answered
+            // — fragility honesty for later debugging.
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                result.rung,
+            );
             Ok((prov, body))
         }
         wiki_archive::Route::YouTube { .. } | wiki_archive::Route::Video => {

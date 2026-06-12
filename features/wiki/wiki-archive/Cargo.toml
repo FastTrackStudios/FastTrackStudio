@@ -9,7 +9,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-chrono = { workspace = true }
+# `serde` feature: the health ledger serializes its
+# last-success/failure instants.
+chrono = { workspace = true, features = ["serde"] }
+# Extractor-health ledger (`task wiki archive health`) is a
+# small serde JSON file.
+serde = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
