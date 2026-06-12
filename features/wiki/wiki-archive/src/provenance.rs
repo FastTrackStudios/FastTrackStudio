@@ -51,6 +51,14 @@ pub struct Provenance {
     pub media: Option<String>,
     /// Media duration in whole seconds.
     pub duration_secs: Option<u64>,
+    /// `unarchived` when extraction failed and only a stub
+    /// was stored (phase-3 accept-fragility routes). Stub
+    /// FILENAMES also carry an `unarchived-` prefix so the
+    /// retry sweep is a filename scan, like dedup.
+    pub archive_status: Option<String>,
+    /// Why the last extraction attempt failed — honest UX on
+    /// the source page itself.
+    pub archive_error: Option<String>,
 }
 
 impl Provenance {
@@ -72,6 +80,8 @@ impl Provenance {
             extractor: extractor.into(),
             media: None,
             duration_secs: None,
+            archive_status: None,
+            archive_error: None,
         }
     }
 
@@ -123,6 +133,12 @@ impl Provenance {
         }
         if let Some(d) = self.duration_secs {
             out.push_str(&format!("duration: {d}\n"));
+        }
+        if let Some(s) = &self.archive_status {
+            out.push_str(&format!("archive_status: {s}\n"));
+        }
+        if let Some(e) = &self.archive_error {
+            out.push_str(&format!("archive_error: {}\n", yaml_quote(e)));
         }
         out.push_str("---\n");
         out
@@ -249,6 +265,18 @@ mod tests {
         let fm = prov().frontmatter();
         assert!(!fm.contains("media:"));
         assert!(!fm.contains("duration:"));
+        assert!(!fm.contains("archive_status:"));
+        assert!(!fm.contains("archive_error:"));
+    }
+
+    #[test]
+    fn unarchived_stub_fields_render() {
+        let mut p = prov();
+        p.archive_status = Some("unarchived".into());
+        p.archive_error = Some("HTTP 403 — blocked".into());
+        let fm = p.frontmatter();
+        assert!(fm.contains("archive_status: unarchived"), "{fm}");
+        assert!(fm.contains("archive_error: \"HTTP 403 — blocked\""), "{fm}");
     }
 
     #[test]

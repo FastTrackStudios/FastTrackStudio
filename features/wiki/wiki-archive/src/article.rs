@@ -190,6 +190,52 @@ pub async fn fetch_text(
     })
 }
 
+/// GET a URL as raw bytes, returning `(content_type, bytes)`.
+/// The archive front door uses the content type (plus magic
+/// bytes) to divert e.g. extensionless PDFs away from the
+/// readability path.
+pub async fn fetch_bytes(
+    client: &reqwest::Client,
+    url: &str,
+    accept: &str,
+) -> Result<(String, Vec<u8>), ArchiveError> {
+    let resp = client
+        .get(url)
+        .header("accept", accept)
+        .send()
+        .await
+        .map_err(|e| ArchiveError::Fetch {
+            url: url.to_string(),
+            message: e.to_string(),
+        })?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(ArchiveError::BadResponse {
+            url: url.to_string(),
+            message: format!("HTTP {status}"),
+        });
+    }
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| ArchiveError::Fetch {
+            url: url.to_string(),
+            message: e.to_string(),
+        })?
+        .to_vec();
+    Ok((content_type, bytes))
+}
+
 /// `attachment; filename="My Doc.md"` → `My Doc.md`. Handles
 /// the unquoted variant too; skips RFC 5987 `filename*=`
 /// (Google doesn't emit it for doc exports).

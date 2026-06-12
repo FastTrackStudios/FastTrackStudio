@@ -38,6 +38,37 @@ pub enum Route {
     /// Other yt-dlp-able hosts (Vimeo, TikTok, X video) —
     /// same transcript path as YouTube, no id extraction.
     Video,
+    /// PDF by URL extension (`…/paper.pdf`). URLs that serve
+    /// `application/pdf` without the extension divert to the
+    /// same extractor at fetch time via content-type sniff.
+    Pdf,
+    /// Apple Podcasts page. `podcast_id` is the `id<digits>`
+    /// path segment; `episode_id` the `?i=` query param when
+    /// the link points at one episode.
+    ApplePodcast {
+        podcast_id: String,
+        episode_id: Option<String>,
+    },
+    /// Spotify podcast page (`/episode/` or `/show/`).
+    /// Spotify exposes no public audio or transcript —
+    /// extraction is metadata-only unless Podcast Index
+    /// resolves the show to a public RSS feed.
+    SpotifyPodcast { kind: SpotifyKind, id: String },
+    /// Reddit thread (`/r/…/comments/…`). `permalink` is the
+    /// normalized path — host variants (old/np/new/m) all
+    /// collapse onto it.
+    Reddit { permalink: String },
+    /// X/Twitter post (`/status/<id>`). Phase 1 sent these to
+    /// yt-dlp as `Video`; the text-extraction ladder owns
+    /// them now (media URLs ride along in the payloads).
+    Tweet { status_id: String },
+}
+
+/// Which Spotify podcast resource a URL names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpotifyKind {
+    Episode,
+    Show,
 }
 
 /// Parse + classify in one step. The common entry point for
@@ -62,6 +93,9 @@ pub fn content_type_for(route: &Route) -> &'static str {
         Route::Article => "article",
         Route::GoogleDoc { .. } => "document",
         Route::YouTube { .. } | Route::Video => "video",
+        Route::Pdf => "pdf",
+        Route::ApplePodcast { .. } | Route::SpotifyPodcast { .. } => "podcast",
+        Route::Reddit { .. } | Route::Tweet { .. } => "post",
     }
 }
 
@@ -107,6 +141,73 @@ fn route_for(url: &Url) -> Route {
         }
     }
 
+    // ── Apple Podcasts ──────────────────────────────────
+    // podcasts.apple.com/<cc>/podcast/<slug>/id<digits>[?i=<episode>]
+    if host == "podcasts.apple.com" {
+        if let Some(podcast_id) = path
+            .split('/')
+            .filter_map(|seg| seg.strip_prefix("id"))
+            .find(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+        {
+            let episode_id = url
+                .query_pairs()
+                .find(|(k, _)| k == "i")
+                .map(|(_, v)| v.into_owned())
+                .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()));
+            return Route::ApplePodcast {
+                podcast_id: podcast_id.to_string(),
+                episode_id,
+            };
+        }
+    }
+
+    // ── Spotify podcasts ────────────────────────────────
+    if host == "open.spotify.com" {
+        for (prefix, kind) in [
+            ("/episode/", SpotifyKind::Episode),
+            ("/show/", SpotifyKind::Show),
+        ] {
+            // Locale-prefixed paths (`/intl-de/episode/…`) too.
+            if let Some(i) = path.find(prefix) {
+                let id: String = path[i + prefix.len()..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric())
+                    .collect();
+                if !id.is_empty() {
+                    return Route::SpotifyPodcast { kind, id };
+                }
+            }
+        }
+    }
+
+    // ── Reddit threads ──────────────────────────────────
+    // reddit.com / old. / new. / np. / m. — collapse to one
+    // permalink. (redd.it short links need a fetch to
+    // resolve; they stay on the article path.)
+    if (host == "reddit.com" || host.ends_with(".reddit.com")) && path.contains("/comments/") {
+        return Route::Reddit {
+            permalink: path.trim_end_matches('/').to_string(),
+        };
+    }
+
+    // ── X/Twitter posts ─────────────────────────────────
+    if host == "x.com" || host == "twitter.com" || host == "mobile.twitter.com" {
+        if let Some(i) = path.find("/status/") {
+            let id: String = path[i + "/status/".len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if !id.is_empty() {
+                return Route::Tweet { status_id: id };
+            }
+        }
+    }
+
+    // ── PDF by extension ────────────────────────────────
+    if path.to_ascii_lowercase().ends_with(".pdf") {
+        return Route::Pdf;
+    }
+
     // ── Other yt-dlp hosts (same transcript path) ───────
     if host == "vimeo.com" || host.ends_with(".vimeo.com") {
         return Route::Video;
@@ -114,13 +215,8 @@ fn route_for(url: &Url) -> Route {
     if host == "tiktok.com" || host.ends_with(".tiktok.com") {
         return Route::Video;
     }
-    // X/Twitter: only `/status/` permalinks can carry video;
-    // profile/search pages stay articles (they'd fail in
-    // yt-dlp anyway). Social-post text extraction proper is
-    // phase 3.
-    if (host == "x.com" || host == "twitter.com") && path.contains("/status/") {
-        return Route::Video;
-    }
+    // X/Twitter `/status/` permalinks route to the Tweet
+    // ladder above; profile/search pages stay articles.
 
     Route::Article
 }
@@ -136,7 +232,29 @@ pub fn canonicalize(url: &Url, route: &Route) -> String {
         Route::GoogleDoc { doc_id } => {
             format!("https://docs.google.com/document/d/{doc_id}")
         }
-        Route::Article | Route::Video => generic_canonical(url),
+        Route::ApplePodcast {
+            podcast_id,
+            episode_id,
+        } => match episode_id {
+            // Episode links carry the episode in the key — the
+            // same show page archived twice IS the same page,
+            // but two episodes are two resources.
+            Some(ep) => format!("https://podcasts.apple.com/podcast/id{podcast_id}?i={ep}"),
+            None => format!("https://podcasts.apple.com/podcast/id{podcast_id}"),
+        },
+        Route::SpotifyPodcast { kind, id } => {
+            let seg = match kind {
+                SpotifyKind::Episode => "episode",
+                SpotifyKind::Show => "show",
+            };
+            format!("https://open.spotify.com/{seg}/{id}")
+        }
+        Route::Reddit { permalink } => format!("https://www.reddit.com{permalink}"),
+        // `/i/status/` is the user-agnostic spelling — the
+        // same post shared from different handles (or after a
+        // rename) collapses onto one key.
+        Route::Tweet { status_id } => format!("https://x.com/i/status/{status_id}"),
+        Route::Article | Route::Video | Route::Pdf => generic_canonical(url),
     }
 }
 
@@ -311,8 +429,115 @@ mod tests {
     fn video_hosts_route_to_video() {
         assert_eq!(route("https://vimeo.com/12345"), Route::Video);
         assert_eq!(route("https://www.tiktok.com/@user/video/7123"), Route::Video);
-        assert_eq!(route("https://x.com/user/status/17890"), Route::Video);
         assert_eq!(route("https://x.com/user"), Route::Article);
+    }
+
+    #[test]
+    fn reddit_spellings_collapse_to_one_permalink() {
+        let forms = [
+            "https://www.reddit.com/r/rust/comments/abc123/some_title/",
+            "https://old.reddit.com/r/rust/comments/abc123/some_title",
+            "https://np.reddit.com/r/rust/comments/abc123/some_title/?share_id=xyz",
+        ];
+        for f in forms {
+            assert_eq!(
+                route(f),
+                Route::Reddit {
+                    permalink: "/r/rust/comments/abc123/some_title".into()
+                },
+                "route for {f}"
+            );
+            assert_eq!(
+                canon(f),
+                "https://www.reddit.com/r/rust/comments/abc123/some_title",
+                "canon for {f}"
+            );
+        }
+        // Subreddit listings are not threads.
+        assert_eq!(route("https://www.reddit.com/r/rust/"), Route::Article);
+    }
+
+    #[test]
+    fn tweet_status_routes_user_agnostically() {
+        for f in [
+            "https://x.com/jane/status/1629307668568633344",
+            "https://twitter.com/jane/status/1629307668568633344?s=20",
+            "https://mobile.twitter.com/other/status/1629307668568633344/photo/1",
+        ] {
+            assert_eq!(
+                route(f),
+                Route::Tweet {
+                    status_id: "1629307668568633344".into()
+                },
+                "route for {f}"
+            );
+            assert_eq!(canon(f), "https://x.com/i/status/1629307668568633344");
+        }
+    }
+
+    #[test]
+    fn pdf_extension_routes_to_pdf() {
+        assert_eq!(route("https://arxiv.org/pdf/1706.03762v7.pdf"), Route::Pdf);
+        assert_eq!(route("https://example.com/whitepaper.PDF"), Route::Pdf);
+        // No extension ⇒ article (content-type sniff diverts
+        // at fetch time, not here).
+        assert_eq!(route("https://arxiv.org/pdf/1706.03762"), Route::Article);
+    }
+
+    #[test]
+    fn apple_podcast_routes_with_optional_episode() {
+        let show = "https://podcasts.apple.com/us/podcast/the-talk-show/id528458508";
+        assert_eq!(
+            route(show),
+            Route::ApplePodcast {
+                podcast_id: "528458508".into(),
+                episode_id: None
+            }
+        );
+        assert_eq!(
+            canon(show),
+            "https://podcasts.apple.com/podcast/id528458508"
+        );
+        let ep = "https://podcasts.apple.com/us/podcast/ep-1/id528458508?i=1000123456789&l=en";
+        assert_eq!(
+            route(ep),
+            Route::ApplePodcast {
+                podcast_id: "528458508".into(),
+                episode_id: Some("1000123456789".into())
+            }
+        );
+        assert_eq!(
+            canon(ep),
+            "https://podcasts.apple.com/podcast/id528458508?i=1000123456789"
+        );
+    }
+
+    #[test]
+    fn spotify_podcast_routes() {
+        let ep = "https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk?si=share123";
+        assert_eq!(
+            route(ep),
+            Route::SpotifyPodcast {
+                kind: SpotifyKind::Episode,
+                id: "4rOoJ6Egrf8K2IrywzwOMk".into()
+            }
+        );
+        assert_eq!(
+            canon(ep),
+            "https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk"
+        );
+        assert_eq!(
+            route("https://open.spotify.com/intl-de/show/abcDEF123ghi"),
+            Route::SpotifyPodcast {
+                kind: SpotifyKind::Show,
+                id: "abcDEF123ghi".into()
+            }
+        );
+        // Music URLs are not podcasts.
+        assert_eq!(
+            route("https://open.spotify.com/track/abcdef123"),
+            Route::Article
+        );
     }
 
     #[test]
