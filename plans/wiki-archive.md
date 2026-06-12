@@ -10,9 +10,9 @@ queue). Crate: `features/wiki/wiki-archive`.
 
 Tracked issues: phase 1 `32e7b28f` (router, articles,
 YouTube `^t<sec>` transcripts, Readwise/Karakeep/Pocket/
-Netscape importers, SourceViewer), phase 2 (PDFs with page
-anchors, podcasts/whisper), phase 3 (social, extractor
-health).
+Netscape importers, SourceViewer), phase 2 `0a09a0d5` (PDFs
+with page anchors, podcasts/whisper, audio player), phase 3
+`6397f305` (social, extractor health).
 
 ## Conventions
 
@@ -24,6 +24,24 @@ health).
   obsidian block-anchor grammar — `[[Sources/x#^t870]]` deep
   links work with zero parser changes). Curator notes go under
   `## Notes` as `- [mm:ss] … ^t<sec>-noteN`.
+- PDFs: the first paragraph of every page carries a 1-based
+  `^p<page>` anchor (`[p. 12] … ^p12`), same grammar. Pages
+  with no extractable text render an honest placeholder —
+  OCR is deferred, not faked. Engines: pdfium when bindable
+  (`pdf` feature + `TASK_PDFIUM` dir or system libpdfium —
+  dynamic binding, nothing bundled, mirroring wiki-extract),
+  else `pdftotext -layout`.
+- Podcasts: `media:` frontmatter = the playable enclosure
+  URL; the SourceViewer renders a native `<audio>` player and
+  `[mm:ss]` chips seek via `currentTime`. Transcript ladder:
+  feed `<podcast:transcript>` tag (fast path, no audio fetch)
+  → `--transcribe groq` backfill (GROQ_API_KEY) → local
+  whisper (`--features whisper` build; whisper-rs pinned to
+  its codeberg home — the GitHub repo is archived; `small`
+  model dev default, `large-v3-turbo` for production) →
+  honest "no transcript" note. Spotify is metadata-only
+  (no public audio/transcript); PODCASTINDEX_API_KEY/SECRET
+  enables title-search resolution back to public RSS.
 
 ## Phase-1 follow-ups
 

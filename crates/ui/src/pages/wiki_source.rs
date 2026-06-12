@@ -10,7 +10,13 @@
 //! `content_type: video` sources embed the YouTube player
 //! (`enablejsapi=1`); clicking a transcript block's `[mm:ss]`
 //! chip seeks the player to that anchor via the IFrame
-//! postMessage API. v1 is the clean read-only viewer —
+//! postMessage API. `content_type: podcast` sources embed a
+//! native `<audio>` element over the provenance `media:`
+//! enclosure URL — the same `[mm:ss]` chips seek it via a
+//! trivial `currentTime` assignment, so podcast notes are
+//! exactly as seekable as video notes. PDF sources render
+//! their `^p<page>` anchors as `p. N` chips (link targets,
+//! nothing to seek). v1 is the clean read-only viewer —
 //! "insert note at current time" (getCurrentTime → `## Notes`
 //! bullet) is the planned follow-up, see plans/wiki-archive.md.
 
@@ -67,6 +73,23 @@ struct Provenance {
     duration: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Anchor {
+    /// `^t<sec>` — seekable timestamp (video / podcast).
+    Time(u64),
+    /// `^p<page>` — PDF page marker (link target only).
+    Page(u64),
+}
+
+/// Which player the viewer embedded — decides what a
+/// timestamp chip's click does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Player {
+    YouTube,
+    Audio,
+    None,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Block {
     Heading(u8, String),
@@ -74,8 +97,9 @@ enum Block {
     Lede(String),
     Quote(Vec<String>),
     Bullet(String),
-    /// Paragraph; `anchor` = the `^t<sec>` id when present.
-    Para { text: String, anchor: Option<u64> },
+    /// Paragraph; `anchor` = the `^t<sec>` / `^p<page>` id
+    /// when present.
+    Para { text: String, anchor: Option<Anchor> },
 }
 
 fn parse_source(raw: &str) -> (Provenance, Vec<Block>) {
@@ -169,11 +193,19 @@ fn parse_blocks(body: &str) -> Vec<Block> {
     blocks
 }
 
-/// `"… text ^t870"` → `("… text", Some(870))`.
-fn split_anchor(text: &str) -> (String, Option<u64>) {
-    if let Some((head, id)) = text.rsplit_once(" ^t") {
-        if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) {
-            return (head.to_string(), id.parse().ok());
+/// `"… text ^t870"` → `("… text", Some(Time(870)))`;
+/// `"… text ^p12"` → `("… text", Some(Page(12)))`.
+fn split_anchor(text: &str) -> (String, Option<Anchor>) {
+    for (marker, make) in [
+        (" ^t", Anchor::Time as fn(u64) -> Anchor),
+        (" ^p", Anchor::Page as fn(u64) -> Anchor),
+    ] {
+        if let Some((head, id)) = text.rsplit_once(marker) {
+            if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) {
+                if let Ok(n) = id.parse() {
+                    return (head.to_string(), Some(make(n)));
+                }
+            }
         }
     }
     (text.to_string(), None)
@@ -203,6 +235,17 @@ fn youtube_id(media: &str) -> Option<String> {
         .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
         .collect();
     (id.len() >= 6).then_some(id)
+}
+
+/// Seek the embedded `<audio>` player — podcast `media:` is a
+/// plain enclosure URL, so this is just a `currentTime`
+/// assignment.
+fn seek_audio(sec: u64) {
+    let js = format!(
+        "const a = document.getElementById('{EMBED_ID}-audio');
+if (a) {{ a.currentTime = {sec}; a.play(); }}"
+    );
+    let _ = dioxus::document::eval(&js);
 }
 
 /// Seek the embedded player via the IFrame postMessage API.
@@ -330,6 +373,18 @@ fn render_source(prov: &Provenance, blocks: &[Block]) -> Element {
     let video_id = (prov.content_type == "video")
         .then(|| youtube_id(&prov.media))
         .flatten();
+    // Podcasts: `media:` is the playable enclosure URL.
+    let audio_src = (prov.content_type == "podcast"
+        && prov.media.starts_with("http")
+        && !prov.media.contains("open.spotify.com"))
+    .then(|| prov.media.clone());
+    let player = if video_id.is_some() {
+        Player::YouTube
+    } else if audio_src.is_some() {
+        Player::Audio
+    } else {
+        Player::None
+    };
     let archived_day = prov.archived_at.split('T').next().unwrap_or_default().to_string();
     let duration = prov
         .duration
@@ -375,15 +430,28 @@ fn render_source(prov: &Provenance, blocks: &[Block]) -> Element {
                 allowfullscreen: true,
             }
         }
+        if let Some(src) = audio_src {
+            // Sticky so the player stays reachable while
+            // scrolling a long transcript.
+            div { class: "sticky top-0 z-10 -mx-2 rounded-xl border border-border/70 bg-card/95 px-3 py-2 backdrop-blur",
+                audio {
+                    id: "{EMBED_ID}-audio",
+                    class: "w-full",
+                    controls: true,
+                    preload: "metadata",
+                    src: "{src}",
+                }
+            }
+        }
         article { class: "flex flex-col gap-3 pb-12",
             for (i, block) in blocks.iter().enumerate() {
-                {render_block(i, block)}
+                {render_block(i, block, player)}
             }
         }
     }
 }
 
-fn render_block(key: usize, block: &Block) -> Element {
+fn render_block(key: usize, block: &Block, player: Player) -> Element {
     match block {
         // The H1 duplicates the provenance title — skip it.
         Block::Heading(1, _) => rsx! {},
@@ -411,7 +479,7 @@ fn render_block(key: usize, block: &Block) -> Element {
                 span { "{text}" }
             }
         },
-        Block::Para { text, anchor: Some(sec) } => {
+        Block::Para { text, anchor: Some(Anchor::Time(sec)) } => {
             let sec = *sec;
             let stamp = mmss(sec);
             // Strip the leading `[mm:ss] ` the archive writes —
@@ -426,8 +494,32 @@ fn render_block(key: usize, block: &Block) -> Element {
                     button {
                         class: "mt-0.5 shrink-0 rounded-md border border-border/70 bg-card/60 px-1.5 py-0.5 font-mono text-[0.7rem] text-muted-foreground hover:border-primary/60 hover:text-foreground",
                         title: "Seek player to {stamp}",
-                        onclick: move |_| seek_embed(sec),
+                        onclick: move |_| match player {
+                            Player::Audio => seek_audio(sec),
+                            Player::YouTube | Player::None => seek_embed(sec),
+                        },
                         "{stamp}"
+                    }
+                    p { class: "text-sm leading-relaxed", "{text}" }
+                }
+            }
+        }
+        Block::Para { text, anchor: Some(Anchor::Page(page)) } => {
+            let page = *page;
+            // Strip the `[p. N] ` prefix the archive writes —
+            // the chip carries the page number. Nothing to
+            // seek for a PDF; the chip is the `#^pN` target.
+            let text = text
+                .strip_prefix(&format!("[p. {page}] "))
+                .unwrap_or(text)
+                .to_string();
+            rsx! {
+                div { key: "{key}", id: "p{page}",
+                    class: "group flex items-start gap-2 rounded-lg px-2 py-1 -mx-2 hover:bg-accent/30",
+                    span {
+                        class: "mt-0.5 shrink-0 rounded-md border border-border/70 bg-card/60 px-1.5 py-0.5 font-mono text-[0.7rem] text-muted-foreground",
+                        title: "Page {page}",
+                        "p. {page}"
                     }
                     p { class: "text-sm leading-relaxed", "{text}" }
                 }
@@ -457,11 +549,43 @@ mod tests {
         let anchored: Vec<_> = blocks
             .iter()
             .filter_map(|b| match b {
-                Block::Para { anchor: Some(s), .. } => Some(*s),
+                Block::Para { anchor: Some(Anchor::Time(s)), .. } => Some(*s),
                 _ => None,
             })
             .collect();
         assert_eq!(anchored, vec![1, 47]);
+    }
+
+    #[test]
+    fn page_anchors_parse_as_page_kind() {
+        let blocks = parse_blocks(
+            "## Pages\n\n[p. 1] Intro text. ^p1\n\nUnanchored continuation.\n\n[p. 2] Second page. ^p2\n",
+        );
+        let pages: Vec<_> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Para { anchor: Some(Anchor::Page(p)), .. } => Some(*p),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pages, vec![1, 2]);
+        assert!(blocks.contains(&Block::Para {
+            text: "Unanchored continuation.".into(),
+            anchor: None
+        }));
+    }
+
+    #[test]
+    fn podcast_media_is_audio_not_youtube() {
+        let raw = "---\ntitle: \"An Episode\"\nsource_url: \"https://podcasts.apple.com/us/podcast/x/id1?i=2\"\ncontent_type: podcast\nmedia: \"https://cdn.example.com/ep.mp3?tracker=1\"\nduration: 3725\n---\n\n# An Episode\n\n[0:00] Welcome. ^t0\n";
+        let (prov, blocks) = parse_source(raw);
+        assert_eq!(prov.content_type, "podcast");
+        assert!(prov.media.starts_with("http"));
+        assert_eq!(youtube_id(&prov.media), None);
+        assert!(matches!(
+            blocks.last(),
+            Some(Block::Para { anchor: Some(Anchor::Time(0)), .. })
+        ));
     }
 
     #[test]
