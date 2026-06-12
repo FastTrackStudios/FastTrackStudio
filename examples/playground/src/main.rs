@@ -19,6 +19,41 @@ fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     out
 }
 
+/// Demo trigger-autocomplete source — a static "vault" so the
+/// playground exercises `[[` wikilink and `#` tag completion. Real
+/// hosts pass a stateful `CompletionSource::new(..)` closing over
+/// their vault index; the editor only sees `(query, kind) ->
+/// Vec<Candidate>`.
+fn demo_completion(
+    query: &str,
+    kind: editor_view::trigger::CompletionKind,
+) -> Vec<editor_view::trigger::Candidate> {
+    use editor_view::trigger::{Candidate, CompletionKind};
+    let pool: &[(&str, &str)] = match kind {
+        CompletionKind::Wikilink => &[
+            ("Welcome", "playground/Welcome.md"),
+            ("Daily Note", "journal/Daily Note.md"),
+            ("Editor Design", "docs/Editor Design.md"),
+            ("Roadmap", "docs/Roadmap.md"),
+        ],
+        CompletionKind::Tag => &[
+            ("project", ""),
+            ("project/active", ""),
+            ("inbox", ""),
+            ("someday", ""),
+        ],
+    };
+    let q = query.to_lowercase();
+    pool.iter()
+        .filter(|(name, _)| name.to_lowercase().contains(&q))
+        .map(|(name, detail)| Candidate {
+            label: (*name).to_string(),
+            insert_text: (*name).to_string(),
+            detail: (*detail).to_string(),
+        })
+        .collect()
+}
+
 const STYLE: Asset = asset!("/assets/playground.css");
 
 fn main() {
@@ -437,6 +472,9 @@ fn App() -> Element {
                                 ),
                                 vim: if vim_enabled { Some(vim) } else { None },
                                 slash: Some(slash),
+                                completion: editor_view::trigger::CompletionSource::ptr(
+                                    demo_completion,
+                                ),
                             }
                         }
                         editor::editor_view::slash::SlashMenu { state, slash }

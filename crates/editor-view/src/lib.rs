@@ -12,7 +12,9 @@ mod event;
 pub mod hover;
 pub mod slash;
 pub mod tile;
+pub mod trigger;
 
 pub use editor::{DecorationSource, Editor};
 pub use event::TransactionEvent;
 pub use hover::{HoverPopup, HoverTooltipView};
+pub use trigger::{Candidate, CompletionKind, CompletionSource, CompletionState};

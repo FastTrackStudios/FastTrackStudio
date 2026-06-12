@@ -269,6 +269,17 @@ pub fn Editor(
     /// editor does NOT emit.
     #[props(default)]
     on_transaction: Option<Callback<crate::TransactionEvent>>,
+    /// Optional trigger-autocomplete candidate source. When `Some`,
+    /// the editor watches the caret for open `[[` wikilink and `#`
+    /// tag triggers, asks this source for candidates (`(query,
+    /// kind) -> Vec<Candidate>` — the host owns the vault/tag
+    /// index; the editor stays vault-agnostic), and renders the
+    /// completion popup itself. Arrow keys / Enter / Escape route
+    /// into the menu while it's open; accepting splices `[[Name]]`
+    /// / `#tag` through the normal transaction path (and therefore
+    /// the `on_transaction` sink).
+    #[props(default)]
+    completion: Option<crate::trigger::CompletionSource>,
 ) -> Element {
     // True when a decoration widget cell currently has focus
     // (frontmatter property contenteditable, chip-add box, etc.).
@@ -279,6 +290,10 @@ pub fn Editor(
     // the whole doc even when we `stopPropagation` in capture
     // phase on the editor root.
     let widget_focus = use_signal(|| false);
+    // Trigger-autocomplete open state (`[[` / `#`). Owned by the
+    // editor (unlike `slash`, which the host threads in) because the
+    // host's only contract is the candidate source prop.
+    let completion_state = use_signal(|| None::<crate::trigger::CompletionState>);
     // Hover-tooltip popup (resolved content + anchor coords). Driven by the
     // `hover`/`hover-end` bridge messages below; rendered as a floating panel.
     let hover_state = use_signal(|| None::<crate::hover::HoverPopup>);
@@ -1969,6 +1984,7 @@ pub fn Editor(
     // ── onkeydown: vim → keymap dispatch ─────────────────────────
     let keymap_for_keys = keymap.clone();
     let sink_for_keys = on_transaction;
+    let completion_for_keys = completion_state;
     let vim_for_keys = vim;
     let slash_for_keys = slash;
     let widget_focus_for_keys = widget_focus;
@@ -2046,6 +2062,59 @@ pub fn Editor(
                             }
                         }
                         slash_sig.set(None);
+                        evt.prevent_default();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // ── Completion menu key routing ──
+        //
+        // Same contract as the slash menu: Arrows cycle, Enter
+        // accepts, Escape closes; everything else falls through so
+        // continued typing updates the query via the detect effect.
+        // Runs AFTER slash so slash keeps its existing precedence in
+        // the (degenerate) case where both menus are open at once.
+        // Unlike slash, Enter with zero candidates falls through —
+        // swallowing a newline because the host had nothing to offer
+        // would be hostile.
+        {
+            let mut comp_sig = completion_for_keys;
+            let snapshot = comp_sig.peek().clone();
+            if let Some(current) = snapshot {
+                match press.key.as_str() {
+                    "Escape" => {
+                        comp_sig.set(None);
+                        evt.prevent_default();
+                        return;
+                    }
+                    "ArrowDown" if !current.candidates.is_empty() => {
+                        let len = current.candidates.len();
+                        let mut new = current.clone();
+                        new.selected = (current.selected + 1) % len;
+                        comp_sig.set(Some(new));
+                        evt.prevent_default();
+                        return;
+                    }
+                    "ArrowUp" if !current.candidates.is_empty() => {
+                        let len = current.candidates.len();
+                        let mut new = current.clone();
+                        new.selected = (current.selected + len - 1) % len;
+                        comp_sig.set(Some(new));
+                        evt.prevent_default();
+                        return;
+                    }
+                    "Enter" if !current.candidates.is_empty() => {
+                        let idx = current.selected.min(current.candidates.len() - 1);
+                        if let Some(spec) = crate::trigger::accept_candidate(
+                            &cur,
+                            &current,
+                            &current.candidates[idx],
+                        ) {
+                            crate::event::apply_tx(state, &cur, spec, sink_for_keys);
+                        }
+                        comp_sig.set(None);
                         evt.prevent_default();
                         return;
                     }
@@ -2284,6 +2353,52 @@ pub fn Editor(
         });
     }
 
+    // Completion-state refresh: on every doc/selection change,
+    // re-run `detect_trigger` against the caret. Open the menu on a
+    // fresh `[[` / `#` trigger (fetching candidates from the host's
+    // source), refresh candidates as the query grows, close it when
+    // the trigger goes away. Mirrors the slash refresh above.
+    if let Some(source) = completion.clone() {
+        let mut comp_sig = completion_state;
+        use_effect(move || {
+            let s = state.read();
+            let caret = s.selection.primary().head;
+            let detected = crate::trigger::detect_trigger(&s.doc.to_string(), caret);
+            let prev = comp_sig.peek().clone();
+            match (detected, prev) {
+                (Some((kind, start, q)), Some(prev))
+                    if prev.kind == kind && prev.trigger_start == start =>
+                {
+                    // Same trigger, query updated. Re-fetch and clamp
+                    // the highlighted row to the new candidate count.
+                    if prev.query != q {
+                        let candidates = source.run(&q, kind);
+                        let selected = prev.selected.min(candidates.len().saturating_sub(1));
+                        comp_sig.set(Some(crate::trigger::CompletionState {
+                            kind,
+                            trigger_start: start,
+                            query: q,
+                            selected,
+                            candidates,
+                        }));
+                    }
+                }
+                (Some((kind, start, q)), _) => {
+                    let candidates = source.run(&q, kind);
+                    comp_sig.set(Some(crate::trigger::CompletionState {
+                        kind,
+                        trigger_start: start,
+                        query: q,
+                        selected: 0,
+                        candidates,
+                    }));
+                }
+                (None, Some(_)) => comp_sig.set(None),
+                _ => {}
+            }
+        });
+    }
+
     {
         let id = editor_id.clone();
         let deco_source_patch = decorations.clone();
@@ -2431,6 +2546,13 @@ pub fn Editor(
         }
         if let Some(popup) = hover_state.read().clone() {
             crate::hover::HoverTooltipView { popup }
+        }
+        if completion.is_some() {
+            crate::trigger::CompletionMenu {
+                state,
+                completion: completion_state,
+                on_transaction,
+            }
         }
     }
 }
