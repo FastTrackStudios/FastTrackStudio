@@ -8,11 +8,11 @@ use editor::{
 };
 
 /// Combined decoration source — markdown live-preview plus
-/// bracket-pair highlighting. The view's `DecorationSource` is a
-/// plain `fn(&EditorState) -> Vec<DecoratedRange>` so composition
-/// is just concatenation; the inner builders dedupe nothing, but
-/// our overlapping mark spans on brackets sit next to each other
-/// without conflict.
+/// bracket-pair highlighting. Wrapped via
+/// `DecorationSource::ptr` (the stateless fn-pointer shape) so
+/// composition is just concatenation; the inner builders dedupe
+/// nothing, but our overlapping mark spans on brackets sit next
+/// to each other without conflict.
 fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     let mut out = markdown::live_preview(state);
     out.extend(bracket_match::bracket_match(state));
@@ -432,8 +432,9 @@ fn App() -> Element {
                             Editor {
                                 state,
                                 keymap: keymap.clone(),
-                                decorations: combined_decorations
-                                    as editor_view::DecorationSource,
+                                decorations: editor_view::DecorationSource::ptr(
+                                    combined_decorations,
+                                ),
                                 vim: if vim_enabled { Some(vim) } else { None },
                                 slash: Some(slash),
                             }

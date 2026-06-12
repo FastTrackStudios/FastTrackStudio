@@ -42,7 +42,7 @@ use crate::tile::visible::VisibleText;
 
 pub(crate) fn handle_bridge_msg(
     mut state: Signal<EditorState>,
-    deco_source: Option<DecorationSource>,
+    deco_source: Option<&DecorationSource>,
     vim: Option<Signal<editor_vim::VimState>>,
     mut widget_focus: Signal<bool>,
     v: &serde_json::Value,
@@ -69,7 +69,7 @@ pub(crate) fn handle_bridge_msg(
             editor_state::set_deco_phase(editor_state::DecoPhase::Structural);
             let decorations: Vec<DecoratedRange> = match deco_source {
                 Some(src) => {
-                    let mut v = src(&cur);
+                    let mut v = src.run(&cur);
                     v.sort_by_key(|d| d.from);
                     v
                 }

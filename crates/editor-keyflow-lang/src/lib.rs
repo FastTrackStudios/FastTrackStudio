@@ -31,9 +31,8 @@ pub use keyflow_text::highlighting::Theme as HighlightTheme;
 
 /// Build the keyflow decoration set for the current document.
 ///
-/// Coerces to `editor`'s `DecorationSource = fn(&EditorState) ->
-/// Vec<DecoratedRange>` — pass it straight into the `<Editor>` `decorations`
-/// prop.
+/// Wrap with `editor_view::DecorationSource::ptr(keyflow_decorations)` and
+/// pass it straight into the `<Editor>` `decorations` prop.
 ///
 /// Highlight spans come from [`Highlighter::highlight_line`], which works per
 /// line with line-relative byte offsets; we add each line's start offset to

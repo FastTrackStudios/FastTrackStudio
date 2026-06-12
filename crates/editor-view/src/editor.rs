@@ -29,12 +29,13 @@
 //! text already matches state.doc (preventing the writeback
 //! from fighting in-flight typing).
 
-// Component props derive PartialEq on a `fn`-pointer field
-// (DecorationSource); within a single binary fn-ptr equality is
-// reliable enough for prop-diff purposes. The lint guards
-// against codegen-unit splits that don't happen in our build.
+// `DecorationSource`'s fn-pointer fast path compares by fn
+// address; within a single binary fn-ptr equality is reliable
+// enough for prop-diff purposes. The lint guards against
+// codegen-unit splits that don't happen in our build.
 #![allow(unpredictable_function_pointer_comparisons)]
 
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
@@ -45,15 +46,93 @@ use editor_state::{
 use crate::tile::build::build_tiles;
 use crate::tile::patch::build_patch;
 
-/// Decoration source — a pure fn that produces decorations for
+/// Decoration source — a callable that produces decorations for
 /// the current state. Multiple sources can be combined; the view
 /// concatenates and sorts before rendering.
 ///
 /// Conceptually mirrors CM6's `EditorView.decorations` facet —
-/// extensions contribute decorations, the view merges. Using a
-/// plain `fn` keeps the v1 surface tiny; we can swap to a trait
-/// object for stateful sources later.
-pub type DecorationSource = fn(&EditorState) -> Vec<DecoratedRange>;
+/// extensions contribute decorations, the view merges. Two
+/// shapes:
+///
+/// - **Fn pointer** (the original v1 surface): a pure
+///   `fn(&EditorState) -> Vec<DecoratedRange>`. Build via
+///   [`DecorationSource::ptr`] or `From<fn>`. Equality is fn
+///   address comparison, so passing the same fn every render
+///   never re-renders the editor.
+/// - **Stateful closure**: anything capturing environment — a
+///   vault index for wikilink resolution, presence cursors from
+///   a CRDT peer set, settings signals. Build via
+///   [`DecorationSource::new`]. Equality is `Rc` identity, so
+///   hosts should create the source **once** (e.g. inside
+///   `use_hook` / `use_memo`) and capture `Signal`s rather than
+///   values; rebuilding the `Rc` every render forces an editor
+///   re-render every parent render.
+///
+/// The plan docs anticipated this: "we can swap to a trait
+/// object for stateful sources later" — this is that swap, with
+/// the fn-pointer path kept as a zero-cost compatibility shape.
+#[derive(Clone)]
+pub struct DecorationSource(SourceImpl);
+
+/// The bare callable shape both [`DecorationSource`] variants share.
+type SourceFn = dyn Fn(&EditorState) -> Vec<DecoratedRange>;
+
+#[derive(Clone)]
+enum SourceImpl {
+    Ptr(fn(&EditorState) -> Vec<DecoratedRange>),
+    Dyn(Rc<SourceFn>),
+}
+
+impl DecorationSource {
+    /// Wrap a stateful closure. Create once (e.g. in `use_hook`)
+    /// and capture `Signal`s — see the type-level docs for the
+    /// equality contract.
+    pub fn new(f: impl Fn(&EditorState) -> Vec<DecoratedRange> + 'static) -> Self {
+        Self(SourceImpl::Dyn(Rc::new(f)))
+    }
+
+    /// Wrap a plain fn pointer. Identical behavior (including
+    /// prop-diff equality) to the pre-stateful `type
+    /// DecorationSource = fn(..)` alias.
+    #[must_use]
+    pub fn ptr(f: fn(&EditorState) -> Vec<DecoratedRange>) -> Self {
+        Self(SourceImpl::Ptr(f))
+    }
+
+    /// Produce the decoration set for `state`.
+    #[must_use]
+    pub fn run(&self, state: &EditorState) -> Vec<DecoratedRange> {
+        match &self.0 {
+            SourceImpl::Ptr(f) => f(state),
+            SourceImpl::Dyn(f) => f(state),
+        }
+    }
+}
+
+impl From<fn(&EditorState) -> Vec<DecoratedRange>> for DecorationSource {
+    fn from(f: fn(&EditorState) -> Vec<DecoratedRange>) -> Self {
+        Self::ptr(f)
+    }
+}
+
+impl PartialEq for DecorationSource {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (SourceImpl::Ptr(a), SourceImpl::Ptr(b)) => std::ptr::fn_addr_eq(*a, *b),
+            (SourceImpl::Dyn(a), SourceImpl::Dyn(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+impl std::fmt::Debug for DecorationSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            SourceImpl::Ptr(p) => f.debug_tuple("DecorationSource::Ptr").field(p).finish(),
+            SourceImpl::Dyn(_) => f.write_str("DecorationSource::Dyn(..)"),
+        }
+    }
+}
 
 /// Per-instance id allocator — each `<Editor>` mount gets a
 /// unique `data-editor-id` for the JS bridge to find it.
@@ -244,7 +323,7 @@ pub fn Editor(
         // Capture the decoration source so the spawn closure
         // can rebuild the tile tree + visible-text mirror when
         // diffing each input message.
-        let deco_source = decorations;
+        let deco_source = decorations.clone();
         // Hover source + popup signal captured for the recv loop below.
         let hover_source = hover;
         let mut hover_sig = hover_state;
@@ -1860,7 +1939,7 @@ pub fn Editor(
                             }
                             crate::bridge::handle_bridge_msg(
                                 state,
-                                deco_source,
+                                deco_source.as_ref(),
                                 vim,
                                 widget_focus,
                                 &v,
@@ -2189,7 +2268,7 @@ pub fn Editor(
 
     {
         let id = editor_id.clone();
-        let deco_source_patch = decorations;
+        let deco_source_patch = decorations.clone();
         // Mut copies of the incremental-patch signals for the move closure
         // (Signal is Copy; `.set()` needs a mutable binding).
         let mut prev_line_hashes = prev_line_hashes;
@@ -2208,9 +2287,9 @@ pub fn Editor(
                 editor_state::DecoPhase::Structural
             });
             let t_decos = now_ms();
-            let decorations: Vec<DecoratedRange> = match deco_source_patch {
+            let decorations: Vec<DecoratedRange> = match &deco_source_patch {
                 Some(src) => {
-                    let mut v = src(&s);
+                    let mut v = src.run(&s);
                     v.sort_by_key(|d| d.from);
                     v
                 }
@@ -2351,7 +2430,7 @@ pub fn Editor(
 pub(crate) fn push_selection(
     state: &mut Signal<EditorState>,
     cur: &EditorState,
-    deco_source: Option<DecorationSource>,
+    deco_source: Option<&DecorationSource>,
     s: usize,
     e: usize,
 ) {
@@ -2365,7 +2444,7 @@ pub(crate) fn push_selection(
     // never needs the expensive analysis pass — pin Structural.
     if let Some(src) = deco_source {
         editor_state::set_deco_phase(editor_state::DecoPhase::Structural);
-        let decs = src(cur);
+        let decs = src.run(cur);
         s = editor_state::decoration::skip_atomic(&decs, s);
         e = editor_state::decoration::skip_atomic(&decs, e);
     }

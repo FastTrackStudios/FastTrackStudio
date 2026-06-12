@@ -52,7 +52,7 @@ pub fn EditorApp() -> Element {
                 Editor {
                     state,
                     keymap: keymap.read().clone(),
-                    decorations: combined_decorations as editor_view::DecorationSource,
+                    decorations: editor_view::DecorationSource::ptr(combined_decorations),
                     vim: Some(vim),
                     slash: Some(slash),
                 }
