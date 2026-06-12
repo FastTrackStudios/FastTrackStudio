@@ -1,16 +1,20 @@
 //! Shared time-grid view used by week (`days.len() == 7`) and day
 //! (`days.len() == 1`) variants.
 //!
-//! Pixel-based vertical layout (48 px/hour) so drop-y math is
-//! direct. Overlap column-splitting comes from
+//! Pixel-based vertical layout so drop-y math is direct: the hour
+//! height is derived from the scroll container (06:00–24:00 fills
+//! the viewport, 28px/hour floor), measured on mount and
+//! re-derived on viewport resize. Overlap column-splitting comes from
 //! [`crate::layout::day_overlap_layout`]: events that share time
 //! get split into sub-columns. Sweep-to-create on the column
 //! background gives the Google-style click-and-drag event creation.
 
+use std::rc::Rc;
+
 use chrono::{Datelike, Duration, NaiveDate};
 use dioxus::html::geometry::PixelsVector2D;
 use dioxus::html::input_data::MouseButton;
-use dioxus::html::{MountedData, ScrollBehavior};
+use dioxus::html::{MountedData, ResizeData, ScrollBehavior};
 use dioxus::prelude::*;
 
 use crate::layout::{TimeBlockPlacement, day_overlap_layout};
@@ -65,9 +69,14 @@ pub struct TimeGridViewProps {
 #[component]
 pub fn TimeGridView(props: TimeGridViewProps) -> Element {
     let today = chrono::Local::now().date_naive();
-    // Hour height, derived on mount from the scroll container's
-    // height so 06:00–24:00 fills the default viewport exactly.
+    // Hour height, derived from the scroll container's height so
+    // 06:00–24:00 fills the default viewport exactly — measured on
+    // mount and re-derived on every viewport resize (the container
+    // carries an `onresize` ResizeObserver hook).
     let mut px_per_hour = use_signal(|| PX_PER_HOUR_DEFAULT);
+    // The scroll container element, kept so the resize handler can
+    // read + restore the scroll position.
+    let mut scroller: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let pph = px_per_hour();
     let col_height_px = pph * 24;
     // Split: all-day events go to the top strip, timed events to
@@ -138,8 +147,11 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
             // Scrollable grid body. On mount: size the hour rows so
             // the 06:00–24:00 window fills the container, then start
             // scrolled to 06:00 (pre-06:00 stays reachable upward).
+            // On resize: re-derive the row height and keep the
+            // top-of-viewport hour anchored.
             div { class: "flex-1 min-h-0 overflow-y-auto",
                 onmounted: move |e: Event<MountedData>| {
+                    scroller.set(Some(e.data()));
                     spawn(async move {
                         let mut p = PX_PER_HOUR_DEFAULT;
                         if let Ok(rect) = e.data().get_client_rect().await {
@@ -155,6 +167,39 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                             .data()
                             .scroll(PixelsVector2D::new(0.0, y), ScrollBehavior::Instant)
                             .await;
+                    });
+                },
+                // Viewport resize → re-derive the hour height (same
+                // formula + MIN_PX_PER_HOUR floor as on mount) and
+                // rescale the scroll offset so the hour at the top
+                // of the viewport stays anchored (06:00 right after
+                // mount).
+                onresize: move |e: Event<ResizeData>| {
+                    let Ok(size) = e.data().get_content_box_size() else { return };
+                    let h = size.height;
+                    if h <= 100.0 {
+                        return;
+                    }
+                    let new_p = ((h / WINDOW_HOURS as f64).floor() as i64)
+                        .max(MIN_PX_PER_HOUR);
+                    let old_p = *px_per_hour.peek();
+                    if new_p == old_p {
+                        return;
+                    }
+                    let el = scroller.peek().clone();
+                    spawn(async move {
+                        let mut y = (WINDOW_START_HOUR * new_p) as f64;
+                        if let Some(el) = el {
+                            if let Ok(off) = el.get_scroll_offset().await {
+                                y = off.y * new_p as f64 / old_p as f64;
+                            }
+                            px_per_hour.set(new_p);
+                            let _ = el
+                                .scroll(PixelsVector2D::new(0.0, y), ScrollBehavior::Instant)
+                                .await;
+                        } else {
+                            px_per_hour.set(new_p);
+                        }
                     });
                 },
                 div {
