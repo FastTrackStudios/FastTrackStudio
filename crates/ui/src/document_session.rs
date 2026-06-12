@@ -204,6 +204,14 @@ impl DocumentSession {
         *self.save_count.read()
     }
 
+    /// The last committed text (what was fetched on open, or what the
+    /// last successful save wrote). Non-reactive — the collab takeover
+    /// uses it as the three-way base separating "user typed since the
+    /// open" from "the server doc is ahead of our fetch".
+    pub(crate) fn committed_text(&self) -> String {
+        self.saved_text.peek().clone()
+    }
+
     // ── Controls ──────────────────────────────────────────────
 
     /// Suspend / resume the autosave debounce. Explicit saves

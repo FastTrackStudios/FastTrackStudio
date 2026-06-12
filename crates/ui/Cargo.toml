@@ -17,12 +17,11 @@ dioxus = { workspace = true, features = ["router"] }
 dioxus-router.workspace = true
 fts-ui = { workspace = true, features = ["router"] }
 
-# Loro + CRDT machinery + project-proto/project-crdt were
-# ripped along with the Loro entity layer. The editor crate now
-# owns any future CRDT integration (per-file collaborative
-# editing); UI routes drive plain components against the
-# file-backed vault.
+# The editor + the byte⇄scalar adapter for its CRDT host: the
+# vault page wires `Editor`'s `on_transaction` sink through
+# `editor-crdt` into a per-file Loro doc (`src/collab.rs`).
 editor.workspace = true
+editor-crdt.workspace = true
 view.workspace = true
 view-calendar.workspace = true
 # Knowledge-graph view (the `/wiki` graph) — force-directed map of the

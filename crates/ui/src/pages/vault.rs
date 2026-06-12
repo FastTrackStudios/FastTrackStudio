@@ -80,8 +80,10 @@ pub fn VaultView() -> Element {
     });
 
     // Open file + its editing state — the whole
-    // open/save/autosave/conflict lifecycle in one handle.
+    // open/save/autosave/conflict lifecycle in one handle. Provided
+    // as context for the keyed `CollabSession` child.
     let session = use_document_session(home);
+    use_context_provider(|| session);
     let selected = use_memo(move || session.current_path());
     let mut new_name = use_signal(String::new);
     // Failures from tree operations (move / create) outlive their
@@ -136,8 +138,76 @@ pub fn VaultView() -> Element {
         });
     });
 
+    // ── Per-file CRDT collaboration ───────────────────────────
+    // When a file opens, register it via `open_collab` and mount a
+    // keyed `CollabSession` (synced replica + presence cursors).
+    // While the session is live the server write-behind owns
+    // persistence and the sha autosave pauses; if the sync session
+    // drops, tear down and fall back to sha saves (a fresh replica
+    // is opened on the next file open — never a stale outbox).
+    let mut collab = use_signal(|| None::<crate::collab::CollabHandles>);
+    let mut collab_doc = use_signal(|| None::<uuid::Uuid>);
+    let account = try_use_context::<Signal<Option<crate::auth::ActiveAccount>>>();
+    use_effect(move || {
+        let path = selected();
+        collab_doc.set(None);
+        collab.set(None);
+        let Some(path) = path else { return };
+        let slug = home.peek().clone();
+        spawn(async move {
+            match crate::collab::open_collab(slug, path.clone()).await {
+                Ok(ack) => {
+                    // Only arm if this file is still the open one.
+                    if session.current_path().as_deref() == Some(path.as_str()) {
+                        collab_doc.set(Some(ack.doc_id));
+                    }
+                }
+                Err(e) => {
+                    // No collab (older server / native shell) — the
+                    // page simply stays in plain sha mode.
+                    tracing::debug!("vault collab unavailable for {path}: {e}");
+                }
+            }
+        });
+    });
+    // Autosave pauses exactly while collab is live (the server
+    // write-behind owns persistence then).
+    use_effect(move || {
+        let live = collab.read().as_ref().is_some_and(|c| c.is_live());
+        session.set_autosave_paused(live);
+    });
+    // Live → Offline teardown: unmount the session so offline edits
+    // go back through sha saves instead of a buffered CRDT outbox
+    // (re-syncing that outbox AND sha-saving the same edits would
+    // double-apply them server-side).
+    use_effect(move || {
+        let went_offline = collab
+            .read()
+            .as_ref()
+            .is_some_and(|c| (c.live)() && c.doc.status() == crdt::SyncStatus::Offline);
+        if went_offline {
+            collab_doc.set(None);
+            collab.set(None);
+        }
+    });
+    let collab_status = use_memo(move || {
+        collab
+            .read()
+            .as_ref()
+            .map(|c| if c.is_live() { "Collab: live" } else { "Collab: connecting…" })
+    });
+    // Editor → replica bridge + presence cursor publish.
+    let on_transaction = use_callback(move |event: editor::TransactionEvent| {
+        let Some(c) = *collab.peek() else { return };
+        let who = account
+            .and_then(|a| a.peek().as_ref().map(|acct| acct.name.clone()))
+            .unwrap_or_else(|| "anonymous".to_owned());
+        crate::collab::on_editor_transaction(&c, &session, &event, &who);
+    });
+
     // Editor sources — created once, capturing the signals above.
-    let decorations = use_hook(|| vault_lookup::vault_decoration_source(lookup));
+    // Decorations = the vault pass + remote presence cursors.
+    let decorations = use_hook(|| crate::collab::collab_decoration_source(lookup, collab));
     let completion = use_hook(|| vault_lookup::vault_completion_source(link_candidates, tag_rows));
 
     // Open a note through the session (fetch + seed + sha
@@ -375,6 +445,9 @@ pub fn VaultView() -> Element {
                         }
                     }
                     div { class: "flex items-center gap-3",
+                        if let Some(cs) = collab_status() {
+                            Text { variant: TextVariant::Muted, class: "text-xs", "{cs}" }
+                        }
                         if !status_msg.is_empty() {
                             Text { variant: TextVariant::Muted, class: "text-xs", "{status_msg}" }
                         }
@@ -429,6 +502,7 @@ pub fn VaultView() -> Element {
                                         vim: Some(vim),
                                         slash: Some(slash),
                                         completion: completion.clone(),
+                                        on_transaction,
                                     }
                                     SlashMenu { state: session.state, slash }
                                 }
@@ -502,7 +576,12 @@ pub fn VaultView() -> Element {
                 }
             }
         }
+        // Keyed collab child: remount per doc id = fresh replica.
+        if let Some(doc_id) = collab_doc() {
+            crate::collab::CollabSession { key: "{doc_id}", doc_id, out: collab }
+        }
         document::Link { rel: "stylesheet", href: editor::EDITOR_STYLE }
+        document::Style { {crate::collab::COLLAB_STYLE} }
     }
 }
 

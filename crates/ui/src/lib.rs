@@ -8,6 +8,7 @@
 pub mod app;
 pub mod auth;
 pub mod chrome;
+pub mod collab;
 pub mod document_session;
 pub mod feeds;
 pub mod forge_views;
