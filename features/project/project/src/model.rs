@@ -229,6 +229,18 @@ pub struct ProjectInfo {
     #[architect(filterable)]
     pub archived: bool,
 
+    // ── State registry ──────────────────────────────────────
+    /// Optional per-project state registry: custom status names
+    /// bound to canonical [`crate::states::StateGroup`]s. `None`
+    /// = use [`crate::states::default_states`] (the canonical
+    /// open / in-progress / waiting / done / cancelled set).
+    /// Task statuses stay free strings — this only adds the
+    /// group *meaning* that rollups / burndown / kanban consume
+    /// via [`crate::states::resolve_state_group`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(json)]
+    pub states: Option<crate::states::StatesConfig>,
+
     // ── Timestamps ──────────────────────────────────────────
     /// Frontmatter aliases: `dateCreated` / `dateModified`
     /// (kept for back-compat with TaskNotes-style notes).

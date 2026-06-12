@@ -5,19 +5,25 @@
 //! every call. A task belongs to a workstream when
 //! `task.workflow.workstream == Some(id)`.
 //!
-//! Semantics:
-//! - `done` counts status `done` only (cancelled tasks stay in
-//!   `total` but aren't "progress").
+//! Semantics — classification routes through canonical *state
+//! groups* (`project::states`), never raw status strings, so
+//! per-project custom status names roll up correctly:
+//! - `done` counts the `completed` group only (cancelled tasks
+//!   stay in `total` but aren't "progress").
+//! - `in_progress` counts the `started` group (includes
+//!   `waiting` — claimed work that's paused).
 //! - `blocked` counts still-open attached tasks with at least
 //!   one *unresolved* blocker. A blocker is resolved only when
-//!   the referenced task exists in the provided list and is
-//!   done / cancelled — the same rule `task issue ready` uses,
-//!   so a workstream's blocked count matches what agents see.
+//!   the referenced task exists in the provided list and its
+//!   group is closed (completed / cancelled) — the same rule
+//!   `task issue ready` uses, so a workstream's blocked count
+//!   matches what agents see.
 //! - `estimate_points_sum` weights XS/S/M/L/XL as 1/2/3/5/8;
 //!   `Points { value }` counts at face value; no estimate = 0.
 
 use std::collections::HashMap;
 
+use project::states::{StateGroup, resolve_state_group};
 use task::TaskInfo;
 use task::model::Estimate;
 use uuid::Uuid;
@@ -44,12 +50,11 @@ pub fn estimate_points(e: Estimate) -> u32 {
 #[must_use]
 pub fn rollup(workstream_id: Uuid, org_tasks: &[TaskInfo]) -> WorkstreamRollup {
     let by_id: HashMap<Uuid, &TaskInfo> = org_tasks.iter().map(|t| (t.id, t)).collect();
-    let is_closed = |t: &TaskInfo| {
-        matches!(
-            task::Status::from_str(&t.status),
-            Some(task::Status::Done | task::Status::Cancelled)
-        )
-    };
+    // Group classification with the default registry. Callers
+    // that know per-project registries route them in via the
+    // backend (which resolves each task's owning project).
+    let group = |t: &TaskInfo| resolve_state_group(None, &t.status);
+    let is_closed = |t: &TaskInfo| group(t).is_closed();
 
     let mut out = WorkstreamRollup::default();
     for t in org_tasks {
@@ -62,16 +67,16 @@ pub fn rollup(workstream_id: Uuid, org_tasks: &[TaskInfo]) -> WorkstreamRollup {
             continue;
         }
         out.total += 1;
-        match task::Status::from_str(&t.status) {
-            Some(task::Status::Done) => out.done += 1,
-            Some(task::Status::InProgress) => out.in_progress += 1,
+        match group(t) {
+            StateGroup::Completed => out.done += 1,
+            StateGroup::Started => out.in_progress += 1,
             _ => {}
         }
         if let Some(w) = &t.workflow {
             out.estimate_points_sum += w.estimate.map_or(0, estimate_points);
             // Blocked: still open, with >= 1 unresolved blocker.
             // Unresolved = the referenced task is missing from
-            // the org list OR not yet done / cancelled.
+            // the org list OR its group isn't closed yet.
             if !is_closed(t)
                 && w.blockers
                     .iter()

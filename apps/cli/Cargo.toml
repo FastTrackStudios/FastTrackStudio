@@ -21,6 +21,8 @@ eyre.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 serde.workspace = true
 serde_json.workspace = true
+# Parse `project set-states --from` registry files (YAML, a JSON superset).
+serde_yaml.workspace = true
 uuid.workspace = true
 # `task-cli vault …` subcommands operate on a filesystem vault
 # via vault-obsidian's parsed helpers (outline / tasks / props /

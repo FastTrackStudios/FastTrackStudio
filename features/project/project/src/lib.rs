@@ -40,6 +40,7 @@
 pub mod model;
 pub mod parse;
 pub mod service;
+pub mod states;
 
 // FS-dependent modules (vault::Vault, std::fs walks). The
 // wasm-targeted UI imports the wire types + RPC client only,
@@ -53,6 +54,7 @@ pub mod write;
 
 pub use model::{ProjectInfo, Status};
 pub use parse::{ParseError, looks_like_project, parse_page, parse_str};
+pub use states::{StateDef, StateGroup, StatesConfig, default_states, resolve_state_group};
 pub use service::{ProjectError, ProjectService, ProjectServiceRpc};
 #[cfg(feature = "vox")]
 pub use service::{

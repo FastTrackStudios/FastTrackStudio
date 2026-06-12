@@ -28,6 +28,12 @@ uuid = { workspace = true, features = ["v4", "js", "serde"] }
 # doesn't set default-features, so vox rides along for now —
 # same pre-existing idiom as task → vault-proto.)
 task = { workspace = true, default-features = false }
+# Status -> StateGroup resolution (`project::states`) — progress
+# classification ("is this done?") routes through canonical
+# state groups so custom status names classify correctly. The
+# UI keeps its local `Status` enum for pills / columns; groups
+# only decide progress. Wasm-clean (model/states modules only).
+project = { workspace = true, default-features = false }
 # Transition / Activity / AgentRef for the session-history feed
 # + assignee chips.
 workflows-proto = { workspace = true }

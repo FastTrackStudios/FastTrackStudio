@@ -131,9 +131,19 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
         color,
         image,
         archived,
+        states: take_states(&map),
         date_created,
         date_modified,
     })
+}
+
+/// Parse the optional `states:` registry. Tolerant: an
+/// unparseable or empty list reads as `None` (treated as "use
+/// the default registry") rather than failing the page.
+fn take_states(map: &serde_yaml::Mapping) -> Option<crate::states::StatesConfig> {
+    let value = map.get("states")?;
+    let cfg: crate::states::StatesConfig = serde_yaml::from_value(value.clone()).ok()?;
+    (!cfg.is_empty()).then_some(cfg)
 }
 
 // ── helpers (mirror task::parse) ─────────────────────────────

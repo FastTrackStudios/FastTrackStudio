@@ -1057,6 +1057,51 @@ enum ProjectCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Show the project's state registry — every status name
+    /// with its canonical group (backlog / unstarted / started /
+    /// completed / cancelled). Falls back to the default
+    /// registry when the project declares no `states:` config.
+    States {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the registry as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Edit the project's state registry. `--from <file|->`
+    /// replaces the whole registry (YAML or JSON list of
+    /// `{name, group, color?, default?, order?}`); repeatable
+    /// `--add <name>:<group>[:<color>]` upserts single states
+    /// (starting from the current registry, or the default set
+    /// when none is configured). `--clear` drops the custom
+    /// registry (back to defaults).
+    SetStates {
+        target: String,
+        /// Replace the registry from a YAML/JSON file (`-` for
+        /// stdin).
+        #[arg(long)]
+        from: Option<String>,
+        /// Upsert one state: `<name>:<group>[:<color>]`, group ∈
+        /// backlog|unstarted|started|completed|cancelled.
+        #[arg(long = "add", value_name = "NAME:GROUP[:COLOR]")]
+        add: Vec<String>,
+        /// Mark this state name as the default for new tasks.
+        #[arg(long = "default", value_name = "NAME")]
+        default_state: Option<String>,
+        /// Drop the custom registry entirely.
+        #[arg(long)]
+        clear: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the resulting registry as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Set the project's target completion date (YYYY-MM-DD, or
     /// `none`/`clear` to unset). The Linear-style roadmap field.
     SetTarget {
@@ -4454,6 +4499,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 color: String::new(),
                 image: String::new(),
                 archived: false,
+                states: None,
                 date_created: None,
                 date_modified: None,
             };
@@ -4479,6 +4525,160 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             json,
         } => {
             mutate_project(target, org, server, json, |p| p.status = status).await?;
+        }
+        ProjectCmd::States {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let p = resolve_project_target(&client, &target).await?;
+            let custom = p.states.is_some();
+            let registry = p.states.clone().unwrap_or_else(project::default_states);
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "project": p.id,
+                    "custom": custom,
+                    "states": registry,
+                }))?;
+                return Ok(());
+            }
+            let origin = if custom { "custom" } else { "default" };
+            println!("{}  ({origin} registry)\n", p.title);
+            for s in registry.ordered() {
+                let default = if s.default { "  (default)" } else { "" };
+                let color = if s.color.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", s.color)
+                };
+                println!("  {:<18} {:<10}{color}{default}", s.name, s.group.as_str());
+            }
+        }
+        ProjectCmd::SetStates {
+            target,
+            from,
+            add,
+            default_state,
+            clear,
+            org,
+            server,
+            json,
+        } => {
+            if clear && (from.is_some() || !add.is_empty()) {
+                return Err(eyre::eyre!("--clear can't be combined with --from/--add"));
+            }
+            if !clear && from.is_none() && add.is_empty() && default_state.is_none() {
+                return Err(eyre::eyre!(
+                    "nothing to do — pass --from <file|->, --add <name>:<group>, \
+                     --default <name>, or --clear"
+                ));
+            }
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let mut p = resolve_project_target(&client, &target).await?;
+
+            let next = if clear {
+                None
+            } else {
+                // Start from --from (whole-registry replace), else
+                // the current registry, else the default set — so
+                // `--add` extends rather than orphaning canonical
+                // states.
+                let mut cfg: project::StatesConfig = match &from {
+                    Some(src) => {
+                        let raw = if src == "-" {
+                            use std::io::Read as _;
+                            let mut s = String::new();
+                            std::io::stdin()
+                                .read_to_string(&mut s)
+                                .map_err(|e| eyre::eyre!("stdin: {e}"))?;
+                            s
+                        } else {
+                            std::fs::read_to_string(src)
+                                .map_err(|e| eyre::eyre!("read {src}: {e}"))?
+                        };
+                        // serde_yaml parses JSON too (YAML superset).
+                        serde_yaml::from_str(&raw)
+                            .map_err(|e| eyre::eyre!("parse states config: {e}"))?
+                    }
+                    None => p.states.clone().unwrap_or_else(project::default_states),
+                };
+                for spec in &add {
+                    let (name, group, color) = parse_state_spec(spec)?;
+                    let order = cfg
+                        .0
+                        .iter()
+                        .map(|s| s.order + 1)
+                        .max()
+                        .unwrap_or_default();
+                    match cfg
+                        .0
+                        .iter_mut()
+                        .find(|s| s.name.eq_ignore_ascii_case(&name))
+                    {
+                        Some(existing) => {
+                            existing.group = group;
+                            if let Some(c) = color {
+                                existing.color = c;
+                            }
+                        }
+                        None => cfg.0.push(project::StateDef {
+                            name,
+                            group,
+                            color: color.unwrap_or_default(),
+                            default: false,
+                            order,
+                        }),
+                    }
+                }
+                if let Some(name) = &default_state {
+                    if !cfg.0.iter().any(|s| s.name.eq_ignore_ascii_case(name)) {
+                        return Err(eyre::eyre!(
+                            "--default `{name}` is not in the registry — add it first"
+                        ));
+                    }
+                    for s in &mut cfg.0 {
+                        s.default = s.name.eq_ignore_ascii_case(name);
+                    }
+                }
+                if cfg.0.is_empty() {
+                    return Err(eyre::eyre!(
+                        "registry would be empty — use --clear to drop it instead"
+                    ));
+                }
+                Some(cfg)
+            };
+            p.states = next;
+            let updated = client
+                .update(p)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            let registry = updated
+                .states
+                .clone()
+                .unwrap_or_else(project::default_states);
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "project": updated.id,
+                    "custom": updated.states.is_some(),
+                    "states": registry,
+                }))?;
+                return Ok(());
+            }
+            if updated.states.is_none() {
+                println!("{}: custom registry cleared (default applies)", updated.title);
+            } else {
+                println!("{}: registry updated\n", updated.title);
+                for s in registry.ordered() {
+                    let default = if s.default { "  (default)" } else { "" };
+                    println!("  {:<18} {:<10}{default}", s.name, s.group.as_str());
+                }
+            }
         }
         ProjectCmd::SetTarget {
             target,
@@ -4671,6 +4871,26 @@ where
         println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
     }
     Ok(())
+}
+
+/// Parse a `--add` state spec: `<name>:<group>[:<color>]`.
+fn parse_state_spec(spec: &str) -> eyre::Result<(String, project::StateGroup, Option<String>)> {
+    let mut parts = spec.splitn(3, ':');
+    let name = parts.next().unwrap_or_default().trim();
+    let group_s = parts.next().unwrap_or_default().trim();
+    let color = parts.next().map(|c| c.trim().to_string());
+    if name.is_empty() || group_s.is_empty() {
+        return Err(eyre::eyre!(
+            "bad state spec `{spec}` — want <name>:<group>[:<color>]"
+        ));
+    }
+    let group = project::StateGroup::from_str(group_s).ok_or_else(|| {
+        eyre::eyre!(
+            "unknown group `{group_s}` — one of backlog / unstarted / started / \
+             completed / cancelled"
+        )
+    })?;
+    Ok((name.to_string(), group, color))
 }
 
 fn resolve_body(arg: Option<String>) -> eyre::Result<String> {
@@ -12058,8 +12278,32 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 })
                 .collect();
 
+            // Per-project state registries: status → group
+            // classification routes through each task's owning
+            // project (custom registries respected; tasks with
+            // no project use the default registry).
+            let states_by_project: std::collections::HashMap<
+                uuid::Uuid,
+                Option<project::StatesConfig>,
+            > = match connect_project_client(&url).await {
+                Ok(pc) => pc
+                    .list()
+                    .await
+                    .map(|ps| ps.into_iter().map(|p| (p.id, p.states)).collect())
+                    .unwrap_or_default(),
+                Err(_) => std::collections::HashMap::new(),
+            };
+            let group_of = |t: &task::TaskInfo| -> project::StateGroup {
+                let cfg = t
+                    .project_id
+                    .and_then(|pid| states_by_project.get(&pid))
+                    .and_then(Option::as_ref);
+                project::resolve_state_group(cfg, &t.status)
+            };
+
             let total = filtered.len();
             let mut by_status: BTreeMap<String, usize> = BTreeMap::new();
+            let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_priority: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_project: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_assignee: BTreeMap<String, usize> = BTreeMap::new();
@@ -12071,6 +12315,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
 
             for t in filtered.drain(..) {
                 *by_status.entry(t.status.clone()).or_default() += 1;
+                *by_group.entry(group_of(t).as_str().to_string()).or_default() += 1;
                 *by_priority.entry(t.priority.clone()).or_default() += 1;
                 let p_label = t
                     .project_id
@@ -12081,16 +12326,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     for a in &wf.assignees.0 {
                         *by_assignee.entry(a.short_label()).or_default() += 1;
                     }
-                    // Blocked = has at least one blocker that
-                    // is not done/cancelled (or that we can't
-                    // resolve, which means it's still open).
+                    // Blocked = has at least one blocker whose
+                    // state *group* isn't closed (completed /
+                    // cancelled), or that we can't resolve.
                     let is_blocked = wf.blockers.0.iter().any(|bid| {
-                        by_id.get(bid).is_none_or(|b| {
-                            !matches!(
-                                task::Status::from_str(&b.status),
-                                Some(task::Status::Done | task::Status::Cancelled)
-                            )
-                        })
+                        by_id.get(bid).is_none_or(|b| !group_of(b).is_closed())
                     });
                     if is_blocked {
                         blocked += 1;
@@ -12104,6 +12344,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     "with_workflow": with_workflow,
                     "blocked": blocked,
                     "by_status": by_status,
+                    "by_group": by_group,
                     "by_priority": by_priority,
                     "by_project": by_project,
                     "by_assignee": by_assignee,
@@ -12121,6 +12362,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             println!();
             println!("by status:");
             for (k, v) in &by_status {
+                println!("  {k:<14} {v}");
+            }
+            println!();
+            println!("by group:");
+            for (k, v) in &by_group {
                 println!("  {k:<14} {v}");
             }
             println!();
