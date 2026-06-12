@@ -40,6 +40,12 @@ pub struct PlannedBlock {
     pub note: Option<String>,
     /// `None` = nothing assigned (e.g. an empty allocatable slot).
     pub assignment: Option<BlockAssignment>,
+    /// Immovable. Fixed blocks ("be at work at 10", a recurring
+    /// church service) win every overlap — [`crate::resolve`]
+    /// reflows the flexible blocks around them and never moves,
+    /// shrinks, or drops a fixed block.
+    #[serde(default)]
+    pub fixed: bool,
 }
 
 /// `Vec<PlannedBlock>` newtype — a JSON column on [`DayPlan`].
