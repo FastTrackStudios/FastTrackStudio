@@ -210,6 +210,8 @@ pub fn nav_tabs() -> Vec<NavTab> {
     ]
 }
 
+/// The bottom-tab-bar set: four primary destinations. Everything else
+/// lives behind the "More" tab the bar appends itself.
 pub fn primary_mobile_tabs() -> Vec<NavTab> {
     vec![
         NavTab {
@@ -218,9 +220,9 @@ pub fn primary_mobile_tabs() -> Vec<NavTab> {
             route: Route::HomeRoute {},
         },
         NavTab {
-            label: "Inbox",
-            icon: icon_inbox,
-            route: Route::InboxRoute {},
+            label: "Tasks",
+            icon: icon_tasks,
+            route: Route::TasksRoute {},
         },
         NavTab {
             label: "Projects",
@@ -228,14 +230,9 @@ pub fn primary_mobile_tabs() -> Vec<NavTab> {
             route: Route::ProjectsRoute {},
         },
         NavTab {
-            label: "Vault",
-            icon: icon_vault,
-            route: Route::VaultRoute { path: String::new() },
-        },
-        NavTab {
-            label: "Settings",
-            icon: icon_settings,
-            route: Route::SettingsRoute {},
+            label: "Schedule",
+            icon: icon_schedule,
+            route: Route::ScheduleRoute {},
         },
     ]
 }
