@@ -388,6 +388,7 @@ impl VaultSync for Backend {
                     // `raw` is the file's verbatim UTF-8 bytes, so this
                     // matches the manifest's per-file hash.
                     sha256: sha256_hex(p.raw.as_bytes()),
+                    aliases: fm.as_ref().map(fm_aliases).unwrap_or_default(),
                 }
             })
             .collect();
@@ -542,6 +543,35 @@ fn fm_text(fm: &FrontMatter, key: &str) -> Option<String> {
             PropValue::Text(s) | PropValue::Date(s) => Some(s.clone()),
             _ => None,
         })
+}
+
+/// Frontmatter `aliases` / `alias` values, flattened in document
+/// order. Accepts the YAML list form (`aliases: [a, b]` / block
+/// list) and the legacy comma-separated string form Obsidian
+/// still tolerates.
+fn fm_aliases(fm: &FrontMatter) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in &fm.props {
+        if !(p.key.eq_ignore_ascii_case("aliases") || p.key.eq_ignore_ascii_case("alias")) {
+            continue;
+        }
+        match &p.value {
+            PropValue::List(items) => out.extend(
+                items
+                    .iter()
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty()),
+            ),
+            PropValue::Text(s) => out.extend(
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned),
+            ),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Reduce a `folder` value to a bare parent basename. Handles the

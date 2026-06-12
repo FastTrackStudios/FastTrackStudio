@@ -16712,6 +16712,7 @@ dependencies = [
 name = "vault-obsidian"
 version = "0.1.0"
 dependencies = [
+ "architect 0.1.0",
  "chrono",
  "facet",
  "futures",

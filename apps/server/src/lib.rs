@@ -181,6 +181,10 @@ pub struct OrgAppState {
     /// [`presence::PRESENCE_DOC_ID`]; nothing is persisted —
     /// states expire on their own when a peer goes quiet.
     pub presence: crdt::sync::PresenceHost,
+    /// Link-graph read service (`VaultGraph`) over the same vault
+    /// root as [`Self::vault_sync`] — backlinks / links / orphans /
+    /// unresolved / deadends / tags for the web vault page.
+    pub vault_graph: vault::GraphBackend,
 }
 
 /// Top-level server state. Scans `<data_root>/orgs/` at
@@ -721,6 +725,10 @@ pub(crate) async fn build_org_state(
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open intake vault: {e}"))?;
         let intake = intake::Store::new(intake_vault);
 
+        // Link-graph reader over the same `"default"` vault root
+        // the sync backend serves — read-only, so no dir creation.
+        let vault_graph = vault::GraphBackend::single("default", vault_root.clone());
+
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
             auth,
@@ -760,6 +768,7 @@ pub(crate) async fn build_org_state(
                 presence::PRESENCE_DOC_ID,
                 presence::PRESENCE_TIMEOUT_MS,
             ),
+            vault_graph,
         })
     }
 }
@@ -1292,6 +1301,15 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             crdt::sync::doc_presence_service_descriptor(),
             crdt::sync::DocPresenceDispatcher::new(org.presence.clone()),
+        )
+        // Vault link-graph (backlinks / links / orphans / unresolved /
+        // deadends / tags) — the read-only sibling of the vault sync
+        // service mounted above, over the same per-org `"default"`
+        // vault. Backs the vault page's backlinks panel + the
+        // editor's tag-autocomplete candidates.
+        .with(
+            vault_proto::vault_graph_rpc_service_descriptor(),
+            vault_proto::vault_graph_serve(org.vault_graph.clone()),
         )
 }
 
