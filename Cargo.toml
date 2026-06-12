@@ -10,6 +10,7 @@ members = [
     "crates/editor-keyflow",
     "crates/editor-keyflow-lang",
     "crates/editor",
+    "crates/editor-crdt",
     "examples/playground",
 ]
 
@@ -32,6 +33,7 @@ editor-mermaid = { path = "crates/editor-mermaid" }
 editor-keyflow = { path = "crates/editor-keyflow" }
 editor-keyflow-lang = { path = "crates/editor-keyflow-lang" }
 editor = { path = "crates/editor" }
+editor-crdt = { path = "crates/editor-crdt" }
 
 # Keyflow — the editor's `.kf` fence renderer (`editor-keyflow`) drives the
 # engraver's CPU-only `svg` tier; `editor-keyflow-lang` drives the text

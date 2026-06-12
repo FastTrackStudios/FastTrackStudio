@@ -36,6 +36,15 @@ impl Doc {
         self.rope.len_bytes()
     }
 
+    /// Borrow the underlying rope. Exposed for adapters that need
+    /// rope-native indexing — e.g. `editor-crdt` translating byte
+    /// offsets to unicode-scalar offsets via `byte_to_char` without
+    /// materializing the document as a `String`.
+    #[must_use]
+    pub fn rope(&self) -> &Rope {
+        &self.rope
+    }
+
     /// `true` if the doc is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
