@@ -17,6 +17,20 @@ tracing = { workspace = true }
 # normalization, tracking-param strip, provider-specific
 # rewrites) needs a real URL model, not string hacks.
 url = "2.5"
+# Readability-style article extraction — the maintained
+# winner among the Rust readability ports (html5ever-based,
+# mozilla/readability test-suite parity). `TextMode::Markdown`
+# emits markdown straight from the cleaned DOM.
+dom_smoothie = "0.18"
+# turndown-style HTML→Markdown. Used where the HTML is
+# *already* reader-clean (Readwise Reader `html_content`,
+# Karakeep `htmlContent`, dom_smoothie's cleaned-HTML
+# fallback) and running full readability again would
+# wrongly re-prune content.
+htmd = "0.5"
+# Article + subtitle-track fetches. Workspace config =
+# rustls, no openssl.
+reqwest = { workspace = true }
 
 [lints]
 workspace = true

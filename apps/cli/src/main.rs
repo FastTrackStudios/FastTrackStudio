@@ -9066,10 +9066,44 @@ async fn archive_extract_url(
 ) -> eyre::Result<(wiki_archive::Provenance, String)> {
     let (url, route) = wiki_archive::classify(target).map_err(|e| eyre::eyre!("{e}"))?;
     let canonical = wiki_archive::canonicalize(&url, &route);
-    let _ = (&canonical, yt_dlp, &title_override);
+    let content_type = wiki_archive::content_type_for(&route);
+    let _ = yt_dlp;
     match route {
-        wiki_archive::Route::Article | wiki_archive::Route::GoogleDoc { .. } => {
-            eyre::bail!("article/document extractor not wired yet (next commit)")
+        wiki_archive::Route::Article => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let a = wiki_archive::article::fetch_article(&client, &url)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let title = title_override
+                .or_else(|| (!a.title.is_empty()).then(|| a.title.clone()))
+                .unwrap_or_else(|| target.to_string());
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "dom_smoothie",
+            );
+            let body = match &a.byline {
+                Some(byline) => format!("_{byline}_\n\n{}", a.markdown),
+                None => a.markdown,
+            };
+            Ok((prov, body))
+        }
+        wiki_archive::Route::GoogleDoc { doc_id } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let (doc_title, md) = wiki_archive::article::fetch_google_doc(&client, &doc_id)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let title = title_override.unwrap_or(doc_title);
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "gdocs-export",
+            );
+            Ok((prov, md))
         }
         wiki_archive::Route::YouTube { .. } | wiki_archive::Route::Video => {
             eyre::bail!("video extractor not wired yet (later commit)")

@@ -31,6 +31,7 @@
 //! each emits the same `(Provenance, String)` pair so the CLI
 //! glue stays a single code path.
 
+pub mod article;
 pub mod provenance;
 pub mod router;
 
