@@ -10,7 +10,7 @@
 //! to-move on the grid and drag-a-task-onto-a-block are planned polish
 //! (see `plans/day-by-day-scheduling.md`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{Datelike, NaiveDate, Utc, Weekday};
 use dioxus::prelude::*;
@@ -83,8 +83,21 @@ pub fn ScheduleView() -> Element {
         Some((monday, monday + chrono::Duration::days(6)))
     });
     let mut plans = use_signal(HashMap::<NaiveDate, DayPlan>::new);
+    // Per-date ids of *soft* blocks — template fallback rather than
+    // explicitly saved. Rendered dashed/faded; cleared for a date
+    // once the user edits it (the save persists the whole merged
+    // day, making every block explicit).
+    let mut soft_ids = use_signal(HashMap::<NaiveDate, HashSet<String>>::new);
     // Which (date, block_id) is being edited, if any.
     let mut editing = use_signal(|| None::<(NaiveDate, String)>);
+    // Planned meals — previewed inside Meal-category blocks
+    // ("what's for dinner on that date").
+    let meals = use_resource(move || async move {
+        match slug() {
+            Some(s) => crate::feeds::fetch_meal_plans(&s).await.unwrap_or_default(),
+            None => Vec::new(),
+        }
+    });
     // Real events — loaded from + persisted to the CalendarEvents
     // service.
     let mut state = use_signal(CalendarState::default);
@@ -143,11 +156,11 @@ pub fn ScheduleView() -> Element {
             let mut loaded = Vec::new();
             while d <= end {
                 if !plans.peek().contains_key(&d) {
-                    let plan = match crate::feeds::fetch_day_plan(&slug, &d.to_string()).await {
-                        Ok(Some(p)) => p,
-                        _ => materialize(d, &tpls),
-                    };
-                    loaded.push((d, plan));
+                    let saved = crate::feeds::fetch_day_plan(&slug, &d.to_string())
+                        .await
+                        .ok()
+                        .flatten();
+                    loaded.push((d, resolve_day(d, saved, &tpls)));
                 }
                 d = match d.succ_opt() {
                     Some(n) => n,
@@ -156,15 +169,20 @@ pub fn ScheduleView() -> Element {
             }
             if !loaded.is_empty() {
                 let mut w = plans.write();
-                for (d, p) in loaded {
-                    w.entry(d).or_insert(p);
+                let mut sw = soft_ids.write();
+                for (d, (p, soft)) in loaded {
+                    if !w.contains_key(&d) {
+                        w.insert(d, p);
+                        sw.insert(d, soft);
+                    }
                 }
             }
         });
     });
 
     let events = state.read().events.values().cloned().collect::<Vec<_>>();
-    let template_blocks = build_blocks(&plans.read());
+    let meal_lookup = build_meal_lookup(meals().as_deref().unwrap_or(&[]));
+    let template_blocks = build_blocks(&plans.read(), &soft_ids.read(), &meal_lookup);
 
     // The block currently under edit, resolved to its values.
     let editor = editing().and_then(|(date, id)| {
@@ -211,6 +229,9 @@ pub fn ScheduleView() -> Element {
             }
             plan.clone()
         };
+        // The save persists the whole merged day — every block is
+        // explicit from here on.
+        soft_ids.write().remove(&date);
         editing.set(None);
         spawn(async move {
             let _ = crate::feeds::save_day_plan(&slug, plan).await;
@@ -232,6 +253,7 @@ pub fn ScheduleView() -> Element {
             }
             plan.clone()
         };
+        soft_ids.write().remove(&date);
         spawn(async move {
             let _ = crate::feeds::save_day_plan(&slug, plan).await;
         });
@@ -280,6 +302,11 @@ pub fn ScheduleView() -> Element {
                     .collect()
             }
         };
+        {
+            let mut sw = soft_ids.write();
+            sw.remove(&orig);
+            sw.remove(&target);
+        }
         for plan in to_save {
             let slug = slug.clone();
             spawn(async move {
@@ -295,7 +322,9 @@ pub fn ScheduleView() -> Element {
             Some(Ok(t)) => t.clone(),
             _ => Vec::new(),
         };
-        plans.write().insert(date, materialize(date, &tpls));
+        let (plan, soft) = resolve_day(date, None, &tpls);
+        plans.write().insert(date, plan);
+        soft_ids.write().insert(date, soft);
         editing.set(None);
         spawn(async move {
             let _ = crate::feeds::delete_day_plan(&slug, &date.to_string()).await;
@@ -583,40 +612,81 @@ fn template_for(date: NaiveDate, templates: &[DayTemplate]) -> Option<&DayTempla
         .or_else(|| templates.first())
 }
 
-/// Build a fresh `DayPlan` for `date` from its template (unassigned).
-fn materialize(date: NaiveDate, templates: &[DayTemplate]) -> DayPlan {
+/// Resolve a date to the plan the page renders: the saved plan's
+/// blocks verbatim (explicit) plus the weekday template's blocks
+/// reflowed into the remaining free time as *soft* fallback (see
+/// `scheduling_proto::resolve::merge_template`). A date with no
+/// saved plan is the all-soft template; a *sparse* saved plan (e.g.
+/// only a scheduled meal block) still shows the rest of its day.
+/// Returns the merged plan + the set of soft block ids.
+fn resolve_day(
+    date: NaiveDate,
+    saved: Option<DayPlan>,
+    templates: &[DayTemplate],
+) -> (DayPlan, HashSet<String>) {
     let tpl = template_for(date, templates);
-    let blocks = tpl.map_or_else(Vec::new, |t| {
-        t.blocks
-            .iter()
-            .map(|b| PlannedBlock {
-                id: b.id.clone(),
-                start: b.start,
-                end: b.end,
-                label: b.label.clone(),
-                category: b.category,
-                note: b.note.clone(),
-                assignment: None,
-            })
-            .collect()
-    });
-    DayPlan {
+    let saved_blocks: &[PlannedBlock] = saved.as_ref().map_or(&[], |p| &p.blocks.0);
+    let tpl_blocks: &[scheduling_proto::TimeBlock] = tpl.map_or(&[], |t| &t.blocks.0);
+    let merged = scheduling_proto::resolve::merge_template(saved_blocks, tpl_blocks);
+    let soft: HashSet<String> = merged
+        .iter()
+        .filter(|rb| rb.soft)
+        .map(|rb| rb.block.id.0.clone())
+        .collect();
+    let plan = DayPlan {
         date: date.to_string(),
-        from_template: tpl.map(|t| t.id.clone()),
-        blocks: blocks.into(),
+        from_template: saved
+            .and_then(|p| p.from_template)
+            .or_else(|| tpl.map(|t| t.id.clone())),
+        blocks: merged.into_iter().map(|rb| rb.block).collect(),
+    };
+    (plan, soft)
+}
+
+/// `(date, slot)` → planned meal titles for the schedule's meal
+/// preview. Only `planned`/`cooked` meals; skipped ones don't show.
+fn build_meal_lookup(meals: &[mealplan_proto::Meal]) -> HashMap<(NaiveDate, String), Vec<String>> {
+    let mut out: HashMap<(NaiveDate, String), Vec<String>> = HashMap::new();
+    for m in meals {
+        if matches!(m.status.as_str(), "skipped" | "eating-out") {
+            continue;
+        }
+        let slot = mealplan_proto::Slot::from_str(&m.slot)
+            .map_or_else(|| m.slot.to_ascii_lowercase(), |s| s.as_str().to_string());
+        out.entry((m.scheduled_for, slot))
+            .or_default()
+            .push(m.name.clone());
     }
+    out
 }
 
 /// Convert the loaded plans into dated calendar overlay blocks,
-/// splitting any block that wraps past midnight.
-fn build_blocks(plans: &HashMap<NaiveDate, DayPlan>) -> Vec<TemplateBlock> {
+/// splitting any block that wraps past midnight. Soft (template-
+/// fallback) blocks carry the `soft` flag for dashed/faded
+/// rendering; Meal blocks with nothing assigned preview the meal
+/// planned for that date + slot.
+fn build_blocks(
+    plans: &HashMap<NaiveDate, DayPlan>,
+    soft_ids: &HashMap<NaiveDate, HashSet<String>>,
+    meals: &HashMap<(NaiveDate, String), Vec<String>>,
+) -> Vec<TemplateBlock> {
     let mut out = Vec::new();
     for (date, plan) in plans {
+        let soft_set = soft_ids.get(date);
         for b in plan.blocks.iter() {
             let start = b.start.minutes_since_midnight;
             let end = b.end.minutes_since_midnight;
             let color = category_color(b.category);
-            let assignment = b.assignment.as_ref().map(|a| a.title.clone());
+            let soft = soft_set.is_some_and(|s| s.contains(&b.id.0));
+            let assignment = b.assignment.as_ref().map(|a| a.title.clone()).or_else(|| {
+                if b.category != BlockCategory::Meal {
+                    return None;
+                }
+                let slot = scheduling_proto::resolve::meal_slot_for_block(&b.label, b.start);
+                meals
+                    .get(&(*date, slot.to_string()))
+                    .map(|names| names.join(" · "))
+            });
             let mk = |start_min, end_min| TemplateBlock {
                 id: b.id.0.clone(),
                 date: *date,
@@ -625,6 +695,7 @@ fn build_blocks(plans: &HashMap<NaiveDate, DayPlan>) -> Vec<TemplateBlock> {
                 end_min,
                 color,
                 assignment: assignment.clone(),
+                soft,
             };
             if end <= start {
                 if start < 1440 {
