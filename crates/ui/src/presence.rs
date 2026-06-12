@@ -404,6 +404,55 @@ fn PublisherEffect(
 
 // ── roster ──────────────────────────────────────────────────────────
 
+/// Connection-state badge for the roster header — the user-visible
+/// answer to "is this roster live?". Reads the app's shared
+/// `Connection<vox::Caller>` (the supervised per-org connection from
+/// `use_app_supervised`):
+///
+/// - **Live** (green) — connection `Ready`; presence/collab/queries
+///   ride a healthy socket.
+/// - **Connecting…** (amber, pulsing) — first establish in flight.
+/// - **Reconnecting…** (amber/red, pulsing) — the socket died and the
+///   supervisor is re-establishing with backoff; red once an attempt
+///   has failed (hover shows the error). Rosters may be stale until it
+///   flips back to Live.
+/// - **Offline** (red) — never connected and the last attempt failed
+///   (still retrying; hover shows the error).
+#[component]
+pub fn ConnectionBadge() -> Element {
+    let conn = architect::use_connection::<vox_core::Caller>();
+    let generation = conn.generation();
+    let (dot, label, title) = match conn.state() {
+        architect::ConnectionState::Ready(_) => ("bg-emerald-500", "Live", "Connected".to_string()),
+        architect::ConnectionState::Connecting if generation == 0 => (
+            "bg-amber-400 animate-pulse",
+            "Connecting…",
+            "Establishing connection".to_string(),
+        ),
+        architect::ConnectionState::Connecting => (
+            "bg-amber-400 animate-pulse",
+            "Reconnecting…",
+            "Connection lost — re-establishing".to_string(),
+        ),
+        architect::ConnectionState::Failed(e) if generation == 0 => {
+            ("bg-red-500", "Offline", format!("Connect failed: {e}"))
+        }
+        architect::ConnectionState::Failed(e) => (
+            "bg-red-500 animate-pulse",
+            "Reconnecting…",
+            format!("Reconnect failed: {e} — retrying"),
+        ),
+    };
+    rsx! {
+        span {
+            class: "flex items-center gap-1 text-[10px] font-normal normal-case text-muted-foreground",
+            title: "{title}",
+            span { class: "h-1.5 w-1.5 rounded-full {dot}" }
+            "{label}"
+        }
+    }
+}
+
 /// Sidebar roster: live peers + derived agent/timer entries, humans
 /// first, with status dots and the current activity.
 #[component]
@@ -446,7 +495,14 @@ pub fn PresenceRoster() -> Element {
 
     rsx! {
         SidebarGroup {
-            SidebarGroupLabel { "Online — {count}" }
+            SidebarGroupLabel {
+                span { class: "flex w-full items-center justify-between gap-2",
+                    span { "Online — {count}" }
+                    // Connection-state badge: is this roster live, or
+                    // stale while the org socket reconnects?
+                    ConnectionBadge {}
+                }
+            }
             SidebarGroupContent {
                 if entries.is_empty() {
                     div { class: "px-2 py-1 text-xs text-muted-foreground", "Nobody around right now" }

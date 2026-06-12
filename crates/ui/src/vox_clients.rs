@@ -20,8 +20,18 @@
 //! assumptions, and the vox stack is already cross-target, so the same
 //! `establish_for` works on both.
 //!
-//! Reconnection after a server restart is a follow-up — a stale client
-//! surfaces as a request error, and a reload re-establishes.
+//! ## Liveness
+//!
+//! A cached root can die (server restart, socket drop). Every cache
+//! access **validates** the root via `Caller::is_connected()` — vox's
+//! session-liveness primitive, false the moment the session observes
+//! transport EOF/error — and a dead entry is evicted + transparently
+//! re-established. We validate per-access rather than keying entries by
+//! the app `Connection`'s generation because this cache is *below* that
+//! layer: multi-org fan-out (`feeds::*`) reaches it for orgs the app
+//! connection isn't even pointed at, so the root's own liveness is the
+//! only invariant that always applies. The generation still drives
+//! hook-level invalidation upstream (`architect::Connection::generation`).
 
 use crate::vox_session::vox_url;
 
@@ -73,15 +83,28 @@ pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
 
         // The cached NoopClient is the connection's liveness anchor —
         // dropping the last caller closes the socket, so the cache
-        // holds the root for the page's lifetime. Typed clients built
-        // from the caller are virtual views (no session handle).
+        // holds the root while it lives. Typed clients built from the
+        // caller are virtual views (no session handle).
         thread_local! {
             static ROOTS: RefCell<HashMap<String, vox_core::NoopClient>> =
                 RefCell::new(HashMap::new());
         }
-        if let Some(caller) =
-            ROOTS.with(|m| m.borrow().get(slug).map(|root| root.caller.clone()))
-        {
+        // Validate on access: a dead root (server restart, socket drop)
+        // is evicted so the next lines re-establish instead of handing
+        // out a corpse forever. See the module docs ("Liveness") for why
+        // this is a per-access check rather than generation keying.
+        if let Some(caller) = ROOTS.with(|m| {
+            let mut m = m.borrow_mut();
+            match m.get(slug) {
+                Some(root) if root.caller.is_connected() => Some(root.caller.clone()),
+                Some(_) => {
+                    tracing::warn!(slug, "vox: cached org root is dead; re-establishing");
+                    m.remove(slug);
+                    None
+                }
+                None => None,
+            }
+        }) {
             return Ok(caller);
         }
         let root = establish_at::<vox_core::NoopClient>(&org_ws_url(slug)).await?;

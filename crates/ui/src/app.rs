@@ -76,8 +76,16 @@ pub fn App() -> Element {
         }
     });
 
-    let _conn: architect::Connection<vox_core::Caller> =
-        architect::use_app_reactive(move || {
+    // Supervised: the established caller is watched for death
+    // (`Caller::closed()` resolves when the org socket drops — server
+    // restart, network blip) and the connection re-establishes under
+    // exponential backoff with full jitter (floor 250ms, cap 10s). The
+    // `Connection::generation` bump on each re-establish is what tells
+    // hooks/caches downstream to invalidate; `caller_for`'s root cache
+    // additionally self-validates via `is_connected()` (see
+    // `vox_clients`), so the reconnect lands on a fresh socket.
+    let _conn: architect::Connection<vox_core::Caller> = architect::use_app_supervised(
+        move || {
             let slug = match &*org_selection.read() {
                 OrgSelection::One(slug) => slug.clone(),
                 OrgSelection::All => home_slug(&org_list.read()),
@@ -90,7 +98,9 @@ pub fn App() -> Element {
                 }
                 crate::vox_clients::caller_for(&slug).await
             }
-        });
+        },
+        |caller: vox_core::Caller| async move { caller.closed().await },
+    );
 
     // Web auth: the active-account context + boot restore (validate
     // the persisted session, or auto sign-in as Guest). Needs the

@@ -148,8 +148,15 @@ pub fn VaultView() -> Element {
     let mut collab = use_signal(|| None::<crate::collab::CollabHandles>);
     let mut collab_doc = use_signal(|| None::<uuid::Uuid>);
     let account = try_use_context::<Signal<Option<crate::auth::ActiveAccount>>>();
+    let conn = architect::use_connection::<vox_core::Caller>();
     use_effect(move || {
         let path = selected();
+        // Reactive read: re-run on every (re-)establish of the shared
+        // org connection. After an outage the Live→Offline teardown
+        // below clears the session; the generation bump is what re-opens
+        // collab for the still-open file once the socket is back — no
+        // refresh, fresh replica, delta resync by version vector.
+        let _generation = conn.generation();
         collab_doc.set(None);
         collab.set(None);
         let Some(path) = path else { return };
