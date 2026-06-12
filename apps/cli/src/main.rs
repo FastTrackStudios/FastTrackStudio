@@ -9106,7 +9106,38 @@ async fn archive_extract_url(
             Ok((prov, md))
         }
         wiki_archive::Route::YouTube { .. } | wiki_archive::Route::Video => {
-            eyre::bail!("video extractor not wired yet (later commit)")
+            let yt = wiki_archive::youtube::YtDlp::new(yt_dlp);
+            let meta = yt.probe(target).await.map_err(|e| eyre::eyre!("{e}"))?;
+            let blocks = match &meta.json3_track {
+                Some((lang, track_url)) => {
+                    let client =
+                        wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+                    let json3 =
+                        wiki_archive::article::fetch_text(&client, track_url, "application/json")
+                            .await
+                            .map_err(|e| eyre::eyre!("subtitle track ({lang}): {e}"))?;
+                    let cues = wiki_archive::youtube::parse_json3_cues(&json3)
+                        .map_err(|e| eyre::eyre!("{e}"))?;
+                    wiki_archive::youtube::coalesce_cues(
+                        &cues,
+                        wiki_archive::youtube::DEFAULT_BLOCK_SECS,
+                    )
+                }
+                None => Vec::new(),
+            };
+            let body = wiki_archive::youtube::render_video_markdown(&meta, &blocks);
+            let title = title_override.unwrap_or_else(|| meta.title.clone());
+            let mut prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical.clone(),
+                content_type,
+                "yt-dlp",
+            );
+            // `media:` = what the SourceViewer should embed.
+            prov.media = Some(canonical);
+            prov.duration_secs = meta.duration_secs;
+            Ok((prov, body))
         }
     }
 }

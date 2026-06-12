@@ -31,6 +31,12 @@ htmd = "0.5"
 # Article + subtitle-track fetches. Workspace config =
 # rustls, no openssl.
 reqwest = { workspace = true }
+# yt-dlp `-J` probe output + json3 subtitle tracks + the
+# importer API payloads (Readwise/Karakeep) are all JSON.
+serde_json = { workspace = true }
+# yt-dlp runs as an async subprocess (`tokio::process`) with
+# a hard timeout — never let a stuck extractor wedge the CLI.
+tokio = { workspace = true }
 
 [lints]
 workspace = true

@@ -34,6 +34,7 @@
 pub mod article;
 pub mod provenance;
 pub mod router;
+pub mod youtube;
 
 pub use provenance::{Provenance, canon_hash8, compose_source_markdown, find_canonical_match};
 pub use router::{Route, canonicalize, classify, content_type_for};
