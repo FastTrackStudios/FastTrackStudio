@@ -7,17 +7,19 @@
 //!
 //! This page lists the selected org's milestones (title, due
 //! date, project, status) and offers a friction-light "Add
-//! milestone" form (title + project + optional due date).
-//! Editing, status flips, and goal-laddering live in the CLI for
-//! now; this is the read + create slice, mirroring the locations
-//! page.
+//! milestone" form (title + project + optional due date). State is
+//! the shared optimistic store ([`crate::stores`]): one `AtomResult`
+//! list, typed `Id::Temp` rows for in-flight creates, rollback +
+//! tray notification on failure.
 
+use architect::Id;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use milestone_proto::Milestone;
+use uuid::Uuid;
 
-use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
      focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
@@ -28,7 +30,7 @@ pub fn MilestonesView() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
 
-    // The org we list / create into (first selected, or home).
+    // The org we create into (first selected, or home).
     let slug = use_memo(move || {
         crate::orgs::selected_slugs(&selection.read(), &org_list.read())
             .into_iter()
@@ -39,21 +41,9 @@ pub fn MilestonesView() -> Element {
     let mut project = use_signal(String::new);
     let mut due = use_signal(String::new);
 
-    // Authoritative list: optimistic create, write-through to the org's
-    // MilestoneService. Initial snapshot loaded below; no refetch on create.
-    let list = use_optimistic_list::<Milestone, _>(|m| m.id);
-
-    let loader = use_resource(move || async move {
-        match slug() {
-            Some(s) => crate::feeds::fetch_milestones(&s).await,
-            None => Ok(Vec::new()),
-        }
-    });
-    use_effect(move || {
-        if let Some(Ok(rows)) = &*loader.read_unchecked() {
-            list.set(rows.clone());
-        }
-    });
+    // The shared store: one AtomResult for the list, optimistic create.
+    let result = stores::use_milestone_list();
+    let muts = stores::use_milestone_mutations();
 
     // The org's projects power the picker (project_id is required).
     let projects = use_resource(move || async move {
@@ -64,9 +54,6 @@ pub fn MilestonesView() -> Element {
     });
     let project_options = projects.read().clone().unwrap_or_default();
 
-    // Create a provisional milestone (client-minted id; backend assigns its
-    // own on write — the whole row is replaced when it returns), show it
-    // instantly, then write through.
     let mut create = move || {
         let t = title.read().trim().to_string();
         if t.is_empty() {
@@ -86,30 +73,12 @@ pub fn MilestonesView() -> Element {
         };
         title.set(String::new());
         due.set(String::new());
-        let provisional = Milestone {
-            path: String::new(),
-            id: uuid::Uuid::new_v4(),
-            title: t.clone(),
-            project_id,
-            goal_id: None,
-            status: "open".to_owned(),
-            due_date,
-            tags: milestone_proto::Tags::default(),
-            forge_ref: None,
-            date_created: None,
-            date_modified: None,
-            details: String::new(),
-        };
-        list.create(provisional, async move {
-            crate::feeds::create_milestone(&s, &t, project_id, due_date).await
-        });
+        muts.create(s, stores::draft_milestone(t, project_id, due_date));
     };
 
-    let rows = list.items().read().clone();
-    let load_err: Option<String> = match &*loader.read() {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
+    let rows: Vec<(Id<Uuid>, Milestone)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
+    let first_load = result.is_waiting() && result.value().is_none();
 
     // Project id → title, for resolving each milestone's owner.
     let project_name = {
@@ -173,17 +142,21 @@ pub fn MilestonesView() -> Element {
             }
 
             // ── The register ───────────────────────────────────────
-            if rows.is_empty() {
+            if first_load {
+                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
+                    Text { variant: TextVariant::Muted, "Loading milestones…" }
+                }
+            } else if rows.is_empty() {
                 div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
                     Text { variant: TextVariant::Muted, "No milestones yet — add your first checkpoint above." }
                 }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for ms in rows {
+                    for (id, ms) in rows {
                         MilestoneRow {
-                            key: "{ms.id}",
+                            key: "{id}",
                             project_label: project_name(ms.project_id),
-                            state: list.state(ms.id),
+                            pending: id.is_temp(),
                             ms,
                         }
                     }
@@ -194,19 +167,19 @@ pub fn MilestonesView() -> Element {
 }
 
 /// One milestone in the register: title + owning project + due
-/// date + status badge. `state` reflects optimistic write-through:
-/// dimmed while `Pending`, a destructive ring while `Failed`.
+/// date + status badge. `pending` dims an optimistic row whose
+/// write-through is in flight; failures roll back + notify.
 #[component]
-fn MilestoneRow(ms: Milestone, project_label: Option<String>, state: RowState) -> Element {
+fn MilestoneRow(ms: Milestone, project_label: Option<String>, pending: bool) -> Element {
     let title = ms.title.clone();
     let due = ms.due_date.map(|d| d.format("%b %-d, %Y").to_string());
     let closed = ms.status.eq_ignore_ascii_case("closed");
     let status_label = if closed { "closed" } else { "open" };
 
-    let state_cls = match state {
-        RowState::Settled => "border-border bg-card/40",
-        RowState::Pending => "border-border bg-card/40 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    let state_cls = if pending {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
     };
 
     rsx! {

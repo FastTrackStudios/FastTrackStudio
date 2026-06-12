@@ -301,3 +301,13 @@ impl Course {
         }
     }
 }
+
+/// Client-side optimistic cache identity (`architect::Store`): keyed by
+/// the vault-relative `path` (recipes have no UUID).
+#[cfg(feature = "atom")]
+impl architect::StoreEntity for Recipe {
+    type Key = String;
+    fn key(&self) -> String {
+        self.path.clone()
+    }
+}

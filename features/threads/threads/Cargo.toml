@@ -17,6 +17,9 @@ threads-ui = { workspace = true, optional = true }
 default = ["vox"]
 # Client surface (vox-generated `ThreadsServiceClient` + service descriptors).
 vox = ["threads-proto/vox"]
+# Client-side optimistic store (`architect::StoreEntity` impls on
+# `Thread` / `Message`) -- UI-only, pulls Dioxus via architect-atom.
+atom = ["threads-proto/atom"]
 # Server surface — the SeaORM `Store` + `Migrator` from `threads-db`, and
 # the proto's server-side SeaORM emission.
 server = ["threads-proto/server", "dep:threads-db"]

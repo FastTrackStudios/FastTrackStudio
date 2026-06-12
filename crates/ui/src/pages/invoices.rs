@@ -6,6 +6,12 @@
 //! 2. **Invoices** — the persisted list with Draft / Sent / Paid /
 //!    Partially-paid status; mark sent, record payment, delete drafts.
 //! 3. **Preview** — a printable card for the selected invoice.
+//!
+//! State is the shared optimistic invoice store ([`crate::stores`]):
+//! mutations patch the list instantly and reconcile against the server
+//! (rollback + tray notification on failure) — no refresh counter. The
+//! *derived* uninvoiced view can't be reconciled client-side, so the
+//! mutations invalidate its reactivity key and it refetches.
 
 use std::collections::HashMap;
 
@@ -18,6 +24,7 @@ use finance_proto::GenerateInvoice;
 use finance_proto::invoice::{Invoice, InvoiceStatus};
 
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 fn money(cents: i64) -> String {
     let neg = cents < 0;
@@ -46,16 +53,21 @@ pub fn InvoicesView() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let slugs = use_memo(move || crate::orgs::selected_slugs(&selection.read(), &org_list.read()));
-    let reload = use_signal(|| 0u32);
     let mut selected = use_signal(|| None::<Uuid>);
 
-    let uninvoiced = use_resource(move || async move {
-        let _ = reload();
-        crate::feeds::fetch_uninvoiced_multi(&slugs()).await
-    });
-    let invoices = use_resource(move || async move {
-        let _ = reload();
-        crate::feeds::fetch_invoices_multi(&slugs()).await
+    // The shared optimistic store: one AtomResult for the invoice list.
+    let invoices = stores::use_invoice_list();
+
+    // Uninvoiced time is *derived* server-side (it reshapes whenever an
+    // invoice is generated/deleted), so it can't reconcile from the
+    // store — settled invoice mutations invalidate this reactivity key
+    // and the resource refetches.
+    let reactivity = architect::try_use_reactivity();
+    let uninvoiced = use_resource(move || {
+        if let Some(r) = reactivity {
+            r.track(stores::UNINVOICED_KEY);
+        }
+        async move { crate::feeds::fetch_uninvoiced_multi(&slugs()).await }
     });
     let projects = use_resource(move || async move {
         crate::feeds::fetch_projects(&slugs())
@@ -67,14 +79,15 @@ pub fn InvoicesView() -> Element {
     });
 
     let un_rows = uninvoiced.read().clone().unwrap_or_default();
-    let inv_rows = invoices.read().clone().unwrap_or_default();
+    let inv_rows: Vec<(architect::Id<Uuid>, stores::OrgInvoice)> =
+        invoices.value().cloned().unwrap_or_default();
     let proj_names = projects.read().clone().unwrap_or_default();
 
     let selected_inv = selected().and_then(|id| {
         inv_rows
             .iter()
-            .find(|(_, i)| i.id == id)
-            .map(|(_, i)| i.clone())
+            .find(|(_, r)| r.invoice.id == id)
+            .map(|(_, r)| r.invoice.clone())
     });
 
     rsx! {
@@ -97,7 +110,6 @@ pub fn InvoicesView() -> Element {
                                 slug: slug.clone(),
                                 group: g.clone(),
                                 label: g.project_id.and_then(|p| proj_names.get(&p).cloned()).unwrap_or_else(|| if g.tag.is_empty() { "General".into() } else { g.tag.clone() }),
-                                reload,
                             }
                         }
                     }
@@ -113,12 +125,12 @@ pub fn InvoicesView() -> Element {
                     }
                 } else {
                     div { class: "flex flex-col divide-y divide-border/50 rounded-xl border border-border/60 bg-card/40",
-                        for (slug , inv) in inv_rows {
+                        for (id , row) in inv_rows {
                             InvoiceRow {
-                                key: "{inv.id}",
-                                slug: slug.clone(),
-                                invoice: inv.clone(),
-                                reload,
+                                key: "{id}",
+                                pending: id.is_temp(),
+                                slug: row.slug.clone(),
+                                invoice: row.invoice.clone(),
                                 on_view: move |id| selected.set(Some(id)),
                             }
                         }
@@ -139,16 +151,17 @@ fn UninvoicedRow(
     slug: String,
     group: finance_proto::UninvoicedGroup,
     label: String,
-    reload: Signal<u32>,
 ) -> Element {
+    let muts = stores::use_invoice_mutations();
     let mut open = use_signal(|| false);
     let mut client = use_signal(|| label.clone());
     let mut net_days = use_signal(|| "30".to_string());
-    let mut busy = use_signal(|| false);
 
     let hrs = group.seconds as f64 / 3600.0;
     let project_id = group.project_id;
     let tag = group.tag.clone();
+    let amount_minor = group.amount_minor;
+    let currency = group.currency.clone();
     // Sub-label distinguishes a project bucket from a tag / general one.
     let kind = if group.project_id.is_some() {
         "project"
@@ -158,28 +171,23 @@ fn UninvoicedRow(
         "tag"
     };
 
+    // Optimistic: a draft invoice (seeded with this group's totals)
+    // appears in the list instantly and reconciles to the generated
+    // one; the uninvoiced view refetches when the mutation settles.
     let generate = move |_| {
         if client.read().trim().is_empty() {
             return;
         }
-        let slug = slug.clone();
-        let tag = tag.clone();
-        let mut reload = reload;
         let req = GenerateInvoice {
             project_id,
-            tag,
+            tag: tag.clone(),
             client_name: client.read().clone(),
             since: String::new(),
             until: String::new(),
             net_days: net_days.read().parse().unwrap_or(30),
         };
-        busy.set(true);
-        spawn(async move {
-            let _ = crate::feeds::generate_invoice(&slug, req).await;
-            busy.set(false);
-            open.set(false);
-            reload += 1;
-        });
+        muts.generate(slug.clone(), req, amount_minor, currency.clone());
+        open.set(false);
     };
 
     rsx! {
@@ -216,7 +224,6 @@ fn UninvoicedRow(
                     Button {
                         variant: ButtonVariant::Primary,
                         size: ButtonSize::Small,
-                        disabled: busy(),
                         on_click: generate,
                         "Create draft"
                     }
@@ -230,55 +237,48 @@ fn UninvoicedRow(
 fn InvoiceRow(
     slug: String,
     invoice: Invoice,
-    reload: Signal<u32>,
+    pending: bool,
     on_view: EventHandler<Uuid>,
 ) -> Element {
+    let muts = stores::use_invoice_mutations();
+    // Hold the slug in a Copy `Signal` so `act` stays `Copy` across the
+    // multiple button closures below.
     let slug = use_signal(|| slug);
-    let inv = use_signal(|| invoice);
-    let snap = inv.read();
-    let id = snap.id;
-    let (badge, badge_cls) = status_chip(&snap.status);
-    let number = if snap.number.is_empty() {
+    let id = invoice.id;
+    let (badge, badge_cls) = status_chip(&invoice.status);
+    let number = if invoice.number.is_empty() {
         "Draft".to_string()
     } else {
-        snap.number.clone()
+        invoice.number.clone()
     };
-    let total = money(snap.total_minor);
-    let balance = snap.balance_minor;
-    let is_draft = snap.status == InvoiceStatus::Draft;
+    let total = money(invoice.total_minor);
+    let balance = invoice.balance_minor;
+    let is_draft = invoice.status == InvoiceStatus::Draft;
     let is_open = matches!(
-        snap.status,
+        invoice.status,
         InvoiceStatus::Sent
             | InvoiceStatus::Viewed
             | InvoiceStatus::PartiallyPaid
             | InvoiceStatus::Overdue
     );
-    let date = snap.issue_date.clone();
-    drop(snap);
+    let date = invoice.issue_date.clone();
 
-    let act = move |kind: &'static str| {
-        let slug = slug();
-        let mut reload = reload;
-        spawn(async move {
-            match kind {
-                "sent" => {
-                    let _ = crate::feeds::invoice_mark_sent(&slug, id).await;
-                }
-                "pay" => {
-                    let date = Utc::now().date_naive().to_string();
-                    let _ = crate::feeds::invoice_record_payment(&slug, id, balance, date).await;
-                }
-                "delete" => {
-                    let _ = crate::feeds::invoice_delete(&slug, id).await;
-                }
-                _ => {}
-            }
-            reload += 1;
-        });
+    // Optimistic: the row flips status / vanishes instantly, then
+    // reconciles against the server (rollback + tray on failure).
+    let act = move |kind: &'static str| match kind {
+        "sent" => muts.mark_sent(slug(), id),
+        "pay" => {
+            let date = Utc::now().date_naive().to_string();
+            muts.record_payment(slug(), id, balance, date);
+        }
+        "delete" => muts.delete(slug(), id),
+        _ => {}
     };
 
+    let row_cls = if pending { " opacity-60" } else { "" };
+
     rsx! {
-        div { class: "flex items-center justify-between gap-3 px-3 py-2.5",
+        div { class: "flex items-center justify-between gap-3 px-3 py-2.5{row_cls}",
             button {
                 class: "flex min-w-0 flex-1 items-center gap-2 text-left",
                 onclick: move |_| on_view.call(id),

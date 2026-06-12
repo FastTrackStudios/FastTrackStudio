@@ -30,26 +30,26 @@ view-knowledge-graph.workspace = true
 task-ui.workspace = true
 # `vox` for the `DayTemplatesClient` the schedule page calls to load
 # the day-plan overlay. Wasm-clean (serde-only client side).
-scheduling-proto = { workspace = true, features = ["vox"] }
-inbox-proto = { workspace = true, features = ["vox"] }
-threads = { workspace = true, features = ["vox", "ui"] }
-locations-proto = { workspace = true, features = ["vox"] }
+scheduling-proto = { workspace = true, features = ["vox", "atom"] }
+inbox-proto = { workspace = true, features = ["vox", "atom"] }
+threads = { workspace = true, features = ["vox", "ui", "atom"] }
+locations-proto = { workspace = true, features = ["vox", "atom"] }
 # Inventory wire surface — `Item` model + `InventoryService`
 # client for the `/inventory` route. Wasm-clean (serde-only
 # client side), `vox` feature only.
-inventory-proto = { workspace = true, features = ["vox"] }
-milestone-proto = { workspace = true, features = ["vox"] }
+inventory-proto = { workspace = true, features = ["vox", "atom"] }
+milestone-proto = { workspace = true, features = ["vox", "atom"] }
 finance-proto = { workspace = true, features = ["vox"] }
 # Fitness suite wire surface — body / exercises / workouts /
 # intake service clients for the `/fitness` route. Wasm-clean
 # (serde-only client side), `vox` feature only.
-fitness-proto = { workspace = true, features = ["vox"] }
+fitness-proto = { workspace = true, features = ["vox", "atom"] }
 # Mealplan suite wire surface — cookbook (recipes) / pantry
 # (ingredient stock) / mealplan (planned meals) service clients
 # for the `/mealplan` route. Wasm-clean (serde-only client side),
 # `vox` feature only (no `native` → never pulls `inventory`).
-cookbook-proto = { workspace = true, features = ["vox"] }
-pantry-proto = { workspace = true, features = ["vox"] }
+cookbook-proto = { workspace = true, features = ["vox", "atom"] }
+pantry-proto = { workspace = true, features = ["vox", "atom"] }
 mealplan-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
 # Cyclic life-calendar — Goals view uses the pure-function

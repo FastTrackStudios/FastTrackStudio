@@ -32,6 +32,10 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox", "cookbook-proto/vox"]
+# Client-side optimistic store (`architect::Store`): adds the
+# `architect::StoreEntity` impls UI crates key their entity caches on.
+# Pulls Dioxus via architect-atom, so it stays opt-in (UI-only).
+atom = ["architect/atom"]
 server = ["architect/server-seaorm", "dep:sea-orm", "cookbook-proto/server"]
 fake = ["dep:fake", "architect/fake", "cookbook-proto/fake"]
 # `inventory` interop (`PantryItem::to_item` / `from_item`). Native

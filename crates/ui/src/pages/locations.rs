@@ -6,16 +6,20 @@
 //! features (notably inventory) reference them through renames.
 //!
 //! This page lists the org's locations and offers a friction-light
-//! "Add location" form (name + kind + optional address). Editing,
-//! nesting (parent), tags, and rename live in the CLI for now; this
-//! is the read + create slice, mirroring the inbox capture page.
+//! "Add location" form (name + kind + optional address). State is the
+//! shared optimistic store ([`crate::stores`]): the list renders one
+//! `AtomResult` (stale-while-revalidate across org switches), creates
+//! appear instantly as typed `Id::Temp` rows, and failures roll back
+//! and surface in the notification tray.
 
+use architect::Id;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use locations_proto::Location;
+use uuid::Uuid;
 
-use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
      focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
@@ -30,7 +34,7 @@ pub fn LocationsView() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
 
-    // The org we list / create into (first selected, or home).
+    // The org we create into (first selected, or home).
     let slug = use_memo(move || {
         crate::orgs::selected_slugs(&selection.read(), &org_list.read())
             .into_iter()
@@ -41,25 +45,10 @@ pub fn LocationsView() -> Element {
     let mut kind = use_signal(|| "other".to_string());
     let mut address = use_signal(String::new);
 
-    // Authoritative list: optimistic create, write-through to the org's
-    // LocationsService. Initial snapshot loaded below; no refetch on create.
-    let list = use_optimistic_list::<Location, _>(|l| l.id);
+    // The shared store: one AtomResult for the list, optimistic create.
+    let result = stores::use_location_list();
+    let muts = stores::use_location_mutations();
 
-    let loader = use_resource(move || async move {
-        match slug() {
-            Some(s) => crate::feeds::fetch_locations(&s).await,
-            None => Ok(Vec::new()),
-        }
-    });
-    use_effect(move || {
-        if let Some(Ok(rows)) = &*loader.read_unchecked() {
-            list.set(rows.clone());
-        }
-    });
-
-    // Create a provisional location (client-minted id; backend assigns its
-    // own on write — the whole row is replaced when it returns), show it
-    // instantly, then write through.
     let mut create = move || {
         let n = name.read().trim().to_string();
         if n.is_empty() {
@@ -73,29 +62,12 @@ pub fn LocationsView() -> Element {
         };
         name.set(String::new());
         address.set(String::new());
-        let provisional = Location {
-            path: String::new(),
-            id: uuid::Uuid::new_v4(),
-            name: n.clone(),
-            kind: k.clone(),
-            parent_id: None,
-            address: addr.clone(),
-            tags: locations_proto::model::Tags::default(),
-            same_as: None,
-            date_created: None,
-            date_modified: None,
-            details: String::new(),
-        };
-        list.create(provisional, async move {
-            crate::feeds::create_location(&s, &n, &k, addr).await
-        });
+        muts.create(s, stores::draft_location(n, k, addr));
     };
 
-    let rows = list.items().read().clone();
-    let load_err: Option<String> = match &*loader.read() {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
+    let rows: Vec<(Id<Uuid>, Location)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
+    let first_load = result.is_waiting() && result.value().is_none();
 
     rsx! {
         div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-6 lg:p-10",
@@ -155,14 +127,18 @@ pub fn LocationsView() -> Element {
             }
 
             // ── The register ───────────────────────────────────────
-            if rows.is_empty() {
+            if first_load {
+                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
+                    Text { variant: TextVariant::Muted, "Loading locations…" }
+                }
+            } else if rows.is_empty() {
                 div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
                     Text { variant: TextVariant::Muted, "No locations yet — add your first place above." }
                 }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for loc in rows {
-                        LocationRow { key: "{loc.id}", state: list.state(loc.id), loc }
+                    for (id, loc) in rows {
+                        LocationRow { key: "{id}", pending: id.is_temp(), loc }
                     }
                 }
             }
@@ -171,18 +147,18 @@ pub fn LocationsView() -> Element {
 }
 
 /// One location in the register: name + kind badge + optional address.
-/// `state` reflects optimistic write-through: dimmed while `Pending`, a
-/// destructive ring + "not saved" hint while `Failed`.
+/// `pending` marks an optimistic row whose write-through is in flight
+/// (dimmed); a failed write rolls the row back and reports to the tray.
 #[component]
-fn LocationRow(loc: Location, state: RowState) -> Element {
+fn LocationRow(loc: Location, pending: bool) -> Element {
     let name = loc.name.clone();
     let kind = loc.kind.clone();
     let address = loc.address.clone();
 
-    let state_cls = match state {
-        RowState::Settled => "border-border bg-card/40",
-        RowState::Pending => "border-border bg-card/40 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    let state_cls = if pending {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
     };
 
     rsx! {

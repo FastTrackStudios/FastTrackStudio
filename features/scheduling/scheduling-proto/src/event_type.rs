@@ -85,3 +85,14 @@ pub struct EventType {
     #[architect(filterable)]
     pub published: bool,
 }
+
+/// Client-side optimistic cache identity (`architect::Store`): keyed by
+/// the stable event-type id (`id.0`), minted at create time
+/// -- the vault `path` PK isn't known until the scanner assigns it.
+#[cfg(feature = "atom")]
+impl architect::StoreEntity for EventType {
+    type Key = String;
+    fn key(&self) -> String {
+        self.id.0.clone()
+    }
+}

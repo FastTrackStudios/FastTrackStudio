@@ -1,9 +1,15 @@
 # Optimistic UI pattern — canonical write-through for list pages
 
-**Status:** rollout complete for the clean-fit pages. Helper landed +
-generalized over the id key type; 7 pages converted. Remaining gaps are
-genuinely blocked (server-derived create that returns no entity) and
-documented under Non-goals / Blocked.
+> **SUPERSEDED** by the architect atom store migration — see
+> [`atom-store-migration.md`](atom-store-migration.md). The in-house
+> write-through list helper this plan introduced (`src/optimistic.rs`)
+> and the task wiring shim were the precursors; both are deleted.
+> Pages now share one pattern: `architect::Store` + `AtomResult` +
+> `use_mutation` via per-feature hooks in `crates/ui/src/stores.rs`.
+> Kept for history.
+
+**Status:** superseded (was: rollout complete for the clean-fit
+pages; 7 pages converted on the in-house helper).
 **Scope:** every `/…` route in `crates/ui/src/pages/` that lists a vault
 entity and lets the user create / edit / delete it. The lifecycle-y
 pages (timer start/stop, invoice mark-paid/void) are explicitly *out*

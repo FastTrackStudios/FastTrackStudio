@@ -5,18 +5,29 @@
 //! sessions with a today total. Org-scoped: it reads/writes the
 //! selected org's timer service.
 //!
+//! State is the shared optimistic session store ([`crate::stores`]):
+//! one slug-tagged list across the selected orgs, with the running
+//! session *derived* from it (the open row for the active org +
+//! owner) — no separate `active_timer` round-trip and no
+//! refresh-counter refetch after start/stop/edit/delete. Mutations
+//! patch the store instantly and reconcile against the server
+//! (rollback + tray notification on failure).
+//!
 //! Identity: `org_id` comes from the org's manifest (surfaced via the
 //! well-known endpoint). `user_id` is a stable per-org "local owner"
 //! id derived from `org_id` — a single-user stand-in until auth wires
 //! a real signed-in user through to the page.
 
+use architect::Id;
 use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use timer_proto::{StartTimerRequest, WorkSession};
+use uuid::Uuid;
 
 use crate::chrome::{fmt_hms, owner_id, resolve_org, use_second_tick};
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 #[component]
 pub fn TimerView() -> Element {
@@ -25,23 +36,9 @@ pub fn TimerView() -> Element {
 
     let target = use_memo(move || resolve_org(&selection.read(), &org_list.read()));
 
-    // Bumped after start/stop so the resources refetch.
-    let mut reload = use_signal(|| 0u32);
-
-    let active = use_resource(move || async move {
-        let _ = reload();
-        match target() {
-            Some((slug, org_id)) => crate::feeds::fetch_active_timer(&slug, owner_id(org_id)).await,
-            None => Ok(None),
-        }
-    });
-    // The Recent list spans every selected org (so `All` shows all your
-    // timer entries everywhere) and every member (contractors too).
-    let sessions = use_resource(move || async move {
-        let _ = reload();
-        let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
-        crate::feeds::fetch_sessions_multi(&slugs).await
-    });
+    // The shared session store: every selected org, newest first.
+    let result = stores::use_session_list();
+    let muts = stores::use_timer_mutations();
 
     // Live elapsed clock — re-render once a second while mounted.
     let tick = use_signal(|| 0u64);
@@ -50,39 +47,48 @@ pub fn TimerView() -> Element {
 
     let mut description = use_signal(String::new);
 
+    let rows: Vec<(Id<Uuid>, stores::OrgSession)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
+    let first_load = result.is_waiting() && result.value().is_none();
+
+    // The running session, derived from the one list: the open row for
+    // the active org + owner (the backend enforces at most one).
+    let active: Option<stores::OrgSession> = target().and_then(|(slug, org_id)| {
+        let owner = owner_id(org_id);
+        rows.iter()
+            .map(|(_, r)| r)
+            .find(|r| r.slug == slug && r.session.user_id == owner && r.session.end_time.is_none())
+            .cloned()
+    });
+
     let start = move |_| {
         let Some((slug, org_id)) = target() else {
             return;
         };
         let desc = description.peek().trim().to_string();
-        spawn(async move {
-            let req = StartTimerRequest {
+        description.set(String::new());
+        muts.start(
+            slug,
+            StartTimerRequest {
                 user_id: owner_id(org_id),
                 org_id,
                 project_id: None,
                 project_path: String::new(),
                 task_note_path: String::new(),
                 description: desc,
-            };
-            if crate::feeds::start_timer(&slug, req).await.is_ok() {
-                description.set(String::new());
-                reload += 1;
-            }
-        });
+            },
+        );
     };
 
+    let active_for_stop = active.clone();
     let stop = move |_| {
         let Some((slug, org_id)) = target() else {
             return;
         };
-        spawn(async move {
-            if crate::feeds::stop_timer(&slug, owner_id(org_id))
-                .await
-                .is_ok()
-            {
-                reload += 1;
-            }
-        });
+        let Some(open) = active_for_stop.as_ref() else {
+            return;
+        };
+        muts.stop(slug, owner_id(org_id), open.session.id);
     };
 
     let body = if target().is_none() {
@@ -92,20 +98,20 @@ pub fn TimerView() -> Element {
     } else {
         rsx! {
             // Running session, or the start form.
-            match &*active.read_unchecked() {
-                Some(Ok(Some(s))) => running_card(s, stop),
-                Some(Ok(None)) => start_form(description, start),
-                Some(Err(e)) => rsx! {
-                    div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                        "Couldn't reach the timer service: {e}"
-                    }
-                },
-                None => rsx! { Text { variant: TextVariant::Muted, "Loading timer…" } },
+            if let Some(open) = active.as_ref() {
+                {running_card(&open.session, stop)}
+            } else if first_load {
+                Text { variant: TextVariant::Muted, "Loading timer…" }
+            } else if let Some(e) = load_err.as_ref() {
+                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                    "Couldn't reach the timer service: {e}"
+                }
+            } else {
+                {start_form(description, start)}
             }
             // Recent sessions (all selected orgs).
-            match &*sessions.read_unchecked() {
-                Some(rows) if !rows.is_empty() => session_list(rows, reload),
-                _ => rsx! {},
+            if !rows.is_empty() {
+                {session_list(&rows)}
             }
         }
     };
@@ -180,13 +186,17 @@ fn start_form(
 }
 
 /// Recent sessions, newest first, with a today total. Each row (tagged
-/// with its org) edits / deletes in place.
-fn session_list(rows: &[(String, WorkSession)], reload: Signal<u32>) -> Element {
+/// with its org) edits / deletes in place through the shared store.
+fn session_list(rows: &[(Id<Uuid>, stores::OrgSession)]) -> Element {
     let today = Utc::now().date_naive();
     let today_secs: i64 = rows
         .iter()
-        .filter(|(_, s)| s.start_time.date_naive() == today)
-        .filter_map(|(_, s)| s.end_time.map(|e| (e - s.start_time).num_seconds()))
+        .filter(|(_, r)| r.session.start_time.date_naive() == today)
+        .filter_map(|(_, r)| {
+            r.session
+                .end_time
+                .map(|e| (e - r.session.start_time).num_seconds())
+        })
         .sum();
 
     rsx! {
@@ -196,8 +206,13 @@ fn session_list(rows: &[(String, WorkSession)], reload: Signal<u32>) -> Element 
                 Text { variant: TextVariant::Muted, "Today: {fmt_hms(today_secs)}" }
             }
             div { class: "flex flex-col divide-y divide-border/50 rounded-xl border border-border/60 bg-card/40",
-                for (slug , s) in rows.iter().take(50) {
-                    SessionRow { key: "{s.id}", session: s.clone(), slug: slug.clone(), reload }
+                for (id , row) in rows.iter().take(50) {
+                    SessionRow {
+                        key: "{id}",
+                        pending: id.is_temp(),
+                        session: row.session.clone(),
+                        slug: row.slug.clone(),
+                    }
                 }
             }
         }
@@ -206,29 +221,35 @@ fn session_list(rows: &[(String, WorkSession)], reload: Signal<u32>) -> Element 
 
 /// One recent-session row — its org badge + an Edit affordance that
 /// swaps to an inline editor (description + billable + Save / Cancel /
-/// Delete). Editing re-snapshots the rate server-side.
+/// Delete). Editing re-snapshots the rate server-side; the store
+/// reconciles against the returned row.
 #[component]
-fn SessionRow(session: WorkSession, slug: String, reload: Signal<u32>) -> Element {
+fn SessionRow(session: WorkSession, slug: String, pending: bool) -> Element {
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let sess = use_signal(|| session);
+    let muts = stores::use_timer_mutations();
     let mut editing = use_signal(|| false);
-    let mut desc = use_signal(|| sess.peek().description.clone());
-    let mut billable = use_signal(|| sess.peek().billable);
+    // Edit drafts — (re)seeded from the store row when Edit is opened,
+    // so a reconciled server value isn't shadowed by a stale draft.
+    let mut desc = use_signal(String::new);
+    let mut billable = use_signal(|| false);
 
-    let snap = sess.read();
-    let running = snap.end_time.is_none();
-    let dur = snap.end_time.map_or_else(
-        || (Utc::now() - snap.start_time).num_seconds(),
-        |e| (e - snap.start_time).num_seconds(),
+    let running = session.end_time.is_none();
+    let dur = session.end_time.map_or_else(
+        || (Utc::now() - session.start_time).num_seconds(),
+        |e| (e - session.start_time).num_seconds(),
     );
-    let title = if snap.description.trim().is_empty() {
+    let title = if session.description.trim().is_empty() {
         "(no description)".to_string()
     } else {
-        snap.description.clone()
+        session.description.clone()
     };
-    let when = snap.start_time.format("%a %b %-d, %-I:%M %p").to_string();
-    let id = snap.id;
-    drop(snap);
+    let when = session
+        .start_time
+        .format("%a %b %-d, %-I:%M %p")
+        .to_string();
+    let id = session.id;
+    let stored_desc = session.description.clone();
+    let stored_billable = session.billable;
 
     let org_name = org_list
         .read()
@@ -239,36 +260,32 @@ fn SessionRow(session: WorkSession, slug: String, reload: Signal<u32>) -> Elemen
     let save = {
         let slug = slug.clone();
         move |_| {
-            let slug = slug.clone();
-            let mut reload = reload;
             let req = timer_proto::service::UpdateSessionRequest {
                 id,
                 description: Some(desc.peek().clone()),
                 billable: Some(billable()),
                 ..Default::default()
             };
-            spawn(async move {
-                let _ = crate::feeds::update_session(&slug, req).await;
-                reload += 1;
-                editing.set(false);
-            });
+            muts.update(slug.clone(), req);
+            editing.set(false);
         }
     };
     let delete = {
         let slug = slug.clone();
         move |_| {
-            let slug = slug.clone();
-            let mut reload = reload;
-            spawn(async move {
-                let _ = crate::feeds::delete_session(&slug, id).await;
-                reload += 1;
-            });
+            muts.delete(slug.clone(), id);
         }
+    };
+
+    let row_cls = if pending {
+        "opacity-60"
+    } else {
+        ""
     };
 
     if editing() {
         rsx! {
-            div { class: "flex flex-col gap-2 px-3 py-2.5",
+            div { class: "flex flex-col gap-2 px-3 py-2.5 {row_cls}",
                 input {
                     class: "rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40",
                     value: "{desc}",
@@ -290,7 +307,7 @@ fn SessionRow(session: WorkSession, slug: String, reload: Signal<u32>) -> Elemen
         }
     } else {
         rsx! {
-            div { class: "group flex items-center justify-between gap-3 px-3 py-2.5",
+            div { class: "group flex items-center justify-between gap-3 px-3 py-2.5 {row_cls}",
                 div { class: "flex min-w-0 flex-col",
                     span { class: "truncate text-sm text-foreground", "{title}" }
                     span { class: "flex items-center gap-1.5 text-xs text-muted-foreground",
@@ -308,7 +325,11 @@ fn SessionRow(session: WorkSession, slug: String, reload: Signal<u32>) -> Elemen
                 }
                 button {
                     class: "shrink-0 rounded px-1.5 py-0.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100",
-                    onclick: move |_| editing.set(true),
+                    onclick: move |_| {
+                        desc.set(stored_desc.clone());
+                        billable.set(stored_billable);
+                        editing.set(true);
+                    },
                     "Edit"
                 }
             }

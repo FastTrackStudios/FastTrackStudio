@@ -7,16 +7,20 @@
 //!
 //! Event types and bookings live as markdown pages in the vault
 //! (`scheduling/event-types/` + `scheduling/bookings/`) and are
-//! served by the same `VaultScheduler` as the day-plan half. The
-//! public booking page (slot picker + create) lives elsewhere; this
-//! is the admin read + create slice, mirroring the locations page.
+//! served by the same `VaultScheduler` as the day-plan half. State is
+//! the shared optimistic store ([`crate::stores`]) for **both** lists:
+//! a created event type appears instantly as a typed `Id::Temp` row
+//! and reconciles against the persisted entity (no refresh-counter
+//! refetch); a cancelled booking vanishes instantly and rolls back +
+//! notifies on failure.
 
+use architect::Id;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use scheduling_proto::{Booking, BookingStatus, EventType};
 
-use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
      focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
@@ -40,41 +44,14 @@ pub fn BookingsView() -> Element {
 
     let mut title = use_signal(String::new);
     let mut duration = use_signal(|| 30u16);
-    // Bumped after every event-type mutation to re-run that fetch. Event
-    // types create via a UNIT-returning feed, so they stay on the
-    // refresh-counter pattern; bookings use the optimistic helper below.
-    let mut refresh = use_signal(|| 0u32);
 
-    let event_types = use_resource(move || {
-        let _ = refresh(); // subscribe so mutations re-fetch
-        async move {
-            match slug() {
-                Some(s) => crate::feeds::fetch_event_types(&s).await,
-                None => Ok(Vec::new()),
-            }
-        }
-    });
+    // Shared optimistic stores for both halves of the page.
+    let types_result = stores::use_event_type_list();
+    let type_muts = stores::use_event_type_mutations();
+    let bookings_result = stores::use_booking_list();
 
-    // Authoritative bookings list: optimistic delete (cancel), write-through
-    // to the org's scheduler. Initial snapshot loaded below; the only
-    // mutation is cancel, so no refetch on mutate — independent of `refresh`.
-    let bookings = use_optimistic_list::<Booking, _>(|b| b.id.0.clone());
-
-    let bookings_loader = use_resource(move || async move {
-        match slug() {
-            Some(s) => crate::feeds::fetch_bookings(&s).await,
-            None => Ok(Vec::new()),
-        }
-    });
-    use_effect(move || {
-        if let Some(Ok(all)) = &*bookings_loader.read_unchecked() {
-            let mut v = all.clone();
-            v.sort_by(|a, b| a.start_utc.cmp(&b.start_utc));
-            bookings.set(v);
-        }
-    });
-
-    // Create the drafted event type, then clear the form + refetch.
+    // Create the drafted event type: it appears instantly, then
+    // reconciles against the persisted entity.
     let mut create = move || {
         let t = title.read().trim().to_string();
         if t.is_empty() {
@@ -83,23 +60,14 @@ pub fn BookingsView() -> Element {
         let Some(s) = slug() else { return };
         let d = duration();
         title.set(String::new());
-        spawn(async move {
-            let _ = crate::feeds::create_event_type(&s, &t, d).await;
-            refresh += 1;
-        });
+        type_muts.create(s, stores::draft_event_type(t, d));
     };
 
-    let (types, types_err): (Vec<EventType>, Option<String>) = match &*event_types.read() {
-        Some(Ok(all)) => (all.clone(), None),
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
-    };
+    let types: Vec<(Id<String>, EventType)> = types_result.value().cloned().unwrap_or_default();
+    let types_err = types_result.error().cloned();
 
-    let rows = bookings.items().read().clone();
-    let bookings_err: Option<String> = match &*bookings_loader.read() {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
+    let rows: Vec<(Id<String>, Booking)> = bookings_result.value().cloned().unwrap_or_default();
+    let bookings_err = bookings_result.error().cloned();
 
     rsx! {
         div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-6 lg:p-10",
@@ -159,8 +127,8 @@ pub fn BookingsView() -> Element {
                 }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for et in types {
-                        EventTypeRow { key: "{et.id.0}", event_type: et }
+                    for (id, et) in types {
+                        EventTypeRow { key: "{id}", pending: id.is_temp(), event_type: et }
                     }
                 }
             }
@@ -178,12 +146,11 @@ pub fn BookingsView() -> Element {
                 }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for booking in rows {
+                    for (id, booking) in rows {
                         BookingRow {
-                            key: "{booking.id.0}",
-                            state: bookings.state(booking.id.0.clone()),
+                            key: "{id}",
+                            pending: id.is_temp(),
                             slug: slug().unwrap_or_default(),
-                            bookings,
                             booking,
                         }
                     }
@@ -193,15 +160,22 @@ pub fn BookingsView() -> Element {
     }
 }
 
-/// One event type: title + duration + published badge.
+/// One event type: title + duration + published badge. `pending` dims
+/// an optimistic row whose write-through is in flight.
 #[component]
-fn EventTypeRow(event_type: EventType) -> Element {
+fn EventTypeRow(event_type: EventType, pending: bool) -> Element {
     let title = event_type.title.clone();
     let duration = event_type.duration_min;
     let published = event_type.published;
 
+    let state_cls = if pending {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
+    };
+
     rsx! {
-        div { class: "flex items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
+        div { class: "flex items-center gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-1",
                 Text { class: "break-words text-sm font-medium", "{title}" }
                 span { class: "text-[11px] text-muted-foreground", "{duration} min" }
@@ -219,16 +193,12 @@ fn EventTypeRow(event_type: EventType) -> Element {
 
 /// One booking: attendee + when + status badge + cancel.
 ///
-/// `state` reflects optimistic write-through of the cancel: a cancelled
-/// row vanishes instantly; if the write fails the helper restores it and
-/// flags it `Failed` (destructive ring). `Pending` dims it.
+/// Cancelling removes the row instantly; if the server rejects it the
+/// store rolls the row back and the failure lands in the notification
+/// tray. `pending` dims an in-flight optimistic row.
 #[component]
-fn BookingRow(
-    booking: Booking,
-    state: RowState,
-    slug: String,
-    bookings: crate::optimistic::OptimisticList<Booking, String>,
-) -> Element {
+fn BookingRow(booking: Booking, pending: bool, slug: String) -> Element {
+    let muts = stores::use_booking_mutations();
     let who = booking.attendee_name.clone();
     let email = booking.attendee_email.clone();
     let when = booking.start_utc.clone();
@@ -242,16 +212,14 @@ fn BookingRow(
         BookingStatus::Completed => (StatusBadgeVariant::Neutral, "Completed"),
     };
 
-    let state_cls = match state {
-        RowState::Settled => "border-border bg-card/40",
-        RowState::Pending => "border-border bg-card/40 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    let state_cls = if pending {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
     };
 
     let cancel = move |_| {
-        let s = slug.clone();
-        let id = id.clone();
-        bookings.delete(id.clone(), async move { crate::feeds::cancel_booking(&s, &id).await });
+        muts.cancel(slug.clone(), id.clone());
     };
 
     rsx! {

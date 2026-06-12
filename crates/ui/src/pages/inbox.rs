@@ -7,17 +7,21 @@
 //! snoozed items stay hidden until their date (toggle "Show all" to see
 //! everything, including processed + archived).
 //!
-//! Processing into a task / atomic wiki note is the next slice; for now
-//! "Process" retires the item (marks it `processed`) and records nothing
-//! downstream.
+//! State is the shared optimistic store ([`crate::stores`]): every
+//! mutation — capture, status flips, snoozes, deletes, and the focused
+//! ProcessReview decisions — patches the store instantly and reconciles
+//! against the server (rollback + tray notification on failure), so
+//! leaving review mode needs no refetch: the store already reflects
+//! every decision.
 
+use architect::Id;
 use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use inbox_proto::InboxItem;
 
-use crate::optimistic::{use_optimistic_list, OptimisticList, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
      focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
@@ -37,36 +41,17 @@ pub fn InboxView() -> Element {
 
     let mut draft = use_signal(String::new);
     let mut show_all = use_signal(|| false);
-    // Bumped to force a full refetch — used only when `ProcessReview`
-    // (which mutates the backend directly, bypassing the optimistic
-    // list) hands control back, so the list reconciles with server truth.
-    let mut reload = use_signal(|| 0u32);
     // Focused daily-review ("process") mode + its frozen work queue.
     let mut processing = use_signal(|| false);
     let mut queue = use_signal(Vec::<InboxItem>::new);
 
-    // Authoritative list: optimistic mutations write through to the org's
-    // InboxClient. Initial snapshot (and post-process reload) loaded below.
-    let list = use_optimistic_list::<InboxItem, _>(|i| i.id.clone());
+    // The shared store: one AtomResult for the list; every mutation is
+    // optimistic, so exiting process mode needs no reload.
+    let result = stores::use_inbox_list();
+    let muts = stores::use_inbox_mutations();
 
-    let loader = use_resource(move || {
-        let _ = reload(); // subscribe so process-mode exit refetches
-        async move {
-            match slug() {
-                Some(s) => crate::feeds::fetch_inbox(&s).await,
-                None => Ok(Vec::new()),
-            }
-        }
-    });
-    use_effect(move || {
-        if let Some(Ok(rows)) = &*loader.read_unchecked() {
-            list.set(rows.clone());
-        }
-    });
-
-    // Capture the current draft as a fresh fleeting note: show it
-    // instantly, then write through (upsert returns unit, so the future
-    // hands back the provisional item it persisted).
+    // Capture the current draft as a fresh fleeting note: it appears
+    // instantly as a typed temp row, then persists.
     let mut capture = move || {
         let text = draft.read().trim().to_string();
         if text.is_empty() {
@@ -76,24 +61,18 @@ pub fn InboxView() -> Element {
         draft.set(String::new());
         let id = uuid::Uuid::new_v4().to_string();
         let created = Utc::now().to_rfc3339();
-        let item = InboxItem::capture(id, text, "ui", created);
-        list.create(item.clone(), async move {
-            crate::feeds::upsert_inbox_item(&s, item.clone()).await.map(|()| item)
-        });
+        muts.capture(s, InboxItem::capture(id, text, "ui", created));
     };
 
     let today = Utc::now().date_naive().to_string();
 
-    let all_rows = list.items().read().clone();
-    let load_err: Option<String> = match &*loader.read() {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
+    let all_rows: Vec<(Id<String>, InboxItem)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
 
     let show_all_now = show_all();
-    let rows: Vec<InboxItem> = all_rows
+    let rows: Vec<(Id<String>, InboxItem)> = all_rows
         .iter()
-        .filter(|it| {
+        .filter(|(_, it)| {
             show_all_now
                 || (it.is_open()
                     && it
@@ -104,40 +83,38 @@ pub fn InboxView() -> Element {
         .cloned()
         .collect();
 
-    let open_count = all_rows.iter().filter(|it| it.is_open()).count();
+    let open_count = all_rows.iter().filter(|(_, it)| it.is_open()).count();
 
     // The daily-review work set: open items whose snooze has elapsed,
     // oldest first (the fetch already sorts). Frozen into `queue` when
     // the user enters process mode so mutations don't reshuffle it.
     let due_open: Vec<InboxItem> = all_rows
         .iter()
-        .filter(|it| {
+        .filter(|(_, it)| {
             it.is_open()
                 && it
                     .resurface_on
                     .as_deref()
                     .is_none_or(|d| d <= today.as_str())
         })
-        .cloned()
+        .map(|(_, it)| it.clone())
         .collect();
 
     // Agent-proposed captures awaiting one-tap accept/dismiss.
-    let suggested: Vec<InboxItem> = all_rows
+    let suggested: Vec<(Id<String>, InboxItem)> = all_rows
         .iter()
-        .filter(|it| it.status == InboxItem::STATUS_SUGGESTED)
+        .filter(|(_, it)| it.status == InboxItem::STATUS_SUGGESTED)
         .cloned()
         .collect();
 
-    // Focused review mode takes over the whole page.
+    // Focused review mode takes over the whole page. Decisions mutate
+    // the shared store optimistically, so exiting just exits.
     if processing() {
         return rsx! {
             ProcessReview {
                 items: queue(),
                 slug,
-                on_exit: move |()| {
-                    processing.set(false);
-                    reload += 1;
-                },
+                on_exit: move |()| processing.set(false),
             }
         };
     }
@@ -217,8 +194,8 @@ pub fn InboxView() -> Element {
                             "{suggested.len()} from your sources — accept to add to the queue"
                         }
                     }
-                    for item in suggested {
-                        SuggestedRow { key: "{item.id}", state: list.state(item.id.clone()), item, slug, list }
+                    for (id, item) in suggested {
+                        SuggestedRow { key: "{id}", pending: id.is_temp(), item, slug }
                     }
                 }
             }
@@ -230,8 +207,8 @@ pub fn InboxView() -> Element {
                 }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for item in rows {
-                        InboxRow { key: "{item.id}", state: list.state(item.id.clone()), item, slug, list }
+                    for (id, item) in rows {
+                        InboxRow { key: "{id}", pending: id.is_temp(), item, slug }
                     }
                 }
             }
@@ -242,15 +219,10 @@ pub fn InboxView() -> Element {
 /// One row in the review queue. Its own component so each row's action
 /// closures capture just that item by value.
 #[component]
-fn InboxRow(
-    item: InboxItem,
-    slug: Memo<Option<String>>,
-    list: OptimisticList<InboxItem, String>,
-    state: RowState,
-) -> Element {
+fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, pending: bool) -> Element {
+    let muts = stores::use_inbox_mutations();
     // Hold the item in a Copy `Signal` so each action closure captures
-    // only Copy handles (Signal / Memo / list) and stays cheap to clone
-    // into the multiple `on_click`s.
+    // only Copy handles and stays cheap to clone into the `on_click`s.
     let item = use_signal(|| item);
 
     let snap = item.read();
@@ -263,15 +235,13 @@ fn InboxRow(
     let resurface = snap.resurface_on.clone();
     drop(snap);
 
-    // Mutate this item's status (process / archive / reopen) optimistically,
-    // then write through (upsert returns unit → hand back the sent item).
+    // Flip this item's status (process / archive / reopen): optimistic
+    // store patch + write-through.
     let set_status = move |status: &'static str| {
         let Some(s) = slug() else { return };
         let mut next = item();
         next.status = status.to_string();
-        list.update(next.clone(), async move {
-            crate::feeds::upsert_inbox_item(&s, next.clone()).await.map(|()| next)
-        });
+        muts.save(s, next);
     };
 
     // Snooze a week out — resurfaces in the daily queue then.
@@ -280,25 +250,20 @@ fn InboxRow(
         let mut next = item();
         let until = (Utc::now().date_naive() + chrono::Duration::days(7)).to_string();
         next.resurface_on = Some(until);
-        list.update(next.clone(), async move {
-            crate::feeds::upsert_inbox_item(&s, next.clone()).await.map(|()| next)
-        });
+        muts.save(s, next);
     };
 
     let delete = move || {
         let Some(s) = slug() else { return };
-        let id = item().id;
-        list.delete(id.clone(), async move {
-            crate::feeds::delete_inbox_item(&s, &id).await
-        });
+        muts.delete(s, item().id);
     };
 
-    // Closed items already read as muted; layer pending/failed on top.
-    let state_cls = match state {
-        RowState::Settled if open => "border-border bg-card/40",
-        RowState::Settled => "border-border bg-card/40 opacity-60",
-        RowState::Pending => "border-border bg-card/40 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    // Closed items already read as muted; layer pending on top. A
+    // failed write rolls back and reports to the notification tray.
+    let state_cls = if pending || !open {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
     };
 
     rsx! {
@@ -358,12 +323,8 @@ fn InboxRow(
 /// One agent-suggested capture: the proposed text + a one-tap Accept
 /// (→ enters the open review queue) or Dismiss (→ deleted).
 #[component]
-fn SuggestedRow(
-    item: InboxItem,
-    slug: Memo<Option<String>>,
-    list: OptimisticList<InboxItem, String>,
-    state: RowState,
-) -> Element {
+fn SuggestedRow(item: InboxItem, slug: Memo<Option<String>>, pending: bool) -> Element {
+    let muts = stores::use_inbox_mutations();
     let item = use_signal(|| item);
     let snap = item.read();
     let body = snap.body.clone();
@@ -374,22 +335,17 @@ fn SuggestedRow(
         let Some(s) = slug() else { return };
         let mut next = item();
         next.status = InboxItem::STATUS_OPEN.to_string();
-        list.update(next.clone(), async move {
-            crate::feeds::upsert_inbox_item(&s, next.clone()).await.map(|()| next)
-        });
+        muts.save(s, next);
     };
     let dismiss = move |_| {
         let Some(s) = slug() else { return };
-        let id = item().id;
-        list.delete(id.clone(), async move {
-            crate::feeds::delete_inbox_item(&s, &id).await
-        });
+        muts.delete(s, item().id);
     };
 
-    let state_cls = match state {
-        RowState::Settled => "border-border bg-card/60",
-        RowState::Pending => "border-border bg-card/60 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    let state_cls = if pending {
+        "border-border bg-card/60 opacity-60"
+    } else {
+        "border-border bg-card/60"
     };
 
     rsx! {
@@ -419,14 +375,16 @@ fn SuggestedRow(
 /// Focused daily-review ("process") mode: walk a frozen queue of open
 /// items one at a time and decide what each becomes — a Task, an atomic
 /// note, a snooze, done, or gone. Mirrors the FLAP processing ritual.
-/// Mutations fire optimistically and the cursor advances immediately;
-/// the queue is a snapshot so it never reshuffles under you.
+/// Every decision is an optimistic store mutation (rollback + tray
+/// notification on failure) and the cursor advances immediately; the
+/// queue is a snapshot so it never reshuffles under you.
 #[component]
 fn ProcessReview(
     items: Vec<InboxItem>,
     slug: Memo<Option<String>>,
     on_exit: EventHandler<()>,
 ) -> Element {
+    let muts = stores::use_inbox_mutations();
     let mut cursor = use_signal(|| 0usize);
     let total = items.len();
     let idx = cursor();
@@ -461,15 +419,7 @@ fn ProcessReview(
         let details = details.clone();
         move |_| {
             if let Some(s) = slug() {
-                let (item, title, details) = (item.clone(), title.clone(), details.clone());
-                spawn(async move {
-                    if let Ok(t) = crate::feeds::create_task(&s, &title, &details).await {
-                        let mut done = item;
-                        done.status = InboxItem::STATUS_PROCESSED.to_string();
-                        done.processed_into = Some(t.path);
-                        let _ = crate::feeds::upsert_inbox_item(&s, done).await;
-                    }
-                });
+                muts.promote_to_task(s, item.clone(), title.clone(), details.clone());
             }
             cursor += 1;
         }
@@ -481,21 +431,13 @@ fn ProcessReview(
         let body = body.clone();
         move |_| {
             if let Some(s) = slug() {
-                let (item, title, body) = (item.clone(), title.clone(), body.clone());
                 let path = format!(
                     "Wiki/Atomic/{}-{}.md",
                     slugify(&title),
                     item.id.get(..6).unwrap_or("note")
                 );
                 let md = atomic_markdown(&title, &body, &Utc::now().to_rfc3339());
-                spawn(async move {
-                    if crate::feeds::create_wiki_note(&s, &path, &md).await.is_ok() {
-                        let mut done = item;
-                        done.status = InboxItem::STATUS_PROCESSED.to_string();
-                        done.processed_into = Some(path);
-                        let _ = crate::feeds::upsert_inbox_item(&s, done).await;
-                    }
-                });
+                muts.promote_to_note(s, item.clone(), path, md);
             }
             cursor += 1;
         }
@@ -506,10 +448,8 @@ fn ProcessReview(
         move |_| {
             if let Some(s) = slug() {
                 let mut done = item.clone();
-                spawn(async move {
-                    done.status = InboxItem::STATUS_PROCESSED.to_string();
-                    let _ = crate::feeds::upsert_inbox_item(&s, done).await;
-                });
+                done.status = InboxItem::STATUS_PROCESSED.to_string();
+                muts.save(s, done);
             }
             cursor += 1;
         }
@@ -519,10 +459,7 @@ fn ProcessReview(
         let id = item.id.clone();
         move |_| {
             if let Some(s) = slug() {
-                let id = id.clone();
-                spawn(async move {
-                    let _ = crate::feeds::delete_inbox_item(&s, &id).await;
-                });
+                muts.delete(s, id.clone());
             }
             cursor += 1;
         }
@@ -530,18 +467,15 @@ fn ProcessReview(
 
     // Snooze the current item `days` out, then advance. Inlined per
     // button (each needs its own clone of the item).
-    let snooze_btn =
-        |item: InboxItem, slug: Memo<Option<String>>, mut cursor: Signal<usize>, days: i64| {
-            if let Some(s) = slug() {
-                let mut next = item;
-                let until = (Utc::now().date_naive() + chrono::Duration::days(days)).to_string();
-                spawn(async move {
-                    next.resurface_on = Some(until);
-                    let _ = crate::feeds::upsert_inbox_item(&s, next).await;
-                });
-            }
-            cursor += 1;
-        };
+    let snooze_btn = move |item: InboxItem, mut cursor: Signal<usize>, days: i64| {
+        if let Some(s) = slug() {
+            let mut next = item;
+            let until = (Utc::now().date_naive() + chrono::Duration::days(days)).to_string();
+            next.resurface_on = Some(until);
+            muts.save(s, next);
+        }
+        cursor += 1;
+    };
 
     rsx! {
         div { class: "mx-auto flex max-w-2xl flex-col gap-4 p-6 lg:p-10",
@@ -585,7 +519,7 @@ fn ProcessReview(
                     size: ButtonSize::Small,
                     on_click: {
                         let item = item.clone();
-                        move |_| snooze_btn(item.clone(), slug, cursor, 1)
+                        move |_| snooze_btn(item.clone(), cursor, 1)
                     },
                     "Tomorrow"
                 }
@@ -594,7 +528,7 @@ fn ProcessReview(
                     size: ButtonSize::Small,
                     on_click: {
                         let item = item.clone();
-                        move |_| snooze_btn(item.clone(), slug, cursor, 3)
+                        move |_| snooze_btn(item.clone(), cursor, 3)
                     },
                     "3 days"
                 }
@@ -603,7 +537,7 @@ fn ProcessReview(
                     size: ButtonSize::Small,
                     on_click: {
                         let item = item.clone();
-                        move |_| snooze_btn(item.clone(), slug, cursor, 7)
+                        move |_| snooze_btn(item.clone(), cursor, 7)
                     },
                     "1 week"
                 }

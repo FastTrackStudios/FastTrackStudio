@@ -847,3 +847,13 @@ impl FoodCategory {
         }
     }
 }
+
+/// Client-side optimistic cache identity (`architect::Store`): keyed by
+/// the stable `id`.
+#[cfg(feature = "atom")]
+impl architect::StoreEntity for PantryItem {
+    type Key = uuid::Uuid;
+    fn key(&self) -> uuid::Uuid {
+        self.id
+    }
+}

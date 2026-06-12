@@ -91,3 +91,14 @@ pub struct Booking {
     #[architect(filterable, sortable)]
     pub created_utc: String,
 }
+
+/// Client-side optimistic cache identity (`architect::Store`): keyed by
+/// the stable booking id (`id.0`), minted at create time --
+/// the vault `path` PK isn't known until the scanner assigns it.
+#[cfg(feature = "atom")]
+impl architect::StoreEntity for Booking {
+    type Key = String;
+    fn key(&self) -> String {
+        self.id.0.clone()
+    }
+}
