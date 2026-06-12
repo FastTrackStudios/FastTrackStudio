@@ -1,0 +1,127 @@
+# Default values for the task chart.
+#
+# Self-hoster quickstart: you usually only need to set
+#   ingress.host      — the hostname your Task instance lives on
+#   server.persistence.size — how much room for your data
+# and (recommended for production)
+#   server.existingSecret — a Secret carrying TASK_SERVER_SEALING_KEY
+#
+# How traffic flows: the web app is a wasm bundle served by nginx. It
+# derives its websocket/API URL from window.location at runtime, so
+# the SAME host must route the API paths to task-server. The Ingress
+# template does exactly that: ingress.serverPaths -> server Service,
+# everything else -> web Service. No per-deployment rebuild of the web
+# bundle is ever needed.
+
+image:
+  # Registry+namespace prefix for all three images. Override if you
+  # mirror them somewhere else.
+  registry: codeberg.org/fasttrackstudios
+  pullPolicy: IfNotPresent
+  # e.g. pullSecrets: [{ name: my-registry-cred }]
+  pullSecrets: []
+
+server:
+  image:
+    repository: task-server
+    # Empty = chart appVersion. CI publishes `dev` + `sha-<short>` from
+    # the dev branch and `latest` + `sha-<short>` from main.
+    tag: ""
+  replicas: 1
+
+  # Public base URL of this instance (scheme + host, no trailing
+  # slash). Used by the server to mint signed attachment upload /
+  # download URLs. Empty = derived as https://<ingress.host> when the
+  # ingress is enabled.
+  publicUrl: ""
+
+  # Plain (non-secret) env vars, name -> value. See
+  # deploy/docker/server.Dockerfile for the full reference. Example:
+  #   env:
+  #     TASK_SERVER_ORG: my-org
+  #     RUST_LOG: info,task_server=debug
+  env: {}
+
+  # Name of an existing Secret whose keys are injected via envFrom.
+  # Put TASK_SERVER_SEALING_KEY (openssl rand -hex 32) and any
+  # integration tokens (TASK_FORGEJO_TOKEN, HERMES_*) here. Without a
+  # sealing key the server falls back to a machine-stable dev key and
+  # logs a warning — fine for kicking the tires, not for production.
+  existingSecret: ""
+
+  persistence:
+    # Everything the server owns lives in this one PVC (mounted at
+    # /data = TASK_DATA_ROOT): org sqlites, vault, crdt docs, wiki,
+    # attachment blobs, the server keypair. Backing up this volume
+    # backs up the instance.
+    size: 10Gi
+    # Empty = cluster default StorageClass.
+    storageClass: ""
+    # Use a pre-provisioned claim instead of creating one.
+    existingClaim: ""
+    accessModes:
+      - ReadWriteOnce
+
+  resources: {}
+  #  e.g.
+  #  resources:
+  #    requests: { cpu: 100m, memory: 256Mi }
+  #    limits: { memory: 1Gi }
+
+  # Extra pod knobs, passed through verbatim.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+
+web:
+  enabled: true
+  image:
+    repository: task-web
+    tag: ""
+  replicas: 1
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+
+# ui-lab — the component gallery / design lab. Not something a normal
+# self-hoster wants exposed; off by default.
+uiLab:
+  enabled: false
+  # Hostname for the lab when enabled (its Ingress reuses
+  # ingress.className/annotations and routes the same API paths to the
+  # server so live-data stories work).
+  host: ""
+  image:
+    repository: task-ui-lab
+    tag: ""
+  replicas: 1
+  resources: {}
+
+ingress:
+  enabled: true
+  className: traefik
+  # The one hostname this instance serves. The web app and the API
+  # share it — same-origin is what makes the runtime URL derivation
+  # work.
+  host: task.example.com
+  # Extra annotations (cert-manager, traefik middlewares, …).
+  # WebSockets work through Traefik with no special annotation.
+  annotations: {}
+  # Path prefixes routed to task-server; the rest goes to the static
+  # web app. /org covers per-org endpoints (/org/<slug>/vox, webhooks),
+  # /server the server-management vox, /blobs attachment up/downloads.
+  serverPaths:
+    - /vox
+    - /org
+    - /server
+    - /blobs
+    - /.well-known
+  # TLS is usually terminated OUTSIDE the cluster (or by cert-manager);
+  # passthrough list in standard ingress.spec.tls shape:
+  #   tls:
+  #     - secretName: task-tls
+  #       hosts: [task.example.com]
+  tls: []

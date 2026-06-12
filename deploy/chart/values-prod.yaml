@@ -1,0 +1,36 @@
+# EXAMPLE values — the production environment on starcommand (ArgoCD
+# watches the `main` branch with these). Self-hosters: copy as a
+# starting point; the chart defaults are generic.
+#
+#   helm upgrade --install task ./deploy/chart/task \
+#     -n task --create-namespace \
+#     -f deploy/chart/values-prod.yaml
+
+server:
+  image:
+    tag: latest
+  publicUrl: https://tasks.starcommand.live
+  # REQUIRED for prod: a Secret with TASK_SERVER_SEALING_KEY (and any
+  # integration tokens). Without it the server seals secrets with a
+  # machine-dev key.
+  # existingSecret: task-env
+  persistence:
+    size: 50Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
+web:
+  image:
+    tag: latest
+
+# Component gallery stays dev-only.
+uiLab:
+  enabled: false
+
+ingress:
+  className: traefik
+  host: tasks.starcommand.live
