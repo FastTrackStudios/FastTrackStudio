@@ -27,7 +27,9 @@ import { AuthServiceClient } from "@/generated/authservice.generated";
 import { MilestoneServiceRpcClient } from "@/generated/milestoneservicerpc.generated";
 import { ProjectServiceRpcClient } from "@/generated/projectservicerpc.generated";
 import { TaskServiceRpcClient } from "@/generated/taskservicerpc.generated";
+import { TaskServiceStreamClient } from "@/generated/taskservicestream.generated";
 import { WorkstreamServiceRpcClient } from "@/generated/workstreamservicerpc.generated";
+import { WorkstreamServiceStreamClient } from "@/generated/workstreamservicestream.generated";
 import {
   errorMessage,
   installTelemetry,
@@ -211,6 +213,29 @@ export const milestonesFor = clientCache(
 export const workstreamsFor = clientCache(
   "WorkstreamServiceRpc",
   (caller) => new WorkstreamServiceRpcClient(caller),
+);
+
+/**
+ * `#[subscribe]` stream siblings — live change feeds. Subscribe by
+ * creating a channel pair and handing the tx to the stream verb:
+ *
+ *   const [tx, rx] = channel<TaskEvent>();   // @bearcove/vox-core
+ *   const stream = await taskStreamFor(org);
+ *   await stream.events(tx);                  // resolves once attached
+ *   for await (const ev of rx) { ... }        // Upserted / Deleted
+ *
+ * Fetch-once-then-fold contract: subscribe FIRST, then `list()`, then
+ * fold events into the local copy (events are idempotent full-state
+ * payloads, so re-applying one already in the fetched list is fine).
+ */
+export const taskStreamFor = clientCache(
+  "TaskServiceStream",
+  (caller) => new TaskServiceStreamClient(caller),
+);
+
+export const workstreamStreamFor = clientCache(
+  "WorkstreamServiceStream",
+  (caller) => new WorkstreamServiceStreamClient(caller),
 );
 
 export const authFor = clientCache(

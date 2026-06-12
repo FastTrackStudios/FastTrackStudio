@@ -73,12 +73,21 @@ fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
     // proto crates (each #[architect::rpc] trait emits a
     // `<snake_name>_service_descriptor()` under the `vox` feature).
     // Add new services here as their TS clients are needed.
+    //
+    // Traits with `#[subscribe]` declarations also emit a stream
+    // sibling (`<Trait>Stream` — a vox service whose methods take a
+    // `Tx<Event>` sink). Those descriptors are listed too, so the
+    // generated TS exposes the subscription streams: create a
+    // channel pair (`channel<TaskEvent>()` from @bearcove/vox-core),
+    // pass the tx to `events(tx)`, and `for await` the rx.
     vec![
         project::project_service_descriptor(),
         task::task_service_descriptor(),
+        task::task_stream_descriptor(),
         auth_proto::auth_service_service_descriptor(),
         milestone_proto::milestone_service_descriptor(),
         workstream_proto::workstream_service_descriptor(),
+        workstream_proto::workstream_stream_descriptor(),
     ]
 }
 

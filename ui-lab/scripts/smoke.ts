@@ -10,12 +10,16 @@
  * connect per org, list projects, get one project, list its tasks +
  * milestones, and a real AuthService sign-in against the home org.
  */
+import { channel } from "@bearcove/vox-core";
+
+import type { TaskEvent } from "../src/generated/taskservicestream.generated";
 import { fetchOrgs, homeSlug } from "../src/lib/orgs";
 import {
   DEFAULT_ORG,
   authFor,
   milestonesFor,
   projectsFor,
+  taskStreamFor,
   tasksFor,
   unwrap,
   voxUrlFor,
@@ -100,6 +104,81 @@ async function main() {
       `WorkstreamServiceRpc.rollup("${w.title}") -> ${rollup.done}/${rollup.total} done, ` +
         `${rollup.in_progress} in progress, ${rollup.blocked} blocked, ${rollup.estimate_points_sum} pts`,
     );
+  }
+
+  // `#[subscribe]` stream smoke: subscribe to TaskServiceStream
+  // events, mutate, and assert the events arrive (fetch-once-then-
+  // fold is the board's live path). Mutations are confined to the
+  // `test` org; when it isn't hosted the stream check is skipped.
+  if (orgs.some((o) => o.slug === "test")) {
+    const stream = await taskStreamFor("test");
+    const [tx, rx] = channel<TaskEvent>();
+    // Subscribe BEFORE mutating — the awaited call returns once the
+    // sink is attached to the backend hub, so nothing is missed.
+    await stream.events(tx);
+
+    const testTasks = await tasksFor("test");
+    const created = unwrap(
+      await testTasks.create({
+        id: "00000000-0000-0000-0000-000000000000", // nil -> backend assigns
+        path: "",
+        title: `smoke stream probe ${Date.now()}`,
+        status: "open",
+        priority: "normal",
+        due: null,
+        scheduled: null,
+        tags: ["smoke"],
+        contexts: [],
+        projects: [],
+        project_id: null,
+        milestone_id: null,
+        time_estimate: null,
+        time_entries: [],
+        recurrence: null,
+        recurrence_anchor: null,
+        complete_instances: [],
+        completed_date: null,
+        agent_profile: "",
+        dispatched_agent_tasks: [],
+        date_created: null,
+        date_modified: null,
+        details: "",
+        workflow: null,
+      }),
+    );
+    const next = async (): Promise<TaskEvent> => {
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("no TaskEvent within 10s of a mutation")),
+          10_000,
+        ),
+      );
+      const ev = await Promise.race([rx.recv(), timeout]);
+      if (ev === null) throw new Error("task event stream closed early");
+      return ev;
+    };
+
+    const upserted = await next();
+    if (
+      upserted.tag !== "Upserted" ||
+      String(upserted.value.id) !== String(created.id)
+    ) {
+      throw new Error(
+        `expected Upserted(${String(created.id)}) after create, got ${JSON.stringify(upserted).slice(0, 200)}`,
+      );
+    }
+    unwrap(await testTasks.delete(created.id));
+    const deleted = await next();
+    if (deleted.tag !== "Deleted" || String(deleted.value) !== String(created.id)) {
+      throw new Error(
+        `expected Deleted(${String(created.id)}) after delete, got ${JSON.stringify(deleted).slice(0, 200)}`,
+      );
+    }
+    console.log(
+      `TaskServiceStream.events(test) -> Upserted + Deleted observed for ${String(created.id)}`,
+    );
+  } else {
+    console.log("(skip stream smoke: `test` org not hosted)");
   }
 
   // Real sign-in against the home org — the account switcher's path.
