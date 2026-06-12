@@ -33,6 +33,7 @@
 
 pub mod article;
 pub mod import;
+pub mod pdf;
 pub mod provenance;
 pub mod router;
 pub mod youtube;

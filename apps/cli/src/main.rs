@@ -2616,6 +2616,12 @@ struct WikiArchiveArgs {
     /// via `TASK_YTDLP`.
     #[arg(long, env = "TASK_YTDLP", default_value = "yt-dlp")]
     yt_dlp: String,
+    /// pdftotext binary (poppler) — the PDF-extraction
+    /// fallback when pdfium isn't available. The pdfium path
+    /// itself loads `libpdfium` from the `TASK_PDFIUM`
+    /// directory or the system library path at runtime.
+    #[arg(long, env = "TASK_PDFTOTEXT", default_value = "pdftotext")]
+    pdftotext: String,
     #[arg(long, default_value = "default")]
     wiki_id: String,
     #[arg(long)]
@@ -9461,7 +9467,7 @@ async fn run_wiki_archive(args: WikiArchiveArgs) -> eyre::Result<()> {
         let title = args.title.clone().unwrap_or_else(|| name.clone());
         (name, mime, title, std::fs::read(local)?, None)
     } else {
-        let (prov, body) = archive_extract_url(&target, args.title.clone(), &args.yt_dlp)
+        let (prov, body) = archive_extract_url(&target, &args)
             .await
             .map_err(|e| eyre::eyre!("archive {target}: {e}"))?;
         let md = wiki_archive::compose_source_markdown(&prov, &body);
@@ -9561,18 +9567,31 @@ async fn run_wiki_archive(args: WikiArchiveArgs) -> eyre::Result<()> {
 /// provenance + extracted markdown body.
 async fn archive_extract_url(
     target: &str,
-    title_override: Option<String>,
-    yt_dlp: &str,
+    args: &WikiArchiveArgs,
 ) -> eyre::Result<(wiki_archive::Provenance, String)> {
+    let title_override = args.title.clone();
+    let yt_dlp = args.yt_dlp.as_str();
     let (url, route) = wiki_archive::classify(target).map_err(|e| eyre::eyre!("{e}"))?;
     let canonical = wiki_archive::canonicalize(&url, &route);
     let content_type = wiki_archive::content_type_for(&route);
-    let _ = yt_dlp;
     match route {
         wiki_archive::Route::Article => {
             let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
-            let a = wiki_archive::article::fetch_article(&client, &url)
-                .await
+            // Fetch once as bytes: extensionless PDF links
+            // (arxiv `/pdf/…`, DOI redirects) divert to the
+            // PDF extractor on content-type or magic bytes.
+            let (ct, bytes) = wiki_archive::article::fetch_bytes(
+                &client,
+                url.as_str(),
+                "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8",
+            )
+            .await
+            .map_err(|e| eyre::eyre!("{e}"))?;
+            if ct == "application/pdf" || bytes.starts_with(b"%PDF-") {
+                return archive_pdf_from_bytes(target, canonical, args, &bytes).await;
+            }
+            let html = String::from_utf8_lossy(&bytes);
+            let a = wiki_archive::article::extract_article(&html, url.as_str())
                 .map_err(|e| eyre::eyre!("{e}"))?;
             let title = title_override
                 .or_else(|| (!a.title.is_empty()).then(|| a.title.clone()))
@@ -9590,6 +9609,17 @@ async fn archive_extract_url(
             };
             Ok((prov, body))
         }
+        wiki_archive::Route::Pdf => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let (_ct, bytes) = wiki_archive::article::fetch_bytes(
+                &client,
+                url.as_str(),
+                "application/pdf,*/*;q=0.8",
+            )
+            .await
+            .map_err(|e| eyre::eyre!("{e}"))?;
+            archive_pdf_from_bytes(target, canonical, args, &bytes).await
+        }
         wiki_archive::Route::GoogleDoc { doc_id } => {
             let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
             let (doc_title, md) = wiki_archive::article::fetch_google_doc(&client, &doc_id)
@@ -9604,6 +9634,15 @@ async fn archive_extract_url(
                 "gdocs-export",
             );
             Ok((prov, md))
+        }
+        wiki_archive::Route::ApplePodcast { .. } | wiki_archive::Route::SpotifyPodcast { .. } => {
+            // Filled in by the podcast slice (resolver + RSS +
+            // transcript fast path) — classification landed
+            // with the PDF slice so canonical dedup keys are
+            // stable from day one.
+            Err(eyre::eyre!(
+                "podcast archiving not wired yet for {target} (next slice)"
+            ))
         }
         wiki_archive::Route::YouTube { .. } | wiki_archive::Route::Video => {
             let yt = wiki_archive::youtube::YtDlp::new(yt_dlp);
@@ -9640,6 +9679,43 @@ async fn archive_extract_url(
             Ok((prov, body))
         }
     }
+}
+
+/// PDF bytes → per-page text with `^p<page>` anchors.
+/// Engine order: pdfium (feature `pdf`, dynamic libpdfium
+/// binding) then `pdftotext -layout`. Title precedence:
+/// `--title` → PDF metadata title → URL filename stem.
+async fn archive_pdf_from_bytes(
+    target: &str,
+    canonical: String,
+    args: &WikiArchiveArgs,
+    bytes: &[u8],
+) -> eyre::Result<(wiki_archive::Provenance, String)> {
+    let (text, engine) = wiki_archive::pdf::extract_pdf(bytes, &args.pdftotext)
+        .await
+        .map_err(|e| eyre::eyre!("{e}"))?;
+    let title = args
+        .title
+        .clone()
+        .or_else(|| text.title.clone())
+        .unwrap_or_else(|| {
+            // Last path segment without the extension.
+            target
+                .rsplit('/')
+                .next()
+                .unwrap_or(target)
+                .split('?')
+                .next()
+                .unwrap_or(target)
+                .trim_end_matches(".pdf")
+                .trim_end_matches(".PDF")
+                .to_string()
+        });
+    let page_count = text.pages.len();
+    let body = wiki_archive::pdf::render_pdf_markdown(&text.pages);
+    let body = format!("_{page_count} page(s)_\n\n{body}");
+    let prov = wiki_archive::Provenance::new(title, target, canonical, "pdf", engine);
+    Ok((prov, body))
 }
 
 /// `task wiki archive import <kind>` — run one importer and

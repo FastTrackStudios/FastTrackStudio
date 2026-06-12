@@ -93,7 +93,13 @@ wiki-search.workspace = true
 # `task-cli wiki archive <url|file>` — URL router + content
 # extractors + bookmark importers feeding the unchanged
 # raw→ingest pipeline over the wiki-proto RPC surface.
-wiki-archive.workspace = true
+# `pdf` = pdfium-render's dynamic-binding path (same feature
+# shape as wiki-extract): no C build, nothing bundled —
+# libpdfium is looked up at runtime (TASK_PDFIUM dir, then
+# the system path) and the extractor falls back to
+# `pdftotext -layout` when it's absent. Cheap enough to keep
+# always-on for the CLI.
+wiki-archive = { workspace = true, features = ["pdf"] }
 # `task-cli timer …` — local time tracking against a sqlite
 # db. No server needed; the same `timer::Store` the server
 # mounts works fine for a single-user CLI session.

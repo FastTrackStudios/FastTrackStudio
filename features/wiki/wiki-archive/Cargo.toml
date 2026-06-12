@@ -49,5 +49,14 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # real CSV reader, not split(',').
 csv = "1.3"
 
+# PDF text via pdfium — same feature-gate shape as
+# wiki-extract: optional dep, dynamic library binding at
+# runtime (nothing bundled; TASK_PDFIUM or system lib).
+pdfium-render = { version = "0.8", optional = true }
+
+[features]
+default = []
+pdf = ["dep:pdfium-render"]
+
 [lints]
 workspace = true
