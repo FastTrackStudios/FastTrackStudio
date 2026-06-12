@@ -304,6 +304,128 @@ pub fn Avatar(name: String, email: String, #[props(default = 28)] size: u32) -> 
     }
 }
 
+// ── account & status, shared content ────────────────────────────────
+
+/// The status-picker rows both presentations render: the manual
+/// override value, its label, and the status whose dot previews it.
+pub const STATUS_OPTIONS: [(ManualStatus, &str, PresenceStatus); 3] = [
+    (ManualStatus::Auto, "Active (auto)", PresenceStatus::Active),
+    (
+        ManualStatus::Available,
+        "Available",
+        PresenceStatus::Available,
+    ),
+    (ManualStatus::Dnd, "Do not disturb", PresenceStatus::Dnd),
+];
+
+/// Account & status content for the mobile bottom sheet — the same
+/// roster / status / sign-out actions as the desktop [`AccountSwitcher`]
+/// popover (both ride [`AuthCtx`] + [`PresenceLocal`]), restyled as
+/// touch-sized rows (≥44px). `on_done` fires after any action so the
+/// hosting sheet can close.
+#[component]
+pub fn AccountSheetBody(on_done: EventHandler<()>) -> Element {
+    let ctx = use_context::<AuthCtx>();
+    let active = ctx.active;
+    let error = ctx.error;
+    let local = use_context::<PresenceLocal>();
+    let mut manual = local.manual;
+
+    let account = active.read().clone();
+    let (name, email) = account.as_ref().map_or_else(
+        || ("Signing in…".to_owned(), String::new()),
+        |a| (a.name.clone(), a.email.clone()),
+    );
+    let active_email = account.as_ref().map(|a| a.email.clone());
+    let effective = local.effective_status();
+    let dot = effective.dot_class();
+    let current_status = *manual.read();
+
+    rsx! {
+        div { class: "flex flex-col gap-4 pb-2",
+            // Signed-in identity card.
+            div { class: "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3",
+                span { class: "relative shrink-0",
+                    Avatar { name: name.clone(), email: email.clone(), size: 40 }
+                    span { class: "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card {dot}",
+                        title: "{effective.label()}",
+                    }
+                }
+                span { class: "flex min-w-0 flex-col",
+                    span { class: "truncate text-sm font-semibold text-foreground", "{name}" }
+                    if !email.is_empty() {
+                        span { class: "truncate text-xs text-muted-foreground", "{email}" }
+                    }
+                }
+            }
+            if let Some(msg) = error.read().as_ref() {
+                div { class: "px-1 text-xs text-destructive", "{msg}" }
+            }
+
+            section {
+                h3 { class: "px-1 pb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                    "Switch account"
+                }
+                div { class: "flex flex-col",
+                    for dev in DEV_ACCOUNTS {
+                        button {
+                            key: "{dev.email}",
+                            r#type: "button",
+                            class: "flex min-h-[44px] w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-accent",
+                            onclick: move |_| {
+                                on_done.call(());
+                                spawn(async move { ctx.switch_account(dev.email).await });
+                            },
+                            Avatar { name: dev.name.to_string(), email: dev.email.to_string(), size: 28 }
+                            span { class: "flex min-w-0 flex-col",
+                                span { class: "truncate text-sm text-foreground", "{dev.name}" }
+                                span { class: "truncate text-xs text-muted-foreground", "{dev.email}" }
+                            }
+                            if active_email.as_deref() == Some(dev.email) {
+                                span { class: "ml-auto text-sm text-primary", "●" }
+                            }
+                        }
+                    }
+                }
+            }
+
+            section {
+                h3 { class: "px-1 pb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                    "Status"
+                }
+                div { class: "flex flex-col",
+                    for (value , label , status) in STATUS_OPTIONS {
+                        button {
+                            key: "{label}",
+                            r#type: "button",
+                            class: "flex min-h-[44px] w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-accent",
+                            onclick: move |_| {
+                                manual.set(value);
+                                on_done.call(());
+                            },
+                            span { class: "h-2.5 w-2.5 rounded-full {status.dot_class()}" }
+                            span { class: "text-sm text-foreground", "{label}" }
+                            if current_status == value {
+                                span { class: "ml-auto text-sm text-primary", "●" }
+                            }
+                        }
+                    }
+                }
+            }
+
+            button {
+                r#type: "button",
+                class: "flex min-h-[44px] w-full items-center justify-center rounded-lg border border-destructive/40 px-3 py-2 text-sm font-medium text-destructive active:bg-destructive/10",
+                onclick: move |_| {
+                    on_done.call(());
+                    spawn(async move { ctx.sign_out().await });
+                },
+                "Sign out"
+            }
+        }
+    }
+}
+
 // ── bottom-left account switcher ────────────────────────────────────
 
 /// Sidebar-footer account card: avatar + name + email + presence dot,
@@ -328,15 +450,7 @@ pub fn AccountSwitcher() -> Element {
     let effective = local.effective_status();
     let dot = effective.dot_class();
     let current_status = *manual.read();
-    let status_options = [
-        (ManualStatus::Auto, "Active (auto)", PresenceStatus::Active),
-        (
-            ManualStatus::Available,
-            "Available",
-            PresenceStatus::Available,
-        ),
-        (ManualStatus::Dnd, "Do not disturb", PresenceStatus::Dnd),
-    ];
+    let status_options = STATUS_OPTIONS;
 
     rsx! {
         div { class: "flex w-full flex-col gap-1",
