@@ -101,7 +101,7 @@ pub fn TopBar() -> Element {
 
     rsx! {
         div {
-            class: "sticky top-0 z-20 hidden items-center gap-3 border-b border-border bg-background/80 px-6 py-2 backdrop-blur lg:flex",
+            class: "sticky top-0 z-20 hidden items-center gap-3 border-b border-border bg-background/80 px-6 py-2 backdrop-blur md:flex",
             // Push everything to the right.
             div { class: "flex-1" }
 
@@ -263,7 +263,7 @@ pub fn FleetingFab() -> Element {
     let mut open = use_fleeting_open();
     rsx! {
         button {
-            class: "fixed bottom-24 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95 lg:hidden",
+            class: "fixed bottom-24 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95 md:hidden",
             style: "margin-bottom: env(safe-area-inset-bottom, 0px);",
             title: "Capture a fleeting note",
             onclick: move |_| open.set(true),

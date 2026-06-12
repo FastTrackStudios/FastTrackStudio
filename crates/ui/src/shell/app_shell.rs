@@ -21,17 +21,22 @@ pub fn AppShell() -> Element {
         // manual status) on the org channel joined at the app root.
         // Renders nothing; lives here because it needs `use_route`.
         crate::presence::PresencePublisher {}
-        div { class: "min-h-screen bg-background text-foreground lg:grid lg:h-screen lg:grid-cols-[18rem_1fr] lg:overflow-hidden",
-            div { class: "hidden lg:flex lg:h-screen lg:flex-col lg:overflow-hidden",
+        // Mobile is the primary platform: below `md` the sidebar is
+        // gone in favor of the top app bar + bottom tab bar; at `md`
+        // and up the desktop two-column layout takes over unchanged.
+        div { class: "min-h-screen bg-background text-foreground md:grid md:h-screen md:grid-cols-[18rem_1fr] md:overflow-hidden",
+            div { class: "hidden md:flex md:h-screen md:flex-col md:overflow-hidden",
                 SidebarProvider {
                     DesktopSidebar { current: current.clone() }
                 }
             }
 
-            div { class: "flex min-h-screen flex-col lg:h-screen lg:min-h-0 lg:overflow-y-auto",
+            div { class: "flex min-h-screen flex-col md:h-screen md:min-h-0 md:overflow-y-auto",
                 MobileHeader {}
                 TopBar {}
-                main { class: "flex-1 pb-24 lg:pb-0",
+                // Bottom padding keeps content clear of the fixed tab
+                // bar (56px + safe area) plus breathing room.
+                main { class: "flex-1 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] md:pb-0",
                     SuspenseBoundary {
                         fallback: |_| rsx! { RouteFallback {} },
                         Outlet::<Route> {}
@@ -62,7 +67,7 @@ fn NotificationTray() -> Element {
         return rsx! {};
     }
     rsx! {
-        div { class: "pointer-events-none fixed bottom-20 right-4 z-50 flex w-80 flex-col gap-2 lg:bottom-4",
+        div { class: "pointer-events-none fixed bottom-20 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 md:bottom-4",
             for n in list {
                 div {
                     key: "{n.id}",
