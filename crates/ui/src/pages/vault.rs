@@ -69,7 +69,7 @@ struct TreeNode {
 }
 
 #[component]
-pub fn VaultView() -> Element {
+pub fn VaultView(#[props(default)] initial_path: String) -> Element {
     // The vault lives in the home org; resolve its slug from the
     // discovered org list (re-runs when discovery lands).
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
@@ -85,6 +85,34 @@ pub fn VaultView() -> Element {
     let session = use_document_session(home);
     use_context_provider(|| session);
     let selected = use_memo(move || session.current_path());
+
+    // Deep-link support: `/vault?path=<vault-relative path>` opens
+    // that note once the folder index lands (e.g. a knowledge-graph
+    // node click). One-shot — after the first open the user owns the
+    // selection again.
+    let mut deep_link_done = use_signal(|| false);
+    {
+        let want = initial_path.clone();
+        use_effect(move || {
+            if want.is_empty() || *deep_link_done.peek() {
+                return;
+            }
+            if let Some(Ok(pages)) = &*files.read() {
+                // Exact vault-relative path first; fall back to the
+                // basename so graph node ids (file stems) resolve too.
+                let hit = pages.iter().find(|p| p.path == want).or_else(|| {
+                    pages
+                        .iter()
+                        .find(|p| basename_of(&p.path) == basename_of(&want))
+                });
+                if let Some(p) = hit {
+                    deep_link_done.set(true);
+                    session.open(p.path.clone(), p.sha256.clone());
+                }
+            }
+        });
+    }
+
     let mut new_name = use_signal(String::new);
     // Failures from tree operations (move / create) outlive their
     // buttons via the app-wide notification queue.

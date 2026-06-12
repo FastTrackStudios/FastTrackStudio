@@ -39,8 +39,11 @@ pub enum Route {
         #[route("/tasks/:id")]
         TaskDetailRoute { id: uuid::Uuid },
 
-        #[route("/vault")]
-        VaultRoute {},
+        // `path` deep-links straight to a note (vault-relative path,
+        // e.g. from a knowledge-graph node click); empty opens the
+        // tree with nothing selected.
+        #[route("/vault?:path")]
+        VaultRoute { path: String },
 
         #[route("/locations")]
         LocationsRoute {},
@@ -138,8 +141,8 @@ fn TaskDetailRoute(id: uuid::Uuid) -> Element {
 }
 
 #[component]
-fn VaultRoute() -> Element {
-    rsx! { pages::vault::VaultView {} }
+fn VaultRoute(path: String) -> Element {
+    rsx! { pages::vault::VaultView { initial_path: path } }
 }
 
 #[component]
