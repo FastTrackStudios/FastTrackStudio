@@ -125,7 +125,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
         NavTab {
             label: "Vault",
             icon: icon_vault,
-            route: Route::VaultRoute {},
+            route: Route::VaultRoute { path: String::new() },
         },
         NavTab {
             label: "Locations",
@@ -230,7 +230,7 @@ pub fn primary_mobile_tabs() -> Vec<NavTab> {
         NavTab {
             label: "Vault",
             icon: icon_vault,
-            route: Route::VaultRoute {},
+            route: Route::VaultRoute { path: String::new() },
         },
         NavTab {
             label: "Settings",
@@ -254,7 +254,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::GoalsRoute {} => "Goals",
         Route::TasksRoute {} => "Tasks",
         Route::TaskDetailRoute { .. } => "Task",
-        Route::VaultRoute {} => "Vault",
+        Route::VaultRoute { .. } => "Vault",
         Route::LocationsRoute {} => "Locations",
         Route::InventoryRoute {} => "Inventory",
         Route::MilestonesRoute {} => "Milestones",

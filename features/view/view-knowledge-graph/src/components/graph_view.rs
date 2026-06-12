@@ -3,9 +3,15 @@
 //! Data in via props, interaction out via `on_node_click`. The layout
 //! is computed with [`crate::layout`] inside a memo (deterministic, so
 //! it only recomputes when the graph / spacing / scale actually
-//! change). Pan is drag-to-move; zoom is the on-canvas buttons. Hover
-//! dims everything that isn't the hovered node or its neighbors;
-//! `highlighted` (e.g. search matches) takes precedence over hover.
+//! change). The viewBox derives from the layout bounds, so the first
+//! render always fits the whole graph (zoom-to-fit); "Reset view"
+//! returns to that fit. Pan is drag-to-move; zoom is the wheel or the
+//! on-canvas buttons. Label density is zoom-aware: zoomed out only the
+//! biggest hubs keep labels (fading in near the threshold), zooming in
+//! progressively labels smaller nodes; hover and search highlights are
+//! always labeled. Hover dims everything that isn't the hovered node
+//! or its neighbors; `highlighted` (e.g. search matches) takes
+//! precedence over hover.
 //!
 //! Colors come from Tailwind palette utilities (`text-{stem}-400` +
 //! `fill-current`) rather than raw hex, so the graph respects the theme
@@ -21,6 +27,14 @@ use fts_ui::lucide_dioxus::{Maximize, ZoomIn, ZoomOut};
 
 use crate::layout::{LayoutConfig, Position, bounds, layout, node_radius};
 use crate::model::{ColorMode, WikiGraph, community_text_class, kind_text_class};
+
+/// Density score (degree ratio × 4 × zoom) above which a node's label
+/// renders. At zoom 1 a node needs ≥ a quarter-ish of the biggest
+/// hub's degree (scaled by [`LABEL_FADE_BAND`]) to be labeled.
+const LABEL_THRESHOLD: f32 = 0.6;
+/// Width of the fade-in band above [`LABEL_THRESHOLD`] — labels ramp
+/// from faint to full opacity across it.
+const LABEL_FADE_BAND: f32 = 0.4;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct KnowledgeGraphViewProps {
@@ -97,7 +111,10 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
         };
     }
 
-    // viewBox from layout bounds + zoom/pan.
+    // viewBox from layout bounds + zoom/pan. At the initial
+    // `zoom = 1.0, pan = (0, 0)` this is exactly zoom-to-fit: the
+    // padded bounding box of every node, centered (and
+    // `preserveAspectRatio: meet` letterboxes it into the container).
     let (min_x, min_y, max_x, max_y) = bounds(&pmap);
     let raw_w = (max_x - min_x).max(1.0);
     let raw_h = (max_y - min_y).max(1.0);
@@ -216,10 +233,24 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                             };
                             let is_active = active.as_ref().is_none_or(|s| s.contains(&node.id));
                             let dim_class = if has_active && !is_active { "opacity-20" } else { "opacity-100" };
-                            let show_label = is_active
-                                && (hov.as_deref() == Some(node.id.as_str())
-                                    || node.link_count * 4 >= max_links.max(1)
-                                    || !props.highlighted.is_empty());
+                            // Zoom-aware label density: a node's score is its
+                            // degree relative to the biggest hub, boosted by
+                            // the current zoom. Zoomed out only the top hubs
+                            // pass the threshold; zooming in raises every
+                            // score until the leaves label too. Hover and
+                            // search highlights always label.
+                            let is_hovered = hov.as_deref() == Some(node.id.as_str());
+                            let is_highlight = !props.highlighted.is_empty() && is_active;
+                            let density = (node.link_count.max(1) as f32 * 4.0 * z)
+                                / max_links.max(1) as f32;
+                            let show_label = is_active && (is_hovered || is_highlight || density >= LABEL_THRESHOLD);
+                            // Fade labels in as they cross the threshold so a
+                            // zoom doesn't pop a wall of text at once.
+                            let label_opacity = if is_hovered || is_highlight {
+                                1.0
+                            } else {
+                                ((density - LABEL_THRESHOLD) / LABEL_FADE_BAND).clamp(0.35, 1.0)
+                            };
                             let label_size = (r * 0.9).max(edge_unit * 6.0);
                             let label_y = p.y - r - label_size * 0.3;
                             let id_click = node.id.clone();
@@ -244,6 +275,7 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                                             x: "{p.x}", y: "{label_y}",
                                             text_anchor: "middle",
                                             font_size: "{label_size}",
+                                            opacity: "{label_opacity}",
                                             class: "fill-current text-foreground pointer-events-none",
                                             "{node.label}"
                                         }
