@@ -268,6 +268,8 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::InvoicesRoute {} => "Invoices",
         Route::LedgerRoute {} => "Ledger",
         Route::WikiRoute {} => "Wiki",
+        Route::WikiSourcesRoute {} => "Archived sources",
+        Route::WikiSourceRoute { .. } => "Source",
         Route::AgentsRoute {} => "Agents",
         Route::ReposRoute {} => "Repos",
         Route::SettingsRoute {} => "Settings",

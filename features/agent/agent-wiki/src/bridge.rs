@@ -101,13 +101,25 @@ pub async fn run_ingest(
         .read_context()
         .map_err(|e| AgentWikiError::Bridge(format!("read_context: {e}")))?;
 
+    // Archived timestamped media (provenance frontmatter
+    // `content_type: video|audio` from `task wiki archive`)
+    // get the `^t<sec>` anchor-citation directive appended
+    // to BOTH turns: chaptered source page, [mm:ss] deep
+    // links, curator-owned ## Notes preservation.
+    let archive_directive = sniff_media_content_type(&req.source_bytes)
+        .map(|ct| prompts::archive_media_directive(&req.source_filename, &ct));
+
     // ── Step 1: analyze ────────────────────────────────
     let lang = language_directive(&req.language);
     let mut vars1 = HashMap::new();
     vars1.insert("language_directive", lang.as_str());
     vars1.insert("wiki_purpose", ctx.purpose_markdown.as_str());
     vars1.insert("wiki_index", ctx.index_markdown.as_str());
-    let analyze_system = prompts::render(INGEST_ANALYZE_SYSTEM, &vars1);
+    let mut analyze_system = prompts::render(INGEST_ANALYZE_SYSTEM, &vars1);
+    if let Some(d) = &archive_directive {
+        analyze_system.push_str("\n\n");
+        analyze_system.push_str(d);
+    }
 
     let source_text = String::from_utf8_lossy(&req.source_bytes).to_string();
     let user1 = format!(
@@ -133,7 +145,11 @@ pub async fn run_ingest(
     vars2.insert("wiki_purpose", ctx.purpose_markdown.as_str());
     vars2.insert("wiki_index", ctx.index_markdown.as_str());
     vars2.insert("wiki_overview", ctx.overview_markdown.as_str());
-    let generate_system = prompts::render(INGEST_GENERATE_SYSTEM, &vars2);
+    let mut generate_system = prompts::render(INGEST_GENERATE_SYSTEM, &vars2);
+    if let Some(d) = &archive_directive {
+        generate_system.push_str("\n\n");
+        generate_system.push_str(d);
+    }
 
     let user2 = format!(
         "Analysis:\n\n{analysis}\n\nNow emit FILE/REVIEW blocks per the rules. \
@@ -976,9 +992,45 @@ fn merge_sources_into_fm(fm: &str, source_path: &str) -> String {
     out
 }
 
+/// Sniff the provenance `content_type:` out of an archived
+/// source's leading YAML frontmatter. Returns it only for
+/// timestamped media (`video` / `audio`) — the kinds whose
+/// transcripts carry `^t<sec>` anchors. Plain line scan, no
+/// YAML dep: `task wiki archive` writes one `key: value` per
+/// line.
+fn sniff_media_content_type(source_bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(source_bytes).ok()?;
+    let rest = text.strip_prefix("---\n")?;
+    let end = rest.find("\n---")?;
+    for line in rest[..end].lines() {
+        if let Some(v) = line.strip_prefix("content_type:") {
+            let v = v.trim();
+            if matches!(v, "video" | "audio") {
+                return Some(v.to_string());
+            }
+            return None;
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sniffs_video_content_type() {
+        let src = b"---\ntitle: \"X\"\ncontent_type: video\nduration: 213\n---\n\n# X\n";
+        assert_eq!(sniff_media_content_type(src).as_deref(), Some("video"));
+    }
+    #[test]
+    fn ignores_articles_and_plain_sources() {
+        let article = b"---\ntitle: \"X\"\ncontent_type: article\n---\nBody";
+        assert_eq!(sniff_media_content_type(article), None);
+        assert_eq!(sniff_media_content_type(b"no frontmatter here"), None);
+        // content_type mentioned in the body, not frontmatter.
+        let body_only = b"---\ntitle: \"X\"\n---\ncontent_type: video\n";
+        assert_eq!(sniff_media_content_type(body_only), None);
+    }
     #[test]
     fn injects_into_existing_frontmatter() {
         let src = "---\ntitle: Foo\n---\n\nBody.\n";

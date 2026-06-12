@@ -220,6 +220,15 @@ wiki-live = { path = "features/wiki/wiki-live" }
 wiki-graph = { path = "features/wiki/wiki-graph" }
 wiki-search = { path = "features/wiki/wiki-search" }
 wiki-extract = { path = "features/wiki/wiki-extract" }
+# `task wiki archive <url>` — URL router + content extractors
+# (readability articles, Google Docs export, yt-dlp video
+# transcripts) + bookmark-service importers (Readwise,
+# Karakeep, Pocket, Netscape HTML). Pure extraction layer:
+# URL/file → provenance frontmatter + markdown body; the CLI
+# glues the output into the unchanged raw→ingest pipeline
+# over the `wiki-proto` RPC surface.
+# See `plans/wiki-archive.md` (phase 1 = tracked issue 32e7b28f).
+wiki-archive = { path = "features/wiki/wiki-archive" }
 # `agent` feature — LLM-agent integration. `agent-proto` is
 # the wire contract (sessions, messages, tools, kanban,
 # approvals, streaming events). Backends live in sibling

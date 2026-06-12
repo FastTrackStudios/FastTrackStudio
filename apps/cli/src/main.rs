@@ -2427,6 +2427,16 @@ enum WikiCmd {
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
+    /// Archive a URL (or local file) into `Wiki/raw/sources/`
+    /// with provenance frontmatter, then enqueue an ingest
+    /// task. The front door of the wiki archive feature:
+    /// routes by content type — articles → readability
+    /// extraction, Google Docs → markdown export, YouTube /
+    /// video → yt-dlp transcript with `^t<sec>` block
+    /// anchors. Canonical-URL dedup: re-archiving the same
+    /// resource (even via a differently-tracked link) is a
+    /// no-op unless `--force`.
+    Archive(WikiArchiveArgs),
     /// Rewrite a thin wiki page into a proper reference
     /// article. Reads the existing page + its `sources:`,
     /// prompts the LLM to expand with code examples + sharper
@@ -2482,6 +2492,126 @@ enum WikiCmd {
     /// Filesystem watcher — re-ingest on external edits.
     #[command(subcommand)]
     Watch(WikiWatchCmd),
+}
+
+#[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
+struct WikiArchiveArgs {
+    /// Bulk importers (`task wiki archive import <kind>`).
+    #[command(subcommand)]
+    cmd: Option<WikiArchiveSub>,
+    /// URL (http/https) or local file path to archive.
+    #[arg(required = true)]
+    target: Option<String>,
+    /// Override the recorded title (default: extracted from
+    /// the content).
+    #[arg(long)]
+    title: Option<String>,
+    /// Re-archive even when the canonical URL already exists
+    /// under `raw/sources/`.
+    #[arg(long)]
+    force: bool,
+    /// Import + record only — don't enqueue an ingest task.
+    #[arg(long)]
+    no_enqueue: bool,
+    /// yt-dlp binary used for video routes. Also settable
+    /// via `TASK_YTDLP`.
+    #[arg(long, env = "TASK_YTDLP", default_value = "yt-dlp")]
+    yt_dlp: String,
+    #[arg(long, default_value = "default")]
+    wiki_id: String,
+    #[arg(long)]
+    org: Option<String>,
+    #[arg(long)]
+    server: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Subcommand)]
+enum WikiArchiveSub {
+    /// Bookmark-service importers — batch front-ends to the
+    /// archive router. Canonical-URL dedup makes re-runs (and
+    /// cross-service overlap) idempotent.
+    #[command(subcommand)]
+    Import(WikiArchiveImportCmd),
+}
+
+#[derive(Subcommand)]
+enum WikiArchiveImportCmd {
+    /// Readwise classic highlights (v2 /export/ API; Token
+    /// auth, 20 req/min — pages are throttled automatically).
+    Readwise {
+        /// Readwise access token (readwise.io/access_token).
+        #[arg(long, env = "READWISE_TOKEN")]
+        token: String,
+        /// Incremental cursor: only books with highlights
+        /// updated after this RFC3339 instant. The previous
+        /// run prints the value to pass here.
+        #[arg(long)]
+        updated_after: Option<String>,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+    /// Readwise Reader documents (v3 /list/ API with
+    /// withHtmlContent=true — full stored article HTML).
+    Reader {
+        #[arg(long, env = "READWISE_TOKEN")]
+        token: String,
+        #[arg(long)]
+        updated_after: Option<String>,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+    /// Karakeep (self-hosted) via its REST API with
+    /// includeContent=true. The JSON export is lossy (drops
+    /// crawled htmlContent) — the API is the real source.
+    Karakeep {
+        /// Instance base URL, e.g. https://keep.example.com
+        #[arg(long, env = "KARAKEEP_ENDPOINT")]
+        endpoint: String,
+        /// API key (ak2_… — Settings → API Keys).
+        #[arg(long, env = "KARAKEEP_TOKEN")]
+        token: String,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+    /// Pocket export zip (the service is dead — exports
+    /// only). Reads part_*.csv saves + annotations/*.json
+    /// highlights.
+    Pocket {
+        /// Path to the Pocket export zip.
+        zip: std::path::PathBuf,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+    /// Netscape bookmarks HTML (what every browser exports).
+    Bookmarks {
+        /// Path to bookmarks.html.
+        html: std::path::PathBuf,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+}
+
+#[derive(clap::Args, Clone)]
+struct WikiArchiveImportCommon {
+    /// Max items to archive this run (after dedup).
+    #[arg(long)]
+    limit: Option<usize>,
+    /// Parse + report only; nothing is written to the wiki.
+    #[arg(long)]
+    dry_run: bool,
+    /// Import sources but don't enqueue ingest tasks (use
+    /// `task wiki raw rescan` later to enqueue in bulk).
+    #[arg(long)]
+    no_enqueue: bool,
+    #[arg(long, default_value = "default")]
+    wiki_id: String,
+    #[arg(long)]
+    org: Option<String>,
+    #[arg(long)]
+    server: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -8635,6 +8765,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             );
             Ok(())
         }
+        WikiCmd::Archive(args) => run_wiki_archive(args).await,
         WikiCmd::Schema(c) => run_wiki_schema(c).await,
         WikiCmd::Catalog(c) => run_wiki_catalog(c).await,
         WikiCmd::Raw(c) => run_wiki_raw(c).await,
@@ -8888,6 +9019,409 @@ async fn run_wiki_raw(cmd: WikiRawCmd) -> eyre::Result<()> {
         }
     }
     Ok(())
+}
+
+/// `task wiki archive <url|file>` — extract locally, then
+/// feed the UNCHANGED raw→ingest pipeline over RPC:
+/// `import_raw_source` (sha-dedup server-side) +
+/// `enqueue_ingest`. Canonical-URL dedup happens client-side
+/// by filename scan — archived sources are named
+/// `<slug>-<canon8>.md` so the same resource reached via
+/// different links collapses to one file.
+async fn run_wiki_archive(args: WikiArchiveArgs) -> eyre::Result<()> {
+    use wiki_proto::raw::ImportRawSource;
+    use wiki_proto::service::ingest::IngestClient;
+    use wiki_proto::service::raw_layer::RawLayerClient;
+
+    if let Some(WikiArchiveSub::Import(cmd)) = args.cmd {
+        return run_wiki_archive_import(cmd).await;
+    }
+    let target = args
+        .target
+        .clone()
+        .ok_or_else(|| eyre::eyre!("a URL or file path is required"))?;
+
+    let slug = resolve_active_org(args.org.clone())?;
+    let vox_url = resolve_org_vox_url(args.server.clone(), &slug);
+
+    // ── Resolve the target into import-ready parts ──────
+    let local = std::path::Path::new(&target);
+    let (filename, mime, title, bytes, canon8) = if local.exists() {
+        // Local file: bytes go in as-is (binary originals
+        // included) — the ingest pipeline + wiki-extract
+        // already handle md/txt/pdf/docx. No provenance
+        // frontmatter is injected into foreign bytes.
+        let name = local
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("source")
+            .to_string();
+        let mime = archive_mime_for_filename(&name);
+        let title = args.title.clone().unwrap_or_else(|| name.clone());
+        (name, mime, title, std::fs::read(local)?, None)
+    } else {
+        let (prov, body) = archive_extract_url(&target, args.title.clone(), &args.yt_dlp)
+            .await
+            .map_err(|e| eyre::eyre!("archive {target}: {e}"))?;
+        let md = wiki_archive::compose_source_markdown(&prov, &body);
+        (
+            prov.filename(),
+            "text/markdown".to_string(),
+            prov.title.clone(),
+            md.into_bytes(),
+            Some(prov.canon8()),
+        )
+    };
+
+    let raw: RawLayerClient = establish_for_url(&vox_url).await?;
+
+    // ── Canonical-URL dedup ─────────────────────────────
+    if let Some(c8) = &canon8 {
+        let existing = raw
+            .list_raw_sources(args.wiki_id.clone())
+            .await
+            .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?;
+        let hit = wiki_archive::find_canonical_match(
+            existing.iter().map(|r| r.filename.as_str()),
+            c8,
+        )
+        .map(ToString::to_string);
+        if let Some(hit) = hit {
+            if args.force {
+                println!("note: canonical URL already archived as {hit} (continuing: --force)");
+            } else {
+                if args.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "deduped": true, "existing": hit, "canon8": c8 })
+                    );
+                } else {
+                    println!("already archived (canonical-url dedup): raw/sources/{hit}");
+                    println!("pass --force to archive a fresh copy");
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    // ── Import (server sha-dedups byte-identical content) ──
+    let r = raw
+        .import_raw_source(
+            args.wiki_id.clone(),
+            ImportRawSource {
+                filename,
+                mime,
+                title,
+                bytes,
+                auto_enqueue: false, // explicit enqueue below
+            },
+        )
+        .await
+        .map_err(|e| eyre::eyre!("import_raw_source: {e:?}"))?;
+
+    // ── Enqueue ingest ──────────────────────────────────
+    let task_id = if args.no_enqueue {
+        None
+    } else {
+        let ing: IngestClient = establish_for_url(&vox_url).await?;
+        let task = ing
+            .enqueue_ingest(
+                args.wiki_id.clone(),
+                r.path.clone(),
+                wiki_proto::ingest::SourceChange::Created,
+            )
+            .await
+            .map_err(|e| eyre::eyre!("enqueue_ingest: {e:?}"))?;
+        Some(task.id)
+    };
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "path": r.path,
+                "sha256": r.sha256,
+                "size": r.size,
+                "title": r.title,
+                "ingest_task": task_id,
+            })
+        );
+    } else {
+        println!("archived: {} ({} bytes, sha256 {})", r.path, r.size, &r.sha256[..12]);
+        match task_id {
+            Some(id) => println!("ingest task enqueued: {id}"),
+            None => println!("ingest not enqueued (--no-enqueue)"),
+        }
+    }
+    Ok(())
+}
+
+/// Route a URL to its extractor and run it. Returns the
+/// provenance + extracted markdown body.
+async fn archive_extract_url(
+    target: &str,
+    title_override: Option<String>,
+    yt_dlp: &str,
+) -> eyre::Result<(wiki_archive::Provenance, String)> {
+    let (url, route) = wiki_archive::classify(target).map_err(|e| eyre::eyre!("{e}"))?;
+    let canonical = wiki_archive::canonicalize(&url, &route);
+    let content_type = wiki_archive::content_type_for(&route);
+    let _ = yt_dlp;
+    match route {
+        wiki_archive::Route::Article => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let a = wiki_archive::article::fetch_article(&client, &url)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let title = title_override
+                .or_else(|| (!a.title.is_empty()).then(|| a.title.clone()))
+                .unwrap_or_else(|| target.to_string());
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "dom_smoothie",
+            );
+            let body = match &a.byline {
+                Some(byline) => format!("_{byline}_\n\n{}", a.markdown),
+                None => a.markdown,
+            };
+            Ok((prov, body))
+        }
+        wiki_archive::Route::GoogleDoc { doc_id } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let (doc_title, md) = wiki_archive::article::fetch_google_doc(&client, &doc_id)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let title = title_override.unwrap_or(doc_title);
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "gdocs-export",
+            );
+            Ok((prov, md))
+        }
+        wiki_archive::Route::YouTube { .. } | wiki_archive::Route::Video => {
+            let yt = wiki_archive::youtube::YtDlp::new(yt_dlp);
+            let meta = yt.probe(target).await.map_err(|e| eyre::eyre!("{e}"))?;
+            let blocks = match &meta.json3_track {
+                Some((lang, track_url)) => {
+                    let client =
+                        wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+                    let json3 =
+                        wiki_archive::article::fetch_text(&client, track_url, "application/json")
+                            .await
+                            .map_err(|e| eyre::eyre!("subtitle track ({lang}): {e}"))?;
+                    let cues = wiki_archive::youtube::parse_json3_cues(&json3)
+                        .map_err(|e| eyre::eyre!("{e}"))?;
+                    wiki_archive::youtube::coalesce_cues(
+                        &cues,
+                        wiki_archive::youtube::DEFAULT_BLOCK_SECS,
+                    )
+                }
+                None => Vec::new(),
+            };
+            let body = wiki_archive::youtube::render_video_markdown(&meta, &blocks);
+            let title = title_override.unwrap_or_else(|| meta.title.clone());
+            let mut prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical.clone(),
+                content_type,
+                "yt-dlp",
+            );
+            // `media:` = what the SourceViewer should embed.
+            prov.media = Some(canonical);
+            prov.duration_secs = meta.duration_secs;
+            Ok((prov, body))
+        }
+    }
+}
+
+/// `task wiki archive import <kind>` — run one importer and
+/// feed every item through the same provenance + dedup +
+/// import + enqueue path as a single-URL archive.
+async fn run_wiki_archive_import(cmd: WikiArchiveImportCmd) -> eyre::Result<()> {
+    use wiki_archive::import as imp;
+
+    let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+    let started_at = chrono::Utc::now();
+    let (items, common, next_cursor_hint): (Vec<imp::ImportedItem>, _, Option<String>) = match cmd
+    {
+        WikiArchiveImportCmd::Readwise {
+            token,
+            updated_after,
+            common,
+        } => {
+            let items = imp::readwise::fetch_export(&client, &token, updated_after.as_deref())
+                .await
+                .map_err(|e| eyre::eyre!("readwise: {e}"))?;
+            (items, common, Some(started_at.to_rfc3339()))
+        }
+        WikiArchiveImportCmd::Reader {
+            token,
+            updated_after,
+            common,
+        } => {
+            let items = imp::readwise::fetch_reader(&client, &token, updated_after.as_deref())
+                .await
+                .map_err(|e| eyre::eyre!("readwise reader: {e}"))?;
+            (items, common, Some(started_at.to_rfc3339()))
+        }
+        WikiArchiveImportCmd::Karakeep {
+            endpoint,
+            token,
+            common,
+        } => {
+            let (items, skipped) = imp::karakeep::fetch_bookmarks(&client, &endpoint, &token)
+                .await
+                .map_err(|e| eyre::eyre!("karakeep: {e}"))?;
+            if skipped > 0 {
+                println!("note: skipped {skipped} non-link bookmark(s) (text/asset)");
+            }
+            (items, common, None)
+        }
+        WikiArchiveImportCmd::Pocket { zip, common } => {
+            let items = imp::pocket::import_zip(&zip).map_err(|e| eyre::eyre!("pocket: {e}"))?;
+            (items, common, None)
+        }
+        WikiArchiveImportCmd::Bookmarks { html, common } => {
+            let body = std::fs::read_to_string(&html)?;
+            let items =
+                imp::netscape::parse_bookmarks_html(&body).map_err(|e| eyre::eyre!("{e}"))?;
+            (items, common, None)
+        }
+    };
+
+    println!("{} item(s) from the importer", items.len());
+    if common.dry_run {
+        for item in items.iter().take(25) {
+            println!("  [{}] {}  {}", item.origin, item.title, item.url);
+        }
+        if items.len() > 25 {
+            println!("  … {} more", items.len() - 25);
+        }
+        println!("dry run — nothing written");
+        return Ok(());
+    }
+
+    archive_imported_items(items, &common).await?;
+    if let Some(cursor) = next_cursor_hint {
+        println!("incremental: next run pass --updated-after {cursor}");
+    }
+    Ok(())
+}
+
+/// Shared importer back-half: dedup against the wiki's
+/// existing sources (canonical-URL filename scan, plus
+/// in-batch), import over RPC, enqueue ingest.
+async fn archive_imported_items(
+    items: Vec<wiki_archive::import::ImportedItem>,
+    common: &WikiArchiveImportCommon,
+) -> eyre::Result<()> {
+    use wiki_proto::raw::ImportRawSource;
+    use wiki_proto::service::ingest::IngestClient;
+    use wiki_proto::service::raw_layer::RawLayerClient;
+
+    let slug = resolve_active_org(common.org.clone())?;
+    let vox_url = resolve_org_vox_url(common.server.clone(), &slug);
+    let raw: RawLayerClient = establish_for_url(&vox_url).await?;
+    let ing: IngestClient = establish_for_url(&vox_url).await?;
+
+    let mut existing: Vec<String> = raw
+        .list_raw_sources(common.wiki_id.clone())
+        .await
+        .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?
+        .into_iter()
+        .map(|r| r.filename)
+        .collect();
+
+    let limit = common.limit.unwrap_or(usize::MAX);
+    let (mut imported, mut deduped, mut skipped) = (0usize, 0usize, 0usize);
+    for item in &items {
+        if imported >= limit {
+            break;
+        }
+        let (prov, body) = match wiki_archive::import::item_to_source(item) {
+            Ok(v) => v,
+            Err(e) => {
+                println!("  skip {}: {e}", item.url);
+                skipped += 1;
+                continue;
+            }
+        };
+        let canon8 = prov.canon8();
+        if wiki_archive::find_canonical_match(existing.iter().map(String::as_str), &canon8)
+            .is_some()
+        {
+            deduped += 1;
+            continue;
+        }
+        let md = wiki_archive::compose_source_markdown(&prov, &body);
+        let filename = prov.filename();
+        let r = raw
+            .import_raw_source(
+                common.wiki_id.clone(),
+                ImportRawSource {
+                    filename: filename.clone(),
+                    mime: "text/markdown".to_string(),
+                    title: prov.title.clone(),
+                    bytes: md.into_bytes(),
+                    auto_enqueue: false,
+                },
+            )
+            .await
+            .map_err(|e| eyre::eyre!("import_raw_source {}: {e:?}", item.url))?;
+        existing.push(filename);
+        if !common.no_enqueue {
+            ing.enqueue_ingest(
+                common.wiki_id.clone(),
+                r.path.clone(),
+                wiki_proto::ingest::SourceChange::Created,
+            )
+            .await
+            .map_err(|e| eyre::eyre!("enqueue_ingest {}: {e:?}", r.path))?;
+        }
+        println!("  + {}", r.path);
+        imported += 1;
+    }
+    println!(
+        "imported {imported}, deduped {deduped}, skipped {skipped} (of {})",
+        items.len()
+    );
+    if common.no_enqueue && imported > 0 {
+        println!("ingest not enqueued (--no-enqueue) — `task wiki raw rescan` enqueues later");
+    }
+    Ok(())
+}
+
+/// Extension → MIME for local-file archives. Mirrors
+/// `wiki_extract::extract_path`'s table.
+fn archive_mime_for_filename(name: &str) -> String {
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "md" | "markdown" => "text/markdown",
+        "txt" => "text/plain",
+        "html" | "htm" => "text/html",
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "zip" => "application/zip",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 
 async fn run_wiki_ingest(cmd: WikiIngestCmd) -> eyre::Result<()> {
