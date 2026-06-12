@@ -80,29 +80,60 @@ pub struct RedditComment {
 }
 
 /// Fetch one thread anonymously (loid-cookie dance + .json).
+///
+/// Two transports, tried in order:
+/// 1. in-process reqwest/rustls,
+/// 2. a `curl` subprocess.
+///
+/// Reddit's edge fingerprints TLS clients: the rustls
+/// ClientHello gets intermittently-to-permanently 403'd from
+/// some networks while curl (OpenSSL) sails through
+/// (live-verified 2026-06 — same IP, same headers, opposite
+/// outcomes). curl-as-fallback keeps the anonymous path
+/// honest without pulling a TLS-mimicry stack into the tree.
 pub async fn fetch_thread(
     client: &reqwest::Client,
     permalink: &str,
 ) -> Result<RedditThread, ArchiveError> {
-    let cookies = fetch_anon_cookies(client).await?;
     let url = format!(
         "https://old.reddit.com{}.json?limit=100&raw_json=1",
         permalink.trim_end_matches('/')
     );
+    let reqwest_err = match fetch_thread_reqwest(client, &url).await {
+        Ok(t) => return Ok(t),
+        Err(e) => e,
+    };
+    tracing::warn!(error = %reqwest_err, "reddit: in-process client blocked; trying curl");
+    match fetch_thread_curl(&url).await {
+        Ok(t) => Ok(t),
+        // The in-process error usually carries the real story
+        // (403/block); keep both.
+        Err(curl_err) => Err(ArchiveError::BadResponse {
+            url,
+            message: format!("{reqwest_err}; curl fallback: {curl_err}"),
+        }),
+    }
+}
+
+async fn fetch_thread_reqwest(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<RedditThread, ArchiveError> {
+    let cookies = fetch_anon_cookies(client).await?;
     let resp = client
-        .get(&url)
+        .get(url)
         .header("cookie", cookies)
         .header("accept", "application/json")
         .send()
         .await
         .map_err(|e| ArchiveError::Fetch {
-            url: url.clone(),
+            url: url.to_string(),
             message: e.to_string(),
         })?;
     let status = resp.status();
     if !status.is_success() {
         return Err(ArchiveError::BadResponse {
-            url,
+            url: url.to_string(),
             message: format!(
                 "HTTP {status} — Reddit is rate-limiting or blocking; retry later \
                  (`task wiki archive retry`)"
@@ -119,26 +150,117 @@ pub async fn fetch_thread(
         .to_ascii_lowercase();
     if !ct.contains("application/json") {
         return Err(ArchiveError::BadResponse {
-            url,
+            url: url.to_string(),
             message: format!(
                 "expected application/json, got `{ct}` — likely a block page; retry later"
             ),
         });
     }
     let body = resp.text().await.map_err(|e| ArchiveError::Fetch {
-        url: url.clone(),
+        url: url.to_string(),
         message: e.to_string(),
     })?;
     parse_thread(&body)
 }
 
+/// The same dance through a `curl` subprocess (OpenSSL TLS
+/// fingerprint). Two invocations: homepage for cookies, then
+/// the .json with them.
+async fn fetch_thread_curl(url: &str) -> Result<RedditThread, ArchiveError> {
+    let (head, _) = run_curl(&["-D", "-", "-o", "/dev/null", "https://old.reddit.com/"]).await?;
+    let cookies: Vec<String> = head
+        .lines()
+        .filter_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.eq_ignore_ascii_case("set-cookie")
+                .then(|| v.trim().split(';').next().unwrap_or("").to_string())
+        })
+        .filter(|c| !c.is_empty())
+        .collect();
+    if !cookies.iter().any(|c| c.starts_with("loid=")) {
+        return Err(ArchiveError::BadResponse {
+            url: "https://old.reddit.com/".into(),
+            message: "no anonymous loid cookie via curl either — retry later".into(),
+        });
+    }
+    let cookie_header = format!("cookie: {}", cookies.join("; "));
+    let (head, body) = run_curl(&[
+        "-D", "-",
+        "-H", &cookie_header,
+        "-H", "accept: application/json",
+        url,
+    ])
+    .await?;
+    let status_json = head
+        .lines()
+        .next()
+        .is_some_and(|l| l.contains(" 200"))
+        && head.lines().any(|l| {
+            l.to_ascii_lowercase().starts_with("content-type:")
+                && l.to_ascii_lowercase().contains("application/json")
+        });
+    if !status_json {
+        return Err(ArchiveError::BadResponse {
+            url: url.to_string(),
+            message: format!(
+                "curl got `{}` without application/json — likely a block page; retry later",
+                head.lines().next().unwrap_or("(no status)")
+            ),
+        });
+    }
+    parse_thread(&body)
+}
+
+/// Run curl with the Reddit UA + sane flags, returning
+/// `(headers, body)` (headers only when `-D -` is passed).
+async fn run_curl(args: &[&str]) -> Result<(String, String), ArchiveError> {
+    let mut cmd = tokio::process::Command::new("curl");
+    cmd.args(["-s", "-S", "--max-time", "45", "-H"])
+        .arg(format!("user-agent: {REDDIT_USER_AGENT}"))
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .stdin(std::process::Stdio::null());
+    let out = cmd.output().await.map_err(|e| ArchiveError::Subprocess {
+        program: "curl".into(),
+        message: if e.kind() == std::io::ErrorKind::NotFound {
+            "curl not found on PATH".to_string()
+        } else {
+            format!("spawn: {e}")
+        },
+    })?;
+    if !out.status.success() {
+        return Err(ArchiveError::Subprocess {
+            program: "curl".into(),
+            message: format!(
+                "exit {}: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")
+            ),
+        });
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // With `-D -` the response headers precede the body on
+    // stdout, separated by a blank line (last header block
+    // wins across redirects).
+    match stdout.split_once("\r\n\r\n").or_else(|| stdout.split_once("\n\n")) {
+        Some((head, body)) => Ok((head.to_string(), body.to_string())),
+        None => Ok((stdout.to_string(), String::new())),
+    }
+}
+
 /// One GET against old.reddit.com to collect the anonymous
 /// cookie set (`loid` et al), returned as a `Cookie:` header
 /// value.
+///
+/// The `accept: */*` header is LOAD-BEARING (live-verified):
+/// without ANY accept header Reddit's edge answers 403 and
+/// withholds the `loid` cookie; with it, 200 + loid.
 async fn fetch_anon_cookies(client: &reqwest::Client) -> Result<String, ArchiveError> {
     let url = "https://old.reddit.com/";
     let resp = client
         .get(url)
+        .header("accept", "*/*")
         .send()
         .await
         .map_err(|e| ArchiveError::Fetch {
@@ -153,10 +275,14 @@ async fn fetch_anon_cookies(client: &reqwest::Client) -> Result<String, ArchiveE
         .filter_map(|c| c.split(';').next())
         .map(ToString::to_string)
         .collect();
-    if cookies.is_empty() {
+    if !cookies.iter().any(|c| c.starts_with("loid=")) {
         return Err(ArchiveError::BadResponse {
             url: url.to_string(),
-            message: "old.reddit.com set no cookies — anonymous session unavailable".into(),
+            message: format!(
+                "no anonymous loid cookie (HTTP {}) — Reddit is blocking this client; \
+                 retry later",
+                resp.status()
+            ),
         });
     }
     Ok(cookies.join("; "))

@@ -56,8 +56,14 @@ success/failure per route, recorded on every attempt).
 - Reddit: anonymous loid-cookie dance (GET old.reddit.com once
   for cookies → `<permalink>.json` two-Listing parse). The
   cookieless `.json` endpoint is dead (403, live-verified
-  2026-06). ≤ ~10 req/min; content-type-checked before parse
-  (block pages 200 as HTML).
+  2026-06). Three live-found tripwires, all handled: a
+  self-identifying UA gets no loid (stock-browser UA only); a
+  MISSING `accept` header gets 403 (always send `accept: */*`);
+  and Reddit's edge fingerprints rustls TLS — when the
+  in-process client is blocked, the same dance runs through a
+  `curl` subprocess (OpenSSL fingerprint), which sails through.
+  ≤ ~10 req/min; content-type-checked before parse (block
+  pages 200 as HTML).
 - X ladder: syndication tweet-result (token = V8-faithful port
   of react-tweet's `((id/1e15)·π).toString(36)`; note-tweet
   truncation detected and escalated) → FxEmbed → vxtwitter →
