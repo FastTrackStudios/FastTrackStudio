@@ -23,9 +23,12 @@
 //! ## Recurring + fixed events, reconcile
 //!
 //! - `plan recurring add "Church" sun 9:00-12:30` stores a
-//!   `CalEvent` with an RFC-5545 `FREQ=WEEKLY;BYDAY=SU` rule —
-//!   the calendar UI already expands those; `plan show` expands
-//!   the weekly case itself.
+//!   `CalEvent` with an RFC-5545 `FREQ=WEEKLY;BYDAY=SU` rule
+//!   (`--every 2` adds `INTERVAL=2` for biweekly). Expansion goes
+//!   through the shared [`scheduling_proto::recurrence`] engine —
+//!   the same one the calendar UI uses — so `plan show` /
+//!   `reconcile` materialize weekly, biweekly, monthly, … rules
+//!   identically to the UI.
 //! - `plan event add <date> "Work" 10:00-18:00` drops a *fixed*
 //!   `PlannedBlock` on the date's plan and reconciles it.
 //! - `plan reconcile <date>` reflows the day around its fixed
@@ -112,9 +115,11 @@ pub enum PlanCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Weekly recurring fixed events ("Sundays: church 9:00-12:30,
-    /// every week"): add / list / remove. Stored as recurring
-    /// calendar events; they show on every matching day's plan.
+    /// Recurring fixed events ("Sundays: church 9:00-12:30, every
+    /// week" — or every other week via `--every 2`): add / list /
+    /// remove. Stored as recurring calendar events; they show on
+    /// every matching day's plan (weekly, biweekly, monthly, …
+    /// rules all expand through the shared RRULE engine).
     #[command(subcommand)]
     Recurring(RecurringCmd),
     /// One-off fixed events on a specific date ("tomorrow I have
@@ -241,12 +246,18 @@ pub enum BlockCmd {
 pub enum RecurringCmd {
     /// Add a weekly recurring fixed event:
     /// `task plan recurring add "Church" sun 9:00-12:30`.
+    /// Pass `--every 2` for biweekly (every other week).
     Add {
         title: String,
         /// Weekday: `mon`…`sun` (full names work too).
         day: String,
         /// `<start>-<end>` — e.g. `9:00-12:30`, `9am-12:30pm`.
         range: String,
+        /// Repeat every N weeks: 1 = weekly (default), 2 = biweekly.
+        /// The first occurrence (next matching weekday) anchors the
+        /// cycle.
+        #[arg(long, default_value_t = 1)]
+        every: u32,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -624,9 +635,18 @@ pub(crate) fn byday_code(d: chrono::Weekday) -> &'static str {
     }
 }
 
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
 /// Parse a weekly RRULE's BYDAY list. `Some(days)` only when the
-/// rule is `FREQ=WEEKLY` (the only kind `plan recurring` mints —
-/// other frequencies are the calendar UI's department).
+/// rule is `FREQ=WEEKLY` (any INTERVAL) — used for *rendering* the
+/// day list; expansion itself goes through the shared
+/// [`scheduling_proto::recurrence`] engine.
 pub(crate) fn weekly_bydays(rule: &str) -> Option<Vec<chrono::Weekday>> {
     let mut weekly = false;
     let mut days = Vec::new();
@@ -656,11 +676,12 @@ pub(crate) fn weekly_bydays(rule: &str) -> Option<Vec<chrono::Weekday>> {
 
 /// Does `ev` produce an instance on local `date`? Returns the
 /// instance's local `(start_min, end_min_cut_at_24h)` window.
-/// Weekly-recurring events repeat on their BYDAY weekdays (or the
-/// master's weekday) from the master's date onward; other rules
-/// fall back to the master occurrence only.
+/// Recurring events expand through the shared
+/// [`scheduling_proto::recurrence`] engine (full RRULE grammar —
+/// weekly, biweekly `INTERVAL=2`, monthly, …); an unparsable rule
+/// degrades to the master occurrence only.
 pub(crate) fn event_instance_on(ev: &CalEvent, date: &str) -> Option<(u16, u16)> {
-    use chrono::{Datelike as _, Timelike as _};
+    use chrono::Timelike as _;
     let day = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
     let start = chrono::DateTime::parse_from_rfc3339(&ev.start)
         .ok()?
@@ -668,23 +689,32 @@ pub(crate) fn event_instance_on(ev: &CalEvent, date: &str) -> Option<(u16, u16)>
     let end = chrono::DateTime::parse_from_rfc3339(&ev.end)
         .ok()?
         .with_timezone(&chrono::Local);
-    let start_min = (start.hour() * 60 + start.minute()) as u16;
     let dur_min = (end - start).num_minutes().max(0);
 
-    let occurs = match ev.recurrence.as_deref().and_then(weekly_bydays) {
-        Some(days) => {
-            let wanted = if days.is_empty() {
-                vec![start.weekday()]
-            } else {
-                days
-            };
-            day >= start.date_naive() && wanted.contains(&day.weekday())
+    let inst = match ev.recurrence.as_deref() {
+        Some(rule) => {
+            let day_start = day
+                .and_hms_opt(0, 0, 0)?
+                .and_local_timezone(chrono::Local)
+                .single()?;
+            let day_end = day_start + chrono::Duration::days(1);
+            match scheduling_proto::recurrence::expand_rrule(
+                rule,
+                start.with_timezone(&chrono::Utc),
+                day_start.with_timezone(&chrono::Utc),
+                day_end.with_timezone(&chrono::Utc),
+            ) {
+                Some(occurrences) => occurrences
+                    .into_iter()
+                    .map(|d| d.with_timezone(&chrono::Local))
+                    .find(|d| d.date_naive() == day)?,
+                // Bad rule — fall back to the master occurrence.
+                None => (start.date_naive() == day).then_some(start)?,
+            }
         }
-        None => start.date_naive() == day,
+        None => (start.date_naive() == day).then_some(start)?,
     };
-    if !occurs {
-        return None;
-    }
+    let start_min = (inst.hour() * 60 + inst.minute()) as u16;
     let end_min = (i64::from(start_min) + dur_min).min(24 * 60) as u16;
     Some((start_min, end_min.max(start_min)))
 }
@@ -1069,11 +1099,15 @@ fn render_day_view(v: &DayView) -> String {
                 ),
                 _ => format!("{} – {}", e.start, e.end),
             };
+            let recur = if e.recurrence.is_some() {
+                format!(" ({})", recurrence_desc(e))
+            } else {
+                String::new()
+            };
             out.push_str(&format!(
-                "    {span}  {}{}{}\n",
+                "    {span}  {}{}{recur}\n",
                 e.title,
                 if e.all_day { " (all day)" } else { "" },
-                if e.recurrence.is_some() { " (weekly)" } else { "" }
             ));
         }
     }
@@ -1564,8 +1598,8 @@ async fn run_from_template(
 
 // ── task plan recurring ──────────────────────────────────────────────
 
-/// The weekly recurring events (the only kind `plan recurring`
-/// mints), sorted by title for stable list indices.
+/// Every recurring event (weekly, biweekly, monthly, … — anything
+/// with an RRULE), sorted by title for stable list indices.
 async fn fetch_recurring(
     cal: &scheduling_proto::CalendarEventsClient,
 ) -> eyre::Result<Vec<CalEvent>> {
@@ -1574,10 +1608,19 @@ async fn fetch_recurring(
         .await
         .map_err(|e| eyre::eyre!("list_events: {e:?}"))?
         .into_iter()
-        .filter(|e| e.recurrence.as_deref().and_then(weekly_bydays).is_some())
+        .filter(|e| e.recurrence.is_some())
         .collect();
     evs.sort_by(|a, b| a.title.cmp(&b.title).then(a.start.cmp(&b.start)));
     Ok(evs)
+}
+
+/// `"weekly"` / `"biweekly"` / `"monthly"` / … for an event's rule;
+/// `"recurring"` when the rule defies description.
+fn recurrence_desc(e: &CalEvent) -> String {
+    e.recurrence
+        .as_deref()
+        .and_then(scheduling_proto::recurrence::describe_rrule)
+        .unwrap_or_else(|| "recurring".into())
 }
 
 fn render_recurring_line(idx: usize, e: &CalEvent) -> String {
@@ -1587,6 +1630,7 @@ fn render_recurring_line(idx: usize, e: &CalEvent) -> String {
         .and_then(weekly_bydays)
         .unwrap_or_default();
     let days = if days.is_empty() {
+        // Non-weekly (e.g. monthly) or BYDAY-less rule: anchor day.
         chrono::DateTime::parse_from_rfc3339(&e.start).map_or_else(
             |_| "?".into(),
             |d| chrono::Datelike::weekday(&d.with_timezone(&chrono::Local)).to_string(),
@@ -1608,7 +1652,12 @@ fn render_recurring_line(idx: usize, e: &CalEvent) -> String {
         ),
         _ => "?".into(),
     };
-    format!("{:>2}. {}  {days} {span}  (weekly)", idx + 1, e.title)
+    format!(
+        "{:>2}. {}  {days} {span}  ({})",
+        idx + 1,
+        e.title,
+        recurrence_desc(e)
+    )
 }
 
 async fn run_recurring(cmd: RecurringCmd) -> eyre::Result<()> {
@@ -1617,12 +1666,16 @@ async fn run_recurring(cmd: RecurringCmd) -> eyre::Result<()> {
             title,
             day,
             range,
+            every,
             org,
             server,
             json,
         } => {
             let wd = parse_weekday(&day).map_err(|e| eyre::eyre!(e))?;
             let (start, end) = parse_time_range(&range).map_err(|e| eyre::eyre!(e))?;
+            if every == 0 {
+                eyre::bail!("--every must be ≥ 1 (1 = weekly, 2 = biweekly)");
+            }
             let slug = crate::resolve_active_org(org)?;
             let url = crate::resolve_org_vox_url(server, &slug);
             let cal: scheduling_proto::CalendarEventsClient =
@@ -1642,6 +1695,12 @@ async fn run_recurring(cmd: RecurringCmd) -> eyre::Result<()> {
                     .map(|dt| dt.to_rfc3339())
                     .ok_or_else(|| eyre::eyre!("can't resolve local time on {d}"))
             };
+            let mut rule = format!("FREQ=WEEKLY;BYDAY={}", byday_code(wd));
+            if every > 1 {
+                rule.push_str(&format!(";INTERVAL={every}"));
+            }
+            let desc = scheduling_proto::recurrence::describe_rrule(&rule)
+                .unwrap_or_else(|| "recurring".into());
             let ev = CalEvent {
                 id: uuid::Uuid::new_v4().to_string(),
                 title: title.clone(),
@@ -1649,8 +1708,11 @@ async fn run_recurring(cmd: RecurringCmd) -> eyre::Result<()> {
                 end: mk(end)?,
                 all_day: false,
                 color: "primary".into(),
-                description: Some("Weekly recurring — added via `task plan recurring add`".into()),
-                recurrence: Some(format!("FREQ=WEEKLY;BYDAY={}", byday_code(wd))),
+                description: Some(format!(
+                    "{} recurring — added via `task plan recurring add`",
+                    capitalize(&desc)
+                )),
+                recurrence: Some(rule),
             };
             cal.upsert_event(ev.clone())
                 .await
@@ -1658,8 +1720,13 @@ async fn run_recurring(cmd: RecurringCmd) -> eyre::Result<()> {
             if json {
                 return print_json(&ev);
             }
+            let cadence = if every > 1 {
+                format!("every {every} weeks on {wd}")
+            } else {
+                format!("every {wd}")
+            };
             println!(
-                "added weekly recurring \"{title}\" — every {wd} {}–{} (first: {d})",
+                "added {desc} recurring \"{title}\" — {cadence} {}–{} (first: {d})",
                 fmt_tod(start),
                 fmt_tod(end)
             );
@@ -2458,6 +2525,79 @@ mod tests {
         // Not before the anchor, not on other weekdays.
         assert_eq!(event_instance_on(&ev, "2026-06-07"), None);
         assert_eq!(event_instance_on(&ev, "2026-06-15"), None);
+    }
+
+    #[test]
+    fn biweekly_event_skips_the_off_week() {
+        let ev = CalEvent {
+            id: "bw".into(),
+            title: "Cleaners".into(),
+            // Sunday 2026-06-14, 9:00–12:30 local.
+            start: chrono::Local
+                .with_ymd_and_hms(2026, 6, 14, 9, 0, 0)
+                .unwrap()
+                .to_rfc3339(),
+            end: chrono::Local
+                .with_ymd_and_hms(2026, 6, 14, 12, 30, 0)
+                .unwrap()
+                .to_rfc3339(),
+            all_day: false,
+            color: "primary".into(),
+            description: None,
+            recurrence: Some("FREQ=WEEKLY;BYDAY=SU;INTERVAL=2".into()),
+        };
+        // Anchor week and the week after next — not the off week.
+        assert_eq!(event_instance_on(&ev, "2026-06-14"), Some((540, 750)));
+        assert_eq!(event_instance_on(&ev, "2026-06-21"), None);
+        assert_eq!(event_instance_on(&ev, "2026-06-28"), Some((540, 750)));
+        assert_eq!(event_instance_on(&ev, "2026-06-07"), None);
+    }
+
+    #[test]
+    fn monthly_event_repeats_on_anchor_day() {
+        let ev = CalEvent {
+            id: "mo".into(),
+            title: "Rent".into(),
+            // 2026-06-01, 10:00–10:30 local.
+            start: chrono::Local
+                .with_ymd_and_hms(2026, 6, 1, 10, 0, 0)
+                .unwrap()
+                .to_rfc3339(),
+            end: chrono::Local
+                .with_ymd_and_hms(2026, 6, 1, 10, 30, 0)
+                .unwrap()
+                .to_rfc3339(),
+            all_day: false,
+            color: "primary".into(),
+            description: None,
+            recurrence: Some("FREQ=MONTHLY".into()),
+        };
+        assert_eq!(event_instance_on(&ev, "2026-06-01"), Some((600, 630)));
+        assert_eq!(event_instance_on(&ev, "2026-07-01"), Some((600, 630)));
+        assert_eq!(event_instance_on(&ev, "2026-07-02"), None);
+        assert_eq!(event_instance_on(&ev, "2026-05-01"), None);
+    }
+
+    #[test]
+    fn unparsable_rule_degrades_to_master_occurrence() {
+        let ev = CalEvent {
+            id: "bad".into(),
+            title: "Typo".into(),
+            start: chrono::Local
+                .with_ymd_and_hms(2026, 6, 14, 9, 0, 0)
+                .unwrap()
+                .to_rfc3339(),
+            end: chrono::Local
+                .with_ymd_and_hms(2026, 6, 14, 10, 0, 0)
+                .unwrap()
+                .to_rfc3339(),
+            all_day: false,
+            color: "primary".into(),
+            description: None,
+            recurrence: Some("FREQ=FORTNIGHTLYISH".into()),
+        };
+        assert_eq!(event_instance_on(&ev, "2026-06-14"), Some((540, 600)));
+        assert_eq!(event_instance_on(&ev, "2026-06-21"), None);
     }
 
     #[test]

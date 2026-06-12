@@ -38,6 +38,7 @@ pub mod cal_event;
 pub mod day_plan;
 pub mod error;
 pub mod event_type;
+pub mod recurrence;
 pub mod resolve;
 pub mod schedule;
 pub mod service;

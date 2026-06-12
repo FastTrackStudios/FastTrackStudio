@@ -22,7 +22,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
-rrule = { workspace = true }
+# RRULE expansion delegates to the shared engine in
+# `scheduling_proto::recurrence` (no vox — stays wasm-clean).
+scheduling-proto = { workspace = true, default-features = false }
 # Cyclic life-calendar — pure-function date generator powers
 # the cycle overlay (toolbar label, reset-week background).
 # `default-features = false` skips vox so the calendar stays

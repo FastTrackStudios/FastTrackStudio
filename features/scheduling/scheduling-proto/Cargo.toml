@@ -13,6 +13,10 @@ repository.workspace = true
 [dependencies]
 facet = { workspace = true }
 thiserror = { workspace = true }
+# Shared RRULE expansion (`recurrence` module) — the CLI and the
+# calendar UI both delegate here so recurrence semantics agree.
+chrono = { workspace = true }
+rrule = { workspace = true }
 architect = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

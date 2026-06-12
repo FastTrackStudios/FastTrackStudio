@@ -8,21 +8,20 @@
 //! shifted to the occurrence's time; the `id` is preserved so any
 //! mutation triggered from an instance flows back to the master.
 //!
+//! The actual RRULE engine is the shared
+//! [`scheduling_proto::recurrence`] module — the CLI (`task plan`)
+//! expands through the same code, so a rule materializes the same
+//! instances on both surfaces.
+//!
 //! For v1, editing or dragging an instance edits the *whole
 //! series*. Per-instance exceptions ("this and future" / "just
 //! this") are a follow-up that needs an `exdates` + an
 //! "override events" table on the state.
 
 use chrono::{DateTime, Utc};
-use rrule::{RRule, RRuleSet, Tz, Unvalidated};
+use scheduling_proto::recurrence::expand_rrule;
 
 use crate::types::CalendarEvent;
-
-/// Maximum instances to return per master. Guards against runaway
-/// "FREQ=SECONDLY"-style rules; the upper bound is matched against
-/// the visible range so a year of weekly events expands without
-/// hitting the cap.
-const MAX_INSTANCES: u16 = 1024;
 
 /// Expand `event` into all instances that overlap
 /// `[range_start, range_end)`. Non-recurring events return
@@ -36,51 +35,25 @@ pub fn expand_in_range(
     range_end: DateTime<Utc>,
 ) -> Vec<CalendarEvent> {
     let overlaps_master = event.end > range_start && event.start < range_end;
-    let Some(rule_str) = event.recurrence.as_deref() else {
-        return if overlaps_master {
+    let master_only = || {
+        if overlaps_master {
             vec![event.clone()]
         } else {
             vec![]
-        };
-    };
-
-    // Parse + validate. Fall back to the bare master on any error.
-    let rrule: RRule<Unvalidated> = match rule_str.parse() {
-        Ok(r) => r,
-        Err(_) => {
-            return if overlaps_master {
-                vec![event.clone()]
-            } else {
-                vec![]
-            };
         }
     };
-
-    let dt_start = utc_to_rrule(event.start);
-    let validated = match rrule.validate(dt_start) {
-        Ok(r) => r,
-        Err(_) => {
-            return if overlaps_master {
-                vec![event.clone()]
-            } else {
-                vec![]
-            };
-        }
+    let Some(rule_str) = event.recurrence.as_deref() else {
+        return master_only();
     };
-
-    let set = RRuleSet::new(dt_start)
-        .rrule(validated)
-        .after(utc_to_rrule(range_start))
-        .before(utc_to_rrule(range_end));
+    let Some(starts) = expand_rrule(rule_str, event.start, range_start, range_end) else {
+        // Parse / validation failure — fall back to the bare master.
+        return master_only();
+    };
 
     let duration = event.end - event.start;
-    let result = set.all(MAX_INSTANCES);
-
-    result
-        .dates
+    starts
         .into_iter()
-        .map(|dt| {
-            let start = rrule_to_utc(dt);
+        .map(|start| {
             let mut inst = event.clone();
             inst.start = start;
             inst.end = start + duration;
@@ -101,14 +74,6 @@ pub fn expand_all(
         .iter()
         .flat_map(|ev| expand_in_range(ev, range_start, range_end))
         .collect()
-}
-
-fn utc_to_rrule(dt: DateTime<Utc>) -> DateTime<Tz> {
-    dt.with_timezone(&Tz::UTC)
-}
-
-fn rrule_to_utc(dt: DateTime<Tz>) -> DateTime<Utc> {
-    dt.with_timezone(&Utc)
 }
 
 #[cfg(test)]
@@ -138,6 +103,16 @@ mod tests {
         assert_eq!(out.len(), 3);
         assert_eq!(out[1].start - out[0].start, Duration::days(2));
         assert!(out.iter().all(|i| i.id == ev.id));
+    }
+
+    #[test]
+    fn biweekly_expands_every_other_week() {
+        let mut ev = CalendarEvent::new("payday", at(2026, 5, 4, 9), at(2026, 5, 4, 10));
+        ev.recurrence = Some("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO".into());
+        let out = expand_in_range(&ev, at(2026, 5, 4, 0), at(2026, 6, 1, 0));
+        // May 4 and May 18 — not May 11 / 25 (25th is in week 3).
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[1].start - out[0].start, Duration::days(14));
     }
 
     #[test]
