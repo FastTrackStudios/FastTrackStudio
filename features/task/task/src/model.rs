@@ -443,6 +443,94 @@ impl std::ops::DerefMut for UuidList {
     }
 }
 
+/// Typed relation kinds (Plane / Linear parity). Direction is
+/// always *source → target* read as "`source` `<kind>`s
+/// `target`": `blocks` = source blocks target; `duplicate` =
+/// source duplicates target (target is canonical); `implements`
+/// = source implements target (target is the spec / PRD);
+/// `relates` = soft symmetric link.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[serde(rename_all = "lowercase")]
+#[repr(u8)]
+pub enum RelationKind {
+    Blocks,
+    Duplicate,
+    Implements,
+    Relates,
+}
+
+impl RelationKind {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Blocks => "blocks",
+            Self::Duplicate => "duplicate",
+            Self::Implements => "implements",
+            Self::Relates => "relates",
+        }
+    }
+
+    /// Parse a kind slug (alias-tolerant: `duplicates`,
+    /// `relates-to`, `implement`, …).
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "blocks" | "block" => Self::Blocks,
+            "duplicate" | "duplicates" | "dup" => Self::Duplicate,
+            "implements" | "implement" => Self::Implements,
+            "relates" | "relates-to" | "related" => Self::Relates,
+            _ => return None,
+        })
+    }
+}
+
+/// One typed edge from the carrying task to `target`. See
+/// [`RelationKind`] for direction semantics.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+pub struct Relation {
+    pub kind: RelationKind,
+    pub target: Uuid,
+}
+
+/// `Vec<Relation>` newtype — JSON column. Same pattern as
+/// [`UuidList`].
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct RelationList(pub Vec<Relation>);
+
+impl RelationList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<Relation>> for RelationList {
+    fn from(v: Vec<Relation>) -> Self {
+        Self(v)
+    }
+}
+
+impl std::ops::Deref for RelationList {
+    type Target = Vec<Relation>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for RelationList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// `Vec<AgentRef>` newtype — JSON column. Lets a task be
 /// owned by N actors (human + agent + agent triple is common
 /// for human-supervised agent work).
@@ -493,6 +581,15 @@ pub struct WorkflowAttrs {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub cycle: Option<Uuid>,
 
+    /// Owning workstream — the parent-with-swarm construct
+    /// (`workstream::Workstream`) this task rolls up into.
+    /// `None` = unattached (the default; absent in frontmatter
+    /// and on the wire, so existing pages keep round-tripping).
+    /// Orthogonal to `parent` (structural sub-task link): a
+    /// subtask can carry both.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub workstream: Option<Uuid>,
+
     // NOTE: project membership is NOT here — it lives on
     // `TaskInfo::project_id`, which already points at the
     // org-level Project (= the Linear-sense Project, now that
@@ -521,12 +618,32 @@ pub struct WorkflowAttrs {
     /// listed task closes. Sub-issue / parent relations are
     /// modelled the same way (parent task blocks children's
     /// completion implicitly via the workflow rules).
+    ///
+    /// **Legacy encoding** alongside [`Self::relations`]: an
+    /// entry `b` here is equivalent to `b` carrying
+    /// `Relation { kind: Blocks, target: <this task> }`. The
+    /// graph resolver (`crate::relations`) merges both views;
+    /// keep writing whichever is convenient.
     #[serde(skip_serializing_if = "UuidList::is_empty", default)]
     pub blockers: UuidList,
 
     /// Soft links (e.g. "see also"). No completion enforcement.
+    ///
+    /// **Legacy encoding** alongside [`Self::relations`]: an
+    /// entry here is equivalent to a
+    /// `Relation { kind: Relates, target }` on this task. The
+    /// graph resolver (`crate::relations`) merges both views.
     #[serde(skip_serializing_if = "UuidList::is_empty", default)]
     pub relates_to: UuidList,
+
+    /// Typed relations to other tasks — `blocks` / `duplicate`
+    /// / `implements` / `relates`, direction *this task →
+    /// target* (see [`RelationKind`]). Coexists with the legacy
+    /// [`Self::blockers`] / [`Self::relates_to`] lists: those
+    /// keep working, and `crate::relations` merges both
+    /// encodings into one edge set for queries / rollups.
+    #[serde(skip_serializing_if = "RelationList::is_empty", default)]
+    pub relations: RelationList,
 
     /// Currently-active `WorkSession` id from `workflows-proto`,
     /// if work is in progress. Cleared on Finish/Cancel.

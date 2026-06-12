@@ -45,17 +45,28 @@ wiki-live = { workspace = true }
 agent-proto = { workspace = true, features = ["server", "vox"] }
 agent-tasks = { workspace = true }
 agent-dispatch = { workspace = true }
+# Codex backend — in-process agent session/turn host. Mounted for
+# the `Sessions` + `TurnDispatch` vox services (the /agents surface).
+agent-codex = { workspace = true }
 task = { workspace = true, features = ["vox"] }
 # Forge webhook receiver — IssueLink lookup maps an inbound
 # forge issue/PR event back to the local TaskInfo to mutate.
 git-config = { workspace = true }
+# Forge services mounted on `/org/<slug>/vox`: RepoCatalog +
+# IssueTracker + ReviewSurface, served by the Forgejo backend
+# (the org's primary forge). `git-proto` carries the wire
+# contract; `git-forgejo` the REST-backed impl.
+git-proto = { workspace = true }
+git-forgejo = { workspace = true }
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
 milestone = { workspace = true, features = ["vox"] }
+workstream = { workspace = true, features = ["vox"] }
 # Entity-CRUD services additionally mounted on `/org/<slug>/vox`.
 # All four expose architect-generated clients agents + the CLI
 # consume directly.
 locations = { workspace = true, features = ["vox"] }
+inventory = { workspace = true, features = ["vox"] }
 cookbook = { workspace = true, features = ["vox"] }
 mealplan = { workspace = true, features = ["vox"] }
 pantry = { workspace = true, features = ["vox"] }
@@ -71,27 +82,49 @@ intake = { workspace = true, features = ["vox"] }
 org-proto = { workspace = true }
 timer-proto = { workspace = true, features = ["server", "vox"] }
 timer = { workspace = true }
+threads = { workspace = true, features = ["server", "vox"] }
 # Scheduling: day-template service mounted over vox so the app can
 # overlay the daily plan on the calendar. Read-mostly; bookings/slots
 # use in-memory stores until they're surfaced.
 scheduling-proto = { workspace = true, features = ["vox"] }
 scheduling = { workspace = true }
+inbox-proto = { workspace = true, features = ["vox"] }
+inbox = { workspace = true }
 store-proto = { workspace = true }
 # Finance: SQLite + migrations only at this slice; service
 # traits (Invoicing / Ledger) get mounted in a follow-up
 # once their SeaORM-backed impls land.
 finance-proto = { workspace = true, features = ["server"] }
 finance-db = { workspace = true }
+finance = { workspace = true }
+# Email: the canonical `EmailSync` wire trait + a Maildir-backed
+# backend impl. Mounted per-org so the app can list synced
+# accounts + envelopes. The Maildir root lives under the org's
+# vault (`Mail/`); an unconfigured org just serves an empty
+# account set.
+email-proto = { workspace = true, features = ["vox"] }
+email-maildir = { workspace = true }
+# `FolderAliases` for the per-account Maildir registration.
+email-config = { workspace = true }
 vox = { workspace = true }
+# Org-wide presence: `crdt::sync::PresenceHost` + the `DocPresence`
+# vox service mounted per org (`vox` feature = the sync/presence
+# transport; no Dioxus, no persistence backends).
+crdt = { workspace = true, features = ["vox"] }
+# Vault-file ⇄ CRDT reconciliation: per-file docs over the crdt
+# DocRegistry + server write-behind into the vault backend.
+# Mounted per org as the `DocSync` service (and the per-file half
+# of `DocPresence` — see `presence::PresenceRouter`).
+vault-collab = { workspace = true }
 chrono.workspace = true
-architect = { workspace = true, features = ["server-axum", "dispatch-tokio", "local"] }
+architect = { workspace = true, features = ["server", "local"] }
 architect-auth = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 vox = { workspace = true, features = ["transport-websocket"] }
 futures = { workspace = true }
 attachments-proto = { workspace = true }
-architect = { workspace = true }
+architect = { workspace = true, features = ["local"] }
 chrono = { workspace = true }
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

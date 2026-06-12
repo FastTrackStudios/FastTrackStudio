@@ -6,9 +6,10 @@
 //! PUT → manifest → GET, the subscribe stream observing PUT +
 //! DELETE, and a conflict round-trip.
 //!
-//! The server uses `vault::Backend::under_parent` for its
-//! multi-tenant layout — any `vault_id` resolves to a fresh
-//! subdir under the configured root, created on first write.
+//! The server registers exactly one vault per org under the id
+//! `"default"` (`vault::Backend::single` — commit 03d6a09 moved
+//! away from `under_parent`, whose ghost `default/` subdir broke
+//! every vault-walking backend; this test tracked that change).
 //! The architect macro rewrites the sync trait's `&str` args
 //! into owned `String` on the async client side, so call sites
 //! here pass owned strings.
@@ -61,7 +62,7 @@ async fn put_manifest_get_round_trip() {
 
     let ack = client
         .put_file(
-            "v1".to_string(),
+            "default".to_string(),
             "notes/a.md".to_string(),
             b"hello".to_vec(),
             IfMatch::CreateOnly,
@@ -70,14 +71,14 @@ async fn put_manifest_get_round_trip() {
         .unwrap();
     assert!(!ack.sha256.is_empty(), "PUT should return a sha");
 
-    let manifest = client.manifest("v1".to_string()).await.unwrap();
-    assert_eq!(manifest.vault_id, "v1");
+    let manifest = client.manifest("default".to_string()).await.unwrap();
+    assert_eq!(manifest.vault_id, "default");
     assert_eq!(manifest.files.len(), 1);
     assert_eq!(manifest.files[0].path, "notes/a.md");
     assert_eq!(manifest.files[0].size, 5);
 
     let bytes = client
-        .get_file("v1".to_string(), "notes/a.md".to_string())
+        .get_file("default".to_string(), "notes/a.md".to_string())
         .await
         .unwrap();
     assert_eq!(&bytes.0[..], b"hello");
@@ -91,7 +92,7 @@ async fn subscribe_receives_put_and_delete() {
 
     let (tx, mut rx) = vox::channel::<VaultEvent>();
     let _sub = tokio::spawn(async move {
-        let _ = client.subscribe("v1".to_string(), tx).await;
+        let _ = client.subscribe("default".to_string(), tx).await;
     });
 
     // Tiny delay so the subscribe handler is fully attached
@@ -100,7 +101,7 @@ async fn subscribe_receives_put_and_delete() {
 
     writer
         .put_file(
-            "v1".to_string(),
+            "default".to_string(),
             "a.md".to_string(),
             b"x".to_vec(),
             IfMatch::CreateOnly,
@@ -122,7 +123,7 @@ async fn subscribe_receives_put_and_delete() {
     }
 
     writer
-        .delete_file("v1".to_string(), "a.md".to_string(), IfMatch::Force)
+        .delete_file("default".to_string(), "a.md".to_string(), IfMatch::Force)
         .await
         .unwrap();
     let msg = tokio::time::timeout(Duration::from_secs(2), rx.recv())
@@ -142,7 +143,7 @@ async fn put_conflict_returns_server_bytes() {
     let client = connect(&url).await.unwrap();
     client
         .put_file(
-            "v1".to_string(),
+            "default".to_string(),
             "x.md".to_string(),
             b"first".to_vec(),
             IfMatch::CreateOnly,
@@ -151,7 +152,7 @@ async fn put_conflict_returns_server_bytes() {
         .unwrap();
     let err = client
         .put_file(
-            "v1".to_string(),
+            "default".to_string(),
             "x.md".to_string(),
             b"second".to_vec(),
             IfMatch::CreateOnly,

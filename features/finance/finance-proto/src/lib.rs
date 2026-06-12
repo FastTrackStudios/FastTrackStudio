@@ -58,7 +58,7 @@ pub use ledger::{
 pub use party::{Party, PartyKind, PartyRole};
 pub use payment::{InvoicePayment, Payment, PaymentMethod, PaymentStatus};
 pub use recurring::{RecurringFrequency, RecurringSchedule, RecurringStatus};
-pub use service::invoicing::{PaymentAllocation, RecordPayment};
+pub use service::invoicing::{GenerateInvoice, PaymentAllocation, RecordPayment, UninvoicedGroup};
 pub use service::ledger::{AccountBalance, PostTransaction};
 pub use service::{Invoicing, Ledger};
 pub use tax::{TaxLine, TaxLines, TaxRateCatalogEntry};

@@ -4,15 +4,29 @@
 //! (sidebar + headers + bottom bar) is provided by the route
 //! layout; pages only render the content area.
 
+pub mod agents;
+pub mod bookings;
+pub mod email;
+pub mod finances;
+pub mod fitness;
 pub mod gantt;
 pub mod goals;
 pub mod home;
 pub mod inbox;
+pub mod inventory;
+pub mod invoices;
+pub mod ledger;
+pub mod locations;
+pub mod mealplan;
+pub mod milestones;
 pub mod project_detail;
 pub mod projects;
+pub mod repos;
 pub mod schedule;
 pub mod settings;
+pub mod task_detail;
 pub mod tasks;
 pub mod timer;
 pub mod vault;
 pub mod wiki;
+pub mod wiki_source;

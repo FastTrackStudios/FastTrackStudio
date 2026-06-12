@@ -375,6 +375,19 @@ impl Store {
         }
     }
 
+    /// Swap in a cookbook store rooted elsewhere. The default
+    /// walks the *vault* root, but on the standard org layout
+    /// recipes live under the wiki root
+    /// (`<org>/wiki/Knowledge/Cookbook/`) — pass the same
+    /// store the `CookbookService` mounts so
+    /// `add_missing_for_recipe` resolves the same recipe
+    /// paths.
+    #[must_use]
+    pub fn with_cookbook(mut self, cookbook: cookbook::Store) -> Self {
+        self.cookbook = cookbook;
+        self
+    }
+
     #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()
@@ -417,6 +430,13 @@ fn push_or_merge(list: &mut ShoppingList, entry: ShoppingEntry) {
         return;
     }
     list.entries.push(entry);
+}
+
+impl architect::HasDispatcher for Store {
+    type Dispatcher = architect::dispatch::TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        architect::dispatch::TokioBlockingDispatcher
+    }
 }
 
 impl ShoppingService for Store {

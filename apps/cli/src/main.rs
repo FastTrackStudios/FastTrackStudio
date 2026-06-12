@@ -17,9 +17,16 @@
 //! 2. `TASK_VOX_URL` env var (loaded from `.env` if present).
 //! 3. `ws://127.0.0.1:9090/vox` default.
 
+mod brief;
+mod errors;
+mod json_out;
+mod mealprep;
 mod org_ctx;
+mod plan;
+mod recipe_import;
 mod session_store;
 mod shared;
+mod workstream;
 
 use clap::{Parser, Subcommand};
 use shared::RemoteVoxConfig;
@@ -30,13 +37,8 @@ struct Cli {
     /// Vox WebSocket URL (e.g. <ws://127.0.0.1:9090/vox>). Falls back
     /// to `TASK_VOX_URL` (loaded from .env) then to the localhost
     /// default.
-    #[arg(
-        long,
-        env = "TASK_VOX_URL",
-        default_value = "ws://127.0.0.1:9090/vox",
-        global = true
-    )]
-    server: String,
+    #[arg(long, env = "TASK_VOX_URL", global = true)]
+    server: Option<String>,
 
     /// Architect Auth session token for remote vox.
     #[arg(long, env = "TASK_SESSION_TOKEN", global = true)]
@@ -155,10 +157,22 @@ enum Commands {
     /// with Forgejo / GitHub milestones in the future.
     #[command(subcommand)]
     Milestone(MilestoneCmd),
+    /// Workstreams — the parent-with-swarm construct (lead +
+    /// members + status + dates) that replaces the 'epic' tag.
+    /// Tasks attach via `workflow.workstream`; progress is a
+    /// derived rollup (`task workstream rollup`).
+    #[command(subcommand)]
+    Workstream(workstream::WorkstreamCmd),
     /// Physical places — studios, rooms, venues, storage.
     /// Pantry + inventory reference these by id.
     #[command(subcommand)]
     Location(LocationCmd),
+    /// Inbox — capture fleeting notes and triage the daily queue.
+    #[command(subcommand)]
+    Inbox(InboxCmd),
+    /// Threads — log conversations & topics on a task or project.
+    #[command(subcommand)]
+    Threads(ThreadsCmd),
     /// Cookbook recipes (cooklang `.cook` files under
     /// `Wiki/Cookbook/`).
     #[command(subcommand)]
@@ -171,6 +185,10 @@ enum Commands {
     /// barcode resolution.
     #[command(subcommand)]
     Pantry(PantryCmd),
+    /// Shopping lists — auto-populate from recipe shortages /
+    /// low stock / expiry; mark-purchased restocks the pantry.
+    #[command(subcommand)]
+    Shopping(mealprep::ShoppingCmd),
     /// Body metrics — weight / body-fat / measurements log.
     #[command(subcommand)]
     Body(BodyCmd),
@@ -184,6 +202,18 @@ enum Commands {
     /// Food intake log — daily calorie + macro tracking.
     #[command(subcommand)]
     Intake(IntakeCmd),
+    /// Day-plan schedule surface — show / edit blocks, assign
+    /// tasks, materialize from templates, plan-vs-actual diff.
+    /// All logic in `plan.rs`.
+    #[command(subcommand)]
+    Plan(plan::PlanCmd),
+    /// What should I be doing right now — current block + time
+    /// remaining + next block (falls back to the next due task).
+    Next(plan::NextArgs),
+    /// Morning digest — today's blocks + events, due/overdue +
+    /// in-progress tasks, active timer, blocked agent tasks, open
+    /// inbox, meals + bookings. All logic in `brief.rs`.
+    Brief(brief::BriefArgs),
 }
 
 #[derive(Subcommand)]
@@ -481,6 +511,159 @@ enum IntakeCmd {
 }
 
 #[derive(Subcommand)]
+/// Log conversations & topics against a task or project. `new` opens a
+/// thread (topic); `post` adds a message; `list`/`show` read them.
+/// Anchored by `(entity_type, entity_id)` so the same primitive works
+/// for any entity later (forge issues, chats, ingested comms).
+///
+/// Org / server routing: uses the global `--org` / `--server` flags
+/// (no per-variant duplicates).
+enum ThreadsCmd {
+    /// Open a new thread (topic) on a task or project.
+    New {
+        /// Host entity kind: `task` | `project`.
+        #[arg(long)]
+        entity_type: String,
+        /// Host entity — UUID, id prefix, vault path, or title
+        /// (resolved per `--entity-type`).
+        #[arg(long)]
+        entity_id: String,
+        /// Topic / title. Quote multi-word.
+        title: Vec<String>,
+        /// Kind: `discussion` (default) | `question` | `decision` | `action` | `praise`.
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Post a message to a thread.
+    Post {
+        /// Target thread id.
+        thread_id: uuid::Uuid,
+        /// Message text. Quote multi-word.
+        text: Vec<String>,
+        /// Reply to another message in the thread.
+        #[arg(long)]
+        reply_to: Option<uuid::Uuid>,
+        /// Source label: `native` (default) | `agent` | …
+        #[arg(long)]
+        source: Option<String>,
+        /// Author display label. Defaults to `cli` (or `agent` when `--source agent`).
+        #[arg(long)]
+        author: Option<String>,
+    },
+    /// List threads on a task or project.
+    List {
+        #[arg(long)]
+        entity_type: String,
+        /// Host entity — UUID, id prefix, vault path, or title
+        /// (resolved per `--entity-type`).
+        #[arg(long)]
+        entity_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a thread's messages.
+    Show {
+        thread_id: uuid::Uuid,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark a thread resolved (or `--unresolve` to reopen).
+    Resolve {
+        thread_id: uuid::Uuid,
+        #[arg(long)]
+        unresolve: bool,
+    },
+    /// Delete a thread and its messages.
+    Rm { id: uuid::Uuid },
+}
+
+#[derive(Subcommand)]
+/// Capture + triage the inbox — the FLAP "capture" loop. Capture a
+/// fleeting note with `add`, read the queue with `list` (open items,
+/// oldest first), then `mark` / `snooze` / `rm` during the daily
+/// review.
+enum InboxCmd {
+    /// Capture a note into the inbox (default kind `fleeting`).
+    Add {
+        /// The note text. Quote multi-word captures.
+        text: Vec<String>,
+        /// Note kind: `fleeting` (default), `literature`, `lecture`.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Capture source label. Defaults to `cli`.
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Stage an agent-proposed capture for one-tap review (status
+    /// `suggested`). Producers (email ingestion, …) use this so
+    /// suggestions don't flood the open queue until you accept them.
+    Suggest {
+        /// The summary text. Quote multi-word input.
+        text: Vec<String>,
+        /// Capture source label, e.g. `email`. Defaults to `agent`.
+        #[arg(long)]
+        source: Option<String>,
+        /// Optional link back to the original (appended to the body).
+        #[arg(long)]
+        link: Option<String>,
+        /// Note kind: `fleeting` (default), `literature`, `lecture`.
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// List the inbox. By default shows only `open` items, oldest
+    /// first; `--all` includes processed + archived.
+    List {
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set an item's triage status: `open` / `processed` / `archived`.
+    Mark {
+        id: String,
+        /// `open` | `processed` | `archived`.
+        status: String,
+        /// For `processed`: id of the task / note it became.
+        #[arg(long)]
+        into: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Snooze an item until a date (`YYYY-MM-DD`); it's hidden from
+    /// the daily queue until then.
+    Snooze {
+        id: String,
+        until: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Permanently delete an item.
+    Rm {
+        id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(clap::Subcommand)]
 enum LocationCmd {
     /// List every location in the active org's vault.
     List {
@@ -567,6 +750,22 @@ enum RecipeCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Author a new `.cook` recipe (validates the cooklang by
+    /// parsing before anything is written).
+    Create(mealprep::RecipeCreateArgs),
+    /// Import a recipe from a webpage (schema.org/Recipe → cooklang;
+    /// LLM-synthesized, `--offline` for the deterministic converter,
+    /// `--from-file` for bot-protected sites).
+    Import(recipe_import::RecipeImportArgs),
+    /// Replace an existing recipe's cooklang source (validates
+    /// by parsing first).
+    Update(mealprep::RecipeUpdateArgs),
+    /// Rendered view — ingredients / cookware / steps /
+    /// servings (`--json` for the wire shape).
+    Show(mealprep::RecipeShowArgs),
+    /// Fulfillment check against the pantry: have / missing /
+    /// substitution suggestions.
+    CanCook(mealprep::CanCookArgs),
     Delete {
         path: String,
         #[arg(long, short = 'y')]
@@ -653,6 +852,10 @@ enum MealCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Put the meal on its date's day plan as a `Meal` block
+    /// (`task meal schedule <meal> 17:30-18:30`). Overlapping
+    /// blocks are rejected unless `--force`.
+    Schedule(mealprep::MealScheduleArgs),
     Rename {
         target: String,
         new_path: String,
@@ -830,6 +1033,10 @@ enum ProjectCmd {
         /// `normal`.
         #[arg(long)]
         priority: Option<String>,
+        /// Project type / template — `code` | `general` | `personal`.
+        /// Drives the overview layout. Default `general`.
+        #[arg(long = "type")]
+        project_type: Option<String>,
         /// Comma-separated tag list.
         #[arg(long, value_delimiter = ',')]
         tags: Vec<String>,
@@ -851,6 +1058,54 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the project's state registry — every status name
+    /// with its canonical group (backlog / unstarted / started /
+    /// completed / cancelled). Falls back to the default
+    /// registry when the project declares no `states:` config.
+    States {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the registry as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Edit the project's state registry. `--from <file|->`
+    /// replaces the whole registry (YAML or JSON list of
+    /// `{name, group, color?, default?, order?}`); repeatable
+    /// `--add <name>:<group>[:<color>]` upserts single states
+    /// (starting from the current registry, or the default set
+    /// when none is configured). `--clear` drops the custom
+    /// registry (back to defaults).
+    SetStates {
+        target: String,
+        /// Replace the registry from a YAML/JSON file (`-` for
+        /// stdin).
+        #[arg(long)]
+        from: Option<String>,
+        /// Upsert one state: `<name>:<group>[:<color>]`, group ∈
+        /// backlog|unstarted|started|completed|cancelled.
+        #[arg(long = "add", value_name = "NAME:GROUP[:COLOR]")]
+        add: Vec<String>,
+        /// Mark this state name as the default for new tasks.
+        #[arg(long = "default", value_name = "NAME")]
+        default_state: Option<String>,
+        /// Drop the custom registry entirely.
+        #[arg(long)]
+        clear: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the resulting registry as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set the project's target completion date (YYYY-MM-DD, or
     /// `none`/`clear` to unset). The Linear-style roadmap field.
@@ -861,6 +1116,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Recompute + show the project's progress from its tasks
     /// (done / total of tasks whose `projectId` is this project).
@@ -880,18 +1138,24 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear the project parent. Pass `none` / `null`
     /// to unparent.
     SetParent {
         target: String,
-        /// `none`, `null`, a project UUID, or a vault-relative
-        /// path.
+        /// `none`, `null`, a project UUID, name, or a
+        /// vault-relative path.
         parent: String,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Mark the project archived (kept on disk; timer refuses
     /// new sessions against it).
@@ -901,6 +1165,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Reverse of `archive`.
     Unarchive {
@@ -909,6 +1176,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Move the backing markdown file. Preserves `id` so
     /// downstream FKs (timer rows, links) survive.
@@ -919,6 +1189,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the renamed project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Delete the project. Refuses if any other project lists
     /// it as parent — reparent or delete children first.
@@ -943,16 +1216,23 @@ enum ProjectCmd {
 /// `issue` verbs operate through `WorkflowAttrs`: filter / show
 /// / patch the workspace + cycle + project + estimate +
 /// assignees + blockers triplet.
+///
+/// Org / server routing: this command group relies on the global
+/// `--org` / `--server` flags (clap propagates them, so they can
+/// still be passed after the subcommand) instead of re-declaring
+/// per-variant duplicates like the older groups do.
 #[derive(Subcommand)]
 enum IssueCmd {
     /// List tasks filtered by their workflow attributes.
     List {
-        /// Filter by `workflow.cycle = <uuid>`.
+        /// Filter by cycle — UUID, `YYYY:Qn:Cm` / `YYYY-Qn-Cm`
+        /// label, or `current` for today's cycle.
         #[arg(long)]
-        cycle: Option<uuid::Uuid>,
-        /// Filter by `project_id = <uuid>`.
+        cycle: Option<String>,
+        /// Filter by project — UUID, id prefix, vault path, or
+        /// name (exact / unique prefix).
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Filter by an `AgentRef` in `workflow.assignees`.
         /// Accepts `agent:name`, `agent:name@version`,
         /// `human:user_id`, or a bare name (defaults to `agent:`).
@@ -966,23 +1246,15 @@ enum IssueCmd {
         /// out of the issue view.
         #[arg(long)]
         has_workflow: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
         /// Emit JSON instead of the tabular default.
         #[arg(long)]
         json: bool,
     },
 
-    /// Show a single issue. Accepts a full UUID or the first
-    /// 8+ chars of one (`resolve_issue_id` does the prefix match).
+    /// Show a single issue. Accepts a UUID, an id prefix, a vault
+    /// path, or a title (exact / unique prefix).
     Show {
         id: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -992,13 +1264,7 @@ enum IssueCmd {
     /// an agent receives. The same renderer `task agent goal --task`
     /// feeds the loop, exposed standalone so you can inspect exactly
     /// what an agent will be handed.
-    Prompt {
-        id: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-    },
+    Prompt { id: String },
 
     /// Patch the issue's `WorkflowAttrs` in place. Repeatable
     /// `--add-assignee` / `--add-blocker` for set operations.
@@ -1006,12 +1272,18 @@ enum IssueCmd {
     /// task becomes a plain TaskNotes-shape task again).
     SetWorkflow {
         id: String,
-        /// UUID, or `"none"` / `""` to clear.
+        /// UUID, `YYYY:Qn:Cm`, `current`, or `"none"` / `""` to
+        /// clear.
         #[arg(long)]
         cycle: Option<String>,
-        /// UUID, or `"none"` / `""` to clear.
+        /// Project reference (UUID, name, path, prefix), or
+        /// `"none"` / `""` to clear.
         #[arg(long)]
         project: Option<String>,
+        /// Workstream reference (UUID, name, path, prefix), or
+        /// `"none"` / `""` to clear. Sets `workflow.workstream`.
+        #[arg(long)]
+        workstream: Option<String>,
         /// `xs`, `s`, `m`, `l`, `xl`, or a plain integer for
         /// `Estimate::Points`.
         #[arg(long)]
@@ -1020,17 +1292,18 @@ enum IssueCmd {
         add_assignee: Vec<String>,
         #[arg(long = "remove-assignee", value_name = "AGENT")]
         remove_assignee: Vec<String>,
-        #[arg(long = "add-blocker", value_name = "TASK_ID")]
-        add_blocker: Vec<uuid::Uuid>,
-        #[arg(long = "remove-blocker", value_name = "TASK_ID")]
-        remove_blocker: Vec<uuid::Uuid>,
+        /// Blocking issue (UUID, id prefix, path, or title).
+        #[arg(long = "add-blocker", value_name = "TASK")]
+        add_blocker: Vec<String>,
+        /// Blocking issue (UUID, id prefix, path, or title).
+        #[arg(long = "remove-blocker", value_name = "TASK")]
+        remove_blocker: Vec<String>,
         /// Drop the workflow block entirely.
         #[arg(long)]
         clear: bool,
+        /// Emit the resulting issue as JSON.
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        json: bool,
     },
 
     /// Atomically claim an issue for an agent — the core of the
@@ -1046,10 +1319,9 @@ enum IssueCmd {
         /// Steal the claim even if someone else holds it.
         #[arg(long)]
         force: bool,
+        /// Emit the claimed issue as JSON.
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        json: bool,
     },
 
     /// Triage an issue (PRD) into agent-sized subtasks — the
@@ -1075,21 +1347,66 @@ enum IssueCmd {
         /// Priority applied to every created subtask.
         #[arg(long, default_value = "normal")]
         priority: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// List the subtasks of a parent task with their claim +
     /// status, so you can see who's working what at a glance.
+    /// Header shows the derived rollup (done / in-progress /
+    /// blocked / points), classified via state groups.
     Subtasks {
         /// Parent task id (UUID or 8-char prefix).
         id: String,
         #[arg(long)]
-        org: Option<String>,
+        json: bool,
+    },
+
+    /// Derived sub-issue rollup for one parent — done / total /
+    /// in-progress / blocked / estimate points over its direct
+    /// children (`workflow.parent`), classified via each child's
+    /// project state registry. Same engine as the workstream
+    /// rollup.
+    Rollup {
+        /// Parent issue id (UUID, prefix, path, or title).
+        id: String,
         #[arg(long)]
-        server: Option<String>,
+        json: bool,
+    },
+
+    /// Add a typed relation between two issues:
+    /// `task issue relate <a> <kind> <b>` records "<a> <kind>s
+    /// <b>" (kind ∈ blocks | duplicate | implements | relates).
+    /// Stored in `<a>`'s `workflow.relations`; the legacy
+    /// blockers / relates_to lists keep working alongside.
+    Relate {
+        /// Source issue (UUID, prefix, path, or title).
+        a: String,
+        /// blocks | duplicate | implements | relates.
+        kind: String,
+        /// Target issue (UUID, prefix, path, or title).
+        b: String,
+        /// Remove the relation instead of adding it.
+        #[arg(long)]
+        remove: bool,
+        /// Emit the resulting source issue as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show an issue's relation graph — outgoing edges (typed
+    /// relations + the legacy relates_to entries + "blocks"
+    /// edges implied by other tasks' blockers lists) and
+    /// incoming reverse edges ("what blocks / duplicates /
+    /// implements THIS"), merged across both encodings.
+    Relations {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Sugar: every issue this one BLOCKS (typed `blocks`
+    /// relations + other tasks listing it in `blockers`).
+    Blocking {
+        id: String,
         #[arg(long)]
         json: bool,
     },
@@ -1097,10 +1414,6 @@ enum IssueCmd {
     /// List the current assignees on an issue.
     Assignees {
         id: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1120,16 +1433,21 @@ enum IssueCmd {
         /// Initial priority. Default `normal`.
         #[arg(long)]
         priority: Option<String>,
-        /// Cycle UUID. Sets `workflow.cycle`.
+        /// Cycle (UUID, `YYYY:Qn:Cm`, or `current`). Sets
+        /// `workflow.cycle`.
         #[arg(long)]
-        cycle: Option<uuid::Uuid>,
-        /// Project UUID. Sets `project_id`.
+        cycle: Option<String>,
+        /// Project (UUID, name, path, prefix). Sets `project_id`.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
-        /// Parent task UUID — makes this a subtask. Sets
-        /// `workflow.parent`.
+        project: Option<String>,
+        /// Parent issue (UUID, id prefix, path, or title) — makes
+        /// this a subtask. Sets `workflow.parent`.
         #[arg(long)]
-        parent: Option<uuid::Uuid>,
+        parent: Option<String>,
+        /// Workstream (UUID, name, path, prefix). Sets
+        /// `workflow.workstream`.
+        #[arg(long)]
+        workstream: Option<String>,
         /// Estimate (`xs` / `s` / `m` / `l` / `xl` / integer).
         #[arg(long)]
         estimate: Option<String>,
@@ -1137,10 +1455,11 @@ enum IssueCmd {
         /// `human:user_id`. Bare names default to agent.
         #[arg(long = "assignee", value_name = "AGENT")]
         assignees: Vec<String>,
-        /// Repeatable blocker — `task issue ready` won't
-        /// surface this issue until each blocker closes.
-        #[arg(long = "blocker", value_name = "TASK_ID")]
-        blockers: Vec<uuid::Uuid>,
+        /// Repeatable blocker (UUID, id prefix, path, or title) —
+        /// `task issue ready` won't surface this issue until each
+        /// blocker closes.
+        #[arg(long = "blocker", value_name = "TASK")]
+        blockers: Vec<String>,
         /// Repeatable tag.
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
@@ -1148,20 +1467,18 @@ enum IssueCmd {
         #[arg(long)]
         body: Option<String>,
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-        #[arg(long)]
         json: bool,
     },
 
     /// Show issues ready to work — open, not done, with no
     /// unresolved blockers. The beads-equivalent of `bd ready`.
     Ready {
+        /// Cycle filter — UUID, `YYYY:Qn:Cm` label, or `current`.
         #[arg(long)]
-        cycle: Option<uuid::Uuid>,
+        cycle: Option<String>,
+        /// Project filter — UUID, id prefix, path, or name.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Show only issues claimable by this agent (no
         /// assignee yet, OR this agent is already listed).
         #[arg(long)]
@@ -1169,10 +1486,6 @@ enum IssueCmd {
         /// Max rows to show.
         #[arg(long, default_value = "20")]
         limit: usize,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1186,10 +1499,9 @@ enum IssueCmd {
         /// are preserved).
         #[arg(long = "as-agent")]
         as_agent: Option<String>,
+        /// Emit the resulting issue as JSON.
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        json: bool,
     },
 
     /// Close an issue — flips status to `done` and stamps
@@ -1198,10 +1510,9 @@ enum IssueCmd {
         id: String,
         #[arg(long)]
         undo: bool,
+        /// Emit the resulting issue as JSON.
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        json: bool,
     },
 
     /// Migrate beads issues into Task. Reads a `bd list --json`
@@ -1215,23 +1526,16 @@ enum IssueCmd {
         /// Parse + report what would be created without writing.
         #[arg(long)]
         dry_run: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Project-level overview — counts grouped by status,
     /// priority, workspace, and assignee. Beads-equivalent of
     /// `bd stats`.
     Stats {
-        /// Restrict to one project.
+        /// Restrict to one project (UUID, id prefix, path, or
+        /// name).
         #[arg(long)]
-        project: Option<uuid::Uuid>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        project: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1254,10 +1558,6 @@ enum IssueCmd {
         /// `issue` or `pull`. Default `issue`.
         #[arg(long, default_value = "issue")]
         kind: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Push a local TaskInfo upstream — creates a Forgejo issue
@@ -1276,10 +1576,6 @@ enum IssueCmd {
         /// Ignored when --github is set.
         #[arg(long)]
         base_url: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// On-demand bidirectional reconcile — no webhook needed.
@@ -1298,33 +1594,27 @@ enum IssueCmd {
         /// Forgejo host base URL. Falls back to `TASK_FORGEJO_BASE_URL`.
         #[arg(long)]
         base_url: Option<String>,
-        /// Optional project UUID to stamp on newly-pulled tasks.
+        /// Optional project (UUID, name, path, prefix) to stamp
+        /// on newly-pulled tasks.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Don't create local tasks for forge issues we don't
         /// track — only reconcile state of already-linked ones.
         #[arg(long)]
         no_pull: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Sync every linked repo in the org in one pass — one
     /// cron line keeps all your tracked repos fresh without
     /// webhooks.
     SyncAll {
-        /// Optional project UUID to stamp on newly-pulled tasks.
+        /// Optional project (UUID, name, path, prefix) to stamp
+        /// on newly-pulled tasks.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Only reconcile existing links; don't pull new issues.
         #[arg(long)]
         no_pull: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// List open pull requests on a repo.
@@ -1370,10 +1660,6 @@ enum IssueCmd {
         /// task so `pr-merge`/sync can finish the loop.
         #[arg(long)]
         close_task: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Merge a pull request by number. With `--close-task`,
@@ -1396,10 +1682,6 @@ enum IssueCmd {
         /// close-propagation path.
         #[arg(long)]
         close_task: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Serialize-merge a queue of open PRs (the parallel-agent
@@ -1430,10 +1712,6 @@ enum IssueCmd {
         /// instead of stopping at the first conflict.
         #[arg(long)]
         keep_going: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Fetch all issues from a Forgejo repo and create local
@@ -1450,16 +1728,13 @@ enum IssueCmd {
         /// Ignored when --github is set.
         #[arg(long)]
         base_url: Option<String>,
-        /// Optional project UUID to stamp on pulled-in tasks.
+        /// Optional project (UUID, name, path, prefix) to stamp
+        /// on pulled-in tasks.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Filter by issue state: `open` (default), `closed`, or `all`.
         #[arg(long, default_value = "open")]
         state: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 }
 
@@ -1496,7 +1771,11 @@ enum CodeCmd {
         server: Option<String>,
     },
     /// List active `task code` worktrees (parallel work dirs).
-    Worktrees,
+    Worktrees {
+        /// Emit `{branch, path}` rows as a JSON array.
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove the worktree for a task branch once it's merged
     /// (or to abandon it). Accepts the task short-id or branch.
     Cleanup {
@@ -1542,6 +1821,9 @@ enum CodeCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit `{branch, task, links}` as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Park the current branch's task — record a "where I left
     /// off" handoff, release the claim so another agent can pick
@@ -1589,6 +1871,9 @@ enum CodeCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the open handoffs as a JSON array.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1735,6 +2020,9 @@ enum GoalCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting goal as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear the parent goal (`none` clears).
     SetParent {
@@ -1744,6 +2032,9 @@ enum GoalCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting goal as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Anchor a goal to a specific cycle (by UUID, by
     /// `YYYY:Qn:Cm`, or `current` for today's cycle). Pass
@@ -1755,6 +2046,9 @@ enum GoalCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting goal as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Move the backing markdown file. `id` is preserved.
     Rename {
@@ -1764,6 +2058,9 @@ enum GoalCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the renamed goal as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Delete the goal. Refuses if any other goal lists it as
     /// parent.
@@ -1784,7 +2081,12 @@ enum CycleCmd {
     /// year / quarter / cycle ordinal + cycle bounds + how
     /// far through it we are. Returns "(reset / bonus week)"
     /// when today is between cycles.
-    Current,
+    Current {
+        /// Emit the cycle (+ derived progress) as JSON.
+        /// `{"cycle": null, …}` between cycles.
+        #[arg(long)]
+        json: bool,
+    },
     /// List every quarter + cycle for a given cyclic year.
     /// Defaults to the current calendar year.
     List {
@@ -1793,6 +2095,9 @@ enum CycleCmd {
         /// Week-start day. Default: Monday.
         #[arg(long, default_value = "mon")]
         week_start: String,
+        /// Emit the year's quarters + cycles as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Capture a reflection note for a cycle. Writes a
     /// templated page at
@@ -1939,6 +2244,10 @@ enum AuthCmd {
     /// Org membership + selection.
     #[command(subcommand)]
     Org(AuthOrgCmd),
+    /// List every user in the active org's `auth.sqlite`.
+    /// Useful when you need a user_id to pass to
+    /// `timer reassign-user --to`.
+    Users,
 }
 
 #[derive(Subcommand)]
@@ -1948,7 +2257,11 @@ enum AuthOrgCmd {
     /// Set the active org for subsequent commands. Updates
     /// both the local session file and the server-side
     /// `auth_session.active_organization_id`.
-    Use { org_id: uuid::Uuid },
+    Use {
+        /// Org reference — UUID, slug, or name (exact / unique
+        /// prefix), matched against your memberships.
+        org_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2217,6 +2530,16 @@ enum WikiCmd {
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
+    /// Archive a URL (or local file) into `Wiki/raw/sources/`
+    /// with provenance frontmatter, then enqueue an ingest
+    /// task. The front door of the wiki archive feature:
+    /// routes by content type — articles → readability
+    /// extraction, Google Docs → markdown export, YouTube /
+    /// video → yt-dlp transcript with `^t<sec>` block
+    /// anchors. Canonical-URL dedup: re-archiving the same
+    /// resource (even via a differently-tracked link) is a
+    /// no-op unless `--force`.
+    Archive(WikiArchiveArgs),
     /// Rewrite a thin wiki page into a proper reference
     /// article. Reads the existing page + its `sources:`,
     /// prompts the LLM to expand with code examples + sharper
@@ -2272,6 +2595,187 @@ enum WikiCmd {
     /// Filesystem watcher — re-ingest on external edits.
     #[command(subcommand)]
     Watch(WikiWatchCmd),
+}
+
+#[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
+struct WikiArchiveArgs {
+    /// Bulk importers (`task wiki archive import <kind>`).
+    #[command(subcommand)]
+    cmd: Option<WikiArchiveSub>,
+    /// URL (http/https) or local file path to archive.
+    #[arg(required = true)]
+    target: Option<String>,
+    /// Override the recorded title (default: extracted from
+    /// the content).
+    #[arg(long)]
+    title: Option<String>,
+    /// Re-archive even when the canonical URL already exists
+    /// under `raw/sources/`.
+    #[arg(long)]
+    force: bool,
+    /// Import + record only — don't enqueue an ingest task.
+    #[arg(long)]
+    no_enqueue: bool,
+    /// yt-dlp binary used for video routes. Also settable
+    /// via `TASK_YTDLP`.
+    #[arg(long, env = "TASK_YTDLP", default_value = "yt-dlp")]
+    yt_dlp: String,
+    /// pdftotext binary (poppler) — the PDF-extraction
+    /// fallback when pdfium isn't available. The pdfium path
+    /// itself loads `libpdfium` from the `TASK_PDFIUM`
+    /// directory or the system library path at runtime.
+    #[arg(long, env = "TASK_PDFTOTEXT", default_value = "pdftotext")]
+    pdftotext: String,
+    /// Podcast episode picker for show-level URLs: a title
+    /// (or substring) matched against the feed. Episode
+    /// links (`?i=` on Apple) resolve without this; without
+    /// either, the latest episode is archived.
+    #[arg(long)]
+    episode: Option<String>,
+    /// Podcast transcript strategy: `auto` (feed transcript
+    /// tag, then local whisper when compiled in), `tag`
+    /// (feed tag only), `groq` (Groq API backfill,
+    /// needs GROQ_API_KEY, ~$0.04/audio-hour), `whisper`
+    /// (local model — requires a `--features whisper` build),
+    /// `none` (metadata + show notes only).
+    #[arg(long, default_value = "auto")]
+    transcribe: String,
+    /// Whisper model: a name (`small` dev default;
+    /// `large-v3-turbo` for production quality) cached under
+    /// ~/.cache/task/whisper/ and downloaded on first use, or
+    /// a path to a ggml .bin file.
+    #[arg(long, env = "TASK_WHISPER_MODEL", default_value = "small")]
+    whisper_model: String,
+    /// ffmpeg binary for enclosure → PCM decode (whisper
+    /// path only).
+    #[arg(long, env = "TASK_FFMPEG", default_value = "ffmpeg")]
+    ffmpeg: String,
+    #[arg(long, default_value = "default")]
+    wiki_id: String,
+    #[arg(long)]
+    org: Option<String>,
+    #[arg(long)]
+    server: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Subcommand)]
+enum WikiArchiveSub {
+    /// Bookmark-service importers — batch front-ends to the
+    /// archive router. Canonical-URL dedup makes re-runs (and
+    /// cross-service overlap) idempotent.
+    #[command(subcommand)]
+    Import(WikiArchiveImportCmd),
+    /// Extractor health: which archive routes currently work,
+    /// which are broken, and the last error seen — from the
+    /// per-org ledger every archive attempt records into.
+    /// The phase-3 social routes are accept-fragility by
+    /// design; this surface is how their breakage stays
+    /// honest instead of silent.
+    Health {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Re-attempt every unarchived stub (`unarchived-*.md`
+    /// under raw/sources/ — written when an accept-fragility
+    /// route was blocked). Cron-friendly: throttled per
+    /// route, always exits 0, prints a summary. A success
+    /// imports the real source and deletes the stub.
+    Retry {
+        /// Max stubs to attempt this run.
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Import retried sources but don't enqueue ingest.
+        #[arg(long)]
+        no_enqueue: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiArchiveImportCmd {
+    /// Readwise classic highlights (v2 /export/ API; Token
+    /// auth, 20 req/min — pages are throttled automatically).
+    Readwise {
+        /// Readwise access token (readwise.io/access_token).
+        #[arg(long, env = "READWISE_TOKEN")]
+        token: String,
+        /// Incremental cursor: only books with highlights
+        /// updated after this RFC3339 instant. The previous
+        /// run prints the value to pass here.
+        #[arg(long)]
+        updated_after: Option<String>,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+    /// Readwise Reader documents (v3 /list/ API with
+    /// withHtmlContent=true — full stored article HTML).
+    Reader {
+        #[arg(long, env = "READWISE_TOKEN")]
+        token: String,
+        #[arg(long)]
+        updated_after: Option<String>,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+    /// Karakeep (self-hosted) via its REST API with
+    /// includeContent=true. The JSON export is lossy (drops
+    /// crawled htmlContent) — the API is the real source.
+    Karakeep {
+        /// Instance base URL, e.g. https://keep.example.com
+        #[arg(long, env = "KARAKEEP_ENDPOINT")]
+        endpoint: String,
+        /// API key (ak2_… — Settings → API Keys).
+        #[arg(long, env = "KARAKEEP_TOKEN")]
+        token: String,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+    /// Pocket export zip (the service is dead — exports
+    /// only). Reads part_*.csv saves + annotations/*.json
+    /// highlights.
+    Pocket {
+        /// Path to the Pocket export zip.
+        zip: std::path::PathBuf,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+    /// Netscape bookmarks HTML (what every browser exports).
+    Bookmarks {
+        /// Path to bookmarks.html.
+        html: std::path::PathBuf,
+        #[command(flatten)]
+        common: WikiArchiveImportCommon,
+    },
+}
+
+#[derive(clap::Args, Clone)]
+struct WikiArchiveImportCommon {
+    /// Max items to archive this run (after dedup).
+    #[arg(long)]
+    limit: Option<usize>,
+    /// Parse + report only; nothing is written to the wiki.
+    #[arg(long)]
+    dry_run: bool,
+    /// Import sources but don't enqueue ingest tasks (use
+    /// `task wiki raw rescan` later to enqueue in bulk).
+    #[arg(long)]
+    no_enqueue: bool,
+    #[arg(long, default_value = "default")]
+    wiki_id: String,
+    #[arg(long)]
+    org: Option<String>,
+    #[arg(long)]
+    server: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -2903,6 +3407,15 @@ enum TaskCmd {
         /// Only tasks whose status is not done.
         #[arg(long)]
         open: bool,
+        /// Page size — at most this many rows (applied
+        /// server-side, after `--status`/`--project`, over a
+        /// stable path ordering; other filters then apply
+        /// client-side within the page).
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Rows to skip before `--limit` (server-side).
+        #[arg(long)]
+        offset: Option<u32>,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -2962,6 +3475,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     SetStatus {
         target: String,
@@ -2970,6 +3486,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     SetPriority {
         target: String,
@@ -2978,6 +3497,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the due date.
     SetDue {
@@ -2987,6 +3509,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the scheduled date.
     SetScheduled {
@@ -2996,6 +3521,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the owning project.
     SetProject {
@@ -3005,6 +3533,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the milestone link.
     SetMilestone {
@@ -3014,6 +3545,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Replace the tag list.
     SetTags {
@@ -3024,6 +3558,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Move backing markdown file. `id` preserved.
     Rename {
@@ -3033,6 +3570,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the renamed task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     Delete {
         target: String,
@@ -3114,6 +3654,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the due date.
     SetDue {
@@ -3123,6 +3666,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the life-goal link.
     SetGoal {
@@ -3132,6 +3678,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the forge sync ref.
     SetForgeRef {
@@ -3141,6 +3690,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// `closed`. Just `set-status <target> closed`.
     Close {
@@ -3149,6 +3701,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Reopen (status = open).
     Reopen {
@@ -3157,6 +3712,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     Rename {
         target: String,
@@ -3165,6 +3723,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the renamed milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     Delete {
         target: String,
@@ -3378,11 +3939,22 @@ enum TimerCmd {
     /// session is already open.
     Start {
         /// Free-text description. Quoted to allow spaces.
-        description: String,
-        /// Project frontmatter id (uuid) the session is
-        /// logged against. Empty = uncategorized.
+        /// Optional when `--task` is given (defaults to the
+        /// task's title).
+        #[arg(required_unless_present = "task")]
+        description: Option<String>,
+        /// Task to track against — full UUID, unique id
+        /// prefix, or vault-relative path. Validates the
+        /// task exists and fills description (title),
+        /// project (the task's project), and task-note
+        /// (the task's path); explicit flags still win.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        task: Option<String>,
+        /// Project the session is logged against — uuid,
+        /// title, vault path, or a unique prefix of either.
+        /// Empty = uncategorized.
+        #[arg(long)]
+        project: Option<String>,
         /// Vault-relative path to the task note this
         /// session is for.
         #[arg(long, default_value = "")]
@@ -3393,34 +3965,62 @@ enum TimerCmd {
         /// to attach two.
         #[arg(long = "tag")]
         tags: Vec<String>,
+        /// Emit the started session as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Stop the current session. Snapshots `rate_cents` +
     /// `currency` via the rate cascade and writes the closed
     /// row.
-    Stop,
+    Stop {
+        /// Emit the closed session as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Show the active session, if any.
-    Active,
+    Active {
+        /// Emit the session as JSON (plus derived
+        /// `seconds_elapsed` and joined task / project
+        /// titles where resolvable). `null` when idle.
+        #[arg(long)]
+        json: bool,
+    },
     /// Atomic stop-then-start. Same args as `start`.
     Switch {
-        description: String,
+        #[arg(required_unless_present = "task")]
+        description: Option<String>,
+        /// Task to track against (id / prefix / path) —
+        /// same semantics as `start --task`.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        task: Option<String>,
+        /// Project — uuid, title, path, or unique prefix.
+        #[arg(long)]
+        project: Option<String>,
         #[arg(long, default_value = "")]
         task_note: String,
         #[arg(long = "tag")]
         tags: Vec<String>,
+        /// Emit `{stopped, started}` sessions as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Retro-log a past session: `--from` / `--to` ISO 8601
     /// timestamps + description. Skips the active-timer
     /// invariant.
     Log {
-        description: String,
+        #[arg(required_unless_present = "task")]
+        description: Option<String>,
         #[arg(long)]
         from: chrono::DateTime<chrono::Utc>,
         #[arg(long)]
         to: chrono::DateTime<chrono::Utc>,
+        /// Task to log against (id / prefix / path) — same
+        /// semantics as `start --task`.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        task: Option<String>,
+        /// Project — uuid, title, path, or unique prefix.
+        #[arg(long)]
+        project: Option<String>,
         #[arg(long, default_value = "")]
         task_note: String,
         /// `true` / `false` to override the project default.
@@ -3429,12 +4029,73 @@ enum TimerCmd {
         billable: Option<bool>,
         #[arg(long = "tag")]
         tags: Vec<String>,
-    },
-    /// List sessions. Defaults to the last 7 days.
-    List {
-        /// Only sessions on this project (frontmatter uuid).
+        /// Emit the logged session as JSON.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        json: bool,
+    },
+    /// Set an org-level member hourly rate (cascade level 3) for a
+    /// user. New sessions logged for that user snapshot this rate at
+    /// close. Upserts. Use `--org` to target the org's timer DB.
+    SetRate {
+        /// The member's user id (uuid).
+        #[arg(long)]
+        user_id: uuid::Uuid,
+        /// Hourly rate in cents (e.g. 3000 = $30/hr).
+        #[arg(long)]
+        cents: i64,
+        #[arg(long, default_value = "USD")]
+        currency: String,
+        /// Emit the stored rate as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Edit an existing session. Only the flags you pass change; the
+    /// billable rate is re-snapshotted from the cascade afterward
+    /// (so reassigning `--user-id` or `--project` re-rates it).
+    Edit {
+        /// Session id (uuid).
+        id: uuid::Uuid,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        from: Option<chrono::DateTime<chrono::Utc>>,
+        #[arg(long)]
+        to: Option<chrono::DateTime<chrono::Utc>>,
+        /// Reassign to a project — uuid, title, path, or a
+        /// unique prefix of either.
+        #[arg(long)]
+        project: Option<String>,
+        /// Reassign to a different member.
+        #[arg(long)]
+        user_id: Option<uuid::Uuid>,
+        #[arg(long)]
+        billable: Option<bool>,
+        #[arg(long)]
+        task_note: Option<String>,
+        /// Emit the updated session as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a session by id. Permanent.
+    Delete {
+        /// Session id (uuid).
+        id: uuid::Uuid,
+        /// Emit `{"deleted": <id>}` as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List sessions. Defaults to the last 7 days, all
+    /// users (matching the `finance project` rollup —
+    /// the per-org DB is already the scope).
+    List {
+        /// Only sessions on this project — uuid, title,
+        /// path, or a unique prefix of either.
+        #[arg(long)]
+        project: Option<String>,
+        /// Only sessions logged by this user id. Omit for
+        /// all users in the org.
+        #[arg(long)]
+        user: Option<uuid::Uuid>,
         /// Inclusive since-date. Defaults to 7 days ago.
         #[arg(long)]
         since: Option<chrono::DateTime<chrono::Utc>>,
@@ -3447,13 +4108,69 @@ enum TimerCmd {
         /// Filter billable / non-billable; omit for both.
         #[arg(long)]
         billable: Option<bool>,
+        /// Emit the sessions as a JSON array.
+        #[arg(long)]
+        json: bool,
     },
     /// Resolve the rate cascade for the configured user +
     /// project. Useful to preview "what will this session
     /// bill at" before stopping.
     Resolve {
+        /// Project — uuid, title, path, or unique prefix.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
+        /// Emit the resolution as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Audit which user_ids appear on sessions, with name
+    /// resolution from the org's `auth.sqlite`. Useful for
+    /// spotting detached / mis-attributed ids before
+    /// invoicing.
+    Users {
+        /// Emit the per-user aggregates as a JSON array.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Bulk-swap every matching session's `user_id`.
+    /// Optional filters narrow the swap to a project /
+    /// date window — without them, ALL sessions for `from`
+    /// in the org are moved.
+    ReassignUser {
+        /// Source user_id (current owner of the sessions).
+        #[arg(long)]
+        from: uuid::Uuid,
+        /// Destination user_id (new owner).
+        #[arg(long)]
+        to: uuid::Uuid,
+        /// Limit to one project — uuid, title, path, or a
+        /// unique prefix of either.
+        #[arg(long)]
+        project: Option<String>,
+        /// Inclusive lower bound on `start_time`.
+        #[arg(long)]
+        since: Option<chrono::DateTime<chrono::Utc>>,
+        /// Exclusive upper bound on `start_time`.
+        #[arg(long)]
+        until: Option<chrono::DateTime<chrono::Utc>>,
+        /// Limit to sessions whose description matches this
+        /// substring (case-insensitive). Useful for
+        /// untangling "video editing" vs "PNG tracking"
+        /// rows that share a user_id.
+        #[arg(long)]
+        description_contains: Option<String>,
+        /// Re-snapshot `rate_cents` + `currency` from the
+        /// rate cascade for the *new* user. Off by default
+        /// so already-billed amounts don't shift; pass when
+        /// you're correcting a fresh mistake.
+        #[arg(long, default_value_t = false)]
+        rerate: bool,
+        /// Show what would change without writing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Emit the match/update summary as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Tag CRUD + attach to existing sessions.
     #[command(subcommand)]
@@ -3463,7 +4180,11 @@ enum TimerCmd {
 #[derive(Subcommand)]
 enum TimerTagCmd {
     /// List tags in the calling user's org.
-    List,
+    List {
+        /// Emit the tags as a JSON array.
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a tag. Idempotent — no-op if a tag with that
     /// name already exists.
     Create {
@@ -3471,15 +4192,26 @@ enum TimerTagCmd {
         /// Hex `#RRGGBB` (UI hint). Empty = auto-pick.
         #[arg(long, default_value = "")]
         color: String,
+        /// Emit the tag as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Delete a tag by name. Removes the join rows on every
     /// session via FK cascade.
-    Rm { name: String },
+    Rm {
+        name: String,
+        /// Emit the deleted tag as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Attach tags to an existing session.
     Attach {
         session_id: uuid::Uuid,
         #[arg(long = "tag", required = true)]
         tags: Vec<String>,
+        /// Emit `{session_id, attached}` as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Detach tags from a session. `--tag <name>` removes
     /// that tag; `--all` removes every tag.
@@ -3489,6 +4221,9 @@ enum TimerTagCmd {
         tags: Vec<String>,
         #[arg(long)]
         all: bool,
+        /// Emit `{session_id, detached}` as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -3500,6 +4235,9 @@ enum FinanceCmd {
         /// Any date inside the target week. Defaults to today.
         #[arg(long)]
         week_of: Option<chrono::NaiveDate>,
+        /// Emit the summary as JSON instead of markdown.
+        #[arg(long)]
+        json: bool,
     },
     /// Per-project hours rollup for a range. Defaults to
     /// the last 7 days.
@@ -3508,6 +4246,9 @@ enum FinanceCmd {
         since: Option<chrono::DateTime<chrono::Utc>>,
         #[arg(long)]
         until: Option<chrono::DateTime<chrono::Utc>>,
+        /// Emit the rollup rows as a JSON array.
+        #[arg(long)]
+        json: bool,
     },
     /// Build + render an invoice from billable sessions on
     /// one project. By default writes both a PDF and a
@@ -3517,18 +4258,30 @@ enum FinanceCmd {
     /// Use `--out` to override the PDF location and skip the
     /// vault export.
     Invoice {
-        /// Project frontmatter uuid.
+        /// Project frontmatter uuid. Omit to bill every
+        /// billable session in the range regardless of
+        /// project (including unscoped time).
         #[arg(long)]
-        project: uuid::Uuid,
+        project: Option<uuid::Uuid>,
         /// Inclusive lower bound on `start_time`.
         #[arg(long)]
         since: chrono::DateTime<chrono::Utc>,
         /// Exclusive upper bound on `start_time`.
         #[arg(long)]
         until: chrono::DateTime<chrono::Utc>,
-        /// Invoice number, e.g. `INV-2026-0042`.
+        /// Explicit invoice number, e.g. `INV-2026-0042`.
+        /// Mutually exclusive with `--prefix`.
+        #[arg(long, conflicts_with = "prefix")]
+        number: Option<String>,
+        /// Auto-increment from the highest existing
+        /// `<prefix>NNN` (zero-padded `--pad` digits, default
+        /// 3). Example: `--prefix TBM-2026-` → finds the
+        /// next free `TBM-2026-001`, `TBM-2026-002`…
         #[arg(long)]
-        number: String,
+        prefix: Option<String>,
+        /// Width of the numeric suffix when using `--prefix`.
+        #[arg(long, default_value_t = 3)]
+        pad: usize,
         /// Net N days for due date. Default 30.
         #[arg(long, default_value_t = 30)]
         net_days: i64,
@@ -3546,20 +4299,211 @@ enum FinanceCmd {
         /// `<vault>/Reports/Invoices/<num>.md`.
         #[arg(long, short)]
         out: Option<std::path::PathBuf>,
+        /// Render the PDF without persisting the invoice to
+        /// `finance.sqlite` or stamping
+        /// `work_sessions.invoice_id`. Use for previews.
+        /// Without this flag (the default), the same
+        /// `--since/--until` window won't re-bill the same
+        /// hours on a later run.
+        #[arg(long, default_value_t = false)]
+        no_commit: bool,
+        /// Emit the build/persist outcome as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List persisted invoices in `finance.sqlite`.
+    Invoices {
+        /// Filter by status slug (draft / sent / paid /
+        /// void / etc). Case-insensitive.
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by party id.
+        #[arg(long)]
+        party: Option<uuid::Uuid>,
+        /// Cap the output at this many rows (newest issued
+        /// first).
+        #[arg(long, default_value_t = 50)]
+        limit: u64,
+        /// Emit the invoices as a JSON array.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one persisted invoice in detail — header,
+    /// totals, line items, and the contributing session
+    /// ids stamped to it.
+    InvoiceShow {
+        /// Invoice number.
+        number: String,
+        /// Emit the invoice (+ stamped sessions) as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record a payment and update the invoice's balance.
+    /// `--amount` is in minor units (cents). Sets the
+    /// invoice to Paid if balance reaches zero,
+    /// PartiallyPaid otherwise.
+    InvoiceMarkPaid {
+        /// Invoice number.
+        number: String,
+        /// Payment amount in minor units (cents). Omit to
+        /// pay the full outstanding balance.
+        #[arg(long)]
+        amount: Option<i64>,
+        /// ISO 8601 date (YYYY-MM-DD) the payment landed.
+        /// Defaults to today.
+        #[arg(long)]
+        on: Option<chrono::NaiveDate>,
+        /// Free-text note (cheque #, wire ref, …).
+        #[arg(long, default_value = "")]
+        memo: String,
+        /// Emit the payment outcome as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cancel an invoice + un-stamp the contributing
+    /// sessions so they can be re-billed. Idempotent on a
+    /// missing invoice; refuses if the invoice already has
+    /// payments against it (use a credit note instead).
+    InvoiceVoid {
+        /// Invoice number.
+        number: String,
+        /// Emit the void outcome as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
+/// Global `--org` / `--server` flags, captured once before dispatch.
+/// Subcommands that still declare local duplicates shadow these; the
+/// shared resolvers ([`resolve_active_org`], [`resolve_org_vox_url`],
+/// `org_ctx::resolve_active`) fall back here when a handler passes
+/// `None`, so `task --org foo <any subcommand>` works even where the
+/// local flag was removed (issue / threads) or never existed.
+static GLOBAL_ORG: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+static GLOBAL_SERVER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+pub(crate) fn global_org() -> Option<String> {
+    GLOBAL_ORG.get().cloned().flatten()
+}
+
+fn global_server() -> Option<String> {
+    GLOBAL_SERVER.get().cloned().flatten()
+}
+
 #[tokio::main]
-async fn main() -> eyre::Result<()> {
+async fn main() {
     // Best-effort .env load before clap reads env. Missing file is
     // not an error — we just fall through to the hard-coded default.
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
+    GLOBAL_ORG.set(cli.org.clone()).ok();
+    GLOBAL_SERVER.set(cli.server.clone()).ok();
+    // Error boundary: render the taxonomy line + hint and exit with
+    // the stable code (4 not-found / 5 conflict / 6 connection / 1).
+    if let Err(report) = run(cli).await {
+        errors::exit_with(&report);
+    }
+}
+
+/// The proto/server skew guard half of `task doctor`: fetch the
+/// server's `/.well-known/task-server.json`, compare its
+/// `schema_stamps` (computed from the descriptors the *running*
+/// binary mounts) against this CLI's own build (the CLI links
+/// `task_server::schema_stamps()` directly, so both sides fold
+/// the exact same descriptor list — no second list to drift).
+///
+/// A mismatch means the running task-server predates (or
+/// postdates) a `*-proto` change relative to this CLI — the
+/// state that otherwise surfaces as vox `structural mismatch` /
+/// `InvalidPayload` / `Unknown method` errors with zero context.
+/// Exits non-zero so dev scripts can gate on it.
+async fn doctor_check_schema(ws_url: &str) -> eyre::Result<()> {
+    // ws(s)://host:port[/path] → http(s)://host:port/.well-known/…
+    let origin = {
+        let http = ws_url
+            .replacen("wss://", "https://", 1)
+            .replacen("ws://", "http://", 1);
+        let after_scheme = http.find("://").map_or(http.len(), |i| i + 3);
+        let end = http[after_scheme..]
+            .find('/')
+            .map_or(http.len(), |i| after_scheme + i);
+        http[..end].to_owned()
+    };
+    let url = format!("{origin}/.well-known/task-server.json");
+
+    let doc: serde_json::Value = match reqwest::get(&url).await {
+        Ok(resp) => resp
+            .json()
+            .await
+            .map_err(|e| eyre::eyre!("parse {url}: {e}"))?,
+        Err(e) => {
+            println!("Schema check: SKIPPED — could not fetch {url} ({e})");
+            return Ok(());
+        }
+    };
+    let Some(served) = doc.get("schema_stamps").and_then(|v| v.as_object()) else {
+        println!(
+            "Schema check: UNVERIFIED — the server exposes no `schema_stamps` \
+             (it predates the skew guard). If you see `structural mismatch` / \
+             `InvalidPayload` errors, rebuild + restart task-server."
+        );
+        return Ok(());
+    };
+
+    let local = task_server::schema_stamps();
+    let mut stale: Vec<&str> = Vec::new();
+    let mut unserved: Vec<&str> = Vec::new();
+    for (name, stamp) in &local {
+        match served.get(*name).and_then(|v| v.as_str()) {
+            Some(s) if s == stamp => {}
+            Some(_) => stale.push(name),
+            None => unserved.push(name),
+        }
+    }
+
+    if stale.is_empty() && unserved.is_empty() {
+        println!(
+            "Schema check: OK — {} service stamps match the running server",
+            local.len()
+        );
+        return Ok(());
+    }
+    if !unserved.is_empty() {
+        println!(
+            "Schema check: {} service(s) not stamped by the server (added since \
+             its build?): {}",
+            unserved.len(),
+            unserved.join(", ")
+        );
+    }
+    if !stale.is_empty() {
+        println!("Schema check: STALE — stamp mismatch on: {}", stale.join(", "));
+        println!(
+            "  The running task-server was built against different `*-proto` \
+             shapes than this CLI."
+        );
+        println!(
+            "  Fix: rebuild + restart it (`cargo run -p task-server`), or rebuild \
+             this CLI if the server is newer."
+        );
+        return Err(eyre::eyre!(
+            "proto/server schema skew on {} service(s)",
+            stale.len()
+        ));
+    }
+    Ok(())
+}
+
+async fn run(cli: Cli) -> eyre::Result<()> {
     match cli.command {
         Commands::Doctor => {
+            let server = cli
+                .server
+                .unwrap_or_else(|| "ws://127.0.0.1:9090/vox".to_owned());
             let remote =
-                RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
+                RemoteVoxConfig::from_args(server.clone(), cli.session_token, cli.organization_id)?;
             println!("Vox endpoint: {}", remote.display_url);
+            doctor_check_schema(&server).await?;
         }
         Commands::Vault { cmd } => match cmd {
             // Sync ops touch vox and need async; everything
@@ -3619,8 +4563,17 @@ async fn main() -> eyre::Result<()> {
         Commands::Milestone(cmd) => {
             return Box::pin(run_milestone(cmd)).await;
         }
+        Commands::Workstream(cmd) => {
+            return Box::pin(workstream::run_workstream(cmd)).await;
+        }
         Commands::Location(cmd) => {
             return Box::pin(run_location(cmd)).await;
+        }
+        Commands::Inbox(cmd) => {
+            return Box::pin(run_inbox(cmd)).await;
+        }
+        Commands::Threads(cmd) => {
+            return Box::pin(run_threads(cmd)).await;
         }
         Commands::Recipe(cmd) => {
             return Box::pin(run_recipe(cmd)).await;
@@ -3630,6 +4583,9 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Pantry(cmd) => {
             return Box::pin(run_pantry(cmd)).await;
+        }
+        Commands::Shopping(cmd) => {
+            return Box::pin(mealprep::run_shopping(cmd)).await;
         }
         Commands::Body(cmd) => {
             return Box::pin(run_body(cmd)).await;
@@ -3643,6 +4599,15 @@ async fn main() -> eyre::Result<()> {
         Commands::Intake(cmd) => {
             return Box::pin(run_intake(cmd)).await;
         }
+        Commands::Plan(cmd) => {
+            return Box::pin(plan::run_plan(cmd)).await;
+        }
+        Commands::Next(args) => {
+            return Box::pin(plan::run_next(args)).await;
+        }
+        Commands::Brief(args) => {
+            return Box::pin(brief::run_brief(args)).await;
+        }
     }
     Ok(())
 }
@@ -3651,7 +4616,7 @@ async fn main() -> eyre::Result<()> {
 /// Mirror of the helper inside `run_vault_sync`, lifted out
 /// because project + goal share the same routing surface.
 fn resolve_org_vox_url(server: Option<String>, org_slug: &str) -> String {
-    let base = server.unwrap_or_else(|| {
+    let base = server.or_else(global_server).unwrap_or_else(|| {
         std::env::var("TASK_VOX_URL").unwrap_or_else(|_| "ws://127.0.0.1:18080".to_owned())
     });
     let stripped = base.trim_end_matches("/vox").trim_end_matches('/');
@@ -3701,8 +4666,17 @@ where
         let url = resolve_org_vox_url(server, slug);
         Box::pin(vox::connect(&url).establish())
             .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+            .map_err(|e| connect_error(&url, &e))
     }
+}
+
+/// Tag a vox connect/establish failure with the `Connection` exit
+/// class (6) and a "how do I point this somewhere else" hint.
+fn connect_error<E: std::fmt::Debug>(url: &str, e: &E) -> eyre::Report {
+    errors::connection(format!("connect `{url}`"))
+        .cause(format!("{e:?}"))
+        .hint("is task-server running? point the CLI elsewhere with --server or TASK_VOX_URL")
+        .report()
 }
 
 /// Establish a typed client given an already-resolved per-org vox URL
@@ -3725,7 +4699,7 @@ where
     } else {
         Box::pin(vox::connect(url).establish())
             .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+            .map_err(|e| connect_error(url, &e))
     }
 }
 
@@ -3748,12 +4722,15 @@ where
 /// stored session. Returns a friendly error if neither
 /// resolves.
 fn resolve_active_org(override_slug: Option<String>) -> eyre::Result<String> {
-    if let Some(s) = override_slug {
+    if let Some(s) = override_slug.or_else(global_org) {
         return Ok(s);
     }
-    session_store::load()?
-        .map(|s| s.active)
-        .ok_or_else(|| eyre::eyre!("no active org — pass --org or sign in first"))
+    session_store::load()?.map(|s| s.active).ok_or_else(|| {
+        errors::usage("resolve active org")
+            .cause("no org selected and no stored session")
+            .hint("pass --org <slug> or run `task auth login` first")
+            .report()
+    })
 }
 
 async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
@@ -3801,17 +4778,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
         } => {
             let slug = resolve_active_org(org)?;
             let client: ProjectServiceClient = establish_client(server, &slug).await?;
-            let p = if let Ok(id) = uuid::Uuid::parse_str(&target) {
-                client
-                    .get(id)
-                    .await
-                    .map_err(|e| eyre::eyre!("get(id): {e:?}"))?
-            } else {
-                client
-                    .get_by_path(target.clone())
-                    .await
-                    .map_err(|e| eyre::eyre!("get(path): {e:?}"))?
-            };
+            let p = resolve_project_target(&client, &target).await?;
 
             if json {
                 println!(
@@ -3841,6 +4808,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             parent,
             status,
             priority,
+            project_type,
             tags,
             details,
             org,
@@ -3862,6 +4830,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 title,
                 status: status.unwrap_or_else(|| "active".into()),
                 priority: priority.unwrap_or_else(|| "normal".into()),
+                project_type: project_type.unwrap_or_else(|| "general".into()),
                 lead: String::new(),
                 tags: project::model::Tags(tags),
                 parent_id,
@@ -3878,6 +4847,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 color: String::new(),
                 image: String::new(),
                 archived: false,
+                states: None,
                 date_created: None,
                 date_modified: None,
             };
@@ -3900,14 +4870,170 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             status,
             org,
             server,
+            json,
         } => {
-            mutate_project(target, org, server, |p| p.status = status).await?;
+            mutate_project(target, org, server, json, |p| p.status = status).await?;
+        }
+        ProjectCmd::States {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let p = resolve_project_target(&client, &target).await?;
+            let custom = p.states.is_some();
+            let registry = p.states.clone().unwrap_or_else(project::default_states);
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "project": p.id,
+                    "custom": custom,
+                    "states": registry,
+                }))?;
+                return Ok(());
+            }
+            let origin = if custom { "custom" } else { "default" };
+            println!("{}  ({origin} registry)\n", p.title);
+            for s in registry.ordered() {
+                let default = if s.default { "  (default)" } else { "" };
+                let color = if s.color.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", s.color)
+                };
+                println!("  {:<18} {:<10}{color}{default}", s.name, s.group.as_str());
+            }
+        }
+        ProjectCmd::SetStates {
+            target,
+            from,
+            add,
+            default_state,
+            clear,
+            org,
+            server,
+            json,
+        } => {
+            if clear && (from.is_some() || !add.is_empty()) {
+                return Err(eyre::eyre!("--clear can't be combined with --from/--add"));
+            }
+            if !clear && from.is_none() && add.is_empty() && default_state.is_none() {
+                return Err(eyre::eyre!(
+                    "nothing to do — pass --from <file|->, --add <name>:<group>, \
+                     --default <name>, or --clear"
+                ));
+            }
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let mut p = resolve_project_target(&client, &target).await?;
+
+            let next = if clear {
+                None
+            } else {
+                // Start from --from (whole-registry replace), else
+                // the current registry, else the default set — so
+                // `--add` extends rather than orphaning canonical
+                // states.
+                let mut cfg: project::StatesConfig = match &from {
+                    Some(src) => {
+                        let raw = if src == "-" {
+                            use std::io::Read as _;
+                            let mut s = String::new();
+                            std::io::stdin()
+                                .read_to_string(&mut s)
+                                .map_err(|e| eyre::eyre!("stdin: {e}"))?;
+                            s
+                        } else {
+                            std::fs::read_to_string(src)
+                                .map_err(|e| eyre::eyre!("read {src}: {e}"))?
+                        };
+                        // serde_yaml parses JSON too (YAML superset).
+                        serde_yaml::from_str(&raw)
+                            .map_err(|e| eyre::eyre!("parse states config: {e}"))?
+                    }
+                    None => p.states.clone().unwrap_or_else(project::default_states),
+                };
+                for spec in &add {
+                    let (name, group, color) = parse_state_spec(spec)?;
+                    let order = cfg
+                        .0
+                        .iter()
+                        .map(|s| s.order + 1)
+                        .max()
+                        .unwrap_or_default();
+                    match cfg
+                        .0
+                        .iter_mut()
+                        .find(|s| s.name.eq_ignore_ascii_case(&name))
+                    {
+                        Some(existing) => {
+                            existing.group = group;
+                            if let Some(c) = color {
+                                existing.color = c;
+                            }
+                        }
+                        None => cfg.0.push(project::StateDef {
+                            name,
+                            group,
+                            color: color.unwrap_or_default(),
+                            default: false,
+                            order,
+                        }),
+                    }
+                }
+                if let Some(name) = &default_state {
+                    if !cfg.0.iter().any(|s| s.name.eq_ignore_ascii_case(name)) {
+                        return Err(eyre::eyre!(
+                            "--default `{name}` is not in the registry — add it first"
+                        ));
+                    }
+                    for s in &mut cfg.0 {
+                        s.default = s.name.eq_ignore_ascii_case(name);
+                    }
+                }
+                if cfg.0.is_empty() {
+                    return Err(eyre::eyre!(
+                        "registry would be empty — use --clear to drop it instead"
+                    ));
+                }
+                Some(cfg)
+            };
+            p.states = next;
+            let updated = client
+                .update(p)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            let registry = updated
+                .states
+                .clone()
+                .unwrap_or_else(project::default_states);
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "project": updated.id,
+                    "custom": updated.states.is_some(),
+                    "states": registry,
+                }))?;
+                return Ok(());
+            }
+            if updated.states.is_none() {
+                println!("{}: custom registry cleared (default applies)", updated.title);
+            } else {
+                println!("{}: registry updated\n", updated.title);
+                for s in registry.ordered() {
+                    let default = if s.default { "  (default)" } else { "" };
+                    println!("  {:<18} {:<10}{default}", s.name, s.group.as_str());
+                }
+            }
         }
         ProjectCmd::SetTarget {
             target,
             date,
             org,
             server,
+            json,
         } => {
             let parsed = if matches!(
                 date.trim().to_ascii_lowercase().as_str(),
@@ -3920,7 +5046,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                         .map_err(|e| eyre::eyre!("target date `{date}` (want YYYY-MM-DD): {e}"))?,
                 )
             };
-            mutate_project(target, org, server, |p| p.target_date = parsed).await?;
+            mutate_project(target, org, server, json, |p| p.target_date = parsed).await?;
         }
         ProjectCmd::Progress {
             target,
@@ -3973,14 +5099,16 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             priority,
             org,
             server,
+            json,
         } => {
-            mutate_project(target, org, server, |p| p.priority = priority).await?;
+            mutate_project(target, org, server, json, |p| p.priority = priority).await?;
         }
         ProjectCmd::SetParent {
             target,
             parent,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -3990,27 +5118,30 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             } else {
                 Some(resolve_project_target(&client, &parent).await?.id)
             };
-            mutate_project(target, org, server, |p| p.parent_id = new_parent).await?;
+            mutate_project(target, org, server, json, |p| p.parent_id = new_parent).await?;
         }
         ProjectCmd::Archive {
             target,
             org,
             server,
+            json,
         } => {
-            mutate_project(target, org, server, |p| p.archived = true).await?;
+            mutate_project(target, org, server, json, |p| p.archived = true).await?;
         }
         ProjectCmd::Unarchive {
             target,
             org,
             server,
+            json,
         } => {
-            mutate_project(target, org, server, |p| p.archived = false).await?;
+            mutate_project(target, org, server, json, |p| p.archived = false).await?;
         }
         ProjectCmd::Rename {
             target,
             new_path,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
@@ -4020,7 +5151,11 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 .rename(p.id, new_path.clone())
                 .await
                 .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
-            println!("renamed → {}", renamed.path);
+            if json {
+                json_out::print_json(&renamed)?;
+            } else {
+                println!("renamed → {}", renamed.path);
+            }
         }
         ProjectCmd::Delete {
             target,
@@ -4050,26 +5185,20 @@ async fn connect_project_client(url: &str) -> eyre::Result<project::ProjectServi
     establish_for_url(url).await
 }
 
+/// Resolve a project reference — uuid, vault path, title, or a
+/// unique prefix of either (shared flexible resolver).
 async fn resolve_project_target(
     client: &project::ProjectServiceClient,
     target: &str,
 ) -> eyre::Result<project::ProjectInfo> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    client
-        .get_by_path(target.to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+    json_out::resolve_project_flexible(client, target).await
 }
 
 async fn mutate_project<F>(
     target: String,
     org: Option<String>,
     server: Option<String>,
+    json: bool,
     apply: F,
 ) -> eyre::Result<()>
 where
@@ -4084,8 +5213,61 @@ where
         .update(p)
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    if json {
+        json_out::print_json(&updated)?;
+    } else {
+        println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    }
     Ok(())
+}
+
+/// Per-project state registries: project id → its optional
+/// `states:` config. Best-effort (an unreachable project service
+/// degrades to the default registry everywhere).
+async fn project_states_map(
+    url: &str,
+) -> std::collections::HashMap<uuid::Uuid, Option<project::StatesConfig>> {
+    match connect_project_client(url).await {
+        Ok(pc) => pc
+            .list()
+            .await
+            .map(|ps| ps.into_iter().map(|p| (p.id, p.states)).collect())
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    }
+}
+
+/// Classify one task's status via its owning project's state
+/// registry (default registry when project unknown / unset).
+fn resolve_task_group(
+    states: &std::collections::HashMap<uuid::Uuid, Option<project::StatesConfig>>,
+    t: &task::TaskInfo,
+) -> project::StateGroup {
+    let cfg = t
+        .project_id
+        .and_then(|pid| states.get(&pid))
+        .and_then(Option::as_ref);
+    project::resolve_state_group(cfg, &t.status)
+}
+
+/// Parse a `--add` state spec: `<name>:<group>[:<color>]`.
+fn parse_state_spec(spec: &str) -> eyre::Result<(String, project::StateGroup, Option<String>)> {
+    let mut parts = spec.splitn(3, ':');
+    let name = parts.next().unwrap_or_default().trim();
+    let group_s = parts.next().unwrap_or_default().trim();
+    let color = parts.next().map(|c| c.trim().to_string());
+    if name.is_empty() || group_s.is_empty() {
+        return Err(eyre::eyre!(
+            "bad state spec `{spec}` — want <name>:<group>[:<color>]"
+        ));
+    }
+    let group = project::StateGroup::from_str(group_s).ok_or_else(|| {
+        eyre::eyre!(
+            "unknown group `{group_s}` — one of backlog / unstarted / started / \
+             completed / cancelled"
+        )
+    })?;
+    Ok((name.to_string(), group, color))
 }
 
 fn resolve_body(arg: Option<String>) -> eyre::Result<String> {
@@ -4212,17 +5394,7 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
         } => {
             let slug = resolve_active_org(org)?;
             let client: GoalServiceClient = establish_client(server, &slug).await?;
-            let g = if let Ok(id) = uuid::Uuid::parse_str(&target) {
-                client
-                    .get(id)
-                    .await
-                    .map_err(|e| eyre::eyre!("get(id): {e:?}"))?
-            } else {
-                client
-                    .get_by_path(target.clone())
-                    .await
-                    .map_err(|e| eyre::eyre!("get(path): {e:?}"))?
-            };
+            let g = resolve_goal_target(&client, &target).await?;
 
             if json {
                 println!(
@@ -4324,14 +5496,16 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
             status,
             org,
             server,
+            json,
         } => {
-            mutate_goal(target, org, server, |g| g.status = status).await?;
+            mutate_goal(target, org, server, json, |g| g.status = status).await?;
         }
         GoalCmd::SetParent {
             target,
             parent,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -4341,24 +5515,24 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
             } else {
                 Some(resolve_goal_target(&client, &parent).await?.id)
             };
-            mutate_goal(target, org, server, |g| g.parent_id = new_parent).await?;
+            mutate_goal(target, org, server, json, |g| g.parent_id = new_parent).await?;
         }
         GoalCmd::SetCycle {
             target,
             cycle,
             org,
             server,
+            json,
         } => {
-            let is_current = cycle == "current";
-            let arg = if is_current { None } else { Some(cycle) };
-            let new_cycle = resolve_cycle_arg(arg, is_current)?;
-            mutate_goal(target, org, server, |g| g.cycle_id = new_cycle).await?;
+            let new_cycle = resolve_cycle_arg(Some(cycle), false)?;
+            mutate_goal(target, org, server, json, |g| g.cycle_id = new_cycle).await?;
         }
         GoalCmd::Rename {
             target,
             new_path,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
@@ -4368,7 +5542,11 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
                 .rename(g.id, new_path)
                 .await
                 .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
-            println!("renamed → {}", renamed.path);
+            if json {
+                json_out::print_json(&renamed)?;
+            } else {
+                println!("renamed → {}", renamed.path);
+            }
         }
         GoalCmd::Delete {
             target,
@@ -4398,26 +5576,20 @@ async fn connect_goal_client(url: &str) -> eyre::Result<goal::GoalServiceClient>
     establish_for_url(url).await
 }
 
+/// Resolve a goal reference — uuid, vault path, title, or a unique
+/// prefix of either (shared flexible resolver).
 async fn resolve_goal_target(
     client: &goal::GoalServiceClient,
     target: &str,
 ) -> eyre::Result<goal::Goal> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    client
-        .get_by_path(target.to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+    json_out::resolve_goal_flexible(client, target).await
 }
 
 async fn mutate_goal<F>(
     target: String,
     org: Option<String>,
     server: Option<String>,
+    json: bool,
     apply: F,
 ) -> eyre::Result<()>
 where
@@ -4432,7 +5604,11 @@ where
         .update(g)
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    if json {
+        json_out::print_json(&updated)?;
+    } else {
+        println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    }
     Ok(())
 }
 
@@ -4447,7 +5623,7 @@ fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<
     use chrono::{Datelike, Local, Weekday};
     use cycle::FirstWeekRule;
 
-    if current {
+    if current || arg.as_deref() == Some("current") {
         let today = Local::now().date_naive();
         return Ok(cycle::cycle_for_date(
             today,
@@ -4465,8 +5641,10 @@ fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<
     if let Ok(id) = uuid::Uuid::parse_str(&s) {
         return Ok(Some(id));
     }
-    // Parse `YYYY:Qn:Cm`.
-    let parts: Vec<&str> = s.split(':').collect();
+    // Parse `YYYY:Qn:Cm` (also accepted with `-` separators, the
+    // form `cycle current` prints as its label: `2026-Q2-C3`).
+    let sep = if s.contains(':') { ':' } else { '-' };
+    let parts: Vec<&str> = s.split(sep).collect();
     if parts.len() == 3 {
         let year = parts[0].parse::<i32>().ok();
         let q = parts[1]
@@ -4493,16 +5671,20 @@ fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<
                     }
                 }
             }
-            return Err(eyre::eyre!(
-                "cycle `{s}` not found in surrounding years ({}..={})",
-                base - 1,
-                base + 2
-            ));
+            return Err(errors::not_found("resolve cycle", &s)
+                .cause(format!(
+                    "not found in surrounding years ({}..={})",
+                    base - 1,
+                    base + 2
+                ))
+                .report());
         }
     }
-    Err(eyre::eyre!(
-        "--cycle: expected UUID, `YYYY:Qn:Cm`, `current`, or `none` (got `{s}`)"
-    ))
+    Err(errors::usage("parse --cycle")
+        .cause(format!(
+            "expected UUID, `YYYY:Qn:Cm`, `current`, or `none` (got `{s}`)"
+        ))
+        .report())
 }
 
 fn print_goal_row(g: &goal::Goal, indent: usize, cycle: Option<String>) {
@@ -4522,11 +5704,15 @@ fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
     use chrono::Datelike;
     let rule = cycle::FirstWeekRule::AtLeastFourDaysInYear;
     match cmd {
-        CycleCmd::Current => {
+        CycleCmd::Current { json } => {
             let today = chrono::Local::now().date_naive();
             // Walk the year (and its neighbors) to find whether
             // we're inside a cycle or in a reset / bonus week.
             if let Some(c) = cycle::cycle_for_date(today, chrono::Weekday::Mon, rule) {
+                if json {
+                    json_out::print_json(&json_out::cycle_json(&c, today))?;
+                    return Ok(());
+                }
                 let total = (c.end_date - c.start_date).num_days() + 1;
                 let elapsed = (today - c.start_date).num_days() + 1;
                 let pct = (elapsed as f64) * 100.0 / (total as f64);
@@ -4537,16 +5723,35 @@ fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
                 println!("today:   {today}");
                 println!("day {elapsed} of {total}   ({pct:.0}%)");
                 println!("id:      {}", c.id);
+            } else if json {
+                json_out::print_json(&serde_json::json!({
+                    "cycle": null,
+                    "today": today,
+                    "between_cycles": true,
+                }))?;
             } else {
                 println!("today ({today}) is between cycles — reset or bonus week");
             }
         }
-        CycleCmd::List { year, week_start } => {
+        CycleCmd::List {
+            year,
+            week_start,
+            json,
+        } => {
             let year = year.unwrap_or_else(|| chrono::Local::now().year());
             let wd = cycle::weekday_from_short(&week_start)
                 .ok_or_else(|| eyre::eyre!("bad --week-start `{week_start}`"))?;
             let qs = cycle::generate_year(year, wd, rule);
             let bonus = cycle::has_bonus_week(year, wd, rule);
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "year": year,
+                    "week_start": week_start,
+                    "bonus_week": bonus,
+                    "quarters": qs,
+                }))?;
+                return Ok(());
+            }
             println!(
                 "Cyclic year {year}  week-start={week_start}  {}",
                 if bonus { "[cyclic-leap]" } else { "" }
@@ -5090,13 +6295,50 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             let Some(active_entry) = sess.active_server() else {
                 return Err(eyre::eyre!("no active server in session"));
             };
-            // Membership check.
+            // Resolve the reference against the user's memberships:
+            // uuid / id prefix, slug, or name (exact / unique prefix)
+            // — same matcher as every other entity flag. Doubles as
+            // the membership check (non-members never match).
             let memberships = list_user_memberships(active_entry.user_id, &auth_db_path).await?;
-            if !memberships.iter().any(|(m, _)| m.organization_id == org_id) {
-                return Err(eyre::eyre!("user is not a member of org {org_id}"));
+            let cands: Vec<json_out::Candidate> = memberships
+                .iter()
+                .map(|(m, o)| (m.organization_id, o.name.clone(), o.slug.clone()))
+                .collect();
+            let resolved = match json_out::match_entity(&cands, &org_id, "organization") {
+                Ok(i) => cands[i].0,
+                Err(fail) => {
+                    return Err(fail.into_report("organization", &org_id));
+                }
+            };
+            update_session_active_org(&active_entry.token, Some(resolved), &auth_db_path).await?;
+            println!("Architect-auth active membership set to {resolved}");
+        }
+        AuthCmd::Users => {
+            use architect_auth::db::AuthUserEntity;
+            use sea_orm::{Database, EntityTrait};
+            if !auth_db_path.exists() {
+                return Err(eyre::eyre!("no auth.sqlite at {}", auth_db_path.display()));
             }
-            update_session_active_org(&active_entry.token, Some(org_id), &auth_db_path).await?;
-            println!("Architect-auth active membership set to {org_id}");
+            let url = format!("sqlite://{}?mode=ro", auth_db_path.display());
+            let db = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("open {url}: {e}"))?;
+            let users = AuthUserEntity::find()
+                .all(&db)
+                .await
+                .map_err(|e| eyre::eyre!("query auth_users: {e}"))?;
+            if users.is_empty() {
+                println!("(no users)");
+            }
+            println!("{:<38}  {:<24}  email", "user_id", "name");
+            for u in users {
+                println!(
+                    "{:<38}  {:<24}  {}",
+                    u.id,
+                    u.name.unwrap_or_default(),
+                    u.email.unwrap_or_default()
+                );
+            }
         }
     }
     Ok(())
@@ -5176,8 +6418,8 @@ async fn update_session_active_org(
 /// **Recipe (must match `architect-auth/crypto.rs`):**
 /// `base64url-no-pad(SHA256(secret || ":" || token))`.
 fn hash_session_token(secret: &str, token: &str) -> String {
-    use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(secret.as_bytes());
@@ -5200,33 +6442,89 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
         .await
         .map_err(|e| eyre::eyre!("connect timer db `{db_url}`: {e}"))?;
     timer::Migrator::up(&timer_conn, None).await.ok();
+    // `TASK_VAULT_ROOT` is a fixture override; the real
+    // default is the active org's vault. (Was a cwd-relative
+    // `examples/vault` fallback in the invoice arm, which
+    // silently exported invoices into whatever repo you
+    // happened to run from.)
+    let vault_root = std::env::var("TASK_VAULT_ROOT")
+        .map_or_else(|_| ctx.root.vault_dir(), std::path::PathBuf::from);
 
     match cmd {
-        FinanceCmd::Weekly { week_of } => {
+        FinanceCmd::Weekly { week_of, json } => {
             let day = week_of.unwrap_or_else(|| chrono::Utc::now().date_naive());
             let summary = finance::reports::weekly_summary(&timer_conn, None, day)
                 .await
                 .map_err(|e| eyre::eyre!("weekly: {e}"))?;
-            print!("{}", summary.to_markdown());
-        }
-        FinanceCmd::Project { since, until } => {
-            use finance::reports::DateRange;
-            let range = if let (Some(s), Some(u)) = (since, until) {
-                DateRange { since: s, until: u }
+            if json {
+                json_out::print_json(&summary)?;
             } else {
-                DateRange::last_7_days()
+                print!("{}", summary.to_markdown());
+            }
+        }
+        FinanceCmd::Project { since, until, json } => {
+            use finance::reports::DateRange;
+            // Each bound defaults independently: missing
+            // `--until` means "now", missing `--since` means
+            // 7 days before until. Previously `--since`
+            // alone was silently ignored (full fallback to
+            // last-7-days).
+            let range = {
+                let u = until.unwrap_or_else(chrono::Utc::now);
+                let s = since.unwrap_or(u - chrono::Duration::days(7));
+                DateRange { since: s, until: u }
             };
             let rows = finance::reports::hours_by_project(&timer_conn, None, range)
                 .await
                 .map_err(|e| eyre::eyre!("project: {e}"))?;
+            if json {
+                // Rollup rows + the same resolved display label
+                // the human rendering computes.
+                let out: Vec<serde_json::Value> = rows
+                    .iter()
+                    .map(|r| {
+                        let mut v = serde_json::to_value(r).unwrap_or(serde_json::Value::Null);
+                        if let serde_json::Value::Object(map) = &mut v {
+                            let label = if !r.project_path.is_empty() {
+                                r.project_path.clone()
+                            } else if let Some(pid) = r.project_id {
+                                let resolved = project_path_for(&vault_root, Some(pid));
+                                if resolved.is_empty() {
+                                    format!("(project {pid})")
+                                } else {
+                                    resolved
+                                }
+                            } else {
+                                "(unscoped)".to_string()
+                            };
+                            map.insert("project".into(), label.into());
+                        }
+                        v
+                    })
+                    .collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
             if rows.is_empty() {
                 println!("(no closed sessions in range)");
             }
             for r in rows {
-                let project = if r.project_path.is_empty() {
-                    "(unscoped)".to_string()
-                } else {
+                // Older sessions may carry a project_id but
+                // an empty project_path (the path resolver
+                // used to miss nested project folders), so
+                // fall back to a vault lookup before
+                // declaring the bucket unscoped.
+                let project = if !r.project_path.is_empty() {
                     r.project_path.clone()
+                } else if let Some(pid) = r.project_id {
+                    let resolved = project_path_for(&vault_root, Some(pid));
+                    if resolved.is_empty() {
+                        format!("(project {pid})")
+                    } else {
+                        resolved
+                    }
+                } else {
+                    "(unscoped)".to_string()
                 };
                 println!(
                     "{project}\n  sessions: {}\n  total:    {}\n  billable: {} ({} {})",
@@ -5247,13 +6545,37 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             since,
             until,
             number,
+            prefix,
+            pad,
             net_days,
             client_name,
             out,
+            no_commit,
+            json,
         } => {
+            if number.is_none() && prefix.is_none() {
+                return Err(eyre::eyre!(
+                    "pass either --number <explicit> or --prefix <auto>"
+                ));
+            }
+            // Stable per-org / per-client UUIDv5 ids so
+            // repeated invoices share a single Book and
+            // Party row in finance.sqlite. Avoids the
+            // FK-constraint failure that hits when book_id /
+            // party_id are nil, and keeps the schema sane
+            // until a real CLI surface for Books + Parties
+            // lands.
+            let book_id = uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_DNS,
+                format!("task-finance-book/{}", ctx.root.slug()).as_bytes(),
+            );
+            let party_id = uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_DNS,
+                format!("task-finance-party/{}/{}", ctx.root.slug(), client_name).as_bytes(),
+            );
             let book = finance_proto::book::Book {
-                id: uuid::Uuid::nil(),
-                name: "CLI Book".into(),
+                id: book_id,
+                name: format!("{} Book", ctx.root.slug()),
                 kind: finance_proto::book::BookKind::Personal,
                 base_currency: "USD".into(),
                 settings_json: "{}".into(),
@@ -5261,7 +6583,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 updated_at: chrono::Utc::now(),
             };
             let party = finance_proto::party::Party {
-                id: uuid::Uuid::nil(),
+                id: party_id,
                 book_id: book.id,
                 kind: finance_proto::party::PartyKind::Client,
                 display_name: client_name.clone(),
@@ -5278,38 +6600,160 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
-            let build = finance::invoice_from_sessions::build_invoice_from_sessions(
-                &timer_conn,
-                finance::invoice_from_sessions::BuildInvoiceArgs {
-                    book,
-                    party: party.clone(),
-                    project_id: project,
-                    since,
-                    until,
-                    net_days,
-                    number,
-                    notes_public: "Thank you for your business.".into(),
-                    notes_private: String::new(),
-                    terms: format!("Net {net_days} from issue date."),
-                },
-            )
-            .await
-            .map_err(|e| eyre::eyre!("build invoice: {e}"))?;
-
-            let issuer = finance::pdf_adapter::IssuerProfile {
-                name: std::env::var("TASK_ISSUER_NAME").unwrap_or_else(|_| "Your Name".into()),
-                address: std::env::var("TASK_ISSUER_ADDRESS").unwrap_or_default(),
-                email: std::env::var("TASK_ISSUER_EMAIL").unwrap_or_default(),
-                phone: String::new(),
-                tax_id: String::new(),
+            // Open the org's finance.sqlite up-front (even
+            // for --no-commit) so we can pre-check the
+            // invoice number against the unique index and
+            // fail before spending render time on a dupe.
+            let finance_conn = {
+                use sea_orm_migration::MigratorTrait;
+                let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+                let conn = Database::connect(&url)
+                    .await
+                    .map_err(|e| eyre::eyre!("connect finance db `{url}`: {e}"))?;
+                finance_db::Migrator::up(&conn, None)
+                    .await
+                    .map_err(|e| eyre::eyre!("finance migrations: {e}"))?;
+                conn
             };
-            let ifp = finance::pdf_adapter::invoice_for_pdf(&build.invoice, &issuer, &party);
+            // Resolve the final invoice number: explicit
+            // --number, or auto-incremented from --prefix.
+            let final_number: String = if let Some(n) = number.clone() {
+                use finance_db::entity::{InvoiceColumn, InvoiceEntity};
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                let existing = InvoiceEntity::find()
+                    .filter(InvoiceColumn::Number.eq(n.clone()))
+                    .one(&finance_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("check invoice number: {e}"))?;
+                if existing.is_some() {
+                    return Err(eyre::eyre!(
+                        "invoice number `{n}` is already in finance.sqlite. Pick a new --number, or pass --no-commit to render-only."
+                    ));
+                }
+                n
+            } else {
+                let p = prefix.clone().expect("validated above");
+                next_invoice_number(&finance_conn, &p, pad).await?
+            };
+
+            // When `--project` is set we delegate to the
+            // pipeline's per-engagement query. Without it,
+            // load every billable + uninvoiced session in
+            // the window and hand the list to
+            // `build_from_models`.
+            let build = if let Some(pid) = project {
+                finance::invoice_from_sessions::build_invoice_from_sessions(
+                    &timer_conn,
+                    finance::invoice_from_sessions::BuildInvoiceArgs {
+                        book: book.clone(),
+                        party: party.clone(),
+                        project_id: pid,
+                        since,
+                        until,
+                        net_days,
+                        number: final_number.clone(),
+                        notes_public: String::new(),
+                        notes_private: String::new(),
+                        terms: String::new(),
+                    },
+                )
+                .await
+                .map_err(|e| eyre::eyre!("build invoice: {e}"))?
+            } else {
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+                let sessions = WorkSessionEntity::find()
+                    .filter(WorkSessionColumn::Billable.eq(true))
+                    .filter(WorkSessionColumn::EndTime.is_not_null())
+                    .filter(WorkSessionColumn::InvoiceId.is_null())
+                    .filter(WorkSessionColumn::StartTime.gte(since))
+                    .filter(WorkSessionColumn::StartTime.lt(until))
+                    .all(&timer_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("query sessions: {e}"))?;
+                finance::invoice_from_sessions::build_from_models(
+                    book.clone(),
+                    party.clone(),
+                    sessions,
+                    net_days,
+                    final_number.clone(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                )
+                .map_err(|e| eyre::eyre!("build invoice: {e}"))?
+            };
+
+            // Issuer ("From" block): `<org>/issuer.toml` is
+            // the durable source; `TASK_ISSUER_*` env vars
+            // override per-field for fixtures. "Your Name"
+            // placeholder only when neither is set.
+            let stored = org_proto::IssuerProfile::load(&ctx.root.issuer_path())
+                .map_err(|e| eyre::eyre!("issuer.toml: {e}"))?
+                .unwrap_or_default();
+            let field = |env: &str, file: String, default: &str| {
+                std::env::var(env).unwrap_or(if file.is_empty() {
+                    default.to_string()
+                } else {
+                    file
+                })
+            };
+            let issuer = finance::pdf_adapter::IssuerProfile {
+                name: field("TASK_ISSUER_NAME", stored.name, "Your Name"),
+                address: field("TASK_ISSUER_ADDRESS", stored.address, ""),
+                email: field("TASK_ISSUER_EMAIL", stored.email, ""),
+                phone: field("TASK_ISSUER_PHONE", stored.phone, ""),
+                tax_id: field("TASK_ISSUER_TAX_ID", stored.tax_id, ""),
+            };
+            let mut ifp = finance::pdf_adapter::invoice_for_pdf(&build.invoice, &issuer, &party);
+            // Resolve user_id → display name from the org's
+            // auth.sqlite. Missing rows fall back to a
+            // short-id label so a stranded id still reads.
+            let names_by_id = {
+                use architect_auth::db::{AuthUserColumn, AuthUserEntity};
+                use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
+                let auth_path = ctx.root.auth_db();
+                let mut map: std::collections::HashMap<uuid::Uuid, String> =
+                    std::collections::HashMap::new();
+                let ids: Vec<uuid::Uuid> = build.line_meta.iter().map(|m| m.user_id).collect();
+                if !ids.is_empty() && auth_path.exists() {
+                    let url = format!("sqlite://{}?mode=ro", auth_path.display());
+                    if let Ok(db) = Database::connect(&url).await {
+                        if let Ok(rows) = AuthUserEntity::find()
+                            .filter(AuthUserColumn::Id.is_in(ids.clone()))
+                            .all(&db)
+                            .await
+                        {
+                            for r in rows {
+                                let label = r
+                                    .name
+                                    .filter(|s| !s.is_empty())
+                                    .or(r.email)
+                                    .unwrap_or_else(|| r.id.simple().to_string());
+                                map.insert(r.id, label);
+                            }
+                        }
+                    }
+                }
+                map
+            };
+            enrich_invoice_with_assignees(&mut ifp, &build.line_meta, &names_by_id);
+            // User asked to drop the due-date row; keep
+            // `Invoice.due_date` in the proto for accounting
+            // semantics, just hide it on the PDF.
+            ifp.due_date.clear();
+            // Same idea for the status pill — the proto
+            // still says "Draft" until we mount a real
+            // posting flow, but the PDF doesn't need to
+            // shout that at the recipient.
+            ifp.status.clear();
+            // Period the invoice spans — drives the
+            // "Period:" row in the header so a reader
+            // doesn't have to scan line dates.
+            ifp.period_start = since.format("%Y-%m-%d").to_string();
+            ifp.period_end = until.format("%Y-%m-%d").to_string();
             // Decide PDF path: explicit --out wins; else vault-export under
             // `<vault>/Reports/Invoices/pdfs/<num>.pdf`.
-            let vault_root = std::env::var("TASK_VAULT_ROOT").map_or_else(
-                |_| std::path::PathBuf::from("examples/vault"),
-                std::path::PathBuf::from,
-            );
             let do_vault_export = out.is_none();
             let pdf_path: std::path::PathBuf = if let Some(p) = out {
                 p
@@ -5358,6 +6802,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             // Vault export: companion markdown stub at
             // `Reports/Invoices/<num>.md` wikilinking the
             // PDF. Skipped when caller passes --out.
+            let mut md_out: Option<std::path::PathBuf> = None;
             if do_vault_export {
                 let md_path = vault_root
                     .join("Reports")
@@ -5373,18 +6818,377 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                     &party,
                     &rel_pdf,
                     build.source_session_ids.len(),
+                    since,
+                    until,
+                    &ifp.people,
+                    &ifp.assignees,
                 );
                 std::fs::write(&md_path, md)
                     .map_err(|e| eyre::eyre!("write {}: {e}", md_path.display()))?;
-                println!("Wrote {}", md_path.display());
+                if !json {
+                    println!("Wrote {}", md_path.display());
+                }
+                md_out = Some(md_path);
+            }
+            // Persist to finance.sqlite + stamp the
+            // contributing sessions so the same range can't
+            // re-bill the same hours. SQLite-per-DB means
+            // we can't span a tx across the two; finance
+            // first (atomic insert), then timer stamp. If
+            // the stamp fails mid-way the worst case is a
+            // partial set of sessions linked to a real
+            // invoice — re-running `--no-commit=false` will
+            // pick up the leftovers next time because the
+            // invoice number now collides.
+            let mut stamped_sessions: u64 = 0;
+            if no_commit {
+                if !json {
+                    println!("Skipped commit (--no-commit). Sessions remain unbilled.");
+                }
+            } else {
+                use finance_db::entity::{
+                    BookColumn, BookEntity, InvoiceEntity, PartyColumn, PartyEntity,
+                };
+                use sea_orm::sea_query::OnConflict;
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+                // Insert-if-missing book + party (do-nothing
+                // on conflict). The first invoice in a fresh
+                // finance.sqlite is what creates these.
+                BookEntity::insert(finance::billing::book_to_active(&book))
+                    .on_conflict(OnConflict::column(BookColumn::Id).do_nothing().to_owned())
+                    .do_nothing()
+                    .exec(&finance_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("upsert book: {e}"))?;
+                PartyEntity::insert(finance::billing::party_to_active(&party))
+                    .on_conflict(OnConflict::column(PartyColumn::Id).do_nothing().to_owned())
+                    .do_nothing()
+                    .exec(&finance_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("upsert party: {e}"))?;
+                let active = finance::billing::invoice_to_active(&build.invoice);
+                InvoiceEntity::insert(active)
+                    .exec(&finance_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("insert invoice: {e}"))?;
+                let stamped = WorkSessionEntity::update_many()
+                    .col_expr(
+                        WorkSessionColumn::InvoiceId,
+                        sea_orm::sea_query::Expr::value(build.invoice.id),
+                    )
+                    .col_expr(
+                        WorkSessionColumn::UpdatedAt,
+                        sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+                    )
+                    .filter(WorkSessionColumn::Id.is_in(build.source_session_ids.clone()))
+                    .exec(&timer_conn)
+                    .await
+                    .map_err(|e| eyre::eyre!("stamp sessions: {e}"))?;
+                stamped_sessions = stamped.rows_affected;
+                if !json {
+                    println!(
+                        "Persisted invoice {} + stamped {} session(s).",
+                        build.invoice.id, stamped.rows_affected
+                    );
+                }
+            }
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "id": build.invoice.id,
+                    "number": build.invoice.number,
+                    "currency": build.invoice.currency,
+                    "subtotal_minor": build.invoice.subtotal_minor,
+                    "total_minor": build.invoice.total_minor,
+                    "sessions": build.source_session_ids,
+                    "pdf_path": pdf_path,
+                    "pdf_bytes": bytes_len,
+                    "markdown_path": md_out,
+                    "committed": !no_commit,
+                    "stamped_sessions": stamped_sessions,
+                }))?;
+            } else {
+                println!(
+                    "Wrote {} ({bytes_len} bytes, {} sessions, {} {})",
+                    pdf_path.display(),
+                    build.source_session_ids.len(),
+                    fmt_minor(build.invoice.total_minor),
+                    build.invoice.currency,
+                );
+            }
+        }
+        FinanceCmd::Invoices {
+            status,
+            party,
+            limit,
+            json,
+        } => {
+            use finance_db::entity::{InvoiceColumn, InvoiceEntity};
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+            use sea_orm_migration::MigratorTrait;
+            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+            let conn = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
+            finance_db::Migrator::up(&conn, None).await.ok();
+            let mut q = InvoiceEntity::find()
+                .order_by_desc(InvoiceColumn::IssueDate)
+                .order_by_desc(InvoiceColumn::CreatedAt)
+                .limit(limit);
+            if let Some(p) = party {
+                q = q.filter(InvoiceColumn::PartyId.eq(p));
+            }
+            let rows = q
+                .all(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("list invoices: {e}"))?;
+            let status_needle = status.map(|s| s.to_lowercase());
+            let filtered: Vec<_> = rows
+                .into_iter()
+                .filter(|r| {
+                    status_needle
+                        .as_ref()
+                        .is_none_or(|n| format!("{:?}", r.status).to_lowercase() == *n)
+                })
+                .collect();
+            if json {
+                let out: Vec<serde_json::Value> =
+                    filtered.iter().map(json_out::invoice_json).collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
+            if filtered.is_empty() {
+                println!("(no invoices)");
             }
             println!(
-                "Wrote {} ({bytes_len} bytes, {} sessions, {} {})",
-                pdf_path.display(),
-                build.source_session_ids.len(),
-                fmt_minor(build.invoice.total_minor),
-                build.invoice.currency,
+                "{:<24}  {:<11}  {:>12}  {:>12}  {:<10}",
+                "number", "issued", "total", "balance", "status"
             );
+            for r in filtered {
+                println!(
+                    "{:<24}  {:<11}  {:>12}  {:>12}  {:<10}",
+                    r.number,
+                    r.issue_date,
+                    fmt_minor(r.total_minor),
+                    fmt_minor(r.balance_minor),
+                    format!("{:?}", r.status).to_lowercase(),
+                );
+            }
+        }
+        FinanceCmd::InvoiceShow { number, json } => {
+            use finance_db::entity::{InvoiceColumn, InvoiceEntity};
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            use sea_orm_migration::MigratorTrait;
+            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+            let conn = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
+            finance_db::Migrator::up(&conn, None).await.ok();
+            let row = InvoiceEntity::find()
+                .filter(InvoiceColumn::Number.eq(number.clone()))
+                .one(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
+            // Sessions stamped to this invoice (best-effort).
+            let sessions = {
+                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+                WorkSessionEntity::find()
+                    .filter(WorkSessionColumn::InvoiceId.eq(row.id))
+                    .all(&timer_conn)
+                    .await
+                    .unwrap_or_default()
+            };
+            if json {
+                let mut v = json_out::invoice_json(&row);
+                if let serde_json::Value::Object(map) = &mut v {
+                    let rows: Vec<serde_json::Value> = sessions
+                        .into_iter()
+                        .map(|m| json_out::session_json(&timer_proto::WorkSession::from(m)))
+                        .collect();
+                    map.insert("sessions".into(), serde_json::Value::Array(rows));
+                }
+                json_out::print_json(&v)?;
+                return Ok(());
+            }
+            println!("Invoice {}", row.number);
+            println!("  id:          {}", row.id);
+            println!("  status:      {:?}", row.status);
+            println!("  issued:      {}", row.issue_date);
+            println!("  due:         {}", row.due_date);
+            println!("  currency:    {}", row.currency);
+            println!("  subtotal:    {}", fmt_minor(row.subtotal_minor));
+            println!("  total:       {}", fmt_minor(row.total_minor));
+            println!("  paid:        {}", fmt_minor(row.amount_paid_minor));
+            println!("  balance:     {}", fmt_minor(row.balance_minor));
+            println!("  party_id:    {}", row.party_id);
+            println!("  book_id:     {}", row.book_id);
+            println!("  line items:  {}", row.line_items.0.len());
+            for li in &row.line_items.0 {
+                println!(
+                    "    - {}  qty={:.2}h  amount={}",
+                    li.description,
+                    (li.quantity_milli as f64) / 1000.0,
+                    fmt_minor(li.line_total_minor),
+                );
+            }
+            println!("  sessions:    {}", sessions.len());
+            for s in sessions {
+                println!(
+                    "    - {}  {}",
+                    s.start_time.format("%Y-%m-%d %H:%M"),
+                    s.description
+                );
+            }
+        }
+        FinanceCmd::InvoiceMarkPaid {
+            number,
+            amount,
+            on,
+            memo,
+            json,
+        } => {
+            use finance_db::entity::{InvoiceActive, InvoiceColumn, InvoiceEntity};
+            use sea_orm::{
+                ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+            };
+            use sea_orm_migration::MigratorTrait;
+            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+            let conn = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
+            finance_db::Migrator::up(&conn, None).await.ok();
+            let row = InvoiceEntity::find()
+                .filter(InvoiceColumn::Number.eq(number.clone()))
+                .one(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
+            let outstanding = row.balance_minor;
+            if outstanding <= 0 {
+                return Err(eyre::eyre!(
+                    "invoice `{number}` already has zero balance ({})",
+                    fmt_minor(row.amount_paid_minor)
+                ));
+            }
+            let pay = amount.unwrap_or(outstanding);
+            if pay <= 0 {
+                return Err(eyre::eyre!("--amount must be positive"));
+            }
+            if pay > outstanding {
+                return Err(eyre::eyre!(
+                    "--amount {} exceeds outstanding balance {}",
+                    fmt_minor(pay),
+                    fmt_minor(outstanding)
+                ));
+            }
+            let new_paid = row.amount_paid_minor + pay;
+            let new_balance = outstanding - pay;
+            let new_status = if new_balance == 0 {
+                finance_proto::invoice::InvoiceStatus::Paid
+            } else {
+                finance_proto::invoice::InvoiceStatus::PartiallyPaid
+            };
+            let on_date = on.unwrap_or_else(|| chrono::Utc::now().date_naive());
+            let id = row.id;
+            let mut active: InvoiceActive = row.into();
+            active.amount_paid_minor = Set(new_paid);
+            active.balance_minor = Set(new_balance);
+            active.status = Set(new_status);
+            active.updated_at = Set(chrono::Utc::now());
+            active
+                .update(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("update invoice: {e}"))?;
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "id": id,
+                    "number": number,
+                    "payment_minor": pay,
+                    "on": on_date,
+                    "memo": memo,
+                    "status": format!("{new_status:?}").to_lowercase(),
+                    "amount_paid_minor": new_paid,
+                    "balance_minor": new_balance,
+                }))?;
+            } else {
+                println!(
+                    "Recorded payment of {} on {} ({}). status={:?}, paid={}, balance={}",
+                    fmt_minor(pay),
+                    on_date,
+                    if memo.is_empty() { "no memo" } else { &memo },
+                    new_status,
+                    fmt_minor(new_paid),
+                    fmt_minor(new_balance),
+                );
+            }
+        }
+        FinanceCmd::InvoiceVoid { number, json } => {
+            use finance_db::entity::{InvoiceActive, InvoiceColumn, InvoiceEntity};
+            use sea_orm::{
+                ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+            };
+            use sea_orm_migration::MigratorTrait;
+            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
+            let conn = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
+            finance_db::Migrator::up(&conn, None).await.ok();
+            let row = InvoiceEntity::find()
+                .filter(InvoiceColumn::Number.eq(number.clone()))
+                .one(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
+            if row.amount_paid_minor > 0 {
+                return Err(eyre::eyre!(
+                    "invoice `{number}` has payments against it ({}). Issue a credit note instead.",
+                    fmt_minor(row.amount_paid_minor)
+                ));
+            }
+            let invoice_id = row.id;
+            let mut active: InvoiceActive = row.into();
+            active.status = Set(finance_proto::invoice::InvoiceStatus::Cancelled);
+            active.updated_at = Set(chrono::Utc::now());
+            active
+                .update(&conn)
+                .await
+                .map_err(|e| eyre::eyre!("update invoice: {e}"))?;
+            // Un-stamp the contributing sessions so they
+            // become re-billable.
+            use sea_orm::Database;
+            let timer_url = std::env::var("TASK_TIMER_DB")
+                .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
+            let tc = Database::connect(&timer_url)
+                .await
+                .map_err(|e| eyre::eyre!("connect timer db: {e}"))?;
+            use timer::entity::{WorkSessionColumn, WorkSessionEntity};
+            let cleared = WorkSessionEntity::update_many()
+                .col_expr(
+                    WorkSessionColumn::InvoiceId,
+                    sea_orm::sea_query::Expr::value(Option::<uuid::Uuid>::None),
+                )
+                .col_expr(
+                    WorkSessionColumn::UpdatedAt,
+                    sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+                )
+                .filter(WorkSessionColumn::InvoiceId.eq(invoice_id))
+                .exec(&tc)
+                .await
+                .map_err(|e| eyre::eyre!("un-stamp sessions: {e}"))?;
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "id": invoice_id,
+                    "number": number,
+                    "status": "cancelled",
+                    "sessions_unstamped": cleared.rows_affected,
+                }))?;
+            } else {
+                println!(
+                    "Voided `{number}` and un-stamped {} session(s).",
+                    cleared.rows_affected
+                );
+            }
         }
     }
     Ok(())
@@ -5411,15 +7215,311 @@ fn fmt_minor(c: i64) -> String {
     )
 }
 
+/// Stitch assignee labels onto every line, sort by
+/// (assignee → date), and synthesize the per-assignee
+/// summary block + the two chart SVGs that the template
+/// embeds verbatim.
+///
+/// Single-assignee invoices are left untouched (no column,
+/// no summary, no charts) — the breakdown is only useful
+/// when the work is split across people.
+/// Scan `finance_invoices.number` for rows whose number
+/// starts with `prefix` and whose suffix parses as an
+/// integer; return `<prefix><next>` zero-padded to `pad`.
+/// Starts at 1 if no match exists.
+async fn next_invoice_number(
+    conn: &sea_orm::DatabaseConnection,
+    prefix: &str,
+    pad: usize,
+) -> eyre::Result<String> {
+    use finance_db::entity::{InvoiceColumn, InvoiceEntity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    let rows = InvoiceEntity::find()
+        .filter(InvoiceColumn::Number.starts_with(prefix))
+        .all(conn)
+        .await
+        .map_err(|e| eyre::eyre!("scan invoice numbers: {e}"))?;
+    let highest = rows
+        .iter()
+        .filter_map(|r| {
+            r.number
+                .strip_prefix(prefix)
+                .and_then(|s| s.parse::<u64>().ok())
+        })
+        .max()
+        .unwrap_or(0);
+    let next = highest + 1;
+    Ok(format!("{prefix}{next:0>pad$}"))
+}
+
+fn enrich_invoice_with_assignees(
+    ifp: &mut finance::pdf_adapter::InvoiceForPdf,
+    line_meta: &[finance::invoice_from_sessions::LineMeta],
+    names_by_id: &std::collections::HashMap<uuid::Uuid, String>,
+) {
+    if ifp.lines.len() != line_meta.len() || line_meta.is_empty() {
+        return;
+    }
+    // Distinct chart-friendly palette. Reused mod-N for
+    // unusually large teams.
+    const PALETTE: &[&str] = &[
+        "#3b82f6", "#f97316", "#10b981", "#a855f7", "#ef4444", "#eab308", "#0ea5e9", "#ec4899",
+    ];
+    let label_for = |uid: uuid::Uuid| -> String {
+        names_by_id
+            .get(&uid)
+            .cloned()
+            .unwrap_or_else(|| format!("user {}", &uid.simple().to_string()[..8]))
+    };
+
+    // Tag each line with its assignee name + carry the
+    // matching meta through the sort so downstream
+    // aggregations stay aligned with the rendered lines.
+    let mut tagged: Vec<(
+        usize,
+        String,
+        finance::pdf_adapter::InvoiceLineForPdf,
+        finance::invoice_from_sessions::LineMeta,
+    )> = ifp
+        .lines
+        .drain(..)
+        .zip(line_meta.iter().copied())
+        .enumerate()
+        .map(|(i, (mut line, meta))| {
+            let name = label_for(meta.user_id);
+            line.assignee = name.clone();
+            (i, name, line, meta)
+        })
+        .collect();
+    tagged.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+
+    // Hide the per-line assignee column on
+    // single-assignee invoices (no useful signal), but
+    // still produce the per-task breakdown below.
+    let distinct: std::collections::BTreeSet<&str> =
+        tagged.iter().map(|(_, n, _, _)| n.as_str()).collect();
+    let single_assignee = distinct.len() <= 1;
+    if single_assignee {
+        for (_, _, line, _) in &mut tagged {
+            line.assignee.clear();
+        }
+    }
+
+    // Aggregate by task (case-folded description) AND by
+    // person from the sorted tuples — meta is paired with
+    // its line so totals can't drift if sort order changes.
+    let mut totals: std::collections::BTreeMap<String, (i64, i64)> =
+        std::collections::BTreeMap::new();
+    let mut by_person_raw: std::collections::BTreeMap<String, (i64, i64)> =
+        std::collections::BTreeMap::new();
+    for (_, _name, line, meta) in &tagged {
+        let key = canonical_task_label(&line.description);
+        let t = totals.entry(key).or_insert((0, 0));
+        t.0 += meta.secs;
+        t.1 += meta.cents;
+        // Use the user-id directly so the per-person split
+        // is correct even when we've hidden the column.
+        let person = label_for(meta.user_id);
+        if !person.is_empty() {
+            let p = by_person_raw.entry(person).or_insert((0, 0));
+            p.0 += meta.secs;
+            p.1 += meta.cents;
+        }
+    }
+    ifp.lines = tagged.into_iter().map(|(_, _, l, _)| l).collect();
+    if totals.len() <= 1 {
+        return;
+    }
+    let total_secs: i64 = totals.values().map(|(s, _)| *s).sum();
+    let total_secs_f = total_secs.max(1) as f64;
+
+    let tasks: Vec<finance::pdf_adapter::AssigneeSummary> = totals
+        .iter()
+        .enumerate()
+        .map(|(i, (name, (secs, cents)))| {
+            let hours = *secs as f64 / 3600.0;
+            let pct = (*secs as f64) * 100.0 / total_secs_f;
+            finance::pdf_adapter::AssigneeSummary {
+                name: name.clone(),
+                hours: format!("{hours:.2}"),
+                amount: fmt_minor(*cents),
+                pct: format!("{pct:.1}"),
+                color: PALETTE[i % PALETTE.len()].to_string(),
+            }
+        })
+        .collect();
+
+    ifp.donut_svg = build_donut_svg(&tasks, &totals, total_secs);
+    ifp.bars_svg = build_bars_svg(&tasks, &totals);
+    ifp.assignees = tasks;
+
+    // Per-person concise roll-up, computed above from the
+    // sorted (line, meta) tuples — guaranteed aligned.
+    let total_p_secs = by_person_raw.values().map(|(s, _)| *s).sum::<i64>().max(1) as f64;
+    ifp.people = by_person_raw
+        .into_iter()
+        .enumerate()
+        .map(
+            |(i, (name, (secs, cents)))| finance::pdf_adapter::AssigneeSummary {
+                name,
+                hours: format!("{:.2}", secs as f64 / 3600.0),
+                amount: fmt_minor(cents),
+                pct: format!("{:.1}", (secs as f64) * 100.0 / total_p_secs),
+                color: PALETTE[i % PALETTE.len()].to_string(),
+            },
+        )
+        .collect();
+}
+
+/// Pull a stable task label out of a line description.
+/// Lines are formatted as `"{date_prefix}  {description}"`
+/// — the date prefix is either `YYYY-MM-DD` or
+/// `YYYY-MM-DD – MM-DD`. Strip it, normalise the
+/// remainder, and case-fold for grouping.
+fn canonical_task_label(line_desc: &str) -> String {
+    let trimmed = line_desc.trim_start();
+    // Date prefix always starts with 10 chars of date —
+    // skip until the first run of two spaces, which is
+    // how the prefix is separated from the description.
+    let body = trimmed.split_once("  ").map_or(trimmed, |(_, rest)| rest);
+    let body = body.trim().trim_end_matches(" (mixed rates)");
+    let mut out = String::with_capacity(body.len());
+    let mut prev_was_space = false;
+    for ch in body.chars() {
+        if ch.is_whitespace() {
+            if !prev_was_space {
+                out.push(' ');
+            }
+            prev_was_space = true;
+        } else {
+            for c in ch.to_lowercase() {
+                out.push(c);
+            }
+            prev_was_space = false;
+        }
+    }
+    // Title-case the first letter so the legend reads
+    // naturally ("Video editing" vs "video editing").
+    let mut chars = out.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => "Untitled".to_string(),
+    }
+}
+
+/// SVG donut showing each assignee's share of total hours.
+/// Inline + self-contained — fulgur fetches no externals.
+fn build_donut_svg(
+    summaries: &[finance::pdf_adapter::AssigneeSummary],
+    totals: &std::collections::BTreeMap<String, (i64, i64)>,
+    total_secs: i64,
+) -> String {
+    const SIZE: f64 = 110.0;
+    const CX: f64 = SIZE / 2.0;
+    const CY: f64 = SIZE / 2.0;
+    const R_OUTER: f64 = 48.0;
+    const R_INNER: f64 = 28.0;
+    let total = total_secs.max(1) as f64;
+    let mut start = -std::f64::consts::FRAC_PI_2; // 12 o'clock
+    let mut paths = String::new();
+    for s in summaries {
+        let secs = totals.get(&s.name).map_or(0, |(sec, _)| *sec) as f64;
+        let frac = secs / total;
+        let sweep = frac * std::f64::consts::TAU;
+        let end = start + sweep;
+        // Single-slice (100%) needs a full-circle path
+        // rather than two arcs that share both endpoints.
+        let path = if (frac - 1.0).abs() < 1e-6 {
+            format!(
+                "M {x1:.3} {y1:.3} A {ro} {ro} 0 1 1 {x2:.3} {y2:.3} \
+                 M {x3:.3} {y3:.3} A {ri} {ri} 0 1 0 {x4:.3} {y4:.3} Z",
+                x1 = CX + R_OUTER,
+                y1 = CY,
+                x2 = CX + R_OUTER - 0.001,
+                y2 = CY,
+                x3 = CX + R_INNER,
+                y3 = CY,
+                x4 = CX + R_INNER - 0.001,
+                y4 = CY,
+                ro = R_OUTER,
+                ri = R_INNER,
+            )
+        } else {
+            let large = i32::from(sweep > std::f64::consts::PI);
+            let (sx, sy) = (CX + R_OUTER * start.cos(), CY + R_OUTER * start.sin());
+            let (ex, ey) = (CX + R_OUTER * end.cos(), CY + R_OUTER * end.sin());
+            let (isx, isy) = (CX + R_INNER * end.cos(), CY + R_INNER * end.sin());
+            let (iex, iey) = (CX + R_INNER * start.cos(), CY + R_INNER * start.sin());
+            format!(
+                "M {sx:.3} {sy:.3} A {R_OUTER} {R_OUTER} 0 {large} 1 {ex:.3} {ey:.3} \
+                 L {isx:.3} {isy:.3} A {R_INNER} {R_INNER} 0 {large} 0 {iex:.3} {iey:.3} Z",
+            )
+        };
+        paths.push_str(&format!("<path d=\"{path}\" fill=\"{}\" />", s.color));
+        start = end;
+    }
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{SIZE}\" height=\"{SIZE}\" viewBox=\"0 0 {SIZE} {SIZE}\">{paths}</svg>"
+    )
+}
+
+/// Horizontal bars — amount billed per assignee, ranked
+/// high-to-low. Pairs with the donut (hours share) so the
+/// reader sees rate-weighted contribution too.
+fn build_bars_svg(
+    summaries: &[finance::pdf_adapter::AssigneeSummary],
+    totals: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> String {
+    const ROW_H: f64 = 16.0;
+    const PAD_X: f64 = 4.0;
+    const BAR_AREA_W: f64 = 110.0;
+    let mut ranked: Vec<_> = summaries.iter().collect();
+    ranked.sort_by(|a, b| {
+        let av = totals.get(&a.name).map_or(0, |(_, c)| *c);
+        let bv = totals.get(&b.name).map_or(0, |(_, c)| *c);
+        bv.cmp(&av)
+    });
+    let max_cents = ranked
+        .iter()
+        .map(|a| totals.get(&a.name).map_or(0, |(_, c)| *c))
+        .max()
+        .unwrap_or(0)
+        .max(1) as f64;
+    let h = ROW_H * ranked.len() as f64 + 4.0;
+    let w = BAR_AREA_W + PAD_X * 2.0;
+    let mut bars = String::new();
+    for (i, s) in ranked.iter().enumerate() {
+        let cents = totals.get(&s.name).map_or(0, |(_, c)| *c) as f64;
+        let bar_w = (cents / max_cents) * BAR_AREA_W;
+        let y = i as f64 * ROW_H + 4.0;
+        bars.push_str(&format!(
+            "<rect x=\"{PAD_X}\" y=\"{y:.2}\" width=\"{bar_w:.2}\" height=\"8\" rx=\"2\" fill=\"{}\" />\
+             <text x=\"{tx:.2}\" y=\"{ty:.2}\" font-size=\"6.5\" font-family=\"Helvetica,Arial,sans-serif\" fill=\"#222\">${}</text>",
+            s.color,
+            s.amount,
+            tx = PAD_X + bar_w + 3.0,
+            ty = y + 7.0,
+        ));
+    }
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h:.2}\" viewBox=\"0 0 {w} {h:.2}\">{bars}</svg>"
+    )
+}
+
 /// Companion markdown stub for an invoice. Wikilinks the
 /// PDF (Obsidian-style `![[pdfs/INV-...pdf]]` embed) so a
 /// vault viewer can open the file inline. Frontmatter makes
 /// the page queryable in `Reports/Invoices/*.base`.
+#[allow(clippy::too_many_arguments)]
 fn render_invoice_markdown(
     invoice: &finance_proto::invoice::Invoice,
     party: &finance_proto::party::Party,
     rel_pdf_path: &str,
     session_count: usize,
+    period_start: chrono::DateTime<chrono::Utc>,
+    period_end: chrono::DateTime<chrono::Utc>,
+    people: &[finance::pdf_adapter::AssigneeSummary],
+    tasks: &[finance::pdf_adapter::AssigneeSummary],
 ) -> String {
     let mut out = String::new();
     out.push_str("---\n");
@@ -5428,6 +7528,11 @@ fn render_invoice_markdown(
     out.push_str(&format!("status: {:?}\n", invoice.status).to_lowercase());
     out.push_str(&format!("issueDate: {}\n", invoice.issue_date));
     out.push_str(&format!("dueDate: {}\n", invoice.due_date));
+    out.push_str(&format!(
+        "periodStart: {}\n",
+        period_start.format("%Y-%m-%d")
+    ));
+    out.push_str(&format!("periodEnd: {}\n", period_end.format("%Y-%m-%d")));
     out.push_str(&format!("currency: {}\n", invoice.currency));
     out.push_str(&format!("totalMinor: {}\n", invoice.total_minor));
     out.push_str(&format!("balanceMinor: {}\n", invoice.balance_minor));
@@ -5438,15 +7543,40 @@ fn render_invoice_markdown(
     out.push_str("---\n\n");
     out.push_str(&format!("# Invoice {}\n\n", invoice.number));
     out.push_str(&format!(
-        "**To:** {}  \n**Issued:** {}  \n**Due:** {}  \n**Total:** {} {}\n\n",
+        "**To:** {}  \n**Issued:** {}  \n**Period:** {} → {}  \n**Total:** {} {}\n\n",
         party.display_name,
         invoice.issue_date,
-        invoice.due_date,
+        period_start.format("%Y-%m-%d"),
+        period_end.format("%Y-%m-%d"),
         fmt_minor(invoice.total_minor),
         invoice.currency,
     ));
     out.push_str("## PDF\n\n");
     out.push_str(&format!("![[{rel_pdf_path}]]\n\n"));
+    if !people.is_empty() {
+        out.push_str("## Per person\n\n");
+        out.push_str("| Member | Hours | Share | Amount |\n");
+        out.push_str("|---|---:|---:|---:|\n");
+        for p in people {
+            out.push_str(&format!(
+                "| {} | {} | {}% | {} |\n",
+                p.name, p.hours, p.pct, p.amount
+            ));
+        }
+        out.push('\n');
+    }
+    if !tasks.is_empty() {
+        out.push_str("## Time by task\n\n");
+        out.push_str("| Task | Hours | Share | Amount |\n");
+        out.push_str("|---|---:|---:|---:|\n");
+        for t in tasks {
+            out.push_str(&format!(
+                "| {} | {} | {}% | {} |\n",
+                t.name, t.hours, t.pct, t.amount
+            ));
+        }
+        out.push('\n');
+    }
     out.push_str("## Line items\n\n");
     out.push_str("| Description | Quantity | Unit price | Amount |\n");
     out.push_str("|---|---:|---:|---:|\n");
@@ -5483,6 +7613,14 @@ fn render_invoice_markdown(
     out
 }
 
+/// Deterministic local-owner user id for an org. MUST stay identical to
+/// the web UI's `task_ui::chrome::owner_id` (`v5(org_id,
+/// "task-local-owner")`) so the CLI and the `/timer` page resolve the
+/// same user and therefore see the same sessions.
+fn timer_owner_id(org_id: uuid::Uuid) -> uuid::Uuid {
+    uuid::Uuid::new_v5(&org_id, b"task-local-owner")
+}
+
 async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()> {
     use sea_orm::Database;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -5502,26 +7640,23 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
         .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
     let vault_root = std::env::var("TASK_VAULT_ROOT")
         .map_or_else(|_| ctx.root.vault_dir(), std::path::PathBuf::from);
-    let stored_session = session_store::load().ok().flatten();
-    let session_user_id = stored_session
-        .as_ref()
-        .and_then(|s| s.active_server().map(|e| e.user_id));
-    let user_id = session_user_id
-        .or_else(|| {
-            std::env::var("TASK_USER_ID")
-                .ok()
-                .and_then(|s| s.parse::<uuid::Uuid>().ok())
-        })
-        .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap());
-    // `org_id` here is the architect-auth org membership id
-    // (different from the on-disk org slug). Not currently
-    // surfaced in the multi-server session shape; only an
-    // env-var override is honored. Phase 3 federation can
-    // promote this onto `ServerEntry`.
+    // Unified identity. The org id is the org's *manifest* id (the
+    // same value the web UI gets from `.well-known` → `OrgMeta.id`),
+    // and the default user is the deterministic "local owner" derived
+    // from it — matching `task_ui::chrome::owner_id`. This is what makes
+    // CLI- and UI-logged sessions land in the same `(org_id, user_id)`
+    // keyspace so both surfaces see the same data. `TASK_ORG_ID` /
+    // `TASK_USER_ID` still override (e.g. logging a contractor's time
+    // under a distinct user id).
     let org_id = std::env::var("TASK_ORG_ID")
         .ok()
         .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        .or_else(|| ctx.root.manifest().ok().map(|m| m.id))
         .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap());
+    let user_id = std::env::var("TASK_USER_ID")
+        .ok()
+        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        .unwrap_or_else(|| timer_owner_id(org_id));
 
     let conn = Database::connect(&db_url)
         .await
@@ -5534,19 +7669,70 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
     });
     let store = Store::new(conn, defaults);
 
+    // Per-org vox URL for `--task` / `--project` reference
+    // resolution. `establish_for_url` honors `TASK_EMBED` (in-process
+    // backend) vs a running server; the URL is only dialed when a
+    // flag actually needs resolving, so plain local timer use (raw
+    // uuids / no flags) keeps working fully offline.
+    let vox_url = resolve_org_vox_url(None, ctx.root.slug());
+    // `--task <id|prefix|path>` → TaskInfo, used to default the
+    // description / project / task-note on start | switch | log.
+    let resolve_task_flag = |flag: Option<String>| {
+        let vox_url = vox_url.clone();
+        async move {
+            match flag {
+                None => Ok::<_, eyre::Report>(None),
+                Some(t) => {
+                    let tc: task::TaskServiceClient = establish_for_url(&vox_url).await?;
+                    Ok(Some(json_out::resolve_task_flexible(&tc, &t).await?))
+                }
+            }
+        }
+    };
+    // `--project <uuid|title|path|prefix>` → (id, known-path).
+    let resolve_project_flag = |flag: Option<String>| {
+        let vox_url = vox_url.clone();
+        async move {
+            json_out::resolve_project_arg(flag.as_deref(), || async {
+                establish_for_url::<project::ProjectServiceClient>(&vox_url).await
+            })
+            .await
+        }
+    };
+
     match cmd {
         TimerCmd::Start {
             description,
+            task,
             project,
             task_note,
             tags,
+            json,
         } => {
-            let project_path = project_path_for(&vault_root, project);
+            let task_info = resolve_task_flag(task).await?;
+            let (mut project_id, resolved_path) = resolve_project_flag(project).await?;
+            // --task fills the gaps; explicit flags win.
+            if project_id.is_none() {
+                project_id = task_info.as_ref().and_then(|t| t.project_id);
+            }
+            let description = description
+                .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
+                .unwrap_or_default();
+            let task_note = if task_note.is_empty() {
+                task_info
+                    .as_ref()
+                    .map(|t| t.path.clone())
+                    .unwrap_or_default()
+            } else {
+                task_note
+            };
+            let project_path =
+                resolved_path.unwrap_or_else(|| project_path_for(&vault_root, project_id));
             let session = store
                 .start_timer(StartTimerRequest {
                     user_id,
                     org_id,
-                    project_id: project,
+                    project_id,
                     project_path,
                     task_note_path: task_note,
                     description,
@@ -5554,72 +7740,142 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .await
                 .map_err(|e| eyre::eyre!("start: {e}"))?;
             attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
-            println!("Started {} at {}", session.id, session.start_time);
-            println!("  description: {}", session.description);
-            if !session.project_path.is_empty() {
-                println!("  project:     {}", session.project_path);
-            }
-            println!("  billable:    {}", session.billable);
-            if !tags.is_empty() {
-                println!("  tags:        {}", tags.join(", "));
+            if json {
+                json_out::print_json(&json_out::session_json(&session))?;
+            } else {
+                println!("Started {} at {}", session.id, session.start_time);
+                println!("  description: {}", session.description);
+                if !session.project_path.is_empty() {
+                    println!("  project:     {}", session.project_path);
+                }
+                if !session.task_note_path.is_empty() {
+                    println!("  task:        {}", session.task_note_path);
+                }
+                println!("  billable:    {}", session.billable);
+                if !tags.is_empty() {
+                    println!("  tags:        {}", tags.join(", "));
+                }
             }
         }
-        TimerCmd::Stop => {
+        TimerCmd::Stop { json } => {
             let session = store
                 .stop_timer(user_id)
                 .await
                 .map_err(|e| eyre::eyre!("stop: {e}"))?;
-            let elapsed = session
-                .end_time
-                .unwrap_or_else(chrono::Utc::now)
-                .signed_duration_since(session.start_time);
-            println!("Stopped {}", session.id);
-            println!("  description: {}", session.description);
-            println!("  elapsed:     {}", fmt_duration(elapsed));
-            if session.billable {
-                println!(
-                    "  billed:      {} {} (rate: {} {}/h)",
-                    fmt_money(billed_cents(&session, elapsed)),
-                    session.currency,
-                    fmt_money(session.rate_cents),
-                    session.currency,
-                );
+            if json {
+                json_out::print_json(&json_out::session_json(&session))?;
+            } else {
+                let elapsed = session
+                    .end_time
+                    .unwrap_or_else(chrono::Utc::now)
+                    .signed_duration_since(session.start_time);
+                println!("Stopped {}", session.id);
+                println!("  description: {}", session.description);
+                println!("  elapsed:     {}", fmt_duration(elapsed));
+                if session.billable {
+                    println!(
+                        "  billed:      {} {} (rate: {} {}/h)",
+                        fmt_money(billed_cents(&session, elapsed)),
+                        session.currency,
+                        fmt_money(session.rate_cents),
+                        session.currency,
+                    );
+                }
             }
         }
-        TimerCmd::Active => {
+        TimerCmd::Active { json } => {
             match store
                 .active_timer(user_id)
                 .await
                 .map_err(|e| eyre::eyre!("{e}"))?
             {
                 Some(s) => {
-                    let elapsed = chrono::Utc::now().signed_duration_since(s.start_time);
-                    println!("Running for {} ({})", fmt_duration(elapsed), s.id);
-                    if !s.description.is_empty() {
-                        println!("  description: {}", s.description);
-                    }
-                    if !s.project_path.is_empty() {
-                        println!("  project:     {}", s.project_path);
-                    }
-                    if !s.task_note_path.is_empty() {
-                        println!("  task:        {}", s.task_note_path);
+                    if json {
+                        // Joined titles are best-effort: vox being
+                        // down shouldn't break `active --json` —
+                        // the entity + derived seconds still print.
+                        let task_title = if s.task_note_path.is_empty() {
+                            None
+                        } else {
+                            match establish_for_url::<task::TaskServiceClient>(&vox_url).await {
+                                Ok(tc) => tc
+                                    .get_by_path(s.task_note_path.clone())
+                                    .await
+                                    .ok()
+                                    .map(|t| t.title),
+                                Err(_) => None,
+                            }
+                        };
+                        let project_title = match s.project_id {
+                            None => None,
+                            Some(pid) => {
+                                match establish_for_url::<project::ProjectServiceClient>(&vox_url)
+                                    .await
+                                {
+                                    Ok(pc) => pc.get(pid).await.ok().map(|p| p.title),
+                                    Err(_) => None,
+                                }
+                            }
+                        };
+                        json_out::print_json(&json_out::session_json_joined(
+                            &s,
+                            task_title,
+                            project_title,
+                        ))?;
+                    } else {
+                        let elapsed = chrono::Utc::now().signed_duration_since(s.start_time);
+                        println!("Running for {} ({})", fmt_duration(elapsed), s.id);
+                        if !s.description.is_empty() {
+                            println!("  description: {}", s.description);
+                        }
+                        if !s.project_path.is_empty() {
+                            println!("  project:     {}", s.project_path);
+                        }
+                        if !s.task_note_path.is_empty() {
+                            println!("  task:        {}", s.task_note_path);
+                        }
                     }
                 }
-                None => println!("No active timer."),
+                None => {
+                    if json {
+                        println!("null");
+                    } else {
+                        println!("No active timer.");
+                    }
+                }
             }
         }
         TimerCmd::Switch {
             description,
+            task,
             project,
             task_note,
             tags,
+            json,
         } => {
-            let project_path = project_path_for(&vault_root, project);
+            let task_info = resolve_task_flag(task).await?;
+            let (mut project_id, resolved_path) = resolve_project_flag(project).await?;
+            if project_id.is_none() {
+                project_id = task_info.as_ref().and_then(|t| t.project_id);
+            }
+            let description = description
+                .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
+                .unwrap_or_default();
+            let task_note = if task_note.is_empty() {
+                task_info
+                    .as_ref()
+                    .map(|t| t.path.clone())
+                    .unwrap_or_default()
+            } else {
+                task_note
+            };
+            let project_path =
+                resolved_path.unwrap_or_else(|| project_path_for(&vault_root, project_id));
             let (closed, started) = store
                 .switch_timer(StartTimerRequest {
                     user_id,
                     org_id,
-                    project_id: project,
+                    project_id,
                     project_path,
                     task_note_path: task_note,
                     description,
@@ -5627,33 +7883,59 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .await
                 .map_err(|e| eyre::eyre!("switch: {e}"))?;
             attach_tags_by_name(store.conn(), org_id, started.id, &tags).await?;
-            if let Some(prev) = closed {
-                let elapsed = prev
-                    .end_time
-                    .unwrap_or_else(chrono::Utc::now)
-                    .signed_duration_since(prev.start_time);
-                println!("Stopped {} after {}", prev.id, fmt_duration(elapsed));
-            }
-            println!("Started {} at {}", started.id, started.start_time);
-            if !tags.is_empty() {
-                println!("  tags: {}", tags.join(", "));
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "stopped": closed.as_ref().map(json_out::session_json),
+                    "started": json_out::session_json(&started),
+                }))?;
+            } else {
+                if let Some(prev) = closed {
+                    let elapsed = prev
+                        .end_time
+                        .unwrap_or_else(chrono::Utc::now)
+                        .signed_duration_since(prev.start_time);
+                    println!("Stopped {} after {}", prev.id, fmt_duration(elapsed));
+                }
+                println!("Started {} at {}", started.id, started.start_time);
+                if !tags.is_empty() {
+                    println!("  tags: {}", tags.join(", "));
+                }
             }
         }
         TimerCmd::Log {
             description,
             from,
             to,
+            task,
             project,
             task_note,
             billable,
             tags,
+            json,
         } => {
-            let project_path = project_path_for(&vault_root, project);
+            let task_info = resolve_task_flag(task).await?;
+            let (mut project_id, resolved_path) = resolve_project_flag(project).await?;
+            if project_id.is_none() {
+                project_id = task_info.as_ref().and_then(|t| t.project_id);
+            }
+            let description = description
+                .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
+                .unwrap_or_default();
+            let task_note = if task_note.is_empty() {
+                task_info
+                    .as_ref()
+                    .map(|t| t.path.clone())
+                    .unwrap_or_default()
+            } else {
+                task_note
+            };
+            let project_path =
+                resolved_path.unwrap_or_else(|| project_path_for(&vault_root, project_id));
             let session = store
                 .log_session(LogSessionRequest {
                     user_id,
                     org_id,
-                    project_id: project,
+                    project_id,
                     project_path,
                     task_note_path: task_note,
                     description,
@@ -5664,18 +7946,113 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .await
                 .map_err(|e| eyre::eyre!("log: {e}"))?;
             attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
-            println!("Logged {} ({})", session.id, fmt_duration(to - from));
+            if json {
+                json_out::print_json(&json_out::session_json(&session))?;
+            } else {
+                println!("Logged {} ({})", session.id, fmt_duration(to - from));
+            }
+        }
+        TimerCmd::SetRate {
+            user_id,
+            cents,
+            currency,
+            json,
+        } => {
+            store
+                .set_org_member_rate(org_id, user_id, cents, &currency)
+                .await
+                .map_err(|e| eyre::eyre!("set rate: {e}"))?;
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "hourly_cents": cents,
+                    "currency": currency,
+                }))?;
+            } else {
+                println!(
+                    "Set org rate for {user_id}: {} {currency}/hr",
+                    fmt_money(cents)
+                );
+            }
+        }
+        TimerCmd::Edit {
+            id,
+            description,
+            from,
+            to,
+            project,
+            user_id: edit_user,
+            billable,
+            task_note,
+            json,
+        } => {
+            let (project_id, resolved_path) = resolve_project_flag(project).await?;
+            // Reassigning the project also refreshes the cached
+            // path (resolver-known path first, vault scan second).
+            let project_path = project_id.map(|pid| {
+                resolved_path.unwrap_or_else(|| project_path_for(&vault_root, Some(pid)))
+            });
+            let session = store
+                .update_session(timer_proto::service::UpdateSessionRequest {
+                    id,
+                    user_id: edit_user,
+                    project_id,
+                    project_path,
+                    task_note_path: task_note,
+                    description,
+                    start_time: from,
+                    end_time: to,
+                    billable,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("edit: {e}"))?;
+            if json {
+                json_out::print_json(&json_out::session_json(&session))?;
+            } else {
+                println!(
+                    "Updated {} — \"{}\" [{}] {}/hr",
+                    session.id,
+                    session.description,
+                    if session.billable {
+                        "billable"
+                    } else {
+                        "non-billable"
+                    },
+                    fmt_money(session.rate_cents),
+                );
+            }
+        }
+        TimerCmd::Delete { id, json } => {
+            store
+                .delete_session(id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e}"))?;
+            if json {
+                json_out::print_json(&serde_json::json!({ "deleted": id }))?;
+            } else {
+                println!("Deleted {id}");
+            }
         }
         TimerCmd::List {
             project,
+            user,
             since,
             until,
             open,
             billable,
+            json,
         } => {
+            let (project_id, _) = resolve_project_flag(project).await?;
+            // No default user filter: sessions land in this
+            // DB from several surfaces (CLI, web UI) whose
+            // identity derivations have drifted, and a
+            // silent owner filter made `list` undercount vs
+            // the finance rollup (which has always been
+            // org-wide).
             let filter = timer_proto::WorkSessionFilter {
-                user_id: Some(user_id),
-                project_id: project,
+                user_id: user,
+                project_id,
                 since: Some(
                     since.unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::days(7)),
                 ),
@@ -5687,6 +8064,11 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .query_sessions(&filter)
                 .await
                 .map_err(|e| eyre::eyre!("list: {e}"))?;
+            if json {
+                let out: Vec<serde_json::Value> = rows.iter().map(json_out::session_json).collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
             if rows.is_empty() {
                 println!("(no sessions)");
             }
@@ -5712,29 +8094,231 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 );
             }
         }
-        TimerCmd::Resolve { project } => {
+        TimerCmd::Users { json } => {
+            // All sessions in scope; aggregate per user_id.
+            let rows = store
+                .query_sessions(&timer_proto::WorkSessionFilter::default())
+                .await
+                .map_err(|e| eyre::eyre!("list: {e}"))?;
+            let mut agg: std::collections::BTreeMap<uuid::Uuid, (usize, i64, i64)> =
+                std::collections::BTreeMap::new();
+            for s in &rows {
+                let e = agg.entry(s.user_id).or_default();
+                e.0 += 1;
+                let secs = s
+                    .end_time
+                    .unwrap_or(s.start_time)
+                    .signed_duration_since(s.start_time)
+                    .num_seconds()
+                    .max(0);
+                e.1 += secs;
+                e.2 +=
+                    i64::try_from(i128::from(secs) * i128::from(s.rate_cents) / 3600).unwrap_or(0);
+            }
+            // Resolve names from auth.sqlite — same lookup
+            // the invoice path uses.
+            let names = {
+                use architect_auth::db::{AuthUserColumn, AuthUserEntity};
+                use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
+                let mut map: std::collections::HashMap<uuid::Uuid, String> =
+                    std::collections::HashMap::new();
+                let auth_path = ctx.root.auth_db();
+                if auth_path.exists() {
+                    let url = format!("sqlite://{}?mode=ro", auth_path.display());
+                    if let Ok(db) = Database::connect(&url).await {
+                        let ids: Vec<uuid::Uuid> = agg.keys().copied().collect();
+                        if let Ok(users) = AuthUserEntity::find()
+                            .filter(AuthUserColumn::Id.is_in(ids))
+                            .all(&db)
+                            .await
+                        {
+                            for u in users {
+                                let lbl = u
+                                    .name
+                                    .filter(|s| !s.is_empty())
+                                    .or(u.email)
+                                    .unwrap_or_default();
+                                map.insert(u.id, lbl);
+                            }
+                        }
+                    }
+                }
+                map
+            };
+            if json {
+                let out: Vec<serde_json::Value> = agg
+                    .iter()
+                    .map(|(uid, (count, secs, cents))| {
+                        serde_json::json!({
+                            "user_id": uid,
+                            "sessions": count,
+                            "seconds": secs,
+                            "cents": cents,
+                            "name": names.get(uid),
+                        })
+                    })
+                    .collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
+            if agg.is_empty() {
+                println!("(no sessions)");
+            }
+            println!(
+                "{:<38}  {:>6}  {:>9}  {:>10}  name",
+                "user_id", "count", "hours", "cents"
+            );
+            for (uid, (count, secs, cents)) in agg {
+                let hours = secs as f64 / 3600.0;
+                let name = names
+                    .get(&uid)
+                    .cloned()
+                    .unwrap_or_else(|| "(not in auth_users)".into());
+                println!("{uid:<38}  {count:>6}  {hours:>9.2}  {cents:>10}  {name}");
+            }
+        }
+        TimerCmd::ReassignUser {
+            from,
+            to,
+            project,
+            since,
+            until,
+            description_contains,
+            rerate,
+            dry_run,
+            json,
+        } => {
+            let (project_id, _) = resolve_project_flag(project).await?;
+            let filter = timer_proto::WorkSessionFilter {
+                user_id: Some(from),
+                project_id,
+                since,
+                until,
+                billable: None,
+                open: None,
+            };
+            let rows = store
+                .query_sessions(&filter)
+                .await
+                .map_err(|e| eyre::eyre!("list: {e}"))?;
+            let needle = description_contains.map(|s| s.to_lowercase());
+            let matched: Vec<_> = rows
+                .into_iter()
+                .filter(|s| {
+                    needle
+                        .as_ref()
+                        .is_none_or(|n| s.description.to_lowercase().contains(n.as_str()))
+                })
+                .collect();
+            if !json {
+                println!(
+                    "{} session(s) match (from={from}, to={to}, rerate={rerate}, dry_run={dry_run})",
+                    matched.len()
+                );
+                for s in &matched {
+                    println!(
+                        "  {}  {}  {}",
+                        s.start_time.format("%Y-%m-%d %H:%M"),
+                        s.id,
+                        s.description
+                    );
+                }
+            }
+            if dry_run || matched.is_empty() {
+                if json {
+                    json_out::print_json(&serde_json::json!({
+                        "from": from,
+                        "to": to,
+                        "rerate": rerate,
+                        "dry_run": dry_run,
+                        "matched": matched.len(),
+                        "updated": 0,
+                        "session_ids": matched.iter().map(|s| s.id).collect::<Vec<_>>(),
+                    }))?;
+                }
+                return Ok(());
+            }
+            let mut updated = 0_usize;
+            for s in &matched {
+                if rerate {
+                    // Goes through `update_session`, which
+                    // re-snapshots `rate_cents` + `currency`
+                    // from the cascade for the new user.
+                    store
+                        .update_session(timer_proto::service::UpdateSessionRequest {
+                            id: s.id,
+                            user_id: Some(to),
+                            ..Default::default()
+                        })
+                        .await
+                        .map_err(|e| eyre::eyre!("reassign {}: {e}", s.id))?;
+                } else {
+                    // Preserve the historical rate snapshot
+                    // — only swap user_id. Direct SeaORM
+                    // update bypasses cascade re-resolution.
+                    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+                    use timer::entity::{WorkSessionActive, WorkSessionEntity};
+                    let row = WorkSessionEntity::find_by_id(s.id)
+                        .one(store.conn())
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("session {} disappeared", s.id))?;
+                    let mut active: WorkSessionActive = row.into();
+                    active.user_id = Set(to);
+                    active.updated_at = Set(chrono::Utc::now());
+                    active.update(store.conn()).await?;
+                }
+                updated += 1;
+            }
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "from": from,
+                    "to": to,
+                    "rerate": rerate,
+                    "dry_run": false,
+                    "matched": matched.len(),
+                    "updated": updated,
+                    "session_ids": matched.iter().map(|s| s.id).collect::<Vec<_>>(),
+                }))?;
+            } else {
+                println!("Updated {updated} session(s).");
+            }
+        }
+        TimerCmd::Resolve { project, json } => {
+            let (project_id, _) = resolve_project_flag(project).await?;
             let resolved = store
-                .resolve_rate(user_id, project)
+                .resolve_rate(user_id, project_id)
                 .await
                 .map_err(|e| eyre::eyre!("resolve: {e}"))?;
-            println!(
-                "rate: {} {}/h  source: {:?}",
-                fmt_money(resolved.hourly_cents),
-                if resolved.currency.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    resolved.currency
-                },
-                resolved.source,
-            );
+            if json {
+                json_out::print_json(&resolved)?;
+            } else {
+                println!(
+                    "rate: {} {}/h  source: {:?}",
+                    fmt_money(resolved.hourly_cents),
+                    if resolved.currency.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        resolved.currency
+                    },
+                    resolved.source,
+                );
+            }
         }
         TimerCmd::Tag(sub) => match sub {
-            TimerTagCmd::List => {
+            TimerTagCmd::List { json } => {
                 let rows = TagEntity::find()
                     .filter(TagColumn::OrgId.eq(org_id))
                     .all(store.conn())
                     .await
                     .map_err(|e| eyre::eyre!("list tags: {e}"))?;
+                if json {
+                    let out: Vec<serde_json::Value> = rows
+                        .into_iter()
+                        .map(|t| json_out::tag_json(&timer_proto::Tag::from(t)))
+                        .collect();
+                    json_out::print_json(&out)?;
+                    return Ok(());
+                }
                 if rows.is_empty() {
                     println!("(no tags)");
                 }
@@ -5747,11 +8331,15 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                     println!("{}  {}  {}", t.id, t.name, color);
                 }
             }
-            TimerTagCmd::Create { name, color } => {
+            TimerTagCmd::Create { name, color, json } => {
                 let tag = ensure_tag(store.conn(), org_id, &name, &color).await?;
-                println!("{}  {}", tag.id, tag.name);
+                if json {
+                    json_out::print_json(&json_out::tag_json(&timer_proto::Tag::from(tag)))?;
+                } else {
+                    println!("{}  {}", tag.id, tag.name);
+                }
             }
-            TimerTagCmd::Rm { name } => {
+            TimerTagCmd::Rm { name, json } => {
                 let existing = TagEntity::find()
                     .filter(TagColumn::OrgId.eq(org_id))
                     .filter(TagColumn::Name.eq(name.clone()))
@@ -5765,16 +8353,34 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                     .exec(store.conn())
                     .await
                     .map_err(|e| eyre::eyre!("delete tag: {e}"))?;
-                println!("Deleted tag {} ({})", tag.name, tag.id);
+                if json {
+                    json_out::print_json(&serde_json::json!({
+                        "deleted": json_out::tag_json(&timer_proto::Tag::from(tag)),
+                    }))?;
+                } else {
+                    println!("Deleted tag {} ({})", tag.name, tag.id);
+                }
             }
-            TimerTagCmd::Attach { session_id, tags } => {
+            TimerTagCmd::Attach {
+                session_id,
+                tags,
+                json,
+            } => {
                 attach_tags_by_name(store.conn(), org_id, session_id, &tags).await?;
-                println!("Attached {} to {session_id}", tags.join(", "));
+                if json {
+                    json_out::print_json(&serde_json::json!({
+                        "session_id": session_id,
+                        "attached": tags,
+                    }))?;
+                } else {
+                    println!("Attached {} to {session_id}", tags.join(", "));
+                }
             }
             TimerTagCmd::Detach {
                 session_id,
                 tags,
                 all,
+                json,
             } => {
                 if all {
                     WorkSessionTagEntity::delete_many()
@@ -5782,7 +8388,14 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                         .exec(store.conn())
                         .await
                         .map_err(|e| eyre::eyre!("detach all: {e}"))?;
-                    println!("Detached all tags from {session_id}");
+                    if json {
+                        json_out::print_json(&serde_json::json!({
+                            "session_id": session_id,
+                            "detached": "all",
+                        }))?;
+                    } else {
+                        println!("Detached all tags from {session_id}");
+                    }
                 } else if tags.is_empty() {
                     return Err(eyre::eyre!("pass --tag <name> or --all"));
                 } else {
@@ -5802,7 +8415,14 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                         .exec(store.conn())
                         .await
                         .map_err(|e| eyre::eyre!("detach: {e}"))?;
-                    println!("Detached {} from {session_id}", tags.join(", "));
+                    if json {
+                        json_out::print_json(&serde_json::json!({
+                            "session_id": session_id,
+                            "detached": tags,
+                        }))?;
+                    } else {
+                        println!("Detached {} from {session_id}", tags.join(", "));
+                    }
                 }
             }
         },
@@ -5877,33 +8497,43 @@ async fn attach_tags_by_name(
 }
 
 /// Resolve the project markdown path from its frontmatter
-/// id by scanning `Projects/*.md`. `None` project_id → empty.
+/// id by scanning `Projects/**/*.md` recursively (projects
+/// conventionally live in their own folder, e.g.
+/// `Projects/<Name>/<Name>.md` — a flat scan misses them and
+/// every session then stores an empty `project_path`).
+/// `None` project_id → empty.
 fn project_path_for(vault_root: &std::path::Path, project_id: Option<uuid::Uuid>) -> String {
     let Some(pid) = project_id else {
         return String::new();
     };
-    let dir = vault_root.join("Projects");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return String::new();
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("md") {
-            continue;
-        }
-        let Ok(raw) = std::fs::read_to_string(&path) else {
+    let mut dirs = vec![vault_root.join("Projects")];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
-        let rel = path
-            .strip_prefix(vault_root)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let basename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        let Ok(p) = project::parse_str(&rel, basename, &raw) else {
-            continue;
-        };
-        if p.id == pid {
-            return rel;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let rel = path
+                .strip_prefix(vault_root)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let basename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let Ok(p) = project::parse_str(&rel, basename, &raw) else {
+                continue;
+            };
+            if p.id == pid {
+                return rel;
+            }
         }
     }
     String::new()
@@ -5940,7 +8570,7 @@ fn billed_cents(s: &timer_proto::WorkSession, elapsed: chrono::Duration) -> i64 
 
 async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
     use agent_codex::CodexBackend;
-    use agent_wiki::bridge::{IngestRequest, run_ingest};
+    use agent_wiki::bridge::{run_ingest, IngestRequest};
     use std::time::Duration;
     use wiki_live::WikiLive;
 
@@ -6602,6 +9232,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             );
             Ok(())
         }
+        WikiCmd::Archive(args) => run_wiki_archive(args).await,
         WikiCmd::Schema(c) => run_wiki_schema(c).await,
         WikiCmd::Catalog(c) => run_wiki_catalog(c).await,
         WikiCmd::Raw(c) => run_wiki_raw(c).await,
@@ -6855,6 +9486,1052 @@ async fn run_wiki_raw(cmd: WikiRawCmd) -> eyre::Result<()> {
         }
     }
     Ok(())
+}
+
+/// `task wiki archive <url|file>` — extract locally, then
+/// feed the UNCHANGED raw→ingest pipeline over RPC:
+/// `import_raw_source` (sha-dedup server-side) +
+/// `enqueue_ingest`. Canonical-URL dedup happens client-side
+/// by filename scan — archived sources are named
+/// `<slug>-<canon8>.md` so the same resource reached via
+/// different links collapses to one file.
+async fn run_wiki_archive(mut args: WikiArchiveArgs) -> eyre::Result<()> {
+    use wiki_proto::raw::ImportRawSource;
+    use wiki_proto::service::ingest::IngestClient;
+    use wiki_proto::service::raw_layer::RawLayerClient;
+
+    match args.cmd.take() {
+        Some(WikiArchiveSub::Import(cmd)) => return run_wiki_archive_import(cmd).await,
+        Some(WikiArchiveSub::Health { org, json }) => {
+            return run_wiki_archive_health(org, json);
+        }
+        Some(WikiArchiveSub::Retry {
+            limit,
+            wiki_id,
+            org,
+            server,
+            no_enqueue,
+        }) => {
+            return run_wiki_archive_retry(limit, wiki_id, org, server, no_enqueue).await;
+        }
+        None => {}
+    }
+    let target = args
+        .target
+        .clone()
+        .ok_or_else(|| eyre::eyre!("a URL or file path is required"))?;
+
+    let slug = resolve_active_org(args.org.clone())?;
+    let vox_url = resolve_org_vox_url(args.server.clone(), &slug);
+
+    // ── Resolve the target into import-ready parts ──────
+    let local = std::path::Path::new(&target);
+    let (filename, mime, title, bytes, canon8) = if local.exists() {
+        // Local file: bytes go in as-is (binary originals
+        // included) — the ingest pipeline + wiki-extract
+        // already handle md/txt/pdf/docx. No provenance
+        // frontmatter is injected into foreign bytes.
+        let name = local
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("source")
+            .to_string();
+        let mime = archive_mime_for_filename(&name);
+        let title = args.title.clone().unwrap_or_else(|| name.clone());
+        (name, mime, title, std::fs::read(local)?, None)
+    } else {
+        // Health bookkeeping — every attempt lands in the
+        // per-org extractor ledger (`task wiki archive health`).
+        let route_label = wiki_archive::classify(&target)
+            .ok()
+            .map(|(_, r)| wiki_archive::health::route_label(&r));
+        let health_path = archive_health_path(&slug);
+        match archive_extract_url(&target, &args).await {
+            Ok((prov, body)) => {
+                if let (Some(p), Some(label)) = (&health_path, route_label) {
+                    wiki_archive::health::record(p, label, Ok(()));
+                }
+                let md = wiki_archive::compose_source_markdown(&prov, &body);
+                (
+                    prov.filename(),
+                    "text/markdown".to_string(),
+                    prov.title.clone(),
+                    md.into_bytes(),
+                    Some(prov.canon8()),
+                )
+            }
+            Err(e) => {
+                if let (Some(p), Some(label)) = (&health_path, route_label) {
+                    wiki_archive::health::record(p, label, Err(&e.to_string()));
+                }
+                // Accept-fragility routes (Reddit/X) store an
+                // honest unarchived stub instead of failing —
+                // `task wiki archive retry` sweeps them later.
+                let Some((prov, body)) = unarchived_stub(&target, &e.to_string()) else {
+                    return Err(eyre::eyre!("archive {target}: {e}"));
+                };
+                println!("could not archive {target}: {e}");
+                println!(
+                    "storing an unarchived stub — `task wiki archive retry` re-attempts later"
+                );
+                let md = wiki_archive::compose_source_markdown(&prov, &body);
+                (
+                    format!("unarchived-{}", prov.filename()),
+                    "text/markdown".to_string(),
+                    prov.title.clone(),
+                    md.into_bytes(),
+                    Some(prov.canon8()),
+                )
+            }
+        }
+    };
+
+    let raw: RawLayerClient = establish_for_url(&vox_url).await?;
+
+    // ── Canonical-URL dedup ─────────────────────────────
+    let mut stale_stub: Option<String> = None;
+    if let Some(c8) = &canon8 {
+        let existing = raw
+            .list_raw_sources(args.wiki_id.clone())
+            .await
+            .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?;
+        let hit = wiki_archive::find_canonical_match(
+            existing.iter().map(|r| r.filename.as_str()),
+            c8,
+        )
+        .map(ToString::to_string);
+        if let Some(hit) = hit {
+            let importing_stub = filename.starts_with("unarchived-");
+            if importing_stub {
+                // Something (stub or real) already tracks this
+                // canonical URL — never stack stubs.
+                println!("already tracked as raw/sources/{hit} — not writing another stub");
+                return Ok(());
+            }
+            if hit.starts_with("unarchived-") {
+                // A failed earlier attempt left a stub and this
+                // run extracted successfully — replace it.
+                println!("replacing unarchived stub {hit}");
+                stale_stub = Some(hit);
+            } else if args.force {
+                println!("note: canonical URL already archived as {hit} (continuing: --force)");
+            } else {
+                if args.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "deduped": true, "existing": hit, "canon8": c8 })
+                    );
+                } else {
+                    println!("already archived (canonical-url dedup): raw/sources/{hit}");
+                    println!("pass --force to archive a fresh copy");
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    // ── Import (server sha-dedups byte-identical content) ──
+    let r = raw
+        .import_raw_source(
+            args.wiki_id.clone(),
+            ImportRawSource {
+                filename,
+                mime,
+                title,
+                bytes,
+                auto_enqueue: false, // explicit enqueue below
+            },
+        )
+        .await
+        .map_err(|e| eyre::eyre!("import_raw_source: {e:?}"))?;
+
+    // The successful archive supersedes any unarchived stub.
+    if let Some(stub) = stale_stub {
+        if let Err(e) = raw
+            .delete_raw_source(args.wiki_id.clone(), format!("raw/sources/{stub}"))
+            .await
+        {
+            println!("note: could not delete stale stub {stub}: {e:?}");
+        }
+    }
+
+    // ── Enqueue ingest ──────────────────────────────────
+    let task_id = if args.no_enqueue {
+        None
+    } else {
+        let ing: IngestClient = establish_for_url(&vox_url).await?;
+        let task = ing
+            .enqueue_ingest(
+                args.wiki_id.clone(),
+                r.path.clone(),
+                wiki_proto::ingest::SourceChange::Created,
+            )
+            .await
+            .map_err(|e| eyre::eyre!("enqueue_ingest: {e:?}"))?;
+        Some(task.id)
+    };
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "path": r.path,
+                "sha256": r.sha256,
+                "size": r.size,
+                "title": r.title,
+                "ingest_task": task_id,
+            })
+        );
+    } else {
+        println!("archived: {} ({} bytes, sha256 {})", r.path, r.size, &r.sha256[..12]);
+        match task_id {
+            Some(id) => println!("ingest task enqueued: {id}"),
+            None => println!("ingest not enqueued (--no-enqueue)"),
+        }
+    }
+    Ok(())
+}
+
+/// Per-org extractor-health ledger location (best-effort —
+/// health is advisory and never blocks an archive).
+fn archive_health_path(slug: &str) -> Option<std::path::PathBuf> {
+    org_proto::DataRoot::from_env()
+        .ok()
+        .map(|root| root.org(slug).path().join("wiki-archive-health.json"))
+}
+
+/// Build the unarchived-stub `(Provenance, body)` for a
+/// failed extraction — but ONLY for accept-fragility routes
+/// (Reddit/X), where blocks are expected and a retry sweep
+/// exists. Everything else keeps fail-loud semantics.
+fn unarchived_stub(target: &str, error: &str) -> Option<(wiki_archive::Provenance, String)> {
+    let (url, route) = wiki_archive::classify(target).ok()?;
+    if !matches!(
+        route,
+        wiki_archive::Route::Reddit { .. } | wiki_archive::Route::Tweet { .. }
+    ) {
+        return None;
+    }
+    let canonical = wiki_archive::canonicalize(&url, &route);
+    let label = wiki_archive::health::route_label(&route);
+    let mut prov = wiki_archive::Provenance::new(
+        target,
+        target,
+        canonical,
+        wiki_archive::content_type_for(&route),
+        "unarchived",
+    );
+    prov.archive_status = Some("unarchived".into());
+    prov.archive_error = Some(error.to_string());
+    let body = format!(
+        "## Archive status\n\nNot archived yet — {error}\n\nThe `{label}` route is \
+         accept-fragility tier: blocks and shape drift are expected, and the content \
+         is still only a retry away. Re-run `task wiki archive retry` later \
+         (cron-friendly), or re-archive this URL directly once the block clears."
+    );
+    Some((prov, body))
+}
+
+/// `task wiki archive health` — render the per-org ledger.
+fn run_wiki_archive_health(org: Option<String>, json: bool) -> eyre::Result<()> {
+    let slug = resolve_active_org(org)?;
+    let path = archive_health_path(&slug)
+        .ok_or_else(|| eyre::eyre!("no data root — set TASK_DATA_ROOT or run `task org init`"))?;
+    let ledger = wiki_archive::health::load(&path);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&ledger)?);
+    } else {
+        println!("{}", wiki_archive::health::render(&ledger));
+    }
+    Ok(())
+}
+
+/// `task wiki archive retry` — sweep `unarchived-*` stubs and
+/// re-attempt them, throttled per route. Always exits 0 so a
+/// cron line stays quiet; the summary tells the story.
+async fn run_wiki_archive_retry(
+    limit: Option<usize>,
+    wiki_id: String,
+    org: Option<String>,
+    server: Option<String>,
+    no_enqueue: bool,
+) -> eyre::Result<()> {
+    use wiki_proto::raw::ImportRawSource;
+    use wiki_proto::service::ingest::IngestClient;
+    use wiki_proto::service::raw_layer::RawLayerClient;
+
+    let slug = resolve_active_org(org.clone())?;
+    let vox_url = resolve_org_vox_url(server.clone(), &slug);
+    let raw: RawLayerClient = establish_for_url(&vox_url).await?;
+    let health_path = archive_health_path(&slug);
+
+    let stubs: Vec<String> = raw
+        .list_raw_sources(wiki_id.clone())
+        .await
+        .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?
+        .into_iter()
+        .map(|r| r.filename)
+        .filter(|f| f.starts_with("unarchived-"))
+        .collect();
+    if stubs.is_empty() {
+        println!("no unarchived stubs — nothing to retry");
+        return Ok(());
+    }
+    let limit = limit.unwrap_or(usize::MAX);
+    println!("{} unarchived stub(s); retrying up to {limit}", stubs.len());
+
+    // Default single-shot args for re-extraction.
+    let extract_args = WikiArchiveArgs {
+        cmd: None,
+        target: None,
+        title: None,
+        force: false,
+        no_enqueue,
+        yt_dlp: std::env::var("TASK_YTDLP").unwrap_or_else(|_| "yt-dlp".into()),
+        pdftotext: std::env::var("TASK_PDFTOTEXT").unwrap_or_else(|_| "pdftotext".into()),
+        episode: None,
+        transcribe: "auto".into(),
+        whisper_model: std::env::var("TASK_WHISPER_MODEL").unwrap_or_else(|_| "small".into()),
+        ffmpeg: std::env::var("TASK_FFMPEG").unwrap_or_else(|_| "ffmpeg".into()),
+        wiki_id: wiki_id.clone(),
+        org,
+        server,
+        json: false,
+    };
+
+    let (mut recovered, mut still_blocked, mut skipped) = (0usize, 0usize, 0usize);
+    let mut first = true;
+    for stub in stubs.iter().take(limit) {
+        // Pull the original URL out of the stub frontmatter.
+        let bytes = match raw
+            .read_raw_source(wiki_id.clone(), format!("raw/sources/{stub}"))
+            .await
+        {
+            Ok(b) => b,
+            Err(e) => {
+                println!("  skip {stub}: read failed: {e:?}");
+                skipped += 1;
+                continue;
+            }
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let Some(source_url) = text
+            .lines()
+            .find_map(|l| l.strip_prefix("source_url:"))
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .filter(|v| !v.is_empty())
+        else {
+            println!("  skip {stub}: no source_url in frontmatter");
+            skipped += 1;
+            continue;
+        };
+
+        // Throttle BETWEEN requests, per route — Reddit
+        // tolerates ~10/min anonymously.
+        let route = wiki_archive::classify(&source_url).ok().map(|(_, r)| r);
+        if !first {
+            let pause = match route {
+                Some(wiki_archive::Route::Reddit { .. }) => {
+                    wiki_archive::reddit::MIN_REQUEST_INTERVAL
+                }
+                _ => std::time::Duration::from_secs(1),
+            };
+            tokio::time::sleep(pause).await;
+        }
+        first = false;
+
+        let label = route.as_ref().map(wiki_archive::health::route_label);
+        match archive_extract_url(&source_url, &extract_args).await {
+            Ok((prov, body)) => {
+                if let (Some(p), Some(label)) = (&health_path, label) {
+                    wiki_archive::health::record(p, label, Ok(()));
+                }
+                let md = wiki_archive::compose_source_markdown(&prov, &body);
+                let r = raw
+                    .import_raw_source(
+                        wiki_id.clone(),
+                        ImportRawSource {
+                            filename: prov.filename(),
+                            mime: "text/markdown".into(),
+                            title: prov.title.clone(),
+                            bytes: md.into_bytes(),
+                            auto_enqueue: false,
+                        },
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("import_raw_source {source_url}: {e:?}"))?;
+                if !no_enqueue {
+                    let ing: IngestClient = establish_for_url(&vox_url).await?;
+                    ing.enqueue_ingest(
+                        wiki_id.clone(),
+                        r.path.clone(),
+                        wiki_proto::ingest::SourceChange::Created,
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("enqueue_ingest {}: {e:?}", r.path))?;
+                }
+                if let Err(e) = raw
+                    .delete_raw_source(wiki_id.clone(), format!("raw/sources/{stub}"))
+                    .await
+                {
+                    println!("  note: stub {stub} not deleted: {e:?}");
+                }
+                println!("  ✓ {source_url} → {}", r.path);
+                recovered += 1;
+            }
+            Err(e) => {
+                if let (Some(p), Some(label)) = (&health_path, label) {
+                    wiki_archive::health::record(p, label, Err(&e.to_string()));
+                }
+                println!("  ✗ {source_url}: still blocked ({e})");
+                still_blocked += 1;
+            }
+        }
+    }
+    println!(
+        "retry sweep: {recovered} recovered, {still_blocked} still blocked, {skipped} skipped \
+         (of {})",
+        stubs.len()
+    );
+    Ok(())
+}
+
+/// Route a URL to its extractor and run it. Returns the
+/// provenance + extracted markdown body.
+async fn archive_extract_url(
+    target: &str,
+    args: &WikiArchiveArgs,
+) -> eyre::Result<(wiki_archive::Provenance, String)> {
+    let title_override = args.title.clone();
+    let yt_dlp = args.yt_dlp.as_str();
+    let (url, route) = wiki_archive::classify(target).map_err(|e| eyre::eyre!("{e}"))?;
+    let canonical = wiki_archive::canonicalize(&url, &route);
+    let content_type = wiki_archive::content_type_for(&route);
+    match route {
+        wiki_archive::Route::Article => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            // Fetch once as bytes: extensionless PDF links
+            // (arxiv `/pdf/…`, DOI redirects) divert to the
+            // PDF extractor on content-type or magic bytes.
+            let (ct, bytes) = wiki_archive::article::fetch_bytes(
+                &client,
+                url.as_str(),
+                "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8",
+            )
+            .await
+            .map_err(|e| eyre::eyre!("{e}"))?;
+            if ct == "application/pdf" || bytes.starts_with(b"%PDF-") {
+                return archive_pdf_from_bytes(target, canonical, args, &bytes).await;
+            }
+            let html = String::from_utf8_lossy(&bytes);
+            let a = wiki_archive::article::extract_article(&html, url.as_str())
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let title = title_override
+                .or_else(|| (!a.title.is_empty()).then(|| a.title.clone()))
+                .unwrap_or_else(|| target.to_string());
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "dom_smoothie",
+            );
+            let body = match &a.byline {
+                Some(byline) => format!("_{byline}_\n\n{}", a.markdown),
+                None => a.markdown,
+            };
+            Ok((prov, body))
+        }
+        wiki_archive::Route::Pdf => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let (_ct, bytes) = wiki_archive::article::fetch_bytes(
+                &client,
+                url.as_str(),
+                "application/pdf,*/*;q=0.8",
+            )
+            .await
+            .map_err(|e| eyre::eyre!("{e}"))?;
+            archive_pdf_from_bytes(target, canonical, args, &bytes).await
+        }
+        wiki_archive::Route::GoogleDoc { doc_id } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let (doc_title, md) = wiki_archive::article::fetch_google_doc(&client, &doc_id)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let title = title_override.unwrap_or(doc_title);
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "gdocs-export",
+            );
+            Ok((prov, md))
+        }
+        wiki_archive::Route::ApplePodcast {
+            podcast_id,
+            episode_id,
+        } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let show = wiki_archive::podcast::apple_lookup_feed(&client, &podcast_id)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            // Episode links need the entity=podcastEpisode
+            // listing — a direct lookup of the episode id
+            // returns 0 results.
+            let episode_hint = match (&episode_id, &args.episode) {
+                (Some(ep), _) => {
+                    let hint = wiki_archive::podcast::apple_lookup_episode_title(
+                        &client,
+                        &podcast_id,
+                        ep,
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("{e}"))?;
+                    if hint.is_none() {
+                        println!(
+                            "note: episode id {ep} not in the show's latest 200 — archiving the latest episode instead (pass --episode <title> to pick)"
+                        );
+                    }
+                    hint
+                }
+                (None, Some(title)) => Some(title.clone()),
+                (None, None) => None,
+            };
+            archive_podcast_from_feed(
+                target,
+                canonical,
+                args,
+                &client,
+                &show.feed_url,
+                show.show_title.as_deref(),
+                episode_hint.as_deref(),
+            )
+            .await
+        }
+        wiki_archive::Route::SpotifyPodcast { .. } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let oembed_title = wiki_archive::podcast::spotify_oembed_title(&client, target)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            // Podcast Index title-search: the only route from a
+            // Spotify URL back to public RSS. Best-effort.
+            let pi_key = std::env::var("PODCASTINDEX_API_KEY").ok().filter(|s| !s.is_empty());
+            let pi_secret =
+                std::env::var("PODCASTINDEX_API_SECRET").ok().filter(|s| !s.is_empty());
+            if let (Some(key), Some(secret)) = (pi_key, pi_secret) {
+                match wiki_archive::podcast::podcastindex_feed_by_title(
+                    &client,
+                    &key,
+                    &secret,
+                    &oembed_title,
+                )
+                .await
+                {
+                    Ok(Some(feed_url)) => {
+                        println!("podcastindex resolved a public feed: {feed_url}");
+                        return archive_podcast_from_feed(
+                            target,
+                            canonical,
+                            args,
+                            &client,
+                            &feed_url,
+                            None,
+                            Some(&oembed_title),
+                        )
+                        .await;
+                    }
+                    Ok(None) => println!(
+                        "podcastindex: no feed matched `{oembed_title}` — falling back to metadata-only"
+                    ),
+                    Err(e) => println!("podcastindex lookup failed ({e}) — falling back to metadata-only"),
+                }
+            }
+            // Honest metadata-only archive: Spotify exposes no
+            // public audio stream or transcript.
+            let item = wiki_archive::feed::FeedItem {
+                title: oembed_title.clone(),
+                ..Default::default()
+            };
+            let body = wiki_archive::podcast::render_podcast_markdown(
+                None,
+                &item,
+                &[],
+                Some(
+                    "Spotify-exclusive: Spotify exposes no public audio stream or \
+                     transcript for this episode, so only metadata could be archived. \
+                     If the show also publishes a public RSS feed, archive its Apple \
+                     Podcasts page or feed URL instead — or set PODCASTINDEX_API_KEY / \
+                     PODCASTINDEX_API_SECRET so Task can resolve it by title.",
+                ),
+            );
+            let title = args.title.clone().unwrap_or(oembed_title);
+            let mut prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "spotify-oembed",
+            );
+            prov.media = Some(target.to_string());
+            Ok((prov, body))
+        }
+        wiki_archive::Route::Reddit { permalink } => {
+            // Dedicated client: Reddit 403s self-identifying
+            // UAs (no loid cookie) — see reddit.rs.
+            let client = wiki_archive::reddit::client().map_err(|e| eyre::eyre!("{e}"))?;
+            let thread = wiki_archive::reddit::fetch_thread(&client, &permalink)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let body = wiki_archive::reddit::render_reddit_markdown(&thread);
+            let title = title_override.unwrap_or_else(|| thread.title.clone());
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "reddit-json",
+            );
+            Ok((prov, body))
+        }
+        wiki_archive::Route::Tweet { status_id } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let result = wiki_archive::x::fetch_tweet(&client, &status_id)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            let body = wiki_archive::x::render_tweet_markdown(&result.tweet, target);
+            let title = title_override.unwrap_or_else(|| {
+                let head: String = result.tweet.text.chars().take(60).collect();
+                match &result.tweet.author_handle {
+                    Some(h) => format!("@{h}: {head}"),
+                    None => head,
+                }
+            });
+            // `extractor:` records which ladder rung answered
+            // — fragility honesty for later debugging.
+            let prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                result.rung,
+            );
+            Ok((prov, body))
+        }
+        wiki_archive::Route::YouTube { .. } | wiki_archive::Route::Video => {
+            let yt = wiki_archive::youtube::YtDlp::new(yt_dlp);
+            let meta = yt.probe(target).await.map_err(|e| eyre::eyre!("{e}"))?;
+            let blocks = match &meta.json3_track {
+                Some((lang, track_url)) => {
+                    let client =
+                        wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+                    let json3 =
+                        wiki_archive::article::fetch_text(&client, track_url, "application/json")
+                            .await
+                            .map_err(|e| eyre::eyre!("subtitle track ({lang}): {e}"))?;
+                    let cues = wiki_archive::youtube::parse_json3_cues(&json3)
+                        .map_err(|e| eyre::eyre!("{e}"))?;
+                    wiki_archive::youtube::coalesce_cues(
+                        &cues,
+                        wiki_archive::youtube::DEFAULT_BLOCK_SECS,
+                    )
+                }
+                None => Vec::new(),
+            };
+            let body = wiki_archive::youtube::render_video_markdown(&meta, &blocks);
+            let title = title_override.unwrap_or_else(|| meta.title.clone());
+            let mut prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical.clone(),
+                content_type,
+                "yt-dlp",
+            );
+            // `media:` = what the SourceViewer should embed.
+            prov.media = Some(canonical);
+            prov.duration_secs = meta.duration_secs;
+            Ok((prov, body))
+        }
+    }
+}
+
+/// PDF bytes → per-page text with `^p<page>` anchors.
+/// Engine order: pdfium (feature `pdf`, dynamic libpdfium
+/// binding) then `pdftotext -layout`. Title precedence:
+/// `--title` → PDF metadata title → URL filename stem.
+async fn archive_pdf_from_bytes(
+    target: &str,
+    canonical: String,
+    args: &WikiArchiveArgs,
+    bytes: &[u8],
+) -> eyre::Result<(wiki_archive::Provenance, String)> {
+    let (text, engine) = wiki_archive::pdf::extract_pdf(bytes, &args.pdftotext)
+        .await
+        .map_err(|e| eyre::eyre!("{e}"))?;
+    let title = args
+        .title
+        .clone()
+        .or_else(|| text.title.clone())
+        .unwrap_or_else(|| {
+            // Last path segment without the extension.
+            target
+                .rsplit('/')
+                .next()
+                .unwrap_or(target)
+                .split('?')
+                .next()
+                .unwrap_or(target)
+                .trim_end_matches(".pdf")
+                .trim_end_matches(".PDF")
+                .to_string()
+        });
+    let page_count = text.pages.len();
+    let body = wiki_archive::pdf::render_pdf_markdown(&text.pages);
+    let body = format!("_{page_count} page(s)_\n\n{body}");
+    let prov = wiki_archive::Provenance::new(title, target, canonical, "pdf", engine);
+    Ok((prov, body))
+}
+
+/// Archive one podcast episode from its RSS feed: pick the
+/// episode, resolve a transcript (feed `<podcast:transcript>`
+/// tag fast path → Groq backfill → local whisper, governed by
+/// `--transcribe`), render `^t<sec>`-anchored markdown.
+async fn archive_podcast_from_feed(
+    target: &str,
+    canonical: String,
+    args: &WikiArchiveArgs,
+    client: &reqwest::Client,
+    feed_url: &str,
+    show_title: Option<&str>,
+    episode_hint: Option<&str>,
+) -> eyre::Result<(wiki_archive::Provenance, String)> {
+    let xml = wiki_archive::article::fetch_text(client, feed_url, "application/rss+xml,*/*")
+        .await
+        .map_err(|e| eyre::eyre!("feed {feed_url}: {e}"))?;
+    let feed = wiki_archive::feed::parse_feed(&xml).map_err(|e| eyre::eyre!("{e}"))?;
+    let show_title = show_title.or(if feed.title.is_empty() { None } else { Some(&feed.title) });
+    let item = wiki_archive::feed::pick_episode(&feed, episode_hint).ok_or_else(|| {
+        let sample: Vec<&str> = feed.items.iter().take(5).map(|i| i.title.as_str()).collect();
+        eyre::eyre!(
+            "no episode matched `{}` — recent episodes: {}",
+            episode_hint.unwrap_or("<latest>"),
+            sample.join(" | ")
+        )
+    })?;
+
+    let (cues, extractor, note) = podcast_transcript_cues(args, client, item).await?;
+    let blocks =
+        wiki_archive::youtube::coalesce_cues(&cues, wiki_archive::youtube::DEFAULT_BLOCK_SECS);
+    let body =
+        wiki_archive::podcast::render_podcast_markdown(show_title, item, &blocks, note.as_deref());
+    let title = args.title.clone().unwrap_or_else(|| item.title.clone());
+    let mut prov =
+        wiki_archive::Provenance::new(title, target, canonical, "podcast", extractor);
+    // `media:` = the playable enclosure — the SourceViewer's
+    // audio player + seek-on-anchor reads this.
+    prov.media = item.enclosure_url.clone().or_else(|| Some(target.to_string()));
+    prov.duration_secs = item.duration_secs;
+    Ok((prov, body))
+}
+
+/// Transcript ladder for one episode, honest at every rung.
+/// Returns `(cues, extractor-label, note-when-empty)`.
+async fn podcast_transcript_cues(
+    args: &WikiArchiveArgs,
+    client: &reqwest::Client,
+    item: &wiki_archive::feed::FeedItem,
+) -> eyre::Result<(Vec<wiki_archive::youtube::Cue>, String, Option<String>)> {
+    let mode = args.transcribe.as_str();
+    if !matches!(mode, "auto" | "tag" | "groq" | "whisper" | "none") {
+        return Err(eyre::eyre!(
+            "--transcribe must be auto|tag|groq|whisper|none (got `{mode}`)"
+        ));
+    }
+    if mode == "none" {
+        return Ok((Vec::new(), "podcast-feed".into(), Some("Transcript skipped (--transcribe none).".into())));
+    }
+
+    // ── Fast path: the feed's own transcript tag ────────
+    if matches!(mode, "auto" | "tag") {
+        for tref in wiki_archive::transcript::pick_transcripts(&item.transcripts) {
+            let accept = if tref.mime.is_empty() { "*/*" } else { &tref.mime };
+            match wiki_archive::article::fetch_text(client, &tref.url, accept).await {
+                Ok(content) => {
+                    match wiki_archive::transcript::parse_transcript(&content, &tref.mime) {
+                        Ok(cues) => {
+                            return Ok((cues, "podcast-transcript-tag".into(), None));
+                        }
+                        Err(e) => println!("note: transcript {} unusable: {e}", tref.url),
+                    }
+                }
+                Err(e) => println!("note: transcript fetch {} failed: {e}", tref.url),
+            }
+        }
+        if mode == "tag" {
+            return Ok((
+                Vec::new(),
+                "podcast-feed".into(),
+                Some(
+                    "No usable transcript tag in the feed (--transcribe tag stops here; \
+                     try groq or whisper)."
+                        .into(),
+                ),
+            ));
+        }
+    }
+
+    // ── Backfills need the audio itself ─────────────────
+    let fetch_audio = || async {
+        let url = item
+            .enclosure_url
+            .as_deref()
+            .ok_or_else(|| eyre::eyre!("episode has no enclosure URL — nothing to transcribe"))?;
+        let enc = wiki_archive::podcast::enclosure_client().map_err(|e| eyre::eyre!("{e}"))?;
+        // Stacked redirect trackers are normal here; the
+        // enclosure client follows a deeper chain.
+        let (_ct, bytes) = wiki_archive::article::fetch_bytes(&enc, url, "audio/*,*/*")
+            .await
+            .map_err(|e| eyre::eyre!("enclosure {url}: {e}"))?;
+        eyre::Ok(bytes)
+    };
+
+    if mode == "groq" {
+        let key = std::env::var("GROQ_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| eyre::eyre!("--transcribe groq needs GROQ_API_KEY"))?;
+        let audio = fetch_audio().await?;
+        println!("transcribing via Groq ({} MB upload)…", audio.len() / 1_048_576);
+        let cues = wiki_archive::podcast::groq_transcribe(client, &key, audio, "episode.mp3")
+            .await
+            .map_err(|e| eyre::eyre!("{e}"))?;
+        return Ok((cues, "groq-whisper-large-v3-turbo".into(), None));
+    }
+
+    // mode is now `whisper` or `auto`-falling-through.
+    #[cfg(feature = "whisper")]
+    {
+        let audio = fetch_audio().await?;
+        println!(
+            "transcribing locally (whisper, model `{}`)…",
+            args.whisper_model
+        );
+        let cues = wiki_archive::whisper::transcribe_enclosure(
+            client,
+            &args.whisper_model,
+            &args.ffmpeg,
+            audio,
+        )
+        .await
+        .map_err(|e| eyre::eyre!("{e}"))?;
+        let label = format!("whisper-rs-{}", args.whisper_model);
+        return Ok((cues, label, None));
+    }
+    #[cfg(not(feature = "whisper"))]
+    {
+        let _ = &args.whisper_model;
+        let _ = &args.ffmpeg;
+        let _ = fetch_audio; // audio only fetched when a backfill can use it
+        if mode == "whisper" {
+            return Err(eyre::eyre!(
+                "this build has no local whisper — rebuild the CLI with `--features whisper`, \
+                 or use --transcribe groq (GROQ_API_KEY)"
+            ));
+        }
+        Ok((
+            Vec::new(),
+            "podcast-feed".to_string(),
+            Some(
+                "No transcript tag in the feed. Re-run with --transcribe groq \
+                 (GROQ_API_KEY, ~$0.04/audio-hour) or a `--features whisper` build \
+                 for local transcription."
+                    .to_string(),
+            ),
+        ))
+    }
+}
+
+/// `task wiki archive import <kind>` — run one importer and
+/// feed every item through the same provenance + dedup +
+/// import + enqueue path as a single-URL archive.
+async fn run_wiki_archive_import(cmd: WikiArchiveImportCmd) -> eyre::Result<()> {
+    use wiki_archive::import as imp;
+
+    let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+    let started_at = chrono::Utc::now();
+    let (items, common, next_cursor_hint): (Vec<imp::ImportedItem>, _, Option<String>) = match cmd
+    {
+        WikiArchiveImportCmd::Readwise {
+            token,
+            updated_after,
+            common,
+        } => {
+            let items = imp::readwise::fetch_export(&client, &token, updated_after.as_deref())
+                .await
+                .map_err(|e| eyre::eyre!("readwise: {e}"))?;
+            (items, common, Some(started_at.to_rfc3339()))
+        }
+        WikiArchiveImportCmd::Reader {
+            token,
+            updated_after,
+            common,
+        } => {
+            let items = imp::readwise::fetch_reader(&client, &token, updated_after.as_deref())
+                .await
+                .map_err(|e| eyre::eyre!("readwise reader: {e}"))?;
+            (items, common, Some(started_at.to_rfc3339()))
+        }
+        WikiArchiveImportCmd::Karakeep {
+            endpoint,
+            token,
+            common,
+        } => {
+            let (items, skipped) = imp::karakeep::fetch_bookmarks(&client, &endpoint, &token)
+                .await
+                .map_err(|e| eyre::eyre!("karakeep: {e}"))?;
+            if skipped > 0 {
+                println!("note: skipped {skipped} non-link bookmark(s) (text/asset)");
+            }
+            (items, common, None)
+        }
+        WikiArchiveImportCmd::Pocket { zip, common } => {
+            let items = imp::pocket::import_zip(&zip).map_err(|e| eyre::eyre!("pocket: {e}"))?;
+            (items, common, None)
+        }
+        WikiArchiveImportCmd::Bookmarks { html, common } => {
+            let body = std::fs::read_to_string(&html)?;
+            let items =
+                imp::netscape::parse_bookmarks_html(&body).map_err(|e| eyre::eyre!("{e}"))?;
+            (items, common, None)
+        }
+    };
+
+    println!("{} item(s) from the importer", items.len());
+    if common.dry_run {
+        for item in items.iter().take(25) {
+            println!("  [{}] {}  {}", item.origin, item.title, item.url);
+        }
+        if items.len() > 25 {
+            println!("  … {} more", items.len() - 25);
+        }
+        println!("dry run — nothing written");
+        return Ok(());
+    }
+
+    archive_imported_items(items, &common).await?;
+    if let Some(cursor) = next_cursor_hint {
+        println!("incremental: next run pass --updated-after {cursor}");
+    }
+    Ok(())
+}
+
+/// Shared importer back-half: dedup against the wiki's
+/// existing sources (canonical-URL filename scan, plus
+/// in-batch), import over RPC, enqueue ingest.
+async fn archive_imported_items(
+    items: Vec<wiki_archive::import::ImportedItem>,
+    common: &WikiArchiveImportCommon,
+) -> eyre::Result<()> {
+    use wiki_proto::raw::ImportRawSource;
+    use wiki_proto::service::ingest::IngestClient;
+    use wiki_proto::service::raw_layer::RawLayerClient;
+
+    let slug = resolve_active_org(common.org.clone())?;
+    let vox_url = resolve_org_vox_url(common.server.clone(), &slug);
+    let raw: RawLayerClient = establish_for_url(&vox_url).await?;
+    let ing: IngestClient = establish_for_url(&vox_url).await?;
+
+    let mut existing: Vec<String> = raw
+        .list_raw_sources(common.wiki_id.clone())
+        .await
+        .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?
+        .into_iter()
+        .map(|r| r.filename)
+        .collect();
+
+    let limit = common.limit.unwrap_or(usize::MAX);
+    let (mut imported, mut deduped, mut skipped) = (0usize, 0usize, 0usize);
+    for item in &items {
+        if imported >= limit {
+            break;
+        }
+        let (prov, body) = match wiki_archive::import::item_to_source(item) {
+            Ok(v) => v,
+            Err(e) => {
+                println!("  skip {}: {e}", item.url);
+                skipped += 1;
+                continue;
+            }
+        };
+        let canon8 = prov.canon8();
+        if wiki_archive::find_canonical_match(existing.iter().map(String::as_str), &canon8)
+            .is_some()
+        {
+            deduped += 1;
+            continue;
+        }
+        let md = wiki_archive::compose_source_markdown(&prov, &body);
+        let filename = prov.filename();
+        let r = raw
+            .import_raw_source(
+                common.wiki_id.clone(),
+                ImportRawSource {
+                    filename: filename.clone(),
+                    mime: "text/markdown".to_string(),
+                    title: prov.title.clone(),
+                    bytes: md.into_bytes(),
+                    auto_enqueue: false,
+                },
+            )
+            .await
+            .map_err(|e| eyre::eyre!("import_raw_source {}: {e:?}", item.url))?;
+        existing.push(filename);
+        if !common.no_enqueue {
+            ing.enqueue_ingest(
+                common.wiki_id.clone(),
+                r.path.clone(),
+                wiki_proto::ingest::SourceChange::Created,
+            )
+            .await
+            .map_err(|e| eyre::eyre!("enqueue_ingest {}: {e:?}", r.path))?;
+        }
+        println!("  + {}", r.path);
+        imported += 1;
+    }
+    println!(
+        "imported {imported}, deduped {deduped}, skipped {skipped} (of {})",
+        items.len()
+    );
+    if common.no_enqueue && imported > 0 {
+        println!("ingest not enqueued (--no-enqueue) — `task wiki raw rescan` enqueues later");
+    }
+    Ok(())
+}
+
+/// Extension → MIME for local-file archives. Mirrors
+/// `wiki_extract::extract_path`'s table.
+fn archive_mime_for_filename(name: &str) -> String {
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "md" | "markdown" => "text/markdown",
+        "txt" => "text/plain",
+        "html" | "htm" => "text/html",
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "zip" => "application/zip",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 
 async fn run_wiki_ingest(cmd: WikiIngestCmd) -> eyre::Result<()> {
@@ -8272,8 +11949,8 @@ fn run_subprocess(
 ) -> eyre::Result<SubprocOut> {
     use std::io::{BufRead as _, BufReader, Write as _};
     use std::process::{Command, Stdio};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     let started = std::time::Instant::now();
     let mut child = Command::new("sh")
@@ -8554,6 +12231,8 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             project,
             milestone,
             open,
+            limit,
+            offset,
             org,
             server,
             json,
@@ -8561,10 +12240,6 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
             let client = connect_task_client(&url).await?;
-            let rows = client
-                .list()
-                .await
-                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
             let ctx_filter = context.map(|c| {
                 if c.starts_with('@') {
                     c
@@ -8586,6 +12261,55 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     Some(Some(resolve_milestone_target(&mc, m).await?.id))
                 }
                 None => None,
+            };
+
+            // Push --status/--project/--limit/--offset to the
+            // server (`TaskService::query`) so big orgs don't
+            // ship the whole list over the wire. A server that
+            // predates the verb (schema skew — see `task
+            // doctor`) falls back to the unfiltered `list()` +
+            // the client-side filters below. Skip the server
+            // path when a page window combines with
+            // client-only filters: slicing before --tag /
+            // --context / --milestone / --open would drop rows.
+            let has_client_only_filters =
+                tag.is_some() || ctx_filter.is_some() || milestone_filter.is_some() || open;
+            let want_server_query = (status.is_some()
+                || project_id.is_some()
+                || limit.is_some()
+                || offset.is_some())
+                && !((limit.is_some() || offset.is_some()) && has_client_only_filters);
+            let mut window_applied = false;
+            let rows = if want_server_query {
+                let filter = task::TaskListFilter {
+                    project: project_id,
+                    workstream: None,
+                    status: status.clone(),
+                    limit,
+                    offset,
+                };
+                match client.query(filter).await {
+                    Ok(rows) => {
+                        window_applied = true;
+                        rows
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "warning: server-side query failed ({e:?}); falling back to full \
+                             list() + client-side filters (is task-server stale? run `task \
+                             doctor`)"
+                        );
+                        client
+                            .list()
+                            .await
+                            .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                    }
+                }
+            } else {
+                client
+                    .list()
+                    .await
+                    .map_err(|e| eyre::eyre!("list: {e:?}"))?
             };
 
             let mut rows: Vec<_> = rows
@@ -8622,6 +12346,17 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     .then_with(|| a.due.cmp(&b.due))
                     .then_with(|| a.title.cmp(&b.title))
             });
+            // Page window that couldn't go server-side (combined
+            // with client-only filters, or the query fallback):
+            // slice after filtering + sorting.
+            if !window_applied && (limit.is_some() || offset.is_some()) {
+                let off = offset.unwrap_or(0) as usize;
+                rows = rows
+                    .into_iter()
+                    .skip(off)
+                    .take(limit.map_or(usize::MAX, |n| n as usize))
+                    .collect();
+            }
 
             if json {
                 println!(
@@ -8778,8 +12513,9 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             undo,
             org,
             server,
+            json,
         } => {
-            mutate_task(target, org, server, |t| {
+            mutate_task(target, org, server, json, |t| {
                 if undo {
                     t.status = "open".into();
                     t.completed_date = None;
@@ -8795,44 +12531,49 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             status,
             org,
             server,
-        } => mutate_task(target, org, server, |t| t.status = status).await?,
+            json,
+        } => mutate_task(target, org, server, json, |t| t.status = status).await?,
         TaskCmd::SetPriority {
             target,
             priority,
             org,
             server,
-        } => mutate_task(target, org, server, |t| t.priority = priority).await?,
+            json,
+        } => mutate_task(target, org, server, json, |t| t.priority = priority).await?,
         TaskCmd::SetDue {
             target,
             due,
             org,
             server,
+            json,
         } => {
             let v = if matches!(due.as_str(), "none" | "null" | "") {
                 None
             } else {
                 Some(due)
             };
-            mutate_task(target, org, server, |t| t.due = v).await?;
+            mutate_task(target, org, server, json, |t| t.due = v).await?;
         }
         TaskCmd::SetScheduled {
             target,
             scheduled,
             org,
             server,
+            json,
         } => {
             let v = if matches!(scheduled.as_str(), "none" | "null" | "") {
                 None
             } else {
                 Some(scheduled)
             };
-            mutate_task(target, org, server, |t| t.scheduled = v).await?;
+            mutate_task(target, org, server, json, |t| t.scheduled = v).await?;
         }
         TaskCmd::SetProject {
             target,
             project,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -8842,13 +12583,14 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 let pc = connect_project_client(&url).await?;
                 Some(resolve_project_target(&pc, &project).await?.id)
             };
-            mutate_task(target, org, server, |t| t.project_id = new_proj).await?;
+            mutate_task(target, org, server, json, |t| t.project_id = new_proj).await?;
         }
         TaskCmd::SetMilestone {
             target,
             milestone,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -8859,7 +12601,7 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 let ms = resolve_milestone_target(&mc, &milestone).await?;
                 (Some(ms.id), Some(ms.project_id))
             };
-            mutate_task(target, org, server, |t| {
+            mutate_task(target, org, server, json, |t| {
                 t.milestone_id = new_ms;
                 if let Some(p) = new_proj {
                     // Auto-fix project link when it's missing or
@@ -8875,8 +12617,9 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             tags,
             org,
             server,
+            json,
         } => {
-            mutate_task(target, org, server, |t| {
+            mutate_task(target, org, server, json, |t| {
                 t.tags = task::model::StringList(tags);
             })
             .await?;
@@ -8886,6 +12629,7 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             new_path,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
@@ -8895,7 +12639,11 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 .rename(t.id, new_path)
                 .await
                 .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
-            println!("renamed → {}", renamed.path);
+            if json {
+                json_out::print_json(&renamed)?;
+            } else {
+                println!("renamed → {}", renamed.path);
+            }
         }
         TaskCmd::Delete {
             target,
@@ -8925,26 +12673,20 @@ async fn connect_task_client(url: &str) -> eyre::Result<task::TaskServiceClient>
     establish_for_url(url).await
 }
 
+/// Resolve a task reference — uuid, vault path, title, or a unique
+/// prefix of either (shared flexible resolver).
 async fn resolve_task_target(
     client: &task::TaskServiceClient,
     target: &str,
 ) -> eyre::Result<task::TaskInfo> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    client
-        .get_by_path(target.to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+    json_out::resolve_task_flexible(client, target).await
 }
 
 async fn mutate_task<F>(
     target: String,
     org: Option<String>,
     server: Option<String>,
+    json: bool,
     apply: F,
 ) -> eyre::Result<()>
 where
@@ -8959,7 +12701,11 @@ where
         .update(t)
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    if json {
+        json_out::print_json(&updated)?;
+    } else {
+        println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    }
     Ok(())
 }
 
@@ -9016,38 +12762,14 @@ fn parse_estimate(s: &str) -> eyre::Result<task::model::Estimate> {
     }
 }
 
-/// Resolve an issue id — accepts a full UUID or an 8-char
-/// (or longer) prefix. Falls back to a list-scan for the
-/// prefix case since the server only exposes exact lookups.
+/// Resolve an issue reference — uuid, id prefix, vault path, or
+/// title (issues and tasks are the same `TaskInfo` row, so this is
+/// the shared flexible task resolver).
 async fn resolve_issue_id(
     client: &task::TaskServiceClient,
     id: &str,
 ) -> eyre::Result<task::TaskInfo> {
-    if let Ok(uuid) = uuid::Uuid::parse_str(id) {
-        return client
-            .get(uuid)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    let prefix = id.trim().to_ascii_lowercase();
-    if prefix.is_empty() {
-        return Err(eyre::eyre!("empty id"));
-    }
-    let rows = client
-        .list()
-        .await
-        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
-    let mut hits: Vec<task::TaskInfo> = rows
-        .into_iter()
-        .filter(|t| t.id.to_string().to_ascii_lowercase().starts_with(&prefix))
-        .collect();
-    match hits.len() {
-        0 => Err(eyre::eyre!("no issue matches `{id}`")),
-        1 => Ok(hits.remove(0)),
-        n => Err(eyre::eyre!(
-            "`{id}` matches {n} issues — disambiguate with the full UUID"
-        )),
-    }
+    json_out::resolve_task_flexible(client, id).await
 }
 
 fn short_uuid(u: &uuid::Uuid) -> String {
@@ -9069,6 +12791,9 @@ fn print_workflow_block(w: &task::model::WorkflowAttrs) {
     println!("  workflow:");
     if let Some(cy) = w.cycle {
         println!("    cycle:     {cy}");
+    }
+    if let Some(ws) = w.workstream {
+        println!("    workstream:{ws}");
     }
     if let Some(est) = &w.estimate {
         let rendered = match est {
@@ -9137,32 +12862,30 @@ async fn try_claim(
     })
 }
 
-/// Apply `set-workflow` style edits to a `TaskInfo` in-place.
+/// Apply `set-workflow` style edits to a `TaskInfo` in-place. The
+/// cycle / project / blocker references arrive pre-resolved (the
+/// caller ran the flexible resolvers): outer `None` = leave alone,
+/// `Some(None)` = clear, `Some(Some(id))` = set.
 #[allow(clippy::too_many_arguments)]
+// Option<Option<_>> is exactly the tri-state these patch fields
+// need (untouched / cleared / set) — a custom enum adds noise for
+// one private helper.
+#[allow(clippy::option_option)]
 fn apply_workflow_patch(
     t: &mut task::TaskInfo,
-    cycle: Option<String>,
-    project: Option<String>,
+    cycle: Option<Option<uuid::Uuid>>,
+    project: Option<Option<uuid::Uuid>>,
+    workstream: Option<Option<uuid::Uuid>>,
     estimate: Option<String>,
     add_assignee: Vec<workflows_proto::AgentRef>,
     remove_assignee: Vec<workflows_proto::AgentRef>,
     add_blocker: Vec<uuid::Uuid>,
     remove_blocker: Vec<uuid::Uuid>,
 ) -> eyre::Result<()> {
-    fn parse_uuid_field(field: &str, raw: &str) -> eyre::Result<Option<uuid::Uuid>> {
-        let r = raw.trim();
-        if matches!(r, "" | "none" | "null") {
-            return Ok(None);
-        }
-        uuid::Uuid::parse_str(r)
-            .map(Some)
-            .map_err(|e| eyre::eyre!("--{field} `{raw}`: {e}"))
-    }
-
     // Project membership lives on TaskInfo.project_id (the
     // canonical Project link), not in WorkflowAttrs.
     if let Some(v) = project {
-        t.project_id = parse_uuid_field("project", &v)?;
+        t.project_id = v;
     }
 
     let w = t
@@ -9170,7 +12893,10 @@ fn apply_workflow_patch(
         .get_or_insert_with(task::model::WorkflowAttrs::default);
 
     if let Some(v) = cycle {
-        w.cycle = parse_uuid_field("cycle", &v)?;
+        w.cycle = v;
+    }
+    if let Some(v) = workstream {
+        w.workstream = v;
     }
     if let Some(v) = estimate {
         w.estimate = Some(parse_estimate(&v)?);
@@ -9194,6 +12920,50 @@ fn apply_workflow_patch(
     Ok(())
 }
 
+/// Resolve an optional `--project` filter (uuid, id prefix, path,
+/// or name) into the project id, dialing the project service only
+/// when the flag is present.
+async fn resolve_project_filter(
+    url: &str,
+    project: Option<String>,
+) -> eyre::Result<Option<uuid::Uuid>> {
+    match project {
+        None => Ok(None),
+        Some(p) => {
+            let pc = connect_project_client(url).await?;
+            Ok(Some(json_out::resolve_project_flexible(&pc, &p).await?.id))
+        }
+    }
+}
+
+/// Resolve an optional `--workstream` filter (uuid, id prefix,
+/// path, or name) into the workstream id, dialing the workstream
+/// service only when the flag is present.
+async fn resolve_workstream_filter(
+    url: &str,
+    workstream: Option<String>,
+) -> eyre::Result<Option<uuid::Uuid>> {
+    match workstream {
+        None => Ok(None),
+        Some(w) => {
+            let wc: ::workstream::WorkstreamServiceClient = establish_for_url(url).await?;
+            Ok(Some(
+                json_out::resolve_workstream_flexible(&wc, &w).await?.id,
+            ))
+        }
+    }
+}
+
+/// Org slug + per-org vox URL from the global `--org` / `--server`
+/// flags (the `issue` group dropped its per-variant duplicates).
+/// Called per-arm so org-free verbs (`pr-list`, dry runs) keep
+/// working without a session.
+fn issue_ctx() -> eyre::Result<(String, String)> {
+    let slug = resolve_active_org(None)?;
+    let url = resolve_org_vox_url(None, &slug);
+    Ok((slug, url))
+}
+
 async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
     match cmd {
         IssueCmd::List {
@@ -9202,12 +12972,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             assignee,
             status,
             has_workflow,
-            org,
-            server,
             json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
+            let cycle = resolve_cycle_arg(cycle, false)?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let rows = client
                 .list()
@@ -9267,14 +13036,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 );
             }
         }
-        IssueCmd::Show {
-            id,
-            org,
-            server,
-            json,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Show { id, json } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             if json {
@@ -9299,9 +13062,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 None => println!("  workflow: (none)"),
             }
         }
-        IssueCmd::Prompt { id, org, server } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Prompt { id } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             let parent = match t.workflow.as_ref().and_then(|w| w.parent) {
@@ -9314,17 +13076,16 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             id,
             cycle,
             project,
+            workstream,
             estimate,
             add_assignee,
             remove_assignee,
             add_blocker,
             remove_blocker,
             clear,
-            org,
-            server,
+            json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut t = resolve_issue_id(&client, &id).await?;
             if clear {
@@ -9338,21 +13099,44 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     .iter()
                     .map(|s| parse_agent_ref(s))
                     .collect::<eyre::Result<_>>()?;
+                // Resolve the entity references up-front: cycle
+                // accepts uuid / label / `current` / `none`; project
+                // accepts uuid / name / path / prefix / `none`;
+                // blockers accept any issue reference.
+                let cycle = match cycle {
+                    None => None,
+                    Some(c) => Some(resolve_cycle_arg(Some(c), false)?),
+                };
+                let project = match project.as_deref() {
+                    None => None,
+                    Some("" | "none" | "null") => Some(None),
+                    Some(p) => Some(resolve_project_filter(&url, Some(p.to_owned())).await?),
+                };
+                let workstream = match workstream.as_deref() {
+                    None => None,
+                    Some("" | "none" | "null") => Some(None),
+                    Some(w) => Some(resolve_workstream_filter(&url, Some(w.to_owned())).await?),
+                };
+                let mut add_b = Vec::with_capacity(add_blocker.len());
+                for b in &add_blocker {
+                    add_b.push(resolve_issue_id(&client, b).await?.id);
+                }
+                let mut rm_b = Vec::with_capacity(remove_blocker.len());
+                for b in &remove_blocker {
+                    rm_b.push(resolve_issue_id(&client, b).await?.id);
+                }
                 apply_workflow_patch(
-                    &mut t,
-                    cycle,
-                    project,
-                    estimate,
-                    add,
-                    rm,
-                    add_blocker,
-                    remove_blocker,
+                    &mut t, cycle, project, workstream, estimate, add, rm, add_b, rm_b,
                 )?;
             }
             let updated = client
                 .update(t)
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            if json {
+                json_out::print_json(&updated)?;
+                return Ok(());
+            }
             println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
             if let Some(w) = &updated.workflow {
                 print_workflow_block(w);
@@ -9364,31 +13148,41 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             id,
             as_agent,
             force,
-            org,
-            server,
+            json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
             let t = resolve_issue_id(&client, &id).await?;
             match try_claim(&client, &t.id, &agent, force).await? {
                 ClaimOutcome::Won => {
-                    println!("claimed {} by {}", short_uuid(&t.id), agent.short_label());
+                    if !json {
+                        println!("claimed {} by {}", short_uuid(&t.id), agent.short_label());
+                    }
                 }
                 ClaimOutcome::AlreadyMine => {
-                    println!(
-                        "{} already claimed by {}",
-                        short_uuid(&t.id),
-                        agent.short_label()
-                    );
+                    if !json {
+                        println!(
+                            "{} already claimed by {}",
+                            short_uuid(&t.id),
+                            agent.short_label()
+                        );
+                    }
                 }
                 ClaimOutcome::Lost(holder) => {
-                    return Err(eyre::eyre!(
-                        "{} is already claimed by {holder} — pass --force to steal",
-                        short_uuid(&t.id)
-                    ));
+                    return Err(errors::conflict("claim issue", short_uuid(&t.id))
+                        .cause(format!("already claimed by {holder}"))
+                        .hint("pass --force to steal the claim")
+                        .report());
                 }
+            }
+            if json {
+                // Re-read so the emitted entity reflects the claim.
+                let after = client
+                    .get(t.id)
+                    .await
+                    .map_err(|e| eyre::eyre!("re-read after claim: {e:?}"))?;
+                json_out::print_json(&after)?;
             }
         }
         IssueCmd::Triage {
@@ -9397,11 +13191,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             from,
             parent_status,
             priority,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut parent = resolve_issue_id(&client, &id).await?;
 
@@ -9502,20 +13293,20 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 "\nparallel agents now: `task issue ready --as-agent <name>` → `task issue claim <id> --as-agent <name>`"
             );
         }
-        IssueCmd::Subtasks {
-            id,
-            org,
-            server,
-            json,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Subtasks { id, json } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let parent = resolve_issue_id(&client, &id).await?;
             let all = client
                 .list()
                 .await
                 .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            // Derived rollup over the children — shared engine,
+            // classified via each task's project state registry.
+            let states = project_states_map(&url).await;
+            let rollup = ::workstream::subtask_rollup(parent.id, &all, |t| {
+                resolve_task_group(&states, t)
+            });
             let mut subs: Vec<&task::TaskInfo> = all
                 .iter()
                 .filter(|t| t.workflow.as_ref().and_then(|w| w.parent) == Some(parent.id))
@@ -9524,21 +13315,29 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&subs).map_err(|e| eyre::eyre!("json: {e}"))?
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "parent": parent.id,
+                        "rollup": rollup,
+                        "subtasks": subs,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
                 );
                 return Ok(());
             }
-            let done = subs
-                .iter()
-                .filter(|t| matches!(task::Status::from_str(&t.status), Some(task::Status::Done)))
-                .count();
             println!(
                 "{} [{}]  {}",
                 short_uuid(&parent.id),
                 parent.status,
                 parent.title
             );
-            println!("  {done}/{} subtasks done\n", subs.len());
+            println!(
+                "  {}/{} done · {} in-progress · {} blocked · {} pts\n",
+                rollup.done,
+                rollup.total,
+                rollup.in_progress,
+                rollup.blocked,
+                rollup.estimate_points_sum
+            );
             for t in &subs {
                 let claim = t
                     .workflow
@@ -9557,14 +13356,205 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 );
             }
         }
-        IssueCmd::Assignees {
-            id,
-            org,
-            server,
+        IssueCmd::Rollup { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let parent = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let states = project_states_map(&url).await;
+            let rollup = ::workstream::subtask_rollup(parent.id, &all, |t| {
+                resolve_task_group(&states, t)
+            });
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "parent": parent.id,
+                        "rollup": rollup,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]  {}", short_uuid(&parent.id), parent.status, parent.title);
+            println!("  done:        {}/{}", rollup.done, rollup.total);
+            println!("  in-progress: {}", rollup.in_progress);
+            println!("  blocked:     {}", rollup.blocked);
+            println!("  points:      {}", rollup.estimate_points_sum);
+            let g = &rollup.groups;
+            println!(
+                "  groups:      backlog {} / unstarted {} / started {} / completed {} / cancelled {}",
+                g.backlog, g.unstarted, g.started, g.completed, g.cancelled
+            );
+            if rollup.total > 0 {
+                println!(
+                    "  progress:    {:.0}%",
+                    f64::from(rollup.done) * 100.0 / f64::from(rollup.total)
+                );
+            }
+        }
+        IssueCmd::Relate {
+            a,
+            kind,
+            b,
+            remove,
             json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let kind = task::RelationKind::from_str(&kind).ok_or_else(|| {
+                eyre::eyre!(
+                    "unknown relation kind `{kind}` — one of blocks / duplicate / \
+                     implements / relates"
+                )
+            })?;
+            let mut src = resolve_issue_id(&client, &a).await?;
+            let dst = resolve_issue_id(&client, &b).await?;
+            if src.id == dst.id {
+                return Err(eyre::eyre!("an issue can't relate to itself"));
+            }
+            let rel = task::Relation {
+                kind,
+                target: dst.id,
+            };
+            let w = src
+                .workflow
+                .get_or_insert_with(task::model::WorkflowAttrs::default);
+            let already = w.relations.0.contains(&rel);
+            if remove {
+                if !already {
+                    return Err(eyre::eyre!(
+                        "no `{}` relation from {} to {}",
+                        kind.as_str(),
+                        short_uuid(&src.id),
+                        short_uuid(&dst.id)
+                    ));
+                }
+                w.relations.0.retain(|r| r != &rel);
+            } else if !already {
+                w.relations.0.push(rel);
+            }
+            // Relation changes ride the normal update path, so the
+            // backend publishes TaskEvent::Upserted to subscribers.
+            let updated = client
+                .update(src)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            if json {
+                json_out::print_json(&updated)?;
+                return Ok(());
+            }
+            let verb = if remove { "unrelated" } else { "related" };
+            println!(
+                "{verb}: {} ({}) —{}→ {} ({})",
+                updated.title,
+                short_uuid(&updated.id),
+                kind.as_str(),
+                dst.title,
+                short_uuid(&dst.id)
+            );
+        }
+        IssueCmd::Relations { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+                all.iter().map(|x| (x.id, x)).collect();
+            let label = |id: &uuid::Uuid| {
+                by_id
+                    .get(id)
+                    .map_or_else(|| "(unknown)".to_string(), |x| x.title.clone())
+            };
+            // Outgoing from the merged local view; incoming via
+            // the server's reverse index.
+            let outgoing = task::relations::outgoing(t.id, &all);
+            let incoming = client
+                .reverse_relations(t.id)
+                .await
+                .map_err(|e| eyre::eyre!("reverse_relations: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "id": t.id,
+                        "outgoing": outgoing,
+                        "incoming": incoming,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]  {}\n", short_uuid(&t.id), t.status, t.title);
+            if outgoing.is_empty() && incoming.is_empty() {
+                println!("  (no relations)");
+                return Ok(());
+            }
+            if !outgoing.is_empty() {
+                println!("  outgoing (this issue → other):");
+                for r in &outgoing {
+                    println!(
+                        "    {:<11} {}  {}",
+                        r.kind.as_str(),
+                        short_uuid(&r.target),
+                        label(&r.target)
+                    );
+                }
+            }
+            if !incoming.is_empty() {
+                println!("  incoming (other → this issue):");
+                for r in &incoming {
+                    println!(
+                        "    {:<11} {}  {}",
+                        r.kind.as_str(),
+                        short_uuid(&r.source),
+                        label(&r.source)
+                    );
+                }
+            }
+        }
+        IssueCmd::Blocking { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let blocked_ids = task::relations::blocking(t.id, &all);
+            let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+                all.iter().map(|x| (x.id, x)).collect();
+            if json {
+                let rows: Vec<&task::TaskInfo> = blocked_ids
+                    .iter()
+                    .filter_map(|bid| by_id.get(bid).copied())
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if blocked_ids.is_empty() {
+                println!("{} blocks nothing", short_uuid(&t.id));
+                return Ok(());
+            }
+            println!("{} blocks:", short_uuid(&t.id));
+            for bid in &blocked_ids {
+                match by_id.get(bid) {
+                    Some(b) => println!("  {}  {:<12} {}", short_uuid(bid), b.status, b.title),
+                    None => println!("  {bid}  (unknown)"),
+                }
+            }
+        }
+        IssueCmd::Assignees { id, json } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             let assignees: Vec<workflows_proto::AgentRef> = t
@@ -9597,19 +13587,33 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             cycle,
             project,
             parent,
+            workstream,
             estimate,
             assignees,
             blockers,
             tags,
             body,
-            org,
-            server,
             json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let body = resolve_body(body)?;
+
+            // Resolve entity references: cycle label / `current`,
+            // project name / path / prefix, parent + blockers by
+            // any issue reference.
+            let cycle = resolve_cycle_arg(cycle, false)?;
+            let project = resolve_project_filter(&url, project).await?;
+            let workstream = resolve_workstream_filter(&url, workstream).await?;
+            let parent = match parent {
+                None => None,
+                Some(p) => Some(resolve_issue_id(&client, &p).await?.id),
+            };
+            let mut blocker_ids = Vec::with_capacity(blockers.len());
+            for b in &blockers {
+                blocker_ids.push(resolve_issue_id(&client, b).await?.id);
+            }
+            let blockers = blocker_ids;
 
             // Build the WorkflowAttrs from inline flags. Skip if
             // nothing was set — leaves `workflow: None`, preserving
@@ -9620,6 +13624,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .collect::<eyre::Result<_>>()?;
             let any_workflow = cycle.is_some()
                 || parent.is_some()
+                || workstream.is_some()
                 || estimate.is_some()
                 || !assignee_refs.is_empty()
                 || !blockers.is_empty();
@@ -9631,6 +13636,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 Some(task::model::WorkflowAttrs {
                     cycle,
                     parent,
+                    workstream,
                     estimate,
                     assignees: task::model::AgentRefList(assignee_refs),
                     blockers: task::model::UuidList(blockers),
@@ -9688,12 +13694,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             project,
             as_agent,
             limit,
-            org,
-            server,
             json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
+            let cycle = resolve_cycle_arg(cycle, false)?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let rows = client
                 .list()
@@ -9782,14 +13787,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 );
             }
         }
-        IssueCmd::Start {
-            id,
-            as_agent,
-            org,
-            server,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Start { id, as_agent, json } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut t = resolve_issue_id(&client, &id).await?;
             // Flip status; preserve completedDate semantics: if
@@ -9809,6 +13808,10 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .update(t)
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            if json {
+                json_out::print_json(&updated)?;
+                return Ok(());
+            }
             println!(
                 "started {}  [{}]  {}",
                 short_uuid(&updated.id),
@@ -9819,12 +13822,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 print_workflow_block(w);
             }
         }
-        IssueCmd::ImportBeads {
-            from,
-            dry_run,
-            org,
-            server,
-        } => {
+        IssueCmd::ImportBeads { from, dry_run } => {
             // 1. Get the beads JSON.
             let raw = match from.as_str() {
                 "bd" => {
@@ -9898,8 +13896,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 return Ok(());
             }
 
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut created = 0usize;
             for it in &items {
@@ -9955,16 +13952,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                  the beads ids don't survive into TaskInfo uuids. Re-link by hand if needed."
             );
         }
-        IssueCmd::Stats {
-            project,
-            org,
-            server,
-            json,
-        } => {
+        IssueCmd::Stats { project, json } => {
             use std::collections::BTreeMap;
 
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let rows = client
                 .list()
@@ -9979,8 +13971,32 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 })
                 .collect();
 
+            // Per-project state registries: status → group
+            // classification routes through each task's owning
+            // project (custom registries respected; tasks with
+            // no project use the default registry).
+            let states_by_project: std::collections::HashMap<
+                uuid::Uuid,
+                Option<project::StatesConfig>,
+            > = match connect_project_client(&url).await {
+                Ok(pc) => pc
+                    .list()
+                    .await
+                    .map(|ps| ps.into_iter().map(|p| (p.id, p.states)).collect())
+                    .unwrap_or_default(),
+                Err(_) => std::collections::HashMap::new(),
+            };
+            let group_of = |t: &task::TaskInfo| -> project::StateGroup {
+                let cfg = t
+                    .project_id
+                    .and_then(|pid| states_by_project.get(&pid))
+                    .and_then(Option::as_ref);
+                project::resolve_state_group(cfg, &t.status)
+            };
+
             let total = filtered.len();
             let mut by_status: BTreeMap<String, usize> = BTreeMap::new();
+            let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_priority: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_project: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_assignee: BTreeMap<String, usize> = BTreeMap::new();
@@ -9992,6 +14008,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
 
             for t in filtered.drain(..) {
                 *by_status.entry(t.status.clone()).or_default() += 1;
+                *by_group.entry(group_of(t).as_str().to_string()).or_default() += 1;
                 *by_priority.entry(t.priority.clone()).or_default() += 1;
                 let p_label = t
                     .project_id
@@ -10002,16 +14019,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     for a in &wf.assignees.0 {
                         *by_assignee.entry(a.short_label()).or_default() += 1;
                     }
-                    // Blocked = has at least one blocker that
-                    // is not done/cancelled (or that we can't
-                    // resolve, which means it's still open).
+                    // Blocked = has at least one blocker whose
+                    // state *group* isn't closed (completed /
+                    // cancelled), or that we can't resolve.
                     let is_blocked = wf.blockers.0.iter().any(|bid| {
-                        by_id.get(bid).is_none_or(|b| {
-                            !matches!(
-                                task::Status::from_str(&b.status),
-                                Some(task::Status::Done | task::Status::Cancelled)
-                            )
-                        })
+                        by_id.get(bid).is_none_or(|b| !group_of(b).is_closed())
                     });
                     if is_blocked {
                         blocked += 1;
@@ -10025,6 +14037,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     "with_workflow": with_workflow,
                     "blocked": blocked,
                     "by_status": by_status,
+                    "by_group": by_group,
                     "by_priority": by_priority,
                     "by_project": by_project,
                     "by_assignee": by_assignee,
@@ -10042,6 +14055,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             println!();
             println!("by status:");
             for (k, v) in &by_status {
+                println!("  {k:<14} {v}");
+            }
+            println!();
+            println!("by group:");
+            for (k, v) in &by_group {
                 println!("  {k:<14} {v}");
             }
             println!();
@@ -10064,14 +14082,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 }
             }
         }
-        IssueCmd::Close {
-            id,
-            undo,
-            org,
-            server,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Close { id, undo, json } => {
+            let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut t = resolve_issue_id(&client, &id).await?;
             if undo {
@@ -10090,17 +14102,23 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .update(t)
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-            let verb = if undo { "reopened" } else { "closed" };
-            println!(
-                "{verb} {}  [{}]  {}",
-                short_uuid(&updated.id),
-                updated.status,
-                updated.title
-            );
+            if json {
+                json_out::print_json(&updated)?;
+            } else {
+                let verb = if undo { "reopened" } else { "closed" };
+                println!(
+                    "{verb} {}  [{}]  {}",
+                    short_uuid(&updated.id),
+                    updated.status,
+                    updated.title
+                );
+            }
 
             // Propagate to any linked forge issues. Best-effort:
             // a forge that's unreachable / unauthenticated logs
-            // a warning but doesn't fail the local close.
+            // a warning but doesn't fail the local close. Under
+            // --json the note goes to stderr so stdout stays a
+            // single parseable entity.
             let new_state = if undo {
                 git_proto::IssueState::Open
             } else {
@@ -10108,6 +14126,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             };
             match propagate_state_to_forge(&slug, &updated.id, new_state).await {
                 Ok(0) => {}
+                Ok(n) if json => eprintln!("propagated to {n} linked forge issue(s)"),
                 Ok(n) => println!("  propagated to {n} linked forge issue(s)"),
                 Err(e) => eprintln!("  warning: forge propagation failed: {e}"),
             }
@@ -10118,11 +14137,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             number,
             base_url,
             kind,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             let (owner, repo_name) = parse_repo_slug(&repo)?;
@@ -10159,11 +14175,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             repo,
             github,
             base_url,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             let repo_id = build_repo_id(&repo, github, base_url)?;
@@ -10223,11 +14236,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             base_url,
             project,
             state,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let repo_id = build_repo_id(&repo, github, base_url)?;
             let filter_state = match state.to_ascii_lowercase().as_str() {
@@ -10297,11 +14308,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             base_url,
             project,
             no_pull,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let repo_id = build_repo_id(&repo, github, base_url)?;
             let store = forge_link_store(&slug)?;
@@ -10309,14 +14318,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 sync_repo(&client, &store, &repo_id, project, no_pull).await?;
             println!("\nsync: {reconciled} reconciled, {pulled} pulled");
         }
-        IssueCmd::SyncAll {
-            project,
-            no_pull,
-            org,
-            server,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::SyncAll { project, no_pull } => {
+            let (slug, url) = issue_ctx()?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let store = forge_link_store(&slug)?;
             let repos = store
@@ -10391,8 +14395,6 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             draft,
             closes,
             close_task,
-            org,
-            server,
         } => {
             let repo_id = build_repo_id(&repo, github, base_url)?;
             let mut body = resolve_body(body)?;
@@ -10401,8 +14403,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             // explicit --closes wins; else look up the linked
             // forge issue for --close-task. Capture the task id
             // so we can record a PR link afterward.
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
             let store = forge_link_store(&slug)?;
             use git_config::BindingStore as _;
             let mut closes_number = closes;
@@ -10488,8 +14489,6 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             number,
             method,
             close_task,
-            org,
-            server,
         } => {
             let repo_id = build_repo_id(&repo, github, base_url)?;
             let merge_method = match method.to_ascii_lowercase().as_str() {
@@ -10515,8 +14514,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             // The `task code merge` chain: close the linked task,
             // which propagates the close to its own forge issue.
             if let Some(tid) = close_task {
-                let slug = resolve_active_org(org)?;
-                let url = resolve_org_vox_url(server, &slug);
+                let (slug, url) = issue_ctx()?;
                 let client = connect_task_client(&url).await?;
                 let mut t = resolve_issue_id(&client, &tid).await?;
                 t.status = "done".into();
@@ -10550,8 +14548,6 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             issue,
             dry_run,
             keep_going,
-            org,
-            server,
         } => {
             use git_config::BindingStore as _;
             let repo_id = build_repo_id(&repo, github, base_url)?;
@@ -10561,8 +14557,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 "rebase" => git_proto::reviews::MergeMethod::Rebase,
                 _ => return Err(eyre::eyre!("--method must be merge, squash, or rebase")),
             };
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let store = forge_link_store(&slug)?;
 
@@ -11456,24 +15451,34 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
         }
-        CodeCmd::Worktrees => {
+        CodeCmd::Worktrees { json } => {
             // `git worktree list --porcelain` → show the task ones.
             let out = git(&["worktree", "list", "--porcelain"])?;
             let mut path = String::new();
-            let mut found = false;
+            let mut rows: Vec<(String, String)> = Vec::new();
             for line in out.lines() {
                 if let Some(p) = line.strip_prefix("worktree ") {
                     path = p.to_string();
                 } else if let Some(b) = line.strip_prefix("branch ") {
                     let b = b.trim_start_matches("refs/heads/");
                     if b.starts_with("task/") {
-                        println!("{b}\n  {path}");
-                        found = true;
+                        rows.push((b.to_string(), path.clone()));
                     }
                 }
             }
-            if !found {
+            if json {
+                let out: Vec<serde_json::Value> = rows
+                    .iter()
+                    .map(|(branch, path)| serde_json::json!({ "branch": branch, "path": path }))
+                    .collect();
+                json_out::print_json(&out)?;
+                return Ok(());
+            }
+            if rows.is_empty() {
                 println!("(no task worktrees)");
+            }
+            for (branch, path) in rows {
+                println!("{branch}\n  {path}");
             }
         }
         CodeCmd::Cleanup { id } => {
@@ -11605,22 +15610,61 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                 eprintln!("  note: task has no linked forge issue — PR won't auto-close one");
             }
         }
-        CodeCmd::Status { org, server } => {
+        CodeCmd::Status { org, server, json } => {
             let branch = current_branch()?;
-            println!("branch:  {branch}");
+            if !json {
+                println!("branch:  {branch}");
+            }
             let Some(short) = task_short_from_branch(&branch) else {
-                println!("task:    (branch isn't a task/<id>-… branch)");
+                if json {
+                    json_out::print_json(&serde_json::json!({
+                        "branch": branch,
+                        "task": null,
+                        "links": [],
+                    }))?;
+                } else {
+                    println!("task:    (branch isn't a task/<id>-… branch)");
+                }
                 return Ok(());
             };
             let slug = resolve_active_org(org)?;
             let vox = resolve_org_vox_url(server, &slug);
             let client = connect_task_client(&vox).await?;
             let t = resolve_issue_id(&client, &short).await?;
-            println!("task:    {} [{}]  {}", short, t.status, t.title);
             let store = forge_link_store(&slug)?;
             let links = store
                 .issues_for_task(&t.id.to_string())
                 .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            if json {
+                let link_rows: Vec<serde_json::Value> = links
+                    .iter()
+                    .map(|l| {
+                        let kind = match l.kind {
+                            git_config::LinkKind::Issue => "issue",
+                            git_config::LinkKind::Pull => "pr",
+                        };
+                        serde_json::json!({
+                            "kind": kind,
+                            "owner": l.repo.owner,
+                            "repo": l.repo.repo,
+                            "number": l.number,
+                        })
+                    })
+                    .collect();
+                json_out::print_json(&serde_json::json!({
+                    "branch": branch,
+                    "task": {
+                        "id": t.id,
+                        "short": short,
+                        "status": t.status,
+                        "title": t.title,
+                        "path": t.path,
+                    },
+                    "links": link_rows,
+                }))?;
+                return Ok(());
+            }
+            println!("task:    {} [{}]  {}", short, t.status, t.title);
             for l in links {
                 let kind = match l.kind {
                     git_config::LinkKind::Issue => "issue",
@@ -11764,6 +15808,7 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
             as_agent,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let vox = resolve_org_vox_url(server, &slug);
@@ -11782,8 +15827,28 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                     _ => true,
                 })
                 .collect();
-            if open.is_empty() {
+            if open.is_empty() && !json {
                 println!("(no parked tasks)");
+                return Ok(());
+            }
+            if json {
+                // Handoff entities + the joined task title.
+                let mut rows: Vec<serde_json::Value> = Vec::with_capacity(open.len());
+                for h in open {
+                    let title = client.get(h.session_id).await.ok().map(|t| t.title);
+                    let mut v = serde_json::to_value(h).unwrap_or(serde_json::Value::Null);
+                    if let serde_json::Value::Object(map) = &mut v {
+                        map.insert(
+                            "task_short".into(),
+                            h.session_id.simple().to_string()[..8].into(),
+                        );
+                        if let Some(t) = title {
+                            map.insert("task_title".into(), t.into());
+                        }
+                    }
+                    rows.push(v);
+                }
+                json_out::print_json(&rows)?;
                 return Ok(());
             }
             println!("{} parked task(s):", open.len());
@@ -12294,12 +16359,14 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
             status,
             org,
             server,
-        } => mutate_milestone(target, org, server, |m| m.status = status).await?,
+            json,
+        } => mutate_milestone(target, org, server, json, |m| m.status = status).await?,
         MilestoneCmd::SetDue {
             target,
             due,
             org,
             server,
+            json,
         } => {
             let v = if matches!(due.as_str(), "none" | "null" | "") {
                 None
@@ -12309,13 +16376,14 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
                         .map_err(|e| eyre::eyre!("--due: {e}"))?,
                 )
             };
-            mutate_milestone(target, org, server, |m| m.due_date = v).await?;
+            mutate_milestone(target, org, server, json, |m| m.due_date = v).await?;
         }
         MilestoneCmd::SetGoal {
             target,
             goal,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -12325,36 +16393,40 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
                 let gc = connect_goal_client(&url).await?;
                 Some(resolve_goal_target(&gc, &goal).await?.id)
             };
-            mutate_milestone(target, org, server, |m| m.goal_id = new_goal).await?;
+            mutate_milestone(target, org, server, json, |m| m.goal_id = new_goal).await?;
         }
         MilestoneCmd::SetForgeRef {
             target,
             forge_ref,
             org,
             server,
+            json,
         } => {
             let v = if matches!(forge_ref.as_str(), "none" | "null" | "") {
                 None
             } else {
                 Some(forge_ref)
             };
-            mutate_milestone(target, org, server, |m| m.forge_ref = v).await?;
+            mutate_milestone(target, org, server, json, |m| m.forge_ref = v).await?;
         }
         MilestoneCmd::Close {
             target,
             org,
             server,
-        } => mutate_milestone(target, org, server, |m| m.status = "closed".into()).await?,
+            json,
+        } => mutate_milestone(target, org, server, json, |m| m.status = "closed".into()).await?,
         MilestoneCmd::Reopen {
             target,
             org,
             server,
-        } => mutate_milestone(target, org, server, |m| m.status = "open".into()).await?,
+            json,
+        } => mutate_milestone(target, org, server, json, |m| m.status = "open".into()).await?,
         MilestoneCmd::Rename {
             target,
             new_path,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
@@ -12364,7 +16436,11 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
                 .rename(m.id, new_path)
                 .await
                 .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
-            println!("renamed → {}", renamed.path);
+            if json {
+                json_out::print_json(&renamed)?;
+            } else {
+                println!("renamed → {}", renamed.path);
+            }
         }
         MilestoneCmd::Delete {
             target,
@@ -12394,26 +16470,20 @@ async fn connect_milestone_client(url: &str) -> eyre::Result<milestone::Mileston
     establish_for_url(url).await
 }
 
+/// Resolve a milestone reference — uuid, vault path, title, or a
+/// unique prefix of either (shared flexible resolver).
 async fn resolve_milestone_target(
     client: &milestone::MilestoneServiceClient,
     target: &str,
 ) -> eyre::Result<milestone::Milestone> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    client
-        .get_by_path(target.to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+    json_out::resolve_milestone_flexible(client, target).await
 }
 
 async fn mutate_milestone<F>(
     target: String,
     org: Option<String>,
     server: Option<String>,
+    json: bool,
     apply: F,
 ) -> eyre::Result<()>
 where
@@ -12428,11 +16498,395 @@ where
         .update(m)
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    if json {
+        json_out::print_json(&updated)?;
+    } else {
+        println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    }
     Ok(())
 }
 
 // ── Location (locations::Store) ──────────────────────────────────────
+
+async fn connect_threads_client(url: &str) -> eyre::Result<threads::ThreadsServiceClient> {
+    establish_for_url(url).await
+}
+
+/// Resolve `(org_id, local_user_id)` for CLI-authored threads, matching
+/// the timer CLI's identity derivation so UI + CLI share a keyspace.
+fn threads_local_ids(org_override: Option<&str>) -> (uuid::Uuid, uuid::Uuid) {
+    let org_id = org_ctx::resolve_active(org_override)
+        .ok()
+        .and_then(|ctx| ctx.root.manifest().ok().map(|m| m.id))
+        .unwrap_or_else(uuid::Uuid::nil);
+    (org_id, timer_owner_id(org_id))
+}
+
+/// Resolve a threads `--entity-id` reference (uuid, id prefix, path,
+/// or title) against the service named by `--entity-type`. Unknown
+/// entity types still take a literal UUID.
+async fn resolve_thread_entity(
+    url: &str,
+    entity_type: &str,
+    target: &str,
+) -> eyre::Result<uuid::Uuid> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return Ok(id);
+    }
+    match entity_type {
+        "task" => {
+            let tc = connect_task_client(url).await?;
+            Ok(json_out::resolve_task_flexible(&tc, target).await?.id)
+        }
+        "project" => {
+            let pc = connect_project_client(url).await?;
+            Ok(json_out::resolve_project_flexible(&pc, target).await?.id)
+        }
+        other => Err(errors::usage("resolve --entity-id")
+            .cause(format!(
+                "`{target}` is not a UUID and entity type `{other}` has no name resolver"
+            ))
+            .hint("pass a literal UUID, or use --entity-type task|project")
+            .report()),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_threads(cmd: ThreadsCmd) -> eyre::Result<()> {
+    // Global --org / --server routing, shared by every arm.
+    let slug = resolve_active_org(None)?;
+    let url = resolve_org_vox_url(None, &slug);
+    match cmd {
+        ThreadsCmd::New {
+            entity_type,
+            entity_id,
+            title,
+            kind,
+        } => {
+            let title = title.join(" ");
+            if title.trim().is_empty() {
+                eyre::bail!("a thread needs a title — pass some text");
+            }
+            let entity_id = resolve_thread_entity(&url, &entity_type, &entity_id).await?;
+            let (org_id, user_id) = threads_local_ids(None);
+            let client = connect_threads_client(&url).await?;
+            let t = client
+                .create_thread(threads::CreateThreadRequest {
+                    org_id,
+                    entity_type,
+                    entity_id,
+                    title,
+                    kind: kind.unwrap_or_default(),
+                    created_by: user_id,
+                    source_kind: "native".into(),
+                    source_ref: None,
+                    source_url: None,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("create_thread: {e:?}"))?;
+            println!("created thread {}  {}", t.id, t.title);
+        }
+        ThreadsCmd::Post {
+            thread_id,
+            text,
+            reply_to,
+            source,
+            author,
+        } => {
+            let body = text.join(" ");
+            if body.trim().is_empty() {
+                eyre::bail!("nothing to post — pass some message text");
+            }
+            let (org_id, user_id) = threads_local_ids(None);
+            let client = connect_threads_client(&url).await?;
+            let source_kind = source.unwrap_or_else(|| "native".into());
+            let author_label = author.unwrap_or_else(|| {
+                if source_kind == "agent" {
+                    "agent".into()
+                } else {
+                    "cli".into()
+                }
+            });
+            let m = client
+                .post_message(threads::PostMessageRequest {
+                    thread_id,
+                    org_id,
+                    author_id: Some(user_id),
+                    author_label,
+                    body,
+                    reply_to,
+                    source_kind,
+                    external_id: None,
+                    original_text: None,
+                    source_url: None,
+                    posted_at: None,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("post_message: {e:?}"))?;
+            println!("posted {}", m.id);
+        }
+        ThreadsCmd::List {
+            entity_type,
+            entity_id,
+            json,
+        } => {
+            let entity_id = resolve_thread_entity(&url, &entity_type, &entity_id).await?;
+            let client = connect_threads_client(&url).await?;
+            let rows = client
+                .list_threads(entity_type, entity_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_threads: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} threads", rows.len());
+            for t in rows {
+                let r = if t.resolved { " (resolved)" } else { "" };
+                println!("  {}  [{}]{}  {}", t.id, t.kind, r, t.title);
+            }
+        }
+        ThreadsCmd::Show { thread_id, json } => {
+            let client = connect_threads_client(&url).await?;
+            let msgs = client
+                .list_messages(thread_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_messages: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&msgs).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} messages", msgs.len());
+            for m in msgs {
+                println!(
+                    "  [{}] {}: {}",
+                    m.posted_at.format("%Y-%m-%d %H:%M"),
+                    m.author_label,
+                    m.body
+                );
+            }
+        }
+        ThreadsCmd::Resolve {
+            thread_id,
+            unresolve,
+        } => {
+            let (_org_id, user_id) = threads_local_ids(None);
+            let client = connect_threads_client(&url).await?;
+            let t = client
+                .set_resolved(thread_id, !unresolve, Some(user_id))
+                .await
+                .map_err(|e| eyre::eyre!("set_resolved: {e:?}"))?;
+            println!("thread {} resolved={}", t.id, t.resolved);
+        }
+        ThreadsCmd::Rm { id } => {
+            let client = connect_threads_client(&url).await?;
+            client
+                .delete_thread(id)
+                .await
+                .map_err(|e| eyre::eyre!("delete_thread: {e:?}"))?;
+            println!("deleted thread {id}");
+        }
+    }
+    Ok(())
+}
+
+async fn connect_inbox_client(url: &str) -> eyre::Result<inbox_proto::InboxClient> {
+    establish_for_url(url).await
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_inbox(cmd: InboxCmd) -> eyre::Result<()> {
+    match cmd {
+        InboxCmd::Add {
+            text,
+            kind,
+            source,
+            org,
+            server,
+        } => {
+            let body = text.join(" ");
+            if body.trim().is_empty() {
+                eyre::bail!("nothing to capture — pass some note text");
+            }
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let id = uuid::Uuid::new_v4().to_string();
+            let created = chrono::Utc::now().to_rfc3339();
+            let mut item = inbox_proto::InboxItem::capture(
+                id.clone(),
+                body,
+                source.unwrap_or_else(|| "cli".into()),
+                created,
+            );
+            if let Some(k) = kind {
+                item.kind = k;
+            }
+            client
+                .upsert_inbox_item(item)
+                .await
+                .map_err(|e| eyre::eyre!("capture: {e:?}"))?;
+            println!("captured {id}");
+        }
+        InboxCmd::Suggest {
+            text,
+            source,
+            link,
+            kind,
+            org,
+            server,
+        } => {
+            let mut body = text.join(" ");
+            if body.trim().is_empty() {
+                eyre::bail!("nothing to suggest — pass some text");
+            }
+            if let Some(l) = link {
+                body.push_str(&format!("\n\n[open original]({l})"));
+            }
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let id = uuid::Uuid::new_v4().to_string();
+            let created = chrono::Utc::now().to_rfc3339();
+            let mut item = inbox_proto::InboxItem::capture(
+                id.clone(),
+                body,
+                source.unwrap_or_else(|| "agent".into()),
+                created,
+            );
+            item.status = inbox_proto::InboxItem::STATUS_SUGGESTED.to_string();
+            if let Some(k) = kind {
+                item.kind = k;
+            }
+            client
+                .upsert_inbox_item(item)
+                .await
+                .map_err(|e| eyre::eyre!("suggest: {e:?}"))?;
+            println!("suggested {id}");
+        }
+        InboxCmd::List {
+            all,
+            json,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            // The daily-review queue: open items whose snooze (if any)
+            // has elapsed. `--all` bypasses both filters.
+            let today = chrono::Utc::now().date_naive().to_string();
+            let rows: Vec<_> = client
+                .list_inbox()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|it| {
+                    all || (it.is_open()
+                        && it
+                            .resurface_on
+                            .as_deref()
+                            .is_none_or(|d| d <= today.as_str()))
+                })
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if rows.is_empty() {
+                println!("inbox empty — nothing to review 🎉");
+                return Ok(());
+            }
+            for it in &rows {
+                let first_line = it.body.lines().next().unwrap_or("").trim();
+                let date = it.created.get(..10).unwrap_or(&it.created);
+                let snooze = it
+                    .resurface_on
+                    .as_deref()
+                    .map(|d| format!("  💤 {d}"))
+                    .unwrap_or_default();
+                println!(
+                    "{:<8}  {date}  {:<10}  {:<9}  {first_line}{snooze}",
+                    it.id.get(..8).unwrap_or(&it.id),
+                    it.kind,
+                    it.status,
+                );
+            }
+        }
+        InboxCmd::Mark {
+            id,
+            status,
+            into,
+            org,
+            server,
+        } => {
+            let allowed = [
+                inbox_proto::InboxItem::STATUS_OPEN,
+                inbox_proto::InboxItem::STATUS_PROCESSED,
+                inbox_proto::InboxItem::STATUS_ARCHIVED,
+            ];
+            if !allowed.contains(&status.as_str()) {
+                eyre::bail!("status must be one of: open, processed, archived");
+            }
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let mut item = client
+                .get_inbox_item(id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("get `{id}`: {e:?}"))?;
+            item.status = status.clone();
+            if into.is_some() {
+                item.processed_into = into;
+            }
+            client
+                .upsert_inbox_item(item)
+                .await
+                .map_err(|e| eyre::eyre!("mark: {e:?}"))?;
+            println!("{id} → {status}");
+        }
+        InboxCmd::Snooze {
+            id,
+            until,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            let mut item = client
+                .get_inbox_item(id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("get `{id}`: {e:?}"))?;
+            item.resurface_on = Some(until.clone());
+            client
+                .upsert_inbox_item(item)
+                .await
+                .map_err(|e| eyre::eyre!("snooze: {e:?}"))?;
+            println!("{id} snoozed until {until}");
+        }
+        InboxCmd::Rm { id, org, server } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_inbox_client(&u).await?;
+            client
+                .delete_inbox_item(id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {id}");
+        }
+    }
+    Ok(())
+}
 
 async fn connect_locations_client(url: &str) -> eyre::Result<locations::LocationsServiceClient> {
     establish_for_url(url).await
@@ -12454,7 +16908,11 @@ async fn resolve_location_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|l| l.path == target || l.name == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_location(cmd: LocationCmd) -> eyre::Result<()> {
@@ -12682,6 +17140,11 @@ async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
                 }
             }
         }
+        RecipeCmd::Create(a) => return mealprep::recipe_create(a).await,
+        RecipeCmd::Import(a) => return recipe_import::recipe_import(a).await,
+        RecipeCmd::Update(a) => return mealprep::recipe_update(a).await,
+        RecipeCmd::Show(a) => return mealprep::recipe_show(a).await,
+        RecipeCmd::CanCook(a) => return mealprep::recipe_can_cook(a).await,
         RecipeCmd::Delete {
             path,
             yes,
@@ -12725,9 +17188,11 @@ async fn resolve_meal_target(
         .list()
         .await
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
-    rows.into_iter()
-        .find(|m| m.path == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+    rows.into_iter().find(|m| m.path == target).ok_or_else(|| {
+        errors::not_found("resolve target", target)
+            .cause("no path or name match")
+            .report()
+    })
 }
 
 async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
@@ -12814,6 +17279,8 @@ async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
             let client = connect_mealplan_client(&u).await?;
             let scheduled_for = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
                 .map_err(|e| eyre::eyre!("--date: {e}"))?;
+            // Accept recipe display names as well as `.cook` paths.
+            let recipe = mealprep::resolve_recipe_refs(&u, recipe).await?;
             let new_meal = mealplan::Meal {
                 id: uuid::Uuid::nil(),
                 path: String::new(),
@@ -12902,6 +17369,7 @@ async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
                 .map_err(|e| eyre::eyre!("skip: {e:?}"))?;
             println!("skipped {}  ({})", skipped.name, skipped.path);
         }
+        MealCmd::Schedule(a) => return mealprep::meal_schedule(a).await,
         MealCmd::Rename {
             target,
             new_path,
@@ -12964,7 +17432,11 @@ async fn resolve_pantry_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|p| p.path == target || p.name == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_pantry(cmd: PantryCmd) -> eyre::Result<()> {
@@ -13412,7 +17884,11 @@ async fn resolve_body_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|m| m.path == target || m.name == target || m.kind == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_body(cmd: BodyCmd) -> eyre::Result<()> {
@@ -13591,7 +18067,11 @@ async fn resolve_exercise_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|e| e.path == target || e.name.eq_ignore_ascii_case(target))
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_exercise(cmd: ExerciseCmd) -> eyre::Result<()> {
@@ -13766,7 +18246,11 @@ async fn resolve_routine_target(
         .map_err(|e| eyre::eyre!("list_routines: {e:?}"))?;
     rows.into_iter()
         .find(|r| r.path == target || r.name.eq_ignore_ascii_case(target))
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn resolve_session_target(
@@ -13783,9 +18267,11 @@ async fn resolve_session_target(
         .list_sessions()
         .await
         .map_err(|e| eyre::eyre!("list_sessions: {e:?}"))?;
-    rows.into_iter()
-        .find(|s| s.path == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+    rows.into_iter().find(|s| s.path == target).ok_or_else(|| {
+        errors::not_found("resolve target", target)
+            .cause("no path or name match")
+            .report()
+    })
 }
 
 async fn run_workout(cmd: WorkoutCmd) -> eyre::Result<()> {
@@ -14049,7 +18535,11 @@ async fn resolve_intake_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|l| l.path == target || l.date.to_string() == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_intake(cmd: IntakeCmd) -> eyre::Result<()> {
@@ -14526,7 +19016,7 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
 /// wrapper handles the I/O + the CLI's flag plumbing.
 async fn run_vault_sync(cmd: VaultCmd) -> eyre::Result<()> {
     use vault_proto::{IfMatch, VaultSyncClient};
-    use vault_sync_client::{LocalEntry, Side, SyncOp, SyncSummary, index_local, plan_sync};
+    use vault_sync_client::{index_local, plan_sync, LocalEntry, Side, SyncOp, SyncSummary};
 
     enum Mode {
         Sync,

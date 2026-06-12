@@ -40,15 +40,15 @@ pub mod write;
 pub use model::{LoggedSet, Routine, RoutineDay, RoutineSlot, SessionStatus, WorkoutSession};
 pub use parse::{ParseError, looks_like_routine, looks_like_session, parse_routine, parse_session};
 pub use scan::{scan_routines, scan_sessions, sessions_between, sessions_for_exercise};
-pub use service::{WorkoutsError, WorkoutsService, WorkoutsServiceRpc};
+pub use service::{WorkoutsError, WorkoutsService};
 
 #[cfg(feature = "vox")]
-pub use service::{
-    Service as WorkoutsServiceBridge, WorkoutsServiceClient,
-    WorkoutsServiceRpcDispatcher as WorkoutsDispatcher, layer as workouts_service_layer,
-    serve as serve_workouts_service,
-    workouts_service_rpc_service_descriptor as workouts_service_descriptor,
+pub use fitness_proto::workouts::{
+    WorkoutsDispatcher, WorkoutsServiceBridge, WorkoutsServiceClient, serve_workouts_service,
+    workouts_service_descriptor, workouts_service_layer,
 };
+#[cfg(feature = "vox")]
+pub use service::{WorkoutsServiceRpc, WorkoutsServiceRpcDispatcher};
 pub use store::Store;
 pub use write::{
     WriteError, default_routine_path, default_session_path, serialize_routine, serialize_session,

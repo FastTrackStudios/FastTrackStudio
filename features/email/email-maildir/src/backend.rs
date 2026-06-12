@@ -5,8 +5,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use architect::vox;
 use email_config::FolderAliases;
 use email_proto::{
@@ -24,7 +22,7 @@ use crate::parse;
 /// one-or-more accounts; each account maps to a root directory
 /// shaped like a Maildir++ tree (root = INBOX, sibling `.Foo`
 /// dirs for sub-mailboxes).
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Backend {
     accounts: Arc<HashMap<String, AccountState>>,
     /// Per-account broadcast sender, lazily created on first
@@ -120,13 +118,6 @@ impl Backend {
         let (tx, _rx) = broadcast::channel::<EmailEvent>(256);
         chans.insert(account.to_string(), tx.clone());
         tx
-    }
-}
-
-impl HasDispatcher for Backend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

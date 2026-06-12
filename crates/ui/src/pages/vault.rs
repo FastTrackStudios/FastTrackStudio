@@ -12,9 +12,22 @@
 //! sidebar (a "move to folder" picker rewrites the `folder`
 //! property through [`set_folder`]).
 //!
-//! Editing path is unchanged: selecting a note pulls its bytes
-//! via `get_file`, saves through `put_file` with an
-//! `IfMatch::Sha` conditional write, and surfaces conflicts.
+//! The open/save/conflict lifecycle lives in
+//! [`DocumentSession`](crate::document_session::DocumentSession):
+//! typed conflicts, a debounced autosave, explicit save (Ctrl+S /
+//! toolbar), force-save (the conflict banner's *Overwrite*), and
+//! reload — the page renders from its typed state instead of a
+//! hand-rolled signal cluster.
+//!
+//! Wikilinks + embeds resolve through the client-side
+//! [`ClientVaultIndex`](crate::vault_lookup::ClientVaultIndex)
+//! (folder-index metadata + lazy `get_file` content LRU), passed
+//! to the editor as a stateful `DecorationSource`; `[[` and `#`
+//! autocomplete ride the editor's trigger `CompletionSource`
+//! (basenames + aliases from the folder index, tags from the
+//! `VaultGraph` RPC). A right-side **backlinks panel** lists
+//! pages linking to the open note via the same RPC and refreshes
+//! after every save.
 //!
 //! The server registers exactly one vault per org under the id
 //! `"default"`.
@@ -27,42 +40,24 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use editor::Editor;
 use editor::editor_view::slash::{SlashMenu, SlashState};
 use editor::editor_vim::VimState;
-use editor::{Editor, EditorState, editor_view};
 use fts_ui::lucide_dioxus::{ChevronRight, FileText, Folder};
 use fts_ui::prelude::*;
-use vault_proto::PageMeta;
+use vault_proto::{PageMeta, TagCount};
 
-/// The single vault id the server hosts per org. Referenced
-/// only from the wasm client calls.
+use crate::document_session::{SaveStatus, use_document_session};
+use crate::vault_lookup::{self, ClientVaultIndex};
+
 #[cfg(target_arch = "wasm32")]
-const VAULT_ID: &str = "default";
+use crate::document_session::VAULT_ID;
 
 /// Minimal payload to open a file: its path + last-known sha.
 #[derive(Clone, PartialEq)]
 struct FileMeta {
     path: String,
     sha256: String,
-}
-
-/// The server's version of a file we tried to save over.
-#[derive(Clone, PartialEq)]
-struct ConflictInfo {
-    server_sha: String,
-    server_text: String,
-}
-
-/// Outcome of a `put_file` attempt. `Saved` / `Conflict` are
-/// only constructed in the wasm client path.
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-enum SaveOutcome {
-    Saved(String),
-    Conflict {
-        server_sha: String,
-        server_text: String,
-    },
-    Failed(String),
 }
 
 /// One node of the virtual-folder tree.
@@ -74,18 +69,54 @@ struct TreeNode {
 }
 
 #[component]
-pub fn VaultView() -> Element {
-    let mut files = use_resource(|| async move { fetch_folder_index().await });
+pub fn VaultView(#[props(default)] initial_path: String) -> Element {
+    // The vault lives in the home org; resolve its slug from the
+    // discovered org list (re-runs when discovery lands).
+    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let mut files = use_resource(move || {
+        let slug = home();
+        async move { fetch_folder_index(slug).await }
+    });
 
-    // Open file + its editing state.
-    let mut selected = use_signal(|| None::<String>);
-    let mut state = use_signal(|| EditorState::new(String::new()));
-    let mut sha = use_signal(|| None::<String>);
-    let mut saved_text = use_signal(String::new);
-    let mut dirty = use_signal(|| false);
-    let mut status = use_signal(String::new);
-    let mut conflict = use_signal(|| None::<ConflictInfo>);
+    // Open file + its editing state — the whole
+    // open/save/autosave/conflict lifecycle in one handle. Provided
+    // as context for the keyed `CollabSession` child.
+    let session = use_document_session(home);
+    use_context_provider(|| session);
+    let selected = use_memo(move || session.current_path());
+
+    // Deep-link support: `/vault?path=<vault-relative path>` opens
+    // that note once the folder index lands (e.g. a knowledge-graph
+    // node click). One-shot — after the first open the user owns the
+    // selection again.
+    let mut deep_link_done = use_signal(|| false);
+    {
+        let want = initial_path.clone();
+        use_effect(move || {
+            if want.is_empty() || *deep_link_done.peek() {
+                return;
+            }
+            if let Some(Ok(pages)) = &*files.read() {
+                // Exact vault-relative path first; fall back to the
+                // basename so graph node ids (file stems) resolve too.
+                let hit = pages.iter().find(|p| p.path == want).or_else(|| {
+                    pages
+                        .iter()
+                        .find(|p| basename_of(&p.path) == basename_of(&want))
+                });
+                if let Some(p) = hit {
+                    deep_link_done.set(true);
+                    session.open(p.path.clone(), p.sha256.clone());
+                }
+            }
+        });
+    }
+
     let mut new_name = use_signal(String::new);
+    // Failures from tree operations (move / create) outlive their
+    // buttons via the app-wide notification queue.
+    let notify = architect::try_use_notifications();
 
     // Tree UI state. `collapsed` holds folders the user has
     // closed — default-empty means the whole tree starts
@@ -102,28 +133,187 @@ pub fn VaultView() -> Element {
     let vim = use_signal(VimState::new);
     let slash = use_signal(|| None::<SlashState>);
 
+    // Cross-file lookup for the decoration pass: rebuild the
+    // client index whenever the folder index (or org) changes.
+    // The decoration source below captures the *signal*, so the
+    // swap doesn't rebuild the source (Rc identity = the editor's
+    // prop-diff contract).
+    let mut lookup = use_signal(|| None::<Rc<ClientVaultIndex>>);
+    // Lazy-fetch worker for embeds/previews — page-owned, so the
+    // fetch's awaits and editor pokes never touch signals from the
+    // root scope (the suite's console gate treats that as fatal).
+    let fetcher = vault_lookup::use_vault_fetch_worker(home, lookup);
     use_effect(move || {
-        let cur = state.read().doc.to_string();
-        dirty.set(cur != *saved_text.read());
+        let pages = match &*files.read() {
+            Some(Ok(pages)) => pages.clone(),
+            _ => Vec::new(),
+        };
+        lookup.set(Some(ClientVaultIndex::new(&pages, session.state, fetcher)));
     });
 
-    // Open a note: pull bytes, seed a fresh state, remember the
-    // server sha so the next save is a conditional write.
-    let on_open = use_callback(move |meta: FileMeta| {
+    // Autocomplete candidates. `[[` completes basenames + aliases
+    // straight off the folder index; `#` completes vault tags
+    // pulled once per org (and re-pulled after each save, since
+    // saves can mint tags).
+    let link_candidates = use_memo(move || match &*files.read() {
+        Some(Ok(pages)) => vault_lookup::wikilink_candidates(pages),
+        _ => Vec::new(),
+    });
+    let mut tag_rows = use_signal(Vec::<TagCount>::new);
+    use_effect(move || {
+        let slug = home();
+        let _refresh = session.save_count();
         spawn(async move {
-            status.set(String::new());
-            conflict.set(None);
-            match fetch_file(meta.path.clone()).await {
-                Ok(text) => {
-                    saved_text.set(text.clone());
-                    state.set(EditorState::new(text));
-                    sha.set(Some(meta.sha256));
-                    selected.set(Some(meta.path));
-                    dirty.set(false);
-                }
-                Err(e) => status.set(format!("Load failed: {e}")),
+            if let Ok(tags) = vault_lookup::tag_candidates(slug).await {
+                tag_rows.set(tags);
             }
         });
+    });
+
+    // ── Per-file CRDT collaboration ───────────────────────────
+    // When a file opens, register it via `open_collab` and mount a
+    // keyed `CollabSession` (synced replica + presence cursors).
+    // While the session is live the server write-behind owns
+    // persistence and the sha autosave pauses; if the sync session
+    // drops, tear down and fall back to sha saves (a fresh replica
+    // is opened on the next file open — never a stale outbox).
+    //
+    // OWNERSHIP: `handles` (and every signal inside it) is created
+    // HERE, at the page scope, via `use_collab_handles`. The keyed
+    // `CollabSession` child only *drives* the slots. The Editor's
+    // decoration source + on_transaction sink capture `handles`
+    // through `collab`; because the page scope outlives the Editor,
+    // a session remount (file switch, reconnect-generation re-key,
+    // Live→Offline teardown) can never leave the Editor's keydown
+    // path holding dropped signals — the bug that used to kill all
+    // input (backspace, vim) after the first re-key.
+    let handles = crate::collab::use_collab_handles();
+    let mut collab = use_signal(|| None::<crate::collab::CollabHandles>);
+    let mut collab_doc = use_signal(|| None::<uuid::Uuid>);
+    let account = try_use_context::<Signal<Option<crate::auth::ActiveAccount>>>();
+    let conn = architect::use_connection::<vox_core::Caller>();
+    use_effect(move || {
+        let path = selected();
+        // Reactive read: re-run on every (re-)establish of the shared
+        // org connection. After an outage the Live→Offline teardown
+        // below clears the session; the generation bump is what re-opens
+        // collab for the still-open file once the socket is back — no
+        // refresh, fresh replica, delta resync by version vector.
+        let _generation = conn.generation();
+        collab_doc.set(None);
+        collab.set(None);
+        handles.reset();
+        let Some(path) = path else { return };
+        let slug = home.peek().clone();
+        spawn(async move {
+            match crate::collab::open_collab(slug, path.clone()).await {
+                Ok(ack) => {
+                    // Only arm if this file is still the open one.
+                    if session.current_path().as_deref() == Some(path.as_str()) {
+                        collab_doc.set(Some(ack.doc_id));
+                        collab.set(Some(handles));
+                    }
+                }
+                Err(e) => {
+                    // No collab (older server / native shell) — the
+                    // page simply stays in plain sha mode.
+                    tracing::debug!("vault collab unavailable for {path}: {e}");
+                }
+            }
+        });
+    });
+    // Autosave pauses exactly while collab is live (the server
+    // write-behind owns persistence then).
+    use_effect(move || {
+        let live = collab.read().as_ref().is_some_and(|c| c.is_live());
+        session.set_autosave_paused(live);
+    });
+    // Live → Offline teardown: unmount the session so offline edits
+    // go back through sha saves instead of a buffered CRDT outbox
+    // (re-syncing that outbox AND sha-saving the same edits would
+    // double-apply them server-side).
+    use_effect(move || {
+        let went_offline = collab
+            .read()
+            .as_ref()
+            .is_some_and(|c| (c.live)() && c.doc.status() == crdt::SyncStatus::Offline);
+        if went_offline {
+            collab_doc.set(None);
+            collab.set(None);
+            handles.reset();
+        }
+    });
+    let collab_status = use_memo(move || {
+        collab
+            .read()
+            .as_ref()
+            .map(|c| if c.is_live() { "Collab: live" } else { "Collab: connecting…" })
+    });
+    // Browser-conformance hook (tests/multiplayer): mirror the exact
+    // editor buffer + collab state into `window.__taskVault`. The
+    // decorated DOM can't be scraped back into doc text — hidden
+    // live-preview replacements render *nothing* (see editor-view's
+    // `render_dx.rs` Widget arm), so DOM reconstruction would drop
+    // those bytes. Cost is one string clone per buffer change.
+    #[cfg(target_arch = "wasm32")]
+    use_effect(move || {
+        let text = session.state.read().doc.to_string();
+        // Reading `revision()` subscribes this mirror to remote
+        // imports, so `replica` stays current; replica-vs-text is
+        // exactly the split the conformance suites need to localize
+        // a sync stall (transport vs editor-apply bridge).
+        let (live, status, rev, replica) = match &*collab.read() {
+            Some(c) => (
+                c.is_live(),
+                format!("{:?}", c.doc.status()),
+                c.doc.revision(),
+                c.doc
+                    .doc()
+                    .map(|d| {
+                        d.loro()
+                            .get_text(vault_proto::COLLAB_TEXT_CONTAINER)
+                            .to_string()
+                    })
+                    .unwrap_or_default(),
+            ),
+            None => (false, "none".to_owned(), 0, String::new()),
+        };
+        let path = selected.read().clone().unwrap_or_default();
+        let Some(win) = web_sys::window() else { return };
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: wasm_bindgen::JsValue| {
+            let _ = js_sys::Reflect::set(&obj, &wasm_bindgen::JsValue::from_str(k), &v);
+        };
+        set("text", wasm_bindgen::JsValue::from_str(&text));
+        set("live", wasm_bindgen::JsValue::from_bool(live));
+        set("status", wasm_bindgen::JsValue::from_str(&status));
+        set("rev", wasm_bindgen::JsValue::from_f64(rev as f64));
+        set("replica", wasm_bindgen::JsValue::from_str(&replica));
+        set("path", wasm_bindgen::JsValue::from_str(&path));
+        let _ = js_sys::Reflect::set(
+            &win,
+            &wasm_bindgen::JsValue::from_str("__taskVault"),
+            &obj,
+        );
+    });
+    // Editor → replica bridge + presence cursor publish.
+    let on_transaction = use_callback(move |event: editor::TransactionEvent| {
+        let Some(c) = *collab.peek() else { return };
+        let who = account
+            .and_then(|a| a.peek().as_ref().map(|acct| acct.name.clone()))
+            .unwrap_or_else(|| "anonymous".to_owned());
+        crate::collab::on_editor_transaction(&c, &session, &event, &who);
+    });
+
+    // Editor sources — created once, capturing the signals above.
+    // Decorations = the vault pass + remote presence cursors.
+    let decorations = use_hook(|| crate::collab::collab_decoration_source(lookup, collab));
+    let completion = use_hook(|| vault_lookup::vault_completion_source(link_candidates, tag_rows));
+
+    // Open a note through the session (fetch + seed + sha
+    // bookkeeping).
+    let on_open = use_callback(move |meta: FileMeta| {
+        session.open(meta.path, meta.sha256);
     });
 
     // Re-file a note under `parent` (None = root) via set_folder,
@@ -131,53 +321,25 @@ pub fn VaultView() -> Element {
     let do_move = use_callback(
         move |(path, prev_sha, parent): (String, String, Option<String>)| {
             spawn(async move {
-                status.set("Moving…".to_owned());
-                match move_to_folder(path, parent, prev_sha).await {
-                    Ok(()) => {
-                        status.set("Moved".to_owned());
+                match move_to_folder(home(), path, parent, prev_sha).await {
+                    Ok(_new_sha) => {
                         move_target.set(None);
                         files.restart();
                     }
-                    Err(e) => status.set(format!("Move failed: {e}")),
+                    Err(e) => {
+                        if let Some(n) = notify {
+                            n.error(format!("Move failed: {e}"));
+                        }
+                    }
                 }
             });
         },
     );
 
-    // Save the current buffer. `force` skips the sha guard.
-    let do_save = move |force: bool| {
-        let Some(path) = selected.peek().clone() else {
-            return;
-        };
-        let cur_sha = sha.peek().clone();
-        let text = state.peek().doc.to_string();
-        spawn(async move {
-            status.set("Saving…".to_owned());
-            match save_file(path, text.clone(), cur_sha, force).await {
-                SaveOutcome::Saved(new_sha) => {
-                    sha.set(Some(new_sha));
-                    saved_text.set(text);
-                    dirty.set(false);
-                    conflict.set(None);
-                    status.set("Saved".to_owned());
-                }
-                SaveOutcome::Conflict {
-                    server_sha,
-                    server_text,
-                } => {
-                    conflict.set(Some(ConflictInfo {
-                        server_sha,
-                        server_text,
-                    }));
-                    status.set("Conflict — file changed on server".to_owned());
-                }
-                SaveOutcome::Failed(e) => status.set(format!("Save failed: {e}")),
-            }
-        });
-    };
-
     // Create a new empty note. If a folder was chosen (via a
-    // folder row's "+"), file it there right after creating.
+    // folder row's "+"), file it there right after creating, then
+    // open through the session — the open re-fetches, so the
+    // buffer reflects the server-spliced `folder:` frontmatter.
     let create_file = move || {
         let mut name = new_name.peek().trim().to_owned();
         if name.is_empty() {
@@ -188,32 +350,30 @@ pub fn VaultView() -> Element {
         }
         let parent = create_parent.peek().clone();
         spawn(async move {
-            status.set("Creating…".to_owned());
-            match create_new_file(name.clone()).await {
-                Ok(new_sha) => {
+            match create_new_file(home(), name.clone()).await {
+                Ok(created_sha) => {
                     new_name.set(String::new());
                     create_parent.set(None);
-                    let mut open_sha = new_sha;
+                    let mut open_sha = created_sha.clone();
                     if let Some(parent) = parent {
-                        match move_to_folder(name.clone(), Some(parent), open_sha.clone()).await {
-                            Ok(()) => {}
-                            Err(e) => status.set(format!("Filed, but move failed: {e}")),
+                        match move_to_folder(home(), name.clone(), Some(parent), created_sha).await
+                        {
+                            Ok(new_sha) => open_sha = new_sha,
+                            Err(e) => {
+                                if let Some(n) = notify {
+                                    n.error(format!("Created, but filing failed: {e}"));
+                                }
+                            }
                         }
-                        // The folder write changed the sha; reload by
-                        // path on open below handles it, but seed an
-                        // empty buffer either way.
-                        open_sha = String::new();
                     }
-                    saved_text.set(String::new());
-                    state.set(EditorState::new(String::new()));
-                    sha.set(Some(open_sha));
-                    selected.set(Some(name));
-                    dirty.set(false);
-                    conflict.set(None);
-                    status.set("Created".to_owned());
+                    session.open(name, open_sha);
                     files.restart();
                 }
-                Err(e) => status.set(format!("Create failed: {e}")),
+                Err(e) => {
+                    if let Some(n) = notify {
+                        n.error(format!("Create failed: {e}"));
+                    }
+                }
             }
         });
     };
@@ -222,6 +382,30 @@ pub fn VaultView() -> Element {
     let tree = use_memo(move || match &*files.read_unchecked() {
         Some(Ok(pages)) => Some(Rc::new(build_tree(pages))),
         _ => None,
+    });
+
+    // path → (title, sha) for the backlinks panel rows.
+    let page_lookup = use_memo(move || match &*files.read_unchecked() {
+        Some(Ok(pages)) => pages
+            .iter()
+            .map(|p| (p.path.clone(), (p.title.clone(), p.sha256.clone())))
+            .collect::<HashMap<String, (String, String)>>(),
+        _ => HashMap::new(),
+    });
+
+    // Backlinks for the open note, re-pulled when the selection
+    // changes and after every committed save.
+    let backlinks_open = use_signal(|| true);
+    let backlinks = use_resource(move || {
+        let slug = home();
+        let path = selected();
+        let _refresh = session.save_count();
+        async move {
+            match path {
+                Some(p) => fetch_backlinks(slug, p).await,
+                None => Ok(Vec::new()),
+            }
+        }
     });
 
     let sidebar_body = match &*files.read_unchecked() {
@@ -263,11 +447,17 @@ pub fn VaultView() -> Element {
 
     let has_file = selected.read().is_some();
     let current = selected.read().clone().unwrap_or_default();
-    let is_dirty = *dirty.read();
-    let status_msg = status.read().clone();
-    let conflict_open = conflict.read().is_some();
+    let is_dirty = session.dirty();
+    let status_msg = match session.status() {
+        SaveStatus::Idle => String::new(),
+        SaveStatus::Saving => "Saving…".to_owned(),
+        SaveStatus::Saved => "Saved".to_owned(),
+        SaveStatus::Failed(msg) => msg,
+    };
+    let conflict_open = session.conflict().is_some();
     let moving = move_target.read().clone();
     let create_under = create_parent.read().clone();
+    let panel_open = *backlinks_open.read();
 
     rsx! {
         div { class: "flex h-full min-h-[80vh]",
@@ -342,7 +532,7 @@ pub fn VaultView() -> Element {
                     let m = evt.modifiers();
                     if (m.ctrl() || m.meta()) && evt.key().to_string() == "s" {
                         evt.prevent_default();
-                        do_save(false);
+                        session.save();
                     }
                 },
                 div { class: "flex items-center justify-between gap-3 border-b border-border px-4 py-2",
@@ -355,6 +545,9 @@ pub fn VaultView() -> Element {
                         }
                     }
                     div { class: "flex items-center gap-3",
+                        if let Some(cs) = collab_status() {
+                            Text { variant: TextVariant::Muted, class: "text-xs", "{cs}" }
+                        }
                         if !status_msg.is_empty() {
                             Text { variant: TextVariant::Muted, class: "text-xs", "{status_msg}" }
                         }
@@ -362,8 +555,19 @@ pub fn VaultView() -> Element {
                             variant: ButtonVariant::Primary,
                             size: ButtonSize::Small,
                             disabled: !has_file,
-                            on_click: move |_| do_save(false),
+                            on_click: move |_| session.save(),
                             "Save"
+                        }
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Small,
+                            disabled: !has_file,
+                            on_click: move |_| {
+                                let mut o = backlinks_open;
+                                let cur = *o.peek();
+                                o.set(!cur);
+                            },
+                            if panel_open { "Hide backlinks" } else { "Backlinks" }
                         }
                     }
                 }
@@ -374,53 +578,114 @@ pub fn VaultView() -> Element {
                             Button {
                                 variant: ButtonVariant::Outline,
                                 size: ButtonSize::Small,
-                                on_click: move |_| {
-                                    let snapshot = conflict.peek().clone();
-                                    if let Some(c) = snapshot {
-                                        saved_text.set(c.server_text.clone());
-                                        state.set(EditorState::new(c.server_text));
-                                        sha.set(Some(c.server_sha));
-                                        dirty.set(false);
-                                        conflict.set(None);
-                                        status.set("Reloaded from server".to_owned());
-                                    }
-                                },
+                                on_click: move |_| session.reload_from_server(),
                                 "Reload"
                             }
                             Button {
                                 variant: ButtonVariant::Destructive,
                                 size: ButtonSize::Small,
-                                on_click: move |_| do_save(true),
+                                on_click: move |_| session.force_save(),
                                 "Overwrite"
                             }
                         }
                     }
                 }
-                div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
-                    if has_file {
-                        div { class: "editor-app",
-                            div { class: "editor-frame",
-                                Editor {
-                                    state,
-                                    keymap: keymap.read().clone(),
-                                    decorations: editor::combined_decorations as editor_view::DecorationSource,
-                                    vim: Some(vim),
-                                    slash: Some(slash),
+                div { class: "flex min-h-0 flex-1",
+                    div { class: "flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto",
+                        if has_file {
+                            div { class: "editor-app",
+                                // --flush: no card chrome — the vault page is a
+                                // full-page embed; the editor sits directly on
+                                // the app background (Obsidian-style).
+                                div { class: "editor-frame editor-frame--flush",
+                                    Editor {
+                                        state: session.state,
+                                        keymap: keymap.read().clone(),
+                                        decorations: decorations.clone(),
+                                        vim: Some(vim),
+                                        slash: Some(slash),
+                                        completion: completion.clone(),
+                                        on_transaction,
+                                    }
+                                    SlashMenu { state: session.state, slash }
                                 }
-                                SlashMenu { state, slash }
+                            }
+                        } else {
+                            div { class: "flex h-full items-center justify-center p-8",
+                                Text { variant: TextVariant::Muted,
+                                    "Select a note from the tree to start editing."
+                                }
                             }
                         }
-                    } else {
-                        div { class: "flex h-full items-center justify-center p-8",
-                            Text { variant: TextVariant::Muted,
-                                "Select a note from the tree to start editing."
+                    }
+                    // ── Backlinks panel ───────────────────
+                    if has_file && panel_open {
+                        aside { class: "flex w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/30",
+                            div { class: "flex items-center justify-between px-3 py-3",
+                                Heading { level: HeadingLevel::H3, "Backlinks" }
+                                button {
+                                    class: "text-xs text-muted-foreground hover:text-foreground",
+                                    onclick: move |_| {
+                                        let mut o = backlinks_open;
+                                        o.set(false);
+                                    },
+                                    "Hide"
+                                }
+                            }
+                            match &*backlinks.read_unchecked() {
+                                Some(Ok(list)) if list.is_empty() => rsx! {
+                                    div { class: "px-3 py-2 text-sm text-muted-foreground",
+                                        "No backlinks yet. Link to this note with [[{basename_of(&current)}]]."
+                                    }
+                                },
+                                Some(Ok(list)) => rsx! {
+                                    nav { class: "flex flex-col gap-0.5 px-2 pb-4",
+                                        for path in list.iter().cloned() {
+                                            {
+                                                let (title, sha) = page_lookup
+                                                    .read()
+                                                    .get(&path)
+                                                    .cloned()
+                                                    .unwrap_or_else(|| (basename_of(&path).to_owned(), String::new()));
+                                                let target = FileMeta { path: path.clone(), sha256: sha };
+                                                rsx! {
+                                                    button {
+                                                        key: "{path}",
+                                                        class: "group flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-sm hover:bg-accent/50",
+                                                        onclick: move |_| on_open.call(target.clone()),
+                                                        span { class: "font-medium", "{title}" }
+                                                        span { class: "text-xs text-muted-foreground", "{path}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                Some(Err(e)) => rsx! {
+                                    div { class: "px-3 py-2 text-sm text-destructive",
+                                        "Couldn't load backlinks: {e}"
+                                    }
+                                },
+                                None => rsx! {
+                                    div { class: "flex flex-col gap-2 px-3 py-2",
+                                        Skeleton { class: "h-4 w-3/4" }
+                                        Skeleton { class: "h-4 w-1/2" }
+                                        Skeleton { class: "h-4 w-2/3" }
+                                    }
+                                },
                             }
                         }
                     }
                 }
             }
         }
+        // Keyed collab child: remount per doc id = fresh replica,
+        // driven INTO the page-owned `handles` slots.
+        if let Some(doc_id) = collab_doc() {
+            crate::collab::CollabSession { key: "{doc_id}", doc_id, handles }
+        }
         document::Link { rel: "stylesheet", href: editor::EDITOR_STYLE }
+        document::Style { {crate::collab::COLLAB_STYLE} }
     }
 }
 
@@ -435,7 +700,7 @@ fn render_node(
     idx: usize,
     depth: usize,
     mut collapsed: Signal<HashSet<String>>,
-    selected: Signal<Option<String>>,
+    selected: Memo<Option<String>>,
     on_open: Callback<FileMeta>,
     mut move_target: Signal<Option<String>>,
     mut create_parent: Signal<Option<String>>,
@@ -590,9 +855,16 @@ fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
     (nodes, roots)
 }
 
+/// Filename without dirs/extension — display fallback for paths
+/// missing from the folder index.
+fn basename_of(path: &str) -> &str {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    file.strip_suffix(".md").unwrap_or(file)
+}
+
 /// Frontmatter-derived page index for the folder tree.
-async fn fetch_folder_index() -> Result<Vec<PageMeta>, String> {
-    let client = crate::vox_clients::vault_client().await?;
+async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, String> {
+    let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
         let idx = client
@@ -618,16 +890,15 @@ async fn fetch_folder_index() -> Result<Vec<PageMeta>, String> {
     }
 }
 
-/// Read one file's bytes as UTF-8 text.
-async fn fetch_file(path: String) -> Result<String, String> {
-    let client = crate::vox_clients::vault_client().await?;
+/// Pages linking to `path`, via the `VaultGraph` RPC.
+async fn fetch_backlinks(slug: String, path: String) -> Result<Vec<String>, String> {
+    let client = crate::vox_clients::vault_graph_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
-        let bytes = client
-            .get_file(VAULT_ID.to_owned(), path)
+        client
+            .backlinks(VAULT_ID.to_owned(), path)
             .await
-            .map_err(|e| format!("get_file: {e:?}"))?;
-        Ok(String::from_utf8_lossy(&bytes.0).into_owned())
+            .map_err(|e| format!("backlinks: {e:?}"))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -636,63 +907,16 @@ async fn fetch_file(path: String) -> Result<String, String> {
     }
 }
 
-/// Conditional-write the file back. `prev_sha` is the
-/// last-known-server hash (`None` → create-only); `force`
-/// writes unconditionally.
-async fn save_file(
-    path: String,
-    text: String,
-    prev_sha: Option<String>,
-    force: bool,
-) -> SaveOutcome {
-    let client = match crate::vox_clients::vault_client().await {
-        Ok(c) => c,
-        Err(e) => return SaveOutcome::Failed(e),
-    };
-    #[cfg(target_arch = "wasm32")]
-    {
-        use vault_proto::IfMatch;
-        use vault_proto::VaultSyncError;
-        use vox::VoxError;
-        let if_match = if force {
-            IfMatch::Force
-        } else {
-            match prev_sha {
-                Some(s) => IfMatch::Sha(s),
-                None => IfMatch::CreateOnly,
-            }
-        };
-        match client
-            .put_file(VAULT_ID.to_owned(), path, text.into_bytes(), if_match)
-            .await
-        {
-            Ok(ack) => SaveOutcome::Saved(ack.sha256),
-            Err(VoxError::User(VaultSyncError::Conflict {
-                server_sha,
-                server_bytes,
-            })) => SaveOutcome::Conflict {
-                server_sha,
-                server_text: String::from_utf8_lossy(&server_bytes).into_owned(),
-            },
-            Err(e) => SaveOutcome::Failed(format!("{e:?}")),
-        }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (client, path, text, prev_sha, force);
-        SaveOutcome::Failed("native client not wired yet".to_owned())
-    }
-}
-
 /// Re-file a note: set its `folder` to `parent` (None = root)
 /// via the server-side frontmatter splice. `prev_sha` empty →
-/// unconditional.
+/// unconditional. Returns the freshly committed sha.
 async fn move_to_folder(
+    slug: String,
     path: String,
     parent: Option<String>,
     prev_sha: String,
-) -> Result<(), String> {
-    let client = crate::vox_clients::vault_client().await?;
+) -> Result<String, String> {
+    let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
         use vault_proto::IfMatch;
@@ -701,11 +925,11 @@ async fn move_to_folder(
         } else {
             IfMatch::Sha(prev_sha)
         };
-        client
+        let ack = client
             .set_folder(VAULT_ID.to_owned(), path, parent, if_match)
             .await
             .map_err(|e| format!("set_folder: {e:?}"))?;
-        Ok(())
+        Ok(ack.sha256)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -715,8 +939,8 @@ async fn move_to_folder(
 }
 
 /// Create a new empty file (create-only). Returns its sha.
-async fn create_new_file(path: String) -> Result<String, String> {
-    let client = crate::vox_clients::vault_client().await?;
+async fn create_new_file(slug: String, path: String) -> Result<String, String> {
+    let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
         use vault_proto::IfMatch;

@@ -5,9 +5,9 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
+use crate::model::Status;
 use crate::TaskInfo;
 use crate::TaskMutation;
-use crate::model::Status;
 
 use super::detail::TaskDetail;
 use super::kanban::KanbanBoard;
@@ -36,6 +36,10 @@ pub struct TasksAppProps {
     pub on_event: EventHandler<TaskMutation>,
     #[props(default)]
     pub initial_view: Option<ViewMode>,
+    /// When set, the quick-edit sheet offers "Open full view" and
+    /// emits the task id — the page layer routes it (`/tasks/:id`).
+    #[props(default)]
+    pub on_open_full: Option<EventHandler<Uuid>>,
 }
 
 #[component]
@@ -48,11 +52,9 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
         .and_then(|id| props.tasks.iter().find(|t| t.id == id).cloned());
 
     let total = props.tasks.len();
-    let done = props
-        .tasks
-        .iter()
-        .filter(|t| t.status_enum() == Status::Done)
-        .count();
+    // Progress counts route through state groups (is_done), not
+    // the Status enum, so custom completed-group names count.
+    let done = props.tasks.iter().filter(|t| t.is_done()).count();
     let open_count = total - done;
 
     rsx! {
@@ -117,6 +119,7 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                     task: t,
                     on_event: props.on_event,
                     on_close: move |()| open_id.set(None),
+                    on_open_full: props.on_open_full,
                 }
             }
         }

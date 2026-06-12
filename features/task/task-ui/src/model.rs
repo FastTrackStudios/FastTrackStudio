@@ -73,9 +73,20 @@ impl TaskInfo {
         s.get(..10).and_then(|d| d.parse::<NaiveDate>().ok())
     }
 
+    /// Canonical state group for this task's raw status —
+    /// progress classification goes through this, not the
+    /// `Status` enum, so custom status names (e.g. `shipped`,
+    /// `qa-review`) classify sensibly. Uses the default
+    /// registry; components are project-agnostic (props-driven),
+    /// so per-project registries resolve upstream.
+    #[must_use]
+    pub fn state_group(&self) -> project::StateGroup {
+        project::resolve_state_group(None, &self.status)
+    }
+
     #[must_use]
     pub fn is_done(&self) -> bool {
-        self.status_enum().is_done()
+        self.state_group() == project::StateGroup::Completed
     }
 }
 

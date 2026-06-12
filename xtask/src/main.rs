@@ -50,11 +50,9 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let out_dir = workspace_root
-        .join("integrations")
-        .join("obsidian")
-        .join("plugin")
-        .join("generated");
+    // ui-lab is the only TS consumer today. The Obsidian plugin will
+    // get its own out-dir entry here when it grows vox clients.
+    let out_dir = workspace_root.join("ui-lab").join("src").join("generated");
     std::fs::create_dir_all(&out_dir)?;
 
     for service in service_descriptors() {
@@ -71,9 +69,26 @@ fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::E
 }
 
 fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
-    // Vertical-slice reset: per-feature service descriptors will be
-    // pulled from the new features/* trios as they come online.
-    Vec::new()
+    // Per-feature service descriptors, pulled from the features/*
+    // proto crates (each #[architect::rpc] trait emits a
+    // `<snake_name>_service_descriptor()` under the `vox` feature).
+    // Add new services here as their TS clients are needed.
+    //
+    // Traits with `#[subscribe]` declarations also emit a stream
+    // sibling (`<Trait>Stream` — a vox service whose methods take a
+    // `Tx<Event>` sink). Those descriptors are listed too, so the
+    // generated TS exposes the subscription streams: create a
+    // channel pair (`channel<TaskEvent>()` from @bearcove/vox-core),
+    // pass the tx to `events(tx)`, and `for await` the rx.
+    vec![
+        project::project_service_descriptor(),
+        task::task_service_descriptor(),
+        task::task_stream_descriptor(),
+        auth_proto::auth_service_service_descriptor(),
+        milestone_proto::milestone_service_descriptor(),
+        workstream_proto::workstream_service_descriptor(),
+        workstream_proto::workstream_stream_descriptor(),
+    ]
 }
 
 fn build_obsidian_plugin(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {

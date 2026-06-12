@@ -213,3 +213,52 @@ async fn balances_reflect_posted_transactions() {
     assert_eq!(cash_bal.currency, "USD");
     assert_eq!(income_bal.currency, "USD");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn books_and_accounts_read_surface() {
+    let fx = setup().await;
+    let svc = LedgerService::new(fx.conn.clone()).unwrap();
+
+    // books() returns the seeded book.
+    let books = on_blocking(svc.clone(), |s| s.books())
+        .await
+        .expect("books ok");
+    assert_eq!(books.len(), 1);
+    assert_eq!(books[0].id, fx.book_id);
+
+    // accounts(book) returns the two seeded accounts, name-sorted.
+    let book_id = fx.book_id;
+    let accounts = on_blocking(svc, move |s| s.accounts(book_id))
+        .await
+        .expect("accounts ok");
+    let names: Vec<&str> = accounts.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, vec!["Cash", "Sales"], "name-sorted accounts");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ensure_account_is_idempotent() {
+    let fx = setup().await;
+    let svc = LedgerService::new(fx.conn.clone()).unwrap();
+    let book_id = fx.book_id;
+
+    // First call creates "Accounts Receivable"; second resolves it.
+    // `ensure_account` is async (not a sync trait method) so it runs
+    // directly on the test's runtime.
+    let a1 = svc
+        .ensure_account(book_id, "Accounts Receivable", AccountKind::Asset)
+        .await
+        .expect("create AR");
+    let a2 = svc
+        .ensure_account(book_id, "Accounts Receivable", AccountKind::Asset)
+        .await
+        .expect("resolve AR");
+    assert_eq!(a1, a2, "ensure_account is find-or-create, not create-twice");
+
+    // The book now has exactly one extra account (Cash + Sales + AR).
+    // `accounts` is sync (blocks on the runtime), so drive it off the
+    // worker via `spawn_blocking`.
+    let accounts = on_blocking(svc, move |s| s.accounts(book_id))
+        .await
+        .expect("accounts ok");
+    assert_eq!(accounts.len(), 3);
+}

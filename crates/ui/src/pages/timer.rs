@@ -5,18 +5,29 @@
 //! sessions with a today total. Org-scoped: it reads/writes the
 //! selected org's timer service.
 //!
+//! State is the shared optimistic session store ([`crate::stores`]):
+//! one slug-tagged list across the selected orgs, with the running
+//! session *derived* from it (the open row for the active org +
+//! owner) — no separate `active_timer` round-trip and no
+//! refresh-counter refetch after start/stop/edit/delete. Mutations
+//! patch the store instantly and reconcile against the server
+//! (rollback + tray notification on failure).
+//!
 //! Identity: `org_id` comes from the org's manifest (surfaced via the
 //! well-known endpoint). `user_id` is a stable per-org "local owner"
 //! id derived from `org_id` — a single-user stand-in until auth wires
 //! a real signed-in user through to the page.
 
+use architect::Id;
 use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use timer_proto::{StartTimerRequest, WorkSession};
 use uuid::Uuid;
 
+use crate::chrome::{fmt_hms, owner_id, resolve_org, use_second_tick};
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 #[component]
 pub fn TimerView() -> Element {
@@ -25,66 +36,59 @@ pub fn TimerView() -> Element {
 
     let target = use_memo(move || resolve_org(&selection.read(), &org_list.read()));
 
-    // Bumped after start/stop so the resources refetch.
-    let mut reload = use_signal(|| 0u32);
-
-    let active = use_resource(move || async move {
-        let _ = reload();
-        match target() {
-            Some((slug, org_id)) => crate::feeds::fetch_active_timer(&slug, owner_id(org_id)).await,
-            None => Ok(None),
-        }
-    });
-    let sessions = use_resource(move || async move {
-        let _ = reload();
-        match target() {
-            Some((slug, org_id)) => {
-                crate::feeds::fetch_recent_sessions(&slug, owner_id(org_id)).await
-            }
-            None => Ok(Vec::new()),
-        }
-    });
+    // The shared session store: every selected org, newest first.
+    let result = stores::use_session_list();
+    let muts = stores::use_timer_mutations();
 
     // Live elapsed clock — re-render once a second while mounted.
     let tick = use_signal(|| 0u64);
-    use_elapsed_tick(tick);
+    use_second_tick(tick);
     let _ = tick(); // subscribe so the running card's clock ticks.
 
     let mut description = use_signal(String::new);
+
+    let rows: Vec<(Id<Uuid>, stores::OrgSession)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
+    let first_load = result.is_waiting() && result.value().is_none();
+
+    // The running session, derived from the one list: the open row for
+    // the active org + owner (the backend enforces at most one).
+    let active: Option<stores::OrgSession> = target().and_then(|(slug, org_id)| {
+        let owner = owner_id(org_id);
+        rows.iter()
+            .map(|(_, r)| r)
+            .find(|r| r.slug == slug && r.session.user_id == owner && r.session.end_time.is_none())
+            .cloned()
+    });
 
     let start = move |_| {
         let Some((slug, org_id)) = target() else {
             return;
         };
         let desc = description.peek().trim().to_string();
-        spawn(async move {
-            let req = StartTimerRequest {
+        description.set(String::new());
+        muts.start(
+            slug,
+            StartTimerRequest {
                 user_id: owner_id(org_id),
                 org_id,
                 project_id: None,
                 project_path: String::new(),
                 task_note_path: String::new(),
                 description: desc,
-            };
-            if crate::feeds::start_timer(&slug, req).await.is_ok() {
-                description.set(String::new());
-                reload += 1;
-            }
-        });
+            },
+        );
     };
 
+    let active_for_stop = active.clone();
     let stop = move |_| {
         let Some((slug, org_id)) = target() else {
             return;
         };
-        spawn(async move {
-            if crate::feeds::stop_timer(&slug, owner_id(org_id))
-                .await
-                .is_ok()
-            {
-                reload += 1;
-            }
-        });
+        let Some(open) = active_for_stop.as_ref() else {
+            return;
+        };
+        muts.stop(slug, owner_id(org_id), open.session.id);
     };
 
     let body = if target().is_none() {
@@ -94,20 +98,20 @@ pub fn TimerView() -> Element {
     } else {
         rsx! {
             // Running session, or the start form.
-            match &*active.read_unchecked() {
-                Some(Ok(Some(s))) => running_card(s, stop),
-                Some(Ok(None)) => start_form(description, start),
-                Some(Err(e)) => rsx! {
-                    div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                        "Couldn't reach the timer service: {e}"
-                    }
-                },
-                None => rsx! { Text { variant: TextVariant::Muted, "Loading timer…" } },
+            if let Some(open) = active.as_ref() {
+                {running_card(&open.session, stop)}
+            } else if first_load {
+                Text { variant: TextVariant::Muted, "Loading timer…" }
+            } else if let Some(e) = load_err.as_ref() {
+                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                    "Couldn't reach the timer service: {e}"
+                }
+            } else {
+                {start_form(description, start)}
             }
-            // Recent sessions.
-            match &*sessions.read_unchecked() {
-                Some(Ok(rows)) if !rows.is_empty() => session_list(rows),
-                _ => rsx! {},
+            // Recent sessions (all selected orgs).
+            if !rows.is_empty() {
+                {session_list(&rows)}
             }
         }
     };
@@ -181,13 +185,18 @@ fn start_form(
     }
 }
 
-/// Recent sessions, newest first, with a today total.
-fn session_list(rows: &[WorkSession]) -> Element {
+/// Recent sessions, newest first, with a today total. Each row (tagged
+/// with its org) edits / deletes in place through the shared store.
+fn session_list(rows: &[(Id<Uuid>, stores::OrgSession)]) -> Element {
     let today = Utc::now().date_naive();
     let today_secs: i64 = rows
         .iter()
-        .filter(|s| s.start_time.date_naive() == today)
-        .filter_map(|s| s.end_time.map(|e| (e - s.start_time).num_seconds()))
+        .filter(|(_, r)| r.session.start_time.date_naive() == today)
+        .filter_map(|(_, r)| {
+            r.session
+                .end_time
+                .map(|e| (e - r.session.start_time).num_seconds())
+        })
         .sum();
 
     rsx! {
@@ -197,35 +206,12 @@ fn session_list(rows: &[WorkSession]) -> Element {
                 Text { variant: TextVariant::Muted, "Today: {fmt_hms(today_secs)}" }
             }
             div { class: "flex flex-col divide-y divide-border/50 rounded-xl border border-border/60 bg-card/40",
-                for s in rows.iter().take(20) {
-                    {
-                        let running = s.end_time.is_none();
-                        let dur = s.end_time.map_or_else(
-                            || (Utc::now() - s.start_time).num_seconds(),
-                            |e| (e - s.start_time).num_seconds(),
-                        );
-                        let title = if s.description.trim().is_empty() {
-                            "(no description)".to_string()
-                        } else {
-                            s.description.clone()
-                        };
-                        let when = s.start_time.format("%a %b %-d, %-I:%M %p").to_string();
-                        rsx! {
-                            div { key: "{s.id}", class: "flex items-center justify-between gap-3 px-3 py-2.5",
-                                div { class: "flex min-w-0 flex-col",
-                                    span { class: "truncate text-sm text-foreground", "{title}" }
-                                    span { class: "text-xs text-muted-foreground", "{when}" }
-                                }
-                                span {
-                                    class: if running {
-                                        "shrink-0 font-mono text-sm tabular-nums text-emerald-400"
-                                    } else {
-                                        "shrink-0 font-mono text-sm tabular-nums text-muted-foreground"
-                                    },
-                                    "{fmt_hms(dur)}"
-                                }
-                            }
-                        }
+                for (id , row) in rows.iter().take(50) {
+                    SessionRow {
+                        key: "{id}",
+                        pending: id.is_temp(),
+                        session: row.session.clone(),
+                        slug: row.slug.clone(),
                     }
                 }
             }
@@ -233,49 +219,124 @@ fn session_list(rows: &[WorkSession]) -> Element {
     }
 }
 
-// ── helpers ─────────────────────────────────────────────────────────
+/// One recent-session row — its org badge + an Edit affordance that
+/// swaps to an inline editor (description + billable + Save / Cancel /
+/// Delete). Editing re-snapshots the rate server-side; the store
+/// reconciles against the returned row.
+#[component]
+fn SessionRow(session: WorkSession, slug: String, pending: bool) -> Element {
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let muts = stores::use_timer_mutations();
+    let mut editing = use_signal(|| false);
+    // Edit drafts — (re)seeded from the store row when Edit is opened,
+    // so a reconciled server value isn't shadowed by a stale draft.
+    let mut desc = use_signal(String::new);
+    let mut billable = use_signal(|| false);
 
-/// Resolve the selection to `(slug, org_id)` for the timer (org-scoped,
-/// single-target): the chosen org in `One` mode, else the home org.
-/// `None` until the org list (with ids) has loaded.
-fn resolve_org(sel: &OrgSelection, orgs: &[OrgMeta]) -> Option<(String, Uuid)> {
-    let meta = match sel {
-        OrgSelection::One(slug) => orgs.iter().find(|o| &o.slug == slug),
-        OrgSelection::All => orgs.iter().find(|o| o.is_home).or_else(|| orgs.first()),
-    }?;
-    Some((meta.slug.clone(), meta.id?))
-}
+    let running = session.end_time.is_none();
+    let dur = session.end_time.map_or_else(
+        || (Utc::now() - session.start_time).num_seconds(),
+        |e| (e - session.start_time).num_seconds(),
+    );
+    let title = if session.description.trim().is_empty() {
+        "(no description)".to_string()
+    } else {
+        session.description.clone()
+    };
+    let when = session
+        .start_time
+        .format("%a %b %-d, %-I:%M %p")
+        .to_string();
+    let id = session.id;
+    let stored_desc = session.description.clone();
+    let stored_billable = session.billable;
 
-/// Stable per-org "local owner" user id — a single-user stand-in until
-/// auth threads a real signed-in user id to the page. Deterministic so
-/// start/stop/list all key on the same user.
-fn owner_id(org_id: Uuid) -> Uuid {
-    Uuid::new_v5(&org_id, b"task-local-owner")
-}
+    let org_name = org_list
+        .read()
+        .iter()
+        .find(|o| o.slug == slug)
+        .map_or_else(|| slug.clone(), |o| o.name.clone());
 
-fn fmt_hms(secs: i64) -> String {
-    let s = secs.max(0);
-    format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
-}
-
-/// Re-render once a second so the running clock advances. Wasm sleeps
-/// via `gloo-timers`; native parks (the page is offline there anyway).
-fn use_elapsed_tick(mut tick: Signal<u64>) {
-    use_future(move || async move {
-        loop {
-            sleep_one_second().await;
-            tick += 1;
+    let save = {
+        let slug = slug.clone();
+        move |_| {
+            let req = timer_proto::service::UpdateSessionRequest {
+                id,
+                description: Some(desc.peek().clone()),
+                billable: Some(billable()),
+                ..Default::default()
+            };
+            muts.update(slug.clone(), req);
+            editing.set(false);
         }
-    });
+    };
+    let delete = {
+        let slug = slug.clone();
+        move |_| {
+            muts.delete(slug.clone(), id);
+        }
+    };
+
+    let row_cls = if pending {
+        "opacity-60"
+    } else {
+        ""
+    };
+
+    if editing() {
+        rsx! {
+            div { class: "flex flex-col gap-2 px-3 py-2.5 {row_cls}",
+                input {
+                    class: "rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40",
+                    value: "{desc}",
+                    oninput: move |e| desc.set(e.value()),
+                }
+                div { class: "flex items-center gap-2",
+                    Button {
+                        variant: if billable() { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                        size: ButtonSize::Small,
+                        on_click: move |_| billable.toggle(),
+                        if billable() { "Billable ✓" } else { "Non-billable" }
+                    }
+                    div { class: "flex-1" }
+                    Button { variant: ButtonVariant::Ghost, size: ButtonSize::Small, on_click: move |_| editing.set(false), "Cancel" }
+                    Button { variant: ButtonVariant::Primary, size: ButtonSize::Small, on_click: save, "Save" }
+                    Button { variant: ButtonVariant::Destructive, size: ButtonSize::Small, on_click: delete, "Delete" }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div { class: "group flex items-center justify-between gap-3 px-3 py-2.5 {row_cls}",
+                div { class: "flex min-w-0 flex-col",
+                    span { class: "truncate text-sm text-foreground", "{title}" }
+                    span { class: "flex items-center gap-1.5 text-xs text-muted-foreground",
+                        span { class: "rounded bg-muted px-1.5 py-px text-[10px]", "{org_name}" }
+                        span { "{when}" }
+                    }
+                }
+                span {
+                    class: if running {
+                        "shrink-0 font-mono text-sm tabular-nums text-emerald-400"
+                    } else {
+                        "shrink-0 font-mono text-sm tabular-nums text-muted-foreground"
+                    },
+                    "{fmt_hms(dur)}"
+                }
+                button {
+                    class: "shrink-0 rounded px-1.5 py-0.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100",
+                    onclick: move |_| {
+                        desc.set(stored_desc.clone());
+                        billable.set(stored_billable);
+                        editing.set(true);
+                    },
+                    "Edit"
+                }
+            }
+        }
+    }
 }
 
-#[cfg(target_arch = "wasm32")]
-async fn sleep_one_second() {
-    gloo_timers::future::TimeoutFuture::new(1000).await;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn sleep_one_second() {
-    // No periodic tick off-browser; the timer page is web-only today.
-    futures_util::future::pending::<()>().await;
-}
+// Shared chrome helpers (`resolve_org`, `owner_id`, `fmt_hms`,
+// `use_second_tick`) live in `crate::chrome` so the top-bar timer
+// widget and this page agree on the same org / owner identity.

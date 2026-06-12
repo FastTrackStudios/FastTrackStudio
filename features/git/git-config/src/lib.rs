@@ -379,6 +379,22 @@ impl FileStore {
         Ok(out)
     }
 
+    /// Distinct repos that are *connected* — i.e. bound to a project
+    /// via a [`RepoBinding`]. Unlike [`Self::distinct_repos`] this
+    /// ignores issue-link history, so it reflects the repos this org
+    /// has deliberately wired up (what the `/repos` "connected" view
+    /// shows), not every repo a stray issue once linked to.
+    pub fn binding_repos(&self) -> Result<Vec<RepoId>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        let mut out: Vec<RepoId> = Vec::new();
+        for b in &inner.repo_bindings {
+            if !out.contains(&b.repo) {
+                out.push(b.repo.clone());
+            }
+        }
+        Ok(out)
+    }
+
     fn flush_locked(&self, inner: &FileInner) -> Result<(), ConfigError> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ConfigError::Storage(e.to_string()))?;

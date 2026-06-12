@@ -17,12 +17,11 @@ dioxus = { workspace = true, features = ["router"] }
 dioxus-router.workspace = true
 fts-ui = { workspace = true, features = ["router"] }
 
-# Loro + CRDT machinery + project-proto/project-crdt were
-# ripped along with the Loro entity layer. The editor crate now
-# owns any future CRDT integration (per-file collaborative
-# editing); UI routes drive plain components against the
-# file-backed vault.
+# The editor + the byte⇄scalar adapter for its CRDT host: the
+# vault page wires `Editor`'s `on_transaction` sink through
+# `editor-crdt` into a per-file Loro doc (`src/collab.rs`).
 editor.workspace = true
+editor-crdt.workspace = true
 view.workspace = true
 view-calendar.workspace = true
 # Knowledge-graph view (the `/wiki` graph) — force-directed map of the
@@ -31,7 +30,27 @@ view-knowledge-graph.workspace = true
 task-ui.workspace = true
 # `vox` for the `DayTemplatesClient` the schedule page calls to load
 # the day-plan overlay. Wasm-clean (serde-only client side).
-scheduling-proto = { workspace = true, features = ["vox"] }
+scheduling-proto = { workspace = true, features = ["vox", "atom"] }
+inbox-proto = { workspace = true, features = ["vox", "atom"] }
+threads = { workspace = true, features = ["vox", "ui", "atom"] }
+locations-proto = { workspace = true, features = ["vox", "atom"] }
+# Inventory wire surface — `Item` model + `InventoryService`
+# client for the `/inventory` route. Wasm-clean (serde-only
+# client side), `vox` feature only.
+inventory-proto = { workspace = true, features = ["vox", "atom"] }
+milestone-proto = { workspace = true, features = ["vox", "atom"] }
+finance-proto = { workspace = true, features = ["vox"] }
+# Fitness suite wire surface — body / exercises / workouts /
+# intake service clients for the `/fitness` route. Wasm-clean
+# (serde-only client side), `vox` feature only.
+fitness-proto = { workspace = true, features = ["vox", "atom"] }
+# Mealplan suite wire surface — cookbook (recipes) / pantry
+# (ingredient stock) / mealplan (planned meals) service clients
+# for the `/mealplan` route. Wasm-clean (serde-only client side),
+# `vox` feature only (no `native` → never pulls `inventory`).
+cookbook-proto = { workspace = true, features = ["vox", "atom"] }
+pantry-proto = { workspace = true, features = ["vox", "atom"] }
+mealplan-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
 # Cyclic life-calendar — Goals view uses the pure-function
 # generator to resolve `cycle_id` references to displayable
@@ -46,11 +65,33 @@ goal = { workspace = true, features = ["vox"] }
 task = { workspace = true, features = ["vox"] }
 # Timer service client for the `/timer` time-tracking page.
 timer-proto = { workspace = true, features = ["vox"] }
+# Agent service clients for the `/agents` page — `SessionsClient`
+# lists agent sessions, `TurnDispatchClient` kicks off turns. `vox`
+# feature only (no `server`), so it stays wasm-clean.
+agent-proto = { workspace = true, features = ["vox"] }
 # Vault file-replication wire surface — manifest / get_file /
 # put_file. The `/vault` route drives `editor::Editor` over the
 # auto-emitted `VaultSyncClient`. `vox` feature only (no
 # `server`/`full`), so it stays wasm-clean like the others.
 vault-proto = { workspace = true, features = ["vox"] }
+# Wiki raw-source wire surface — `RawLayerClient` for the
+# `/wiki/sources` list + `/wiki/source/:name` SourceViewer
+# (archived articles + ^t-anchored video transcripts). `vox`
+# feature only, wasm-clean like the other proto clients.
+wiki-proto = { workspace = true, features = ["vox"] }
+# Email wire surface — the `EmailSync` client for the `/email`
+# page (account list + recent envelopes). `vox` feature only, so
+# it stays wasm-clean like the other proto clients above.
+email-proto = { workspace = true, features = ["vox"] }
+# Forge wire surface — `RepoCatalog` / `IssueTracker` clients the
+# `/repos` page binds to list repos + their issues for the
+# selected org. `vox` feature only, wasm-clean like the others.
+git-proto = { workspace = true, features = ["vox"] }
+# architect-auth wire surface — `AuthServiceClient` + the session
+# bundle types for the account switcher's real sign-in flow
+# (`src/auth.rs`). `vox` feature only (no `server`), wasm-clean
+# like the other proto clients above.
+auth-proto = { workspace = true, features = ["vox"] }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
@@ -90,6 +131,21 @@ futures-util.workspace = true
 vox.workspace = true
 vox-core.workspace = true
 vox-websocket.workspace = true
+
+# Client-state framework: Connection/use_connect_reactive (per-org vox
+# caller), notifications + reactivity registries, optimistic Store +
+# AtomResult as pages migrate. `client` = vox + atom + form, wasm-clean.
+# `platform` adds the cross-target `architect::sleep` the presence
+# module's idle/poll tickers use (crdt's `dioxus` feature pulls it in
+# anyway; declared explicitly so our direct uses don't lean on feature
+# unification).
+architect = { workspace = true, features = ["client", "platform"] }
+
+# Org-wide presence (`src/presence.rs`): `use_presence_channel` +
+# `Presence` over the fixed org doc id, riding the shared per-org
+# connection. `dioxus` implies the `vox` sync transport; presence is
+# ephemeral, so the `indexeddb` persistence feature is NOT needed.
+crdt = { workspace = true, features = ["dioxus"] }
 
 # Browser-only timers for the live elapsed-time tick on the timer
 # page. Wasm-only — used inside `cfg(target_arch = "wasm32")` blocks.

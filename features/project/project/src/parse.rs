@@ -94,11 +94,20 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
 
     // `id` is required for stable cross-feature references.
-    // First-write callers (`scan_vault::ensure_id`) backfill
-    // a new UUID when missing.
+    // When the frontmatter lacks one, derive a deterministic
+    // namespace uuid from the path — the same v5 fallback the
+    // task / milestone / goal / workstream parsers use — so the
+    // same file resolves to the same id on every scan (and
+    // across machines) until a save persists it to disk. A
+    // random per-scan id here broke `get(list()[i].id)` round
+    // trips, deep links, and `task.project_id` pointers.
     let id = take_str(&map, "id")
         .and_then(|s| Uuid::from_str(&s).ok())
-        .unwrap_or_else(Uuid::nil);
+        .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_URL, rel_path.as_bytes()));
+
+    let project_type = take_str(&map, "projectType")
+        .or_else(|| take_str(&map, "project_type"))
+        .unwrap_or_default();
 
     Ok(ProjectInfo {
         path: rel_path.to_string(),
@@ -106,6 +115,7 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
         title,
         status,
         priority,
+        project_type,
         lead,
         tags: crate::model::Tags(tags),
         same_as,
@@ -126,9 +136,19 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
         color,
         image,
         archived,
+        states: take_states(&map),
         date_created,
         date_modified,
     })
+}
+
+/// Parse the optional `states:` registry. Tolerant: an
+/// unparseable or empty list reads as `None` (treated as "use
+/// the default registry") rather than failing the page.
+fn take_states(map: &serde_yaml::Mapping) -> Option<crate::states::StatesConfig> {
+    let value = map.get("states")?;
+    let cfg: crate::states::StatesConfig = serde_yaml::from_value(value.clone()).ok()?;
+    (!cfg.is_empty()).then_some(cfg)
 }
 
 // ── helpers (mirror task::parse) ─────────────────────────────

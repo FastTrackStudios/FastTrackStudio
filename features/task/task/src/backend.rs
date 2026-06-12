@@ -7,24 +7,42 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::Utc;
 use uuid::Uuid;
 use vault::Vault;
 
 use crate::model::TaskInfo;
 use crate::parse::{looks_like_task, parse_page};
-use crate::service::{ClaimResult, TaskError, TaskService};
+use crate::service::{
+    ClaimResult, TaskError, TaskEvent, TaskListFilter, TaskReverseRelations, TaskService,
+};
 use crate::write::{default_task_path, write_task};
 
-#[derive(Debug, Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct TaskBackend {
     vault_root: PathBuf,
     /// Serializes `try_claim` read-check-write so two concurrent
     /// claims on the same task can't both win. One server process
     /// per org, so a process-local mutex is the whole story.
     claim_lock: Arc<Mutex<()>>,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful mutation publishes the post-write state
+    /// here ([`TaskEvent::Upserted`] / [`TaskEvent::Deleted`]).
+    /// Sliding mailbox: a slow subscriber loses its *oldest*
+    /// queued events, which is correct for state-shaped payloads.
+    /// Clones share the hub (it's `Arc` inside), so the service
+    /// mount and the stream mount can each hold a backend clone.
+    #[cfg(feature = "vox")]
+    events: architect::PubSub<TaskEvent>,
+}
+
+// Manual impl: `PubSub` carries no `Debug`.
+impl std::fmt::Debug for TaskBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskBackend")
+            .field("vault_root", &self.vault_root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl TaskBackend {
@@ -33,7 +51,20 @@ impl TaskBackend {
         Self {
             vault_root: vault_root.into(),
             claim_lock: Arc::new(Mutex::new(())),
+            #[cfg(feature = "vox")]
+            events: architect::PubSub::sliding(256),
         }
+    }
+
+    /// Publish a task change to every `events` subscriber. Call only
+    /// after the write succeeded — subscribers fold these into state
+    /// fetched via `list()`, so a phantom event would desync them.
+    /// No-op without the `vox` feature (no wire, no subscribers).
+    fn publish(&self, event: TaskEvent) {
+        #[cfg(feature = "vox")]
+        self.events.publish(event);
+        #[cfg(not(feature = "vox"))]
+        let _ = event;
     }
 
     #[must_use]
@@ -58,13 +89,6 @@ impl TaskBackend {
             }
         }
         Ok(out)
-    }
-}
-
-impl HasDispatcher for TaskBackend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 
@@ -109,6 +133,7 @@ impl TaskService for TaskBackend {
         }
         write_task(&self.vault_root, &mut task, false)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        self.publish(TaskEvent::Upserted(task.clone()));
         Ok(task)
     }
 
@@ -124,6 +149,7 @@ impl TaskService for TaskBackend {
         next.date_modified = Some(Utc::now());
         write_task(&self.vault_root, &mut next, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        self.publish(TaskEvent::Upserted(next.clone()));
         Ok(next)
     }
 
@@ -161,7 +187,75 @@ impl TaskService for TaskBackend {
         t.date_modified = Some(Utc::now());
         write_task(&self.vault_root, &mut t, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        // A won claim changed the assignees — that's an upsert. The
+        // `AlreadyMine` / `Lost` early returns above write nothing,
+        // so they (correctly) publish nothing.
+        self.publish(TaskEvent::Upserted(t));
         Ok(ClaimResult::Won)
+    }
+
+    fn reverse_relations(
+        &self,
+        id: Uuid,
+    ) -> Result<Vec<crate::relations::ReverseRelation>, TaskError> {
+        // Build the reverse index over the same snapshot list()
+        // serves. Per-call build matches the walk-on-each-call
+        // architecture of this backend; promote to a cached
+        // index if vault walks get hot.
+        let tasks = self.list_inner()?;
+        if !tasks.iter().any(|t| t.id == id) {
+            return Err(TaskError::NotFound(id.to_string()));
+        }
+        Ok(crate::relations::reverse_relations_for(id, &tasks))
+    }
+
+    fn reverse_relations_batch(
+        &self,
+        ids: Vec<Uuid>,
+    ) -> Result<Vec<TaskReverseRelations>, TaskError> {
+        // One vault walk + one reverse index for the whole
+        // batch — the point of the verb. Unknown ids come back
+        // with empty `relations` (no per-id NotFound: a list row
+        // asking about a just-deleted task shouldn't fail the
+        // whole page).
+        let tasks = self.list_inner()?;
+        let mut idx = crate::relations::reverse_index(&tasks);
+        Ok(ids
+            .into_iter()
+            .map(|id| TaskReverseRelations {
+                id,
+                relations: idx.remove(&id).unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    fn query(&self, filter: TaskListFilter) -> Result<Vec<TaskInfo>, TaskError> {
+        let mut rows: Vec<TaskInfo> = self
+            .list_inner()?
+            .into_iter()
+            .filter(|t| filter.project.is_none_or(|pid| t.project_id == Some(pid)))
+            .filter(|t| {
+                filter.workstream.is_none_or(|ws| {
+                    t.workflow.as_ref().and_then(|w| w.workstream) == Some(ws)
+                })
+            })
+            .filter(|t| {
+                filter
+                    .status
+                    .as_deref()
+                    .is_none_or(|s| t.status.eq_ignore_ascii_case(s))
+            })
+            .collect();
+        // Stable page windows: order by vault-relative path
+        // (unique per task) before slicing, so offset/limit
+        // pages don't shear between calls.
+        rows.sort_by(|a, b| a.path.cmp(&b.path));
+        let offset = filter.offset.unwrap_or(0) as usize;
+        let rows = rows.into_iter().skip(offset);
+        Ok(match filter.limit {
+            Some(n) => rows.take(n as usize).collect(),
+            None => rows.collect(),
+        })
     }
 
     fn rename(&self, id: Uuid, new_path: &str) -> Result<TaskInfo, TaskError> {
@@ -186,6 +280,7 @@ impl TaskService for TaskBackend {
         t.date_modified = Some(Utc::now());
         write_task(&self.vault_root, &mut t, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        self.publish(TaskEvent::Upserted(t.clone()));
         Ok(t)
     }
 
@@ -198,6 +293,159 @@ impl TaskService for TaskBackend {
         let abs = self.vault_root.join(&t.path);
         std::fs::remove_file(&abs)
             .map_err(|e| TaskError::Io(format!("remove {}: {e}", abs.display())))?;
+        self.publish(TaskEvent::Deleted(id));
         Ok(())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// `TaskService` impl above, on every successful mutation.
+#[cfg(feature = "vox")]
+impl crate::service::TaskServiceStreamSource for TaskBackend {
+    fn events_hub(&self) -> &architect::PubSub<TaskEvent> {
+        &self.events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Relation, RelationKind, RelationList, WorkflowAttrs};
+    use crate::service::TaskListFilter;
+
+    fn make(
+        be: &TaskBackend,
+        title: &str,
+        status: &str,
+        project: Option<Uuid>,
+        workstream: Option<Uuid>,
+    ) -> TaskInfo {
+        let mut t = crate::capture(title);
+        t.status = status.into();
+        t.project_id = project;
+        if let Some(ws) = workstream {
+            t.workflow = Some(WorkflowAttrs {
+                workstream: Some(ws),
+                ..Default::default()
+            });
+        }
+        be.create(t).expect("create")
+    }
+
+    #[test]
+    fn query_filters_and_paginates_stably() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let be = TaskBackend::new(tmp.path());
+        let proj = Uuid::new_v4();
+        let ws = Uuid::new_v4();
+        make(&be, "alpha", "open", Some(proj), Some(ws));
+        make(&be, "beta", "done", Some(proj), None);
+        make(&be, "gamma", "open", None, Some(ws));
+        make(&be, "delta", "open", None, None);
+
+        // Default filter == list (modulo path ordering).
+        let all = be.query(TaskListFilter::default()).expect("query all");
+        assert_eq!(all.len(), 4);
+        let mut paths: Vec<_> = all.iter().map(|t| t.path.clone()).collect();
+        let sorted = paths.clone();
+        paths.sort();
+        assert_eq!(paths, sorted, "query orders by path");
+
+        // Single filters.
+        let by_proj = be
+            .query(TaskListFilter {
+                project: Some(proj),
+                ..Default::default()
+            })
+            .expect("by project");
+        assert_eq!(by_proj.len(), 2);
+        assert!(by_proj.iter().all(|t| t.project_id == Some(proj)));
+
+        let by_ws = be
+            .query(TaskListFilter {
+                workstream: Some(ws),
+                ..Default::default()
+            })
+            .expect("by workstream");
+        assert_eq!(by_ws.len(), 2);
+
+        // Filters AND together; status is case-insensitive.
+        let combo = be
+            .query(TaskListFilter {
+                project: Some(proj),
+                status: Some("OPEN".into()),
+                ..Default::default()
+            })
+            .expect("combo");
+        assert_eq!(combo.len(), 1);
+        assert_eq!(combo[0].title, "alpha");
+
+        // Pagination windows tile the full ordered set.
+        let page1 = be
+            .query(TaskListFilter {
+                limit: Some(2),
+                ..Default::default()
+            })
+            .expect("page1");
+        let page2 = be
+            .query(TaskListFilter {
+                limit: Some(2),
+                offset: Some(2),
+                ..Default::default()
+            })
+            .expect("page2");
+        assert_eq!(page1.len(), 2);
+        assert_eq!(page2.len(), 2);
+        let tiled: Vec<_> = page1.iter().chain(&page2).map(|t| t.id).collect();
+        let full: Vec<_> = all.iter().map(|t| t.id).collect();
+        assert_eq!(tiled, full, "limit/offset pages tile the path-ordered list");
+
+        // Offset past the end is an empty page, not an error.
+        let past = be
+            .query(TaskListFilter {
+                offset: Some(99),
+                ..Default::default()
+            })
+            .expect("past end");
+        assert!(past.is_empty());
+    }
+
+    #[test]
+    fn reverse_relations_batch_one_walk_many_answers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let be = TaskBackend::new(tmp.path());
+        let victim = make(&be, "victim", "open", None, None);
+        let bystander = make(&be, "bystander", "open", None, None);
+        // blocker declares a typed `blocks -> victim` edge.
+        let mut blocker = crate::capture("blocker");
+        blocker.workflow = Some(WorkflowAttrs {
+            relations: RelationList(vec![Relation {
+                kind: RelationKind::Blocks,
+                target: victim.id,
+            }]),
+            ..Default::default()
+        });
+        let blocker = be.create(blocker).expect("create blocker");
+
+        let ghost = Uuid::new_v4();
+        let got = be
+            .reverse_relations_batch(vec![victim.id, bystander.id, ghost])
+            .expect("batch");
+        assert_eq!(got.len(), 3, "one entry per requested id");
+        assert_eq!(got[0].id, victim.id, "requested order preserved");
+        assert_eq!(
+            got[0].relations,
+            vec![crate::relations::ReverseRelation {
+                kind: RelationKind::Blocks,
+                source: blocker.id,
+            }]
+        );
+        assert!(got[1].relations.is_empty(), "no incoming edges");
+        assert!(got[2].relations.is_empty(), "unknown id -> empty, not error");
+
+        // Parity with the single-id verb.
+        let single = be.reverse_relations(victim.id).expect("single");
+        assert_eq!(single, got[0].relations);
     }
 }

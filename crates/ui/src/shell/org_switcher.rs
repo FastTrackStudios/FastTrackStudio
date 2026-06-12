@@ -11,17 +11,11 @@ use fts_ui::lucide_dioxus::Palette;
 use fts_ui::prelude::*;
 use fts_ui::primitives::{ContentAlign, ContentSide};
 
-use crate::data::Organization;
-use crate::orgs::{OrgMeta, OrgSelection};
+use crate::orgs::{OrgMeta, OrgSelection, home_slug};
 use crate::theming::{OrgThemeOverrides, state_from_preset_name};
 
 #[component]
-pub fn OrgSwitcher(
-    #[props(default = Vec::new())] orgs: Vec<Organization>,
-    #[props(default = false)] compact: bool,
-) -> Element {
-    let _ = &orgs; // legacy prop; org list now comes from context
-    let active_org = use_context::<Signal<Organization>>();
+pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
     let mut org_overrides = use_context::<OrgThemeOverrides>();
     // Data selection + discovered org list.
     let mut selection = use_context::<Signal<OrgSelection>>();
@@ -29,7 +23,13 @@ pub fn OrgSwitcher(
 
     let mut open = use_signal(|| false);
     let mut theme_open = use_signal(|| false);
-    let active = active_org();
+
+    // Theme edits apply to the active org (the selected one, or home
+    // under "All"), keyed by slug in the overrides map.
+    let active_slug = use_memo(move || match &*selection.read() {
+        OrgSelection::One(slug) => slug.clone(),
+        OrgSelection::All => home_slug(&org_list.read()),
+    });
 
     let list = org_list();
     let current = selection();
@@ -40,20 +40,20 @@ pub fn OrgSwitcher(
         let name = org_overrides
             .map
             .read()
-            .get(active.id)
+            .get(&active_slug())
             .cloned()
-            .unwrap_or_else(|| active.theme_preset.to_string());
+            .unwrap_or_default();
         let mode = *org_overrides.mode.read();
         state_from_preset_name(&name, mode)
     });
 
-    let active_id_for_effect: &'static str = active.id;
     use_effect(move || {
         let name = switcher_state.read().preset.clone();
-        let prev = org_overrides.map.read().get(active_id_for_effect).cloned();
+        let slug = active_slug();
+        let prev = org_overrides.map.read().get(&slug).cloned();
         if prev.as_deref() != Some(name.as_str()) {
             let mut m = org_overrides.map.write();
-            m.insert(active_id_for_effect.to_string(), name);
+            m.insert(slug, name);
         }
     });
 

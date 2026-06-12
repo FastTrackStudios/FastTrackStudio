@@ -1,0 +1,99 @@
+# Container images — builds + pushes task-server / task-web /
+# task-ui-lab to the Codeberg registry on every push to dev and main.
+#
+#   dev  -> codeberg.org/fasttrackstudios/task-{server,web,ui-lab}:dev    + :sha-<short>
+#   main -> codeberg.org/fasttrackstudios/task-{server,web,ui-lab}:latest + :sha-<short>
+#
+# ArgoCD deploys these via deploy/chart/task (targetRevision dev/main).
+#
+# Runner assumptions (header per deploy/README.md — verify on your
+# runner before trusting a green check):
+#   * runs-on: docker matches the label deploy.yml already uses; that
+#     workflow runs bare `cargo build`, so the runner is a NixOS-based
+#     host runner with the toolchain (NOT an ephemeral node container).
+#   * `nix` is available for the dev-shell wasm build, `docker` (with
+#     buildx/BuildKit) for image builds + pushes.
+#   * The workspace path-depends on sibling repos; the clone step
+#     materializes them NEXT TO the checkout from the pins in
+#     deploy/docker/siblings.lock. If a pin is not pushed to its
+#     remote yet the build fails fast there — push the sibling first.
+#   * Secrets REGISTRY_USER / REGISTRY_TOKEN must be set in the repo's
+#     Actions secrets: a Codeberg user (or org bot) + an access token
+#     with package:write scope.
+name: images
+on:
+  push:
+    branches: [dev, main]
+
+jobs:
+  images:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sibling checkouts (workspace path deps)
+        run: bash deploy/docker/siblings.sh clone "$(dirname "$PWD")"
+
+      - name: Compute tags
+        id: tags
+        run: |
+          short="$(git rev-parse --short HEAD)"
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then channel=latest; else channel=dev; fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "sha=sha-$short" >> "$GITHUB_OUTPUT"
+          echo "tags: $channel sha-$short"
+
+      - name: Build web bundle (env-agnostic)
+        # No TASK_VOX_URL_WEB in the environment: the bundle then
+        # derives its vox URL same-origin from window.location at
+        # runtime, so one image serves every hostname.
+        run: |
+          nix develop .#playwright --command bash -c \
+            'cd apps/web && env -u TASK_VOX_URL_WEB dx build --platform web --release'
+          rm -rf deploy/docker/web-public
+          cp -r target/dx/task-app-web/release/web/public deploy/docker/web-public
+
+      - name: Build ui-lab dist
+        run: |
+          nix develop .#playwright --command bash -c \
+            'cd ui-lab && pnpm install --frozen-lockfile && pnpm build'
+          rm -rf deploy/docker/ui-lab-dist
+          cp -r ui-lab/dist deploy/docker/ui-lab-dist
+
+      - name: Registry login
+        run: |
+          echo "${{ secrets.REGISTRY_TOKEN }}" | \
+            docker login codeberg.org -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+
+      - name: Build + push task-server
+        run: |
+          ctx="$(mktemp -d)"
+          bash deploy/docker/siblings.sh context "$ctx"
+          docker build --network=host \
+            -f "$ctx/Task/deploy/docker/server.Dockerfile" \
+            -t codeberg.org/fasttrackstudios/task-server:${{ steps.tags.outputs.channel }} \
+            -t codeberg.org/fasttrackstudios/task-server:${{ steps.tags.outputs.sha }} \
+            "$ctx"
+          docker push codeberg.org/fasttrackstudios/task-server:${{ steps.tags.outputs.channel }}
+          docker push codeberg.org/fasttrackstudios/task-server:${{ steps.tags.outputs.sha }}
+          rm -rf "$ctx"
+
+      - name: Build + push task-web
+        run: |
+          docker build --network=host \
+            -f deploy/docker/web.Dockerfile \
+            -t codeberg.org/fasttrackstudios/task-web:${{ steps.tags.outputs.channel }} \
+            -t codeberg.org/fasttrackstudios/task-web:${{ steps.tags.outputs.sha }} \
+            deploy/docker
+          docker push codeberg.org/fasttrackstudios/task-web:${{ steps.tags.outputs.channel }}
+          docker push codeberg.org/fasttrackstudios/task-web:${{ steps.tags.outputs.sha }}
+
+      - name: Build + push task-ui-lab
+        run: |
+          docker build --network=host \
+            -f deploy/docker/ui-lab.Dockerfile \
+            -t codeberg.org/fasttrackstudios/task-ui-lab:${{ steps.tags.outputs.channel }} \
+            -t codeberg.org/fasttrackstudios/task-ui-lab:${{ steps.tags.outputs.sha }} \
+            deploy/docker
+          docker push codeberg.org/fasttrackstudios/task-ui-lab:${{ steps.tags.outputs.channel }}
+          docker push codeberg.org/fasttrackstudios/task-ui-lab:${{ steps.tags.outputs.sha }}

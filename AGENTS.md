@@ -136,6 +136,23 @@ These keep tripping up new agents. Read them before writing your first line.
 - This repo uses **direnv** for the `.#ui` dev shell. Recipes call `cargo` / `dx` directly — no `nix develop` wrapping. On hosts without direnv, prefix recipes with `nix develop .#ui --command just <recipe>`.
 - The Hermes dashboard at `hermes.starcommand.live` rejects external Host headers; SSH-tunnel to `localhost:9119` for live integration testing (documented in `IntegrationSettings`).
 
+### Proto changes require a task-server rebuild (schema skew)
+
+Changing any `*-proto` crate changes vox method ids (they hash the
+method's name + payload shapes), so a **running `task-server` built
+before the change can't talk to freshly built clients** — the failure
+mode is opaque `structural mismatch` / `InvalidPayload` / `Unknown
+method` errors. The rule: **after touching a `*-proto`, rebuild +
+restart task-server before trusting any live behavior.**
+
+The guard: the server publishes per-service schema stamps in
+`/.well-known/task-server.json` (`schema_stamps`, see
+`task_server::schema_stamps` / `org_proto::schema_stamp`). Run
+`task doctor` to compare your CLI build against the running server
+(exits non-zero on mismatch); ui-lab's `pnpm smoke` does the same for
+the generated TS bundle and downgrades skew-shaped failures to loud
+`SKEW SKIP` warnings instead of red herrings.
+
 ### Mixed-target cargo check false alarms
 
 When you see `error: This wasm target is unsupported by mio` while running `cargo check -p task-server -p task-app-web --target wasm32-unknown-unknown`, that's **not a real error** — it's mio (a native-only dep of `task-server`) being asked to compile for wasm. Check them separately:

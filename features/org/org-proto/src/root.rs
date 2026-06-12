@@ -271,8 +271,21 @@ impl OrgRoot {
     }
 
     #[must_use]
+    pub fn threads_db(&self) -> PathBuf {
+        self.path.join("threads.sqlite")
+    }
+
+    #[must_use]
     pub fn vault_dir(&self) -> PathBuf {
         self.path.join("vault")
+    }
+
+    /// `<org>/issuer.toml` — billing identity for invoices.
+    /// Sibling of `org.toml`; see [`crate::issuer`] for why
+    /// it's not part of the federated manifest.
+    #[must_use]
+    pub fn issuer_path(&self) -> PathBuf {
+        self.path.join("issuer.toml")
     }
 
     /// `<org>/wiki/` — sibling of `vault/`. The wiki is its

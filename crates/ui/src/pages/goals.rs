@@ -1,40 +1,50 @@
 //! `/goals` — goal hierarchy + cycle anchoring.
 //!
-//! Fetches `Vec<Goal>` from the active org's
-//! `/org/<slug>/vox` endpoint via the architect-generated
-//! `GoalServiceClient`. Cycle pills resolve `cycle_id` ⇒
-//! `(year, quarter, ordinal)` via the local pure-function
-//! generator (deterministic UUIDv5 means the wasm side
-//! agrees with the server's seeded files).
+//! Loads the selected org(s)' goals via the multi-org
+//! [`crate::feeds`] fan-out (the same convention as `/projects` and
+//! `/tasks`): "All" aggregates every hosted org, selecting one scopes
+//! to it. Cycle pills resolve `cycle_id` ⇒ `(year, quarter, ordinal)`
+//! via the local pure-function generator (deterministic UUIDv5 means
+//! the wasm side agrees with the server's seeded files).
 
 use chrono::Weekday;
 use cycle::{FirstWeekRule, generate_year};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use goal::Goal;
-#[cfg(target_arch = "wasm32")]
-use goal::GoalServiceClient;
 use uuid::Uuid;
 
-use crate::vox_session::vox_url;
+use crate::orgs::{OrgMeta, OrgSelection};
 
 #[component]
 pub fn GoalsView() -> Element {
-    let goals = use_resource(|| async move { fetch_goals().await });
+    let selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let goals = use_resource(move || async move {
+        let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
+        crate::feeds::fetch_goals(&slugs).await
+    });
 
     // Current cycle highlight — drives the "you're here" pill.
     let today = chrono::Local::now().date_naive();
     let now_cycle =
         cycle::cycle_for_date(today, Weekday::Mon, FirstWeekRule::AtLeastFourDaysInYear);
 
-    let body = match &*goals.read_unchecked() {
-        Some(Ok(rows)) => render_loaded(rows, now_cycle.clone()),
-        Some(Err(e)) => rsx! {
-            div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                "Couldn't reach the goal service: {e}"
-            }
-        },
-        None => rsx! { Text { variant: TextVariant::Muted, "Loading goals…" } },
+    // While the org list is still being discovered the fetch resolves
+    // to an empty set — show loading rather than an empty hierarchy
+    // (mirrors the projects/home gate).
+    let body = if org_list.read().is_empty() {
+        rsx! { Text { variant: TextVariant::Muted, "Loading goals…" } }
+    } else {
+        match &*goals.read_unchecked() {
+            Some(Ok(rows)) => render_loaded(rows, now_cycle.clone()),
+            Some(Err(e)) => rsx! {
+                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                    "Couldn't reach the goal service: {e}"
+                }
+            },
+            None => rsx! { Text { variant: TextVariant::Muted, "Loading goals…" } },
+        }
     };
 
     rsx! {
@@ -44,7 +54,7 @@ pub fn GoalsView() -> Element {
                     Heading { level: HeadingLevel::H1, "Goals" }
                     Text {
                         variant: TextVariant::Muted,
-                        "Live from `/org/<slug>/vox` via `GoalServiceClient`."
+                        "Live from the selected orgs' goal services."
                     }
                 }
                 if let Some(c) = now_cycle.clone() {
@@ -311,37 +321,4 @@ fn first_line(body: &str) -> Option<String> {
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with("---"))
         .map(std::string::ToString::to_string)
-}
-
-async fn fetch_goals() -> Result<Vec<Goal>, String> {
-    let url = build_org_vox_url();
-    if url.is_empty() {
-        return Err("no vox URL configured".to_owned());
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        use vox_core::acceptor_on;
-        let link = vox_websocket::WsLink::connect(&url)
-            .await
-            .map_err(|e| format!("ws connect: {e:?}"))?;
-        let client: GoalServiceClient = acceptor_on(link)
-            .on_connection(())
-            .establish::<GoalServiceClient>()
-            .await
-            .map_err(|e| format!("establish: {e:?}"))?;
-        client.list().await.map_err(|e| format!("list: {e:?}"))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Err("native client not wired yet".to_owned())
-    }
-}
-
-fn build_org_vox_url() -> String {
-    let base = vox_url();
-    if base.is_empty() {
-        return String::new();
-    }
-    let trimmed = base.trim_end_matches("/vox").trim_end_matches('/');
-    format!("{trimmed}/org/codywright/vox")
 }

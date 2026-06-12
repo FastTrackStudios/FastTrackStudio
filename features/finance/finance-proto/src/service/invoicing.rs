@@ -34,8 +34,69 @@ pub struct RecordPayment {
     pub allocations: Vec<PaymentAllocation>,
 }
 
+/// Inputs for [`Invoicing::generate_invoice`] — build a draft invoice
+/// from a project's billable, not-yet-invoiced timer sessions.
+#[derive(Debug, Clone, PartialEq, facet::Facet)]
+pub struct GenerateInvoice {
+    /// Project bucket → `Some(id)`. Tag / general bucket → `None`.
+    pub project_id: Option<Uuid>,
+    /// Tag bucket → the tag name (bills project-less time with that
+    /// tag). General bucket → empty (bills project-less, untagged time).
+    /// Ignored when `project_id` is set.
+    pub tag: String,
+    /// Bill-to display name. Find-or-creates a party in the org's book.
+    pub client_name: String,
+    /// Inclusive ISO `YYYY-MM-DD` lower bound, or empty for no bound.
+    pub since: String,
+    /// Inclusive ISO `YYYY-MM-DD` upper bound, or empty for no bound.
+    pub until: String,
+    /// `due_date = issue_date + net_days`.
+    pub net_days: i64,
+}
+
+/// A bucket of billable time not yet invoiced. Either a **project**
+/// (`project_id = Some`), a **tag** of project-less time
+/// (`tag` non-empty), or **general** project-less, untagged time
+/// (`project_id = None`, `tag` empty).
+#[derive(Debug, Clone, PartialEq, facet::Facet)]
+pub struct UninvoicedGroup {
+    pub project_id: Option<Uuid>,
+    pub tag: String,
+    pub session_count: i64,
+    /// Total seconds.
+    pub seconds: i64,
+    pub amount_minor: i64,
+    pub currency: String,
+}
+
 #[architect::rpc]
 pub trait Invoicing {
+    /// Build + persist a **draft** invoice from a project's billable,
+    /// not-yet-invoiced sessions, marking those sessions as billed.
+    fn generate_invoice(&self, req: GenerateInvoice) -> Result<Invoice, FinanceError>;
+
+    /// All invoices in the org's book, newest first.
+    fn list_invoices(&self) -> Result<Vec<Invoice>, FinanceError>;
+
+    /// One invoice by id.
+    fn get_invoice(&self, id: Uuid) -> Result<Invoice, FinanceError>;
+
+    /// Delete a **draft** invoice and un-bill its sessions. Issued
+    /// (non-draft) invoices must be voided instead.
+    fn delete_invoice(&self, id: Uuid) -> Result<(), FinanceError>;
+
+    /// Record a payment of `amount_minor` against one invoice and
+    /// update its paid / balance / status. Returns the updated invoice.
+    fn record_invoice_payment(
+        &self,
+        id: Uuid,
+        amount_minor: i64,
+        date: String,
+    ) -> Result<Invoice, FinanceError>;
+
+    /// Per-project billable time not yet on any invoice.
+    fn uninvoiced(&self) -> Result<Vec<UninvoicedGroup>, FinanceError>;
+
     /// Issue an invoice: assigns a number from the book's
     /// counter, locks the line items, posts the AR ↔ income
     /// transaction to the ledger.

@@ -6,6 +6,7 @@
 @source "../../features/*/*-ui/src/**/*.rs";
 @source "../../features/*/view-*/src/**/*.rs";
 @source "../../../FastTrackStudio/fts-ui/crates/fts-ui/src/**/*.rs";
+@source "../../../FastTrackStudio/fts-ui/features/core/src/**/*.rs";
 
 @layer base {
     html {

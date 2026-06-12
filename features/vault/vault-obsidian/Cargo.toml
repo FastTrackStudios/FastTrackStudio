@@ -40,6 +40,10 @@ license.workspace = true
 # directories into that shape.
 vault-live.workspace = true
 vault-proto.workspace = true
+# `graph.rs` — the `VaultGraph` RPC backend needs the
+# `architect::HasDispatcher` derive so the bridge can marshal
+# sync method calls (same shape as vault-live's sync Backend).
+architect.workspace = true
 chrono.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 tracing.workspace = true

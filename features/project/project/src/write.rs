@@ -1,9 +1,11 @@
 //! `ProjectInfo` → markdown bytes + write-to-disk.
 //!
-//! `id: <uuid>` is always emitted — first-write callers
-//! (`scan_vault::ensure_id`) backfill before write, so the
-//! file on disk always carries a stable identity downstream
-//! features can FK against.
+//! `id: <uuid>` is always emitted (nil ids are backfilled
+//! here), so the file on disk always carries a stable identity
+//! downstream features can FK against. Pages that were never
+//! written through this path parse with a deterministic
+//! uuid-v5-of-path fallback (see `parse_page`), which this
+//! writer persists on the next save.
 
 use std::path::{Path, PathBuf};
 
@@ -82,6 +84,59 @@ pub fn write_project(
     let serialized = serialize_project(project)?;
     std::fs::write(&abs, serialized).map_err(|e| WriteError::Io(e.to_string()))?;
     Ok(abs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::states::{StateDef, StateGroup, StatesConfig};
+
+    /// `states:` config survives a serialize → parse round-trip,
+    /// and absent config round-trips as `None` (so vaults
+    /// without registries stay byte-stable).
+    #[test]
+    fn states_config_round_trips_through_frontmatter() {
+        let mut p = crate::parse_str(
+            "Projects/demo.md",
+            "demo",
+            "---\ntype: project\ntitle: Demo\n---\n",
+        )
+        .expect("minimal project parses");
+        assert_eq!(p.states, None);
+        p.id = Uuid::new_v4();
+
+        // No config: serialized page carries no `states:` key.
+        let plain = serialize_project(&p).expect("serialize");
+        assert!(!plain.contains("states:"));
+
+        p.states = Some(StatesConfig(vec![
+            StateDef {
+                name: "specced".into(),
+                group: StateGroup::Unstarted,
+                color: "#88ccff".into(),
+                default: true,
+                order: 1,
+            },
+            StateDef {
+                name: "building".into(),
+                group: StateGroup::Started,
+                color: String::new(),
+                default: false,
+                order: 2,
+            },
+            StateDef {
+                name: "shipped".into(),
+                group: StateGroup::Completed,
+                color: String::new(),
+                default: false,
+                order: 3,
+            },
+        ]));
+        let raw = serialize_project(&p).expect("serialize");
+        let back = crate::parse_str("Projects/demo.md", "demo", &raw).expect("re-parse");
+        assert_eq!(back.states, p.states);
+        assert_eq!(back.id, p.id);
+    }
 }
 
 /// Conventional path for a freshly captured project — slug

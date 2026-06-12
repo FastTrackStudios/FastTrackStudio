@@ -6,13 +6,12 @@ use dioxus::prelude::*;
 use dioxus_router::Navigator;
 use fts_ui::prelude::*;
 
-use crate::data::Organization;
 use crate::nav::{NavTab, nav_tabs, tabs_match};
 use crate::routes::Route;
 use crate::shell::org_switcher::OrgSwitcher;
 
 #[component]
-pub fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
+pub fn DesktopSidebar(current: Route) -> Element {
     let nav = use_navigator();
     rsx! {
         Sidebar { class: "flex h-screen w-72 flex-col overflow-hidden",
@@ -40,12 +39,25 @@ pub fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
                 }
             }
             SidebarSeparator {}
-            div { class: "flex-1 min-h-0 overflow-y-auto" }
+            div { class: "flex-1 min-h-0 overflow-y-auto",
+                // Org-wide presence roster: live peers + agents
+                // mid-turn + open timers, humans first.
+                crate::presence::PresenceRoster {}
+            }
             SidebarFooter {
-                div { class: "px-1 pb-1 pt-2",
+                div { class: "px-1 pb-2",
+                    crate::chrome::FleetingButton {}
+                }
+                // Account switcher: avatar card for the signed-in
+                // account, with the account roster + presence status
+                // options + sign-out in one popover.
+                div { class: "px-1 pb-2",
+                    crate::auth::AccountSwitcher {}
+                }
+                div { class: "px-1 pb-1 pt-1",
                     SectionHeader { label: "Organization", size: SectionHeaderSize::Small }
                 }
-                OrgSwitcher { orgs, compact: false }
+                OrgSwitcher { compact: false }
             }
         }
     }

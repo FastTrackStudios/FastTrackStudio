@@ -4,7 +4,7 @@
 
 use uuid::Uuid;
 
-use crate::{TaskInfo, TaskMutation, model::Status};
+use crate::{TaskInfo, TaskMutation};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TaskState {
@@ -34,10 +34,12 @@ pub fn apply(state: &mut TaskState, mu: &TaskMutation) {
             if let Some(t) = state.tasks.iter_mut().find(|t| t.id == *id) {
                 t.status = status.clone();
                 t.date_modified = Some(chrono::Utc::now());
-                // Stamp `completedDate` on the canonical Done
-                // status so list grouping by completion day
-                // works without re-reading the file mtime.
-                if Status::from_str(status) == Some(Status::Done) {
+                // Stamp `completedDate` whenever the status
+                // classifies into the `completed` state group
+                // (group-routed, so custom names like `shipped`
+                // count) — list grouping by completion day works
+                // without re-reading the file mtime.
+                if project::resolve_state_group(None, status) == project::StateGroup::Completed {
                     t.completed_date = Some(chrono::Local::now().date_naive());
                 } else {
                     t.completed_date = None;

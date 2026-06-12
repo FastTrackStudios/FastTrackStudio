@@ -15,7 +15,9 @@
 //! `TokioBlockingDispatcher` for the server, `CurrentThread`
 //! for tests / in-process callers.
 
-use crate::{FileBytes, FolderIndex, IfMatch, Manifest, PutAck, VaultEvent, VaultSyncError};
+use crate::{
+    CollabAck, FileBytes, FolderIndex, IfMatch, Manifest, PutAck, VaultEvent, VaultSyncError,
+};
 use vox::Tx;
 
 /// File-replication operations on a single server. Sync methods
@@ -72,6 +74,16 @@ pub trait VaultSync {
         parent: Option<String>,
         if_match: IfMatch,
     ) -> Result<PutAck, VaultSyncError>;
+
+    /// Register `path` for per-file CRDT collaboration and return
+    /// its doc id ([`crate::collab_doc_id`] of `(vault_id, path)`)
+    /// plus the file's current sha. Validates the path exists
+    /// ([`VaultSyncError::NotFound`] otherwise) and records the
+    /// `doc_id → (vault_id, path)` reverse mapping the server's doc
+    /// registry consults for admission and write-behind routing.
+    /// Idempotent — re-opening an already-registered file refreshes
+    /// the sha and returns the same id.
+    fn open_collab(&self, vault_id: &str, path: &str) -> Result<CollabAck, VaultSyncError>;
 
     /// Subscribe to live change events for `vault_id`. The
     /// server keeps sending until the caller drops `tx`. On

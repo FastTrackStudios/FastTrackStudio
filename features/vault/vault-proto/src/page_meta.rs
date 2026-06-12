@@ -41,6 +41,11 @@ pub struct PageMeta {
     /// manifest's hashing — lets the client issue a conditional
     /// `set_folder` / open without a separate round-trip.
     pub sha256: String,
+    /// Frontmatter `aliases` (and singular `alias`) values —
+    /// alternate wikilink names for the page. Feeds the editor's
+    /// `[[…]]` autocomplete candidates without another RPC.
+    /// Empty for pages without aliases.
+    pub aliases: Vec<String>,
 }
 
 /// Full folder index for one vault. `vault_id` echoes the

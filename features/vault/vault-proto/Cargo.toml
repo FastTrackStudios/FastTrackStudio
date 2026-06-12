@@ -15,6 +15,10 @@ serde_json = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
 architect = { workspace = true }
+# Per-file collab doc ids are uuid v5 of (vault_id, path) —
+# see `src/collab.rs`. `js` keeps the wasm build happy (the ui
+# crate reaches this through the default `vox` feature).
+uuid = { workspace = true, features = ["v5", "js"] }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }

@@ -20,12 +20,10 @@ mod reviews;
 
 use std::sync::Arc;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use git_proto::{Forge, RepoId};
 
 /// GitHub backend. Cheap to `Clone` — internals are `Arc`'d.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Backend {
     inner: Arc<Inner>,
 }
@@ -77,13 +75,6 @@ impl Backend {
 
     pub(crate) fn runtime(&self) -> &tokio::runtime::Handle {
         &self.inner.runtime
-    }
-}
-
-impl HasDispatcher for Backend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

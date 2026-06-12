@@ -88,6 +88,23 @@ pub struct InvoiceBuild {
     /// future `WorkSession.invoice_id` column) so the same
     /// sessions don't get re-billed next run.
     pub source_session_ids: Vec<Uuid>,
+    /// Sidecar metadata per line, keyed by the line's own
+    /// `id`. Lives outside [`InvoiceLineItem`] because the
+    /// proto schema has no assignee column. The renderer
+    /// joins on this to label + chart by assignee.
+    pub line_meta: Vec<LineMeta>,
+}
+
+/// Per-line sidecar — who logged it, how long, how much.
+/// `secs` and `cents` mirror the line totals (kept so the
+/// chart can skip re-deriving them from the formatted
+/// quantity / amount strings).
+#[derive(Debug, Clone, Copy)]
+pub struct LineMeta {
+    pub line_id: Uuid,
+    pub user_id: Uuid,
+    pub secs: i64,
+    pub cents: i64,
 }
 
 pub async fn build_invoice_from_sessions(
@@ -98,10 +115,39 @@ pub async fn build_invoice_from_sessions(
         .filter(WorkSessionColumn::ProjectId.eq(args.project_id))
         .filter(WorkSessionColumn::Billable.eq(true))
         .filter(WorkSessionColumn::EndTime.is_not_null())
+        // Only bill sessions not already on an invoice.
+        .filter(WorkSessionColumn::InvoiceId.is_null())
         .filter(WorkSessionColumn::StartTime.gte(args.since))
         .filter(WorkSessionColumn::StartTime.lt(args.until))
         .all(timer_conn)
         .await?;
+    build_from_models(
+        args.book,
+        args.party,
+        sessions,
+        args.net_days,
+        args.number,
+        args.notes_public,
+        args.notes_private,
+        args.terms,
+    )
+}
+
+/// Build a draft invoice from an already-selected set of work-session
+/// models (the caller decides the filter — by project, by tag, or all
+/// general/project-less time). Same grouping + money logic as
+/// [`build_invoice_from_sessions`].
+#[allow(clippy::too_many_arguments)]
+pub fn build_from_models(
+    book: Book,
+    party: Party,
+    sessions: Vec<WorkSessionModel>,
+    net_days: i64,
+    number: String,
+    notes_public: String,
+    notes_private: String,
+    terms: String,
+) -> Result<InvoiceBuild, InvoicePipelineError> {
     if sessions.is_empty() {
         return Err(InvoicePipelineError::NothingToBill);
     }
@@ -124,23 +170,26 @@ pub async fn build_invoice_from_sessions(
         )));
     }
 
-    // Group by task-note path; sessions without a task note
-    // each become their own line so users can spot stray work.
-    let mut by_task: std::collections::BTreeMap<String, Vec<&WorkSessionModel>> =
+    // Group by (assignee, task-note path) so each user's
+    // contribution to a task is its own line. Sessions
+    // without a task note each become their own line so
+    // users can spot stray work.
+    let mut by_user_task: std::collections::BTreeMap<(Uuid, String), Vec<&WorkSessionModel>> =
         std::collections::BTreeMap::new();
     for s in &sessions {
         let key = if s.task_note_path.is_empty() {
-            // Use the session id so each ungrouped row becomes
-            // a distinct line; we strip the prefix in display.
             format!("__unscoped__/{}", s.id.simple())
         } else {
             s.task_note_path.clone()
         };
-        by_task.entry(key).or_default().push(s);
+        by_user_task.entry((s.user_id, key)).or_default().push(s);
     }
 
-    let mut lines: Vec<InvoiceLineItem> = Vec::with_capacity(by_task.len());
-    for (key, bucket) in by_task {
+    // Each line carries its earliest session start so the
+    // finished invoice reads chronologically.
+    let mut dated_lines: Vec<(DateTime<Utc>, InvoiceLineItem, LineMeta)> =
+        Vec::with_capacity(by_user_task.len());
+    for ((user_id, key), bucket) in by_user_task {
         let total_secs: i64 = bucket
             .iter()
             .map(|s| {
@@ -180,6 +229,7 @@ pub async fn build_invoice_from_sessions(
                 .unwrap_or(0_i64);
             line_total_minor += cents;
         }
+        let line_secs = total_secs;
         let description = if let Some(stripped) = key.strip_prefix("__unscoped__/") {
             // Use the first session's description verbatim.
             bucket.first().map_or_else(
@@ -206,33 +256,75 @@ pub async fn build_invoice_from_sessions(
                 stem
             }
         };
-        lines.push(InvoiceLineItem {
-            id: Uuid::new_v4(),
-            kind: LineItemType::TimeEntry,
-            description,
-            quantity_milli,
-            unit_price_minor,
-            discount_minor: 0,
-            taxes: Vec::new(),
-            line_total_minor,
-            source_ref: bucket.first().map_or_else(Uuid::nil, |s| s.id),
-        });
+        // Prefix the work date (a range when the bucket spans
+        // days) so the customer can match lines to their own
+        // calendar. FUTURE: a real date column on
+        // `pdf::InvoiceLine` + the template once the proto's
+        // `InvoiceLineItem` grows a date field.
+        let first_start = bucket
+            .iter()
+            .map(|s| s.start_time)
+            .min()
+            .unwrap_or_else(Utc::now);
+        let last_start = bucket
+            .iter()
+            .map(|s| s.start_time)
+            .max()
+            .unwrap_or(first_start);
+        let (first_day, last_day) = (first_start.date_naive(), last_start.date_naive());
+        let date_prefix = if first_day == last_day {
+            first_day.format("%Y-%m-%d").to_string()
+        } else {
+            format!(
+                "{} – {}",
+                first_day.format("%Y-%m-%d"),
+                last_day.format("%m-%d")
+            )
+        };
+        let line_id = Uuid::new_v4();
+        dated_lines.push((
+            first_start,
+            InvoiceLineItem {
+                id: line_id,
+                kind: LineItemType::TimeEntry,
+                description: format!("{date_prefix}  {description}"),
+                quantity_milli,
+                unit_price_minor,
+                discount_minor: 0,
+                taxes: Vec::new(),
+                line_total_minor,
+                source_ref: bucket.first().map_or_else(Uuid::nil, |s| s.id),
+            },
+            LineMeta {
+                line_id,
+                user_id,
+                secs: line_secs,
+                cents: line_total_minor,
+            },
+        ));
+    }
+    dated_lines.sort_by_key(|(start, _, _)| *start);
+    let mut lines: Vec<InvoiceLineItem> = Vec::with_capacity(dated_lines.len());
+    let mut line_meta: Vec<LineMeta> = Vec::with_capacity(dated_lines.len());
+    for (_, l, m) in dated_lines {
+        lines.push(l);
+        line_meta.push(m);
     }
 
     let subtotal: i64 = lines.iter().map(|l| l.line_total_minor).sum();
     let total = subtotal; // no tax pass yet — caller can add
     let now = Utc::now();
     let today = now.date_naive();
-    let due = (today + Duration::days(args.net_days))
+    let due = (today + Duration::days(net_days))
         .format("%Y-%m-%d")
         .to_string();
 
     let invoice = Invoice {
         id: Uuid::new_v4(),
-        book_id: args.book.id,
-        party_id: args.party.id,
+        book_id: book.id,
+        party_id: party.id,
         kind: InvoiceKind::Invoice,
-        number: args.number,
+        number,
         status: InvoiceStatus::Draft,
         issue_date: today.format("%Y-%m-%d").to_string(),
         due_date: due,
@@ -246,9 +338,9 @@ pub async fn build_invoice_from_sessions(
         total_minor: total,
         amount_paid_minor: 0,
         balance_minor: total,
-        notes_public: args.notes_public,
-        notes_private: args.notes_private,
-        terms: args.terms,
+        notes_public,
+        notes_private,
+        terms,
         footer: String::new(),
         locked: false,
         posted_at: now,
@@ -259,6 +351,7 @@ pub async fn build_invoice_from_sessions(
     Ok(InvoiceBuild {
         invoice,
         source_session_ids: sessions.iter().map(|s| s.id).collect(),
+        line_meta,
     })
 }
 

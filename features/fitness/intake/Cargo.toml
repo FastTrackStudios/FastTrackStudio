@@ -20,6 +20,7 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 architect = { workspace = true }
 vault = { workspace = true }
 mealplan = { workspace = true }
+fitness-proto = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
@@ -32,8 +33,9 @@ vox = [
     "dep:vox-types",
     "architect/vox",
     "mealplan/vox",
+    "fitness-proto/vox",
 ]
-server = ["architect/server-seaorm", "dep:sea-orm"]
+server = ["architect/server-seaorm", "dep:sea-orm", "fitness-proto/server"]
 # `fake` feature intentionally omitted until
 # `mealplan::cookbook::Nutrition` gains a `Dummy` impl —
 # without it the synthetic `IntakeLogCreate` can't derive

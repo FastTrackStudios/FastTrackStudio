@@ -16,7 +16,7 @@ use crate::scan::scan_vault;
 use crate::service::{InventoryError, InventoryService};
 use crate::write::{default_item_path, serialize_item};
 
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
     inner: Arc<Mutex<Vault>>,
 }

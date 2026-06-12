@@ -9,25 +9,11 @@ members = [
 # grows native integration tests again.
 #    "features/*/tests/native",
     "xtask",
-    # CodeMirror-style editor — subtree-imported from
-    # github.com/.../Editor. Lives under `features/editor/` so its
-    # internal Cargo.toml + git history stay intact. We re-expose
-    # its crates here so the rest of Task can depend on them.
-    "features/editor/crates/editor-state",
-    "features/editor/crates/editor-syntax",
-    "features/editor/crates/editor-view",
-    "features/editor/crates/editor-vim",
-    "features/editor/crates/editor-typst",
-    "features/editor/crates/editor-mermaid",
-    "features/editor/crates/editor-keyflow",
-    "features/editor/crates/editor",
-    # Vendored fork of `mermaid-rs-renderer` 0.2.2 with web-time
-    # patched in for wasm32 compat. Lives next to the editor it
-    # supports.
-    "features/editor/vendor/mermaid-rs-renderer",
-    # Editor playground — Dioxus app that dogfoods the editor.
-    # Built with `dx serve --package playground`.
-    "features/editor/examples/playground",
+    # CodeMirror-style editor — now its own repo at ../Editor
+    # (github.com/.../Editor). Task depends on its crates via the
+    # `[workspace.dependencies]` path entries below + the
+    # mermaid-rs-renderer patch; nothing editor-related lives under
+    # `features/editor/` anymore.
     # Email feature harness — same pattern as the editor
     # playground: standalone Dioxus binary that exercises the
     # email-* crates without pulling in the full task-ui shell.
@@ -37,18 +23,6 @@ members = [
     # the new editor + vault stack on demand.
 ]
 exclude = [
-    # `features/editor/` keeps its imported `crates/` + `vendor/`
-    # + `examples/` subdirs so the editor's internal layout
-    # stays intact. Each real crate is listed above explicitly;
-    # exclude the intermediate parent dirs from the
-    # `features/*/*` glob so cargo doesn't try to parse them as
-    # manifests.
-    "features/editor/crates",
-    "features/editor/vendor",
-    "features/editor/examples",
-    "features/editor/docs",
-    "features/editor/plans",
-    "features/editor/tests",
     # The `features/*/*` glob would otherwise try to parse
     # `features/email/examples/` and `features/email/plans/`
     # as crate manifests.
@@ -246,6 +220,15 @@ wiki-live = { path = "features/wiki/wiki-live" }
 wiki-graph = { path = "features/wiki/wiki-graph" }
 wiki-search = { path = "features/wiki/wiki-search" }
 wiki-extract = { path = "features/wiki/wiki-extract" }
+# `task wiki archive <url>` — URL router + content extractors
+# (readability articles, Google Docs export, yt-dlp video
+# transcripts) + bookmark-service importers (Readwise,
+# Karakeep, Pocket, Netscape HTML). Pure extraction layer:
+# URL/file → provenance frontmatter + markdown body; the CLI
+# glues the output into the unchanged raw→ingest pipeline
+# over the `wiki-proto` RPC surface.
+# See `plans/wiki-archive.md` (phase 1 = tracked issue 32e7b28f).
+wiki-archive = { path = "features/wiki/wiki-archive" }
 # `agent` feature — LLM-agent integration. `agent-proto` is
 # the wire contract (sessions, messages, tools, kanban,
 # approvals, streaming events). Backends live in sibling
@@ -311,6 +294,13 @@ org-proto = { path = "features/org/org-proto" }
 # truth for the project metadata.
 timer-proto = { path = "features/timer/timer-proto" }
 timer = { path = "features/timer/timer" }
+# Threads feature — universal conversation primitive (topics +
+# messages anchored to any entity via (entity_type, entity_id)),
+# SeaORM-backed so the DB is swappable.
+threads-proto = { path = "features/threads/threads-proto" }
+threads-db = { path = "features/threads/threads-db" }
+threads = { path = "features/threads/threads" }
+threads-ui = { path = "features/threads/threads-ui" }
 # Finance feature — double-entry ledger + invoicing + expenses.
 # `finance-proto` is the wire contract (Book/Account/Transaction/
 # Split/Party/Invoice/Payment/Expense entities, plus the
@@ -340,6 +330,11 @@ finance-ui = { path = "features/finance/finance-ui" }
 vault = { path = "features/vault/vault" }
 vault-live = { path = "features/vault/vault-live" }
 vault-proto = { path = "features/vault/vault-proto" }
+# Vault-file ⇄ CRDT reconciliation: per-file Loro docs over
+# architect's DocRegistry, server write-behind into put_file,
+# inbound merge of external writes. Native-only; mounted by
+# `task-server` next to the plain `VaultSync` service.
+vault-collab = { path = "features/vault/vault-collab" }
 # Pull/push/sync orchestration on top of `vault_proto::VaultSync`.
 # Inspired by `cooklang/cooklang-sync`'s indexer + syncer split
 # (without content-defined chunking — full-file transfer is the
@@ -361,6 +356,18 @@ goal = { path = "features/goal/goal" }
 # tasks roll up to. Maps cleanly to Forgejo / GitHub milestone
 # API for the future sync.
 milestone = { path = "features/milestone/milestone" }
+# `milestone-proto` is wasm-clean (the web UI binds to it
+# directly); the `milestone` crate owns the vault-backed
+# parse / write / backend side.
+milestone-proto = { path = "features/milestone/milestone-proto", default-features = false }
+# Workstreams — the parent-with-swarm construct (lead + members +
+# status + dates) replacing the 'epic' tag. Tasks attach via
+# `workflow.workstream`; progress is a derived rollup.
+workstream = { path = "features/workstream/workstream" }
+# `workstream-proto` is wasm-clean (the web UI binds to it
+# directly); the `workstream` crate owns the vault-backed
+# parse / write / rollup / backend side.
+workstream-proto = { path = "features/workstream/workstream-proto", default-features = false }
 # Cyclic life-calendar primitives — Cycle + Quarter entities
 # + pure-function date generator. See
 # `plans/cyclic-life-calendar.md`.
@@ -388,16 +395,22 @@ email-sync = { path = "features/email/email-sync" }
 # notes / people via a many-to-many index. Used by other
 # features to record "this email is about this project."
 email-link = { path = "features/email/email-link" }
-# CodeMirror-style editor (subtree). `editor` is the umbrella
-# crate that re-exports the others — apps consume that.
-editor-state = { path = "features/editor/crates/editor-state" }
-editor-syntax = { path = "features/editor/crates/editor-syntax" }
-editor-view = { path = "features/editor/crates/editor-view" }
-editor-vim = { path = "features/editor/crates/editor-vim" }
-editor-typst = { path = "features/editor/crates/editor-typst" }
-editor-mermaid = { path = "features/editor/crates/editor-mermaid" }
-editor-keyflow = { path = "features/editor/crates/editor-keyflow" }
-editor = { path = "features/editor/crates/editor" }
+# CodeMirror-style editor — its own repo at ../Editor. `editor`
+# is the umbrella crate that re-exports the others — apps consume
+# that. These crates are members of the Editor workspace; Cargo
+# builds them as path dependencies and resolves their own
+# `workspace = true` deps against Editor's manifest.
+editor-state = { path = "../Editor/crates/editor-state" }
+editor-syntax = { path = "../Editor/crates/editor-syntax" }
+editor-view = { path = "../Editor/crates/editor-view" }
+editor-vim = { path = "../Editor/crates/editor-vim" }
+editor-typst = { path = "../Editor/crates/editor-typst" }
+editor-mermaid = { path = "../Editor/crates/editor-mermaid" }
+editor-keyflow = { path = "../Editor/crates/editor-keyflow" }
+# Byte-offset `Changes` ⇄ scalar `TextOp` adapter for the CRDT
+# host (the vault page's collaborative editing path). Wasm-clean.
+editor-crdt = { path = "../Editor/crates/editor-crdt" }
+editor = { path = "../Editor/crates/editor" }
 
 # Keyflow's engraver, CPU-only `svg` tier (no wgpu/vello/PDF) — the
 # editor renders ```kf``` fences to inline SVG client-side. The `svg`
@@ -420,10 +433,19 @@ attachments-proto = { path = "features/attachments/attachments-proto" }
 # carry a stable `id` so other features reference them by
 # uuid through renames.
 locations = { path = "features/locations/locations" }
+# `locations-proto` is wasm-clean (the web UI binds to it
+# directly); the `locations` crate owns the vault-backed
+# parse / write / store side.
+locations-proto = { path = "features/locations/locations-proto", default-features = false }
 # `inventory` — typed view of gear/equipment pages
 # (`type: item`). References locations by `location_id`;
 # rides on top of `vault` like `task` does.
 inventory = { path = "features/inventory/inventory" }
+# `inventory-proto` is wasm-clean (the web UI binds the
+# `InventoryService` client + `Item` model directly); the native
+# `inventory` crate owns the vault-backed parse / write / scan /
+# store side and re-exports it. Mirrors the `locations-proto` split.
+inventory-proto = { path = "features/inventory/inventory-proto", default-features = false }
 # `mealplan` slice — vault-superset trio for food/cooking.
 # `cookbook` owns cooklang `.cook` files under `<vault>/Cookbook/`
 # (single file per recipe, no sidecar; ingredient names ARE
@@ -435,8 +457,31 @@ inventory = { path = "features/inventory/inventory" }
 # `fitness` feature depends on `mealplan` for nutrition data.
 # See `plans/cooklang-migration.md`.
 cookbook = { path = "features/mealplan/cookbook" }
+# `recipe-import` — `task recipe import <url>`: webpage → NormalizedRecipe
+# (cooklang-import's JSON-LD/microdata/HTML-class extractors) → `.cook`
+# (LLM-primary synthesis with parser validation, heuristic fallback for
+# `--offline`). CLI-only, native-only; saving goes through the existing
+# `CookbookService` create/update RPC, never raw fs.
+recipe-import = { path = "features/mealplan/recipe-import" }
+# `cookbook-proto` is wasm-clean — holds the `Nutrition` macro
+# shape so `fitness-proto` (and the web UI) can bind to it
+# without pulling the vault-backed `cookbook` crate. The
+# `cookbook` crate re-exports it so `cookbook::Nutrition` keeps
+# working.
+cookbook-proto = { path = "features/mealplan/cookbook/cookbook-proto", default-features = false }
 pantry = { path = "features/mealplan/pantry" }
+# `pantry-proto` is wasm-clean (the web UI binds the `PantryService`
+# client directly); the native `pantry` crate re-exports it. The
+# `native` feature (off by default) adds the `inventory::Item`
+# interop so wasm builds never pull the vault-backed `inventory`
+# crate. Mirrors the `cookbook-proto` split.
+pantry-proto = { path = "features/mealplan/pantry/pantry-proto", default-features = false }
 mealplan = { path = "features/mealplan/mealplan" }
+# `mealplan-proto` is wasm-clean — holds the `Meal` model +
+# `MealplanService` trait (and the `Fulfillment` wire types) so the
+# web UI binds the client directly. The native `mealplan` crate
+# re-exports it + keeps the cook/fulfillment domain logic.
+mealplan-proto = { path = "features/mealplan/mealplan/mealplan-proto", default-features = false }
 
 # Cooklang recipe format parser (https://cooklang.org).
 # Native parser + scaling + unit conversion + aisle.conf.
@@ -452,6 +497,12 @@ workouts = { path = "features/fitness/workouts" }
 body = { path = "features/fitness/body" }
 intake = { path = "features/fitness/intake" }
 fitness = { path = "features/fitness/fitness" }
+# `fitness-proto` is wasm-clean (the web UI binds to the four
+# fitness service clients directly); the native `body` /
+# `exercises` / `workouts` / `intake` crates own the
+# vault-backed parse / write / store side and re-export this
+# proto. Mirrors the `locations-proto` split.
+fitness-proto = { path = "features/fitness/fitness-proto", default-features = false }
 view = { path = "features/view/view" }
 view-gantt = { path = "features/view/view-gantt" }
 view-kanban = { path = "features/view/view-kanban" }
@@ -465,10 +516,19 @@ view-knowledge-graph = { path = "features/view/view-knowledge-graph" }
 scheduling = { path = "features/scheduling/scheduling" }
 scheduling-proto = { path = "features/scheduling/scheduling-proto", default-features = false }
 scheduling-ui = { path = "features/scheduling/scheduling-ui" }
+# Inbox — the FLAP capture queue. Trio follows the vault pattern;
+# `inbox-proto` is wasm-clean (the UI binds to it directly).
+inbox = { path = "features/inbox/inbox" }
+inbox-proto = { path = "features/inbox/inbox-proto", default-features = false }
 # General app-state persistence. Capability sub-traits
 # (`KvStore` / `LogStore`) so any feature can mount any backend.
 store-proto = { path = "crates/store-proto", default-features = false }
-architect-auth = { path = "../architect-auth/crates/architect-auth" }
+architect-auth = { path = "../architect/features/auth/architect-auth" }
+# Wire contract for architect-auth — `AuthServiceClient` + the session
+# bundle types. wasm-clean with just the `vox` feature (uuid `js` flows
+# from architect), so the web UI drives the real sign-in flow over the
+# per-org endpoint.
+auth-proto = { path = "../architect/features/auth/auth-proto", default-features = false }
 
 # Git feature — issue + PR workflow on top of forges
 # (GitHub now, Forgejo next). `git-proto` is the wire
@@ -498,7 +558,11 @@ rayon = "1"
 # helix and other rust TUIs — fast prefix-friendly bonuses + Unicode
 # normalization. Wasm-clean.
 nucleo-matcher = "0.3"
-fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui", default-features = false }
+# `core` (default in fts-ui) is now feature-gated — it backs `fts_ui::prelude`
+# + `lucide_dioxus`. The `crates/* -> features/*` refactor moved fts-ui-core
+# behind this flag, so `default-features = false` alone strips the whole
+# design system. Opt `core` back in explicitly.
+fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui", default-features = false, features = ["core"] }
 
 # Ordered-map for round-trippable frontmatter key preservation
 # (needed by knowledge-proto's obsidian helpers).
@@ -541,8 +605,8 @@ git = "https://github.com/Leaf-Computer/lumen-blocks.git"
 tag = "v0.2.0"
 
 [workspace.dependencies.moire]
-git = "https://git.starcommand.live/codywright/moire"
-rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624"
+git = "https://codeberg.org/FastTrackStudios/moire"
+rev = "7a2f1dc"
 
 # Loro — CRDT engine, source of truth for every feature's data.
 # SeaORM stores the doc's snapshot + update log as opaque bytes.
@@ -854,34 +918,41 @@ debug = false
 strip = "debuginfo"
 
 # Use the local FastTrackStudio input_actions checkout during development so
-# dependent crates share the same updated vox/facet stack.
+# dependent crates share the same updated vox/facet stack. The codeberg
+# variant is the live source (daw-proto → keyflow → editor reach
+# actions-proto through it on `branch=main`); without folding it to the
+# local checkout, that branch drags in the old vox 0.5.0 which collides
+# with the 0.8.2 the rest of the graph uses.
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
+[patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
+
 # Unify vox onto a single source. `architect` (../architect) pins vox at
-# the starcommand fork (rev f31f1040 — the uuid-opaque-scalar tip, which
+# the codeberg fork (rev b3d806f8 — matching architect's current pin, which
 # carries the Uuid/chrono opaque-scalar serialization fix), while the
 # workspace deps point at bearcove/vox. Two identical-content vox copies
 # means architect's generated `Handler` impls don't unify across them and
 # every proto's dispatcher fails the trait bound. Redirect bearcove/vox
-# at the published starcommand rev so the graph carries exactly one
+# at the published codeberg rev so the graph carries exactly one
 # `vox-types` — the same source+rev architect already uses (no local path
 # dep, so this is portable to fresh clones / CI).
 [patch."https://github.com/bearcove/vox"]
-vox                = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-core           = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-codegen        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit            = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit-abi        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit-cal        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-macros-core    = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-macros-parse   = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-postcard       = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-schema         = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-service-macros = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-types          = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-websocket      = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-facet-cbor         = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox                = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-core           = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-codegen        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-jit            = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-jit-abi        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-jit-cal        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-macros-core    = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-macros-parse   = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-postcard       = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-schema         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-service-macros = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-types          = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-websocket      = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+facet-cbor         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
 
 # daw-proto reaches actions-proto through the starcommand host (not the
 # github mirror above), so redirect that source to the same local checkout.
@@ -898,22 +969,39 @@ actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto"
 [patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
 daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
 
+# Current keyflow main pulls daw-proto from the codeberg daw mirror,
+# whose main still pins vox @ f31f1040 — incompatible with the
+# b3d806f8 rev architect (and this workspace) now unify on. Redirect
+# to the local checkout, whose vox pins are bumped to b3d806f8, until
+# the daw repo's pins move on the remote.
+[patch."https://codeberg.org/FastTrackStudios/daw.git"]
+daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
+
+# keyflow still declares color-palette / music-catalog from the starcommand
+# dynamic-template host (branch = main). Redirect that source to the codeberg
+# mirror — the canonical migrated repo (its main is vox-fork-aligned) — so the
+# graph carries no starcommand sources. (The clean fix is keyflow's own
+# Cargo.toml lines 102-103; this patch migrates Task's view in the meantime.)
+[patch."https://git.starcommand.live/FastTrackStudios/dynamic-template.git"]
+color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+
 # Redirect every transitive bearcove/moire reference (vox's
 # moire-runtime / moire-tokio / moire-types, etc.) to the codywright
 # fork at the same rev as the workspace dep above. Without this,
 # vox + architect end up with two parallel moire compilations.
 
 [patch."https://github.com/bearcove/moire"]
-moire             = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-macros      = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-macros-noop = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-runtime     = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-tokio       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-trace-capture = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-trace-types = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-types       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-wasm        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
-moire-wire        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire             = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-macros      = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-runtime     = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-tokio       = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-types       = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-wasm        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-wire        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
 
 [workspace.dependencies.architect]
 path = "../architect/macros/architect"
@@ -944,7 +1032,9 @@ rev = "d01afa40d79227a4a2de85b50e76849300890766"
 # crate calls `std::time::Instant::now()` unconditionally from
 # its layout pipeline, which panics on `wasm32-unknown-unknown`.
 # Our fork swaps that for `web_time::Instant` so editor-mermaid
-# can render diagrams in the browser. Subtree-imported with the
-# editor, lives at `features/editor/vendor/mermaid-rs-renderer`.
+# can render diagrams in the browser. Lives in the Editor repo at
+# `../Editor/vendor/mermaid-rs-renderer`. `[patch]` only applies
+# from the build-root workspace, so Task carries this itself even
+# though Editor declares the same patch internally.
 [patch.crates-io.mermaid-rs-renderer]
-path = "features/editor/vendor/mermaid-rs-renderer"
+path = "../Editor/vendor/mermaid-rs-renderer"

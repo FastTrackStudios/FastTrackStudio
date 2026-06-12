@@ -37,14 +37,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use architect::vox;
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
+use uuid::Uuid;
 use vault_proto::{
-    FileBytes, FolderIndex, IfMatch, Manifest, ManifestEntry, PageMeta, PutAck, VaultEvent,
-    VaultSync, VaultSyncError,
+    CollabAck, FileBytes, FolderIndex, IfMatch, Manifest, ManifestEntry, PageMeta, PutAck,
+    VaultEvent, VaultSync, VaultSyncError, collab_doc_id,
 };
 
 use crate::vault::Vault;
@@ -87,7 +86,7 @@ enum Layout {
 ///   `vault_id → path` registry. Unknown ids fail.
 /// - [`Backend::under_parent`]: open-ended, one subdir per
 ///   vault under a shared parent. Unknown ids auto-create.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Backend {
     layout: Layout,
     /// Coarse global write lock. Reads bypass it; writes
@@ -98,6 +97,14 @@ pub struct Backend {
     /// `subscribe`. Capacity 256: rapid bursts coalesce
     /// client-side via [`VaultEvent::Resync`].
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<VaultEvent>>>>,
+    /// CRDT collaboration registrations: `doc_id → (vault_id, path)`.
+    /// Populated by [`VaultSync::open_collab`]; consulted by the
+    /// server's doc-registry admission hook (which only sees a
+    /// `Uuid`) and by the write-behind / inbound reconciler to route
+    /// file events to open docs. `std::sync::RwLock` — holds are
+    /// instant lookups from both sync (dispatcher blocking pool) and
+    /// async contexts.
+    collab: Arc<std::sync::RwLock<HashMap<Uuid, (String, String)>>>,
 }
 
 impl Backend {
@@ -131,7 +138,21 @@ impl Backend {
             layout,
             write_lock: Arc::new(std::sync::Mutex::new(())),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            collab: Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Reverse-resolve a collab doc id to its `(vault_id, path)`,
+    /// if [`VaultSync::open_collab`] registered it. This is what the
+    /// doc registry's admission hook calls — an unregistered id is
+    /// not served.
+    #[must_use]
+    pub fn collab_route(&self, doc_id: Uuid) -> Option<(String, String)> {
+        self.collab
+            .read()
+            .expect("vault::sync collab map poisoned")
+            .get(&doc_id)
+            .cloned()
     }
 
     /// Resolve `vault_id` to an absolute root path. Returns
@@ -241,13 +262,6 @@ impl Backend {
         let (tx, _rx) = broadcast::channel::<VaultEvent>(256);
         chans.insert(vault_id.to_string(), tx.clone());
         tx
-    }
-}
-
-impl HasDispatcher for Backend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 
@@ -397,6 +411,7 @@ impl VaultSync for Backend {
                     // `raw` is the file's verbatim UTF-8 bytes, so this
                     // matches the manifest's per-file hash.
                     sha256: sha256_hex(p.raw.as_bytes()),
+                    aliases: fm.as_ref().map(fm_aliases).unwrap_or_default(),
                 }
             })
             .collect();
@@ -469,6 +484,23 @@ impl VaultSync for Backend {
         Ok(PutAck {
             sha256: new_sha,
             mtime_ms,
+        })
+    }
+
+    fn open_collab(&self, vault_id: &str, path: &str) -> Result<CollabAck, VaultSyncError> {
+        let abs = self.file_path(vault_id, path)?;
+        if !abs.exists() {
+            return Err(VaultSyncError::NotFound);
+        }
+        let bytes = std::fs::read(&abs).map_err(io_err)?;
+        let doc_id = collab_doc_id(vault_id, path);
+        self.collab
+            .write()
+            .expect("vault::sync collab map poisoned")
+            .insert(doc_id, (vault_id.to_string(), path.to_string()));
+        Ok(CollabAck {
+            doc_id,
+            sha256: sha256_hex(&bytes),
         })
     }
 
@@ -551,6 +583,35 @@ fn fm_text(fm: &FrontMatter, key: &str) -> Option<String> {
             PropValue::Text(s) | PropValue::Date(s) => Some(s.clone()),
             _ => None,
         })
+}
+
+/// Frontmatter `aliases` / `alias` values, flattened in document
+/// order. Accepts the YAML list form (`aliases: [a, b]` / block
+/// list) and the legacy comma-separated string form Obsidian
+/// still tolerates.
+fn fm_aliases(fm: &FrontMatter) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in &fm.props {
+        if !(p.key.eq_ignore_ascii_case("aliases") || p.key.eq_ignore_ascii_case("alias")) {
+            continue;
+        }
+        match &p.value {
+            PropValue::List(items) => out.extend(
+                items
+                    .iter()
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty()),
+            ),
+            PropValue::Text(s) => out.extend(
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned),
+            ),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Reduce a `folder` value to a bare parent basename. Handles the
@@ -848,6 +909,33 @@ mod tests {
         .unwrap();
         assert_eq!(backend.manifest("b").unwrap().files.len(), 0);
         assert_eq!(backend.manifest("a").unwrap().files.len(), 1);
+    }
+
+    #[test]
+    fn open_collab_registers_and_reverse_resolves() {
+        let (_tmp, b) = make_backend();
+        b.put_file("v1", "n.md", b"body".to_vec(), IfMatch::CreateOnly)
+            .unwrap();
+        let ack = b.open_collab("v1", "n.md").unwrap();
+        assert_eq!(ack.doc_id, collab_doc_id("v1", "n.md"));
+        assert_eq!(ack.sha256, sha256_hex(b"body"));
+        assert_eq!(
+            b.collab_route(ack.doc_id),
+            Some(("v1".to_string(), "n.md".to_string()))
+        );
+        // Idempotent: same id, refreshed sha.
+        b.put_file("v1", "n.md", b"body2".to_vec(), IfMatch::Force)
+            .unwrap();
+        let again = b.open_collab("v1", "n.md").unwrap();
+        assert_eq!(again.doc_id, ack.doc_id);
+        assert_eq!(again.sha256, sha256_hex(b"body2"));
+        // Unregistered ids resolve to nothing — the admission gate.
+        assert_eq!(b.collab_route(collab_doc_id("v1", "other.md")), None);
+        // Missing path refuses registration.
+        assert!(matches!(
+            b.open_collab("v1", "missing.md"),
+            Err(VaultSyncError::NotFound)
+        ));
     }
 
     fn meta<'a>(idx: &'a vault_proto::FolderIndex, base: &str) -> &'a PageMeta {

@@ -4,8 +4,6 @@
 
 use std::path::{Path, PathBuf};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::Utc;
 use uuid::Uuid;
 use vault::Vault;
@@ -15,7 +13,7 @@ use crate::parse::{looks_like_milestone, parse_page};
 use crate::service::{MilestoneError, MilestoneService};
 use crate::write::{default_milestone_path, write_milestone};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, architect::HasDispatcher)]
 pub struct MilestoneBackend {
     vault_root: PathBuf,
 }
@@ -82,13 +80,6 @@ impl MilestoneBackend {
         Err(MilestoneError::BadRequest(format!(
             "no project with id {project_id} in this vault"
         )))
-    }
-}
-
-impl HasDispatcher for MilestoneBackend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

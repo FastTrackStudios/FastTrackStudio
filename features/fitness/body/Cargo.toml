@@ -19,6 +19,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 architect = { workspace = true }
 vault = { workspace = true }
+fitness-proto = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
@@ -33,9 +34,9 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 
 [features]
 default = ["vox"]
-vox = ["dep:vox", "dep:vox-types", "architect/vox"]
-server = ["architect/server-seaorm", "dep:sea-orm"]
-fake = ["dep:fake", "architect/fake"]
+vox = ["dep:vox", "dep:vox-types", "architect/vox", "fitness-proto/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm", "fitness-proto/server"]
+fake = ["dep:fake", "architect/fake", "fitness-proto/fake"]
 full = ["vox", "server", "fake"]
 
 [dev-dependencies]

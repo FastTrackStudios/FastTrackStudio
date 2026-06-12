@@ -41,6 +41,7 @@
 pub mod capture;
 pub mod model;
 pub mod parse;
+pub mod relations;
 pub mod service;
 
 // FS-dependent modules (vault::Vault, std::fs walks). The
@@ -55,9 +56,15 @@ pub mod write;
 pub mod backend;
 
 pub use capture::capture;
-pub use model::{Priority, Status, TaskInfo, TimeEntry};
+pub use model::{Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry};
+pub use relations::ReverseRelation;
+// Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
+// so UI consumers don't need their own workflows-proto dep.
+pub use workflows_proto;
 pub use parse::{ParseError, parse_page, parse_str};
-pub use service::{TaskError, TaskService, TaskServiceRpc};
+pub use service::{
+    TaskError, TaskEvent, TaskListFilter, TaskReverseRelations, TaskService, TaskServiceRpc,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::TaskBackend;
@@ -71,4 +78,14 @@ pub use service::{
     Service as TaskServiceBridge, TaskServiceClient, TaskServiceRpcDispatcher as TaskDispatcher,
     layer as task_service_layer, serve as serve_task_service,
     task_service_rpc_service_descriptor as task_service_descriptor,
+};
+
+// `#[subscribe] fn events` stream sibling — live task changes.
+// Mount `task_service_stream_layer(backend)` next to the base
+// service; subscribers drive a `TaskServiceStreamClient`.
+#[cfg(feature = "vox")]
+pub use service::{
+    TaskServiceStream, TaskServiceStreamClient, TaskServiceStreamSource,
+    stream_layer as task_service_stream_layer, stream_serve as serve_task_service_stream,
+    task_service_stream_service_descriptor as task_stream_descriptor,
 };

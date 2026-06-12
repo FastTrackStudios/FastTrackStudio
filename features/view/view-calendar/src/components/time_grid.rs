@@ -1,14 +1,20 @@
 //! Shared time-grid view used by week (`days.len() == 7`) and day
 //! (`days.len() == 1`) variants.
 //!
-//! Pixel-based vertical layout (48 px/hour) so drop-y math is
-//! direct. Overlap column-splitting comes from
+//! Pixel-based vertical layout so drop-y math is direct: the hour
+//! height is derived from the scroll container (06:00–24:00 fills
+//! the viewport, 28px/hour floor), measured on mount and
+//! re-derived on viewport resize. Overlap column-splitting comes from
 //! [`crate::layout::day_overlap_layout`]: events that share time
 //! get split into sub-columns. Sweep-to-create on the column
 //! background gives the Google-style click-and-drag event creation.
 
+use std::rc::Rc;
+
 use chrono::{Datelike, Duration, NaiveDate};
+use dioxus::html::geometry::PixelsVector2D;
 use dioxus::html::input_data::MouseButton;
+use dioxus::html::{MountedData, ResizeData, ScrollBehavior};
 use dioxus::prelude::*;
 
 use crate::layout::{TimeBlockPlacement, day_overlap_layout};
@@ -25,9 +31,18 @@ use super::event_chip::EventChip;
 use super::now_line::NowLine;
 use super::style::{chip_palette, template_palette};
 
-const PX_PER_HOUR: i64 = 48;
-const COL_HEIGHT_PX: i64 = PX_PER_HOUR * 24;
+/// Fallback row height when the scroll container can't be measured
+/// (also the floor for very short viewports).
+const PX_PER_HOUR_DEFAULT: i64 = 48;
+const MIN_PX_PER_HOUR: i64 = 28;
 const SNAP_MINUTES: i64 = 15;
+/// Default visible day window: 06:00–24:00. The grid still spans
+/// the whole 24h (00:00–06:00 is reachable by scrolling up — the
+/// sleep block lives there) but gets no default screen space: the
+/// hour height is derived from the container so the 18h window
+/// exactly fills it, and the container starts scrolled to 06:00.
+const WINDOW_START_HOUR: i64 = 6;
+const WINDOW_HOURS: i64 = 18;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TimeGridViewProps {
@@ -54,6 +69,16 @@ pub struct TimeGridViewProps {
 #[component]
 pub fn TimeGridView(props: TimeGridViewProps) -> Element {
     let today = chrono::Local::now().date_naive();
+    // Hour height, derived from the scroll container's height so
+    // 06:00–24:00 fills the default viewport exactly — measured on
+    // mount and re-derived on every viewport resize (the container
+    // carries an `onresize` ResizeObserver hook).
+    let mut px_per_hour = use_signal(|| PX_PER_HOUR_DEFAULT);
+    // The scroll container element, kept so the resize handler can
+    // read + restore the scroll position.
+    let mut scroller: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
+    let pph = px_per_hour();
+    let col_height_px = pph * 24;
     // Split: all-day events go to the top strip, timed events to
     // the time grid itself. `position` would mis-classify multi-day
     // timed events; we treat duration ≥ 24h with midnight-aligned
@@ -119,12 +144,68 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                 on_event: props.on_event,
                 on_open_editor: props.on_open_editor,
             }
-            // Scrollable grid body
+            // Scrollable grid body. On mount: size the hour rows so
+            // the 06:00–24:00 window fills the container, then start
+            // scrolled to 06:00 (pre-06:00 stays reachable upward).
+            // On resize: re-derive the row height and keep the
+            // top-of-viewport hour anchored.
             div { class: "flex-1 min-h-0 overflow-y-auto",
+                onmounted: move |e: Event<MountedData>| {
+                    scroller.set(Some(e.data()));
+                    spawn(async move {
+                        let mut p = PX_PER_HOUR_DEFAULT;
+                        if let Ok(rect) = e.data().get_client_rect().await {
+                            let h = rect.size.height;
+                            if h > 100.0 {
+                                p = ((h / WINDOW_HOURS as f64).floor() as i64)
+                                    .max(MIN_PX_PER_HOUR);
+                            }
+                        }
+                        px_per_hour.set(p);
+                        let y = (WINDOW_START_HOUR * p) as f64;
+                        let _ = e
+                            .data()
+                            .scroll(PixelsVector2D::new(0.0, y), ScrollBehavior::Instant)
+                            .await;
+                    });
+                },
+                // Viewport resize → re-derive the hour height (same
+                // formula + MIN_PX_PER_HOUR floor as on mount) and
+                // rescale the scroll offset so the hour at the top
+                // of the viewport stays anchored (06:00 right after
+                // mount).
+                onresize: move |e: Event<ResizeData>| {
+                    let Ok(size) = e.data().get_content_box_size() else { return };
+                    let h = size.height;
+                    if h <= 100.0 {
+                        return;
+                    }
+                    let new_p = ((h / WINDOW_HOURS as f64).floor() as i64)
+                        .max(MIN_PX_PER_HOUR);
+                    let old_p = *px_per_hour.peek();
+                    if new_p == old_p {
+                        return;
+                    }
+                    let el = scroller.peek().clone();
+                    spawn(async move {
+                        let mut y = (WINDOW_START_HOUR * new_p) as f64;
+                        if let Some(el) = el {
+                            if let Ok(off) = el.get_scroll_offset().await {
+                                y = off.y * new_p as f64 / old_p as f64;
+                            }
+                            px_per_hour.set(new_p);
+                            let _ = el
+                                .scroll(PixelsVector2D::new(0.0, y), ScrollBehavior::Instant)
+                                .await;
+                        } else {
+                            px_per_hour.set(new_p);
+                        }
+                    });
+                },
                 div {
                     class: "grid relative",
-                    style: "grid-template-columns: 56px repeat({props.days.len()}, 1fr); height: {COL_HEIGHT_PX}px;",
-                    HourAxis {}
+                    style: "grid-template-columns: 56px repeat({props.days.len()}, 1fr); height: {col_height_px}px;",
+                    HourAxis { px_per_hour: pph }
                     for (idx, date) in props.days.iter().enumerate() {
                         DayColumn {
                             key: "{date}",
@@ -135,6 +216,7 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                             on_block_drop: props.on_block_drop,
                             on_block_edit: props.on_block_edit,
                             is_last: idx == props.days.len() - 1,
+                            px_per_hour: pph,
                             readonly: props.readonly,
                             on_event: props.on_event,
                             on_open_editor: props.on_open_editor,
@@ -142,7 +224,7 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                     }
                     // Now-line overlay — placed after columns so
                     // it stacks on top.
-                    NowLine { days: props.days.clone(), px_per_hour: PX_PER_HOUR }
+                    NowLine { days: props.days.clone(), px_per_hour: pph }
                 }
             }
         }
@@ -160,14 +242,14 @@ fn is_effectively_all_day(ev: &CalendarEvent) -> bool {
 }
 
 #[component]
-fn HourAxis() -> Element {
+fn HourAxis(px_per_hour: i64) -> Element {
     rsx! {
         div { class: "relative border-r border-border/40 text-[10px] text-muted-foreground",
             for (h, label) in hour_labels() {
                 div {
                     key: "{h}",
                     class: "absolute right-1 -translate-y-2",
-                    style: "top: {h * PX_PER_HOUR as u32}px;",
+                    style: "top: {i64::from(h) * px_per_hour}px;",
                     "{label}"
                 }
             }
@@ -194,6 +276,7 @@ struct DayColumnProps {
     #[props(default)]
     on_block_edit: Option<EventHandler<crate::types::BlockEdit>>,
     is_last: bool,
+    px_per_hour: i64,
     readonly: bool,
     on_event: EventHandler<CalendarMutation>,
     on_open_editor: EventHandler<EventId>,
@@ -228,6 +311,7 @@ impl Sweep {
 #[component]
 fn DayColumn(props: DayColumnProps) -> Element {
     let mut ctx = use_drag_context();
+    let pph = props.px_per_hour;
     let date = props.date;
     let on_event = props.on_event;
     let on_open_editor = props.on_open_editor;
@@ -255,6 +339,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
         pal: &'static str,
         label: String,
         assignment: Option<String>,
+        soft: bool,
     }
     let template_placements: Vec<TplPlacement> = props
         .template_blocks
@@ -264,11 +349,12 @@ fn DayColumn(props: DayColumnProps) -> Element {
             id: tb.id.clone(),
             start_min: i64::from(tb.start_min),
             end_min: i64::from(tb.end_min),
-            top: i64::from(tb.start_min) * PX_PER_HOUR / 60,
-            h: i64::from(tb.end_min - tb.start_min) * PX_PER_HOUR / 60,
+            top: i64::from(tb.start_min) * pph / 60,
+            h: i64::from(tb.end_min - tb.start_min) * pph / 60,
             pal: template_palette(tb.color),
             label: tb.label.clone(),
             assignment: tb.assignment.clone(),
+            soft: tb.soft,
         })
         .collect();
     let on_block_click = props.on_block_click;
@@ -313,7 +399,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     bd.committed = true;
                 }
                 let col_y = e.data().element_coordinates().y as i64;
-                let pointer_min = px_to_minutes(col_y);
+                let pointer_min = px_to_minutes(col_y, pph);
                 match bd.kind {
                     BlockDragKind::Move => {
                         bd.date = date; // follow the cursor's column
@@ -341,7 +427,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                 div {
                     key: "h-{h}",
                     class: "absolute left-0 right-0 border-t border-border/30 pointer-events-none",
-                    style: "top: {h as i64 * PX_PER_HOUR}px;",
+                    style: "top: {h as i64 * pph}px;",
                 }
             }
             // Half-hour grid lines (dashed, very faint) — improves
@@ -350,7 +436,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                 div {
                     key: "h2-{h}",
                     class: "absolute left-0 right-0 border-t border-dashed border-border/15 pointer-events-none",
-                    style: "top: {h as i64 * PX_PER_HOUR + PX_PER_HOUR / 2}px;",
+                    style: "top: {h as i64 * pph + pph / 2}px;",
                 }
             }
             // Background surface — captures all pointer-based input
@@ -385,7 +471,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                         ctx.state.set(Some(ds.clone()));
                     }
                     let y = e.data().element_coordinates().y as i64;
-                    let snap_min = snap_minutes(px_to_minutes(y));
+                    let snap_min = snap_minutes(px_to_minutes(y, pph));
                     let (start_min, end_min) = ghost_range(ds.kind, ds.orig_start, ds.orig_end, snap_min, date);
                     ctx.ghost.set(Some(Ghost {
                         event: ds.event,
@@ -403,7 +489,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     let drag_snapshot = ctx.state.peek().clone();
                     if let Some(ds) = drag_snapshot {
                         let y = e.data().element_coordinates().y as i64;
-                        let drop_min = snap_minutes(px_to_minutes(y));
+                        let drop_min = snap_minutes(px_to_minutes(y, pph));
                         match ds.kind {
                             DragKind::Move => {
                                 let new_start = day_start_utc(date) + Duration::minutes(drop_min);
@@ -462,14 +548,14 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     if props.readonly { return; }
                     if e.data().trigger_button() != Some(MouseButton::Primary) { return; }
                     let y = e.data().element_coordinates().y as i64;
-                    let anchor = snap_minutes(px_to_minutes(y));
+                    let anchor = snap_minutes(px_to_minutes(y, pph));
                     sweep.set(Some(Sweep { anchor_min: anchor, current_min: anchor }));
                 },
                 onmousemove: move |e: MouseEvent| {
                     if props.readonly { return; }
                     let Some(mut s) = *sweep.peek() else { return };
                     let y = e.data().element_coordinates().y as i64;
-                    s.current_min = snap_minutes(px_to_minutes(y));
+                    s.current_min = snap_minutes(px_to_minutes(y, pph));
                     sweep.set(Some(s));
                 },
                 onmouseleave: move |_| {
@@ -485,8 +571,8 @@ fn DayColumn(props: DayColumnProps) -> Element {
             if let Some(s) = *sweep.read() {
                 {
                     let (a, b) = s.range();
-                    let top = minutes_to_px(a);
-                    let h = minutes_to_px(b - a).max(2);
+                    let top = minutes_to_px(a, pph);
+                    let h = minutes_to_px(b - a, pph).max(2);
                     rsx! {
                         div {
                             class: "absolute left-1 right-1 rounded-sm bg-primary/20 border border-primary/60 pointer-events-none",
@@ -521,6 +607,15 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     // pointer events fall through to the column handler.
                     let pe = if interactive && !being_dragged { "" } else { "pointer-events-none" };
                     let dim = if being_dragged { "opacity-30" } else { "" };
+                    // Soft (template-fallback) blocks read as a planned
+                    // shape, not a confirmed block: dashed outline +
+                    // reduced opacity. Explicit blocks keep the solid
+                    // left-accent palette.
+                    let softness = if tp.soft {
+                        "border border-dashed border-border/70 opacity-60"
+                    } else {
+                        ""
+                    };
                     // Build a drag for this block in `kind` mode.
                     let mk_drag = move |kind: BlockDragKind, id: String, grab: i64, page_y: f64| BlockDrag {
                         block_id: id,
@@ -538,7 +633,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     rsx! {
                         div {
                             key: "tpl-{tp.id}-{tp.top}",
-                            class: "absolute left-0.5 right-0.5 rounded-[3px] overflow-hidden transition {cursor} {pe} {dim} {tp.pal}",
+                            class: "absolute left-0.5 right-0.5 rounded-[3px] overflow-hidden transition {cursor} {pe} {dim} {tp.pal} {softness}",
                             style: "top: {tp.top}px; height: {tp.h}px;",
                             onpointerdown: move |e: Event<PointerData>| {
                                 if !draggable_block {
@@ -549,7 +644,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                                 block_ctx.drag.set(Some(mk_drag(
                                     BlockDragKind::Move,
                                     down_id.clone(),
-                                    px_to_minutes(elem_y),
+                                    px_to_minutes(elem_y, pph),
                                     page_y,
                                 )));
                             },
@@ -622,8 +717,8 @@ fn DayColumn(props: DayColumnProps) -> Element {
             // Live snapped ghost of the block being dragged.
             if let Some(bd) = active_block.as_ref() {
                 {
-                    let top = minutes_to_px(bd.cur_start_min);
-                    let h = minutes_to_px(bd.cur_end_min - bd.cur_start_min).max(2);
+                    let top = minutes_to_px(bd.cur_start_min, pph);
+                    let h = minutes_to_px(bd.cur_end_min - bd.cur_start_min, pph).max(2);
                     rsx! {
                         div {
                             class: "absolute left-0.5 right-0.5 z-20 rounded-md border-2 border-primary/70 bg-primary/15 pointer-events-none",
@@ -636,7 +731,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
             for placement in props.placements.iter() {
                 {
                     let id = placement.event.id;
-                    let style = block_style(placement);
+                    let style = block_style(placement, pph);
                     let event = placement.event.clone();
                     rsx! {
                         EventChip {
@@ -655,8 +750,8 @@ fn DayColumn(props: DayColumnProps) -> Element {
                 if g.date == date {
                     {
                         let palette = chip_palette(g.color);
-                        let top = minutes_to_px(g.start_min);
-                        let h = minutes_to_px(g.end_min - g.start_min).max(8);
+                        let top = minutes_to_px(g.start_min, pph);
+                        let h = minutes_to_px(g.end_min - g.start_min, pph).max(8);
                         let label = format_ghost_label(g.start_min, g.end_min);
                         let body = palette.body;
                         rsx! {
@@ -730,9 +825,9 @@ fn ghost_range(
 /// `height_min`, horizontal sub-column from `column` /
 /// `cluster_size`. Inset by 2px on each side so adjacent columns
 /// have a thin gutter (Google's look).
-fn block_style(p: &TimeBlockPlacement) -> String {
-    let top = minutes_to_px(p.top_min);
-    let h = minutes_to_px(p.height_min);
+fn block_style(p: &TimeBlockPlacement, px_per_hour: i64) -> String {
+    let top = minutes_to_px(p.top_min, px_per_hour);
+    let h = minutes_to_px(p.height_min, px_per_hour);
     let width_pct = 100.0_f32 / f32::from(p.cluster_size);
     let left_pct = f32::from(p.column) * width_pct;
     // Inner gutter via percentage subtraction would over-shrink
@@ -743,12 +838,12 @@ fn block_style(p: &TimeBlockPlacement) -> String {
     )
 }
 
-fn minutes_to_px(min: i64) -> i64 {
-    (min * PX_PER_HOUR) / 60
+fn minutes_to_px(min: i64, px_per_hour: i64) -> i64 {
+    (min * px_per_hour) / 60
 }
 
-fn px_to_minutes(px: i64) -> i64 {
-    (px * 60) / PX_PER_HOUR
+fn px_to_minutes(px: i64, px_per_hour: i64) -> i64 {
+    (px * 60) / px_per_hour
 }
 
 fn snap_minutes(min: i64) -> i64 {

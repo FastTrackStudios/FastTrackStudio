@@ -53,7 +53,10 @@ pub fn resolve_active(cli_override: Option<&str>) -> eyre::Result<ActiveOrg> {
     let root = org_proto::DataRoot::from_env().wrap_err("resolve data root")?;
     root.ensure().wrap_err("ensure data root")?;
 
-    // 1. --org <slug>.
+    // 1. --org <slug> — the explicit parameter when a subcommand
+    //    still declares a local flag, else the global `--org`.
+    let global = crate::global_org();
+    let cli_override = cli_override.or(global.as_deref());
     if let Some(slug) = cli_override {
         let (org, manifest) = root.load_org(slug).wrap_err_with(|| {
             format!(

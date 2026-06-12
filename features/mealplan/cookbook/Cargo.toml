@@ -17,6 +17,7 @@ facet = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 architect = { workspace = true }
+cookbook-proto = { workspace = true }
 cooklang = { workspace = true }
 walkdir = { workspace = true }
 
@@ -27,9 +28,9 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 
 [features]
 default = ["vox"]
-vox = ["dep:vox", "dep:vox-types", "architect/vox"]
-server = ["architect/server-seaorm", "dep:sea-orm"]
-fake = ["dep:fake", "architect/fake"]
+vox = ["dep:vox", "dep:vox-types", "architect/vox", "architect/dispatch-tokio", "cookbook-proto/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm", "cookbook-proto/server"]
+fake = ["dep:fake", "architect/fake", "cookbook-proto/fake"]
 full = ["vox", "server", "fake"]
 
 [[bin]]

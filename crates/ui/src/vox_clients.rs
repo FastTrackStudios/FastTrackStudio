@@ -1,123 +1,63 @@
-//! Cached vox service clients.
+//! Cached vox service clients — cross-target (wasm + native).
 //!
-//! Establishing a vox client opens a WebSocket whose wasm-bindgen
-//! callback closures live exactly as long as the established client
-//! value. The naive "connect → use → drop" pattern tears those
-//! closures down at the end of the request while the socket can still
-//! fire a queued event — surfacing as
-//! `closure invoked recursively or after being dropped` in the browser
-//! console and a dead page.
+//! Establishing a vox client opens a WebSocket and runs the handshake.
+//! On **wasm** the client's wasm-bindgen callback closures live exactly
+//! as long as the established client value — a naive connect → use → drop
+//! tears those closures down at the end of the request while the socket
+//! can still fire a queued event, surfacing as
+//! `closure invoked recursively or after being dropped` and a dead page.
+//! So on wasm each `(service, org)` client is established **once** and
+//! cached for the page's lifetime, then reused for every request.
 //!
-//! So each service client is established **once** and cached for the
-//! page's lifetime (the same reason `vox_session` `mem::forget`s its
-//! bootstrap session), then reused for every request. One long-lived
-//! WebSocket per service, no per-call churn, no dropped closures.
+//! On **native** there's no dropped-closure hazard, so the native build
+//! skips the cache and establishes per call (a native client cache is a
+//! possible follow-up if the desktop/SSR path turns hot).
 //!
-//! Reconnection after a server restart is a follow-up — a stale client
-//! surfaces as a request error, and a reload re-establishes.
+//! Both targets share one transport — `vox_websocket::WsLink::connect`
+//! (web-sys `WebSocket` on wasm, `tokio-tungstenite` on native) plus
+//! vox-core's `initiator_on(..).establish()`. There is **no** per-target
+//! API duplication: architect's generated clients carry no transport
+//! assumptions, and the vox stack is already cross-target, so the same
+//! `establish_for` works on both.
+//!
+//! ## Liveness
+//!
+//! A cached root can die (server restart, socket drop). Every cache
+//! access **validates** the root via `Caller::is_connected()` — vox's
+//! session-liveness primitive, false the moment the session observes
+//! transport EOF/error — and a dead entry is evicted + transparently
+//! re-established. We validate per-access rather than keying entries by
+//! the app `Connection`'s generation because this cache is *below* that
+//! layer: multi-org fan-out (`feeds::*`) reaches it for orgs the app
+//! connection isn't even pointed at, so the root's own liveness is the
+//! only invariant that always applies. The generation still drives
+//! hook-level invalidation upstream (`architect::Connection::generation`).
 
-#[cfg(target_arch = "wasm32")]
-use crate::vox_session::org_vox_url;
+use crate::vox_session::vox_url;
 
-/// The org's `TaskServiceClient`, established once and cached.
-pub async fn task_client() -> Result<task::TaskServiceClient, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::cell::RefCell;
-        thread_local! {
-            static CACHE: RefCell<Option<task::TaskServiceClient>> = const { RefCell::new(None) };
-        }
-        if let Some(c) = CACHE.with(|c| c.borrow().clone()) {
-            return Ok(c);
-        }
-        use vox_core::{TransportMode, initiator_on};
-        let link = link().await?;
-        let client = initiator_on(link, TransportMode::Bare)
-            .establish::<task::TaskServiceClient>()
-            .await
-            .map_err(|e| format!("establish: {e:?}"))?;
-        CACHE.with(|cell| *cell.borrow_mut() = Some(client.clone()));
-        Ok(client)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Err("native client not wired yet".to_owned())
-    }
-}
-
-/// The org's `ProjectServiceClient`, established once and cached.
-pub async fn project_client() -> Result<project::ProjectServiceClient, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::cell::RefCell;
-        thread_local! {
-            static CACHE: RefCell<Option<project::ProjectServiceClient>> =
-                const { RefCell::new(None) };
-        }
-        if let Some(c) = CACHE.with(|c| c.borrow().clone()) {
-            return Ok(c);
-        }
-        use vox_core::{TransportMode, initiator_on};
-        let link = link().await?;
-        let client = initiator_on(link, TransportMode::Bare)
-            .establish::<project::ProjectServiceClient>()
-            .await
-            .map_err(|e| format!("establish: {e:?}"))?;
-        CACHE.with(|cell| *cell.borrow_mut() = Some(client.clone()));
-        Ok(client)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Err("native client not wired yet".to_owned())
-    }
-}
-
-/// The org's `VaultSyncClient`, established once and cached.
-/// Backs the `/vault` route — file manifest, read, and
-/// conditional write over the same long-lived socket.
-pub async fn vault_client() -> Result<vault_proto::VaultSyncClient, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::cell::RefCell;
-        thread_local! {
-            static CACHE: RefCell<Option<vault_proto::VaultSyncClient>> =
-                const { RefCell::new(None) };
-        }
-        if let Some(c) = CACHE.with(|c| c.borrow().clone()) {
-            return Ok(c);
-        }
-        use vox_core::{TransportMode, initiator_on};
-        let link = link().await?;
-        let client = initiator_on(link, TransportMode::Bare)
-            .establish::<vault_proto::VaultSyncClient>()
-            .await
-            .map_err(|e| format!("establish: {e:?}"))?;
-        CACHE.with(|cell| *cell.borrow_mut() = Some(client.clone()));
-        Ok(client)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Err("native client not wired yet".to_owned())
-    }
-}
-
-/// Open a WS link to the (default home) org endpoint.
-#[cfg(target_arch = "wasm32")]
-async fn link() -> Result<vox_websocket::WsLink, String> {
-    let url = org_vox_url();
+/// Establish a client of type `C` against `url` — no caching. Shared by
+/// every public helper; cross-target.
+async fn establish_at<C>(url: &str) -> Result<C, String>
+where
+    C: vox_core::FromVoxSession + 'static,
+{
+    use vox_core::{TransportMode, initiator_on};
     if url.is_empty() {
-        return Err("no vox URL configured (set TASK_VOX_URL_WEB)".to_owned());
+        return Err("no vox URL configured (set TASK_VOX_URL[_WEB])".to_owned());
     }
-    vox_websocket::WsLink::connect(&url)
+    let link = vox_websocket::WsLink::connect(url)
         .await
-        .map_err(|e| format!("ws connect: {e:?}"))
+        .map_err(|e| format!("ws connect `{url}`: {e:?}"))?;
+    initiator_on(link, TransportMode::Bare)
+        .establish::<C>()
+        .await
+        .map_err(|e| format!("establish `{url}`: {e:?}"))
 }
 
 /// Per-org vox endpoint: the configured base retargeted at
 /// `/org/<slug>/vox`. Empty when no base is configured.
-#[cfg(target_arch = "wasm32")]
 fn org_ws_url(slug: &str) -> String {
-    let base = crate::vox_session::vox_url();
+    let base = vox_url();
     if base.is_empty() {
         return String::new();
     }
@@ -125,49 +65,102 @@ fn org_ws_url(slug: &str) -> String {
     format!("{trimmed}/org/{slug}/vox")
 }
 
-/// Establish *any* service client against a specific org's vox
-/// endpoint, cached per `(service type, slug)` so the multi-org
-/// fetchers reuse one socket per org instead of re-dialing on every
-/// render. This is what backs the org switcher's "All" mode (fan out
-/// across slugs) and single-org mode alike.
-#[cfg(target_arch = "wasm32")]
+/// One shared [`vox_core::Caller`] per org — the handle every typed
+/// client is built from. On wasm the connection root (a liveness-only
+/// `NoopClient`) is cached per slug: one socket per org, no matter how
+/// many services a page touches. The server's per-org `LayerRouter`
+/// dispatches every service on that one connection.
+///
+/// This also backs the app root's `Connection<Caller>`
+/// (`architect::use_app_reactive` over the active org) — pages that
+/// migrate to atom hooks build clients from the shared caller; legacy
+/// `feeds::*` fns ride the same socket through [`establish_for`].
+pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+
+        // The cached NoopClient is the connection's liveness anchor —
+        // dropping the last caller closes the socket, so the cache
+        // holds the root while it lives. Typed clients built from the
+        // caller are virtual views (no session handle).
+        thread_local! {
+            static ROOTS: RefCell<HashMap<String, vox_core::NoopClient>> =
+                RefCell::new(HashMap::new());
+        }
+        // Validate on access: a dead root (server restart, socket drop)
+        // is evicted so the next lines re-establish instead of handing
+        // out a corpse forever. See the module docs ("Liveness") for why
+        // this is a per-access check rather than generation keying.
+        if let Some(caller) = ROOTS.with(|m| {
+            let mut m = m.borrow_mut();
+            match m.get(slug) {
+                Some(root) if root.caller.is_connected() => Some(root.caller.clone()),
+                Some(_) => {
+                    tracing::warn!(slug, "vox: cached org root is dead; re-establishing");
+                    m.remove(slug);
+                    None
+                }
+                None => None,
+            }
+        }) {
+            return Ok(caller);
+        }
+        let root = establish_at::<vox_core::NoopClient>(&org_ws_url(slug)).await?;
+        let caller = root.caller.clone();
+        ROOTS.with(|m| m.borrow_mut().insert(slug.to_owned(), root));
+        Ok(caller)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Native has no cache (mirrors the old per-call behavior); the
+        // root is returned through the caller it carries — callers that
+        // need liveness across awaits should hold the typed client from
+        // `establish_for` instead.
+        let root = establish_at::<vox_core::NoopClient>(&org_ws_url(slug)).await?;
+        Ok(root.caller.clone())
+    }
+}
+
+/// Establish *any* service client against a specific org's vox endpoint.
+/// Wasm: a cheap typed view over the org's one cached connection
+/// ([`caller_for`]) — previously this cached a socket per
+/// `(service, org)`. Native: per-call establish, as before.
 pub async fn establish_for<C>(slug: &str) -> Result<C, String>
 where
     C: vox_core::FromVoxSession + Clone + 'static,
 {
-    use std::any::{Any, TypeId};
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-    use vox_core::{TransportMode, initiator_on};
-
-    thread_local! {
-        static CACHE: RefCell<HashMap<(TypeId, String), Box<dyn Any>>> =
-            RefCell::new(HashMap::new());
+    #[cfg(target_arch = "wasm32")]
+    {
+        let caller = caller_for(slug).await?;
+        Ok(C::from_vox_session(caller, None))
     }
-    let key = (TypeId::of::<C>(), slug.to_owned());
-    if let Some(c) = CACHE.with(|m| {
-        m.borrow()
-            .get(&key)
-            .and_then(|b| b.downcast_ref::<C>().cloned())
-    }) {
-        return Ok(c);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        establish_at::<C>(&org_ws_url(slug)).await
     }
-    let url = org_ws_url(slug);
-    if url.is_empty() {
-        return Err("no vox URL configured (set TASK_VOX_URL_WEB)".to_owned());
-    }
-    let link = vox_websocket::WsLink::connect(&url)
-        .await
-        .map_err(|e| format!("ws connect `{url}`: {e:?}"))?;
-    let client = initiator_on(link, TransportMode::Bare)
-        .establish::<C>()
-        .await
-        .map_err(|e| format!("establish `{slug}`: {e:?}"))?;
-    CACHE.with(|m| m.borrow_mut().insert(key, Box::new(client.clone())));
-    Ok(client)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn establish_for<C>(_slug: &str) -> Result<C, String> {
-    Err("native client not wired yet".to_owned())
+/// An org's `TaskServiceClient` — a view over the org's shared caller.
+pub async fn task_client(slug: &str) -> Result<task::TaskServiceClient, String> {
+    establish_for::<task::TaskServiceClient>(slug).await
+}
+
+/// An org's `ProjectServiceClient`.
+pub async fn project_client(slug: &str) -> Result<project::ProjectServiceClient, String> {
+    establish_for::<project::ProjectServiceClient>(slug).await
+}
+
+/// An org's `VaultSyncClient` — backs the `/vault` route (manifest,
+/// read, conditional write over the same long-lived socket).
+pub async fn vault_client(slug: &str) -> Result<vault_proto::VaultSyncClient, String> {
+    establish_for::<vault_proto::VaultSyncClient>(slug).await
+}
+
+/// An org's `VaultGraphClient` — link-graph reads (backlinks /
+/// links / orphans / unresolved / deadends / tags) for the vault
+/// page's backlinks panel and the editor's tag candidates.
+pub async fn vault_graph_client(slug: &str) -> Result<vault_proto::VaultGraphClient, String> {
+    establish_for::<vault_proto::VaultGraphClient>(slug).await
 }

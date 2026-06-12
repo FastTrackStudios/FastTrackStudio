@@ -5,8 +5,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use cookbook::Store as CookbookStore;
 use cookbook::{self, CookbookService};
 use pantry::{PantryService, Store as PantryStore};
@@ -14,7 +12,7 @@ use uuid::Uuid;
 use vault::Vault;
 
 use crate::fulfillment::{self, Fulfillment};
-use crate::model::{Meal, PantryDeduction};
+use crate::model::{Meal, MealNutrition, PantryDeduction};
 use crate::parse::{looks_like_meal, parse_page};
 use crate::scan::scan_vault;
 use crate::service::{MealplanError, MealplanService};
@@ -27,7 +25,7 @@ use crate::write::{default_meal_path, serialize_meal};
 /// against pantry edits made through the other surface.
 /// Construct via [`Store::new`] from a single `Vault` so the
 /// shared mutex is set up correctly.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
     inner: Arc<Mutex<Vault>>,
     pantry: PantryStore,
@@ -63,6 +61,18 @@ impl Store {
             pantry,
             cookbook,
         }
+    }
+
+    /// Swap in a cookbook store rooted elsewhere. The default
+    /// from [`Store::new`] walks the *vault* root, but on the
+    /// standard org layout recipes live under the wiki root
+    /// (`<org>/wiki/Knowledge/Cookbook/`) — pass the same
+    /// store the `CookbookService` mounts so `can_cook` and
+    /// cook-deductions resolve the same recipe paths.
+    #[must_use]
+    pub fn with_cookbook(mut self, cookbook: CookbookStore) -> Self {
+        self.cookbook = cookbook;
+        self
     }
 
     #[must_use]
@@ -106,13 +116,6 @@ fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
         .pages
         .iter()
         .position(|p| looks_like_meal(p) && parse_page(p).map(|m| m.id == id).unwrap_or(false))
-}
-
-impl HasDispatcher for Store {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
-    }
 }
 
 impl MealplanService for Store {

@@ -11,8 +11,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::Utc;
 use wiki_proto::error::WikiError;
 use wiki_proto::graph as gtypes;
@@ -37,7 +35,7 @@ enum Layout {
 }
 
 /// Cheaply clonable multi-vault backend.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct WikiBackend {
     layout: Layout,
     /// Watcher state per wiki — `true` = watcher running.
@@ -84,13 +82,6 @@ impl WikiBackend {
             Layout::UnderParent(parent) => parent.join(wiki_id),
         };
         Ok(WikiLive::open(root))
-    }
-}
-
-impl HasDispatcher for WikiBackend {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
     }
 }
 

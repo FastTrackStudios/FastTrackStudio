@@ -18,6 +18,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 architect = { workspace = true }
+milestone-proto = { workspace = true }
 # Wasm-clean wire shape for `VaultPage`.
 vault-proto = { workspace = true, default-features = false }
 
@@ -28,9 +29,9 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 
 [features]
 default = ["vox"]
-vox = ["dep:vox", "dep:vox-types", "architect/vox"]
-server = ["architect/server-seaorm", "dep:sea-orm"]
-fake = ["dep:fake", "architect/fake"]
+vox = ["dep:vox", "dep:vox-types", "architect/vox", "milestone-proto/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm", "milestone-proto/server"]
+fake = ["dep:fake", "architect/fake", "milestone-proto/fake"]
 full = ["vox", "server", "fake"]
 
 # `vault::Vault` is server-only. Wasm UI consumers get only

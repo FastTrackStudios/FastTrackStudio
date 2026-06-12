@@ -41,6 +41,22 @@ pub use vault_proto::{
     descriptor, layer, serve,
 };
 
+// ── Link-graph read service (`VaultGraph`) ────────────────────────
+// Wire trait + payloads are wasm-clean and unconditional, like
+// `VaultSync` above. The canonical backend (`GraphBackend`, over
+// `LinkIndex`) ships with the obsidian layer below.
+pub use vault_proto::{GraphLink, GraphUnresolved, TagCount, VaultGraph};
+
+#[cfg(feature = "vox")]
+pub use vault_proto::{
+    VaultGraphClient, VaultGraphRpc, VaultGraphRpcDispatcher as GraphDispatcher,
+    VaultGraphService as GraphService, vault_graph_layer as graph_layer,
+    vault_graph_rpc_service_descriptor as graph_descriptor, vault_graph_serve as graph_serve,
+};
+
+#[cfg(feature = "obsidian")]
+pub use vault_obsidian::GraphBackend;
+
 // ── Live filesystem implementation ────────────────────────────────
 /// Sub-module access into the live backend implementation, when
 /// callers need `vault::sync::WatcherHandle` or the like.

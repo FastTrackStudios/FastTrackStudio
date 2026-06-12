@@ -81,6 +81,19 @@ pub struct ProjectInfo {
     #[architect(filterable, sortable)]
     pub priority: String,
 
+    /// Project type / template — `code` | `general` (default) |
+    /// `personal`. Drives the overview layout: code projects lead with
+    /// issues & PRs, personal projects hide the repo, general is the
+    /// neutral default. Free-form so more types slot in without a
+    /// schema bump; empty is treated as `general`.
+    #[serde(
+        default,
+        rename = "projectType",
+        skip_serializing_if = "String::is_empty"
+    )]
+    #[architect(filterable)]
+    pub project_type: String,
+
     /// Project lead / responsible party. Free-text (often a
     /// `[[User Name]]` wikilink). Multiple leads → join with
     /// `, ` in the frontmatter.
@@ -215,6 +228,18 @@ pub struct ProjectInfo {
     #[serde(default)]
     #[architect(filterable)]
     pub archived: bool,
+
+    // ── State registry ──────────────────────────────────────
+    /// Optional per-project state registry: custom status names
+    /// bound to canonical [`crate::states::StateGroup`]s. `None`
+    /// = use [`crate::states::default_states`] (the canonical
+    /// open / in-progress / waiting / done / cancelled set).
+    /// Task statuses stay free strings — this only adds the
+    /// group *meaning* that rollups / burndown / kanban consume
+    /// via [`crate::states::resolve_state_group`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(json)]
+    pub states: Option<crate::states::StatesConfig>,
 
     // ── Timestamps ──────────────────────────────────────────
     /// Frontmatter aliases: `dateCreated` / `dateModified`

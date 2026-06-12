@@ -1,8 +1,10 @@
 //! `/projects` — the workspace's project command center.
 //!
-//! Fetches `Vec<ProjectInfo>` from the active org's `/org/<slug>/vox`
-//! endpoint via the architect-generated `ProjectServiceClient`, then
-//! renders a live stats band over a grid of rich project cards.
+//! Reads the shared optimistic project store ([`crate::stores`]) —
+//! slug-tagged rows fetched across the selected orgs via the
+//! architect-generated `ProjectServiceClient` — then renders a live
+//! stats band over a grid of rich project cards. Visiting this page
+//! hydrates the store, so `/projects/:id` resolves from cache.
 //!
 //! Each card carries a data-driven accent (the project's own `color`,
 //! or a stable pick from the chart palette), a real progress bar, and
@@ -34,24 +36,20 @@ enum ViewMode {
 
 #[component]
 pub fn ProjectsView() -> Element {
-    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
-    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
-    let projects = use_resource(move || async move {
-        let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
-        crate::feeds::fetch_projects(&slugs).await
-    });
+    // The shared optimistic project store: one AtomResult for the list
+    // (stale-while-revalidate across org switches), and the cache that
+    // makes `/projects/:id` instant after this visit.
+    let projects = crate::stores::use_project_list();
     let view_mode = use_signal(ViewMode::default);
 
-    // While the org list is still being discovered the fetch resolves
-    // to an empty set — show loading rather than an empty grid.
-    let view = if org_list.read().is_empty() {
-        render_loading()
-    } else {
-        match &*projects.read() {
-            Some(Ok(rows)) => render_loaded(rows, view_mode),
-            Some(Err(e)) => render_error(e),
-            None => render_loading(),
+    let view = match (projects.value(), projects.error()) {
+        (Some(rows), _) => {
+            let rows: Vec<ProjectInfo> =
+                rows.iter().map(|(_, r)| r.project.clone()).collect();
+            render_loaded(&rows, view_mode)
         }
+        (None, Some(e)) => render_error(e),
+        (None, None) => render_loading(),
     };
 
     rsx! {

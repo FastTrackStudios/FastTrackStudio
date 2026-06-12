@@ -24,6 +24,7 @@
 //! | [`VISION_CAPTION_PINNED`]      | `src/lib/vision-caption.ts:69-70`                     |
 //! | [`VISION_CAPTION_CONTEXTUAL`]  | `src/lib/vision-caption.ts:83-103`                    |
 //! | [`LANGUAGE_DIRECTIVE`]         | `src/lib/output-language.ts:22-33`                    |
+//! | [`ARCHIVE_SOURCE_SYSTEM`]      | Task-native (timestamped-media archive, no upstream)  |
 
 use std::collections::HashMap;
 
@@ -70,6 +71,16 @@ pub const VISION_CAPTION_PINNED: &str = include_str!("templates/vision_caption_p
 pub const VISION_CAPTION_CONTEXTUAL: &str = include_str!("templates/vision_caption_contextual.txt");
 pub const LANGUAGE_DIRECTIVE: &str = include_str!("templates/language_directive.txt");
 pub const DEEPEN_PAGE_SYSTEM: &str = include_str!("templates/deepen_page_system.txt");
+/// Appended to BOTH ingest system prompts when the raw
+/// source is an archived timestamped medium (provenance
+/// frontmatter `content_type: video|audio` — written by
+/// `task wiki archive`). Teaches the `^t<seconds>` anchor
+/// convention: chaptered source pages, `[mm:ss]` citations
+/// deep-linking `[[<source>#^t<sec>]]`, and the curator-owned
+/// `## Notes` section that must survive regeneration.
+/// Task-native (no llm_wiki counterpart — upstream has no
+/// media archiving).
+pub const ARCHIVE_SOURCE_SYSTEM: &str = include_str!("templates/archive_source_system.txt");
 
 /// Helper: build the language directive block.
 #[must_use]
@@ -77,6 +88,21 @@ pub fn language_directive(lang: &str) -> String {
     let mut vars = HashMap::new();
     vars.insert("language", lang);
     render(LANGUAGE_DIRECTIVE, &vars)
+}
+
+/// Helper: render the archived-media directive for a source.
+/// `source_filename` = raw filename (with extension),
+/// `content_type` = provenance value (`video` / `audio`).
+#[must_use]
+pub fn archive_media_directive(source_filename: &str, content_type: &str) -> String {
+    let source_basename = source_filename
+        .rsplit_once('.')
+        .map_or(source_filename, |(stem, _)| stem);
+    let mut vars = HashMap::new();
+    vars.insert("source_filename", source_filename);
+    vars.insert("source_basename", source_basename);
+    vars.insert("content_type", content_type);
+    render(ARCHIVE_SOURCE_SYSTEM, &vars)
 }
 
 #[cfg(test)]
@@ -94,6 +120,15 @@ mod tests {
     fn render_leaves_unknown_keys_literal() {
         let vars = HashMap::new();
         assert_eq!(render("Hi {nobody}", &vars), "Hi {nobody}");
+    }
+
+    #[test]
+    fn archive_media_directive_substitutes() {
+        let out = archive_media_directive("rick-roll-0424974c.md", "video");
+        assert!(out.contains("[[rick-roll-0424974c#^t870]]"), "{out}");
+        assert!(out.contains("wiki/sources/rick-roll-0424974c.md"));
+        assert!(out.contains("archived video transcript"));
+        assert!(!out.contains('{'));
     }
 
     #[test]

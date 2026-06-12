@@ -16,21 +16,20 @@
 //! field — `sum(fx_amount_minor) == 0`. A non-zero sum is rejected
 //! with [`FinanceError::SplitsImbalanced`] and **nothing is written**.
 
-use architect::HasDispatcher;
-use architect::dispatch::TokioBlockingDispatcher;
 use chrono::{DateTime, Utc};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
 
+use finance_proto::book::Book;
 use finance_proto::error::FinanceError;
-use finance_proto::ledger::Transaction;
+use finance_proto::ledger::{Account, AccountKind, Transaction};
 use finance_proto::service::ledger::{AccountBalance, Ledger, PostTransaction};
 
 use crate::finance_db_entity::{
-    AccountColumn, AccountEntity, BookEntity, TransactionActive, TransactionColumn,
-    TransactionEntity,
+    AccountActive, AccountColumn, AccountEntity, AccountModel, BookEntity, BookModel,
+    TransactionActive, TransactionColumn, TransactionEntity,
 };
 
 /// Default page size for [`Ledger::account_transactions`] when the
@@ -40,7 +39,7 @@ const DEFAULT_TXN_LIMIT: u64 = 100;
 
 /// Concrete ledger service. Cheap to clone — the connection handle
 /// and runtime handle are both `Clone`.
-#[derive(Clone)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct LedgerService {
     db: DatabaseConnection,
     runtime: tokio::runtime::Handle,
@@ -189,12 +188,121 @@ impl LedgerService {
         }
         Ok(out)
     }
+
+    /// Async post — the same invariant-checked write the sync
+    /// [`Ledger::post_transaction`] performs, but awaitable so callers
+    /// already inside an async context (e.g. the invoicing backend's
+    /// `block_on`) can post without nesting a `block_on`.
+    ///
+    /// # Errors
+    /// [`FinanceError::SplitsImbalanced`] if the splits don't net to
+    /// zero in base currency, or a backend error on write failure.
+    pub async fn post(&self, payload: PostTransaction) -> Result<Uuid, FinanceError> {
+        self.post_transaction_inner(payload).await
+    }
+
+    /// Find-or-create a canonical account by `(book, name, kind)`.
+    /// Idempotent: looks up an existing account with the same name in
+    /// the book first; creates one (inheriting the book's base
+    /// currency, zero opening balance) only when absent. Returns the
+    /// account id.
+    ///
+    /// Used by the invoicing flow to resolve its three standing
+    /// accounts — "Accounts Receivable" (Asset), "Income" (Income),
+    /// and "Cash" (Asset) — before posting.
+    ///
+    /// # Errors
+    /// Backend error on lookup / insert failure.
+    pub async fn ensure_account(
+        &self,
+        book_id: Uuid,
+        name: &str,
+        kind: AccountKind,
+    ) -> Result<Uuid, FinanceError> {
+        if let Some(m) = AccountEntity::find()
+            .filter(AccountColumn::BookId.eq(book_id))
+            .filter(AccountColumn::Name.eq(name))
+            .one(&self.db)
+            .await
+            .map_err(Self::backend_err)?
+        {
+            return Ok(m.id);
+        }
+        let now = Utc::now();
+        let acct = Account {
+            id: Uuid::new_v4(),
+            book_id,
+            name: name.to_string(),
+            kind,
+            parent_id: Uuid::nil(),
+            currency: String::new(), // inherit book base currency
+            is_archived: false,
+            opening_balance_minor: 0,
+            notes: String::new(),
+            created_at: now,
+            updated_at: now,
+        };
+        let active = AccountActive {
+            id: Set(acct.id),
+            book_id: Set(acct.book_id),
+            name: Set(acct.name),
+            kind: Set(acct.kind),
+            parent_id: Set(acct.parent_id),
+            currency: Set(acct.currency),
+            is_archived: Set(acct.is_archived),
+            opening_balance_minor: Set(acct.opening_balance_minor),
+            notes: Set(acct.notes),
+            created_at: Set(acct.created_at),
+            updated_at: Set(acct.updated_at),
+        };
+        active.insert(&self.db).await.map_err(Self::backend_err)?;
+        Ok(acct.id)
+    }
+
+    async fn books_inner(&self) -> Result<Vec<Book>, FinanceError> {
+        let rows = BookEntity::find()
+            .all(&self.db)
+            .await
+            .map_err(Self::backend_err)?;
+        Ok(rows.into_iter().map(book_from_model).collect())
+    }
+
+    async fn accounts_inner(&self, book_id: Uuid) -> Result<Vec<Account>, FinanceError> {
+        let rows = AccountEntity::find()
+            .filter(AccountColumn::BookId.eq(book_id))
+            .order_by_asc(AccountColumn::Name)
+            .all(&self.db)
+            .await
+            .map_err(Self::backend_err)?;
+        Ok(rows.into_iter().map(account_from_model).collect())
+    }
 }
 
-impl HasDispatcher for LedgerService {
-    type Dispatcher = TokioBlockingDispatcher;
-    fn dispatcher(&self) -> Self::Dispatcher {
-        TokioBlockingDispatcher
+fn book_from_model(m: BookModel) -> Book {
+    Book {
+        id: m.id,
+        name: m.name,
+        kind: m.kind,
+        base_currency: m.base_currency,
+        settings_json: m.settings_json,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+    }
+}
+
+fn account_from_model(m: AccountModel) -> Account {
+    Account {
+        id: m.id,
+        book_id: m.book_id,
+        name: m.name,
+        kind: m.kind,
+        parent_id: m.parent_id,
+        currency: m.currency,
+        is_archived: m.is_archived,
+        opening_balance_minor: m.opening_balance_minor,
+        notes: m.notes,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
     }
 }
 
@@ -220,5 +328,13 @@ impl Ledger for LedgerService {
         as_of: Option<DateTime<Utc>>,
     ) -> Result<Vec<AccountBalance>, FinanceError> {
         self.runtime.block_on(self.balances_inner(book_id, as_of))
+    }
+
+    fn books(&self) -> Result<Vec<Book>, FinanceError> {
+        self.runtime.block_on(self.books_inner())
+    }
+
+    fn accounts(&self, book_id: Uuid) -> Result<Vec<Account>, FinanceError> {
+        self.runtime.block_on(self.accounts_inner(book_id))
     }
 }

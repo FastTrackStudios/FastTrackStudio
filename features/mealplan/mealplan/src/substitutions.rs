@@ -325,6 +325,13 @@ fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
         .position(|p| looks_like_substitution_rule(p) && parse_page(p).is_some_and(|r| r.id == id))
 }
 
+impl architect::HasDispatcher for Store {
+    type Dispatcher = architect::dispatch::TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        architect::dispatch::TokioBlockingDispatcher
+    }
+}
+
 impl SubstitutionService for Store {
     fn list(&self) -> Result<Vec<SubstitutionRule>, SubstitutionError> {
         let guard = self.inner.lock().expect("substitutions store poisoned");

@@ -116,6 +116,44 @@ impl Store {
         &self.conn
     }
 
+    /// Upsert an org-level member rate (cascade level 3). Sets the
+    /// hourly rate (cents) + currency for `(org_id, user_id)`,
+    /// updating the existing row if one exists. New sessions logged
+    /// for that member snapshot this rate at close time.
+    pub async fn set_org_member_rate(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+        hourly_cents: i64,
+        currency: &str,
+    ) -> Result<(), TimerDbError> {
+        let existing = OrgMemberRateEntity::find()
+            .filter(OrgMemberRateColumn::OrgId.eq(org_id))
+            .filter(OrgMemberRateColumn::UserId.eq(user_id))
+            .one(&self.conn)
+            .await?;
+        if let Some(row) = existing {
+            let mut active: crate::entity::OrgMemberRateActive = row.into();
+            active.hourly_cents = Set(hourly_cents);
+            active.currency = Set(currency.to_string());
+            active.updated_at = Set(Utc::now());
+            active.update(&self.conn).await?;
+        } else {
+            OrgMemberRateEntity::insert(crate::entity::OrgMemberRateActive {
+                id: Set(Uuid::new_v4()),
+                org_id: Set(org_id),
+                user_id: Set(user_id),
+                hourly_cents: Set(hourly_cents),
+                currency: Set(currency.to_string()),
+                created_at: Set(Utc::now()),
+                updated_at: Set(Utc::now()),
+            })
+            .exec(&self.conn)
+            .await?;
+        }
+        Ok(())
+    }
+
     // ── Active timer helpers ────────────────────────────────
 
     async fn read_active(&self, user_id: Uuid) -> Result<Option<WorkSession>, TimerDbError> {
@@ -218,6 +256,7 @@ impl Store {
             rate_cents: Set(rate_cents),
             currency: Set(currency),
             task_note_path: Set(req.task_note_path.clone()),
+            invoice_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -419,6 +458,76 @@ impl TimerService for Store {
     ) -> Result<Vec<WorkSession>, TimerError> {
         self.query_sessions(&filter).await.map_err(Into::into)
     }
+
+    async fn update_session(
+        &self,
+        req: timer_proto::service::UpdateSessionRequest,
+    ) -> Result<WorkSession, TimerError> {
+        let row = WorkSessionEntity::find_by_id(req.id)
+            .one(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?
+            .ok_or_else(|| TimerError::WorkSessionNotFound(req.id.to_string()))?;
+
+        // Resolve the final values (Some overwrites, None keeps). A
+        // project can be set but not cleared through this path.
+        let user_id = req.user_id.unwrap_or(row.user_id);
+        let project_id = req.project_id.or(row.project_id);
+        let start_time = req.start_time.unwrap_or(row.start_time);
+        let end_time = req.end_time.or(row.end_time);
+        let billable = req.billable.unwrap_or(row.billable);
+        if let Some(et) = end_time {
+            if et <= start_time {
+                return Err(TimerError::Invalid(
+                    "update_session: end_time must be > start_time".into(),
+                ));
+            }
+        }
+
+        // Re-snapshot the rate against the (possibly changed) user /
+        // project / billable. Open or non-billable sessions hold $0.
+        let (rate_cents, currency) = if end_time.is_some() && billable {
+            let r = self
+                .cascade_for(user_id, row.org_id, project_id)
+                .await
+                .map_err(TimerError::from)?;
+            (r.hourly_cents, r.currency)
+        } else {
+            (0, String::new())
+        };
+
+        let mut active: WorkSessionActive = row.into();
+        active.user_id = Set(user_id);
+        active.project_id = Set(project_id);
+        if let Some(p) = req.project_path {
+            active.project_path = Set(p);
+        }
+        if let Some(t) = req.task_note_path {
+            active.task_note_path = Set(t);
+        }
+        if let Some(d) = req.description {
+            active.description = Set(d);
+        }
+        active.start_time = Set(start_time);
+        active.end_time = Set(end_time);
+        active.billable = Set(billable);
+        active.rate_cents = Set(rate_cents);
+        active.currency = Set(currency);
+        active.updated_at = Set(Utc::now());
+        let updated = active
+            .update(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        Ok(model_to_session(updated))
+    }
+
+    async fn delete_session(&self, id: Uuid) -> Result<(), TimerError> {
+        WorkSessionEntity::delete_by_id(id)
+            .exec(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        Ok(())
+    }
 }
 
 fn model_to_session(m: WorkSessionModel) -> WorkSession {
@@ -435,6 +544,7 @@ fn model_to_session(m: WorkSessionModel) -> WorkSession {
         rate_cents: m.rate_cents,
         currency: m.currency,
         task_note_path: m.task_note_path,
+        invoice_id: m.invoice_id,
         created_at: m.created_at,
         updated_at: m.updated_at,
     }

@@ -30,7 +30,7 @@ pub fn parse_day_plan(path: &str, frontmatter_yaml: &str) -> Result<DayPlan, Par
     Ok(DayPlan {
         date,
         from_template,
-        blocks,
+        blocks: blocks.into(),
     })
 }
 
@@ -50,6 +50,10 @@ fn parse_block(raw: &serde_yaml::Value) -> Result<PlannedBlock, ParseError> {
     let end = get("end").ok_or(ParseError::MissingField { field: "end" })?;
     let category = get("category").map_or(scheduling_proto::BlockCategory::Other, parse_category);
     let note = get("note").map(str::to_string);
+    let fixed = m
+        .get(serde_yaml::Value::String("fixed".into()))
+        .and_then(serde_yaml::Value::as_bool)
+        .unwrap_or(false);
 
     // Assignment is a nested mapping: { kind, title, ref_id? }.
     let assignment = m
@@ -78,5 +82,6 @@ fn parse_block(raw: &serde_yaml::Value) -> Result<PlannedBlock, ParseError> {
         category,
         note,
         assignment,
+        fixed,
     })
 }
