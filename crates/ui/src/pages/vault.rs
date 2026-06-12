@@ -111,12 +111,16 @@ pub fn VaultView() -> Element {
     // swap doesn't rebuild the source (Rc identity = the editor's
     // prop-diff contract).
     let mut lookup = use_signal(|| None::<Rc<ClientVaultIndex>>);
+    // Lazy-fetch worker for embeds/previews — page-owned, so the
+    // fetch's awaits and editor pokes never touch signals from the
+    // root scope (the suite's console gate treats that as fatal).
+    let fetcher = vault_lookup::use_vault_fetch_worker(home, lookup);
     use_effect(move || {
         let pages = match &*files.read() {
             Some(Ok(pages)) => pages.clone(),
             _ => Vec::new(),
         };
-        lookup.set(Some(ClientVaultIndex::new(home(), &pages, session.state)));
+        lookup.set(Some(ClientVaultIndex::new(&pages, session.state, fetcher)));
     });
 
     // Autocomplete candidates. `[[` completes basenames + aliases

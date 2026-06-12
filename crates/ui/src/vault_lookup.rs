@@ -39,7 +39,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 use editor::editor_view;
@@ -61,7 +61,6 @@ const LOADING: &str = "Loading…";
 /// a lazy content LRU. Implements [`VaultLookup`] for the
 /// editor's live-preview pass.
 pub struct ClientVaultIndex {
-    org: String,
     /// The page's editor state signal. Poked (no-op write) when a
     /// lazy fetch lands so the editor re-renders and the
     /// decoration pass re-resolves against the warm cache.
@@ -69,8 +68,8 @@ pub struct ClientVaultIndex {
     /// Lowercased basename → page meta.
     by_basename: HashMap<String, PageMeta>,
     cache: RefCell<ContentCache>,
-    /// Self-handle for the fetch tasks ([`Rc::new_cyclic`]).
-    weak_self: Weak<ClientVaultIndex>,
+    /// Page-owned lazy-fetch worker ([`use_vault_fetch_worker`]).
+    fetcher: Coroutine<String>,
 }
 
 struct ContentCache {
@@ -103,15 +102,22 @@ impl ContentCache {
 
 impl ClientVaultIndex {
     /// Build from the folder index. Rebuilt whenever the index
-    /// refreshes (cheap — content cache starts cold).
+    /// refreshes (cheap — content cache starts cold). `fetcher` is
+    /// the page-owned lazy-fetch worker (see
+    /// [`use_vault_fetch_worker`]) — the index only *sends* paths
+    /// to it; all awaiting and signal writes happen in the worker,
+    /// inside the page's scope.
     #[must_use]
-    pub fn new(org: String, pages: &[PageMeta], state: Signal<EditorState>) -> Rc<Self> {
+    pub fn new(
+        pages: &[PageMeta],
+        state: Signal<EditorState>,
+        fetcher: Coroutine<String>,
+    ) -> Rc<Self> {
         let by_basename = pages
             .iter()
             .map(|p| (p.basename.to_lowercase(), p.clone()))
             .collect();
-        Rc::new_cyclic(|weak| Self {
-            org,
+        Rc::new(Self {
             state,
             by_basename,
             cache: RefCell::new(ContentCache {
@@ -119,13 +125,20 @@ impl ClientVaultIndex {
                 order: VecDeque::new(),
                 pending: HashSet::new(),
             }),
-            weak_self: weak.clone(),
+            fetcher,
         })
     }
 
     /// Cached content for `path`, scheduling a background fetch
     /// on miss. Misses return `None` *now*; the completed fetch
     /// pokes the editor state so the next decoration pass hits.
+    ///
+    /// Runs inside the editor's render (the decoration pass), so
+    /// it must not spawn or write signals here: it only enqueues
+    /// the path on the page-owned worker. (The old shape used
+    /// `spawn_forever` + wrote `state` from the root scope — a
+    /// signal-ownership violation the multiplayer suite's console
+    /// gate flags as fatal.)
     fn content(&self, path: &str) -> Option<String> {
         let mut cache = self.cache.borrow_mut();
         if let Some(text) = cache.map.get(path).cloned() {
@@ -133,35 +146,56 @@ impl ClientVaultIndex {
             return Some(text);
         }
         if cache.pending.insert(path.to_owned()) {
-            let weak = self.weak_self.clone();
-            let org = self.org.clone();
-            let path = path.to_owned();
-            // `spawn_forever`: the decoration pass runs inside the
-            // editor component's render, and the fetch should
-            // outlive any one render.
-            dioxus::dioxus_core::spawn_forever(async move {
-                let fetched = crate::document_session::fetch_file(org, path.clone()).await;
-                let Some(idx) = weak.upgrade() else {
-                    return; // page rebuilt/unmounted the index
-                };
-                let mut cache = idx.cache.borrow_mut();
-                cache.pending.remove(&path);
-                if let Ok(text) = fetched {
-                    cache.insert(path, text);
-                    drop(cache);
-                    // No-op write → editor re-renders → the
-                    // decoration source re-resolves with content.
-                    let mut state = idx.state;
-                    state.write();
-                }
-            });
+            self.fetcher.send(path.to_owned());
         }
         None
+    }
+
+    /// Land a completed lazy fetch: clear the pending mark, warm
+    /// the cache, and poke the editor state (no-op write) so the
+    /// next decoration pass re-resolves. Called by the page-owned
+    /// fetch worker — never from a render path.
+    pub fn complete_fetch(&self, path: &str, fetched: Result<String, String>) {
+        let mut cache = self.cache.borrow_mut();
+        cache.pending.remove(path);
+        if let Ok(text) = fetched {
+            cache.insert(path.to_owned(), text);
+            drop(cache);
+            let mut state = self.state;
+            state.write();
+        }
     }
 
     fn meta(&self, name: &str) -> Option<&PageMeta> {
         self.by_basename.get(&name.to_lowercase())
     }
+}
+
+/// Page-owned worker draining the lazy-fetch requests that
+/// [`ClientVaultIndex::content`] enqueues from the decoration
+/// pass. Create once per page, BEFORE the index (the index
+/// captures the returned handle). Owning the awaits + the editor
+/// poke here keeps every signal touch inside the page's scope —
+/// `content` runs inside the editor's render, where neither
+/// spawning at the root nor writing page signals is allowed.
+pub fn use_vault_fetch_worker(
+    org: Memo<String>,
+    lookup: Signal<Option<Rc<ClientVaultIndex>>>,
+) -> Coroutine<String> {
+    use futures_util::StreamExt;
+    use_coroutine(move |mut rx: dioxus::prelude::UnboundedReceiver<String>| async move {
+        while let Some(path) = rx.next().await {
+            let slug = org.peek().clone();
+            let fetched = crate::document_session::fetch_file(slug, path.clone()).await;
+            // The index may have been swapped (folder-index refresh)
+            // mid-fetch; landing on the current one still warms the
+            // right cache (path-keyed, same org family).
+            let Some(idx) = lookup.peek().clone() else {
+                continue;
+            };
+            idx.complete_fetch(&path, fetched);
+        }
+    })
 }
 
 impl VaultLookup for ClientVaultIndex {
