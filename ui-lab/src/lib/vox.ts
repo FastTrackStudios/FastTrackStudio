@@ -27,6 +27,7 @@ import { AuthServiceClient } from "@/generated/authservice.generated";
 import { MilestoneServiceRpcClient } from "@/generated/milestoneservicerpc.generated";
 import { ProjectServiceRpcClient } from "@/generated/projectservicerpc.generated";
 import { TaskServiceRpcClient } from "@/generated/taskservicerpc.generated";
+import { WorkstreamServiceRpcClient } from "@/generated/workstreamservicerpc.generated";
 import {
   errorMessage,
   installTelemetry,
@@ -205,6 +206,11 @@ export const tasksFor = clientCache(
 export const milestonesFor = clientCache(
   "MilestoneServiceRpc",
   (caller) => new MilestoneServiceRpcClient(caller),
+);
+
+export const workstreamsFor = clientCache(
+  "WorkstreamServiceRpc",
+  (caller) => new WorkstreamServiceRpcClient(caller),
 );
 
 export const authFor = clientCache(

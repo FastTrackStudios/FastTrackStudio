@@ -19,6 +19,7 @@ import {
   tasksFor,
   unwrap,
   voxUrlFor,
+  workstreamsFor,
 } from "../src/lib/vox";
 
 async function main() {
@@ -74,6 +75,31 @@ async function main() {
   }
   if (all.length > 0 && !fetchedOne) {
     throw new Error("get() failed for every project returned by list()");
+  }
+
+  // Workstream round-trip: list + the server-side rollup verb. The
+  // `test` org carries the synthetic workstream fixtures; fall back to
+  // the default org when it isn't hosted. Read-only — smoke never
+  // mutates.
+  const wsOrg = orgs.some((o) => o.slug === "test") ? "test" : org;
+  const wsClient = await workstreamsFor(wsOrg);
+  const workstreams = unwrap(await wsClient.list(null));
+  console.log(
+    `WorkstreamServiceRpc.list(${wsOrg}) -> ${workstreams.length} workstream(s)`,
+  );
+  if (workstreams.length > 0) {
+    const first = workstreams[0];
+    const { workstream: w, rollup } = unwrap(await wsClient.rollup(first.id));
+    if (String(w.id) !== String(first.id)) {
+      throw new Error("rollup returned a different workstream");
+    }
+    if (rollup.done > rollup.total || rollup.in_progress > rollup.total) {
+      throw new Error(`rollup arithmetic is off: ${JSON.stringify(rollup)}`);
+    }
+    console.log(
+      `WorkstreamServiceRpc.rollup("${w.title}") -> ${rollup.done}/${rollup.total} done, ` +
+        `${rollup.in_progress} in progress, ${rollup.blocked} blocked, ${rollup.estimate_points_sum} pts`,
+    );
   }
 
   // Real sign-in against the home org — the account switcher's path.

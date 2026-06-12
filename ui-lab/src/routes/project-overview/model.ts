@@ -1,21 +1,38 @@
 /**
  * Pure derivation layer for the project overview — classification of
- * the agent/human task layers, swarm rollups, milestone progress,
- * estimate math, and project health. No React in here; everything is
- * computed once per query result and memoized by the page.
+ * the agent/human task layers, workstream rollups, state-group math,
+ * milestone progress, estimates, and project health. No React in
+ * here; everything is computed once per query result and memoized by
+ * the page.
  *
  * THE core problem this feeds: agent-scale vs human-scale tasks. A
  * project like the test org's "Hermes Integration" carries a handful
- * of human tasks/epics and a ~56-task agent swarm; the human layer is
- * the default view, with each epic rolling its swarm up into a strip.
+ * of human tasks and a ~56-task agent swarm attached to a few
+ * **Workstreams** (the parent-with-swarm construct — a real entity
+ * served by WorkstreamService; tasks attach via
+ * `workflow.workstream`). The human layer is the default view, with
+ * each workstream rolling its swarm up into a strip.
+ *
+ * All status classification flows through the project's STATE
+ * REGISTRY (`ProjectInfo.states`, lib/states.ts): free-form status
+ * strings resolve to the five canonical groups, and blocked/review
+ * are derived overlays on top of the groups.
  */
 import type {
   AgentRef,
   Estimate,
+  Relation,
   TaskInfo,
 } from "@/generated/taskservicerpc.generated";
 import type { Milestone } from "@/generated/milestoneservicerpc.generated";
-import type { ProjectInfo } from "@/generated/projectservicerpc.generated";
+import type { StatesConfig } from "@/generated/projectservicerpc.generated";
+import type { Workstream } from "@/generated/workstreamservicerpc.generated";
+import {
+  isClosedGroup,
+  isReviewStatus,
+  resolveStateGroup,
+  type GroupTag,
+} from "@/lib/states";
 
 // ── agent / human classification ────────────────────────────────────
 
@@ -48,6 +65,25 @@ export function agentClaimant(
   return null;
 }
 
+/** Short agent-ref label, `name@model` (the `agent:claude@fable-5` form sans prefix). */
+export function claimantKey(c: { name: string; model: string | null }): string {
+  return c.model ? `${c.name}@${c.model}` : c.name;
+}
+
+/** Label an AgentRef (lead / member chips): humans by name, agents `name@model`. */
+export function agentRefLabel(a: AgentRef): string {
+  const raw = a as unknown as {
+    name?: string;
+    model_version?: string | null;
+    user_id?: string;
+    display_name?: string | null;
+  };
+  if (isAgentRef(a)) {
+    return raw.model_version ? `${raw.name}@${raw.model_version}` : (raw.name ?? "agent");
+  }
+  return raw.display_name || raw.user_id || "human";
+}
+
 /**
  * Agent-layer task: carries an `AgentRef::Agent` assignee (the claim),
  * or — for unclaimed swarm members that have no assignee yet — the
@@ -57,12 +93,33 @@ export function isAgentTask(t: TaskInfo): boolean {
   return agentClaimant(t) !== null || t.tags.includes("agent");
 }
 
-/** Epic: a human-layer task other tasks point at via `workflow.parent`. */
-export function isEpicTag(t: TaskInfo): boolean {
-  return t.tags.includes("epic");
+// ── state groups + status buckets ───────────────────────────────────
+
+/** Per-group counts — the segmented progress bars render these. */
+export type GroupCounts = Record<GroupTag, number> & { total: number };
+
+export function emptyGroupCounts(): GroupCounts {
+  return {
+    Backlog: 0,
+    Unstarted: 0,
+    Started: 0,
+    Completed: 0,
+    Cancelled: 0,
+    total: 0,
+  };
 }
 
-// ── status buckets ──────────────────────────────────────────────────
+export function countGroups(
+  tasks: TaskInfo[],
+  states: StatesConfig | null,
+): GroupCounts {
+  const c = emptyGroupCounts();
+  for (const t of tasks) {
+    c[resolveStateGroup(states, t.status)] += 1;
+    c.total += 1;
+  }
+  return c;
+}
 
 export type StatusBucket =
   | "done"
@@ -73,12 +130,15 @@ export type StatusBucket =
   | "open";
 
 /**
- * Park-for-review detection. Convention: a parked task whose park
- * reason is prefixed `review-required:`. The reason rides whatever
- * field the parking flow wrote — we check tags (`review-required:…`),
- * the status itself, and the first line of details.
+ * Park-for-review detection. Two conventions feed the review lane:
+ * a `review-required[:reason]` tag (or details prefix) on the task,
+ * and a registry state whose name contains "review" (the test org's
+ * `qa-review`).
  */
-export function reviewReason(t: TaskInfo): string | null {
+export function reviewReason(
+  t: TaskInfo,
+  states: StatesConfig | null,
+): string | null {
   for (const tag of t.tags) {
     if (tag.startsWith("review-required")) {
       return tag.includes(":") ? tag.slice(tag.indexOf(":") + 1).trim() : "review required";
@@ -88,45 +148,55 @@ export function reviewReason(t: TaskInfo): string | null {
   if (firstLine.toLowerCase().startsWith("review-required:")) {
     return firstLine.slice("review-required:".length).trim();
   }
-  if (t.status === "parked" && firstLine.toLowerCase().includes("review")) {
-    return firstLine;
+  if (isReviewStatus(states, t.status)) {
+    return `in ${t.status}`;
   }
   return null;
 }
 
+/** Unresolved blockers: blocker tasks that aren't closed (done/cancelled). */
+export function unresolvedBlockers(
+  t: TaskInfo,
+  byId: Map<string, TaskInfo>,
+  states: StatesConfig | null,
+): string[] {
+  const out: string[] = [];
+  for (const blocker of t.workflow?.blockers ?? []) {
+    const id = String(blocker);
+    const other = byId.get(id);
+    // Unknown blocker id still blocks — absence of evidence isn't done.
+    if (!other || !isClosedGroup(resolveStateGroup(states, other.status))) {
+      out.push(id);
+    }
+  }
+  // `Blocks` relations point the OTHER way (this task blocks target),
+  // so only `blockers` feeds blocked-ness here; reverse relations are
+  // surfaced separately on rows.
+  return out;
+}
+
 /**
- * Bucket a task's status, deriving `blocked` from unresolved blockers
- * (`workflow.blockers` entries whose task isn't done yet) — the wire
- * has no first-class blocked status.
+ * Bucket a task for kanban lanes / row icons. Group-derived
+ * (registry-aware), with two overlays the groups can't express:
+ * review (parked for a human) and blocked (unresolved blockers).
  */
 export function statusBucket(
   t: TaskInfo,
   byId: Map<string, TaskInfo>,
+  states: StatesConfig | null,
 ): StatusBucket {
-  if (reviewReason(t) !== null) return "review";
-  switch (t.status) {
-    case "done":
-    case "completed":
+  if (reviewReason(t, states) !== null) return "review";
+  const group = resolveStateGroup(states, t.status);
+  switch (group) {
+    case "Completed":
       return "done";
-    case "cancelled":
+    case "Cancelled":
       return "cancelled";
-    case "in-progress":
-    case "active":
-    case "running":
-      return "running";
-    case "blocked":
-      return "blocked";
+    default:
+      break;
   }
-  for (const blocker of t.workflow?.blockers ?? []) {
-    const other = byId.get(String(blocker));
-    // Unknown blocker id still blocks — absence of evidence isn't done.
-    if (!other || statusOf(other) !== "done") return "blocked";
-  }
-  return "open";
-}
-
-function statusOf(t: TaskInfo): "done" | "other" {
-  return t.status === "done" || t.status === "completed" ? "done" : "other";
+  if (unresolvedBlockers(t, byId, states).length > 0) return "blocked";
+  return group === "Started" ? "running" : "open";
 }
 
 export interface SwarmCounts {
@@ -154,10 +224,11 @@ export function emptyCounts(): SwarmCounts {
 export function countTasks(
   tasks: TaskInfo[],
   byId: Map<string, TaskInfo>,
+  states: StatesConfig | null,
 ): SwarmCounts {
   const c = emptyCounts();
   for (const t of tasks) {
-    c[statusBucket(t, byId)] += 1;
+    c[statusBucket(t, byId, states)] += 1;
     c.total += 1;
   }
   return c;
@@ -169,76 +240,119 @@ export function completionPct(c: SwarmCounts): number {
   return denom === 0 ? 0 : Math.round((c.done / denom) * 100);
 }
 
-// ── the two layers + epic rollups ───────────────────────────────────
+// ── relations ───────────────────────────────────────────────────────
 
-export interface EpicRollup {
-  epic: TaskInfo;
-  /** The epic's agent-subtask swarm (children via `workflow.parent`). */
-  swarm: TaskInfo[];
+export interface RelationView {
+  kind: "Blocks" | "Duplicate" | "Implements" | "Relates";
+  targetId: string;
+  /** Resolved target title when the task is in this project's set. */
+  targetTitle: string | null;
+}
+
+export function taskRelations(
+  t: TaskInfo,
+  byId: Map<string, TaskInfo>,
+): RelationView[] {
+  return (t.workflow?.relations ?? []).map((r: Relation) => {
+    const targetId = String(r.target);
+    return {
+      kind: r.kind.tag,
+      targetId,
+      targetTitle: byId.get(targetId)?.title ?? null,
+    };
+  });
+}
+
+// ── the two layers + workstream rollups ─────────────────────────────
+
+export interface WorkstreamModel {
+  workstream: Workstream;
+  /** Member tasks (attached via `workflow.workstream`). */
+  members: TaskInfo[];
+  /** Bucketed counts (review/blocked overlays included). */
   counts: SwarmCounts;
+  /** Per-state-group counts — the strip's segmented bar. */
+  groups: GroupCounts;
+  /** Client-computed estimate-point sum over members (mirrors the
+   * server rollup's XS/S/M/L/XL → 1/2/3/5/8 weights). */
+  points: number;
 }
 
 export interface ProjectModel {
   byId: Map<string, TaskInfo>;
-  /** Human-layer rows that are NOT epics. */
+  states: StatesConfig | null;
+  /** Workstreams with their member rollups (largest swarm first). */
+  workstreams: WorkstreamModel[];
+  /** Human-layer rows attached to NO workstream. */
   humans: TaskInfo[];
-  /** Epics with their swarm rollups (largest swarm first). */
-  epics: EpicRollup[];
   /** Every agent-layer task in the project (the full swarm). */
   agents: TaskInfo[];
-  /** Agent tasks parked for human review — the review lane. */
+  /** Tasks parked for human review — the review lane. */
   review: TaskInfo[];
   all: SwarmCounts;
-  agentCounts: SwarmCounts;
-  humanCounts: SwarmCounts;
+  allGroups: GroupCounts;
 }
 
-export function buildModel(tasks: TaskInfo[]): ProjectModel {
+export function buildModel(
+  tasks: TaskInfo[],
+  workstreams: Workstream[],
+  states: StatesConfig | null,
+): ProjectModel {
   const byId = new Map<string, TaskInfo>();
   for (const t of tasks) byId.set(String(t.id), t);
 
-  const agents: TaskInfo[] = [];
-  const humanLayer: TaskInfo[] = [];
-  for (const t of tasks) (isAgentTask(t) ? agents : humanLayer).push(t);
-
-  const swarmByParent = new Map<string, TaskInfo[]>();
-  for (const t of agents) {
-    const parent = t.workflow?.parent ? String(t.workflow.parent) : "";
-    if (!parent) continue;
-    const bucket = swarmByParent.get(parent);
-    if (bucket) bucket.push(t);
-    else swarmByParent.set(parent, [t]);
-  }
-
-  const epics: EpicRollup[] = [];
-  const humans: TaskInfo[] = [];
-  for (const t of humanLayer) {
-    const swarm = swarmByParent.get(String(t.id)) ?? [];
-    if (swarm.length > 0 || isEpicTag(t)) {
-      epics.push({ epic: t, swarm, counts: countTasks(swarm, byId) });
+  const membersByWs = new Map<string, TaskInfo[]>();
+  const loose: TaskInfo[] = [];
+  for (const t of tasks) {
+    const ws = t.workflow?.workstream ? String(t.workflow.workstream) : "";
+    if (ws) {
+      const bucket = membersByWs.get(ws);
+      if (bucket) bucket.push(t);
+      else membersByWs.set(ws, [t]);
     } else {
-      humans.push(t);
+      loose.push(t);
     }
   }
-  epics.sort((a, b) => b.swarm.length - a.swarm.length);
-  humans.sort(
-    (a, b) =>
-      bucketRank(statusBucket(a, byId)) - bucketRank(statusBucket(b, byId)) ||
-      priorityRank(a.priority) - priorityRank(b.priority) ||
-      a.title.localeCompare(b.title),
-  );
 
-  const review = agents.filter((t) => reviewReason(t) !== null);
+  const wsModels: WorkstreamModel[] = workstreams.map((w) => {
+    const members = membersByWs.get(String(w.id)) ?? [];
+    return {
+      workstream: w,
+      members,
+      counts: countTasks(members, byId, states),
+      groups: countGroups(members, states),
+      points: members.reduce(
+        (sum, t) => sum + estimatePoints(t.workflow?.estimate),
+        0,
+      ),
+    };
+  });
+  wsModels.sort((a, b) => b.members.length - a.members.length);
+
+  // Tasks attached to a workstream the service didn't return (cross-
+  // project attach) still belong to the human/agent layers below.
+  const agents = tasks.filter(isAgentTask);
+  const humans = loose
+    .filter((t) => !isAgentTask(t))
+    .sort(
+      (a, b) =>
+        bucketRank(statusBucket(a, byId, states)) -
+          bucketRank(statusBucket(b, byId, states)) ||
+        priorityRank(a.priority) - priorityRank(b.priority) ||
+        a.title.localeCompare(b.title),
+    );
+
+  const review = tasks.filter((t) => reviewReason(t, states) !== null);
 
   return {
     byId,
+    states,
+    workstreams: wsModels,
     humans,
-    epics,
     agents,
     review,
-    all: countTasks(tasks, byId),
-    agentCounts: countTasks(agents, byId),
-    humanCounts: countTasks(humanLayer, byId),
+    all: countTasks(tasks, byId, states),
+    allGroups: countGroups(tasks, states),
   };
 }
 
@@ -277,7 +391,7 @@ export function priorityRank(p: string): number {
 
 // ── estimates ───────────────────────────────────────────────────────
 
-/** Fibonacci-ish point value per t-shirt size; `Points` passes through. */
+/** Bucket weights per t-shirt size (matches the server rollup); `Points` passes through. */
 export function estimatePoints(e: Estimate | null | undefined): number {
   switch (e?.tag) {
     case "XS":
@@ -307,6 +421,7 @@ export interface EstimateRollup {
 export function rollupEstimates(
   tasks: TaskInfo[],
   byId: Map<string, TaskInfo>,
+  states: StatesConfig | null,
 ): EstimateRollup {
   let total = 0;
   let done = 0;
@@ -316,7 +431,7 @@ export function rollupEstimates(
     if (pts === 0) continue;
     estimated += 1;
     total += pts;
-    if (statusBucket(t, byId) === "done") done += pts;
+    if (statusBucket(t, byId, states) === "done") done += pts;
   }
   return { total, done, estimated };
 }
@@ -336,12 +451,13 @@ export function milestoneProgress(
   milestones: Milestone[],
   tasks: TaskInfo[],
   byId: Map<string, TaskInfo>,
+  states: StatesConfig | null,
 ): MilestoneProgress[] {
   return milestones.map((m) => {
     const mine = tasks.filter(
       (t) => String(t.milestone_id ?? "") === String(m.id),
     );
-    const counts = countTasks(mine, byId);
+    const counts = countTasks(mine, byId, states);
     const due = m.due_date == null ? null : String(m.due_date);
     const closed = m.status === "done" || m.status === "closed";
     return {
