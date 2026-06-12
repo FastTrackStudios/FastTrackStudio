@@ -3341,6 +3341,15 @@ enum TaskCmd {
         /// Only tasks whose status is not done.
         #[arg(long)]
         open: bool,
+        /// Page size — at most this many rows (applied
+        /// server-side, after `--status`/`--project`, over a
+        /// stable path ordering; other filters then apply
+        /// client-side within the page).
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Rows to skip before `--limit` (server-side).
+        #[arg(long)]
+        offset: Option<u32>,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -4330,6 +4339,95 @@ async fn main() {
     }
 }
 
+/// The proto/server skew guard half of `task doctor`: fetch the
+/// server's `/.well-known/task-server.json`, compare its
+/// `schema_stamps` (computed from the descriptors the *running*
+/// binary mounts) against this CLI's own build (the CLI links
+/// `task_server::schema_stamps()` directly, so both sides fold
+/// the exact same descriptor list — no second list to drift).
+///
+/// A mismatch means the running task-server predates (or
+/// postdates) a `*-proto` change relative to this CLI — the
+/// state that otherwise surfaces as vox `structural mismatch` /
+/// `InvalidPayload` / `Unknown method` errors with zero context.
+/// Exits non-zero so dev scripts can gate on it.
+async fn doctor_check_schema(ws_url: &str) -> eyre::Result<()> {
+    // ws(s)://host:port[/path] → http(s)://host:port/.well-known/…
+    let origin = {
+        let http = ws_url
+            .replacen("wss://", "https://", 1)
+            .replacen("ws://", "http://", 1);
+        let after_scheme = http.find("://").map_or(http.len(), |i| i + 3);
+        let end = http[after_scheme..]
+            .find('/')
+            .map_or(http.len(), |i| after_scheme + i);
+        http[..end].to_owned()
+    };
+    let url = format!("{origin}/.well-known/task-server.json");
+
+    let doc: serde_json::Value = match reqwest::get(&url).await {
+        Ok(resp) => resp
+            .json()
+            .await
+            .map_err(|e| eyre::eyre!("parse {url}: {e}"))?,
+        Err(e) => {
+            println!("Schema check: SKIPPED — could not fetch {url} ({e})");
+            return Ok(());
+        }
+    };
+    let Some(served) = doc.get("schema_stamps").and_then(|v| v.as_object()) else {
+        println!(
+            "Schema check: UNVERIFIED — the server exposes no `schema_stamps` \
+             (it predates the skew guard). If you see `structural mismatch` / \
+             `InvalidPayload` errors, rebuild + restart task-server."
+        );
+        return Ok(());
+    };
+
+    let local = task_server::schema_stamps();
+    let mut stale: Vec<&str> = Vec::new();
+    let mut unserved: Vec<&str> = Vec::new();
+    for (name, stamp) in &local {
+        match served.get(*name).and_then(|v| v.as_str()) {
+            Some(s) if s == stamp => {}
+            Some(_) => stale.push(name),
+            None => unserved.push(name),
+        }
+    }
+
+    if stale.is_empty() && unserved.is_empty() {
+        println!(
+            "Schema check: OK — {} service stamps match the running server",
+            local.len()
+        );
+        return Ok(());
+    }
+    if !unserved.is_empty() {
+        println!(
+            "Schema check: {} service(s) not stamped by the server (added since \
+             its build?): {}",
+            unserved.len(),
+            unserved.join(", ")
+        );
+    }
+    if !stale.is_empty() {
+        println!("Schema check: STALE — stamp mismatch on: {}", stale.join(", "));
+        println!(
+            "  The running task-server was built against different `*-proto` \
+             shapes than this CLI."
+        );
+        println!(
+            "  Fix: rebuild + restart it (`cargo run -p task-server`), or rebuild \
+             this CLI if the server is newer."
+        );
+        return Err(eyre::eyre!(
+            "proto/server schema skew on {} service(s)",
+            stale.len()
+        ));
+    }
+    Ok(())
+}
+
 async fn run(cli: Cli) -> eyre::Result<()> {
     match cli.command {
         Commands::Doctor => {
@@ -4337,8 +4435,9 @@ async fn run(cli: Cli) -> eyre::Result<()> {
                 .server
                 .unwrap_or_else(|| "ws://127.0.0.1:9090/vox".to_owned());
             let remote =
-                RemoteVoxConfig::from_args(server, cli.session_token, cli.organization_id)?;
+                RemoteVoxConfig::from_args(server.clone(), cli.session_token, cli.organization_id)?;
             println!("Vox endpoint: {}", remote.display_url);
+            doctor_check_schema(&server).await?;
         }
         Commands::Vault { cmd } => match cmd {
             // Sync ops touch vox and need async; everything
@@ -11423,6 +11522,8 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             project,
             milestone,
             open,
+            limit,
+            offset,
             org,
             server,
             json,
@@ -11430,10 +11531,6 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
             let client = connect_task_client(&url).await?;
-            let rows = client
-                .list()
-                .await
-                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
             let ctx_filter = context.map(|c| {
                 if c.starts_with('@') {
                     c
@@ -11455,6 +11552,55 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     Some(Some(resolve_milestone_target(&mc, m).await?.id))
                 }
                 None => None,
+            };
+
+            // Push --status/--project/--limit/--offset to the
+            // server (`TaskService::query`) so big orgs don't
+            // ship the whole list over the wire. A server that
+            // predates the verb (schema skew — see `task
+            // doctor`) falls back to the unfiltered `list()` +
+            // the client-side filters below. Skip the server
+            // path when a page window combines with
+            // client-only filters: slicing before --tag /
+            // --context / --milestone / --open would drop rows.
+            let has_client_only_filters =
+                tag.is_some() || ctx_filter.is_some() || milestone_filter.is_some() || open;
+            let want_server_query = (status.is_some()
+                || project_id.is_some()
+                || limit.is_some()
+                || offset.is_some())
+                && !((limit.is_some() || offset.is_some()) && has_client_only_filters);
+            let mut window_applied = false;
+            let rows = if want_server_query {
+                let filter = task::TaskListFilter {
+                    project: project_id,
+                    workstream: None,
+                    status: status.clone(),
+                    limit,
+                    offset,
+                };
+                match client.query(filter).await {
+                    Ok(rows) => {
+                        window_applied = true;
+                        rows
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "warning: server-side query failed ({e:?}); falling back to full \
+                             list() + client-side filters (is task-server stale? run `task \
+                             doctor`)"
+                        );
+                        client
+                            .list()
+                            .await
+                            .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                    }
+                }
+            } else {
+                client
+                    .list()
+                    .await
+                    .map_err(|e| eyre::eyre!("list: {e:?}"))?
             };
 
             let mut rows: Vec<_> = rows
@@ -11491,6 +11637,17 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     .then_with(|| a.due.cmp(&b.due))
                     .then_with(|| a.title.cmp(&b.title))
             });
+            // Page window that couldn't go server-side (combined
+            // with client-only filters, or the query fallback):
+            // slice after filtering + sorting.
+            if !window_applied && (limit.is_some() || offset.is_some()) {
+                let off = offset.unwrap_or(0) as usize;
+                rows = rows
+                    .into_iter()
+                    .skip(off)
+                    .take(limit.map_or(usize::MAX, |n| n as usize))
+                    .collect();
+            }
 
             if json {
                 println!(
@@ -12518,6 +12675,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             println!("  in-progress: {}", rollup.in_progress);
             println!("  blocked:     {}", rollup.blocked);
             println!("  points:      {}", rollup.estimate_points_sum);
+            let g = &rollup.groups;
+            println!(
+                "  groups:      backlog {} / unstarted {} / started {} / completed {} / cancelled {}",
+                g.backlog, g.unstarted, g.started, g.completed, g.cancelled
+            );
             if rollup.total > 0 {
                 println!(
                     "  progress:    {:.0}%",

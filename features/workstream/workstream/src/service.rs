@@ -7,7 +7,8 @@
 //! at the crate root via [`crate`]'s re-exports.
 
 pub use workstream_proto::service::{
-    WorkstreamError, WorkstreamEvent, WorkstreamRollup, WorkstreamService, WorkstreamWithRollup,
+    StateGroupCounts, WorkstreamError, WorkstreamEvent, WorkstreamRollup, WorkstreamService,
+    WorkstreamWithRollup,
 };
 
 #[cfg(feature = "vox")]

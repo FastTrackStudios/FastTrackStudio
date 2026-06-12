@@ -406,6 +406,11 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
             println!("    in-progress: {}", r.in_progress);
             println!("    blocked:     {}", r.blocked);
             println!("    points:      {}", r.estimate_points_sum);
+            let g = &r.groups;
+            println!(
+                "    groups:      backlog {} / unstarted {} / started {} / completed {} / cancelled {}",
+                g.backlog, g.unstarted, g.started, g.completed, g.cancelled
+            );
             if r.total > 0 {
                 println!(
                     "    progress:    {:.0}%",

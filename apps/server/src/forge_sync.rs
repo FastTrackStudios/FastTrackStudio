@@ -229,6 +229,17 @@ impl TaskService for ForgeSyncTaskService {
         self.inner.reverse_relations(id)
     }
 
+    fn reverse_relations_batch(
+        &self,
+        ids: Vec<Uuid>,
+    ) -> Result<Vec<task::TaskReverseRelations>, TaskError> {
+        self.inner.reverse_relations_batch(ids)
+    }
+
+    fn query(&self, filter: task::TaskListFilter) -> Result<Vec<TaskInfo>, TaskError> {
+        self.inner.query(filter)
+    }
+
     fn rename(&self, id: Uuid, new_path: &str) -> Result<TaskInfo, TaskError> {
         self.inner.rename(id, new_path)
     }

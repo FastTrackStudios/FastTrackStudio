@@ -15,6 +15,8 @@
 pub mod issuer;
 pub mod manifest;
 pub mod root;
+#[cfg(feature = "vox")]
+pub mod schema_stamp;
 pub mod service;
 
 pub use issuer::{IssuerError, IssuerProfile};

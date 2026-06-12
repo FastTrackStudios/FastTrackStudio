@@ -62,7 +62,9 @@ pub use relations::ReverseRelation;
 // so UI consumers don't need their own workflows-proto dep.
 pub use workflows_proto;
 pub use parse::{ParseError, parse_page, parse_str};
-pub use service::{TaskError, TaskEvent, TaskService, TaskServiceRpc};
+pub use service::{
+    TaskError, TaskEvent, TaskListFilter, TaskReverseRelations, TaskService, TaskServiceRpc,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::TaskBackend;

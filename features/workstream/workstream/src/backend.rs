@@ -455,5 +455,11 @@ mod tests {
         assert_eq!(got.rollup.total, 3);
         assert_eq!(got.rollup.done, 1, "shipped-to-client → completed group");
         assert_eq!(got.rollup.in_progress, 1, "qa → started group");
+        // Per-group counts ride the same registry resolution.
+        assert_eq!(got.rollup.groups.completed, 1);
+        assert_eq!(got.rollup.groups.started, 1);
+        assert_eq!(got.rollup.groups.unstarted, 1);
+        assert_eq!(got.rollup.groups.backlog, 0);
+        assert_eq!(got.rollup.groups.cancelled, 0);
     }
 }

@@ -37,12 +37,21 @@ export type WorkstreamError =
   | { tag: 'BadRequest'; value: string }
   | { tag: 'Io'; value: string };
 
+export interface StateGroupCounts {
+  backlog: number;
+  unstarted: number;
+  started: number;
+  completed: number;
+  cancelled: number;
+}
+
 export interface WorkstreamRollup {
   total: number;
   done: number;
   in_progress: number;
   blocked: number;
   estimate_points_sum: number;
+  groups: StateGroupCounts;
 }
 
 export interface WorkstreamWithRollup {
@@ -368,8 +377,9 @@ export const workstreamServiceRpc_send_schemas: import("@bearcove/vox-core").Ser
     [0x79aa338ed4eb667fn, { id: 0x79aa338ed4eb667fn, type_params: [], kind: { tag: 'enum', name: 'WorkstreamError', variants: [{ name: 'NotFound', index: 0, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'AlreadyExists', index: 1, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'BadRequest', index: 2, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'Io', index: 3, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }] } }],
     [0xba0496aa8cee7a4cn, { id: 0xba0496aa8cee7a4cn, type_params: ['T0', 'T1'], kind: { tag: 'tuple', elements: [{ tag: 'var', name: 'T0' }, { tag: 'var', name: 'T1' }] } }],
     [0xbc5c33249a2dc720n, { id: 0xbc5c33249a2dc720n, type_params: [], kind: { tag: 'primitive', primitive_type: 'unit' } }],
-    [0xd6fad1f9e9a6560en, { id: 0xd6fad1f9e9a6560en, type_params: [], kind: { tag: 'struct', name: 'WorkstreamRollup', fields: [{ name: 'total', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'done', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'in_progress', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'blocked', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'estimate_points_sum', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }] } }],
-    [0x4bacf3606735c819n, { id: 0x4bacf3606735c819n, type_params: [], kind: { tag: 'struct', name: 'WorkstreamWithRollup', fields: [{ name: 'workstream', type_ref: { tag: 'concrete', type_id: 0xa02850b176071a7dn, args: [] }, required: true }, { name: 'rollup', type_ref: { tag: 'concrete', type_id: 0xd6fad1f9e9a6560en, args: [] }, required: true }] } }],
+    [0x02e10bac81c24359n, { id: 0x02e10bac81c24359n, type_params: [], kind: { tag: 'struct', name: 'StateGroupCounts', fields: [{ name: 'backlog', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'unstarted', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'started', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'completed', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'cancelled', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }] } }],
+    [0x20cef0340bd59cc2n, { id: 0x20cef0340bd59cc2n, type_params: [], kind: { tag: 'struct', name: 'WorkstreamRollup', fields: [{ name: 'total', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'done', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'in_progress', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'blocked', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'estimate_points_sum', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'groups', type_ref: { tag: 'concrete', type_id: 0x02e10bac81c24359n, args: [] }, required: true }] } }],
+    [0x80f770cd7770b6f0n, { id: 0x80f770cd7770b6f0n, type_params: [], kind: { tag: 'struct', name: 'WorkstreamWithRollup', fields: [{ name: 'workstream', type_ref: { tag: 'concrete', type_id: 0xa02850b176071a7dn, args: [] }, required: true }, { name: 'rollup', type_ref: { tag: 'concrete', type_id: 0x20cef0340bd59cc2n, args: [] }, required: true }] } }],
   ]),
   methods: new Map<bigint, import("@bearcove/vox-core").MethodSendSchemas>([
     [0x704909729bab6801n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xa02850b176071a7dn, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x79aa338ed4eb667fn, args: [] }] }] } }],
@@ -379,7 +389,7 @@ export const workstreamServiceRpc_send_schemas: import("@bearcove/vox-core").Ser
     [0x126e8d9b6d97f203n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xa02850b176071a7dn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xa02850b176071a7dn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x79aa338ed4eb667fn, args: [] }] }] } }],
     [0x5bc572e74d26eb96n, { argsRootRef: { tag: 'concrete', type_id: 0xba0496aa8cee7a4cn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xa02850b176071a7dn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x79aa338ed4eb667fn, args: [] }] }] } }],
     [0x228d82c9bf61f062n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x79aa338ed4eb667fn, args: [] }] }] } }],
-    [0x15d9e1b370a37688n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x4bacf3606735c819n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x79aa338ed4eb667fn, args: [] }] }] } }],
+    [0x15d9e1b370a37688n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x80f770cd7770b6f0n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x79aa338ed4eb667fn, args: [] }] }] } }],
   ]),
 };
 

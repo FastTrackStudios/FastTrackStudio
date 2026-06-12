@@ -24,6 +24,28 @@ pub enum WorkstreamError {
     Io(String),
 }
 
+/// Member counts per canonical state group (mirrors
+/// `project::states::StateGroup`). Statuses resolve through the
+/// owning project's state registry, so a custom Completed state
+/// (`shipped-to-client`) lands in `completed`, not in a
+/// string-matched bucket. Always sums to the rollup's `total` —
+/// enough for a segmented progress bar without fetching the
+/// member tasks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Facet)]
+pub struct StateGroupCounts {
+    /// Not yet triaged into actionable work.
+    pub backlog: u32,
+    /// Actionable but not begun (also the fallback for status
+    /// names absent from the registry).
+    pub unstarted: u32,
+    /// Claimed / in-flight (includes `waiting`).
+    pub started: u32,
+    /// Finished successfully.
+    pub completed: u32,
+    /// Closed without delivery.
+    pub cancelled: u32,
+}
+
 /// Derived progress over the tasks attached to one workstream
 /// (`task.workflow.workstream == id`). Never stored — computed
 /// from the org's task list on demand. The estimate sum uses the
@@ -33,9 +55,11 @@ pub enum WorkstreamError {
 pub struct WorkstreamRollup {
     /// Tasks attached to this workstream.
     pub total: u32,
-    /// Attached tasks whose status is `done`.
+    /// Attached tasks in the `completed` state group (registry
+    /// aware — equals `groups.completed`).
     pub done: u32,
-    /// Attached tasks whose status is `in-progress`.
+    /// Attached tasks in the `started` state group (registry
+    /// aware — equals `groups.started`).
     pub in_progress: u32,
     /// Attached, still-open tasks with at least one unresolved
     /// blocker (a blocker is resolved only when it exists and is
@@ -43,6 +67,8 @@ pub struct WorkstreamRollup {
     pub blocked: u32,
     /// Sum of estimate points across attached tasks.
     pub estimate_points_sum: u32,
+    /// Per-state-group member counts. Sums to `total`.
+    pub groups: StateGroupCounts,
 }
 
 /// `rollup(id)` payload: the workstream plus its derived

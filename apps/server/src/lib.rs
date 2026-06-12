@@ -984,9 +984,17 @@ async fn well_known_handler(State(state): State<AppState>) -> axum::Json<serde_j
             }))
         })
         .collect();
+    // Schema stamps — the proto/server skew guard. Clients
+    // (`task doctor`, ui-lab smoke) compare these against their
+    // own build; see `schema_stamps`.
+    let stamps: serde_json::Map<String, serde_json::Value> = schema_stamps()
+        .into_iter()
+        .map(|(name, stamp)| (name.to_owned(), serde_json::Value::String(stamp)))
+        .collect();
     axum::Json(serde_json::json!({
         "version": 1,
         "orgs": orgs,
+        "schema_stamps": stamps,
     }))
 }
 
@@ -1079,6 +1087,83 @@ async fn legacy_vox_handler(
 /// with architect's composable layer system; the same router is reused
 /// for the WebSocket transport here and the in-process `LocalServer`
 /// transport (see [`org_local_server`]).
+/// Schema stamps for every vox service [`org_layer_router`]
+/// mounts — the dev guard against proto/server skew (served in
+/// `/.well-known/task-server.json` as `schema_stamps`). A vox
+/// method id hashes the method's name + payload shapes, so a
+/// stamp diff between a client's build and the *running* server
+/// binary means one of them predates a `*-proto` change — the
+/// "structural mismatch / InvalidPayload out of nowhere" failure
+/// mode. `task doctor` (which links this very function through
+/// the task-server crate, so the two lists can't drift) and the
+/// ui-lab smoke compare against this map and say "rebuild
+/// task-server" instead of letting the skew surface as decode
+/// errors.
+///
+/// Keep in lockstep with [`org_layer_router`] below — a missing
+/// entry only costs coverage for that service, never
+/// correctness.
+#[must_use]
+pub fn schema_stamps() -> Vec<(&'static str, String)> {
+    org_proto::schema_stamp::stamp_services([
+        architect_auth::auth_service_service_descriptor(),
+        attachments_proto::attachment_service_service_descriptor(),
+        vault_proto::descriptor(),
+        agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
+        agent_proto::service::sessions::sessions_rpc_service_descriptor(),
+        agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
+        agent_proto::service::threads::threads_rpc_service_descriptor(),
+        timer_proto::service::timer_service_rpc_service_descriptor(),
+        threads::service::threads_service_rpc_service_descriptor(),
+        scheduling_proto::service::day_templates::day_templates_rpc_service_descriptor(),
+        scheduling_proto::service::day_plans::day_plans_rpc_service_descriptor(),
+        scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
+        scheduling_proto::service::event_types::event_types_rpc_service_descriptor(),
+        scheduling_proto::service::schedules::schedules_rpc_service_descriptor(),
+        scheduling_proto::service::slots::slots_rpc_service_descriptor(),
+        scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
+        inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
+        finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
+        finance_proto::service::ledger::ledger_rpc_service_descriptor(),
+        wiki_proto::service::schema::schema_rpc_service_descriptor(),
+        wiki_proto::service::catalog::catalog_rpc_service_descriptor(),
+        wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor(),
+        wiki_proto::service::graph::graph_rpc_service_descriptor(),
+        wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
+        wiki_proto::service::lint::lint_rpc_service_descriptor(),
+        wiki_proto::service::search::search_rpc_service_descriptor(),
+        wiki_proto::service::watcher::watcher_rpc_service_descriptor(),
+        wiki_proto::service::multimodal::multimodal_rpc_service_descriptor(),
+        wiki_proto::service::review::review_rpc_service_descriptor(),
+        project::project_service_descriptor(),
+        goal::goal_service_descriptor(),
+        milestone::milestone_service_descriptor(),
+        workstream::workstream_service_descriptor(),
+        workstream::workstream_stream_descriptor(),
+        task::task_service_descriptor(),
+        task::task_stream_descriptor(),
+        locations::locations_service_descriptor(),
+        inventory::inventory_service_descriptor(),
+        cookbook::cookbook_service_descriptor(),
+        mealplan::mealplan_service_descriptor(),
+        pantry::pantry_service_descriptor(),
+        mealplan::shopping::shopping_service_rpc_service_descriptor(),
+        mealplan::substitutions::substitution_service_rpc_service_descriptor(),
+        body::body_service_descriptor(),
+        exercises::exercises_service_descriptor(),
+        workouts::workouts_service_descriptor(),
+        intake::intake_service_descriptor(),
+        email_proto::descriptor(),
+        git_proto::repo::repo_catalog_rpc_service_descriptor(),
+        git_proto::issues::issue_tracker_rpc_service_descriptor(),
+        git_proto::reviews::review_surface_rpc_service_descriptor(),
+        git_proto::connections::repo_connections_rpc_service_descriptor(),
+        crdt::sync::doc_sync_service_descriptor(),
+        crdt::sync::doc_presence_service_descriptor(),
+        vault_proto::vault_graph_rpc_service_descriptor(),
+    ])
+}
+
 pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     use architect::LayerRouter;
 
