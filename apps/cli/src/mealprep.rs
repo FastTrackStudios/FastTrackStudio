@@ -16,8 +16,8 @@
 
 use clap::{Args, Subcommand};
 use cookbook::CookbookServiceClient;
-use mealplan::MealplanServiceClient;
 use mealplan::shopping::{ShoppingList, ShoppingServiceClient};
+use mealplan::MealplanServiceClient;
 use scheduling_proto::{
     BlockAssignment, BlockCategory, DayPlan, DayPlansClient, PlannedBlock, TimeBlockId, TimeOfDay,
 };
@@ -132,16 +132,18 @@ pub(crate) async fn resolve_recipe(
                     .and_then(|s| s.to_str())
                     .is_some_and(|s| s.to_lowercase() == t)
         })
-        .ok_or_else(|| eyre::eyre!("recipe not found: {target} — try `task recipe list`"))
+        .ok_or_else(|| {
+            crate::errors::not_found("resolve recipe", target)
+                .cause("no path or name match")
+                .hint("try `task recipe list`")
+                .report()
+        })
 }
 
 /// Map mixed recipe refs (paths and/or display names) to vault
 /// paths. Used by `meal create --recipe <name>` so an agent can
 /// plan a week without knowing file paths.
-pub(crate) async fn resolve_recipe_refs(
-    url: &str,
-    refs: Vec<String>,
-) -> eyre::Result<Vec<String>> {
+pub(crate) async fn resolve_recipe_refs(url: &str, refs: Vec<String>) -> eyre::Result<Vec<String>> {
     if refs.iter().all(|r| is_cook_path(r)) {
         return Ok(refs);
     }
