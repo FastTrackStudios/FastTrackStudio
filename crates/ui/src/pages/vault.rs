@@ -145,6 +145,17 @@ pub fn VaultView() -> Element {
     // persistence and the sha autosave pauses; if the sync session
     // drops, tear down and fall back to sha saves (a fresh replica
     // is opened on the next file open — never a stale outbox).
+    //
+    // OWNERSHIP: `handles` (and every signal inside it) is created
+    // HERE, at the page scope, via `use_collab_handles`. The keyed
+    // `CollabSession` child only *drives* the slots. The Editor's
+    // decoration source + on_transaction sink capture `handles`
+    // through `collab`; because the page scope outlives the Editor,
+    // a session remount (file switch, reconnect-generation re-key,
+    // Live→Offline teardown) can never leave the Editor's keydown
+    // path holding dropped signals — the bug that used to kill all
+    // input (backspace, vim) after the first re-key.
+    let handles = crate::collab::use_collab_handles();
     let mut collab = use_signal(|| None::<crate::collab::CollabHandles>);
     let mut collab_doc = use_signal(|| None::<uuid::Uuid>);
     let account = try_use_context::<Signal<Option<crate::auth::ActiveAccount>>>();
@@ -159,6 +170,7 @@ pub fn VaultView() -> Element {
         let _generation = conn.generation();
         collab_doc.set(None);
         collab.set(None);
+        handles.reset();
         let Some(path) = path else { return };
         let slug = home.peek().clone();
         spawn(async move {
@@ -167,6 +179,7 @@ pub fn VaultView() -> Element {
                     // Only arm if this file is still the open one.
                     if session.current_path().as_deref() == Some(path.as_str()) {
                         collab_doc.set(Some(ack.doc_id));
+                        collab.set(Some(handles));
                     }
                 }
                 Err(e) => {
@@ -195,6 +208,7 @@ pub fn VaultView() -> Element {
         if went_offline {
             collab_doc.set(None);
             collab.set(None);
+            handles.reset();
         }
     });
     let collab_status = use_memo(move || {
@@ -630,9 +644,10 @@ pub fn VaultView() -> Element {
                 }
             }
         }
-        // Keyed collab child: remount per doc id = fresh replica.
+        // Keyed collab child: remount per doc id = fresh replica,
+        // driven INTO the page-owned `handles` slots.
         if let Some(doc_id) = collab_doc() {
-            crate::collab::CollabSession { key: "{doc_id}", doc_id, out: collab }
+            crate::collab::CollabSession { key: "{doc_id}", doc_id, handles }
         }
         document::Link { rel: "stylesheet", href: editor::EDITOR_STYLE }
         document::Style { {crate::collab::COLLAB_STYLE} }

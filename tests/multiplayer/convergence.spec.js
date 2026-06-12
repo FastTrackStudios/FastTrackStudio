@@ -35,7 +35,7 @@
 const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
-const { loadState, settle, DEV_ACCOUNTS, Peer, dumpArtifacts } = require("./helpers");
+const { loadState, settle, DEV_ACCOUNTS, Peer, dumpArtifacts, killServer, startServer } = require("./helpers");
 
 const NOTE_TITLE = "Collab Test";
 const ROUNDS = 6;
@@ -123,6 +123,96 @@ test.describe("5-way editor convergence", () => {
       }
     } catch (err) {
       await dumpArtifacts(testInfo, peers, { suite: "convergence-baseline" });
+      throw err;
+    } finally {
+      for (const peer of peers) await peer.leave().catch(() => {});
+    }
+  });
+
+  // Regression guard for the 2026-06 signal-ownership bug: the collab
+  // session's signals used to be created inside the keyed CollabSession
+  // scope, so any session re-key (file switch, reconnect-generation
+  // bump, Live→Offline teardown) dropped them while the still-mounted
+  // Editor kept reading them from its keydown path — backspace and vim
+  // died after the first re-key, with "Copy Value … not a descendant of
+  // the owning scope" warnings flooding the console (now suite-fatal
+  // via helpers.js isSignalOwnershipViolation). The handles are now
+  // page-owned (crates/ui/src/collab.rs::use_collab_handles +
+  // architect's crdt use_doc_slot/use_synced_doc_into split).
+  test("input lifecycle: vim Normal boot, backspace round-trip, file-switch + reconnect re-key keep input alive", async ({ browser }, testInfo) => {
+    const state = loadState();
+    const peers = await bringUp(browser, 2, state);
+    const [a, b] = peers;
+    try {
+      // ── vim: Normal mode active on load ──────────────────────
+      // openNote's probe pressed `i` on the fresh page and recorded
+      // whether it switched modes WITHOUT inserting — i.e. VimState
+      // was mounted and booted in Normal mode, the vault default.
+      for (const p of peers) {
+        expect(p.vimNormalOnBoot, `${p.label} vim Normal mode on load`).toBe(true);
+      }
+
+      // ── backspace deletes locally and round-trips ────────────
+      await a.typeAtMarker("alpha:", " DELME");
+      await settle(async () => (await b.docText())?.includes("DELME"), {
+        timeout: 20_000,
+        label: "B sees A's insert before the backspaces",
+      });
+      await a.backspaceAtMarker("alpha:", " DELME".length);
+      const afterBackspace = await quiesce(peers, 30_000);
+      expect(afterBackspace, "backspace deletion converged on both peers").toBe(SEED);
+
+      // ── file switch (collab session re-key #1 and #2) ────────
+      // Away to another note and back: two keyed remounts of the
+      // collab session while the SAME page (and its Editor closures)
+      // stays alive. Input must survive both.
+      await a.openNote("Link Target");
+      await a.openNote(NOTE_TITLE);
+      // (sentinel "ZZ": must not collide with SEED's XDELETEMEXXX)
+      await a.typeAtMarker("alpha:", " (post-switch)ZZ");
+      await a.backspaceAtMarker("alpha:", 2);
+      const afterSwitch = await quiesce(peers, 30_000);
+      expect(afterSwitch, "typing alive after file switch").toContain("(post-switch)");
+      expect(afterSwitch, "backspace alive after file switch").not.toContain("ZZ");
+
+      // ── reconnect-generation re-key (the original regression) ─
+      // A real server restart (SIGKILL) severs every vox socket —
+      // context.setOffline can't (Chromium keeps established
+      // WebSockets alive under offline emulation). The supervised
+      // connection detects the death → vault tears collab down →
+      // reconnect bumps the generation → the open-effect re-arms a
+      // fresh replica. Typing AND backspace must still work after.
+      const notePath = path.join(state.vaultDir, state.collabNote);
+      await settle(() => fs.readFileSync(notePath, "utf8") === afterSwitch, {
+        timeout: 20_000,
+        label: "disk caught up before the server restart",
+      });
+      for (const p of peers) p.expectedOutage = true;
+      killServer();
+      await settle(async () => {
+        const v = await a.vaultState();
+        return v && v.live !== true;
+      }, { timeout: 30_000, label: "A's collab session torn down after socket death" });
+      await startServer();
+      await settle(async () => {
+        const va = await a.vaultState();
+        const vb = await b.vaultState();
+        return va?.live === true && va?.status === "Live" && vb?.live === true && vb?.status === "Live";
+      }, { timeout: 90_000, label: "both peers re-key to Live after the restart" });
+      for (const p of peers) p.expectedOutage = false;
+      await a.typeAtMarker("bravo:", " (post-rekey)YY");
+      await a.backspaceAtMarker("bravo:", 2);
+      const afterRekey = await quiesce(peers, 30_000);
+      expect(afterRekey, "typing alive after reconnect re-key").toContain("(post-rekey)");
+      expect(afterRekey, "backspace alive after reconnect re-key").not.toContain("YY");
+
+      // ── console hygiene: zero errors INCLUDING the ownership
+      //    warning class (suite-fatal via helpers.js) ────────────
+      for (const peer of peers) {
+        expect(peer.errors, `${peer.label} console errors:\n${peer.errors.join("\n")}`).toHaveLength(0);
+      }
+    } catch (err) {
+      await dumpArtifacts(testInfo, peers, { suite: "convergence-input-lifecycle" });
       throw err;
     } finally {
       for (const peer of peers) await peer.leave().catch(() => {});

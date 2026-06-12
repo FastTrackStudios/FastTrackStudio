@@ -7,18 +7,32 @@
 //! [`VaultSync::open_collab`](vault_proto::VaultSync::open_collab),
 //! which validates the path and returns the file's deterministic doc
 //! id ([`vault_proto::collab_doc_id`]). [`CollabSession`] — mounted
-//! keyed by that id — then owns the whole collaborative lifecycle:
+//! keyed by that id — then drives the collaborative lifecycle:
 //!
-//! - `crdt::use_synced_doc_keyed(doc_id)` — an ephemeral local
-//!   replica plus one sync session against the org's shared vox
+//! - `crdt::use_synced_doc_into(handles.doc, doc_id)` — an ephemeral
+//!   local replica plus one sync session against the org's shared vox
 //!   connection (delta reconnects by version vector);
-//! - `crdt::use_presence_channel_keyed(doc_id, 30_000)` — the
-//!   per-file cursor channel;
+//! - `crdt::use_presence_channel_into(handles.presence, doc_id,
+//!   30_000)` — the per-file cursor channel;
 //! - a **takeover** step: once the server's seeded history merges in
 //!   (first doc revision), the session reconciles the editor buffer
 //!   with the replica and flips [`CollabHandles::live`]. From then
 //!   on the *server write-behind* owns persistence and the page
 //!   pauses the sha autosave.
+//!
+//! **Signal ownership (the part that bit us):** every signal inside
+//! [`CollabHandles`] is created at the *page* scope by
+//! [`use_collab_handles`] and merely **driven** by the keyed
+//! [`CollabSession`] child (the crdt slot/driver split —
+//! `crdt::use_doc_slot` + `crdt::use_synced_doc_into`). The editor's
+//! decoration source, `on_transaction` sink, and the page's
+//! status/teardown effects all capture these handles; if they were
+//! created inside the keyed child (as they once were), every remount
+//! — file switch, reconnect-generation re-key, Live→Offline teardown
+//! — dropped them while the still-mounted `Editor` kept reading them
+//! from its keydown path, killing all input ("Copy value used in a
+//! scope that is not a descendant of the owner"). Hoisting ownership
+//! to the page scope is the fix dioxus prescribes for exactly this.
 //!
 //! Steady state is two one-way bridges meeting at the Loro doc:
 //!
@@ -54,9 +68,12 @@ const CURSOR_TIMEOUT_MS: i64 = 30_000;
 const CURSOR_DEBOUNCE_MS: u64 = 200;
 
 /// `Copy` bundle the vault page reads: the synced doc, the cursor
-/// channel, and the takeover flag. Produced by [`CollabSession`]
-/// through an out-signal (the keyed child can't be a hook).
-#[derive(Clone, Copy)]
+/// channel, and the takeover flag. **Every signal in here is owned by
+/// the page scope** ([`use_collab_handles`]) — the keyed
+/// [`CollabSession`] child only drives them — so the editor's
+/// long-lived closures can capture the bundle safely across session
+/// remounts (see the module docs).
+#[derive(Clone, Copy, PartialEq)]
 pub struct CollabHandles {
     pub doc: crdt::DocHandle,
     pub presence: crdt::Presence,
@@ -75,34 +92,50 @@ impl CollabHandles {
     pub fn is_live(&self) -> bool {
         (self.live)() && self.doc.status() == crdt::SyncStatus::Live
     }
+
+    /// Reset the per-file state (doc slot, presence slot, takeover
+    /// flag) — the page calls this whenever it disarms a session
+    /// (file switch, reconnect re-key, Live→Offline teardown), so a
+    /// stale read through a captured handle only ever sees inert
+    /// defaults. The client cursor key and debounce counter are
+    /// deliberately page-lived.
+    pub fn reset(&self) {
+        self.doc.reset();
+        self.presence.reset();
+        let mut live = self.live;
+        if *live.peek() {
+            live.set(false);
+        }
+    }
 }
 
-/// Headless component owning one file's collab session. Mount keyed
-/// by `doc_id` (remount = fresh replica); reads the page's
-/// [`DocumentSession`] from context; publishes its handles through
-/// `out` so the parent (editor props, callbacks) can reach them.
-#[component]
-pub fn CollabSession(doc_id: Uuid, out: Signal<Option<CollabHandles>>) -> Element {
-    let session = use_context::<DocumentSession>();
-    let handle = crdt::use_synced_doc_keyed(doc_id);
-    let presence = crdt::use_presence_channel_keyed(doc_id, CURSOR_TIMEOUT_MS);
-    let live = use_signal(|| false);
-    let key = use_signal(|| format!("cursor-{}", Uuid::new_v4()));
-    let cursor_seq = use_signal(|| 0u64);
-    let handles = CollabHandles {
-        doc: handle,
-        presence,
-        live,
-        key,
-        cursor_seq,
-    };
+/// Create the page-owned [`CollabHandles`]: empty crdt slots + the
+/// takeover flag + this client's stable cursor identity. Call once in
+/// the vault page (a scope that outlives the `Editor`); mount a keyed
+/// [`CollabSession`] to drive the slots per file.
+pub fn use_collab_handles() -> CollabHandles {
+    CollabHandles {
+        doc: crdt::use_doc_slot(),
+        presence: crdt::use_presence_slot(),
+        live: use_signal(|| false),
+        key: use_signal(|| format!("cursor-{}", Uuid::new_v4())),
+        cursor_seq: use_signal(|| 0u64),
+    }
+}
 
-    // Publish the handles up once (and clear on unmount via the
-    // parent's open-effect, which resets `out` before re-arming).
-    use_effect(move || {
-        let mut out = out;
-        out.set(Some(handles));
-    });
+/// Headless component driving one file's collab session **into** the
+/// page-owned [`CollabHandles`]. Mount keyed by `doc_id` (remount =
+/// fresh replica; the drivers reset the slots on mount); reads the
+/// page's [`DocumentSession`] from context. Owns no signals that
+/// outlive it — only the session futures and the takeover effect die
+/// with this scope.
+#[component]
+pub fn CollabSession(doc_id: Uuid, handles: CollabHandles) -> Element {
+    let session = use_context::<DocumentSession>();
+    crdt::use_synced_doc_into(handles.doc, doc_id);
+    crdt::use_presence_channel_into(handles.presence, doc_id, CURSOR_TIMEOUT_MS);
+    let handle = handles.doc;
+    let live = handles.live;
 
     // Takeover + remote-apply. Runs on every doc revision (local
     // commits and remote imports both bump it).

@@ -24,12 +24,76 @@
 
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 
 const STATE_FILE = path.join(__dirname, ".mp-state.json");
 
 /** Read the stack state written by global-setup. */
 function loadState() {
   return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+}
+
+// ── server restart (real socket death) ───────────────────────────
+//
+// The ONLY reliable way to exercise the reconnect path under
+// Playwright: `context.setOffline` emulates offline for HTTP fetches
+// but does NOT sever already-established WebSockets in Chromium, so
+// the app's supervised connection never sees a drop. SIGKILLing the
+// seeded task-server kills every vox socket at once; respawning it on
+// the same port + data root lets the supervised reconnect re-establish
+// (generation bump → the vault re-arms collab with a fresh replica).
+
+/** SIGKILL the seeded task-server (every peer's vox socket dies). */
+function killServer() {
+  const state = loadState();
+  try {
+    process.kill(state.serverPid, "SIGKILL");
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * Respawn the task-server on the same port + data root, update
+ * .mp-state.json (so global-teardown kills the NEW pid), and resolve
+ * once the health endpoint answers.
+ */
+async function startServer() {
+  const state = loadState();
+  const health = `http://127.0.0.1:${state.serverPort}/.well-known/task-server.json`;
+  // Make sure the old process is really gone before rebinding.
+  await settle(
+    async () => {
+      const up = await fetch(health, { signal: AbortSignal.timeout(1_000) })
+        .then((r) => r.ok)
+        .catch(() => false);
+      return up ? null : true;
+    },
+    { timeout: 10_000, label: "old task-server dead" },
+  );
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  const serverBin = path.join(repoRoot, "target", "debug", "task-server");
+  const log = fs.openSync(state.serverLog, "a");
+  const server = spawn(serverBin, [], {
+    env: {
+      ...process.env,
+      TASK_DATA_ROOT: state.dataRoot,
+      TASK_SERVER_BIND: `127.0.0.1:${state.serverPort}`,
+      RUST_LOG: process.env.MP_SERVER_LOG || "task_server=info",
+    },
+    stdio: ["ignore", log, log],
+    detached: true,
+  });
+  server.unref();
+  fs.writeFileSync(STATE_FILE, JSON.stringify({ ...state, serverPid: server.pid }, null, 2));
+  await settle(
+    () =>
+      fetch(health, { signal: AbortSignal.timeout(1_000) })
+        .then((r) => r.ok)
+        .catch(() => false),
+    { timeout: 30_000, label: "restarted task-server healthy" },
+  );
+  return server.pid;
 }
 
 /** Mirror of crates/ui/src/auth.rs::DEV_ACCOUNTS (email → name). */
@@ -216,6 +280,26 @@ function isAllowedError(text) {
   return CONSOLE_ALLOWLIST.some((re) => re.test(text));
 }
 
+/**
+ * Dioxus signal-ownership violations. These surface as console
+ * WARNINGS (tracing::warn → console), not errors — but they are the
+ * exact class that killed all editor input (backspace/vim dead after
+ * the first collab re-key; fixed 2026-06 by hoisting the collab
+ * handles to the vault page scope): a Copy value (Signal) owned by a
+ * dropped scope read from a live one. Any occurrence fails the suite
+ * regardless of console level — never allowlist these.
+ */
+const SIGNAL_OWNERSHIP_PATTERNS = [
+  // dioxus-signals `copy_value_hoisted` warning.
+  /not a descendant of the owning scope/i,
+  // generational-box read-after-drop (the warning's prophecy landing).
+  /Failed to borrow because the value was dropped/i,
+];
+
+function isSignalOwnershipViolation(text) {
+  return SIGNAL_OWNERSHIP_PATTERNS.some((re) => re.test(text));
+}
+
 // ── Peer ─────────────────────────────────────────────────────────
 
 /** Status-picker label → roster status-dot title. */
@@ -260,6 +344,24 @@ class Peer {
     this._lastEmptySlugErrAt = 0;
     this.sawRemoteCursor = false;
     this.connected = false;
+    /**
+     * Result of the FIRST openNote vim probe on this page: `true`
+     * when the initial `i` switched modes WITHOUT inserting — i.e.
+     * VimState was mounted and booted in Normal mode (the vault
+     * page's default contract). `undefined` until a note is opened;
+     * later opens don't overwrite (the page-lived vim signal is in
+     * Insert mode by then, by design).
+     * @type {boolean | undefined}
+     */
+    this.vimNormalOnBoot = undefined;
+    /**
+     * While `true`, browser-native WebSocket-failure console errors
+     * are recorded but don't fail the suite — set around an
+     * INTENTIONAL server restart (killServer/startServer), where
+     * reconnect dial failures are the expected behavior under test.
+     * Signal-ownership violations are NEVER excused.
+     */
+    this.expectedOutage = false;
   }
 
   /** Open the context + page and wait for the signed-in shell. */
@@ -279,7 +381,14 @@ class Peer {
       const entry = { t: Date.now(), type: m.type(), text: m.text() };
       this.console.push(entry);
       if (/\/org\/\/vox/.test(entry.text)) this._lastEmptySlugErrAt = entry.t;
-      if (m.type() === "error" && !isAllowedError(entry.text)) this.errors.push(entry.text);
+      if (isSignalOwnershipViolation(entry.text)) {
+        // Fails the suite at ANY console level — see the pattern docs.
+        this.errors.push(`[signal-ownership] ${entry.text}`);
+      } else if (this.expectedOutage && /WebSocket|ws:\/\//i.test(entry.text)) {
+        // Reconnect dials against a deliberately killed server.
+      } else if (m.type() === "error" && !isAllowedError(entry.text)) {
+        this.errors.push(entry.text);
+      }
     });
     this.page.on("pageerror", (e) => {
       const text = String(e);
@@ -332,9 +441,18 @@ class Peer {
     const row = page.locator("aside button", { hasText: title }).first();
     await row.waitFor({ state: "visible", timeout: 30_000 });
     await row.click();
+    // Wait for THIS note's session: `live` alone can race a file
+    // switch (the mirror momentarily still shows the previous file's
+    // state until the page's open-effect re-arms), so pin the path
+    // too. Vault notes live at the root, so path == `${title}.md`.
+    const expectedPath = `${title}.md`;
     await settle(
-      () => page.evaluate(() => (window.__taskVault?.live ? window.__taskVault : null)),
-      { timeout: liveTimeout, label: `${this.label} collab live` },
+      () =>
+        page.evaluate(
+          (p) => (window.__taskVault?.live && window.__taskVault?.path === p ? window.__taskVault : null),
+          expectedPath,
+        ),
+      { timeout: liveTimeout, label: `${this.label} collab live on ${expectedPath}` },
     );
     // Toolbar must agree.
     await page.getByText("Collab: live", { exact: true }).waitFor({ timeout: 10_000 });
@@ -347,6 +465,7 @@ class Peer {
     await page.keyboard.press("i");
     await new Promise((r) => setTimeout(r, 300));
     const after = await this.docText();
+    if (this.vimNormalOnBoot === undefined) this.vimNormalOnBoot = after === before;
     if (after !== before) {
       await page.keyboard.press("Backspace");
       await settle(async () => (await this.docText()) === before, {
@@ -487,6 +606,7 @@ class Peer {
       email: this.email,
       connected: this.connected,
       sawRemoteCursor: this.sawRemoteCursor,
+      vimNormalOnBoot: this.vimNormalOnBoot,
       knownBootRaces: this.knownBootRaces,
       errors: this.errors,
       console: this.console.slice(-300),
@@ -554,4 +674,7 @@ module.exports = {
   Peer,
   dumpArtifacts,
   isAllowedError,
+  isSignalOwnershipViolation,
+  killServer,
+  startServer,
 };
