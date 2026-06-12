@@ -74,6 +74,11 @@ agent-proto = { workspace = true, features = ["vox"] }
 # auto-emitted `VaultSyncClient`. `vox` feature only (no
 # `server`/`full`), so it stays wasm-clean like the others.
 vault-proto = { workspace = true, features = ["vox"] }
+# Wiki raw-source wire surface — `RawLayerClient` for the
+# `/wiki/sources` list + `/wiki/source/:name` SourceViewer
+# (archived articles + ^t-anchored video transcripts). `vox`
+# feature only, wasm-clean like the other proto clients.
+wiki-proto = { workspace = true, features = ["vox"] }
 # Email wire surface — the `EmailSync` client for the `/email`
 # page (account list + recent envelopes). `vox` feature only, so
 # it stays wasm-clean like the other proto clients above.

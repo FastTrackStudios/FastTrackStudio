@@ -38,3 +38,14 @@ health).
   save-blocking) lands when archiving moves behind an RPC verb.
 - bgutil POT-provider sidecar for YouTube bot-checks: not
   wired; "update yt-dlp" is the standing fix.
+- SourceViewer v1 (`/wiki/source/:name`) is read-only with
+  seek-on-anchor-click (IFrame postMessage). The "note at
+  current time" button (getCurrentTime → insert
+  `- [mm:ss] … ^t<sec>-noteN` under `## Notes` on the
+  generated source page) is the next slice — it needs a
+  write path to wiki pages from the web app.
+- Imported bare bookmarks land as `content_type: bookmark`
+  without fetching; canonical dedup then blocks a later full
+  `task wiki archive <url>` of the same page unless --force.
+  A `task wiki archive upgrade <source>` verb (re-extract in
+  place) would resolve this cleanly.

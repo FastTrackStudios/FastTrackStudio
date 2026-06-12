@@ -62,7 +62,14 @@ pub fn WikiView() -> Element {
                 span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
                     "Workspace"
                 }
-                Heading { level: HeadingLevel::H1, class: "tracking-tight", "Knowledge graph" }
+                div { class: "flex items-baseline justify-between gap-3",
+                    Heading { level: HeadingLevel::H1, class: "tracking-tight", "Knowledge graph" }
+                    Link {
+                        to: crate::routes::Route::WikiSourcesRoute {},
+                        class: "shrink-0 text-xs text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground",
+                        "Archived sources →"
+                    }
+                }
                 Text {
                     variant: TextVariant::Muted,
                     "The wikilink web of your vault — pages are nodes, `[[links]]` are edges."

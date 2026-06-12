@@ -84,6 +84,12 @@ pub enum Route {
         #[route("/wiki")]
         WikiRoute {},
 
+        #[route("/wiki/sources")]
+        WikiSourcesRoute {},
+
+        #[route("/wiki/source/:name")]
+        WikiSourceRoute { name: String },
+
         #[route("/agents")]
         AgentsRoute {},
 
@@ -204,6 +210,16 @@ fn ReposRoute() -> Element {
 #[component]
 fn WikiRoute() -> Element {
     rsx! { pages::wiki::WikiView {} }
+}
+
+#[component]
+fn WikiSourcesRoute() -> Element {
+    rsx! { pages::wiki_source::WikiSourcesView {} }
+}
+
+#[component]
+fn WikiSourceRoute(name: String) -> Element {
+    rsx! { pages::wiki_source::WikiSourceView { name } }
 }
 
 #[component]
