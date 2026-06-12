@@ -29,8 +29,8 @@ pub mod service;
 
 pub use model::{AgentRefList, Links, Status, Workstream};
 pub use service::{
-    WorkstreamError, WorkstreamEvent, WorkstreamRollup, WorkstreamService, WorkstreamServiceRpc,
-    WorkstreamWithRollup,
+    StateGroupCounts, WorkstreamError, WorkstreamEvent, WorkstreamRollup, WorkstreamService,
+    WorkstreamServiceRpc, WorkstreamWithRollup,
 };
 
 // architect-emitted vox bits: the async client / dispatcher /

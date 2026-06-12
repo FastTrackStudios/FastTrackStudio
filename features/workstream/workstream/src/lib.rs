@@ -32,7 +32,8 @@ pub use model::{AgentRefList, Links, Status, Workstream};
 pub use parse::{ParseError, looks_like_workstream, parse_page, parse_workstream};
 pub use rollup::{estimate_points, rollup, rollup_tasks, rollup_with, subtask_rollup};
 pub use service::{
-    WorkstreamError, WorkstreamEvent, WorkstreamRollup, WorkstreamService, WorkstreamWithRollup,
+    StateGroupCounts, WorkstreamError, WorkstreamEvent, WorkstreamRollup, WorkstreamService,
+    WorkstreamWithRollup,
 };
 pub use write::{WriteError, default_workstream_path, serialize_workstream, write_workstream};
 

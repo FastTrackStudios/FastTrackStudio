@@ -14,6 +14,10 @@
 //! Semantics — classification routes through canonical *state
 //! groups* (`project::states`), never raw status strings, so
 //! per-project custom status names roll up correctly:
+//! - `groups` carries the member count per canonical state
+//!   group (backlog / unstarted / started / completed /
+//!   cancelled) — sums to `total` — so rollup-only headers can
+//!   render segmented bars without fetching member tasks.
 //! - `done` counts the `completed` group only (cancelled tasks
 //!   stay in `total` but aren't "progress").
 //! - `in_progress` counts the `started` group (includes
@@ -75,10 +79,17 @@ where
         }
         out.total += 1;
         match group_of(t) {
-            StateGroup::Completed => out.done += 1,
-            StateGroup::Started => out.in_progress += 1,
-            _ => {}
+            StateGroup::Backlog => out.groups.backlog += 1,
+            StateGroup::Unstarted => out.groups.unstarted += 1,
+            StateGroup::Started => out.groups.started += 1,
+            StateGroup::Completed => out.groups.completed += 1,
+            StateGroup::Cancelled => out.groups.cancelled += 1,
         }
+        // Legacy aggregates — kept in lockstep with `groups` so
+        // existing consumers (CLI summary lines, progress bars)
+        // don't have to migrate.
+        out.done = out.groups.completed;
+        out.in_progress = out.groups.started;
         if let Some(w) = &t.workflow {
             out.estimate_points_sum += w.estimate.map_or(0, estimate_points);
         }
@@ -190,6 +201,62 @@ mod tests {
         assert_eq!(r.done, 1);
         assert_eq!(r.in_progress, 1);
         assert_eq!(r.blocked, 0);
+        // Per-group counts mirror the same classification and
+        // sum to total.
+        assert_eq!(r.groups.completed, 1);
+        assert_eq!(r.groups.started, 1);
+        assert_eq!(r.groups.unstarted, 1, "open classifies as unstarted");
+        assert_eq!(r.groups.backlog, 0);
+        assert_eq!(r.groups.cancelled, 0);
+        assert_eq!(
+            r.groups.backlog
+                + r.groups.unstarted
+                + r.groups.started
+                + r.groups.completed
+                + r.groups.cancelled,
+            r.total
+        );
+    }
+
+    #[test]
+    fn rollup_groups_cover_all_five_buckets() {
+        use project::states::{StateDef, StateGroup, StatesConfig, resolve_state_group};
+
+        let ws = Uuid::new_v4();
+        // Custom registry: `shipped-to-client` → completed —
+        // the acceptance case: a custom Completed state counts
+        // as done only via the registry, never by string match.
+        let cfg = StatesConfig(vec![StateDef {
+            name: "shipped-to-client".into(),
+            group: StateGroup::Completed,
+            color: String::new(),
+            default: false,
+            order: 0,
+        }]);
+        let tasks = vec![
+            ws_task(Some(ws), "triage"),            // backlog
+            ws_task(Some(ws), "open"),              // unstarted
+            ws_task(Some(ws), "in-progress"),       // started
+            ws_task(Some(ws), "waiting"),           // started
+            ws_task(Some(ws), "shipped-to-client"), // completed (custom!)
+            ws_task(Some(ws), "cancelled"),         // cancelled
+        ];
+
+        let r = rollup_with(ws, &tasks, |t| resolve_state_group(Some(&cfg), &t.status));
+        assert_eq!(r.total, 6);
+        assert_eq!(r.groups.backlog, 1);
+        assert_eq!(r.groups.unstarted, 1);
+        assert_eq!(r.groups.started, 2);
+        assert_eq!(r.groups.completed, 1, "custom completed state counts");
+        assert_eq!(r.groups.cancelled, 1);
+        assert_eq!(r.done, 1, "done == groups.completed");
+        assert_eq!(r.in_progress, 2, "in_progress == groups.started");
+
+        // Default registry: `shipped-to-client` is unknown →
+        // unstarted, so it does NOT count as done.
+        let r2 = rollup(ws, &tasks);
+        assert_eq!(r2.done, 0, "custom name needs the registry");
+        assert_eq!(r2.groups.unstarted, 2);
     }
 
     #[test]

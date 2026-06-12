@@ -12518,6 +12518,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             println!("  in-progress: {}", rollup.in_progress);
             println!("  blocked:     {}", rollup.blocked);
             println!("  points:      {}", rollup.estimate_points_sum);
+            let g = &rollup.groups;
+            println!(
+                "  groups:      backlog {} / unstarted {} / started {} / completed {} / cancelled {}",
+                g.backlog, g.unstarted, g.started, g.completed, g.cancelled
+            );
             if rollup.total > 0 {
                 println!(
                     "  progress:    {:.0}%",
