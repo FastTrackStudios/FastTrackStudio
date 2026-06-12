@@ -14,12 +14,10 @@
 //
 //  2. "churn" — the full 20-context seeded-schedule churn from the
 //     PRD (~2 min: joins/leaves/status changes/route-change activity
-//     republish + a refresh-rejoin). Marked test.fail(): the same
-//     vox downstream credit starvation freezes every client's
-//     org-presence stream after 16 delivered updates (~30-60s in,
-//     heartbeats included), after which rosters are frozen snapshots
-//     — departed peers never expire, joiners never appear. Remove
-//     the marker when the credit fix lands.
+//     republish + a refresh-rejoin). Used to be test.fail'd on vox
+//     downstream credit starvation (streams frozen at the 16-message
+//     initial window); the wasm GrantCredit fix (vox fork 23acdc0a)
+//     flipped it to passing.
 //
 // Schedules are DETERMINISTIC per seed (override with MP_SEED).
 // Idle (5-minute heuristic) can't be reached in a 2-minute churn;
@@ -103,13 +101,8 @@ test.describe("presence", () => {
 
   test("churn: twenty peers, rosters agree at every quiescence checkpoint", async ({ browser }, testInfo) => {
     test.setTimeout(900_000);
-    test.fail(
-      true,
-      "FINDING: vox downstream credit starvation (see convergence.spec.js header) freezes every " +
-        "client's org-presence stream after 16 delivered updates — rosters become frozen snapshots " +
-        "well inside the 2-minute churn, so checkpoint agreement is impossible. " +
-        "Remove this marker when the credit fix lands.",
-    );
+    // (Was test.fail'd on vox downstream credit starvation; the wasm
+    // GrantCredit fix — vox fork 23acdc0a — flipped it to passing.)
 
     const rng = mulberry32(SEED);
     const pick = (arr) => arr[Math.floor(rng() * arr.length)];

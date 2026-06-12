@@ -24,7 +24,14 @@ const { spawn, execFileSync } = require("child_process");
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SERVER_PORT = parseInt(process.env.MP_SERVER_PORT || "18091", 10);
 const WEB_PORT = parseInt(process.env.MP_WEB_PORT || "18092", 10);
-const ORG_SLUG = "mptest";
+// Per-run unique slug: a leaked page from a PREVIOUS run (a forgotten
+// browser tab on the static-web port) keeps its reconnect supervisor
+// dialing MP_SERVER_PORT forever and — with a fixed slug — joins the
+// fresh run's org as a live, never-expiring presence peer ("ghost
+// roster rows" that no timeout removes, because the tab heartbeats).
+// A unique org per run strands such zombies in an org that no longer
+// exists.
+const ORG_SLUG = `mptest-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36).padStart(2, "0")}`;
 const STATE_FILE = path.join(__dirname, ".mp-state.json");
 
 // Mirror of crates/ui/src/auth.rs::DEV_ACCOUNTS — keep in sync.

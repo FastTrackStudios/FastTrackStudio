@@ -181,10 +181,18 @@ const READ_ROSTER = () => {
   const count = parseInt((label.textContent || "").replace(/\D+/g, ""), 10);
   // Walk up from the label until an ancestor contains the roster
   // rows (PresenceRow roots: .rounded-md with a status-dot
-  // span[title] inside).
+  // span.absolute[title] inside). Key on the ABSOLUTE-positioned
+  // status dot, not any span[title] — the ConnectionBadge in the
+  // group label also carries a title and satisfies the loose
+  // selector on the first hop, stranding the walk above the rows
+  // (roster forever parses as {count: N, rows: []}).
   let group = label.parentElement;
-  for (let i = 0; group && i < 4; i++) {
-    if (group.querySelector("span[title]") || /Nobody around/.test(group.textContent || "")) break;
+  for (let i = 0; group && i < 6; i++) {
+    if (
+      group.querySelector("span.absolute[title]") ||
+      /Nobody around/.test(group.textContent || "")
+    )
+      break;
     group = group.parentElement;
   }
   if (!group) return { count, rows: [] };

@@ -9,25 +9,15 @@
 //     cursors, no console errors.
 //
 //  2. "storm" — the full 5-context concurrent edit storm from the
-//     PRD. Marked test.fail() with a precise finding:
-//
-//     ┌────────────────────────────────────────────────────────────┐
-//     │ FINDING (dd824506 verification, 2026-06-12): every vox     │
-//     │ server→client stream FREEZES after exactly 16 delivered    │
-//     │ messages (DEFAULT_INITIAL_CHANNEL_CREDIT in vox-types).    │
-//     │ The wasm client consumes its Rx but its credit grants      │
-//     │ never replenish the server side, so PubSub::drain_one sees │
-//     │ try_send → Full forever and the subscriber's mailbox grows │
-//     │ silently. Client→server traffic is unaffected (server-side │
-//     │ Rx replenishes fine): in a 2-peer probe, peer B stopped    │
-//     │ receiving after `backlog + 15` updates while the server    │
-//     │ merged ALL 40 of peer A's edits to disk; SyncStatus stayed │
-//     │ Live throughout. The per-file cursor channel freezes the   │
-//     │ same way (remote carets vanish ~30s later via expiry).     │
-//     │ Likely the observable root of / sibling to P0 6303584a.    │
-//     │ When the fix lands this test will "pass unexpectedly" —    │
-//     │ remove the test.fail() line then.                          │
-//     └────────────────────────────────────────────────────────────┘
+//     PRD. History: was test.fail'd on vox downstream credit
+//     starvation (every server→client stream froze at the 16-message
+//     initial window — DEFAULT_INITIAL_CHANNEL_CREDIT — because the
+//     wasm client's GrantCredit control sends were dropped futures).
+//     Fixed in the vox fork (23acdc0a); the storm's remaining
+//     failure after that was a signal-ownership violation in the
+//     vault lazy-fetch path (root-scope spawn_forever writing the
+//     page's editor signal), fixed via the page-owned fetch worker
+//     in crates/ui/src/vault_lookup.rs.
 //
 // The offline/return scenario is a separate spec —
 // offline-return.spec.js (skipped until P0 6303584a merges).
@@ -220,13 +210,8 @@ test.describe("5-way editor convergence", () => {
   });
 
   test("storm: five concurrent editors converge everywhere (and on disk)", async ({ browser }, testInfo) => {
-    test.fail(
-      true,
-      "FINDING: vox downstream credit starvation — every server→client stream freezes after " +
-        "16 messages (DEFAULT_INITIAL_CHANNEL_CREDIT), so peers stop receiving mid-storm while " +
-        "SyncStatus stays Live and the server/disk merge ALL edits correctly. " +
-        "See the header of this spec + tests/multiplayer/README.md. Remove this marker when fixed.",
-    );
+    // (Was test.fail'd — see the header. Credit fix + page-owned
+    // vault fetch worker flipped it to passing.)
     const state = loadState();
     const notePath = path.join(state.vaultDir, state.collabNote);
     const peers = await bringUp(browser, 5, state);
