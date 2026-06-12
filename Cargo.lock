@@ -15487,6 +15487,7 @@ dependencies = [
  "org-proto",
  "pantry",
  "project",
+ "recipe-import",
  "reqwest 0.12.28",
  "scheduling-proto",
  "sea-orm",

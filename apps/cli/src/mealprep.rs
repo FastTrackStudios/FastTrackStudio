@@ -37,7 +37,7 @@ pub struct Remote {
 
 impl Remote {
     /// Resolve the per-org vox URL from the flags + session.
-    fn url(&self) -> eyre::Result<String> {
+    pub(crate) fn url(&self) -> eyre::Result<String> {
         let slug = resolve_active_org(self.org.clone())?;
         Ok(resolve_org_vox_url(self.server.clone(), &slug))
     }
@@ -92,7 +92,7 @@ fn is_cook_path(s: &str) -> bool {
 /// errors. Returns the source to persist — when the recipe has
 /// no title metadata and no frontmatter, a `>> title:` line is
 /// prepended so `<name>` survives as the display title.
-fn validated_source(name: &str, source: String) -> eyre::Result<String> {
+pub(crate) fn validated_source(name: &str, source: String) -> eyre::Result<String> {
     let label = format!("{name}.cook");
     match validate_cooklang(&label, &source) {
         Err(report) => {
