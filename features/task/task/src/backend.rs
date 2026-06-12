@@ -192,6 +192,21 @@ impl TaskService for TaskBackend {
         Ok(ClaimResult::Won)
     }
 
+    fn reverse_relations(
+        &self,
+        id: Uuid,
+    ) -> Result<Vec<crate::relations::ReverseRelation>, TaskError> {
+        // Build the reverse index over the same snapshot list()
+        // serves. Per-call build matches the walk-on-each-call
+        // architecture of this backend; promote to a cached
+        // index if vault walks get hot.
+        let tasks = self.list_inner()?;
+        if !tasks.iter().any(|t| t.id == id) {
+            return Err(TaskError::NotFound(id.to_string()));
+        }
+        Ok(crate::relations::reverse_relations_for(id, &tasks))
+    }
+
     fn rename(&self, id: Uuid, new_path: &str) -> Result<TaskInfo, TaskError> {
         if new_path.is_empty() || new_path.contains("..") || new_path.starts_with('/') {
             return Err(TaskError::BadRequest(format!("bad path: {new_path}")));

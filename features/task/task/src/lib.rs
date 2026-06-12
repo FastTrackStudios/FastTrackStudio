@@ -41,6 +41,7 @@
 pub mod capture;
 pub mod model;
 pub mod parse;
+pub mod relations;
 pub mod service;
 
 // FS-dependent modules (vault::Vault, std::fs walks). The
@@ -55,7 +56,8 @@ pub mod write;
 pub mod backend;
 
 pub use capture::capture;
-pub use model::{Priority, Status, TaskInfo, TimeEntry};
+pub use model::{Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry};
+pub use relations::ReverseRelation;
 // Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
 // so UI consumers don't need their own workflows-proto dep.
 pub use workflows_proto;

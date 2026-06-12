@@ -149,12 +149,15 @@ mod tests {
 
     #[test]
     fn workflow_attrs_round_trip_through_yaml() {
-        use crate::model::{AgentRefList, Estimate, UuidList, WorkflowAttrs};
+        use crate::model::{
+            AgentRefList, Estimate, Relation, RelationKind, RelationList, UuidList, WorkflowAttrs,
+        };
         use workflows_proto::AgentRef;
 
         let cycle = uuid::Uuid::new_v4();
         let workstream = uuid::Uuid::new_v4();
         let blocker = uuid::Uuid::new_v4();
+        let dup_target = uuid::Uuid::new_v4();
 
         let attrs = WorkflowAttrs {
             cycle: Some(cycle),
@@ -167,6 +170,10 @@ mod tests {
             ]),
             blockers: UuidList(vec![blocker]),
             relates_to: UuidList::default(),
+            relations: RelationList(vec![Relation {
+                kind: RelationKind::Duplicate,
+                target: dup_target,
+            }]),
             session: None,
         };
 
@@ -215,6 +222,31 @@ mod tests {
         assert_eq!(parsed_attrs.workstream, Some(workstream));
         assert_eq!(parsed_attrs.assignees.len(), 2);
         assert_eq!(parsed_attrs.blockers.0, vec![blocker]);
+        assert_eq!(
+            parsed_attrs.relations.0,
+            vec![Relation {
+                kind: RelationKind::Duplicate,
+                target: dup_target,
+            }],
+            "typed relations round-trip alongside the legacy lists"
+        );
+    }
+
+    /// A task with no typed relations serializes without a
+    /// `relations:` key (wire / frontmatter compat with
+    /// pre-relations pages).
+    #[test]
+    fn relations_omitted_when_empty() {
+        use crate::model::WorkflowAttrs;
+        let mut t = crate::parse::parse_str(
+            "tasks/plain.md",
+            "plain",
+            "---\ntype: task\ntitle: plain\nworkflow:\n  parent: null\n---\n",
+        )
+        .expect("parse");
+        t.workflow = Some(WorkflowAttrs::default());
+        let yaml = serialize_task(&t).expect("serialize");
+        assert!(!yaml.contains("relations:"), "spurious relations key:\n{yaml}");
     }
 
     #[test]

@@ -11,7 +11,7 @@ use vault::Vault;
 
 use crate::model::{Status, Workstream};
 use crate::parse::{looks_like_workstream, parse_page};
-use crate::rollup::rollup;
+use crate::rollup::rollup_with;
 use crate::service::{WorkstreamError, WorkstreamEvent, WorkstreamService, WorkstreamWithRollup};
 use crate::write::{default_workstream_path, write_workstream};
 
@@ -105,6 +105,30 @@ impl WorkstreamBackend {
             match task::parse_page(&proto) {
                 Ok(t) => out.push(t),
                 Err(e) => tracing::warn!(path = %page.rel_path, ?e, "task parse failed"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Per-project state registries — project id → its optional
+    /// `states:` config. Feeds the rollup's group classifier so
+    /// custom status names classify by their registered group.
+    fn project_states(
+        &self,
+    ) -> Result<std::collections::HashMap<Uuid, Option<project::StatesConfig>>, WorkstreamError>
+    {
+        let vault = self.open_vault()?;
+        let mut out = std::collections::HashMap::new();
+        for page in &vault.pages {
+            let proto = page.to_proto();
+            if !project::looks_like_project(&proto) {
+                continue;
+            }
+            match project::parse_page(&proto) {
+                Ok(p) => {
+                    out.insert(p.id, p.states);
+                }
+                Err(e) => tracing::warn!(path = %page.rel_path, ?e, "project parse failed"),
             }
         }
         Ok(out)
@@ -236,8 +260,19 @@ impl WorkstreamService for WorkstreamBackend {
     fn rollup(&self, id: Uuid) -> Result<WorkstreamWithRollup, WorkstreamError> {
         let workstream = self.find(id)?;
         let tasks = self.org_tasks()?;
+        // Classify via each task's owning project's state
+        // registry (default registry when the project declares
+        // none / the task has no project).
+        let states = self.project_states()?;
+        let group_of = |t: &task::TaskInfo| {
+            let cfg = t
+                .project_id
+                .and_then(|pid| states.get(&pid))
+                .and_then(Option::as_ref);
+            project::resolve_state_group(cfg, &t.status)
+        };
         Ok(WorkstreamWithRollup {
-            rollup: rollup(id, &tasks),
+            rollup: rollup_with(id, &tasks, group_of),
             workstream,
         })
     }
@@ -380,5 +415,45 @@ mod tests {
         assert_eq!(got.rollup.in_progress, 1);
         assert_eq!(got.rollup.blocked, 0);
         assert_eq!(got.rollup.estimate_points_sum, 2 + 3 + 5);
+    }
+
+    /// Custom status names classify through the owning
+    /// project's `states:` registry — `shipped-to-client` is
+    /// meaningless to the default registry but the project maps
+    /// it to the completed group.
+    #[test]
+    fn rollup_classifies_via_project_state_registry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pid = Uuid::new_v4();
+        let dir = tmp.path().join("Projects/Demo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("Demo.md"),
+            format!(
+                "---\ntype: project\nid: {pid}\ntitle: Demo\nstates:\n- name: shipped-to-client\n  group: completed\n- name: qa\n  group: started\n---\n"
+            ),
+        )
+        .unwrap();
+        let be = WorkstreamBackend::new(tmp.path());
+        let ws = be.create(new_ws(pid, "Push")).unwrap();
+
+        let task_dir = tmp.path().join("Task");
+        std::fs::create_dir_all(&task_dir).unwrap();
+        for (i, status) in ["shipped-to-client", "qa", "open"].iter().enumerate() {
+            std::fs::write(
+                task_dir.join(format!("t{i}.md")),
+                format!(
+                    "---\ntype: task\nid: {}\ntitle: t{i}\nstatus: {status}\nprojectId: {pid}\nworkflow:\n  workstream: {}\n---\n",
+                    Uuid::new_v4(),
+                    ws.id
+                ),
+            )
+            .unwrap();
+        }
+
+        let got = be.rollup(ws.id).unwrap();
+        assert_eq!(got.rollup.total, 3);
+        assert_eq!(got.rollup.done, 1, "shipped-to-client → completed group");
+        assert_eq!(got.rollup.in_progress, 1, "qa → started group");
     }
 }

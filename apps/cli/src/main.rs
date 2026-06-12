@@ -1346,8 +1346,61 @@ enum IssueCmd {
 
     /// List the subtasks of a parent task with their claim +
     /// status, so you can see who's working what at a glance.
+    /// Header shows the derived rollup (done / in-progress /
+    /// blocked / points), classified via state groups.
     Subtasks {
         /// Parent task id (UUID or 8-char prefix).
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Derived sub-issue rollup for one parent — done / total /
+    /// in-progress / blocked / estimate points over its direct
+    /// children (`workflow.parent`), classified via each child's
+    /// project state registry. Same engine as the workstream
+    /// rollup.
+    Rollup {
+        /// Parent issue id (UUID, prefix, path, or title).
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Add a typed relation between two issues:
+    /// `task issue relate <a> <kind> <b>` records "<a> <kind>s
+    /// <b>" (kind ∈ blocks | duplicate | implements | relates).
+    /// Stored in `<a>`'s `workflow.relations`; the legacy
+    /// blockers / relates_to lists keep working alongside.
+    Relate {
+        /// Source issue (UUID, prefix, path, or title).
+        a: String,
+        /// blocks | duplicate | implements | relates.
+        kind: String,
+        /// Target issue (UUID, prefix, path, or title).
+        b: String,
+        /// Remove the relation instead of adding it.
+        #[arg(long)]
+        remove: bool,
+        /// Emit the resulting source issue as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show an issue's relation graph — outgoing edges (typed
+    /// relations + the legacy relates_to entries + "blocks"
+    /// edges implied by other tasks' blockers lists) and
+    /// incoming reverse edges ("what blocks / duplicates /
+    /// implements THIS"), merged across both encodings.
+    Relations {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Sugar: every issue this one BLOCKS (typed `blocks`
+    /// relations + other tasks listing it in `blockers`).
+    Blocking {
         id: String,
         #[arg(long)]
         json: bool,
@@ -4871,6 +4924,35 @@ where
         println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
     }
     Ok(())
+}
+
+/// Per-project state registries: project id → its optional
+/// `states:` config. Best-effort (an unreachable project service
+/// degrades to the default registry everywhere).
+async fn project_states_map(
+    url: &str,
+) -> std::collections::HashMap<uuid::Uuid, Option<project::StatesConfig>> {
+    match connect_project_client(url).await {
+        Ok(pc) => pc
+            .list()
+            .await
+            .map(|ps| ps.into_iter().map(|p| (p.id, p.states)).collect())
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    }
+}
+
+/// Classify one task's status via its owning project's state
+/// registry (default registry when project unknown / unset).
+fn resolve_task_group(
+    states: &std::collections::HashMap<uuid::Uuid, Option<project::StatesConfig>>,
+    t: &task::TaskInfo,
+) -> project::StateGroup {
+    let cfg = t
+        .project_id
+        .and_then(|pid| states.get(&pid))
+        .and_then(Option::as_ref);
+    project::resolve_state_group(cfg, &t.status)
 }
 
 /// Parse a `--add` state spec: `<name>:<group>[:<color>]`.
@@ -11819,6 +11901,12 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .list()
                 .await
                 .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            // Derived rollup over the children — shared engine,
+            // classified via each task's project state registry.
+            let states = project_states_map(&url).await;
+            let rollup = ::workstream::subtask_rollup(parent.id, &all, |t| {
+                resolve_task_group(&states, t)
+            });
             let mut subs: Vec<&task::TaskInfo> = all
                 .iter()
                 .filter(|t| t.workflow.as_ref().and_then(|w| w.parent) == Some(parent.id))
@@ -11827,21 +11915,29 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&subs).map_err(|e| eyre::eyre!("json: {e}"))?
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "parent": parent.id,
+                        "rollup": rollup,
+                        "subtasks": subs,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
                 );
                 return Ok(());
             }
-            let done = subs
-                .iter()
-                .filter(|t| matches!(task::Status::from_str(&t.status), Some(task::Status::Done)))
-                .count();
             println!(
                 "{} [{}]  {}",
                 short_uuid(&parent.id),
                 parent.status,
                 parent.title
             );
-            println!("  {done}/{} subtasks done\n", subs.len());
+            println!(
+                "  {}/{} done · {} in-progress · {} blocked · {} pts\n",
+                rollup.done,
+                rollup.total,
+                rollup.in_progress,
+                rollup.blocked,
+                rollup.estimate_points_sum
+            );
             for t in &subs {
                 let claim = t
                     .workflow
@@ -11858,6 +11954,198 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     claim,
                     t.title
                 );
+            }
+        }
+        IssueCmd::Rollup { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let parent = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let states = project_states_map(&url).await;
+            let rollup = ::workstream::subtask_rollup(parent.id, &all, |t| {
+                resolve_task_group(&states, t)
+            });
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "parent": parent.id,
+                        "rollup": rollup,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]  {}", short_uuid(&parent.id), parent.status, parent.title);
+            println!("  done:        {}/{}", rollup.done, rollup.total);
+            println!("  in-progress: {}", rollup.in_progress);
+            println!("  blocked:     {}", rollup.blocked);
+            println!("  points:      {}", rollup.estimate_points_sum);
+            if rollup.total > 0 {
+                println!(
+                    "  progress:    {:.0}%",
+                    f64::from(rollup.done) * 100.0 / f64::from(rollup.total)
+                );
+            }
+        }
+        IssueCmd::Relate {
+            a,
+            kind,
+            b,
+            remove,
+            json,
+        } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let kind = task::RelationKind::from_str(&kind).ok_or_else(|| {
+                eyre::eyre!(
+                    "unknown relation kind `{kind}` — one of blocks / duplicate / \
+                     implements / relates"
+                )
+            })?;
+            let mut src = resolve_issue_id(&client, &a).await?;
+            let dst = resolve_issue_id(&client, &b).await?;
+            if src.id == dst.id {
+                return Err(eyre::eyre!("an issue can't relate to itself"));
+            }
+            let rel = task::Relation {
+                kind,
+                target: dst.id,
+            };
+            let w = src
+                .workflow
+                .get_or_insert_with(task::model::WorkflowAttrs::default);
+            let already = w.relations.0.contains(&rel);
+            if remove {
+                if !already {
+                    return Err(eyre::eyre!(
+                        "no `{}` relation from {} to {}",
+                        kind.as_str(),
+                        short_uuid(&src.id),
+                        short_uuid(&dst.id)
+                    ));
+                }
+                w.relations.0.retain(|r| r != &rel);
+            } else if !already {
+                w.relations.0.push(rel);
+            }
+            // Relation changes ride the normal update path, so the
+            // backend publishes TaskEvent::Upserted to subscribers.
+            let updated = client
+                .update(src)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            if json {
+                json_out::print_json(&updated)?;
+                return Ok(());
+            }
+            let verb = if remove { "unrelated" } else { "related" };
+            println!(
+                "{verb}: {} ({}) —{}→ {} ({})",
+                updated.title,
+                short_uuid(&updated.id),
+                kind.as_str(),
+                dst.title,
+                short_uuid(&dst.id)
+            );
+        }
+        IssueCmd::Relations { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+                all.iter().map(|x| (x.id, x)).collect();
+            let label = |id: &uuid::Uuid| {
+                by_id
+                    .get(id)
+                    .map_or_else(|| "(unknown)".to_string(), |x| x.title.clone())
+            };
+            // Outgoing from the merged local view; incoming via
+            // the server's reverse index.
+            let outgoing = task::relations::outgoing(t.id, &all);
+            let incoming = client
+                .reverse_relations(t.id)
+                .await
+                .map_err(|e| eyre::eyre!("reverse_relations: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "id": t.id,
+                        "outgoing": outgoing,
+                        "incoming": incoming,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]  {}\n", short_uuid(&t.id), t.status, t.title);
+            if outgoing.is_empty() && incoming.is_empty() {
+                println!("  (no relations)");
+                return Ok(());
+            }
+            if !outgoing.is_empty() {
+                println!("  outgoing (this issue → other):");
+                for r in &outgoing {
+                    println!(
+                        "    {:<11} {}  {}",
+                        r.kind.as_str(),
+                        short_uuid(&r.target),
+                        label(&r.target)
+                    );
+                }
+            }
+            if !incoming.is_empty() {
+                println!("  incoming (other → this issue):");
+                for r in &incoming {
+                    println!(
+                        "    {:<11} {}  {}",
+                        r.kind.as_str(),
+                        short_uuid(&r.source),
+                        label(&r.source)
+                    );
+                }
+            }
+        }
+        IssueCmd::Blocking { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let blocked_ids = task::relations::blocking(t.id, &all);
+            let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+                all.iter().map(|x| (x.id, x)).collect();
+            if json {
+                let rows: Vec<&task::TaskInfo> = blocked_ids
+                    .iter()
+                    .filter_map(|bid| by_id.get(bid).copied())
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if blocked_ids.is_empty() {
+                println!("{} blocks nothing", short_uuid(&t.id));
+                return Ok(());
+            }
+            println!("{} blocks:", short_uuid(&t.id));
+            for bid in &blocked_ids {
+                match by_id.get(bid) {
+                    Some(b) => println!("  {}  {:<12} {}", short_uuid(bid), b.status, b.title),
+                    None => println!("  {bid}  (unknown)"),
+                }
             }
         }
         IssueCmd::Assignees { id, json } => {
