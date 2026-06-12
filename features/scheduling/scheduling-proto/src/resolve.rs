@@ -29,7 +29,18 @@
 //!      tries to *shift* whole (≤ [`MAX_SHIFT_MIN`] from its
 //!      original start, nearest fit wins), then to *compress*
 //!      into the largest free interval near its span (≥
-//!      [`MIN_KEEP_MIN`]), else it drops.
+//!      [`MIN_KEEP_MIN`]), else it drops — with one exception:
+//!    - **Meal embedding** — a *meal* that can neither shift nor
+//!      compress, but whose natural window is fully covered by a
+//!      fixed span (lunch inside a "Work 8:00–16:00" shift), is
+//!      not dropped. It is *embedded*: kept at its original start
+//!      (clamped into the fixed span) and compressed to at most
+//!      [`MEAL_EMBED_LEN`] minutes, never below [`MIN_KEEP_MIN`].
+//!      Embedded blocks intentionally overlap their host fixed
+//!      block — they're a break *inside* it. Reported as
+//!      [`ChangeAction::Embedded`]; renderers can re-derive
+//!      embedded-ness from a saved plan (non-fixed block fully
+//!      inside a fixed block's span).
 //!    - **Flexible** blocks (allocatable / maintenance / other)
 //!      go last, in start order. They never move: each shrinks to
 //!      the largest still-free sub-interval of its original span,
@@ -45,6 +56,10 @@
 //! date and is left alone. If a wrapping block is shrunk such
 //! that its evening segment ends before 24:00, it stops wrapping
 //! (the morning tail is dropped) — this is reported as a shrink.
+//! Callers that place one-off wrapping *events* (`task plan event
+//! add 23:00-0:30`) materialize the `00:00–end` tail as a fixed
+//! block on the next date's plan, so it participates in that
+//! day's reconcile rather than silently vanishing.
 
 use serde::{Deserialize, Serialize};
 
@@ -56,6 +71,11 @@ pub const MIN_KEEP_MIN: u16 = 15;
 /// How far (in minutes) an anchored block may shift from its
 /// original start during reconcile.
 pub const MAX_SHIFT_MIN: u16 = 120;
+/// Target length of a meal embedded inside a covering fixed block
+/// (the lunch break inside a work shift). The embedded span is
+/// `min(original length, MEAL_EMBED_LEN)`, floored at
+/// [`MIN_KEEP_MIN`].
+pub const MEAL_EMBED_LEN: u16 = 30;
 
 const DAY_END: u16 = 24 * 60;
 
@@ -104,6 +124,10 @@ pub enum ChangeAction {
     Moved { from: (u16, u16), to: (u16, u16) },
     Shrunk { from: (u16, u16), to: (u16, u16) },
     Dropped { from: (u16, u16), reason: String },
+    /// A meal compressed *inside* a covering fixed block instead
+    /// of dropping (see the module docs). `to` overlaps the host
+    /// fixed span by design.
+    Embedded { from: (u16, u16), to: (u16, u16) },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -307,10 +331,14 @@ pub fn merge_template(saved: &[PlannedBlock], template: &[TimeBlock]) -> Vec<Res
 #[must_use]
 pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> ReconcileOutcome {
     let mut tl = Timeline::default();
+    // Fixed spans (blocks + obstacles) double as embedding hosts
+    // for meals — see the module docs.
+    let mut fixed_spans: Vec<(u16, u16)> = Vec::new();
     for &(s, e) in obstacles {
         let (s, e) = (s.min(DAY_END), e.min(DAY_END));
         if e > s {
             tl.occupy(s, e);
+            fixed_spans.push((s, e));
         }
     }
 
@@ -332,6 +360,7 @@ pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> Reconci
     for b in fixed {
         let (s, e) = day_span(b.start, b.end);
         tl.occupy(s, e);
+        fixed_spans.push((s, e));
         out.push(b);
     }
 
@@ -384,6 +413,30 @@ pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> Reconci
                     action: ChangeAction::Shrunk { from: (s, e), to: (ns, ne) },
                 });
                 apply_span(&mut b, ns, ne);
+                out.push(b);
+            }
+            // Meal embedding: no free time anywhere near, but a
+            // fixed span covers the meal's natural window — keep
+            // it compressed *inside* the fixed block instead of
+            // dropping (lunch break inside the work shift).
+            _ if b.category == BlockCategory::Meal
+                && fixed_spans.iter().any(|&(fs, fe)| fs <= s && e <= fe)
+                && dur >= MIN_KEEP_MIN =>
+            {
+                let &(fs, fe) = fixed_spans
+                    .iter()
+                    .find(|&&(fs, fe)| fs <= s && e <= fe)
+                    .expect("checked by the guard");
+                let len = dur.min(MEAL_EMBED_LEN);
+                let ns = s.clamp(fs, fe - len);
+                let ne = ns + len;
+                changes.push(ReconcileChange {
+                    label: b.label.clone(),
+                    action: ChangeAction::Embedded { from: (s, e), to: (ns, ne) },
+                });
+                apply_span(&mut b, ns, ne);
+                // Deliberately NOT occupied on the timeline: the
+                // span already belongs to the host fixed block.
                 out.push(b);
             }
             _ => changes.push(ReconcileChange {
@@ -441,6 +494,28 @@ fn apply_span(b: &mut PlannedBlock, ns: u16, ne: u16) {
     if !(wraps && ne == DAY_END) {
         b.end = TimeOfDay { minutes_since_midnight: ne };
     }
+}
+
+/// Is `blocks[idx]` an *embedded* block — non-fixed, fully inside
+/// some other fixed block's day span? Re-derives what
+/// [`ChangeAction::Embedded`] produced from a saved plan, so any
+/// renderer can mark embedded meals without extra state.
+#[must_use]
+pub fn is_embedded(blocks: &[PlannedBlock], idx: usize) -> bool {
+    let Some(b) = blocks.get(idx) else {
+        return false;
+    };
+    if b.fixed {
+        return false;
+    }
+    let (s, e) = day_span(b.start, b.end);
+    blocks.iter().enumerate().any(|(i, f)| {
+        if i == idx || !f.fixed {
+            return false;
+        }
+        let (fs, fe) = day_span(f.start, f.end);
+        fs <= s && e <= fe
+    })
 }
 
 #[cfg(test)]
@@ -590,9 +665,63 @@ mod tests {
         assert!(out.blocks.iter().all(|b| b.label != "block-1"));
         assert!(out.changes.iter().any(|c| c.label == "block-1"
             && matches!(c.action, ChangeAction::Dropped { .. })));
+        // Lunch must survive: no free time anywhere near its span,
+        // but the work block covers its natural window → embedded
+        // compressed inside the fixed span (≥ MIN_KEEP_MIN).
+        let lunch = out.blocks.iter().find(|b| b.label == "lunch").unwrap();
+        assert_eq!(span(lunch), (750, 780)); // 12:30–13:00, inside work
+        assert!(out.changes.iter().any(|c| c.label == "lunch"
+            && matches!(c.action, ChangeAction::Embedded { .. })));
+        let lunch_idx = out.blocks.iter().position(|b| b.label == "lunch").unwrap();
+        assert!(is_embedded(&out.blocks, lunch_idx));
         // Sleep untouched.
         let sleep = out.blocks.iter().find(|b| b.label == "sleep").unwrap();
         assert_eq!(span(sleep), (1350, 360));
+    }
+
+    #[test]
+    fn meal_embeds_inside_covering_obstacle_window() {
+        // Same rule when the cover is an external event window
+        // (recurring calendar event) rather than a fixed block.
+        // Free time exists before 8:00 but is > MAX_SHIFT_MIN away,
+        // so shift + compress both fail.
+        let blocks = vec![pb("lunch", (12, 30), (13, 30), BlockCategory::Meal, false)];
+        let out = reconcile(blocks, &[(8 * 60, 16 * 60)]);
+        assert_eq!(out.blocks.len(), 1);
+        assert_eq!(span(&out.blocks[0]), (750, 780));
+        assert!(matches!(
+            out.changes[0].action,
+            ChangeAction::Embedded { from: (750, 810), to: (750, 780) }
+        ));
+    }
+
+    #[test]
+    fn meal_prefers_real_free_time_over_embedding() {
+        // Lunch 12:30–13:30 vs work 12:00–14:00: it can shift whole
+        // (90min ≤ MAX_SHIFT_MIN; the 11:00 slot ties with 14:00
+        // and the earlier candidate wins), so it does — embedding
+        // is strictly the last resort.
+        let blocks = vec![
+            pb("work", (12, 0), (14, 0), BlockCategory::Other, true),
+            pb("lunch", (12, 30), (13, 30), BlockCategory::Meal, false),
+        ];
+        let out = reconcile(blocks, &[]);
+        let lunch = out.blocks.iter().find(|b| b.label == "lunch").unwrap();
+        assert_eq!(span(lunch), (660, 720));
+        assert!(matches!(out.changes[0].action, ChangeAction::Moved { .. }));
+    }
+
+    #[test]
+    fn non_meal_anchored_still_drops_under_fixed_cover() {
+        // Embedding is meal-only: a gym block fully covered by a
+        // fixed span (and nothing free nearby) still drops.
+        let blocks = vec![pb("gym", (12, 0), (13, 0), BlockCategory::Exercise, false)];
+        let out = reconcile(blocks, &[(8 * 60, 16 * 60)]);
+        assert!(out.blocks.is_empty());
+        assert!(matches!(
+            out.changes[0].action,
+            ChangeAction::Dropped { .. }
+        ));
     }
 
     /// Scenario from the brief: concert 19:00–23:00 + dinner-out
@@ -647,9 +776,13 @@ mod tests {
     }
 
     fn assert_no_overlaps(blocks: &[PlannedBlock]) {
+        // Embedded meals overlap their host fixed block by design —
+        // exclude them from the pairwise check.
         let mut spans: Vec<(u16, u16)> = blocks
             .iter()
-            .map(|b| day_span(b.start, b.end))
+            .enumerate()
+            .filter(|&(i, _)| !is_embedded(blocks, i))
+            .map(|(_, b)| day_span(b.start, b.end))
             .collect();
         spans.sort_unstable();
         for w in spans.windows(2) {

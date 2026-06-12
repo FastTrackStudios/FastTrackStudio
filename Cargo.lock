@@ -13555,8 +13555,10 @@ name = "scheduling-proto"
 version = "0.1.0"
 dependencies = [
  "architect 0.1.0",
+ "chrono",
  "facet",
  "fake",
+ "rrule",
  "sea-orm",
  "serde",
  "serde_json",
@@ -17108,7 +17110,7 @@ dependencies = [
  "dioxus-sdk-time",
  "fts-ui",
  "indexmap 2.14.0",
- "rrule",
+ "scheduling-proto",
  "serde",
  "serde_json",
  "tracing",
