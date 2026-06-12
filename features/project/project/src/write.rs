@@ -1,9 +1,11 @@
 //! `ProjectInfo` → markdown bytes + write-to-disk.
 //!
-//! `id: <uuid>` is always emitted — first-write callers
-//! (`scan_vault::ensure_id`) backfill before write, so the
-//! file on disk always carries a stable identity downstream
-//! features can FK against.
+//! `id: <uuid>` is always emitted (nil ids are backfilled
+//! here), so the file on disk always carries a stable identity
+//! downstream features can FK against. Pages that were never
+//! written through this path parse with a deterministic
+//! uuid-v5-of-path fallback (see `parse_page`), which this
+//! writer persists on the next save.
 
 use std::path::{Path, PathBuf};
 
