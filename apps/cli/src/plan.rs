@@ -34,9 +34,13 @@
 //!   category, then a chronological squeeze: fixed blocks never
 //!   move; anchored routine blocks (meals/sleep/reset/…) shift up
 //!   to 2h or compress; flexible blocks (allocatable/maintenance/
-//!   other) shrink in place or drop. Every change is printed —
-//!   nothing is lost silently. Blocks crossing midnight are cut
-//!   at 24:00 for the date being reconciled.
+//!   other) shrink in place or drop. A meal whose window is fully
+//!   covered by a fixed block embeds compressed *inside* it
+//!   instead of dropping (rendered "(embedded)"). Every change is
+//!   printed — nothing is lost silently. Blocks crossing midnight
+//!   are cut at 24:00 for the date being reconciled; `plan event
+//!   add` materializes the after-midnight tail of a wrapping
+//!   one-off event as a fixed block on the next date.
 //!
 //! Lives in its own module so concurrent agents editing
 //! `main.rs` only collide on the two-line dispatch arm.
@@ -845,6 +849,12 @@ pub(crate) fn render_plan(plan: &DayPlan) -> String {
     for (i, b) in plan.blocks.iter().enumerate() {
         out.push_str("  ");
         out.push_str(&render_block_line(i, b));
+        // A non-fixed block fully inside a fixed block's span is an
+        // embedded break (a meal compressed inside a work shift by
+        // reconcile) — mark it so the overlap reads as intentional.
+        if scheduling_proto::resolve::is_embedded(&plan.blocks, i) {
+            out.push_str("  (embedded)");
+        }
         out.push('\n');
     }
     out
@@ -991,11 +1001,16 @@ fn render_day_view(v: &DayView) -> String {
     if v.resolved.is_empty() {
         out.push_str("  (no blocks — no saved plan and no day template)\n");
     }
+    let resolved_blocks: Vec<PlannedBlock> =
+        v.resolved.iter().map(|r| r.block.clone()).collect();
     for (i, rb) in v.resolved.iter().enumerate() {
         out.push_str("  ");
         out.push_str(&render_block_line(i, &rb.block));
         if rb.soft {
             out.push_str("  (soft)");
+        }
+        if scheduling_proto::resolve::is_embedded(&resolved_blocks, i) {
+            out.push_str("  (embedded)");
         }
         out.push('\n');
         // Meal preview: what's planned for this block's slot.
@@ -1725,6 +1740,14 @@ fn fmt_change(c: &ReconcileChange) -> String {
         }
         ChangeAction::Dropped { from, reason } => {
             format!("dropped \"{}\" {} — {}", c.label, fmt_span(*from), reason)
+        }
+        ChangeAction::Embedded { from, to } => {
+            format!(
+                "embedded \"{}\" {} → {} (inside a fixed block)",
+                c.label,
+                fmt_span(*from),
+                fmt_span(*to)
+            )
         }
     }
 }
