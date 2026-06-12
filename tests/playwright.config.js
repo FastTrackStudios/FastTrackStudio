@@ -24,12 +24,12 @@ const path = require("path");
 // users might have a long-running dev session on). Override via
 // `PW_PORT=…` if 9091 is also taken.
 const PORT = parseInt(process.env.PW_PORT || "9091", 10);
-// `features/editor/` is now a subdir of the Task workspace
-// rather than the editor's own repo root. We still launch
-// `dx serve --package playground` from the workspace root so
-// dx finds the (single) Cargo manifest + the playground's
-// Dioxus.toml via package resolution.
-const workspaceRoot = path.resolve(__dirname, "../../..");
+// The editor lives in its own repo again (it was a Task subdir
+// for a while — this used to climb three levels). `tests/` sits
+// directly under the workspace root; launch `dx serve --package
+// playground` from there so dx finds the Cargo manifest + the
+// playground's Dioxus.toml via package resolution.
+const workspaceRoot = path.resolve(__dirname, "..");
 
 module.exports = defineConfig({
   testDir: ".",
