@@ -1,0 +1,22 @@
+[package]
+name = "wiki-archive"
+description = "URL archiving front-end for the wiki feature. Routes a URL (or local file) to a content extractor — readability articles, Google Docs export, yt-dlp video transcripts — and emits provenance-stamped markdown ready for the unchanged raw→ingest pipeline. Also hosts the bookmark-service importers (Readwise, Karakeep, Pocket, Netscape HTML) as batch front-ends to the same router."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# WHATWG URL parsing — the router's canonicalization (host
+# normalization, tracking-param strip, provider-specific
+# rewrites) needs a real URL model, not string hacks.
+url = "2.5"
+
+[lints]
+workspace = true

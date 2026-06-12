@@ -15060,6 +15060,7 @@ dependencies = [
  "vox",
  "vox-core",
  "walkdir",
+ "wiki-archive",
  "wiki-graph",
  "wiki-live",
  "wiki-proto",
@@ -17587,6 +17588,17 @@ name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
+name = "wiki-archive"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "sha2",
+ "thiserror 2.0.18",
+ "tracing",
+ "url",
+]
 
 [[package]]
 name = "wiki-extract"
