@@ -26,8 +26,8 @@ example = { path = "../../example", features = ["vox"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server.
-vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
 wasm-bindgen = "=0.2.118"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"

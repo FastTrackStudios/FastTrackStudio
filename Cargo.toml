@@ -133,10 +133,10 @@ heck = "0.5"
 # describes them as `String` in the schema so plan-based/wasm decode
 # agrees. The client crates (examples/app/{ui,desktop,tests/web}) pin the
 # SAME rev so server + clients share one coherent wire schema.
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-types = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "1db8b13904e5a74fedc22f95eb07071a24258191" }
+vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-types = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
+vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "b3d806f868c7b1247564d0c0b27fd35d1b41cfd8" }
 
 # Loro — CRDT engine. Local-first state lives inside a LoroDoc;
 # SeaORM stores the doc's snapshot + update log as opaque bytes.
