@@ -290,6 +290,10 @@ pub fn Editor(
     // the whole doc even when we `stopPropagation` in capture
     // phase on the editor root.
     let widget_focus = use_signal(|| false);
+    // True while the editor root (or a descendant) holds DOM focus.
+    // Gates the painted modal caret — like the native caret, it must
+    // not render on an unfocused editor.
+    let editor_focused = use_signal(|| false);
     // Trigger-autocomplete open state (`[[` / `#`). Owned by the
     // editor (unlike `slash`, which the host threads in) because the
     // host's only contract is the candidate source prop.
@@ -2442,7 +2446,7 @@ pub fn Editor(
                 // `caret-shape` is Chromium-only as of 2026; Firefox
                 // shows a bar), so non-insert vim modes paint theirs
                 // as a decoration and CSS hides the native caret.
-                v.extend(modal_caret_decoration(&s, vim));
+                v.extend(modal_caret_decoration(&s, vim, editor_focused));
                 v.sort_by_key(|d| d.from);
                 v
             };
@@ -2561,6 +2565,21 @@ pub fn Editor(
             contenteditable: "{contenteditable}",
             spellcheck: "false",
             onkeydown: on_keydown,
+            // Focus tracking for the painted modal caret: like the
+            // native caret, it must not render until the user
+            // actually focuses (clicks into) the editor.
+            onfocusin: move |_| {
+                let mut focused = editor_focused;
+                if !*focused.peek() {
+                    focused.set(true);
+                }
+            },
+            onfocusout: move |_| {
+                let mut focused = editor_focused;
+                if *focused.peek() {
+                    focused.set(false);
+                }
+            },
         }
         if let Some(popup) = hover_state.read().clone() {
             crate::hover::HoverTooltipView { popup }
@@ -2583,16 +2602,19 @@ pub fn Editor(
 /// everywhere; `.editor-root.vim-mode-*` CSS hides the native caret
 /// in the painted modes.
 ///
-/// Reading the vim signal here (from the patch effect) subscribes the
-/// effect to mode flips, so i↔Esc repaints immediately.
+/// Reading the vim and focus signals here (from the patch effect)
+/// subscribes the effect to mode flips and focus changes, so i↔Esc
+/// and click-in/click-away repaint immediately. Nothing paints while
+/// the editor is unfocused — same contract as the native caret.
 fn modal_caret_decoration(
     s: &EditorState,
     vim: Option<Signal<editor_vim::VimState>>,
+    focused: Signal<bool>,
 ) -> Vec<DecoratedRange> {
     let Some(vim) = vim else {
         return Vec::new();
     };
-    if s.reading_mode {
+    if !focused() || s.reading_mode {
         return Vec::new();
     }
     let class = match vim.read().mode {
