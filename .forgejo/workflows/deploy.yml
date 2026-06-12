@@ -10,6 +10,10 @@
 # The deploy target isn't wired yet — steps below build everything and
 # stop at a placeholder gate so flipping production on later is one
 # edit, not a pipeline project.
+#
+# NOTE: container-based deployment now exists — images.yml pushes
+# task-server / task-web / task-ui-lab images on dev+main pushes, and
+# ArgoCD deploys deploy/chart/task from this repo. See deploy/README.md.
 name: deploy
 on:
   push:

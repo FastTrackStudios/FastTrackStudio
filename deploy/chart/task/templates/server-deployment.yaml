@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "task.fullname" . }}-server
+  labels:
+    {{- include "task.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  replicas: {{ .Values.server.replicas }}
+  # Single-writer sqlite + one PVC: never run two servers against the
+  # same data dir mid-rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "task.selectorLabels" (dict "ctx" . "component" "server") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "task.selectorLabels" (dict "ctx" . "component" "server") | nindent 8 }}
+      {{- with .Values.server.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: server
+          image: {{ include "task.image" (dict "ctx" . "img" .Values.server.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: TASK_DATA_ROOT
+              value: /data
+            - name: TASK_SERVER_BIND
+              value: 0.0.0.0:8080
+            {{- with (include "task.publicUrl" .) }}
+            - name: TASK_SERVER_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- range $name, $value := .Values.server.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- with .Values.server.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /.well-known/task-server.json
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /.well-known/task-server.json
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- with .Values.server.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.server.persistence.existingClaim | default (printf "%s-data" (include "task.fullname" .)) }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
