@@ -457,6 +457,12 @@ inventory-proto = { path = "features/inventory/inventory-proto", default-feature
 # `fitness` feature depends on `mealplan` for nutrition data.
 # See `plans/cooklang-migration.md`.
 cookbook = { path = "features/mealplan/cookbook" }
+# `recipe-import` — `task recipe import <url>`: webpage → NormalizedRecipe
+# (cooklang-import's JSON-LD/microdata/HTML-class extractors) → `.cook`
+# (LLM-primary synthesis with parser validation, heuristic fallback for
+# `--offline`). CLI-only, native-only; saving goes through the existing
+# `CookbookService` create/update RPC, never raw fs.
+recipe-import = { path = "features/mealplan/recipe-import" }
 # `cookbook-proto` is wasm-clean — holds the `Nutrition` macro
 # shape so `fitness-proto` (and the web UI) can bind to it
 # without pulling the vault-backed `cookbook` crate. The
