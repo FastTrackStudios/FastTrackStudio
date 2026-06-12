@@ -8,6 +8,7 @@
 pub mod app;
 pub mod auth;
 pub mod chrome;
+pub mod document_session;
 pub mod feeds;
 pub mod forge_views;
 pub mod gantt_adapt;
@@ -21,6 +22,7 @@ pub mod server_registry;
 pub mod shell;
 pub mod task_wiring;
 pub mod theming;
+pub mod vault_lookup;
 pub mod vox_clients;
 pub mod vox_session;
 

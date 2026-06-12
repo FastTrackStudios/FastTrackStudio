@@ -25,12 +25,20 @@
 mod error;
 mod event;
 mod file;
+mod graph;
 mod manifest;
 mod page;
 mod page_meta;
 mod service;
 
 pub use error::VaultSyncError;
+// Link-graph read surface (separate service from `VaultSync`).
+// The prelude carries the architect-emitted vox bits under
+// glob-safe names: `VaultGraphClient`, `VaultGraphRpcDispatcher`,
+// `vault_graph_rpc_service_descriptor`, `vault_graph_serve`,
+// `vault_graph_layer`, `VaultGraphService`.
+pub use graph::prelude::*;
+pub use graph::{GraphLink, GraphUnresolved, TagCount};
 pub use event::VaultEvent;
 pub use file::{FileBytes, IfMatch, PutAck};
 pub use manifest::{Manifest, ManifestEntry};

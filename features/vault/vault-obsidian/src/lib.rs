@@ -32,7 +32,12 @@ pub mod vault;
 pub mod walker;
 pub mod watcher;
 
+// `VaultGraph` RPC backend over `LinkIndex` — the wire face of
+// the link queries below, mounted next to the sync backend.
+pub mod graph;
+
 pub use config::{ObsidianConfig, read_obsidian_config};
+pub use graph::GraphBackend;
 pub use guard::SelfWriteGuard;
 pub use links::{LinkIndex, OutgoingLink, UnresolvedLink};
 pub use vault::{LoadError, SaveError, Vault, VaultBase, VaultEntryRef, VaultPage};

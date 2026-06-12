@@ -134,3 +134,10 @@ pub async fn project_client(slug: &str) -> Result<project::ProjectServiceClient,
 pub async fn vault_client(slug: &str) -> Result<vault_proto::VaultSyncClient, String> {
     establish_for::<vault_proto::VaultSyncClient>(slug).await
 }
+
+/// An org's `VaultGraphClient` — link-graph reads (backlinks /
+/// links / orphans / unresolved / deadends / tags) for the vault
+/// page's backlinks panel and the editor's tag candidates.
+pub async fn vault_graph_client(slug: &str) -> Result<vault_proto::VaultGraphClient, String> {
+    establish_for::<vault_proto::VaultGraphClient>(slug).await
+}
