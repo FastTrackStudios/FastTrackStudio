@@ -21,7 +21,7 @@ on:
 
 jobs:
   release:
-    runs-on: docker
+    runs-on: nix-host
     steps:
       - uses: actions/checkout@v4
       - name: Build server (release)
