@@ -49,14 +49,20 @@ jobs:
         # runtime, so one image serves every hostname.
         # wasm-opt: dx's downloaded prebuilt binaryen SIGABRTs under the
         # runner's service environment (works interactively — same
-        # binary, same machine). Delete any downloaded copy and set
-        # NO_DOWNLOADS so dx resolves wasm-opt from PATH — the dev shell
-        # ships nix-built binaryen. (dx prefers an already-downloaded
-        # tool over PATH, hence the rm.)
+        # binary, same machine). Pre-seed dx's tool dir with a symlink to
+        # the dev shell's nix-built wasm-opt: dx prefers an installed
+        # tool, so the broken download never happens. (NO_DOWNLOADS is
+        # NOT used — it's global and breaks wasm-bindgen version
+        # resolution.) The binaryen-129 dir name is dx 0.7.9's pinned
+        # BINARYEN_VERSION (cli/src/wasm_opt.rs); a dx upgrade that bumps
+        # it just re-downloads and this seed becomes inert.
         run: |
           rm -rf ~/.local/share/.dx/tools/binaryen-*
-          nix develop .#playwright --command bash -c \
-            'cd apps/web && env -u TASK_VOX_URL_WEB NO_DOWNLOADS=1 dx build --platform web --release'
+          nix develop .#playwright --command bash -c '
+            set -e
+            mkdir -p ~/.local/share/.dx/tools/binaryen-129/bin
+            ln -sf "$(command -v wasm-opt)" ~/.local/share/.dx/tools/binaryen-129/bin/wasm-opt
+            cd apps/web && env -u TASK_VOX_URL_WEB dx build --platform web --release'
           rm -rf deploy/docker/web-public
           cp -r target/dx/task-app-web/release/web/public deploy/docker/web-public
 
