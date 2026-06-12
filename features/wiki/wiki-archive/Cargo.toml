@@ -37,6 +37,17 @@ serde_json = { workspace = true }
 # yt-dlp runs as an async subprocess (`tokio::process`) with
 # a hard timeout — never let a stuck extractor wedge the CLI.
 tokio = { workspace = true }
+# Netscape bookmarks HTML is famously malformed (unclosed
+# <DT>/<DD> everywhere); scraper rides html5ever, whose
+# error recovery parses it the way browsers do.
+scraper = "0.27"
+# Pocket exports are a zip of CSV part files + annotation
+# JSON. Same pure-Rust `zip` config as wiki-extract.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Pocket's CSV has quoted titles with embedded commas and a
+# legacy column variant — header-name driven parsing via a
+# real CSV reader, not split(',').
+csv = "1.3"
 
 [lints]
 workspace = true

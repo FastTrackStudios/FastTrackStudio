@@ -32,6 +32,7 @@
 //! glue stays a single code path.
 
 pub mod article;
+pub mod import;
 pub mod provenance;
 pub mod router;
 pub mod youtube;
