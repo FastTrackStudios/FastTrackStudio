@@ -147,5 +147,13 @@ tracing = { workspace = true }
 # `--server ws://...` every time.
 dotenvy = "0.15"
 
+[features]
+# Local whisper transcription for `task wiki archive`
+# podcast routes. Off by default: enabling it compiles
+# whisper.cpp (cmake + C++) and first use downloads a model
+# (~466 MB for `small`). The feed transcript-tag fast path
+# and the Groq backfill work without it.
+whisper = ["wiki-archive/whisper"]
+
 [lints]
 workspace = true

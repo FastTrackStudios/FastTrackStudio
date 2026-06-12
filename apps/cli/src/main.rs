@@ -2622,6 +2622,30 @@ struct WikiArchiveArgs {
     /// directory or the system library path at runtime.
     #[arg(long, env = "TASK_PDFTOTEXT", default_value = "pdftotext")]
     pdftotext: String,
+    /// Podcast episode picker for show-level URLs: a title
+    /// (or substring) matched against the feed. Episode
+    /// links (`?i=` on Apple) resolve without this; without
+    /// either, the latest episode is archived.
+    #[arg(long)]
+    episode: Option<String>,
+    /// Podcast transcript strategy: `auto` (feed transcript
+    /// tag, then local whisper when compiled in), `tag`
+    /// (feed tag only), `groq` (Groq API backfill,
+    /// needs GROQ_API_KEY, ~$0.04/audio-hour), `whisper`
+    /// (local model — requires a `--features whisper` build),
+    /// `none` (metadata + show notes only).
+    #[arg(long, default_value = "auto")]
+    transcribe: String,
+    /// Whisper model: a name (`small` dev default;
+    /// `large-v3-turbo` for production quality) cached under
+    /// ~/.cache/task/whisper/ and downloaded on first use, or
+    /// a path to a ggml .bin file.
+    #[arg(long, env = "TASK_WHISPER_MODEL", default_value = "small")]
+    whisper_model: String,
+    /// ffmpeg binary for enclosure → PCM decode (whisper
+    /// path only).
+    #[arg(long, env = "TASK_FFMPEG", default_value = "ffmpeg")]
+    ffmpeg: String,
     #[arg(long, default_value = "default")]
     wiki_id: String,
     #[arg(long)]
@@ -9635,14 +9659,113 @@ async fn archive_extract_url(
             );
             Ok((prov, md))
         }
-        wiki_archive::Route::ApplePodcast { .. } | wiki_archive::Route::SpotifyPodcast { .. } => {
-            // Filled in by the podcast slice (resolver + RSS +
-            // transcript fast path) — classification landed
-            // with the PDF slice so canonical dedup keys are
-            // stable from day one.
-            Err(eyre::eyre!(
-                "podcast archiving not wired yet for {target} (next slice)"
-            ))
+        wiki_archive::Route::ApplePodcast {
+            podcast_id,
+            episode_id,
+        } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let show = wiki_archive::podcast::apple_lookup_feed(&client, &podcast_id)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            // Episode links need the entity=podcastEpisode
+            // listing — a direct lookup of the episode id
+            // returns 0 results.
+            let episode_hint = match (&episode_id, &args.episode) {
+                (Some(ep), _) => {
+                    let hint = wiki_archive::podcast::apple_lookup_episode_title(
+                        &client,
+                        &podcast_id,
+                        ep,
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("{e}"))?;
+                    if hint.is_none() {
+                        println!(
+                            "note: episode id {ep} not in the show's latest 200 — archiving the latest episode instead (pass --episode <title> to pick)"
+                        );
+                    }
+                    hint
+                }
+                (None, Some(title)) => Some(title.clone()),
+                (None, None) => None,
+            };
+            archive_podcast_from_feed(
+                target,
+                canonical,
+                args,
+                &client,
+                &show.feed_url,
+                show.show_title.as_deref(),
+                episode_hint.as_deref(),
+            )
+            .await
+        }
+        wiki_archive::Route::SpotifyPodcast { .. } => {
+            let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
+            let oembed_title = wiki_archive::podcast::spotify_oembed_title(&client, target)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?;
+            // Podcast Index title-search: the only route from a
+            // Spotify URL back to public RSS. Best-effort.
+            let pi_key = std::env::var("PODCASTINDEX_API_KEY").ok().filter(|s| !s.is_empty());
+            let pi_secret =
+                std::env::var("PODCASTINDEX_API_SECRET").ok().filter(|s| !s.is_empty());
+            if let (Some(key), Some(secret)) = (pi_key, pi_secret) {
+                match wiki_archive::podcast::podcastindex_feed_by_title(
+                    &client,
+                    &key,
+                    &secret,
+                    &oembed_title,
+                )
+                .await
+                {
+                    Ok(Some(feed_url)) => {
+                        println!("podcastindex resolved a public feed: {feed_url}");
+                        return archive_podcast_from_feed(
+                            target,
+                            canonical,
+                            args,
+                            &client,
+                            &feed_url,
+                            None,
+                            Some(&oembed_title),
+                        )
+                        .await;
+                    }
+                    Ok(None) => println!(
+                        "podcastindex: no feed matched `{oembed_title}` — falling back to metadata-only"
+                    ),
+                    Err(e) => println!("podcastindex lookup failed ({e}) — falling back to metadata-only"),
+                }
+            }
+            // Honest metadata-only archive: Spotify exposes no
+            // public audio stream or transcript.
+            let item = wiki_archive::feed::FeedItem {
+                title: oembed_title.clone(),
+                ..Default::default()
+            };
+            let body = wiki_archive::podcast::render_podcast_markdown(
+                None,
+                &item,
+                &[],
+                Some(
+                    "Spotify-exclusive: Spotify exposes no public audio stream or \
+                     transcript for this episode, so only metadata could be archived. \
+                     If the show also publishes a public RSS feed, archive its Apple \
+                     Podcasts page or feed URL instead — or set PODCASTINDEX_API_KEY / \
+                     PODCASTINDEX_API_SECRET so Task can resolve it by title.",
+                ),
+            );
+            let title = args.title.clone().unwrap_or(oembed_title);
+            let mut prov = wiki_archive::Provenance::new(
+                title,
+                target,
+                canonical,
+                content_type,
+                "spotify-oembed",
+            );
+            prov.media = Some(target.to_string());
+            Ok((prov, body))
         }
         wiki_archive::Route::YouTube { .. } | wiki_archive::Route::Video => {
             let yt = wiki_archive::youtube::YtDlp::new(yt_dlp);
@@ -9716,6 +9839,165 @@ async fn archive_pdf_from_bytes(
     let body = format!("_{page_count} page(s)_\n\n{body}");
     let prov = wiki_archive::Provenance::new(title, target, canonical, "pdf", engine);
     Ok((prov, body))
+}
+
+/// Archive one podcast episode from its RSS feed: pick the
+/// episode, resolve a transcript (feed `<podcast:transcript>`
+/// tag fast path → Groq backfill → local whisper, governed by
+/// `--transcribe`), render `^t<sec>`-anchored markdown.
+async fn archive_podcast_from_feed(
+    target: &str,
+    canonical: String,
+    args: &WikiArchiveArgs,
+    client: &reqwest::Client,
+    feed_url: &str,
+    show_title: Option<&str>,
+    episode_hint: Option<&str>,
+) -> eyre::Result<(wiki_archive::Provenance, String)> {
+    let xml = wiki_archive::article::fetch_text(client, feed_url, "application/rss+xml,*/*")
+        .await
+        .map_err(|e| eyre::eyre!("feed {feed_url}: {e}"))?;
+    let feed = wiki_archive::feed::parse_feed(&xml).map_err(|e| eyre::eyre!("{e}"))?;
+    let show_title = show_title.or(if feed.title.is_empty() { None } else { Some(&feed.title) });
+    let item = wiki_archive::feed::pick_episode(&feed, episode_hint).ok_or_else(|| {
+        let sample: Vec<&str> = feed.items.iter().take(5).map(|i| i.title.as_str()).collect();
+        eyre::eyre!(
+            "no episode matched `{}` — recent episodes: {}",
+            episode_hint.unwrap_or("<latest>"),
+            sample.join(" | ")
+        )
+    })?;
+
+    let (cues, extractor, note) = podcast_transcript_cues(args, client, item).await?;
+    let blocks =
+        wiki_archive::youtube::coalesce_cues(&cues, wiki_archive::youtube::DEFAULT_BLOCK_SECS);
+    let body =
+        wiki_archive::podcast::render_podcast_markdown(show_title, item, &blocks, note.as_deref());
+    let title = args.title.clone().unwrap_or_else(|| item.title.clone());
+    let mut prov =
+        wiki_archive::Provenance::new(title, target, canonical, "podcast", extractor);
+    // `media:` = the playable enclosure — the SourceViewer's
+    // audio player + seek-on-anchor reads this.
+    prov.media = item.enclosure_url.clone().or_else(|| Some(target.to_string()));
+    prov.duration_secs = item.duration_secs;
+    Ok((prov, body))
+}
+
+/// Transcript ladder for one episode, honest at every rung.
+/// Returns `(cues, extractor-label, note-when-empty)`.
+async fn podcast_transcript_cues(
+    args: &WikiArchiveArgs,
+    client: &reqwest::Client,
+    item: &wiki_archive::feed::FeedItem,
+) -> eyre::Result<(Vec<wiki_archive::youtube::Cue>, String, Option<String>)> {
+    let mode = args.transcribe.as_str();
+    if !matches!(mode, "auto" | "tag" | "groq" | "whisper" | "none") {
+        return Err(eyre::eyre!(
+            "--transcribe must be auto|tag|groq|whisper|none (got `{mode}`)"
+        ));
+    }
+    if mode == "none" {
+        return Ok((Vec::new(), "podcast-feed".into(), Some("Transcript skipped (--transcribe none).".into())));
+    }
+
+    // ── Fast path: the feed's own transcript tag ────────
+    if matches!(mode, "auto" | "tag") {
+        for tref in wiki_archive::transcript::pick_transcripts(&item.transcripts) {
+            let accept = if tref.mime.is_empty() { "*/*" } else { &tref.mime };
+            match wiki_archive::article::fetch_text(client, &tref.url, accept).await {
+                Ok(content) => {
+                    match wiki_archive::transcript::parse_transcript(&content, &tref.mime) {
+                        Ok(cues) => {
+                            return Ok((cues, "podcast-transcript-tag".into(), None));
+                        }
+                        Err(e) => println!("note: transcript {} unusable: {e}", tref.url),
+                    }
+                }
+                Err(e) => println!("note: transcript fetch {} failed: {e}", tref.url),
+            }
+        }
+        if mode == "tag" {
+            return Ok((
+                Vec::new(),
+                "podcast-feed".into(),
+                Some(
+                    "No usable transcript tag in the feed (--transcribe tag stops here; \
+                     try groq or whisper)."
+                        .into(),
+                ),
+            ));
+        }
+    }
+
+    // ── Backfills need the audio itself ─────────────────
+    let fetch_audio = || async {
+        let url = item
+            .enclosure_url
+            .as_deref()
+            .ok_or_else(|| eyre::eyre!("episode has no enclosure URL — nothing to transcribe"))?;
+        let enc = wiki_archive::podcast::enclosure_client().map_err(|e| eyre::eyre!("{e}"))?;
+        // Stacked redirect trackers are normal here; the
+        // enclosure client follows a deeper chain.
+        let (_ct, bytes) = wiki_archive::article::fetch_bytes(&enc, url, "audio/*,*/*")
+            .await
+            .map_err(|e| eyre::eyre!("enclosure {url}: {e}"))?;
+        eyre::Ok(bytes)
+    };
+
+    if mode == "groq" {
+        let key = std::env::var("GROQ_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| eyre::eyre!("--transcribe groq needs GROQ_API_KEY"))?;
+        let audio = fetch_audio().await?;
+        println!("transcribing via Groq ({} MB upload)…", audio.len() / 1_048_576);
+        let cues = wiki_archive::podcast::groq_transcribe(client, &key, audio, "episode.mp3")
+            .await
+            .map_err(|e| eyre::eyre!("{e}"))?;
+        return Ok((cues, "groq-whisper-large-v3-turbo".into(), None));
+    }
+
+    // mode is now `whisper` or `auto`-falling-through.
+    #[cfg(feature = "whisper")]
+    {
+        let audio = fetch_audio().await?;
+        println!(
+            "transcribing locally (whisper, model `{}`)…",
+            args.whisper_model
+        );
+        let cues = wiki_archive::whisper::transcribe_enclosure(
+            client,
+            &args.whisper_model,
+            &args.ffmpeg,
+            audio,
+        )
+        .await
+        .map_err(|e| eyre::eyre!("{e}"))?;
+        let label = format!("whisper-rs-{}", args.whisper_model);
+        return Ok((cues, label, None));
+    }
+    #[cfg(not(feature = "whisper"))]
+    {
+        let _ = &args.whisper_model;
+        let _ = &args.ffmpeg;
+        let _ = fetch_audio; // audio only fetched when a backfill can use it
+        if mode == "whisper" {
+            return Err(eyre::eyre!(
+                "this build has no local whisper — rebuild the CLI with `--features whisper`, \
+                 or use --transcribe groq (GROQ_API_KEY)"
+            ));
+        }
+        Ok((
+            Vec::new(),
+            "podcast-feed".to_string(),
+            Some(
+                "No transcript tag in the feed. Re-run with --transcribe groq \
+                 (GROQ_API_KEY, ~$0.04/audio-hour) or a `--features whisper` build \
+                 for local transcription."
+                    .to_string(),
+            ),
+        ))
+    }
 }
 
 /// `task wiki archive import <kind>` — run one importer and

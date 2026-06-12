@@ -29,8 +29,17 @@ dom_smoothie = "0.18"
 # wrongly re-prune content.
 htmd = "0.5"
 # Article + subtitle-track fetches. Workspace config =
-# rustls, no openssl.
-reqwest = { workspace = true }
+# rustls, no openssl. `multipart` is for the Groq
+# transcription backfill (audio file upload).
+reqwest = { workspace = true, features = ["multipart"] }
+# Podcast RSS feeds are XML (with CDATA + the podcasting-2.0
+# `podcast:transcript` namespace) — scraper/html5ever would
+# silently mangle them; quick-xml parses them properly.
+quick-xml = "0.38"
+# Podcast Index API auth is sha1(key+secret+date) in an
+# Authorization header. RustCrypto sibling of the sha2 we
+# already carry.
+sha1 = "0.10"
 # yt-dlp `-J` probe output + json3 subtitle tracks + the
 # importer API payloads (Readwise/Karakeep) are all JSON.
 serde_json = { workspace = true }
@@ -54,9 +63,18 @@ csv = "1.3"
 # runtime (nothing bundled; TASK_PDFIUM or system lib).
 pdfium-render = { version = "0.8", optional = true }
 
+# Local whisper transcription. The repo MOVED to codeberg
+# (github.com/tazz4843/whisper-rs is archived) — pinned to a
+# codeberg rev, not crates.io, per the move. Compiling this
+# builds whisper.cpp via cmake, hence the off-by-default
+# feature: the `<podcast:transcript>` fast path and the Groq
+# backfill cover most episodes without any local model.
+whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "129b9826dc8c385f6a28198bdc4f8a275385fe85", optional = true }
+
 [features]
 default = []
 pdf = ["dep:pdfium-render"]
+whisper = ["dep:whisper-rs"]
 
 [lints]
 workspace = true

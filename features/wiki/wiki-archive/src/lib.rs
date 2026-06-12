@@ -32,10 +32,15 @@
 //! glue stays a single code path.
 
 pub mod article;
+pub mod feed;
 pub mod import;
 pub mod pdf;
+pub mod podcast;
 pub mod provenance;
 pub mod router;
+pub mod transcript;
+#[cfg(feature = "whisper")]
+pub mod whisper;
 pub mod youtube;
 
 pub use provenance::{Provenance, canon_hash8, compose_source_markdown, find_canonical_match};
