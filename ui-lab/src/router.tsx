@@ -22,7 +22,7 @@ import { AccountSwitcher } from "./components/account-switcher";
 import { OrgSwitcher } from "./components/org-switcher";
 import { Separator } from "./components/ui/separator";
 import { TooltipProvider } from "./components/ui/tooltip";
-import { ProjectDetailPage } from "./routes/project-detail";
+import { ProjectOverviewPage } from "./routes/project-overview";
 import { ProjectsPage } from "./routes/projects";
 
 const rootRoute = createRootRoute({
@@ -77,7 +77,7 @@ const projectsRoute = createRoute({
 const projectOverviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$org/$projectId",
-  component: ProjectDetailPage,
+  component: ProjectOverviewPage,
 });
 
 const routeTree = rootRoute.addChildren([
