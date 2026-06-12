@@ -62,6 +62,9 @@ locations = { workspace = true, features = ["vox"] }
 inbox-proto = { workspace = true, features = ["vox"] }
 threads = { workspace = true, features = ["vox"] }
 cookbook = { workspace = true, features = ["vox"] }
+# `task recipe import <url>` — fetch/extract/synthesize pipeline; the
+# CLI only shells data between it and the CookbookService client.
+recipe-import = { workspace = true }
 mealplan = { workspace = true, features = ["vox"] }
 pantry = { workspace = true, features = ["vox"] }
 # `task recipe create|update` validate cooklang before saving and

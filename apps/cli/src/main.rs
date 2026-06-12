@@ -23,6 +23,7 @@ mod json_out;
 mod mealprep;
 mod org_ctx;
 mod plan;
+mod recipe_import;
 mod session_store;
 mod shared;
 mod workstream;
@@ -752,6 +753,10 @@ enum RecipeCmd {
     /// Author a new `.cook` recipe (validates the cooklang by
     /// parsing before anything is written).
     Create(mealprep::RecipeCreateArgs),
+    /// Import a recipe from a webpage (schema.org/Recipe → cooklang;
+    /// LLM-synthesized, `--offline` for the deterministic converter,
+    /// `--from-file` for bot-protected sites).
+    Import(recipe_import::RecipeImportArgs),
     /// Replace an existing recipe's cooklang source (validates
     /// by parsing first).
     Update(mealprep::RecipeUpdateArgs),
@@ -16432,6 +16437,7 @@ async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
             }
         }
         RecipeCmd::Create(a) => return mealprep::recipe_create(a).await,
+        RecipeCmd::Import(a) => return recipe_import::recipe_import(a).await,
         RecipeCmd::Update(a) => return mealprep::recipe_update(a).await,
         RecipeCmd::Show(a) => return mealprep::recipe_show(a).await,
         RecipeCmd::CanCook(a) => return mealprep::recipe_can_cook(a).await,
