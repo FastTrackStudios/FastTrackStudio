@@ -248,14 +248,24 @@ pub fn on_editor_transaction(
     publish_cursor(c, session, event, who);
 }
 
-/// Debounced presence publish: `{name, anchor, head}` in unicode
-/// scalar units (Loro's native text addressing), under this client's
-/// session key. Fires for selection-only transactions too — that's
-/// the point.
+/// Debounced presence publish: `{name, anchor_c, head_c}` where the
+/// `_c` values are **encoded Loro stable cursors** minted against the
+/// shared replica, plus legacy `{anchor, head}` scalar ints for
+/// mixed-version peers. Fires for selection-only transactions too —
+/// that's the point.
+///
+/// Stable cursors are the fix for "their caret walks backwards
+/// through my word": a raw scalar published at time T stays fixed
+/// while MY local inserts shift the text under it, so between the
+/// peer's debounced republishes their caret visually drifts. A Loro
+/// cursor is anchored to the character identity instead; every
+/// viewer resolves it against their *own* current doc state
+/// (`get_cursor_pos`), so local edits move remote carets correctly
+/// in real time.
 fn publish_cursor(c: &CollabHandles, session: &DocumentSession, event: &TransactionEvent, who: &str) {
     let primary = session.state.peek().selection.primary();
     let rope = event.doc_after.rope();
-    let clamp = |byte: usize| rope.byte_to_char(byte.min(rope.len_bytes())) as i64;
+    let clamp = |byte: usize| rope.byte_to_char(byte.min(rope.len_bytes()));
     let (anchor, head) = (clamp(primary.anchor), clamp(primary.head));
 
     let seq = c.cursor_seq.peek().wrapping_add(1);
@@ -271,11 +281,31 @@ fn publish_cursor(c: &CollabHandles, session: &DocumentSession, event: &Transact
             return; // a newer cursor superseded this one
         }
         let key = c.key.peek().clone();
-        let entries = vec![
+        let mut entries = vec![
             ("name".to_string(), crdt::loro::LoroValue::from(name)),
-            ("anchor".to_string(), crdt::loro::LoroValue::from(anchor)),
-            ("head".to_string(), crdt::loro::LoroValue::from(head)),
+            ("anchor".to_string(), crdt::loro::LoroValue::from(anchor as i64)),
+            ("head".to_string(), crdt::loro::LoroValue::from(head as i64)),
         ];
+        // Mint stable cursors against the replica at publish time
+        // (post-debounce — the replica has absorbed the edit batch).
+        // Side::Left binds the caret to the char it follows, so a
+        // collision-insert exactly at a peer's caret lands AFTER it.
+        if let Some(doc) = c.doc.doc() {
+            let text = doc.loro().get_text(COLLAB_TEXT_CONTAINER);
+            let len = text.len_unicode();
+            let mut mint = |label: &str, pos: usize| {
+                if let Some(cur) =
+                    text.get_cursor(pos.min(len), crdt::loro::cursor::Side::Left)
+                {
+                    entries.push((
+                        label.to_string(),
+                        crdt::loro::LoroValue::Binary(cur.encode().into()),
+                    ));
+                }
+            };
+            mint("anchor_c", anchor);
+            mint("head_c", head);
+        }
         let value = crdt::loro::LoroValue::Map(entries.into());
         c.presence.set(&key, value);
     });
@@ -332,9 +362,15 @@ pub fn collab_decoration_source(
 }
 
 /// One `Mark` per remote selection + one caret `Widget` (with the
-/// peer's name) per remote head. Scalar→byte through the current
-/// rope, clamped — a peer's position can momentarily outrun our
-/// replica view.
+/// peer's name) per remote head.
+///
+/// Positions resolve from the peer's published **stable cursors**
+/// against OUR replica (`get_cursor_pos`) — so our own in-flight
+/// typing shifts remote carets correctly instead of leaving them
+/// pinned to a stale scalar until the peer republishes. Falls back
+/// to the legacy raw scalars for mixed-version peers. Scalar→byte
+/// through the current rope, clamped — a peer's position can
+/// momentarily outrun our replica view.
 fn remote_cursor_decorations(
     state: &EditorState,
     c: &CollabHandles,
@@ -343,6 +379,7 @@ fn remote_cursor_decorations(
     // re-renders (and this pass re-runs) on every cursor update.
     let states = c.presence.states();
     let own = c.key.read().clone();
+    let doc = c.doc.doc();
     let rope = state.doc.rope();
     let max_char = rope.len_chars();
     let mut out = Vec::new();
@@ -358,15 +395,30 @@ fn remote_cursor_decorations(
             Some(crdt::loro::LoroValue::I64(v)) => Some(*v),
             _ => None,
         };
-        let (Some(anchor), Some(head)) = (read_i64("anchor"), read_i64("head")) else {
+        // Stable cursor first (resolved against our replica), legacy
+        // scalar as the fallback.
+        let resolve = |k_cursor: &str, k_legacy: &str| -> Option<usize> {
+            if let (Some(crdt::loro::LoroValue::Binary(bytes)), Some(doc)) =
+                (map.get(k_cursor), doc.as_ref())
+            {
+                if let Ok(cur) = crdt::loro::cursor::Cursor::decode(bytes) {
+                    if let Ok(q) = doc.loro().get_cursor_pos(&cur) {
+                        return Some(q.current.pos);
+                    }
+                }
+            }
+            read_i64(k_legacy).map(|v| usize::try_from(v.max(0)).unwrap_or(0))
+        };
+        let (Some(anchor), Some(head)) = (resolve("anchor_c", "anchor"), resolve("head_c", "head"))
+        else {
             continue;
         };
         let name = match map.get("name") {
             Some(crdt::loro::LoroValue::String(s)) => s.to_string(),
             _ => "peer".to_string(),
         };
-        let to_byte = |scalar: i64| {
-            let ch = usize::try_from(scalar.max(0)).unwrap_or(0).min(max_char);
+        let to_byte = |scalar: usize| {
+            let ch = scalar.min(max_char);
             rope.char_to_byte(ch)
         };
         let (a, h) = (to_byte(anchor), to_byte(head));
