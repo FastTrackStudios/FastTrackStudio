@@ -69,24 +69,45 @@
     position: relative;
 }
 
-/* Vim-mode caret shape. `caret-shape` is a 2026-era CSS
-   property; falls back gracefully to a normal bar in older
-   browsers. */
+/* Vim modal carets. The block/underscore shapes are PAINTED as
+   decorations (`modal_caret_decoration` in editor-view) because CSS
+   `caret-shape` is Chromium-only — Firefox/Zen silently fall back to
+   a bar caret. In the painted modes the native caret is hidden;
+   Insert and Command keep the native bar. */
 .editor-root.vim-mode-normal,
-.editor-root.vim-mode-visual {
-    caret-shape: block;
-    caret-color: var(--ed-accent);
-}
+.editor-root.vim-mode-visual,
 .editor-root.vim-mode-replace {
-    caret-shape: underscore;
-    caret-color: var(--ed-danger);
+    caret-color: transparent;
 }
 .editor-root.vim-mode-insert {
-    caret-shape: bar;
+    caret-color: var(--ed-accent);
 }
 .editor-root.vim-mode-command {
-    caret-shape: bar;
     caret-color: var(--ed-warn);
+}
+
+.ed-modal-caret-block {
+    background: var(--ed-accent);
+    color: var(--ed-bg, #1e1e2e);
+    border-radius: 1px;
+    animation: ed-modal-caret-blink 1.2s steps(1) infinite;
+}
+.ed-modal-caret-underscore {
+    box-shadow: inset 0 -2px 0 var(--ed-danger);
+    animation: ed-modal-caret-blink 1.2s steps(1) infinite;
+}
+/* Empty-cell widget: the caret legitimately occupies the cell past
+   the last char of a line in vim. */
+.ed-modal-caret-empty {
+    display: inline-block;
+    width: 0.6ch;
+}
+@keyframes ed-modal-caret-blink {
+    50% {
+        background: transparent;
+        color: inherit;
+        box-shadow: none;
+    }
 }
 
 /* Reading mode: dim the editor frame so it's clearly distinct

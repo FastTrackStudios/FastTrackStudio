@@ -2420,13 +2420,19 @@ pub fn Editor(
                 editor_state::DecoPhase::Structural
             });
             let t_decos = now_ms();
-            let decorations: Vec<DecoratedRange> = match &deco_source_patch {
-                Some(src) => {
-                    let mut v = src.run(&s);
-                    v.sort_by_key(|d| d.from);
-                    v
-                }
-                None => Vec::new(),
+            let decorations: Vec<DecoratedRange> = {
+                let mut v = match &deco_source_patch {
+                    Some(src) => src.run(&s),
+                    None => Vec::new(),
+                };
+                // Painted modal caret (block/underscore) — the native
+                // caret can't take these shapes everywhere (CSS
+                // `caret-shape` is Chromium-only as of 2026; Firefox
+                // shows a bar), so non-insert vim modes paint theirs
+                // as a decoration and CSS hides the native caret.
+                v.extend(modal_caret_decoration(&s, vim));
+                v.sort_by_key(|d| d.from);
+                v
             };
             let deco_count = decorations.len();
             let decos_ms = now_ms() - t_decos;
@@ -2554,6 +2560,51 @@ pub fn Editor(
                 on_transaction,
             }
         }
+    }
+}
+
+/// The painted modal caret: a block over the char under the cursor
+/// in Normal/Visual modes, an underscore in Replace. Insert/Command
+/// (and vim disabled) keep the native bar caret. Painted rather than
+/// CSS `caret-shape` — that property is Chromium-only (Firefox/Zen
+/// silently fall back to a bar), and a decoration renders identically
+/// everywhere; `.editor-root.vim-mode-*` CSS hides the native caret
+/// in the painted modes.
+///
+/// Reading the vim signal here (from the patch effect) subscribes the
+/// effect to mode flips, so i↔Esc repaints immediately.
+fn modal_caret_decoration(
+    s: &EditorState,
+    vim: Option<Signal<editor_vim::VimState>>,
+) -> Vec<DecoratedRange> {
+    let Some(vim) = vim else {
+        return Vec::new();
+    };
+    if s.reading_mode {
+        return Vec::new();
+    }
+    let class = match vim.read().mode {
+        editor_vim::Mode::Normal
+        | editor_vim::Mode::VisualChar
+        | editor_vim::Mode::VisualLine
+        | editor_vim::Mode::VisualBlock => "ed-modal-caret-block",
+        editor_vim::Mode::Replace => "ed-modal-caret-underscore",
+        editor_vim::Mode::Insert | editor_vim::Mode::Command => return Vec::new(),
+    };
+    let rope = s.doc.rope();
+    let head = s.selection.primary().head.min(rope.len_bytes());
+    let ch = rope.byte_to_char(head);
+    if ch < rope.len_chars() && rope.char(ch) != '\n' {
+        let end = rope.char_to_byte(ch + 1);
+        vec![DecoratedRange::mark(head..end, class)]
+    } else {
+        // End of line / end of doc: no char to paint over — drop a
+        // fixed-width block widget in the empty cell instead (vim's
+        // caret legitimately occupies the cell past the last char).
+        vec![DecoratedRange::widget(
+            head,
+            format!("<span class=\"{class} ed-modal-caret-empty\">\u{a0}</span>"),
+        )]
     }
 }
 
