@@ -203,6 +203,53 @@ pub fn VaultView() -> Element {
             .as_ref()
             .map(|c| if c.is_live() { "Collab: live" } else { "Collab: connecting…" })
     });
+    // Browser-conformance hook (tests/multiplayer): mirror the exact
+    // editor buffer + collab state into `window.__taskVault`. The
+    // decorated DOM can't be scraped back into doc text — hidden
+    // live-preview replacements render *nothing* (see editor-view's
+    // `render_dx.rs` Widget arm), so DOM reconstruction would drop
+    // those bytes. Cost is one string clone per buffer change.
+    #[cfg(target_arch = "wasm32")]
+    use_effect(move || {
+        let text = session.state.read().doc.to_string();
+        // Reading `revision()` subscribes this mirror to remote
+        // imports, so `replica` stays current; replica-vs-text is
+        // exactly the split the conformance suites need to localize
+        // a sync stall (transport vs editor-apply bridge).
+        let (live, status, rev, replica) = match &*collab.read() {
+            Some(c) => (
+                c.is_live(),
+                format!("{:?}", c.doc.status()),
+                c.doc.revision(),
+                c.doc
+                    .doc()
+                    .map(|d| {
+                        d.loro()
+                            .get_text(vault_proto::COLLAB_TEXT_CONTAINER)
+                            .to_string()
+                    })
+                    .unwrap_or_default(),
+            ),
+            None => (false, "none".to_owned(), 0, String::new()),
+        };
+        let path = selected.read().clone().unwrap_or_default();
+        let Some(win) = web_sys::window() else { return };
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: wasm_bindgen::JsValue| {
+            let _ = js_sys::Reflect::set(&obj, &wasm_bindgen::JsValue::from_str(k), &v);
+        };
+        set("text", wasm_bindgen::JsValue::from_str(&text));
+        set("live", wasm_bindgen::JsValue::from_bool(live));
+        set("status", wasm_bindgen::JsValue::from_str(&status));
+        set("rev", wasm_bindgen::JsValue::from_f64(rev as f64));
+        set("replica", wasm_bindgen::JsValue::from_str(&replica));
+        set("path", wasm_bindgen::JsValue::from_str(&path));
+        let _ = js_sys::Reflect::set(
+            &win,
+            &wasm_bindgen::JsValue::from_str("__taskVault"),
+            &obj,
+        );
+    });
     // Editor → replica bridge + presence cursor publish.
     let on_transaction = use_callback(move |event: editor::TransactionEvent| {
         let Some(c) = *collab.peek() else { return };

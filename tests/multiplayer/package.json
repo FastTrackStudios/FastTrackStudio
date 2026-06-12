@@ -1,0 +1,16 @@
+{
+  "name": "task-multiplayer-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Multiplayer conformance suites: 5-way editor convergence + 20-peer presence churn. Run from the playwright dev shell (`nix develop .#playwright`) via `./run.sh` (builds server/CLI/wasm first) or `pnpm test` against prebuilt artifacts.",
+  "scripts": {
+    "test": "playwright test",
+    "test:convergence": "playwright test convergence.spec.js",
+    "test:churn": "playwright test presence-churn.spec.js",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2"
+  }
+}
