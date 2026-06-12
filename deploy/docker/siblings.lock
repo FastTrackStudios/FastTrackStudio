@@ -21,13 +21,10 @@
 # only exists in your local checkout builds locally (siblings.sh prefers
 # local checkouts) but breaks CI and self-hosters.
 #
-# NOTE 2026-06-12: fts-ui / input_actions / daw pins below match the
-# local dev checkouts but are NOT yet reachable from any branch on
-# their remotes — push those branches before expecting CI image builds
-# to go green. Editor / architect / keyflow pins are published.
+# All pins below are published and clone-able (2026-06-12).
 Editor                          https://codeberg.org/FastTrackStudios/Editor.git           413b08fb42c1a97b27bdd6488542a660718f3cce
 architect                       https://codeberg.org/FastTrackStudios/architect.git        012ad9b2535c7821d28d0bae8064c563af156be3
-FastTrackStudio/fts-ui          https://github.com/FastTrackStudios/fts-ui.git              1c62b19e95577f95d810f0285fec9753d837e16b
+FastTrackStudio/fts-ui          https://codeberg.org/FastTrackStudios/fts-ui.git             1c62b19e95577f95d810f0285fec9753d837e16b
 FastTrackStudio/keyflow         https://codeberg.org/FastTrackStudios/keyflow.git           b45a62025d4369381d43ceaac074916966bd3cc2
-FastTrackStudio/input_actions   https://github.com/FastTrackStudios/input_actions.git       4e7f9ebf971ca4cd285466ca15ad95a54d4ef916
-FastTrackStudio/daw             https://github.com/FastTrackStudios/daw.git                 263b546e26052306c1af37ad2265fbcd04c6cbfa
+FastTrackStudio/input_actions   https://codeberg.org/FastTrackStudios/input_actions.git      4e7f9ebf971ca4cd285466ca15ad95a54d4ef916
+FastTrackStudio/daw             https://codeberg.org/FastTrackStudios/daw.git                263b546e26052306c1af37ad2265fbcd04c6cbfa
