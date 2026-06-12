@@ -86,6 +86,11 @@ pub struct TemplateBlock {
     /// Optional second line — what's assigned to the block today
     /// (a task title, project, or free label). `None` = unassigned.
     pub assignment: Option<String>,
+    /// Soft block — template fallback for a day with no explicit
+    /// plan (or the unedited remainder of a sparse one). Rendered
+    /// dashed + faded so it reads as "planned shape", not a
+    /// confirmed block.
+    pub soft: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

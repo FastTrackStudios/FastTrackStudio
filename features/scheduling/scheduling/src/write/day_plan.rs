@@ -26,6 +26,9 @@ fn serialize_block(b: &PlannedBlock) -> serde_yaml::Value {
     m.insert("start".into(), format_time(b.start).into());
     m.insert("end".into(), format_time(b.end).into());
     m.insert("category".into(), category_label(b.category).into());
+    if b.fixed {
+        m.insert("fixed".into(), true.into());
+    }
     if let Some(n) = &b.note {
         m.insert("note".into(), n.clone().into());
     }
@@ -68,6 +71,7 @@ mod tests {
                         title: "Ship the sync engine".into(),
                         ref_id: Some("abc-123".into()),
                     }),
+                    fixed: true,
                 },
                 PlannedBlock {
                     id: TimeBlockId("gym".into()),
@@ -77,6 +81,7 @@ mod tests {
                     category: BlockCategory::Exercise,
                     note: Some("long run".into()),
                     assignment: None,
+                    fixed: false,
                 },
             ]
             .into(),
