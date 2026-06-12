@@ -57,3 +57,13 @@ pub struct Message {
     #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
     pub updated_at: DateTime<Utc>,
 }
+
+/// Client-side optimistic cache identity (`architect::Store`): keyed by
+/// the stable `id`.
+#[cfg(feature = "atom")]
+impl architect::StoreEntity for Message {
+    type Key = uuid::Uuid;
+    fn key(&self) -> uuid::Uuid {
+        self.id
+    }
+}

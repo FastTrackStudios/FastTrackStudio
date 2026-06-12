@@ -29,6 +29,10 @@ fake = { version = "4", optional = true, features = ["derive"] }
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+# Client-side optimistic store (`architect::Store`): adds the
+# `architect::StoreEntity` impls UI crates key their entity caches on.
+# Pulls Dioxus via architect-atom, so it stays opt-in (UI-only).
+atom = ["architect/atom"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
 fake = ["dep:fake", "architect/fake"]
 full = ["vox", "server", "fake"]

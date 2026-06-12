@@ -107,3 +107,13 @@ impl InboxItem {
         self.status == Self::STATUS_OPEN
     }
 }
+
+/// Client-side optimistic cache identity (`architect::Store`): keyed by
+/// the stable `id`.
+#[cfg(feature = "atom")]
+impl architect::StoreEntity for InboxItem {
+    type Key = String;
+    fn key(&self) -> String {
+        self.id.clone()
+    }
+}

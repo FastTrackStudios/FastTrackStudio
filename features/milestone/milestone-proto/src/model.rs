@@ -158,3 +158,13 @@ impl Status {
         matches!(self, Self::Closed)
     }
 }
+
+/// Client-side optimistic cache identity (`architect::Store`): keyed by
+/// the stable `id`.
+#[cfg(feature = "atom")]
+impl architect::StoreEntity for Milestone {
+    type Key = uuid::Uuid;
+    fn key(&self) -> uuid::Uuid {
+        self.id
+    }
+}
