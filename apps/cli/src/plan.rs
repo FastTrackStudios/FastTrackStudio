@@ -281,8 +281,10 @@ pub enum EventCmd {
     /// Drop a fixed (immovable) event onto a date's plan and
     /// reconcile the day around it:
     /// `task plan event add 2026-06-13 "Work" 10:00-18:00`.
-    /// A range crossing midnight (e.g. `23:00-0:30`) is kept on
-    /// this date and cut at 24:00 for reconcile purposes.
+    /// A range crossing midnight (e.g. `23:00-0:30`) is cut at
+    /// 24:00 on this date; its after-midnight tail (`00:00-0:30`)
+    /// is materialized as a fixed block on the next date and that
+    /// day is reconciled too.
     Add {
         /// `today` | `tomorrow` | `YYYY-MM-DD`.
         date: String,
@@ -574,6 +576,25 @@ pub(crate) fn parse_time_range_wrap(s: &str) -> Result<(TimeOfDay, TimeOfDay, bo
     let wraps = end.minutes_since_midnight < start.minutes_since_midnight
         || end.minutes_since_midnight == 0;
     Ok((start, end, wraps))
+}
+
+/// The after-midnight tail of a wrapping `<start>-<end>` range:
+/// `Some(end)` when the range wraps past midnight and the tail is
+/// non-empty (`23:00-0:30` → tail `00:00–00:30` on the next date).
+/// `None` for non-wrapping ranges and for `…-24:00` / `…-0:00`
+/// (wraps, but ends exactly at midnight — nothing to carry).
+pub(crate) fn wrap_tail_end(end: TimeOfDay, wraps: bool) -> Option<TimeOfDay> {
+    (wraps && end.minutes_since_midnight > 0).then_some(end)
+}
+
+/// ISO date + 1 day (`2026-06-13` → `2026-06-14`).
+pub(crate) fn next_date_str(date: &str) -> eyre::Result<String> {
+    let d = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map_err(|e| eyre::eyre!("date `{date}`: {e}"))?;
+    Ok(d.succ_opt()
+        .ok_or_else(|| eyre::eyre!("date overflow"))?
+        .format("%Y-%m-%d")
+        .to_string())
 }
 
 /// `mon`/`monday`/… → `chrono::Weekday`.
@@ -1874,20 +1895,72 @@ async fn run_event(cmd: EventCmd) -> eyre::Result<()> {
             });
             sort_blocks(&mut plan.blocks);
             save_plan(&plans, plan.clone()).await?;
-            let wrap_note = if wraps {
-                " (crosses midnight — cut at 24:00 on this date)"
-            } else {
-                ""
+            // A wrapping event is cut at 24:00 on its own date; the
+            // after-midnight tail is materialized as a fixed block
+            // on the next date so it participates in that day's
+            // reconcile (concert dinner 23:00-00:30 → next day
+            // shows 00:00–00:30 fixed).
+            let tail_date = match wrap_tail_end(end, wraps) {
+                Some(tail_end) => {
+                    let nd = next_date_str(&date)?;
+                    let mut next_plan = load_plan(&plans, &nd).await?.unwrap_or(DayPlan {
+                        date: nd.clone(),
+                        from_template: None,
+                        blocks: PlannedBlocks::default(),
+                    });
+                    next_plan.blocks.push(PlannedBlock {
+                        id: TimeBlockId(format!("event-{}", uuid::Uuid::new_v4())),
+                        start: TimeOfDay {
+                            minutes_since_midnight: 0,
+                        },
+                        end: tail_end,
+                        label: title.clone(),
+                        category,
+                        note: Some(format!("continues from {date}")),
+                        assignment: None,
+                        fixed: true,
+                    });
+                    sort_blocks(&mut next_plan.blocks);
+                    save_plan(&plans, next_plan).await?;
+                    Some((nd, tail_end))
+                }
+                None => None,
+            };
+            let wrap_note = match &tail_date {
+                Some((nd, tail_end)) => format!(
+                    " (crosses midnight — 00:00–{} carried to {nd} as a fixed block)",
+                    fmt_tod(*tail_end)
+                ),
+                None if wraps => " (crosses midnight — cut at 24:00 on this date)".to_owned(),
+                None => String::new(),
             };
             if !no_reconcile {
                 let (plan, changes, n_events) = reconcile_for_date(&plans, &url, &date).await?;
+                // The tail's day reflows around the carried block too.
+                let tail_out = match &tail_date {
+                    Some((nd, _)) => Some(reconcile_for_date(&plans, &url, nd).await?),
+                    None => None,
+                };
                 if json {
                     #[derive(serde::Serialize)]
                     struct Out {
                         plan: DayPlan,
                         changes: Vec<ReconcileChange>,
+                        #[serde(skip_serializing_if = "Option::is_none")]
+                        tail_plan: Option<DayPlan>,
+                        #[serde(skip_serializing_if = "Vec::is_empty")]
+                        tail_changes: Vec<ReconcileChange>,
                     }
-                    return print_json(&Out { plan, changes });
+                    let (tail_plan, tail_changes) = match tail_out {
+                        Some((p, c, _)) => (Some(p), c),
+                        None => (None, Vec::new()),
+                    };
+                    return print_json(&Out {
+                        plan,
+                        changes,
+                        tail_plan,
+                        tail_changes,
+                    });
                 }
                 println!(
                     "added fixed \"{title}\" {}–{} on {date}{wrap_note}",
@@ -1905,6 +1978,20 @@ async fn run_event(cmd: EventCmd) -> eyre::Result<()> {
                     println!("  {}", fmt_change(c));
                 }
                 print!("{}", render_plan(&plan));
+                if let Some((tail_plan, tail_changes, tail_events)) = tail_out {
+                    println!(
+                        "reconciled {} around {} fixed block(s) + {tail_events} event window(s)",
+                        tail_plan.date,
+                        tail_plan.blocks.iter().filter(|b| b.fixed).count()
+                    );
+                    if tail_changes.is_empty() {
+                        println!("  nothing had to move");
+                    }
+                    for c in &tail_changes {
+                        println!("  {}", fmt_change(c));
+                    }
+                    print!("{}", render_plan(&tail_plan));
+                }
                 return Ok(());
             }
             if json {
@@ -2409,6 +2496,27 @@ mod tests {
         assert!(wraps);
         assert!(parse_time_range_wrap("9:00").is_err());
         assert!(parse_time_range_wrap("9:00-9:00").is_err());
+    }
+
+    #[test]
+    fn wrap_tail_carries_to_next_date() {
+        // 23:00-0:30 → tail 00:00–00:30 on the next date.
+        let (_, e, wraps) = parse_time_range_wrap("23:00-0:30").unwrap();
+        assert_eq!(wrap_tail_end(e, wraps), Some(tod(0, 30)));
+        // …-24:00 wraps but ends at midnight — nothing to carry.
+        let (_, e, wraps) = parse_time_range_wrap("22:00-24:00").unwrap();
+        assert_eq!(wrap_tail_end(e, wraps), None);
+        // Non-wrapping ranges never carry.
+        let (_, e, wraps) = parse_time_range_wrap("10:00-18:00").unwrap();
+        assert_eq!(wrap_tail_end(e, wraps), None);
+    }
+
+    #[test]
+    fn next_date_increments_across_month_end() {
+        assert_eq!(next_date_str("2026-06-13").unwrap(), "2026-06-14");
+        assert_eq!(next_date_str("2026-06-30").unwrap(), "2026-07-01");
+        assert_eq!(next_date_str("2026-12-31").unwrap(), "2027-01-01");
+        assert!(next_date_str("not-a-date").is_err());
     }
 
     #[test]

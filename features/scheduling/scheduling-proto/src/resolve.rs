@@ -56,6 +56,10 @@
 //! date and is left alone. If a wrapping block is shrunk such
 //! that its evening segment ends before 24:00, it stops wrapping
 //! (the morning tail is dropped) — this is reported as a shrink.
+//! Callers that place one-off wrapping *events* (`task plan event
+//! add 23:00-0:30`) materialize the `00:00–end` tail as a fixed
+//! block on the next date's plan, so it participates in that
+//! day's reconcile rather than silently vanishing.
 
 use serde::{Deserialize, Serialize};
 
