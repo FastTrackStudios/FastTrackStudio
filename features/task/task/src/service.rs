@@ -15,6 +15,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::model::TaskInfo;
+use crate::relations::ReverseRelation;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
 #[repr(u8)]
@@ -98,6 +99,14 @@ pub trait TaskService {
     /// claim. This is the parallel-agent primitive: no TOCTOU
     /// window like the client-side optimistic version.
     fn try_claim(&self, id: Uuid, agent: String, force: bool) -> Result<ClaimResult, TaskError>;
+
+    /// Reverse (incoming) relation edges of one task — "what
+    /// blocks / duplicates / implements THIS", with blocked-by
+    /// merged from both encodings (typed `relations` on other
+    /// tasks targeting `id`, plus legacy `blockers` lists). The
+    /// backend builds the in-memory reverse index from the same
+    /// task list `list()` serves (see `crate::relations`).
+    fn reverse_relations(&self, id: Uuid) -> Result<Vec<ReverseRelation>, TaskError>;
 
     /// Move the backing markdown file. `id` preserved.
     fn rename(&self, id: Uuid, new_path: &str) -> Result<TaskInfo, TaskError>;

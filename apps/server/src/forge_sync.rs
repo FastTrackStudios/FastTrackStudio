@@ -225,6 +225,10 @@ impl TaskService for ForgeSyncTaskService {
         self.inner.try_claim(id, agent, force)
     }
 
+    fn reverse_relations(&self, id: Uuid) -> Result<Vec<task::ReverseRelation>, TaskError> {
+        self.inner.reverse_relations(id)
+    }
+
     fn rename(&self, id: Uuid, new_path: &str) -> Result<TaskInfo, TaskError> {
         self.inner.rename(id, new_path)
     }

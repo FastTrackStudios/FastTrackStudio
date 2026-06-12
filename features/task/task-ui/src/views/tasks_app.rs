@@ -52,11 +52,9 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
         .and_then(|id| props.tasks.iter().find(|t| t.id == id).cloned());
 
     let total = props.tasks.len();
-    let done = props
-        .tasks
-        .iter()
-        .filter(|t| t.status_enum() == Status::Done)
-        .count();
+    // Progress counts route through state groups (is_done), not
+    // the Status enum, so custom completed-group names count.
+    let done = props.tasks.iter().filter(|t| t.is_done()).count();
     let open_count = total - done;
 
     rsx! {

@@ -966,7 +966,7 @@ daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
 # Current keyflow main pulls daw-proto from the codeberg daw mirror,
 # whose main still pins vox @ f31f1040 — incompatible with the
 # b3d806f8 rev architect (and this workspace) now unify on. Redirect
-# to the local checkout, whose vox pins are bumped to 23acdc0a, until
+# to the local checkout, whose vox pins are bumped to b3d806f8, until
 # the daw repo's pins move on the remote.
 [patch."https://codeberg.org/FastTrackStudios/daw.git"]
 daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }

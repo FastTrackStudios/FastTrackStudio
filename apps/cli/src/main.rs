@@ -1057,6 +1057,51 @@ enum ProjectCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Show the project's state registry — every status name
+    /// with its canonical group (backlog / unstarted / started /
+    /// completed / cancelled). Falls back to the default
+    /// registry when the project declares no `states:` config.
+    States {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the registry as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Edit the project's state registry. `--from <file|->`
+    /// replaces the whole registry (YAML or JSON list of
+    /// `{name, group, color?, default?, order?}`); repeatable
+    /// `--add <name>:<group>[:<color>]` upserts single states
+    /// (starting from the current registry, or the default set
+    /// when none is configured). `--clear` drops the custom
+    /// registry (back to defaults).
+    SetStates {
+        target: String,
+        /// Replace the registry from a YAML/JSON file (`-` for
+        /// stdin).
+        #[arg(long)]
+        from: Option<String>,
+        /// Upsert one state: `<name>:<group>[:<color>]`, group ∈
+        /// backlog|unstarted|started|completed|cancelled.
+        #[arg(long = "add", value_name = "NAME:GROUP[:COLOR]")]
+        add: Vec<String>,
+        /// Mark this state name as the default for new tasks.
+        #[arg(long = "default", value_name = "NAME")]
+        default_state: Option<String>,
+        /// Drop the custom registry entirely.
+        #[arg(long)]
+        clear: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the resulting registry as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Set the project's target completion date (YYYY-MM-DD, or
     /// `none`/`clear` to unset). The Linear-style roadmap field.
     SetTarget {
@@ -1301,8 +1346,61 @@ enum IssueCmd {
 
     /// List the subtasks of a parent task with their claim +
     /// status, so you can see who's working what at a glance.
+    /// Header shows the derived rollup (done / in-progress /
+    /// blocked / points), classified via state groups.
     Subtasks {
         /// Parent task id (UUID or 8-char prefix).
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Derived sub-issue rollup for one parent — done / total /
+    /// in-progress / blocked / estimate points over its direct
+    /// children (`workflow.parent`), classified via each child's
+    /// project state registry. Same engine as the workstream
+    /// rollup.
+    Rollup {
+        /// Parent issue id (UUID, prefix, path, or title).
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Add a typed relation between two issues:
+    /// `task issue relate <a> <kind> <b>` records "<a> <kind>s
+    /// <b>" (kind ∈ blocks | duplicate | implements | relates).
+    /// Stored in `<a>`'s `workflow.relations`; the legacy
+    /// blockers / relates_to lists keep working alongside.
+    Relate {
+        /// Source issue (UUID, prefix, path, or title).
+        a: String,
+        /// blocks | duplicate | implements | relates.
+        kind: String,
+        /// Target issue (UUID, prefix, path, or title).
+        b: String,
+        /// Remove the relation instead of adding it.
+        #[arg(long)]
+        remove: bool,
+        /// Emit the resulting source issue as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show an issue's relation graph — outgoing edges (typed
+    /// relations + the legacy relates_to entries + "blocks"
+    /// edges implied by other tasks' blockers lists) and
+    /// incoming reverse edges ("what blocks / duplicates /
+    /// implements THIS"), merged across both encodings.
+    Relations {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Sugar: every issue this one BLOCKS (typed `blocks`
+    /// relations + other tasks listing it in `blockers`).
+    Blocking {
         id: String,
         #[arg(long)]
         json: bool,
@@ -4584,6 +4682,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 color: String::new(),
                 image: String::new(),
                 archived: false,
+                states: None,
                 date_created: None,
                 date_modified: None,
             };
@@ -4609,6 +4708,160 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             json,
         } => {
             mutate_project(target, org, server, json, |p| p.status = status).await?;
+        }
+        ProjectCmd::States {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let p = resolve_project_target(&client, &target).await?;
+            let custom = p.states.is_some();
+            let registry = p.states.clone().unwrap_or_else(project::default_states);
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "project": p.id,
+                    "custom": custom,
+                    "states": registry,
+                }))?;
+                return Ok(());
+            }
+            let origin = if custom { "custom" } else { "default" };
+            println!("{}  ({origin} registry)\n", p.title);
+            for s in registry.ordered() {
+                let default = if s.default { "  (default)" } else { "" };
+                let color = if s.color.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", s.color)
+                };
+                println!("  {:<18} {:<10}{color}{default}", s.name, s.group.as_str());
+            }
+        }
+        ProjectCmd::SetStates {
+            target,
+            from,
+            add,
+            default_state,
+            clear,
+            org,
+            server,
+            json,
+        } => {
+            if clear && (from.is_some() || !add.is_empty()) {
+                return Err(eyre::eyre!("--clear can't be combined with --from/--add"));
+            }
+            if !clear && from.is_none() && add.is_empty() && default_state.is_none() {
+                return Err(eyre::eyre!(
+                    "nothing to do — pass --from <file|->, --add <name>:<group>, \
+                     --default <name>, or --clear"
+                ));
+            }
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let mut p = resolve_project_target(&client, &target).await?;
+
+            let next = if clear {
+                None
+            } else {
+                // Start from --from (whole-registry replace), else
+                // the current registry, else the default set — so
+                // `--add` extends rather than orphaning canonical
+                // states.
+                let mut cfg: project::StatesConfig = match &from {
+                    Some(src) => {
+                        let raw = if src == "-" {
+                            use std::io::Read as _;
+                            let mut s = String::new();
+                            std::io::stdin()
+                                .read_to_string(&mut s)
+                                .map_err(|e| eyre::eyre!("stdin: {e}"))?;
+                            s
+                        } else {
+                            std::fs::read_to_string(src)
+                                .map_err(|e| eyre::eyre!("read {src}: {e}"))?
+                        };
+                        // serde_yaml parses JSON too (YAML superset).
+                        serde_yaml::from_str(&raw)
+                            .map_err(|e| eyre::eyre!("parse states config: {e}"))?
+                    }
+                    None => p.states.clone().unwrap_or_else(project::default_states),
+                };
+                for spec in &add {
+                    let (name, group, color) = parse_state_spec(spec)?;
+                    let order = cfg
+                        .0
+                        .iter()
+                        .map(|s| s.order + 1)
+                        .max()
+                        .unwrap_or_default();
+                    match cfg
+                        .0
+                        .iter_mut()
+                        .find(|s| s.name.eq_ignore_ascii_case(&name))
+                    {
+                        Some(existing) => {
+                            existing.group = group;
+                            if let Some(c) = color {
+                                existing.color = c;
+                            }
+                        }
+                        None => cfg.0.push(project::StateDef {
+                            name,
+                            group,
+                            color: color.unwrap_or_default(),
+                            default: false,
+                            order,
+                        }),
+                    }
+                }
+                if let Some(name) = &default_state {
+                    if !cfg.0.iter().any(|s| s.name.eq_ignore_ascii_case(name)) {
+                        return Err(eyre::eyre!(
+                            "--default `{name}` is not in the registry — add it first"
+                        ));
+                    }
+                    for s in &mut cfg.0 {
+                        s.default = s.name.eq_ignore_ascii_case(name);
+                    }
+                }
+                if cfg.0.is_empty() {
+                    return Err(eyre::eyre!(
+                        "registry would be empty — use --clear to drop it instead"
+                    ));
+                }
+                Some(cfg)
+            };
+            p.states = next;
+            let updated = client
+                .update(p)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            let registry = updated
+                .states
+                .clone()
+                .unwrap_or_else(project::default_states);
+            if json {
+                json_out::print_json(&serde_json::json!({
+                    "project": updated.id,
+                    "custom": updated.states.is_some(),
+                    "states": registry,
+                }))?;
+                return Ok(());
+            }
+            if updated.states.is_none() {
+                println!("{}: custom registry cleared (default applies)", updated.title);
+            } else {
+                println!("{}: registry updated\n", updated.title);
+                for s in registry.ordered() {
+                    let default = if s.default { "  (default)" } else { "" };
+                    println!("  {:<18} {:<10}{default}", s.name, s.group.as_str());
+                }
+            }
         }
         ProjectCmd::SetTarget {
             target,
@@ -4801,6 +5054,55 @@ where
         println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
     }
     Ok(())
+}
+
+/// Per-project state registries: project id → its optional
+/// `states:` config. Best-effort (an unreachable project service
+/// degrades to the default registry everywhere).
+async fn project_states_map(
+    url: &str,
+) -> std::collections::HashMap<uuid::Uuid, Option<project::StatesConfig>> {
+    match connect_project_client(url).await {
+        Ok(pc) => pc
+            .list()
+            .await
+            .map(|ps| ps.into_iter().map(|p| (p.id, p.states)).collect())
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    }
+}
+
+/// Classify one task's status via its owning project's state
+/// registry (default registry when project unknown / unset).
+fn resolve_task_group(
+    states: &std::collections::HashMap<uuid::Uuid, Option<project::StatesConfig>>,
+    t: &task::TaskInfo,
+) -> project::StateGroup {
+    let cfg = t
+        .project_id
+        .and_then(|pid| states.get(&pid))
+        .and_then(Option::as_ref);
+    project::resolve_state_group(cfg, &t.status)
+}
+
+/// Parse a `--add` state spec: `<name>:<group>[:<color>]`.
+fn parse_state_spec(spec: &str) -> eyre::Result<(String, project::StateGroup, Option<String>)> {
+    let mut parts = spec.splitn(3, ':');
+    let name = parts.next().unwrap_or_default().trim();
+    let group_s = parts.next().unwrap_or_default().trim();
+    let color = parts.next().map(|c| c.trim().to_string());
+    if name.is_empty() || group_s.is_empty() {
+        return Err(eyre::eyre!(
+            "bad state spec `{spec}` — want <name>:<group>[:<color>]"
+        ));
+    }
+    let group = project::StateGroup::from_str(group_s).ok_or_else(|| {
+        eyre::eyre!(
+            "unknown group `{group_s}` — one of backlog / unstarted / started / \
+             completed / cancelled"
+        )
+    })?;
+    Ok((name.to_string(), group, color))
 }
 
 fn resolve_body(arg: Option<String>) -> eyre::Result<String> {
@@ -12133,6 +12435,12 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .list()
                 .await
                 .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            // Derived rollup over the children — shared engine,
+            // classified via each task's project state registry.
+            let states = project_states_map(&url).await;
+            let rollup = ::workstream::subtask_rollup(parent.id, &all, |t| {
+                resolve_task_group(&states, t)
+            });
             let mut subs: Vec<&task::TaskInfo> = all
                 .iter()
                 .filter(|t| t.workflow.as_ref().and_then(|w| w.parent) == Some(parent.id))
@@ -12141,21 +12449,29 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&subs).map_err(|e| eyre::eyre!("json: {e}"))?
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "parent": parent.id,
+                        "rollup": rollup,
+                        "subtasks": subs,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
                 );
                 return Ok(());
             }
-            let done = subs
-                .iter()
-                .filter(|t| matches!(task::Status::from_str(&t.status), Some(task::Status::Done)))
-                .count();
             println!(
                 "{} [{}]  {}",
                 short_uuid(&parent.id),
                 parent.status,
                 parent.title
             );
-            println!("  {done}/{} subtasks done\n", subs.len());
+            println!(
+                "  {}/{} done · {} in-progress · {} blocked · {} pts\n",
+                rollup.done,
+                rollup.total,
+                rollup.in_progress,
+                rollup.blocked,
+                rollup.estimate_points_sum
+            );
             for t in &subs {
                 let claim = t
                     .workflow
@@ -12172,6 +12488,198 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     claim,
                     t.title
                 );
+            }
+        }
+        IssueCmd::Rollup { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let parent = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let states = project_states_map(&url).await;
+            let rollup = ::workstream::subtask_rollup(parent.id, &all, |t| {
+                resolve_task_group(&states, t)
+            });
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "parent": parent.id,
+                        "rollup": rollup,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]  {}", short_uuid(&parent.id), parent.status, parent.title);
+            println!("  done:        {}/{}", rollup.done, rollup.total);
+            println!("  in-progress: {}", rollup.in_progress);
+            println!("  blocked:     {}", rollup.blocked);
+            println!("  points:      {}", rollup.estimate_points_sum);
+            if rollup.total > 0 {
+                println!(
+                    "  progress:    {:.0}%",
+                    f64::from(rollup.done) * 100.0 / f64::from(rollup.total)
+                );
+            }
+        }
+        IssueCmd::Relate {
+            a,
+            kind,
+            b,
+            remove,
+            json,
+        } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let kind = task::RelationKind::from_str(&kind).ok_or_else(|| {
+                eyre::eyre!(
+                    "unknown relation kind `{kind}` — one of blocks / duplicate / \
+                     implements / relates"
+                )
+            })?;
+            let mut src = resolve_issue_id(&client, &a).await?;
+            let dst = resolve_issue_id(&client, &b).await?;
+            if src.id == dst.id {
+                return Err(eyre::eyre!("an issue can't relate to itself"));
+            }
+            let rel = task::Relation {
+                kind,
+                target: dst.id,
+            };
+            let w = src
+                .workflow
+                .get_or_insert_with(task::model::WorkflowAttrs::default);
+            let already = w.relations.0.contains(&rel);
+            if remove {
+                if !already {
+                    return Err(eyre::eyre!(
+                        "no `{}` relation from {} to {}",
+                        kind.as_str(),
+                        short_uuid(&src.id),
+                        short_uuid(&dst.id)
+                    ));
+                }
+                w.relations.0.retain(|r| r != &rel);
+            } else if !already {
+                w.relations.0.push(rel);
+            }
+            // Relation changes ride the normal update path, so the
+            // backend publishes TaskEvent::Upserted to subscribers.
+            let updated = client
+                .update(src)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            if json {
+                json_out::print_json(&updated)?;
+                return Ok(());
+            }
+            let verb = if remove { "unrelated" } else { "related" };
+            println!(
+                "{verb}: {} ({}) —{}→ {} ({})",
+                updated.title,
+                short_uuid(&updated.id),
+                kind.as_str(),
+                dst.title,
+                short_uuid(&dst.id)
+            );
+        }
+        IssueCmd::Relations { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+                all.iter().map(|x| (x.id, x)).collect();
+            let label = |id: &uuid::Uuid| {
+                by_id
+                    .get(id)
+                    .map_or_else(|| "(unknown)".to_string(), |x| x.title.clone())
+            };
+            // Outgoing from the merged local view; incoming via
+            // the server's reverse index.
+            let outgoing = task::relations::outgoing(t.id, &all);
+            let incoming = client
+                .reverse_relations(t.id)
+                .await
+                .map_err(|e| eyre::eyre!("reverse_relations: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "id": t.id,
+                        "outgoing": outgoing,
+                        "incoming": incoming,
+                    }))
+                    .map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]  {}\n", short_uuid(&t.id), t.status, t.title);
+            if outgoing.is_empty() && incoming.is_empty() {
+                println!("  (no relations)");
+                return Ok(());
+            }
+            if !outgoing.is_empty() {
+                println!("  outgoing (this issue → other):");
+                for r in &outgoing {
+                    println!(
+                        "    {:<11} {}  {}",
+                        r.kind.as_str(),
+                        short_uuid(&r.target),
+                        label(&r.target)
+                    );
+                }
+            }
+            if !incoming.is_empty() {
+                println!("  incoming (other → this issue):");
+                for r in &incoming {
+                    println!(
+                        "    {:<11} {}  {}",
+                        r.kind.as_str(),
+                        short_uuid(&r.source),
+                        label(&r.source)
+                    );
+                }
+            }
+        }
+        IssueCmd::Blocking { id, json } => {
+            let (_slug, url) = issue_ctx()?;
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let blocked_ids = task::relations::blocking(t.id, &all);
+            let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+                all.iter().map(|x| (x.id, x)).collect();
+            if json {
+                let rows: Vec<&task::TaskInfo> = blocked_ids
+                    .iter()
+                    .filter_map(|bid| by_id.get(bid).copied())
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if blocked_ids.is_empty() {
+                println!("{} blocks nothing", short_uuid(&t.id));
+                return Ok(());
+            }
+            println!("{} blocks:", short_uuid(&t.id));
+            for bid in &blocked_ids {
+                match by_id.get(bid) {
+                    Some(b) => println!("  {}  {:<12} {}", short_uuid(bid), b.status, b.title),
+                    None => println!("  {bid}  (unknown)"),
+                }
             }
         }
         IssueCmd::Assignees { id, json } => {
@@ -12592,8 +13100,32 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 })
                 .collect();
 
+            // Per-project state registries: status → group
+            // classification routes through each task's owning
+            // project (custom registries respected; tasks with
+            // no project use the default registry).
+            let states_by_project: std::collections::HashMap<
+                uuid::Uuid,
+                Option<project::StatesConfig>,
+            > = match connect_project_client(&url).await {
+                Ok(pc) => pc
+                    .list()
+                    .await
+                    .map(|ps| ps.into_iter().map(|p| (p.id, p.states)).collect())
+                    .unwrap_or_default(),
+                Err(_) => std::collections::HashMap::new(),
+            };
+            let group_of = |t: &task::TaskInfo| -> project::StateGroup {
+                let cfg = t
+                    .project_id
+                    .and_then(|pid| states_by_project.get(&pid))
+                    .and_then(Option::as_ref);
+                project::resolve_state_group(cfg, &t.status)
+            };
+
             let total = filtered.len();
             let mut by_status: BTreeMap<String, usize> = BTreeMap::new();
+            let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_priority: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_project: BTreeMap<String, usize> = BTreeMap::new();
             let mut by_assignee: BTreeMap<String, usize> = BTreeMap::new();
@@ -12605,6 +13137,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
 
             for t in filtered.drain(..) {
                 *by_status.entry(t.status.clone()).or_default() += 1;
+                *by_group.entry(group_of(t).as_str().to_string()).or_default() += 1;
                 *by_priority.entry(t.priority.clone()).or_default() += 1;
                 let p_label = t
                     .project_id
@@ -12615,16 +13148,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     for a in &wf.assignees.0 {
                         *by_assignee.entry(a.short_label()).or_default() += 1;
                     }
-                    // Blocked = has at least one blocker that
-                    // is not done/cancelled (or that we can't
-                    // resolve, which means it's still open).
+                    // Blocked = has at least one blocker whose
+                    // state *group* isn't closed (completed /
+                    // cancelled), or that we can't resolve.
                     let is_blocked = wf.blockers.0.iter().any(|bid| {
-                        by_id.get(bid).is_none_or(|b| {
-                            !matches!(
-                                task::Status::from_str(&b.status),
-                                Some(task::Status::Done | task::Status::Cancelled)
-                            )
-                        })
+                        by_id.get(bid).is_none_or(|b| !group_of(b).is_closed())
                     });
                     if is_blocked {
                         blocked += 1;
@@ -12638,6 +13166,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     "with_workflow": with_workflow,
                     "blocked": blocked,
                     "by_status": by_status,
+                    "by_group": by_group,
                     "by_priority": by_priority,
                     "by_project": by_project,
                     "by_assignee": by_assignee,
@@ -12655,6 +13184,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             println!();
             println!("by status:");
             for (k, v) in &by_status {
+                println!("  {k:<14} {v}");
+            }
+            println!();
+            println!("by group:");
+            for (k, v) in &by_group {
                 println!("  {k:<14} {v}");
             }
             println!();

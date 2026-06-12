@@ -9,13 +9,16 @@ use crate::model::Status;
 use crate::views::detail_full::{SectionLabel, SubtaskRow};
 use crate::views::palette::status_pill;
 
-/// `(done, total)` across the rows. "Done" follows the same
-/// canonical parse the list view uses.
+/// `(done, total)` across the rows. "Done" = the status
+/// classifies into the `completed` state group (group-routed,
+/// so custom status names count too).
 #[must_use]
 pub fn subtask_summary(rows: &[SubtaskRow]) -> (usize, usize) {
     let done = rows
         .iter()
-        .filter(|r| Status::from_str(&r.task.status).is_some_and(Status::is_done))
+        .filter(|r| {
+            project::resolve_state_group(None, &r.task.status) == project::StateGroup::Completed
+        })
         .count();
     (done, rows.len())
 }
@@ -41,7 +44,11 @@ pub fn SubtasksBoard(props: SubtasksBoardProps) -> Element {
                     {
                         let id = row.task.id;
                         let status = Status::from_str(&row.task.status);
-                        let done_row = status.is_some_and(Status::is_done);
+                        // Strike-through follows the state group
+                        // (progress decision), the pill keeps the
+                        // raw status / enum label (display).
+                        let done_row = project::resolve_state_group(None, &row.task.status)
+                            == project::StateGroup::Completed;
                         let title_cls = if done_row {
                             "flex-1 min-w-0 truncate text-sm text-muted-foreground line-through"
                         } else {

@@ -25,6 +25,11 @@ workflows-proto = { workspace = true }
 # blockers). task's model/parse modules are wasm-clean; we don't
 # need its vox client here.
 task = { workspace = true, default-features = false }
+# Status -> StateGroup resolution (`project::states`) — the
+# rollup classifies done / in-progress / blocked via canonical
+# state groups so per-project custom status names roll up
+# correctly. Model + states modules are wasm-clean.
+project = { workspace = true, default-features = false }
 # Wasm-clean wire shape for `VaultPage`.
 vault-proto = { workspace = true, default-features = false }
 
