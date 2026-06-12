@@ -78,6 +78,7 @@ fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
         task::task_service_descriptor(),
         auth_proto::auth_service_service_descriptor(),
         milestone_proto::milestone_service_descriptor(),
+        workstream_proto::workstream_service_descriptor(),
     ]
 }
 
