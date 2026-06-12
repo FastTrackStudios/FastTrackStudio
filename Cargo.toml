@@ -321,6 +321,11 @@ finance-ui = { path = "features/finance/finance-ui" }
 vault = { path = "features/vault/vault" }
 vault-live = { path = "features/vault/vault-live" }
 vault-proto = { path = "features/vault/vault-proto" }
+# Vault-file ⇄ CRDT reconciliation: per-file Loro docs over
+# architect's DocRegistry, server write-behind into put_file,
+# inbound merge of external writes. Native-only; mounted by
+# `task-server` next to the plain `VaultSync` service.
+vault-collab = { path = "features/vault/vault-collab" }
 # Pull/push/sync orchestration on top of `vault_proto::VaultSync`.
 # Inspired by `cooklang/cooklang-sync`'s indexer + syncer split
 # (without content-defined chunking — full-file transfer is the
@@ -393,6 +398,9 @@ editor-vim = { path = "../Editor/crates/editor-vim" }
 editor-typst = { path = "../Editor/crates/editor-typst" }
 editor-mermaid = { path = "../Editor/crates/editor-mermaid" }
 editor-keyflow = { path = "../Editor/crates/editor-keyflow" }
+# Byte-offset `Changes` ⇄ scalar `TextOp` adapter for the CRDT
+# host (the vault page's collaborative editing path). Wasm-clean.
+editor-crdt = { path = "../Editor/crates/editor-crdt" }
 editor = { path = "../Editor/crates/editor" }
 
 # Keyflow's engraver, CPU-only `svg` tier (no wgpu/vello/PDF) — the

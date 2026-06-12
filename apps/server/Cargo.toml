@@ -111,6 +111,11 @@ vox = { workspace = true }
 # vox service mounted per org (`vox` feature = the sync/presence
 # transport; no Dioxus, no persistence backends).
 crdt = { workspace = true, features = ["vox"] }
+# Vault-file ⇄ CRDT reconciliation: per-file docs over the crdt
+# DocRegistry + server write-behind into the vault backend.
+# Mounted per org as the `DocSync` service (and the per-file half
+# of `DocPresence` — see `presence::PresenceRouter`).
+vault-collab = { workspace = true }
 chrono.workspace = true
 architect = { workspace = true, features = ["server", "local"] }
 architect-auth = { workspace = true, features = ["full"] }

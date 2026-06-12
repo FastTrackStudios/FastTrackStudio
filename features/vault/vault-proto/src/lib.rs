@@ -22,6 +22,7 @@
 //! Mount the server-side backend with [`serve`], or compose
 //! through [`Service`] into an `architect::Services` bundle.
 
+mod collab;
 mod error;
 mod event;
 mod file;
@@ -31,6 +32,12 @@ mod page;
 mod page_meta;
 mod service;
 
+// Per-file CRDT collaboration identity: the uuid-v5 doc-id scheme,
+// the doc's container names, and the `open_collab` ack payload.
+pub use collab::{
+    COLLAB_META_CONTAINER, COLLAB_META_FLUSHED_SHA, COLLAB_TEXT_CONTAINER, CollabAck,
+    VAULT_DOC_NAMESPACE, collab_doc_id,
+};
 pub use error::VaultSyncError;
 // Link-graph read surface (separate service from `VaultSync`).
 // The prelude carries the architect-emitted vox bits under

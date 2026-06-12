@@ -4788,6 +4788,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "editor-crdt"
+version = "0.1.0"
+dependencies = [
+ "editor-state",
+ "ropey",
+]
+
+[[package]]
 name = "editor-keyflow"
 version = "0.1.0"
 dependencies = [
@@ -15130,6 +15138,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vault",
+ "vault-collab",
  "vault-proto",
  "vox",
  "walkdir",
@@ -16299,6 +16308,7 @@ dependencies = [
  "dioxus",
  "dioxus-router",
  "editor",
+ "editor-crdt",
  "email-proto",
  "fake",
  "finance-proto",
@@ -16685,6 +16695,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vault-collab"
+version = "0.1.0"
+dependencies = [
+ "crdt",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vault-live",
+ "vault-proto",
+]
+
+[[package]]
 name = "vault-live"
 version = "0.1.0"
 dependencies = [
@@ -16747,6 +16771,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "uuid",
  "vox",
  "vox-types",
 ]

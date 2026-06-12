@@ -85,6 +85,19 @@ pub struct OrgAppState {
     /// File-replication backend rooted at this org's
     /// `vault/` dir.
     pub vault_sync: vault::Backend,
+    /// Vault-file ⇄ CRDT reconciliation: the per-file doc registry
+    /// (lazily opened, seeded from vault files) + write-behind into
+    /// [`Self::vault_sync`] + inbound merge of external writes.
+    /// Mounted as the `DocSync` service; per-file presence routes
+    /// into it through [`presence::PresenceRouter`]. Docs persist
+    /// under `<org>/crdt/` (override: `TASK_SERVER_CRDT_ROOT`).
+    pub vault_collab: vault_collab::VaultCollab,
+    /// FS watcher over the org's vault root — external disk edits
+    /// (vim, Obsidian, `git pull`) broadcast the same `VaultEvent`s
+    /// wire writes do, which both `subscribe` clients and the
+    /// vault-collab inbound listener consume. Held for its lifetime;
+    /// `None` when attaching failed (warned, non-fatal).
+    pub vault_watcher: Option<Arc<vault::sync::WatcherHandle>>,
     /// Wiki feature backend rooted at this org's `vault/`.
     pub wiki: wiki_live::WikiBackend,
     /// Project list / get backend — walks `vault/Projects/*.md`.
@@ -484,6 +497,27 @@ pub(crate) async fn build_org_state(
         // convention the wiki backend already uses on line 304.
         let vault_sync_state = vault::Backend::single("default", vault_root.clone())
             .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
+        // Per-file CRDT collaboration over the same backend. Doc
+        // persistence (snapshot + update log, one dir per doc id)
+        // lives at `<org>/crdt/` — file-per-doc fits the plain-text
+        // ethos; `crdt-seaorm` is the drop-in alternative if the org
+        // dirs ever move into a database. The inbound listener folds
+        // every `VaultEvent::Put` (non-CRDT `put_file` callers AND
+        // the watcher below) into whichever per-file docs are open.
+        let crdt_root = std::env::var("TASK_SERVER_CRDT_ROOT")
+            .map_or_else(|_| org_root.path().join("crdt"), PathBuf::from);
+        let vault_collab = vault_collab::VaultCollab::new(vault_sync_state.clone(), crdt_root);
+        vault_collab.watch_vault("default");
+        // External disk edits (vim, Obsidian, git) → VaultEvents.
+        // Best-effort: a vault on a filesystem without notify support
+        // still serves wire traffic, just without live disk pickup.
+        let vault_watcher = match vault_sync_state.start_watcher("default").await {
+            Ok(handle) => Some(Arc::new(handle)),
+            Err(e) => {
+                tracing::warn!(org = %org_root.slug(), "vault watcher not attached: {e}");
+                None
+            }
+        };
         // Wiki rooted at `<org>/wiki/Knowledge/` (the curated
         // tier). `LLM/` scratch is a sibling subtree the
         // wiki backend doesn't touch — agents read/write it
@@ -739,6 +773,8 @@ pub(crate) async fn build_org_state(
             auth,
             attachments: attachment_service,
             vault_sync: vault_sync_state,
+            vault_collab,
+            vault_watcher,
             wiki,
             projects,
             goals,
@@ -1311,13 +1347,27 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.issue_links_path.clone(),
             )),
         )
-        // Org-wide presence — the Discord-style "who's online" channel
-        // (`DocPresence` on the fixed `presence::PRESENCE_DOC_ID`).
-        // Ephemeral by construction: states ride Loro's
-        // `EphemeralStore` and expire when a peer goes quiet.
+        // Per-file collaborative editing — the `DocSync` service over
+        // the vault-collab `DocRegistry`: one mounted dispatcher
+        // serves every vault-file doc (admission: ids registered via
+        // `VaultSync::open_collab`), with the write-behind keeping
+        // the plain files on disk authoritative for everyone else.
+        .with(
+            crdt::sync::doc_sync_service_descriptor(),
+            crdt::sync::DocSyncDispatcher::new(org.vault_collab.registry().clone()),
+        )
+        // Presence — ONE mounted `DocPresence` service, routed by doc
+        // id: the fixed `presence::PRESENCE_DOC_ID` reaches the
+        // org-wide "who's online" host; any other id reaches the
+        // vault-collab registry (per-file cursor channels). States
+        // ride Loro's `EphemeralStore` and expire when a peer goes
+        // quiet; nothing is persisted.
         .with(
             crdt::sync::doc_presence_service_descriptor(),
-            crdt::sync::DocPresenceDispatcher::new(org.presence.clone()),
+            crdt::sync::DocPresenceDispatcher::new(presence::PresenceRouter::new(
+                org.presence.clone(),
+                org.vault_collab.registry().clone(),
+            )),
         )
         // Vault link-graph (backlinks / links / orphans / unresolved /
         // deadends / tags) — the read-only sibling of the vault sync
