@@ -294,6 +294,20 @@ pub fn ProjectDetailView(id: String) -> Element {
                     "‹ Projects"
                 }
 
+                // ── Cover banner — the `image:` frontmatter, same source
+                // the /projects cards render. Set/edited from the Details
+                // sidebar below.
+                if !p.image.trim().is_empty() {
+                    div { class: "aspect-[3/1] w-full overflow-hidden rounded-2xl border border-border bg-muted",
+                        img {
+                            src: "{p.image}",
+                            alt: "{p.title}",
+                            loading: "lazy",
+                            class: "h-full w-full object-cover",
+                        }
+                    }
+                }
+
                 // ── Header ──────────────────────────────────────────────
                 div { class: "flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-5",
                     div { class: "flex flex-wrap items-start justify-between gap-3",
@@ -540,6 +554,11 @@ pub fn ProjectDetailView(id: String) -> Element {
                             }
                             if let Some(m) = p.date_modified {
                                 DetailRow { label: "Updated".to_string(), value: m.date_naive().to_string() }
+                            }
+                            CoverImageEditor {
+                                project: p.clone(),
+                                slug: forge_slug.clone(),
+                                on_saved: move |()| page_refresh.with_mut(|x| *x += 1),
                             }
                         }
                         // ── Budget card ─────────────────────────────
@@ -941,6 +960,85 @@ fn ActiveTaskRow(task: DbTask) -> Element {
                     span { class: "text-xs text-muted-foreground", "{holders}" }
                 }
                 StatusBadge { variant: status_variant(&task.status), label: task.status.clone() }
+            }
+        }
+    }
+}
+
+/// Sidebar editor for the project's cover image — writes through the
+/// `image:` frontmatter via `ProjectService::update`, the same idiom
+/// as the Type buttons above it.
+///
+/// Smallest honest slice: paste an image URL (or any path the browser
+/// can resolve) and save; the /projects cards and the detail banner
+/// render it. Uploading bytes through the `AttachmentService` is
+/// deliberately *not* wired yet: its download URLs are short-lived
+/// signed links, so persisting one into `image:` would go stale — that
+/// needs a stable blob URL (or render-time hash → URL resolution)
+/// first. The gap is documented on the issue.
+#[component]
+fn CoverImageEditor(project: ProjectInfo, slug: String, on_saved: EventHandler<()>) -> Element {
+    let mut draft = use_signal(|| project.image.clone());
+    let mut saving = use_signal(|| false);
+    let mut error = use_signal(|| Option::<String>::None);
+    // Re-sync the draft when a refetch lands a new stored value.
+    let stored = project.image.clone();
+    use_effect(use_reactive!(|(stored,)| draft.set(stored)));
+
+    let preview = draft.read().trim().to_string();
+    let dirty = preview != project.image.trim();
+    let busy = *saving.read();
+
+    rsx! {
+        div { class: "flex flex-col gap-1.5 text-sm",
+            span { class: "text-muted-foreground", "Cover image" }
+            if !preview.is_empty() {
+                div { class: "aspect-video w-full overflow-hidden rounded-md border border-border bg-muted",
+                    img {
+                        src: "{preview}",
+                        alt: "Cover preview",
+                        loading: "lazy",
+                        class: "h-full w-full object-cover",
+                    }
+                }
+            }
+            div { class: "flex items-center gap-2",
+                Input {
+                    value: draft,
+                    placeholder: "https://… image URL",
+                    on_change: move |_| {},
+                }
+                if dirty {
+                    Button {
+                        variant: ButtonVariant::Secondary,
+                        size: ButtonSize::Small,
+                        disabled: busy,
+                        on_click: {
+                            let np_base = project.clone();
+                            let save_slug = slug.clone();
+                            move |_| {
+                                let mut np = np_base.clone();
+                                np.image = draft.peek().trim().to_string();
+                                let slug = save_slug.clone();
+                                saving.set(true);
+                                spawn(async move {
+                                    match crate::feeds::update_project(&slug, np).await {
+                                        Ok(_) => {
+                                            error.set(None);
+                                            on_saved.call(());
+                                        }
+                                        Err(e) => error.set(Some(e)),
+                                    }
+                                    saving.set(false);
+                                });
+                            }
+                        },
+                        if busy { "Saving…" } else { "Save" }
+                    }
+                }
+            }
+            if let Some(e) = error.read().as_ref() {
+                span { class: "text-xs text-destructive", "Couldn't save the cover: {e}" }
             }
         }
     }
