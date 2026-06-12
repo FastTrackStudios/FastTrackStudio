@@ -4,10 +4,12 @@
 //! `create` / `update` take the full record, `rename` is the
 //! only path-changing op, `delete` removes the file.
 //!
-//! No special filters on `list()` yet — clients filter
-//! client-side after fetching. The CLI is a thin wrapper that
-//! adds `--status`, `--tag`, `--context`, `--project`,
-//! `--milestone` etc.
+//! `list()` is intentionally unfiltered (full org snapshot —
+//! the subscriber contract on [`TaskEvent`] depends on it);
+//! [`TaskService::query`] is the server-side filtered /
+//! paginated sibling for clients that don't want the whole
+//! list. The CLI layers further client-side filters (`--tag`,
+//! `--context`, `--milestone`) on top.
 
 use facet::Facet;
 use serde::{Deserialize, Serialize};
@@ -40,6 +42,42 @@ pub enum ClaimResult {
     AlreadyMine,
     /// Another actor holds it; `holder` is their short label.
     Lost { holder: String },
+}
+
+/// Server-side filter + page window for [`TaskService::query`].
+/// All fields optional — the zero value selects everything, in
+/// which case `query` equals `list`. Filters AND together;
+/// `limit`/`offset` apply *after* filtering, over a stable
+/// path-ordered view, so pages don't shear between calls when
+/// the vault is quiet.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct TaskListFilter {
+    /// Keep tasks whose `project_id` matches.
+    pub project: Option<Uuid>,
+    /// Keep tasks attached to this workstream
+    /// (`workflow.workstream`).
+    pub workstream: Option<Uuid>,
+    /// Keep tasks whose raw `status` matches
+    /// (ASCII-case-insensitive). Raw string match — state-group
+    /// classification stays a rollup concern.
+    pub status: Option<String>,
+    /// Page size. `None` = no cap.
+    pub limit: Option<u32>,
+    /// Rows to skip (after filtering). `None` = 0.
+    pub offset: Option<u32>,
+}
+
+/// One entry of [`TaskService::reverse_relations_batch`]: the
+/// queried task id and its incoming edges. A list of pairs
+/// rather than a map for wire/codegen friendliness (TS gets a
+/// plain array).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct TaskReverseRelations {
+    /// The task whose incoming edges these are.
+    pub id: Uuid,
+    /// Incoming edges (who points at `id`, with what kind).
+    /// Empty when nothing references the task.
+    pub relations: Vec<ReverseRelation>,
 }
 
 /// One task change, broadcast to every [`TaskService`] subscriber on
@@ -107,6 +145,23 @@ pub trait TaskService {
     /// backend builds the in-memory reverse index from the same
     /// task list `list()` serves (see `crate::relations`).
     fn reverse_relations(&self, id: Uuid) -> Result<Vec<ReverseRelation>, TaskError>;
+
+    /// Batch sibling of [`Self::reverse_relations`]: the reverse
+    /// index for many tasks in one round-trip, so list rows can
+    /// show blocked-by / implemented-by without N calls. One
+    /// entry per requested id, requested order, missing /
+    /// unknown ids included with empty `relations` (a task
+    /// nothing references is indistinguishable from one that
+    /// doesn't exist — both are "no incoming edges").
+    fn reverse_relations_batch(
+        &self,
+        ids: Vec<Uuid>,
+    ) -> Result<Vec<TaskReverseRelations>, TaskError>;
+
+    /// Server-side filtered + paginated [`Self::list`]. The
+    /// default [`TaskListFilter`] returns everything; see the
+    /// filter type for AND semantics and page-window ordering.
+    fn query(&self, filter: TaskListFilter) -> Result<Vec<TaskInfo>, TaskError>;
 
     /// Move the backing markdown file. `id` preserved.
     fn rename(&self, id: Uuid, new_path: &str) -> Result<TaskInfo, TaskError>;

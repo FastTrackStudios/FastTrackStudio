@@ -3341,6 +3341,15 @@ enum TaskCmd {
         /// Only tasks whose status is not done.
         #[arg(long)]
         open: bool,
+        /// Page size — at most this many rows (applied
+        /// server-side, after `--status`/`--project`, over a
+        /// stable path ordering; other filters then apply
+        /// client-side within the page).
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Rows to skip before `--limit` (server-side).
+        #[arg(long)]
+        offset: Option<u32>,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -11423,6 +11432,8 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             project,
             milestone,
             open,
+            limit,
+            offset,
             org,
             server,
             json,
@@ -11430,10 +11441,6 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
             let client = connect_task_client(&url).await?;
-            let rows = client
-                .list()
-                .await
-                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
             let ctx_filter = context.map(|c| {
                 if c.starts_with('@') {
                     c
@@ -11455,6 +11462,55 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     Some(Some(resolve_milestone_target(&mc, m).await?.id))
                 }
                 None => None,
+            };
+
+            // Push --status/--project/--limit/--offset to the
+            // server (`TaskService::query`) so big orgs don't
+            // ship the whole list over the wire. A server that
+            // predates the verb (schema skew — see `task
+            // doctor`) falls back to the unfiltered `list()` +
+            // the client-side filters below. Skip the server
+            // path when a page window combines with
+            // client-only filters: slicing before --tag /
+            // --context / --milestone / --open would drop rows.
+            let has_client_only_filters =
+                tag.is_some() || ctx_filter.is_some() || milestone_filter.is_some() || open;
+            let want_server_query = (status.is_some()
+                || project_id.is_some()
+                || limit.is_some()
+                || offset.is_some())
+                && !((limit.is_some() || offset.is_some()) && has_client_only_filters);
+            let mut window_applied = false;
+            let rows = if want_server_query {
+                let filter = task::TaskListFilter {
+                    project: project_id,
+                    workstream: None,
+                    status: status.clone(),
+                    limit,
+                    offset,
+                };
+                match client.query(filter).await {
+                    Ok(rows) => {
+                        window_applied = true;
+                        rows
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "warning: server-side query failed ({e:?}); falling back to full \
+                             list() + client-side filters (is task-server stale? run `task \
+                             doctor`)"
+                        );
+                        client
+                            .list()
+                            .await
+                            .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                    }
+                }
+            } else {
+                client
+                    .list()
+                    .await
+                    .map_err(|e| eyre::eyre!("list: {e:?}"))?
             };
 
             let mut rows: Vec<_> = rows
@@ -11491,6 +11547,17 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     .then_with(|| a.due.cmp(&b.due))
                     .then_with(|| a.title.cmp(&b.title))
             });
+            // Page window that couldn't go server-side (combined
+            // with client-only filters, or the query fallback):
+            // slice after filtering + sorting.
+            if !window_applied && (limit.is_some() || offset.is_some()) {
+                let off = offset.unwrap_or(0) as usize;
+                rows = rows
+                    .into_iter()
+                    .skip(off)
+                    .take(limit.map_or(usize::MAX, |n| n as usize))
+                    .collect();
+            }
 
             if json {
                 println!(
