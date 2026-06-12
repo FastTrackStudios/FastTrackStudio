@@ -4339,6 +4339,95 @@ async fn main() {
     }
 }
 
+/// The proto/server skew guard half of `task doctor`: fetch the
+/// server's `/.well-known/task-server.json`, compare its
+/// `schema_stamps` (computed from the descriptors the *running*
+/// binary mounts) against this CLI's own build (the CLI links
+/// `task_server::schema_stamps()` directly, so both sides fold
+/// the exact same descriptor list — no second list to drift).
+///
+/// A mismatch means the running task-server predates (or
+/// postdates) a `*-proto` change relative to this CLI — the
+/// state that otherwise surfaces as vox `structural mismatch` /
+/// `InvalidPayload` / `Unknown method` errors with zero context.
+/// Exits non-zero so dev scripts can gate on it.
+async fn doctor_check_schema(ws_url: &str) -> eyre::Result<()> {
+    // ws(s)://host:port[/path] → http(s)://host:port/.well-known/…
+    let origin = {
+        let http = ws_url
+            .replacen("wss://", "https://", 1)
+            .replacen("ws://", "http://", 1);
+        let after_scheme = http.find("://").map_or(http.len(), |i| i + 3);
+        let end = http[after_scheme..]
+            .find('/')
+            .map_or(http.len(), |i| after_scheme + i);
+        http[..end].to_owned()
+    };
+    let url = format!("{origin}/.well-known/task-server.json");
+
+    let doc: serde_json::Value = match reqwest::get(&url).await {
+        Ok(resp) => resp
+            .json()
+            .await
+            .map_err(|e| eyre::eyre!("parse {url}: {e}"))?,
+        Err(e) => {
+            println!("Schema check: SKIPPED — could not fetch {url} ({e})");
+            return Ok(());
+        }
+    };
+    let Some(served) = doc.get("schema_stamps").and_then(|v| v.as_object()) else {
+        println!(
+            "Schema check: UNVERIFIED — the server exposes no `schema_stamps` \
+             (it predates the skew guard). If you see `structural mismatch` / \
+             `InvalidPayload` errors, rebuild + restart task-server."
+        );
+        return Ok(());
+    };
+
+    let local = task_server::schema_stamps();
+    let mut stale: Vec<&str> = Vec::new();
+    let mut unserved: Vec<&str> = Vec::new();
+    for (name, stamp) in &local {
+        match served.get(*name).and_then(|v| v.as_str()) {
+            Some(s) if s == stamp => {}
+            Some(_) => stale.push(name),
+            None => unserved.push(name),
+        }
+    }
+
+    if stale.is_empty() && unserved.is_empty() {
+        println!(
+            "Schema check: OK — {} service stamps match the running server",
+            local.len()
+        );
+        return Ok(());
+    }
+    if !unserved.is_empty() {
+        println!(
+            "Schema check: {} service(s) not stamped by the server (added since \
+             its build?): {}",
+            unserved.len(),
+            unserved.join(", ")
+        );
+    }
+    if !stale.is_empty() {
+        println!("Schema check: STALE — stamp mismatch on: {}", stale.join(", "));
+        println!(
+            "  The running task-server was built against different `*-proto` \
+             shapes than this CLI."
+        );
+        println!(
+            "  Fix: rebuild + restart it (`cargo run -p task-server`), or rebuild \
+             this CLI if the server is newer."
+        );
+        return Err(eyre::eyre!(
+            "proto/server schema skew on {} service(s)",
+            stale.len()
+        ));
+    }
+    Ok(())
+}
+
 async fn run(cli: Cli) -> eyre::Result<()> {
     match cli.command {
         Commands::Doctor => {
@@ -4346,8 +4435,9 @@ async fn run(cli: Cli) -> eyre::Result<()> {
                 .server
                 .unwrap_or_else(|| "ws://127.0.0.1:9090/vox".to_owned());
             let remote =
-                RemoteVoxConfig::from_args(server, cli.session_token, cli.organization_id)?;
+                RemoteVoxConfig::from_args(server.clone(), cli.session_token, cli.organization_id)?;
             println!("Vox endpoint: {}", remote.display_url);
+            doctor_check_schema(&server).await?;
         }
         Commands::Vault { cmd } => match cmd {
             // Sync ops touch vox and need async; everything
