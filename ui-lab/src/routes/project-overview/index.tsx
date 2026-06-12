@@ -5,9 +5,16 @@
  *
  * The core problem: ONE project mixes a handful of human-scale tasks
  * with an agent-scale swarm of dispatched subtasks. The default lens
- * shows the HUMAN layer — epics roll their swarm up into a compact
- * strip — and the Agents lens opens the full swarm as a kanban.
- * Parked review-required work gets its own lane above everything.
+ * shows the HUMAN layer — each **Workstream** (the parent-with-swarm
+ * construct, a real WorkstreamService entity) rolls its members up
+ * into a collapsed strip — and the Agents lens opens the full swarm
+ * as a claimant-grouped kanban. Parked review-required work gets its
+ * own lane above everything.
+ *
+ * Status is never string-matched here: every status name resolves to
+ * a state GROUP through the project's registry (`ProjectInfo.states`,
+ * falling back to the default registry), and the bars/columns render
+ * groups.
  *
  * This is the design the Dioxus app will port; visual parity rides on
  * the shared shadcn primitives + theme tokens.
@@ -21,7 +28,7 @@ import {
   ArrowUpRight,
   Bot,
   CalendarClock,
-  ChevronUp,
+  Layers,
   Minus,
   RefreshCw,
   Target,
@@ -38,13 +45,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { StatesConfig } from "@/generated/projectservicerpc.generated";
 import type { TaskInfo } from "@/generated/taskservicerpc.generated";
 import { AccountAvatar } from "@/lib/auth";
 import {
   projectMilestonesQuery,
   projectQuery,
   projectTasksQuery,
+  projectWorkstreamsQuery,
 } from "@/lib/queries";
+import { resolveStateGroup, stateDefFor } from "@/lib/states";
 import { cn } from "@/lib/utils";
 import {
   buildModel,
@@ -56,6 +66,7 @@ import {
   milestoneProgress,
   rollupEstimates,
   statusBucket,
+  type GroupCounts,
   type Health,
   type MilestoneProgress,
   type ProjectModel,
@@ -63,10 +74,13 @@ import {
 } from "./model";
 import {
   AgentsBoard,
-  BUCKET_META,
   BucketChip,
-  EpicRow,
+  BUCKET_META,
+  GROUP_META,
+  GROUP_SEGMENT_ORDER,
+  RelationChips,
   ReviewLane,
+  WorkstreamRow,
 } from "./swarm";
 
 // ── shared bits ─────────────────────────────────────────────────────
@@ -109,6 +123,33 @@ function statusVariant(
     default:
       return "outline";
   }
+}
+
+/**
+ * A task-status pill that goes through the state registry: group
+ * decides the tone, a registered custom color (e.g. the test org's
+ * `qa-review` #ffaa00) overrides it.
+ */
+export function StatusPill({
+  status,
+  states,
+}: {
+  status: string;
+  states: StatesConfig | null;
+}) {
+  const def = stateDefFor(states, status);
+  const group = resolveStateGroup(states, status);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded border px-1.5 py-px font-mono text-[10px]",
+        GROUP_META[group].text,
+      )}
+      style={def?.color ? { color: def.color, borderColor: `${def.color}66` } : undefined}
+    >
+      {status}
+    </span>
+  );
 }
 
 const HEALTH_TONE: Record<Health["tone"], string> = {
@@ -169,22 +210,22 @@ function PriorityGlyph({ priority }: { priority: string }) {
 
 // ── the ONE progress visual ─────────────────────────────────────────
 
-const SEGMENT_ORDER = ["done", "running", "review", "blocked", "open"] as const;
-
 /**
- * Combined progress: a single segmented bar (done/running/review/
- * blocked/open across EVERY task, swarm included) with milestone
- * markers riding on top of it. One glance = delivery state + where
- * the checkpoints sit.
+ * Combined progress: a single bar segmented by state GROUP (across
+ * EVERY task, swarm included) with milestone markers riding on top of
+ * it, plus blocked/review overlay chips. One glance = delivery state
+ * + where the checkpoints sit.
  */
 function CombinedProgress({
   counts,
+  groups,
   milestones,
 }: {
   counts: SwarmCounts;
+  groups: GroupCounts;
   milestones: MilestoneProgress[];
 }) {
-  const denom = counts.total - counts.cancelled;
+  const denom = groups.total - groups.Cancelled;
   const pct = completionPct(counts);
   const doneMs = milestones.filter((m) => m.pct >= 100).length;
   // Milestones order by target date when present (undated ones last,
@@ -199,12 +240,12 @@ function CombinedProgress({
       <div className="relative">
         <div className="flex h-2 overflow-hidden rounded-full bg-muted">
           {denom > 0 &&
-            SEGMENT_ORDER.map((b) =>
-              counts[b] === 0 ? null : (
+            GROUP_SEGMENT_ORDER.map((g) =>
+              g === "Cancelled" || groups[g] === 0 ? null : (
                 <div
-                  key={b}
-                  className={cn(BUCKET_META[b].bar, "transition-all")}
-                  style={{ width: `${(counts[b] / denom) * 100}%` }}
+                  key={g}
+                  className={cn(GROUP_META[g].bar, "transition-all")}
+                  style={{ width: `${(groups[g] / denom) * 100}%` }}
                 />
               ),
             )}
@@ -240,11 +281,24 @@ function CombinedProgress({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-sm font-semibold tabular-nums">{pct}%</span>
         <span className="text-muted-foreground text-[11px] tabular-nums">
-          {counts.done}/{denom} tasks
+          {groups.Completed}/{denom} tasks
         </span>
-        {SEGMENT_ORDER.filter((b) => b !== "done").map((b) => (
-          <BucketChip key={b} bucket={b} count={counts[b]} />
-        ))}
+        {(["Started", "Unstarted", "Backlog"] as const).map((g) =>
+          groups[g] === 0 ? null : (
+            <span
+              key={g}
+              className={cn(
+                "flex items-center gap-1 text-[11px] tabular-nums",
+                GROUP_META[g].text,
+              )}
+            >
+              <span className={cn("size-1.5 rounded-full", GROUP_META[g].bar)} />
+              {groups[g]} {GROUP_META[g].label}
+            </span>
+          ),
+        )}
+        <BucketChip bucket="review" count={counts.review} />
+        <BucketChip bucket="blocked" count={counts.blocked} />
         {milestones.length > 0 && (
           <span className="text-muted-foreground ml-auto flex items-center gap-1 text-[11px] tabular-nums">
             <Target className="size-3" />
@@ -281,14 +335,9 @@ function PropertiesRail({
   health: Health;
 }) {
   const estimates = rollupEstimates(
-    [...model.humans, ...model.epics.map((e) => e.epic), ...model.agents],
+    [...model.byId.values()],
     model.byId,
-  );
-  const cycles = new Set(
-    [...model.byId.values()]
-      .map((t) => t.workflow?.cycle)
-      .filter((c): c is NonNullable<typeof c> => c != null)
-      .map(String),
+    model.states,
   );
   const tags = new Set<string>(project.tags);
 
@@ -346,16 +395,22 @@ function PropertiesRail({
               </span>
             )}
           </RailRow>
-          <RailRow label="Cycle">
-            {cycles.size > 0 ? (
-              <span>
-                {cycles.size === 1
-                  ? `Cycle ${[...cycles][0].slice(0, 8)}`
-                  : `${cycles.size} cycles`}
+          <RailRow label="Workstreams">
+            {model.workstreams.length > 0 ? (
+              <span className="flex items-center gap-1 tabular-nums">
+                <Layers className="size-3" />
+                {model.workstreams.length}
               </span>
             ) : (
               <span className="text-muted-foreground font-normal">None</span>
             )}
+          </RailRow>
+          <RailRow label="States">
+            <span className="text-muted-foreground font-normal">
+              {project.states && project.states.length > 0
+                ? `${project.states.length} custom`
+                : "default registry"}
+            </span>
           </RailRow>
           <RailRow label="Tags">
             {tags.size > 0 ? (
@@ -457,11 +512,13 @@ function humanAssignee(t: TaskInfo): string | null {
 function HumanRow({
   task,
   byId,
+  states,
 }: {
   task: TaskInfo;
   byId: Map<string, TaskInfo>;
+  states: StatesConfig | null;
 }) {
-  const bucket = statusBucket(task, byId);
+  const bucket = statusBucket(task, byId, states);
   const est = estimateLabel(task.workflow?.estimate);
   const assignee = humanAssignee(task);
   return (
@@ -476,6 +533,8 @@ function HumanRow({
       >
         {task.title || task.path}
       </span>
+      <RelationChips task={task} byId={byId} />
+      <StatusPill status={task.status} states={states} />
       {task.due && (
         <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] sm:flex">
           <CalendarClock className="size-3" />
@@ -535,17 +594,24 @@ export function ProjectOverviewPage() {
   const { org, projectId } = useParams({ from: "/projects/$org/$projectId" });
   const project = useQuery(projectQuery(org, projectId));
   const tasks = useQuery(projectTasksQuery(org, projectId));
+  const workstreamsQ = useQuery(projectWorkstreamsQuery(org, projectId));
   const milestonesQ = useQuery(projectMilestonesQuery(org, projectId));
   const [lens, setLens] = useState("overview");
 
+  const states = project.data?.states ?? null;
   const model = useMemo(
-    () => buildModel(tasks.data ?? []),
-    [tasks.data],
+    () => buildModel(tasks.data ?? [], workstreamsQ.data ?? [], states),
+    [tasks.data, workstreamsQ.data, states],
   );
   const milestones = useMemo(
     () =>
-      milestoneProgress(milestonesQ.data ?? [], tasks.data ?? [], model.byId),
-    [milestonesQ.data, tasks.data, model.byId],
+      milestoneProgress(
+        milestonesQ.data ?? [],
+        tasks.data ?? [],
+        model.byId,
+        states,
+      ),
+    [milestonesQ.data, tasks.data, model.byId, states],
   );
   const health = useMemo(
     () => deriveHealth(model.all, milestones),
@@ -611,6 +677,12 @@ export function ProjectOverviewPage() {
                     ? `Target ${formatDate(project.data.target_date)}`
                     : "No target date"}
                 </span>
+                {model.workstreams.length > 0 && (
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="size-3" />
+                    {model.workstreams.length} workstreams
+                  </span>
+                )}
                 {agentTotal > 0 && (
                   <span className="flex items-center gap-1.5">
                     <Bot className="size-3" />
@@ -619,7 +691,11 @@ export function ProjectOverviewPage() {
                 )}
               </div>
               {tasks.isSuccess && (
-                <CombinedProgress counts={model.all} milestones={milestones} />
+                <CombinedProgress
+                  counts={model.all}
+                  groups={model.allGroups}
+                  milestones={milestones}
+                />
               )}
               {tasks.isPending && <Skeleton className="h-9 w-full" />}
             </header>
@@ -648,34 +724,45 @@ export function ProjectOverviewPage() {
                     error={tasks.error}
                     onRetry={() => void tasks.refetch()}
                   />
-                ) : model.all.total === 0 ? (
+                ) : model.all.total === 0 && model.workstreams.length === 0 ? (
                   <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-12 text-center text-sm">
                     No tasks point at this project yet.
                   </p>
                 ) : (
                   <div className="flex flex-col gap-4">
-                    <ReviewLane tasks={model.review} byId={model.byId} />
+                    <ReviewLane
+                      tasks={model.review}
+                      byId={model.byId}
+                      states={states}
+                    />
 
-                    {model.epics.length > 0 && (
+                    {workstreamsQ.isError && (
+                      <ErrorNote
+                        error={workstreamsQ.error}
+                        onRetry={() => void workstreamsQ.refetch()}
+                      />
+                    )}
+
+                    {model.workstreams.length > 0 && (
                       <section className="overflow-hidden rounded-lg border">
                         <header className="bg-muted/50 flex items-center gap-2 border-b px-3 py-2">
-                          <ChevronUp className="text-muted-foreground size-3.5" />
-                          <h2 className="text-xs font-medium">Epics</h2>
+                          <Layers className="text-muted-foreground size-3.5" />
+                          <h2 className="text-xs font-medium">Workstreams</h2>
                           <span className="text-muted-foreground font-mono text-[10px] tabular-nums">
-                            {model.epics.length}
+                            {model.workstreams.length}
                           </span>
                           <span className="text-muted-foreground/70 ml-auto text-[10px]">
-                            each row rolls up its agent swarm — expand for the
-                            full list
+                            each strip rolls up its swarm — expand inline or
+                            open the stream
                           </span>
                         </header>
-                        {model.epics.map((e) => (
-                          <EpicRow
-                            key={String(e.epic.id)}
-                            epic={e.epic}
-                            swarm={e.swarm}
-                            counts={e.counts}
+                        {model.workstreams.map((w) => (
+                          <WorkstreamRow
+                            key={String(w.workstream.id)}
+                            org={org}
+                            model={w}
                             byId={model.byId}
+                            states={states}
                           />
                         ))}
                       </section>
@@ -691,8 +778,8 @@ export function ProjectOverviewPage() {
                       </header>
                       {model.humans.length === 0 ? (
                         <p className="text-muted-foreground px-4 py-8 text-center text-xs">
-                          No standalone human tasks — everything lives under
-                          the epics above.
+                          No standalone tasks — everything lives under the
+                          workstreams above.
                         </p>
                       ) : (
                         model.humans.map((t) => (
@@ -700,6 +787,7 @@ export function ProjectOverviewPage() {
                             key={String(t.id)}
                             task={t}
                             byId={model.byId}
+                            states={states}
                           />
                         ))
                       )}

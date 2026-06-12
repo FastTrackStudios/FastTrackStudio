@@ -19,6 +19,7 @@ project = { workspace = true, features = ["vox"] }
 task = { workspace = true, features = ["vox"] }
 auth-proto = { workspace = true, features = ["vox"] }
 milestone-proto = { workspace = true, features = ["vox"] }
+workstream-proto = { workspace = true, features = ["vox"] }
 
 [lints]
 workspace = true

@@ -24,6 +24,7 @@ import { Separator } from "./components/ui/separator";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { ProjectOverviewPage } from "./routes/project-overview";
 import { ProjectsPage } from "./routes/projects";
+import { WorkstreamDetailPage } from "./routes/workstream";
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -80,10 +81,19 @@ const projectOverviewRoute = createRoute({
   component: ProjectOverviewPage,
 });
 
+// Org-qualified like the project overview — the workstream id alone
+// doesn't say which org's vox mount to fetch from.
+const workstreamRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/workstreams/$org/$workstreamId",
+  component: WorkstreamDetailPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   projectsRoute,
   projectOverviewRoute,
+  workstreamRoute,
 ]);
 
 export function createAppRouter() {
