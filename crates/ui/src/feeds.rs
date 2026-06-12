@@ -48,6 +48,29 @@ pub async fn fetch_tasks(slugs: &[String]) -> Result<Vec<DbTask>, String> {
         .collect())
 }
 
+/// Projects across the selected orgs, each paired with the slug of the
+/// org it came from — feeds the shared project store so mutations and
+/// the detail page can route back to the owning org.
+pub async fn fetch_projects_tagged(
+    slugs: &[String],
+) -> Result<Vec<(String, ProjectInfo)>, String> {
+    let futs = slugs.iter().map(|slug| async move {
+        match crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await {
+            Ok(client) => client
+                .list()
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|p| (slug.clone(), p))
+                        .collect::<Vec<_>>()
+                })
+                .map_err(|e| format!("{slug}: list: {e:?}")),
+            Err(e) => Err(format!("{slug}: {e}")),
+        }
+    });
+    collect(futures_util::future::join_all(futs).await)
+}
+
 /// Tasks across the selected orgs, each paired with the slug of the org
 /// it came from — so mutations can be routed back to the right org's
 /// `TaskService` when viewing "All".
@@ -156,28 +179,20 @@ pub async fn fetch_event_types(slug: &str) -> Result<Vec<scheduling_proto::Event
         .map_err(|e| format!("{slug}: list event types: {e:?}"))
 }
 
-/// Create (upsert) a bookable event type. The backend derives the
-/// vault `path` from the slug/id, so we leave it empty here.
-pub async fn create_event_type(slug: &str, title: &str, duration_min: u16) -> Result<(), String> {
+/// Create (upsert) a bookable event type, returning the persisted draft
+/// so optimistic stores can reconcile against it. The backend derives
+/// the vault `path` from the slug/id; the caller builds the entity (see
+/// `stores::draft_event_type`).
+pub async fn create_event_type(
+    slug: &str,
+    event_type: scheduling_proto::EventType,
+) -> Result<scheduling_proto::EventType, String> {
     let client =
         crate::vox_clients::establish_for::<scheduling_proto::EventTypesClient>(slug).await?;
-    let id = uuid::Uuid::new_v4().to_string();
-    let url_slug = slugify(title);
-    let event_type = scheduling_proto::EventType {
-        path: String::new(),
-        id: scheduling_proto::EventTypeId(id),
-        title: title.to_owned(),
-        slug: url_slug,
-        description: None,
-        duration_min,
-        buffer_min: 0,
-        location: scheduling_proto::EventTypeLocation::Tbd,
-        schedule_id: None,
-        published: true,
-    };
     client
-        .upsert_event_type(event_type)
+        .upsert_event_type(event_type.clone())
         .await
+        .map(|()| event_type)
         .map_err(|e| format!("{slug}: create event type: {e:?}"))
 }
 
@@ -205,7 +220,7 @@ pub async fn cancel_booking(slug: &str, id: &str) -> Result<(), String> {
 }
 
 /// Lowercase, hyphenate, strip non-url-safe chars for an event-type slug.
-fn slugify(s: &str) -> String {
+pub fn slugify(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev_dash = false;
     for ch in s.trim().chars() {
@@ -502,30 +517,15 @@ pub async fn fetch_locations(slug: &str) -> Result<Vec<locations_proto::Location
         .map_err(|e| format!("{slug}: list locations: {e:?}"))
 }
 
-/// Create one location. The backend assigns the `id` (nil here) and
-/// the vault `path` (empty here, defaulting to `locations/<slug>.md`).
-/// Returns the persisted location.
+/// Create one location from a caller-built draft (see
+/// `stores::draft_location` — the backend assigns the real `id` and
+/// vault `path`). Returns the persisted location.
 pub async fn create_location(
     slug: &str,
-    name: &str,
-    kind: &str,
-    address: Option<String>,
+    loc: locations_proto::Location,
 ) -> Result<locations_proto::Location, String> {
     let client =
         crate::vox_clients::establish_for::<locations_proto::LocationsServiceClient>(slug).await?;
-    let loc = locations_proto::Location {
-        path: String::new(),
-        id: uuid::Uuid::nil(),
-        name: name.to_owned(),
-        kind: kind.to_owned(),
-        parent_id: None,
-        address,
-        tags: locations_proto::model::Tags::default(),
-        same_as: None,
-        date_created: None,
-        date_modified: None,
-        details: String::new(),
-    };
     client
         .create(loc)
         .await
@@ -545,36 +545,15 @@ pub async fn fetch_inventory(slug: &str) -> Result<Vec<inventory_proto::Item>, S
         .map_err(|e| format!("{slug}: list inventory: {e:?}"))
 }
 
-/// Create one inventory item. The backend assigns the `id` (nil here)
-/// and the vault `path` (empty here, defaulting to `inventory/<slug>.md`).
-/// Returns the persisted item.
+/// Create one inventory item from a caller-built draft (see
+/// `stores::draft_item` — the backend assigns the real `id` and vault
+/// `path`). Returns the persisted item.
 pub async fn create_item(
     slug: &str,
-    name: &str,
-    category: &str,
-    location_id: Option<uuid::Uuid>,
+    item: inventory_proto::Item,
 ) -> Result<inventory_proto::Item, String> {
     let client =
         crate::vox_clients::establish_for::<inventory_proto::InventoryServiceClient>(slug).await?;
-    let item = inventory_proto::Item {
-        path: String::new(),
-        id: uuid::Uuid::nil(),
-        name: name.to_owned(),
-        category: category.to_owned(),
-        location_id,
-        condition: inventory_proto::Condition::Good.as_str().to_owned(),
-        status: inventory_proto::Status::Stored.as_str().to_owned(),
-        manufacturer: None,
-        model: None,
-        serial: None,
-        purchase_date: None,
-        value: None,
-        tasks: inventory_proto::StringList::default(),
-        tags: inventory_proto::StringList::default(),
-        date_created: None,
-        date_modified: None,
-        details: String::new(),
-    };
     client
         .create(item)
         .await
@@ -610,32 +589,15 @@ pub async fn fetch_milestones(slug: &str) -> Result<Vec<milestone_proto::Milesto
         .map_err(|e| format!("{slug}: list milestones: {e:?}"))
 }
 
-/// Create one milestone. `project_id` is required (a milestone
-/// always lives inside a project); the backend derives the vault
-/// `path` (empty here) and assigns the `id` (nil here). Returns
-/// the persisted milestone.
+/// Create one milestone from a caller-built draft (see
+/// `stores::draft_milestone` — the backend derives the vault `path` and
+/// assigns the real `id`). Returns the persisted milestone.
 pub async fn create_milestone(
     slug: &str,
-    title: &str,
-    project_id: uuid::Uuid,
-    due_date: Option<chrono::NaiveDate>,
+    ms: milestone_proto::Milestone,
 ) -> Result<milestone_proto::Milestone, String> {
     let client =
         crate::vox_clients::establish_for::<milestone_proto::MilestoneServiceClient>(slug).await?;
-    let ms = milestone_proto::Milestone {
-        path: String::new(),
-        id: uuid::Uuid::nil(),
-        title: title.to_owned(),
-        project_id,
-        goal_id: None,
-        status: "open".to_owned(),
-        due_date,
-        tags: milestone_proto::Tags::default(),
-        forge_ref: None,
-        date_created: None,
-        date_modified: None,
-        details: String::new(),
-    };
     client
         .create(ms)
         .await
@@ -658,30 +620,15 @@ pub async fn fetch_body_metrics(
         .map_err(|e| format!("{slug}: list body metrics: {e:?}"))
 }
 
-/// Create one body metric (e.g. a "Weight" series tracked in
-/// kg). The backend assigns the `id` (nil here) and the vault
-/// `path` (empty here). Returns the persisted metric.
+/// Create one body metric from a caller-built draft (see
+/// `stores::draft_body_metric` — the backend assigns the real `id` and
+/// vault `path`). Returns the persisted metric.
 pub async fn create_body_metric(
     slug: &str,
-    name: &str,
-    kind: &str,
-    unit: &str,
+    metric: fitness_proto::body::BodyMetric,
 ) -> Result<fitness_proto::body::BodyMetric, String> {
     let client =
         crate::vox_clients::establish_for::<fitness_proto::body::BodyServiceClient>(slug).await?;
-    let metric = fitness_proto::body::BodyMetric {
-        path: String::new(),
-        id: uuid::Uuid::nil(),
-        name: name.to_owned(),
-        kind: kind.to_owned(),
-        unit: unit.to_owned(),
-        goal: None,
-        tags: fitness_proto::body::Tags::default(),
-        entries: fitness_proto::body::Entries::default(),
-        date_created: None,
-        date_modified: None,
-        details: String::new(),
-    };
     client
         .create(metric)
         .await
@@ -726,37 +673,16 @@ pub async fn fetch_exercises(
         .map_err(|e| format!("{slug}: list exercises: {e:?}"))
 }
 
-/// Add one exercise to the catalog (name + movement category).
-/// The backend assigns the `id` (nil here) and the vault `path`
-/// (empty here). Returns the persisted exercise.
+/// Add one exercise to the catalog from a caller-built draft (see
+/// `stores::draft_exercise` — the backend assigns the real `id` and
+/// vault `path`). Returns the persisted exercise.
 pub async fn create_exercise(
     slug: &str,
-    name: &str,
-    category: &str,
+    exercise: fitness_proto::exercises::Exercise,
 ) -> Result<fitness_proto::exercises::Exercise, String> {
     let client =
         crate::vox_clients::establish_for::<fitness_proto::exercises::ExercisesServiceClient>(slug)
             .await?;
-    let exercise = fitness_proto::exercises::Exercise {
-        path: String::new(),
-        id: uuid::Uuid::nil(),
-        name: name.to_owned(),
-        aliases: fitness_proto::exercises::StringList::default(),
-        description: None,
-        category: category.to_owned(),
-        primary_muscles: fitness_proto::exercises::StringList::default(),
-        secondary_muscles: fitness_proto::exercises::StringList::default(),
-        equipment: fitness_proto::exercises::StringList::default(),
-        mechanics: None,
-        force: None,
-        instructions: fitness_proto::exercises::StringList::default(),
-        video_url: None,
-        image_url: None,
-        tags: fitness_proto::exercises::StringList::default(),
-        date_created: None,
-        date_modified: None,
-        details: String::new(),
-    };
     client
         .create(exercise)
         .await
@@ -802,30 +728,15 @@ pub async fn fetch_recipes(slug: &str) -> Result<Vec<cookbook_proto::Recipe>, St
         .map_err(|e| format!("{slug}: list recipes: {e:?}"))
 }
 
-/// Create one recipe from a name. Identity is the vault-relative
-/// `path`; the backend fills `path` from the name + parses the
-/// `source`. We seed a minimal cooklang source (`>> title:`).
-pub async fn create_recipe(slug: &str, name: &str) -> Result<cookbook_proto::Recipe, String> {
+/// Create one recipe from a caller-built draft (see
+/// `stores::draft_recipe` — identity is the vault-relative `path`; the
+/// backend parses the cooklang `source`). Returns the persisted recipe.
+pub async fn create_recipe(
+    slug: &str,
+    recipe: cookbook_proto::Recipe,
+) -> Result<cookbook_proto::Recipe, String> {
     let client =
         crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
-    let recipe = cookbook_proto::Recipe {
-        path: format!("Cookbook/{name}.cook"),
-        name: name.to_owned(),
-        description: None,
-        course: None,
-        cuisine: None,
-        prep_minutes: None,
-        cook_minutes: None,
-        servings: None,
-        ingredients: cookbook_proto::Ingredients::default(),
-        steps: cookbook_proto::StringList::default(),
-        cookware: cookbook_proto::StringList::default(),
-        nested_recipes: cookbook_proto::StringList::default(),
-        tags: cookbook_proto::StringList::default(),
-        source_url: None,
-        date_modified: None,
-        source: format!(">> title: {name}\n"),
-    };
     client
         .create(recipe)
         .await
@@ -843,51 +754,15 @@ pub async fn fetch_pantry(slug: &str) -> Result<Vec<pantry_proto::PantryItem>, S
         .map_err(|e| format!("{slug}: list pantry: {e:?}"))
 }
 
-/// Create one pantry item (name + qty + unit). The backend
-/// assigns the `id` (nil here) and the vault `path` (empty here).
-/// Returns the persisted item.
+/// Create one pantry item from a caller-built draft (see
+/// `stores::draft_pantry_item` — the backend assigns the real `id` and
+/// vault `path`). Returns the persisted item.
 pub async fn create_pantry_item(
     slug: &str,
-    name: &str,
-    qty: Option<f64>,
-    unit: &str,
+    item: pantry_proto::PantryItem,
 ) -> Result<pantry_proto::PantryItem, String> {
     let client =
         crate::vox_clients::establish_for::<pantry_proto::PantryServiceClient>(slug).await?;
-    let item = pantry_proto::PantryItem {
-        path: String::new(),
-        id: uuid::Uuid::nil(),
-        name: name.to_owned(),
-        category: "food".to_owned(),
-        location_id: None,
-        condition: "good".to_owned(),
-        status: "stored".to_owned(),
-        tags: pantry_proto::StringList(vec!["item".into(), "pantry".into()]),
-        date_created: None,
-        date_modified: None,
-        food_category: String::new(),
-        qty,
-        unit: unit.to_owned(),
-        purchase_unit: None,
-        purchase_to_stock_factor: None,
-        expiry: None,
-        opened: false,
-        opened_date: None,
-        brand: None,
-        nutrition_per_unit: None,
-        nutrition_unit: None,
-        minimum: None,
-        default_best_before_days: None,
-        default_best_before_days_after_open: None,
-        default_best_before_days_after_freezing: None,
-        default_best_before_days_after_thawing: None,
-        due_type: "best-before".to_owned(),
-        stock_entries: pantry_proto::StockEntries::default(),
-        substitutes: pantry_proto::Substitutions::default(),
-        barcodes: pantry_proto::StringList::default(),
-        image_url: None,
-        details: String::new(),
-    };
     client
         .create(item)
         .await

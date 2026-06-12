@@ -12,18 +12,23 @@
 //!
 //! Editing, entry logging, routines, and nutrition resolution live
 //! in the CLI for now; this is the read + light-create slice,
-//! mirroring the `/locations` page.
+//! mirroring the `/locations` page. Body + Exercises state is the
+//! shared optimistic store ([`crate::stores`]): one `AtomResult` per
+//! section, typed `Id::Temp` rows for in-flight creates, rollback +
+//! tray notification on failure.
 
+use architect::Id;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
+use uuid::Uuid;
 
 use fitness_proto::body::BodyMetric;
 use fitness_proto::exercises::Exercise;
 use fitness_proto::intake::IntakeLog;
 use fitness_proto::workouts::WorkoutSession;
 
-use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
      focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
@@ -126,21 +131,9 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
     let mut kind = use_signal(|| "weight".to_string());
     let mut unit = use_signal(|| "kg".to_string());
 
-    // Authoritative list: optimistic create, write-through to the org's
-    // BodyService. Initial snapshot loaded below; no refetch on create.
-    let list = use_optimistic_list::<BodyMetric, _>(|m| m.id);
-
-    let metrics = use_resource(move || async move {
-        match slug() {
-            Some(s) => crate::feeds::fetch_body_metrics(&s).await,
-            None => Ok(Vec::new()),
-        }
-    });
-    use_effect(move || {
-        if let Some(Ok(rows)) = &*metrics.read_unchecked() {
-            list.set(rows.clone());
-        }
-    });
+    // The shared store: one AtomResult for the list, optimistic create.
+    let result = stores::use_body_metric_list();
+    let muts = stores::use_body_metric_mutations();
 
     let mut create = move || {
         let n = name.read().trim().to_string();
@@ -151,29 +144,11 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
         let k = kind.read().clone();
         let u = unit.read().trim().to_string();
         name.set(String::new());
-        let provisional = BodyMetric {
-            path: String::new(),
-            id: uuid::Uuid::new_v4(),
-            name: n.clone(),
-            kind: k.clone(),
-            unit: u.clone(),
-            goal: None,
-            tags: fitness_proto::body::Tags::default(),
-            entries: fitness_proto::body::Entries::default(),
-            date_created: None,
-            date_modified: None,
-            details: String::new(),
-        };
-        list.create(provisional, async move {
-            crate::feeds::create_body_metric(&s, &n, &k, &u).await
-        });
+        muts.create(s, stores::draft_body_metric(n, k, u));
     };
 
-    let rows = list.items().read().clone();
-    let load_err: Option<String> = match &*metrics.read() {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
+    let rows: Vec<(Id<Uuid>, BodyMetric)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
 
     rsx! {
         section { class: "flex flex-col gap-3",
@@ -221,8 +196,8 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
                 EmptyState { message: "No body metrics yet — add one above.".to_string() }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for m in rows {
-                        BodyRow { key: "{m.id}", state: list.state(m.id), metric: m }
+                    for (id, m) in rows {
+                        BodyRow { key: "{id}", pending: id.is_temp(), metric: m }
                     }
                 }
             }
@@ -230,20 +205,20 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
     }
 }
 
-/// One body metric: name + kind badge + latest reading. `state`
-/// reflects optimistic write-through: dimmed while `Pending`, a
-/// destructive ring while `Failed`.
+/// One body metric: name + kind badge + latest reading. `pending` dims
+/// an optimistic row whose write-through is in flight; failures roll
+/// back + notify.
 #[component]
-fn BodyRow(metric: BodyMetric, state: RowState) -> Element {
+fn BodyRow(metric: BodyMetric, pending: bool) -> Element {
     let name = metric.name.clone();
     let kind = metric.kind.clone();
     let unit = metric.unit.clone();
     let latest = metric.latest().map(|e| (e.value, e.date));
 
-    let state_cls = match state {
-        RowState::Settled => "border-border bg-card/40",
-        RowState::Pending => "border-border bg-card/40 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    let state_cls = if pending {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
     };
 
     rsx! {
@@ -268,21 +243,9 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
     let mut name = use_signal(String::new);
     let mut category = use_signal(|| "chest".to_string());
 
-    // Authoritative list: optimistic create, write-through to the org's
-    // ExercisesService. Initial snapshot loaded below; no refetch on create.
-    let list = use_optimistic_list::<Exercise, _>(|e| e.id);
-
-    let exercises = use_resource(move || async move {
-        match slug() {
-            Some(s) => crate::feeds::fetch_exercises(&s).await,
-            None => Ok(Vec::new()),
-        }
-    });
-    use_effect(move || {
-        if let Some(Ok(rows)) = &*exercises.read_unchecked() {
-            list.set(rows.clone());
-        }
-    });
+    // The shared store: one AtomResult for the list, optimistic create.
+    let result = stores::use_exercise_list();
+    let muts = stores::use_exercise_mutations();
 
     let mut create = move || {
         let n = name.read().trim().to_string();
@@ -292,36 +255,11 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
         let Some(s) = slug() else { return };
         let c = category.read().clone();
         name.set(String::new());
-        let provisional = Exercise {
-            path: String::new(),
-            id: uuid::Uuid::new_v4(),
-            name: n.clone(),
-            aliases: fitness_proto::exercises::StringList::default(),
-            description: None,
-            category: c.clone(),
-            primary_muscles: fitness_proto::exercises::StringList::default(),
-            secondary_muscles: fitness_proto::exercises::StringList::default(),
-            equipment: fitness_proto::exercises::StringList::default(),
-            mechanics: None,
-            force: None,
-            instructions: fitness_proto::exercises::StringList::default(),
-            video_url: None,
-            image_url: None,
-            tags: fitness_proto::exercises::StringList::default(),
-            date_created: None,
-            date_modified: None,
-            details: String::new(),
-        };
-        list.create(provisional, async move {
-            crate::feeds::create_exercise(&s, &n, &c).await
-        });
+        muts.create(s, stores::draft_exercise(n, c));
     };
 
-    let rows = list.items().read().clone();
-    let load_err: Option<String> = match &*exercises.read() {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
+    let rows: Vec<(Id<Uuid>, Exercise)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
 
     rsx! {
         section { class: "flex flex-col gap-3",
@@ -358,8 +296,8 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
                 EmptyState { message: "No exercises yet — add one above.".to_string() }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for ex in rows {
-                        ExerciseRow { key: "{ex.id}", state: list.state(ex.id), exercise: ex }
+                    for (id, ex) in rows {
+                        ExerciseRow { key: "{id}", pending: id.is_temp(), exercise: ex }
                     }
                 }
             }
@@ -367,19 +305,19 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
     }
 }
 
-/// One exercise: name + category badge + equipment summary. `state`
-/// reflects optimistic write-through: dimmed while `Pending`, a
-/// destructive ring while `Failed`.
+/// One exercise: name + category badge + equipment summary. `pending`
+/// dims an optimistic row whose write-through is in flight; failures
+/// roll back + notify.
 #[component]
-fn ExerciseRow(exercise: Exercise, state: RowState) -> Element {
+fn ExerciseRow(exercise: Exercise, pending: bool) -> Element {
     let name = exercise.name.clone();
     let category = exercise.category.clone();
     let equipment = exercise.equipment.join(", ");
 
-    let state_cls = match state {
-        RowState::Settled => "border-border bg-card/40",
-        RowState::Pending => "border-border bg-card/40 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    let state_cls = if pending {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
     };
 
     rsx! {

@@ -13,8 +13,10 @@
 //! - **Top bar** — [`TopBar`]: desktop-only sticky header, right
 //!   aligned, with at-a-glance stat chips + the two widgets.
 //!
-//! A [`Refresh`] context signal is bumped on every mutation (capture,
-//! start, stop) so the stat chips re-fetch without a full reload.
+//! All three read/write the shared optimistic stores
+//! ([`crate::stores`]), so a capture or a timer start made *anywhere*
+//! (these widgets, `/inbox`, `/timer`) updates the chips and the clock
+//! instantly — no refresh counter, no extra round-trips.
 
 use chrono::Utc;
 use dioxus::prelude::*;
@@ -32,23 +34,13 @@ use crate::routes::Route;
 #[derive(Clone, Copy)]
 pub struct FleetingOpen(pub Signal<bool>);
 
-/// Monotonic data-version counter. Bumped after a capture / timer
-/// start / stop so chrome resources re-fetch. Provided by the shell.
-#[derive(Clone, Copy)]
-pub struct Refresh(pub Signal<u64>);
-
 /// Install the chrome contexts. Call once in the app shell.
 pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
-    use_context_provider(|| Refresh(Signal::new(0)));
 }
 
 fn use_fleeting_open() -> Signal<bool> {
     use_context::<FleetingOpen>().0
-}
-
-fn use_refresh() -> Signal<u64> {
-    use_context::<Refresh>().0
 }
 
 // ── top bar ─────────────────────────────────────────────────────────
@@ -60,56 +52,52 @@ fn use_refresh() -> Signal<u64> {
 pub fn TopBar() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let refresh = use_refresh();
 
     let target = use_memo(move || resolve_org(&selection.read(), &org_list.read()));
 
+    // Both chips derive from the shared stores, so a capture or a
+    // stopped timer made anywhere updates them instantly (the widgets
+    // below mutate the same stores).
+    let inbox_rows = crate::stores::use_inbox_list();
+    let session_rows = crate::stores::use_session_list();
+
     // Open inbox items still to review (excludes processed / archived
     // and not-yet-due snoozes), for the at-a-glance chip.
-    let inbox_open = use_resource(move || async move {
-        let _ = refresh();
-        let Some((slug, _)) = target() else {
-            return 0usize;
-        };
-        let today = Utc::now().date_naive().to_string();
-        crate::feeds::fetch_inbox(&slug)
-            .await
-            .map(|items| {
-                items
-                    .iter()
-                    .filter(|it| {
-                        it.is_open()
-                            && it
-                                .resurface_on
-                                .as_deref()
-                                .is_none_or(|d| d <= today.as_str())
-                    })
-                    .count()
+    let today = Utc::now().date_naive().to_string();
+    let inbox_count = inbox_rows.value().map_or(0, |rows| {
+        rows.iter()
+            .filter(|(_, it)| {
+                it.is_open()
+                    && it
+                        .resurface_on
+                        .as_deref()
+                        .is_none_or(|d| d <= today.as_str())
             })
-            .unwrap_or(0)
+            .count()
     });
 
     // Time logged today (completed sessions only — the running one is
-    // shown live in the timer widget).
-    let today_secs = use_resource(move || async move {
-        let _ = refresh();
-        let Some((slug, org_id)) = target() else {
-            return 0i64;
-        };
-        let today = Utc::now().date_naive();
-        crate::feeds::fetch_recent_sessions(&slug, owner_id(org_id))
-            .await
-            .map(|rows| {
-                rows.iter()
-                    .filter(|s| s.start_time.date_naive() == today)
-                    .filter_map(|s| s.end_time.map(|e| (e - s.start_time).num_seconds()))
-                    .sum()
-            })
-            .unwrap_or(0)
-    });
-
-    let inbox_count = inbox_open().unwrap_or(0);
-    let logged = today_secs().unwrap_or(0);
+    // shown live in the timer widget), scoped to the active org+owner.
+    let today_date = Utc::now().date_naive();
+    let logged: i64 = match (target(), session_rows.value()) {
+        (Some((slug, org_id)), Some(rows)) => {
+            let owner = owner_id(org_id);
+            rows.iter()
+                .map(|(_, r)| r)
+                .filter(|r| {
+                    r.slug == slug
+                        && r.session.user_id == owner
+                        && r.session.start_time.date_naive() == today_date
+                })
+                .filter_map(|r| {
+                    r.session
+                        .end_time
+                        .map(|e| (e - r.session.start_time).num_seconds())
+                })
+                .sum()
+        }
+        _ => 0,
+    };
 
     rsx! {
         div {
@@ -185,18 +173,20 @@ pub fn FleetingButton(#[props(default = false)] compact: bool) -> Element {
 #[component]
 pub fn FleetingModal() -> Element {
     let mut open = use_fleeting_open();
-    let mut refresh = use_refresh();
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let target = use_memo(move || resolve_org(&selection.read(), &org_list.read()));
+    let muts = crate::stores::use_inbox_mutations();
 
     let mut draft = use_signal(String::new);
-    let mut saving = use_signal(|| false);
 
     if !open() {
         return rsx! {};
     }
 
+    // Optimistic: the capture lands in the shared inbox store
+    // instantly (chip + /inbox update), persists in the background,
+    // and rolls back + notifies on failure.
     let mut submit = move || {
         let text = draft.peek().trim().to_string();
         if text.is_empty() {
@@ -206,17 +196,11 @@ pub fn FleetingModal() -> Element {
         let Some((slug, _)) = target() else {
             return;
         };
-        saving.set(true);
-        spawn(async move {
-            let id = uuid::Uuid::new_v4().to_string();
-            let created = Utc::now().to_rfc3339();
-            let item = inbox_proto::InboxItem::capture(id, text, "ui", created);
-            let _ = crate::feeds::upsert_inbox_item(&slug, item).await;
-            draft.set(String::new());
-            saving.set(false);
-            refresh += 1;
-            open.set(false);
-        });
+        let id = uuid::Uuid::new_v4().to_string();
+        let created = Utc::now().to_rfc3339();
+        muts.capture(slug, inbox_proto::InboxItem::capture(id, text, "ui", created));
+        draft.set(String::new());
+        open.set(false);
     };
 
     rsx! {
@@ -262,7 +246,6 @@ pub fn FleetingModal() -> Element {
                     Button {
                         variant: ButtonVariant::Primary,
                         size: ButtonSize::Small,
-                        disabled: saving(),
                         on_click: move |_| submit(),
                         "Capture"
                     }
@@ -298,15 +281,23 @@ pub fn FleetingFab() -> Element {
 pub fn TimerWidget() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let mut refresh = use_refresh();
     let target = use_memo(move || resolve_org(&selection.read(), &org_list.read()));
 
-    let active = use_resource(move || async move {
-        let _ = refresh();
-        match target() {
-            Some((slug, org_id)) => crate::feeds::fetch_active_timer(&slug, owner_id(org_id)).await,
-            None => Ok(None),
-        }
+    // The running session is derived from the shared session store —
+    // the same rows /timer renders, so the widget and the page can
+    // never disagree.
+    let session_rows = crate::stores::use_session_list();
+    let muts = crate::stores::use_timer_mutations();
+    let active: Option<crate::stores::OrgSession> = target().and_then(|(slug, org_id)| {
+        let owner = owner_id(org_id);
+        session_rows.value().and_then(|rows| {
+            rows.iter()
+                .map(|(_, r)| r)
+                .find(|r| {
+                    r.slug == slug && r.session.user_id == owner && r.session.end_time.is_none()
+                })
+                .cloned()
+        })
     });
 
     // Live clock — re-render once a second so the running elapsed advances.
@@ -316,47 +307,44 @@ pub fn TimerWidget() -> Element {
 
     let mut draft = use_signal(String::new);
 
-    let start = move || {
+    // Optimistic: the running card appears/clears instantly and
+    // reconciles against the server (rollback + tray on failure).
+    let mut start = move || {
         let Some((slug, org_id)) = target() else {
             return;
         };
         let desc = draft.peek().trim().to_string();
-        spawn(async move {
-            let req = timer_proto::StartTimerRequest {
+        draft.set(String::new());
+        muts.start(
+            slug,
+            timer_proto::StartTimerRequest {
                 user_id: owner_id(org_id),
                 org_id,
                 project_id: None,
                 project_path: String::new(),
                 task_note_path: String::new(),
                 description: desc,
-            };
-            if crate::feeds::start_timer(&slug, req).await.is_ok() {
-                draft.set(String::new());
-                refresh += 1;
-            }
-        });
+            },
+        );
     };
 
+    let active_for_stop = active.clone();
     let stop = move || {
         let Some((slug, org_id)) = target() else {
             return;
         };
-        spawn(async move {
-            if crate::feeds::stop_timer(&slug, owner_id(org_id))
-                .await
-                .is_ok()
-            {
-                refresh += 1;
-            }
-        });
+        let Some(open) = active_for_stop.as_ref() else {
+            return;
+        };
+        muts.stop(slug, owner_id(org_id), open.session.id);
     };
 
     if target().is_none() {
         return rsx! {};
     }
 
-    match &*active.read_unchecked() {
-        Some(Ok(Some(s))) => {
+    match active.as_ref().map(|r| &r.session) {
+        Some(s) => {
             let elapsed = (Utc::now() - s.start_time).num_seconds();
             let title = if s.description.trim().is_empty() {
                 "Tracking".to_string()
@@ -380,7 +368,7 @@ pub fn TimerWidget() -> Element {
                 }
             }
         }
-        _ => {
+        None => {
             rsx! {
                 div { class: "flex items-center gap-1 rounded-lg border border-border bg-card/40 py-1 pl-2.5 pr-1",
                     input {

@@ -1,13 +1,16 @@
 //! `/projects/:id` — project overview.
 //!
-//! Fetches one [`ProjectInfo`] via `ProjectServiceClient.get` and the
-//! org's tasks via the shared [`crate::task_wiring`], filters tasks to
-//! this project (by `project_id` or `[[wikilink]]`), and renders a
-//! header with a live progress bar plus the project's tasks through
-//! [`task_ui::TasksApp`] (fully editable, write-through). Native has
-//! no client yet (offline notice).
+//! Resolves one project through the shared optimistic project store
+//! ([`crate::stores::use_project`] — instant from cache after a
+//! `/projects` visit, else a per-org probe), filters the shared task
+//! store's rows to this project (by `project_id` or `[[wikilink]]`),
+//! and renders a header with a live progress bar plus the project's
+//! tasks through [`task_ui::TasksApp`] (fully editable, optimistic
+//! write-through with rollback + tray notification on failure).
+//! Threads/messages ride their own stores — posting reconciles the
+//! created entity in, no refetch counters anywhere.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use agent_proto::session::{Session as AgentSession, SessionStatus as AgentStatus};
 use chrono::{DateTime, Utc};
@@ -19,70 +22,58 @@ use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
 use timer_proto::WorkSession;
 use uuid::Uuid;
 
-use crate::orgs::{OrgMeta, OrgSelection};
+use crate::orgs::OrgMeta;
 use crate::routes::Route;
-use crate::task_wiring::{handle, to_ui};
+use crate::stores::{self, to_ui};
 use threads::ui::ConversationsPanel;
-
-/// The overview payload: project + its tasks + threads + connected repos,
-/// loaded in one resource so they fetch concurrently.
-type Overview = (
-    ProjectInfo,
-    String,
-    Vec<DbTask>,
-    Vec<threads::Thread>,
-    Vec<git_proto::RepoId>,
-);
 
 #[component]
 pub fn ProjectDetailView(id: String) -> Element {
-    let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let route_id = id.clone();
-    // Bumped after a write (e.g. changing the project type) to re-fetch.
-    let mut page_refresh = use_signal(|| 0u32);
-    // Bumped after a thread is created or a message posted.
-    let mut threads_refresh = use_signal(|| 0u32);
     let mut selected_thread = use_signal(|| Option::<Uuid>::None);
 
-    // One resource loads the whole overview. After locating the project
-    // (which carries its id + owning org), tasks + threads + connected
-    // repos are fetched **concurrently** — no `use_effect → signal →
-    // resource` waterfall gating a second round-trip wave behind a render
-    // cycle. Works in "All" mode (searches the selected orgs by id).
-    let data = use_resource(move || {
-        let id = route_id.clone();
-        let _ = page_refresh.read();
-        let _ = threads_refresh.read();
-        async move {
-            let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
-            let (project, slug) = crate::feeds::find_project(&id, &slugs).await?;
-            let pid = project.id;
-            let (tasks_r, threads_r, repos_r) = futures_util::future::join3(
-                crate::feeds::fetch_tasks_tagged(std::slice::from_ref(&slug)),
-                crate::feeds::fetch_threads(&slug, "project", pid),
-                crate::feeds::fetch_repos_for_project(&slug, pid),
-            )
-            .await;
-            let tasks = tasks_r?.into_iter().map(|(_, t)| t).collect::<Vec<_>>();
-            // Threads / repos are non-fatal: a forge or threads hiccup
-            // shouldn't blank the whole overview.
-            let threads = threads_r.unwrap_or_default();
-            let repos = repos_r.unwrap_or_default();
-            Ok::<Overview, String>((project, slug, tasks, threads, repos))
-        }
-    });
+    // The project itself: cache-first from the shared store (instant
+    // after a /projects visit), else a per-org probe. Mutations (type
+    // change, cover image) reconcile straight into this value — no
+    // page refresh counter.
+    let project_res = stores::use_project(id.clone());
+    let project_muts = stores::use_project_mutations();
 
-    let mut tasks = use_signal(Vec::<DbTask>::new);
-    let mut org_of = use_signal(HashMap::<Uuid, String>::new);
-    let mut project_slug = use_signal(String::new);
-    let mut project_uuid = use_signal(|| Option::<Uuid>::None);
-    use_effect(move || {
-        if let Some(Ok((p, slug, rows, _, _))) = &*data.read_unchecked() {
-            tasks.set(rows.clone());
-            org_of.set(rows.iter().map(|t| (t.id, slug.clone())).collect());
-            project_slug.set(slug.clone());
-            project_uuid.set(Some(p.id));
+    // `(owning slug, project id)` once resolved — the key every
+    // dependent fetch hangs off. Mirrored into a reactive memo so the
+    // resources/hooks below re-run when it lands or changes.
+    let pkey: Option<(String, Uuid)> = project_res
+        .value()
+        .map(|r| (r.slug.clone(), r.project.id));
+    let pkey_for_memo = pkey.clone();
+    let pkey_memo = use_memo(use_reactive!(|(pkey_for_memo,)| pkey_for_memo));
+
+    // The shared task store: the selected orgs' tasks (slug-tagged);
+    // `belongs()` filters to this project at render time.
+    let tasks_res = stores::use_task_list();
+    let task_store = stores::use_task_store();
+    let task_muts = stores::use_task_mutations();
+
+    // Conversations: threads anchored to this project + the selected
+    // thread's messages, each its own store (posting reconciles the
+    // created entity in).
+    let threads_res = stores::use_project_threads(pkey.clone());
+    let thread_muts = stores::use_thread_mutations();
+    let msg_key: Option<(String, Uuid)> = pkey
+        .as_ref()
+        .and_then(|(slug, _)| selected_thread().map(|tid| (slug.clone(), tid)));
+    let messages_res = stores::use_thread_messages(msg_key);
+
+    // Connected repos — read-only, fetched once the project resolves.
+    let repos_res = use_resource(move || {
+        let k = pkey_memo();
+        async move {
+            match k {
+                Some((slug, pid)) => crate::feeds::fetch_repos_for_project(&slug, pid)
+                    .await
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            }
         }
     });
 
@@ -104,13 +95,9 @@ pub fn ProjectDetailView(id: String) -> Element {
     // join — one extra call, resolved in [`build_budget`]).
     let budget = use_resource(move || {
         let _ = live_tick.read();
-        let slug = project_slug.read().clone();
-        let pid = *project_uuid.read();
+        let k = pkey_memo();
         async move {
-            let pid = pid?;
-            if slug.is_empty() {
-                return None;
-            }
+            let (slug, pid) = k?;
             let (sessions, uninvoiced, invoices) = futures_util::future::join3(
                 crate::feeds::fetch_project_sessions(&slug, pid, false),
                 crate::feeds::fetch_uninvoiced(&slug),
@@ -130,13 +117,9 @@ pub fn ProjectDetailView(id: String) -> Element {
     // sessions mid-turn (Running) or blocked on a human (AwaitingUser).
     let active_now = use_resource(move || {
         let _ = live_tick.read();
-        let slug = project_slug.read().clone();
-        let pid = *project_uuid.read();
+        let k = pkey_memo();
         async move {
-            let pid = pid?;
-            if slug.is_empty() {
-                return None;
-            }
+            let (slug, pid) = k?;
             let (timers, agents) = futures_util::future::join(
                 crate::feeds::fetch_project_sessions(&slug, pid, true),
                 crate::feeds::fetch_project_agent_sessions(&slug, &pid.to_string()),
@@ -152,25 +135,23 @@ pub fn ProjectDetailView(id: String) -> Element {
 
     // ── Live task fold ──────────────────────────────────────────────
     // Fetch-once-then-fold (the TaskService subscriber contract): the
-    // overview resource above fetched the org's task list once; from
-    // here on every change arrives as a [`task::TaskEvent`] and folds
-    // into the same `tasks` signal — no refetch, and the page never
-    // blanks because the `data` resource is left untouched. `tasks`
-    // holds the *whole org's* rows and `belongs()` filters at render
-    // time, so an Upserted task that newly matches the project joins
-    // the list and one that stops matching drops out, for free.
+    // task store hydrated once; from here on every change arrives as a
+    // [`task::TaskEvent`] and folds into the **shared store** — no
+    // refetch, and `belongs()` filters at render time, so an Upserted
+    // task that newly matches the project joins the list and one that
+    // stops matching drops out, for free.
     //
-    // The subscribe future reads `project_slug`, so when an org switch
+    // The subscribe future reads `pkey_memo`, so when an org switch
     // resolves the page to a different slug the hook re-runs and
     // re-subscribes against the new org's stream (and the initial
-    // empty-slug run returns `false`, retried once the slug lands).
+    // unresolved run returns `false`, retried once the key lands).
     architect::use_stream(
         move |tx| {
-            let slug = project_slug.read().clone();
+            let slug = pkey_memo.read().as_ref().map(|(s, _)| s.clone());
             async move {
-                if slug.is_empty() {
+                let Some(slug) = slug else {
                     return false;
-                }
+                };
                 let Ok(client) =
                     crate::vox_clients::establish_for::<task::TaskServiceStreamClient>(&slug).await
                 else {
@@ -180,50 +161,38 @@ pub fn ProjectDetailView(id: String) -> Element {
             }
         },
         move |ev: task::TaskEvent| {
-            // `Signal` is `Copy`; rebind mutably inside the `Fn`.
-            let (mut tasks, mut org_of) = (tasks, org_of);
             match ev {
                 task::TaskEvent::Upserted(t) => {
-                    let slug = project_slug.peek().clone();
-                    let mut list = tasks.write();
-                    if let Some(row) = list.iter_mut().find(|r| r.id == t.id) {
-                        *row = t;
-                    } else {
-                        org_of.write().insert(t.id, slug);
-                        list.push(t);
-                    }
+                    let slug = pkey_memo
+                        .peek()
+                        .as_ref()
+                        .map(|(s, _)| s.clone())
+                        .unwrap_or_default();
+                    // Server-pushed upsert: fold the authoritative row
+                    // in (keeps the slug from the event's org stream).
+                    task_store.put(stores::OrgTask { slug, task: t });
                 }
                 task::TaskEvent::Deleted(id) => {
-                    tasks.write().retain(|r| r.id != id);
-                    org_of.write().remove(&id);
+                    task_store.remove_real(&id);
                 }
             }
         },
     );
 
-    // Messages of the selected thread — separate so selecting a thread
-    // doesn't refetch the whole overview.
-    let messages_res = use_resource(move || {
-        let _ = threads_refresh.read();
-        let sel = *selected_thread.read();
-        let slug = project_slug.read().clone();
-        async move {
-            match sel {
-                Some(tid) if !slug.is_empty() => {
-                    crate::feeds::fetch_thread_messages(&slug, tid).await
-                }
-                _ => Ok::<Vec<threads::Message>, String>(Vec::new()),
-            }
-        }
-    });
-
-    let proj = data.read();
-    let body = match &*proj {
-        Some(Ok((p, _slug, _tasks, threads_list, connected_repos))) => {
-            let p = p.clone();
-            let threads_list = threads_list.clone();
-            let connected_repos = connected_repos.clone();
-            let all = tasks.read().clone();
+    let body = match (project_res.value(), project_res.error()) {
+        (Some(op), _) => {
+            let p = op.project.clone();
+            let forge_slug = op.slug.clone();
+            let threads_list: Vec<threads::Thread> = threads_res
+                .value()
+                .map(|rows| rows.iter().map(|(_, t)| t.clone()).collect())
+                .unwrap_or_default();
+            let connected_repos: Vec<git_proto::RepoId> =
+                repos_res.read().clone().unwrap_or_default();
+            let all: Vec<DbTask> = tasks_res
+                .value()
+                .map(|rows| rows.iter().map(|(_, r)| r.task.clone()).collect())
+                .unwrap_or_default();
             let mine: Vec<UiTask> = all.iter().filter(|t| belongs(t, &p)).map(to_ui).collect();
             let total = mine.len();
             let done = mine.iter().filter(|t| t.status == "done").count();
@@ -235,14 +204,11 @@ pub fn ProjectDetailView(id: String) -> Element {
                 0.0
             };
 
-            let msgs = messages_res
-                .read()
-                .as_ref()
-                .and_then(|r| r.as_ref().ok())
-                .cloned()
+            let msgs: Vec<threads::Message> = messages_res
+                .value()
+                .map(|rows| rows.iter().map(|(_, m)| m.clone()).collect())
                 .unwrap_or_default();
             let sel = *selected_thread.read();
-            let forge_slug = project_slug.read().clone();
             let kind = ProjectKind::from_str(&p.project_type);
 
             // In-flight slice of the project's tasks: in-progress, or
@@ -414,9 +380,11 @@ pub fn ProjectDetailView(id: String) -> Element {
                     } else {
                         TasksApp {
                             tasks: mine,
-                            on_event: move |mu: TaskMutation| {
-                                let create_slug = project_slug.read().clone();
-                                handle(&mut tasks, &mut org_of, &create_slug, mu);
+                            on_event: {
+                                let create_slug = forge_slug.clone();
+                                move |mu: TaskMutation| {
+                                    task_muts.apply(&create_slug, mu);
+                                }
                             },
                         }
                     }
@@ -427,18 +395,22 @@ pub fn ProjectDetailView(id: String) -> Element {
                     messages: msgs,
                     selected: sel,
                     on_select: move |id: Uuid| selected_thread.set(Some(id)),
-                    on_new_thread: move |title: String| {
-                        let slug = project_slug.read().clone();
-                        let pid = *project_uuid.read();
-                        let org_id = org_list
-                            .read()
-                            .iter()
-                            .find(|o| o.slug == slug)
-                            .and_then(|o| o.id)
-                            .unwrap_or_else(Uuid::nil);
-                        spawn(async move {
-                            if let Some(pid) = pid {
-                                let req = threads::CreateThreadRequest {
+                    on_new_thread: {
+                        let slug = forge_slug.clone();
+                        let pid = p.id;
+                        move |title: String| {
+                            let org_id = org_list
+                                .read()
+                                .iter()
+                                .find(|o| o.slug == slug)
+                                .and_then(|o| o.id)
+                                .unwrap_or_else(Uuid::nil);
+                            // Optimistic: the thread appears instantly and
+                            // reconciles to the created entity (rollback +
+                            // tray notification on failure).
+                            thread_muts.create_thread(
+                                slug.clone(),
+                                threads::CreateThreadRequest {
                                     org_id,
                                     entity_type: "project".into(),
                                     entity_id: pid,
@@ -448,26 +420,27 @@ pub fn ProjectDetailView(id: String) -> Element {
                                     source_kind: "native".into(),
                                     source_ref: None,
                                     source_url: None,
-                                };
-                                if let Err(e) = crate::feeds::create_thread(&slug, req).await {
-                                    tracing::warn!("create thread: {e}");
-                                }
-                                threads_refresh.with_mut(|r| *r += 1);
-                            }
-                        });
+                                },
+                            );
+                        }
                     },
-                    on_post: move |body: String| {
-                        let slug = project_slug.read().clone();
-                        let sel = *selected_thread.read();
-                        let org_id = org_list
-                            .read()
-                            .iter()
-                            .find(|o| o.slug == slug)
-                            .and_then(|o| o.id)
-                            .unwrap_or_else(Uuid::nil);
-                        spawn(async move {
-                            if let Some(tid) = sel {
-                                let req = threads::PostMessageRequest {
+                    on_post: {
+                        let slug = forge_slug.clone();
+                        move |body: String| {
+                            let Some(tid) = *selected_thread.read() else {
+                                return;
+                            };
+                            let org_id = org_list
+                                .read()
+                                .iter()
+                                .find(|o| o.slug == slug)
+                                .and_then(|o| o.id)
+                                .unwrap_or_else(Uuid::nil);
+                            // Optimistic: the message appears instantly and
+                            // reconciles to the posted entity.
+                            thread_muts.post_message(
+                                slug.clone(),
+                                threads::PostMessageRequest {
                                     thread_id: tid,
                                     org_id,
                                     author_id: Some(crate::chrome::owner_id(org_id)),
@@ -479,13 +452,9 @@ pub fn ProjectDetailView(id: String) -> Element {
                                     original_text: None,
                                     source_url: None,
                                     posted_at: None,
-                                };
-                                if let Err(e) = crate::feeds::post_thread_message(&slug, req).await {
-                                    tracing::warn!("post message: {e}");
-                                }
-                                threads_refresh.with_mut(|r| *r += 1);
-                            }
-                        });
+                                },
+                            );
+                        }
                     },
                 }
                 // General projects show the repo (when connected) after
@@ -523,15 +492,11 @@ pub fn ProjectDetailView(id: String) -> Element {
                                                     variant: if is_current { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
                                                     size: ButtonSize::Small,
                                                     on_click: move |_| {
+                                                        // Optimistic: the badge flips instantly;
+                                                        // a failed write rolls back + notifies.
                                                         let mut np = np_base.clone();
                                                         np.project_type = k.slug().to_string();
-                                                        let slug = type_slug.clone();
-                                                        spawn(async move {
-                                                            if let Err(e) = crate::feeds::update_project(&slug, np).await {
-                                                                tracing::warn!("update project type: {e}");
-                                                            }
-                                                            page_refresh.with_mut(|x| *x += 1);
-                                                        });
+                                                        project_muts.update(type_slug.clone(), np);
                                                     },
                                                     "{k.label()}"
                                                 }
@@ -558,7 +523,6 @@ pub fn ProjectDetailView(id: String) -> Element {
                             CoverImageEditor {
                                 project: p.clone(),
                                 slug: forge_slug.clone(),
-                                on_saved: move |()| page_refresh.with_mut(|x| *x += 1),
                             }
                         }
                         // ── Budget card ─────────────────────────────
@@ -614,12 +578,12 @@ pub fn ProjectDetailView(id: String) -> Element {
                 }
             }
         }
-        Some(Err(e)) => rsx! {
+        (None, Some(e)) => rsx! {
             div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
                 "Couldn't load project: {e}"
             }
         },
-        None => rsx! {
+        (None, None) => rsx! {
             Text { variant: TextVariant::Muted, "Loading project…" }
         },
     };
@@ -966,8 +930,9 @@ fn ActiveTaskRow(task: DbTask) -> Element {
 }
 
 /// Sidebar editor for the project's cover image — writes through the
-/// `image:` frontmatter via `ProjectService::update`, the same idiom
-/// as the Type buttons above it.
+/// `image:` frontmatter via the optimistic project store, the same
+/// idiom as the Type buttons above it (instant preview, rollback +
+/// tray notification on failure).
 ///
 /// Smallest honest slice: paste an image URL (or any path the browser
 /// can resolve) and save; the /projects cards and the detail banner
@@ -977,17 +942,17 @@ fn ActiveTaskRow(task: DbTask) -> Element {
 /// needs a stable blob URL (or render-time hash → URL resolution)
 /// first. The gap is documented on the issue.
 #[component]
-fn CoverImageEditor(project: ProjectInfo, slug: String, on_saved: EventHandler<()>) -> Element {
+fn CoverImageEditor(project: ProjectInfo, slug: String) -> Element {
+    let muts = stores::use_project_mutations();
     let mut draft = use_signal(|| project.image.clone());
-    let mut saving = use_signal(|| false);
-    let mut error = use_signal(|| Option::<String>::None);
-    // Re-sync the draft when a refetch lands a new stored value.
+    // Re-sync the draft when a reconciled write lands a new stored value.
     let stored = project.image.clone();
     use_effect(use_reactive!(|(stored,)| draft.set(stored)));
 
     let preview = draft.read().trim().to_string();
     let dirty = preview != project.image.trim();
-    let busy = *saving.read();
+    let busy = muts.is_pending();
+    let error = muts.error();
 
     rsx! {
         div { class: "flex flex-col gap-1.5 text-sm",
@@ -1019,25 +984,14 @@ fn CoverImageEditor(project: ProjectInfo, slug: String, on_saved: EventHandler<(
                             move |_| {
                                 let mut np = np_base.clone();
                                 np.image = draft.peek().trim().to_string();
-                                let slug = save_slug.clone();
-                                saving.set(true);
-                                spawn(async move {
-                                    match crate::feeds::update_project(&slug, np).await {
-                                        Ok(_) => {
-                                            error.set(None);
-                                            on_saved.call(());
-                                        }
-                                        Err(e) => error.set(Some(e)),
-                                    }
-                                    saving.set(false);
-                                });
+                                muts.update(save_slug.clone(), np);
                             }
                         },
                         if busy { "Saving…" } else { "Save" }
                     }
                 }
             }
-            if let Some(e) = error.read().as_ref() {
+            if let Some(e) = error.as_ref() {
                 span { class: "text-xs text-destructive", "Couldn't save the cover: {e}" }
             }
         }

@@ -102,6 +102,12 @@ pub fn App() -> Element {
         |caller: vox_core::Caller| async move { caller.closed().await },
     );
 
+    // The per-feature optimistic stores (architect-atom `Store`s) every
+    // route page's `use_<entity>_list` / `use_<entity>_mutations` hooks
+    // read. Provided after `use_app_supervised` so mutations find the
+    // notifications + reactivity registries it installed above.
+    crate::stores::provide_stores();
+
     // Web auth: the active-account context + boot restore (validate
     // the persisted session, or auto sign-in as Guest). Needs the
     // org-list signal above (auth talks to the home org's endpoint);

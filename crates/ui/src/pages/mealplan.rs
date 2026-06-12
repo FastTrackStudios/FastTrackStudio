@@ -12,17 +12,22 @@
 //!
 //! Editing, cooking (pantry deduction), and nutrition resolution
 //! live in the CLI for now; this is the read + light-create slice,
-//! mirroring the `/fitness` page.
+//! mirroring the `/fitness` page. Recipes + Pantry state is the shared
+//! optimistic store ([`crate::stores`]): one `AtomResult` per section,
+//! typed `Id::Temp` rows for in-flight creates (no `__pending__` path
+//! sentinels), rollback + tray notification on failure.
 
+use architect::Id;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
+use uuid::Uuid;
 
 use cookbook_proto::Recipe;
 use mealplan_proto::Meal;
 use pantry_proto::PantryItem;
 
-use crate::optimistic::{use_optimistic_list, RowState};
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::stores;
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
      focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
@@ -95,22 +100,11 @@ fn EmptyState(message: String) -> Element {
 fn RecipesSection(slug: Memo<Option<String>>) -> Element {
     let mut name = use_signal(String::new);
 
-    // Authoritative list: optimistic create, write-through to the org's
-    // CookbookService. Identity is the vault-relative `path` (no Uuid).
-    // Initial snapshot loaded below; no refetch on create.
-    let list = use_optimistic_list::<Recipe, _>(|r| r.path.clone());
-
-    let recipes = use_resource(move || async move {
-        match slug() {
-            Some(s) => crate::feeds::fetch_recipes(&s).await,
-            None => Ok(Vec::new()),
-        }
-    });
-    use_effect(move || {
-        if let Some(Ok(rows)) = &*recipes.read_unchecked() {
-            list.set(rows.clone());
-        }
-    });
+    // The shared store: one AtomResult for the list, optimistic create.
+    // The store keys in-flight drafts by a typed `Id::Temp` — no magic
+    // `__pending__` path sentinel.
+    let result = stores::use_recipe_list();
+    let muts = stores::use_recipe_mutations();
 
     let mut create = move || {
         let n = name.read().trim().to_string();
@@ -119,41 +113,11 @@ fn RecipesSection(slug: Memo<Option<String>>) -> Element {
         }
         let Some(s) = slug() else { return };
         name.set(String::new());
-        // Provisional row. `path` is backend-assigned (from the name), so
-        // a provisional can't key on the real path before the write lands;
-        // mint a unique temp path so the row has a stable, collision-free
-        // key for reconciliation. On the future's Ok the helper finds this
-        // row by its temp path and replaces it in place with the canonical
-        // recipe (real path) — the temp path never persists. Mirrors the
-        // struct literal in `feeds::create_recipe`.
-        let provisional = Recipe {
-            path: format!("__pending__/{}", uuid::Uuid::new_v4()),
-            name: n.clone(),
-            description: None,
-            course: None,
-            cuisine: None,
-            prep_minutes: None,
-            cook_minutes: None,
-            servings: None,
-            ingredients: cookbook_proto::Ingredients::default(),
-            steps: cookbook_proto::StringList::default(),
-            cookware: cookbook_proto::StringList::default(),
-            nested_recipes: cookbook_proto::StringList::default(),
-            tags: cookbook_proto::StringList::default(),
-            source_url: None,
-            date_modified: None,
-            source: format!(">> title: {n}\n"),
-        };
-        list.create(provisional, async move {
-            crate::feeds::create_recipe(&s, &n).await
-        });
+        muts.create(s, stores::draft_recipe(n));
     };
 
-    let rows = list.items().read().clone();
-    let load_err: Option<String> = match &*recipes.read() {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
+    let rows: Vec<(Id<String>, Recipe)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
 
     rsx! {
         section { class: "flex flex-col gap-3",
@@ -182,8 +146,8 @@ fn RecipesSection(slug: Memo<Option<String>>) -> Element {
                 EmptyState { message: "No recipes yet — add one above.".to_string() }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for r in rows {
-                        RecipeRow { key: "{r.path}", state: list.state(r.path.clone()), recipe: r }
+                    for (id, r) in rows {
+                        RecipeRow { key: "{id}", pending: id.is_temp(), recipe: r }
                     }
                 }
             }
@@ -191,19 +155,19 @@ fn RecipesSection(slug: Memo<Option<String>>) -> Element {
     }
 }
 
-/// One recipe: name + course badge + ingredient count.
-/// `state` reflects optimistic write-through: dimmed while `Pending`, a
-/// destructive ring + tint while `Failed`.
+/// One recipe: name + course badge + ingredient count. `pending` dims
+/// an optimistic row whose write-through is in flight; failures roll
+/// back + notify.
 #[component]
-fn RecipeRow(recipe: Recipe, state: RowState) -> Element {
+fn RecipeRow(recipe: Recipe, pending: bool) -> Element {
     let name = recipe.name.clone();
     let course = recipe.course.clone();
     let ingredients = recipe.ingredients.len();
 
-    let state_cls = match state {
-        RowState::Settled => "border-border bg-card/40",
-        RowState::Pending => "border-border bg-card/40 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    let state_cls = if pending {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
     };
 
     rsx! {
@@ -227,21 +191,9 @@ fn PantrySection(slug: Memo<Option<String>>) -> Element {
     let mut qty = use_signal(String::new);
     let mut unit = use_signal(|| "g".to_string());
 
-    // Authoritative list: optimistic create, write-through to the org's
-    // PantryService. Initial snapshot loaded below; no refetch on create.
-    let list = use_optimistic_list::<PantryItem, _>(|i| i.id);
-
-    let items = use_resource(move || async move {
-        match slug() {
-            Some(s) => crate::feeds::fetch_pantry(&s).await,
-            None => Ok(Vec::new()),
-        }
-    });
-    use_effect(move || {
-        if let Some(Ok(rows)) = &*items.read_unchecked() {
-            list.set(rows.clone());
-        }
-    });
+    // The shared store: one AtomResult for the list, optimistic create.
+    let result = stores::use_pantry_list();
+    let muts = stores::use_pantry_mutations();
 
     let mut create = move || {
         let n = name.read().trim().to_string();
@@ -253,53 +205,11 @@ fn PantrySection(slug: Memo<Option<String>>) -> Element {
         let u = unit.read().trim().to_string();
         name.set(String::new());
         qty.set(String::new());
-        // Provisional row (client-minted id; backend assigns its own on
-        // write — the whole row is replaced when it returns). Mirrors the
-        // struct literal in `feeds::create_pantry_item`.
-        let provisional = PantryItem {
-            path: String::new(),
-            id: uuid::Uuid::new_v4(),
-            name: n.clone(),
-            category: "food".to_owned(),
-            location_id: None,
-            condition: "good".to_owned(),
-            status: "stored".to_owned(),
-            tags: pantry_proto::StringList(vec!["item".into(), "pantry".into()]),
-            date_created: None,
-            date_modified: None,
-            food_category: String::new(),
-            qty: q,
-            unit: u.clone(),
-            purchase_unit: None,
-            purchase_to_stock_factor: None,
-            expiry: None,
-            opened: false,
-            opened_date: None,
-            brand: None,
-            nutrition_per_unit: None,
-            nutrition_unit: None,
-            minimum: None,
-            default_best_before_days: None,
-            default_best_before_days_after_open: None,
-            default_best_before_days_after_freezing: None,
-            default_best_before_days_after_thawing: None,
-            due_type: "best-before".to_owned(),
-            stock_entries: pantry_proto::StockEntries::default(),
-            substitutes: pantry_proto::Substitutions::default(),
-            barcodes: pantry_proto::StringList::default(),
-            image_url: None,
-            details: String::new(),
-        };
-        list.create(provisional, async move {
-            crate::feeds::create_pantry_item(&s, &n, q, &u).await
-        });
+        muts.create(s, stores::draft_pantry_item(n, q, u));
     };
 
-    let rows = list.items().read().clone();
-    let load_err: Option<String> = match &*items.read() {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
+    let rows: Vec<(Id<Uuid>, PantryItem)> = result.value().cloned().unwrap_or_default();
+    let load_err = result.error().cloned();
 
     rsx! {
         section { class: "flex flex-col gap-3",
@@ -350,8 +260,8 @@ fn PantrySection(slug: Memo<Option<String>>) -> Element {
                 EmptyState { message: "No pantry items yet — add one above.".to_string() }
             } else {
                 div { class: "flex flex-col gap-2",
-                    for it in rows {
-                        PantryRow { key: "{it.id}", state: list.state(it.id), item: it }
+                    for (id, it) in rows {
+                        PantryRow { key: "{id}", pending: id.is_temp(), item: it }
                     }
                 }
             }
@@ -360,19 +270,19 @@ fn PantrySection(slug: Memo<Option<String>>) -> Element {
 }
 
 /// One pantry item: name + on-hand qty + food category badge.
-/// `state` reflects optimistic write-through: dimmed while `Pending`, a
-/// destructive ring + tint while `Failed`.
+/// `pending` dims an optimistic row whose write-through is in flight;
+/// failures roll back + notify.
 #[component]
-fn PantryRow(item: PantryItem, state: RowState) -> Element {
+fn PantryRow(item: PantryItem, pending: bool) -> Element {
     let name = item.name.clone();
     let unit = item.unit.clone();
     let on_hand = item.stock_total();
     let category = item.food_category.clone();
 
-    let state_cls = match state {
-        RowState::Settled => "border-border bg-card/40",
-        RowState::Pending => "border-border bg-card/40 opacity-60",
-        RowState::Failed => "border-destructive/40 bg-destructive/10",
+    let state_cls = if pending {
+        "border-border bg-card/40 opacity-60"
+    } else {
+        "border-border bg-card/40"
     };
 
     rsx! {
