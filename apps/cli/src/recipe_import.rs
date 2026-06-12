@@ -69,10 +69,11 @@ pub async fn recipe_import(a: RecipeImportArgs) -> eyre::Result<()> {
     let source = validated_source(&display_name, source)?;
 
     let cov = coverage(&normalized, &source);
+    let todo_parked = source.contains("TODO (import review)");
 
     if a.dry_run {
         println!("{source}");
-        eprintln!("{}", summary(&mode, &cov, "dry-run — nothing written"));
+        eprintln!("{}", summary(&mode, &cov, todo_parked, "dry-run — nothing written"));
         return Ok(());
     }
 
@@ -104,7 +105,7 @@ pub async fn recipe_import(a: RecipeImportArgs) -> eyre::Result<()> {
         r
     };
 
-    println!("{}", summary(&mode, &cov, ""));
+    println!("{}", summary(&mode, &cov, todo_parked, ""));
     if a.json {
         println!("{}", serde_json::to_string_pretty(&saved)?);
     }
@@ -186,13 +187,16 @@ fn confirm_overwrite(name: &str, path: &str, yes: bool) -> eyre::Result<()> {
 }
 
 /// Coverage + mode line printed after every import.
-fn summary(mode: &str, cov: &recipe_import::Coverage, suffix: &str) -> String {
+fn summary(mode: &str, cov: &recipe_import::Coverage, todo_parked: bool, suffix: &str) -> String {
     let mut s = format!(
         "import: {mode}; ingredients annotated {}/{}",
         cov.matched, cov.total
     );
     if !cov.unmatched.is_empty() {
         s.push_str(&format!("; unmatched: {}", cov.unmatched.join(" | ")));
+    }
+    if todo_parked {
+        s.push_str("; some ingredients parked in a TODO step — review the recipe");
     }
     if !suffix.is_empty() {
         s.push_str("; ");

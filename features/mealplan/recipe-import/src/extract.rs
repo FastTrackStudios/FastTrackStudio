@@ -57,7 +57,15 @@ pub fn extract(html: &str, url: &str) -> Result<NormalizedRecipe, ImportError> {
         .map(|i| collapse_ws(i))
         .filter(|i| !i.is_empty())
         .collect();
-    let steps = split_steps(&raw.instructions);
+    let mut steps = split_steps(&raw.instructions);
+    if steps.is_empty() {
+        // Jetpack (WordPress.com's recipe plugin — Smitten Kitchen et
+        // al.) marks up name/ingredients as microdata but never emits
+        // `itemprop="recipeInstructions"`; the directions sit in a
+        // `.jetpack-recipe-directions` div the generic extractors
+        // can't see.
+        steps = jetpack_steps(&context.document);
+    }
 
     if ingredients.is_empty() {
         return Err(ImportError::IncompleteRecipe {
@@ -119,6 +127,27 @@ fn split_steps(instructions: &str) -> Vec<String> {
     blank_split
 }
 
+/// Step texts from a Jetpack recipe-directions container: one step
+/// per `<li>`/`<p>`, whole-container text as a last resort.
+fn jetpack_steps(doc: &scraper::Html) -> Vec<String> {
+    let container = scraper::Selector::parse(".jetpack-recipe-directions, .e-instructions")
+        .expect("static selector");
+    let Some(el) = doc.select(&container).next() else {
+        return Vec::new();
+    };
+    let items = scraper::Selector::parse("li, p").expect("static selector");
+    let steps: Vec<String> = el
+        .select(&items)
+        .map(|item| collapse_ws(&item.text().collect::<String>()))
+        .filter(|s| !s.is_empty())
+        .collect();
+    if !steps.is_empty() {
+        return steps;
+    }
+    let whole = collapse_ws(&el.text().collect::<String>());
+    if whole.is_empty() { Vec::new() } else { vec![whole] }
+}
+
 /// Collapse all whitespace runs (incl. newlines) to single spaces.
 fn collapse_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -172,6 +201,31 @@ mod tests {
         let err = extract("<html><body><p>blog spam</p></body></html>", "https://x.test/")
             .unwrap_err();
         assert!(matches!(err, ImportError::NoRecipeFound { .. }), "{err}");
+    }
+
+    /// Jetpack-style page: microdata name + ingredients but no
+    /// `recipeInstructions` itemprop — directions only as a
+    /// `.jetpack-recipe-directions` div (Smitten Kitchen's shape).
+    const JETPACK_PAGE: &str = r#"<!DOCTYPE html><html><body>
+<div class="jetpack-recipe" itemscope itemtype="https://schema.org/Recipe">
+  <h3 itemprop="name">Blueberry Muffin Loaf</h3>
+  <ul class="jetpack-recipe-ingredients">
+    <li class="jetpack-recipe-ingredient" itemprop="recipeIngredient">5 tablespoons butter</li>
+    <li class="jetpack-recipe-ingredient" itemprop="recipeIngredient">1 cup blueberries</li>
+  </ul>
+  <div class="jetpack-recipe-directions e-instructions">
+    <p>Heat oven to 350F and butter a loaf pan.</p>
+    <p>Fold the blueberries into the batter with the melted butter and bake.</p>
+  </div>
+</div></body></html>"#;
+
+    #[test]
+    fn jetpack_directions_fallback() {
+        let r = extract(JETPACK_PAGE, "https://example.test/jetpack").unwrap();
+        assert_eq!(r.name, "Blueberry Muffin Loaf");
+        assert_eq!(r.ingredients.len(), 2);
+        assert_eq!(r.steps.len(), 2);
+        assert!(r.steps[0].contains("Heat oven"), "{:?}", r.steps);
     }
 
     #[test]

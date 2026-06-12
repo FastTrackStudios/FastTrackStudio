@@ -95,9 +95,12 @@ impl ParsedIngredient {
 }
 
 fn parse_line(line: &str) -> ParsedIngredient {
-    let ing = ingredient::from_str(line);
+    // Parentheticals ("(320 grams or 11.5 ounces)") routinely derail
+    // the qty/name split; the primary amount never lives in one.
+    let cleaned = strip_parens(line);
+    let ing = ingredient::from_str(&cleaned);
     let name = ing.name.split_whitespace().collect::<Vec<_>>().join(" ");
-    let name = if name.is_empty() { line.trim().to_string() } else { name };
+    let name = if name.is_empty() { cleaned.trim().to_string() } else { name };
 
     let amount = ing.amounts.first().map_or_else(String::new, |m| {
         let (value, upper) = m.values();
@@ -210,23 +213,62 @@ fn weave<'a>(
     (out, unmatched)
 }
 
-/// Candidate search strings for an ingredient name: the full name,
-/// then suffixes with leading words dropped, each also tried in
-/// naive singular form. All lowercase, min 3 chars.
+/// Candidate search strings for an ingredient name, most → least
+/// specific: the comma-trimmed name, then suffixes with leading words
+/// dropped (each also in naive singular form), then a last-resort pass
+/// over the individual words minus prep-adjective noise ("Finely
+/// grated zest from one lemon" still finds "zest"). All lowercase,
+/// min 3 chars.
 fn candidates(name: &str) -> Vec<String> {
-    let words: Vec<&str> = name.split_whitespace().collect();
-    let mut out = Vec::new();
+    // Trailing modifiers (", cold is fine") would otherwise pin every
+    // suffix to words that never appear in steps.
+    let base = name.split(',').next().unwrap_or(name);
+    let words: Vec<&str> = base.split_whitespace().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |cand: String| {
+        if cand.len() >= 3 && !out.contains(&cand) {
+            out.push(cand);
+        }
+    };
     for start in 0..words.len() {
         let cand = words[start..].join(" ").to_lowercase();
-        if cand.len() >= 3 && !out.contains(&cand) {
-            out.push(cand.clone());
-        }
         let singular = cand.strip_suffix('s').unwrap_or(&cand).to_string();
-        if singular.len() >= 3 && !out.contains(&singular) {
-            out.push(singular);
+        push(cand);
+        push(singular);
+    }
+    for w in &words {
+        let w = w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+        if w.len() >= 4 && !STOPWORDS.contains(&w.as_str()) {
+            let singular = w.strip_suffix('s').unwrap_or(&w).to_string();
+            push(w.clone());
+            push(singular);
         }
     }
     out
+}
+
+/// Words too generic (units, prep adjectives, glue) to identify an
+/// ingredient on their own in the word-level fallback.
+const STOPWORDS: [&str; 36] = [
+    "with", "from", "into", "over", "plus", "more", "optional", "taste", "fresh", "frozen",
+    "cold", "warm", "room", "temperature", "large", "small", "medium", "extra", "finely",
+    "coarsely", "grated", "chopped", "minced", "sliced", "diced", "melted", "softened",
+    "unsalted", "salted", "ground", "whole", "light", "dark", "heavy", "divided", "packed",
+];
+
+/// Drop `( … )` groups (non-nested is all recipes use).
+fn strip_parens(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth = 0u32;
+    for c in s.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            c if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Case-insensitive word-boundary search; `free` filters out ranges
@@ -428,6 +470,26 @@ mod tests {
         validate_cook("t.cook", &src).expect("sanitized output must parse");
         let cov = coverage(&r, &src);
         assert!(cov.complete(), "{src}");
+    }
+
+    #[test]
+    fn parentheticals_and_trailing_modifiers_still_match() {
+        // Real lines from smittenkitchen.com that the naive matcher
+        // missed: parenthetical weights + ", cold is fine" modifier.
+        let r = NormalizedRecipe {
+            name: "Loaf".into(),
+            ingredients: vec![
+                "8 tablespoons (1/2 cup or 115 grams) unsalted butter, cold is fine".into(),
+                "Finely grated zest from one lemon".into(),
+            ],
+            steps: vec!["Melt the butter in a bowl, then whisk in the sugar and zest.".into()],
+            ..Default::default()
+        };
+        let src = synthesize_heuristic(&r);
+        validate_cook("t.cook", &src).unwrap();
+        assert!(src.contains("@butter{8%tbsp}"), "{src}");
+        assert!(src.contains("@zest"), "{src}");
+        assert!(!src.contains("TODO"), "{src}");
     }
 
     #[test]
