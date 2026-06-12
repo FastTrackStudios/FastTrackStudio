@@ -359,6 +359,9 @@
   .top-px {
     top: 1px;
   }
+  .-right-0\.5 {
+    right: calc(var(--spacing) * -0.5);
+  }
   .right-0 {
     right: calc(var(--spacing) * 0);
   }
@@ -380,11 +383,17 @@
   .right-full {
     right: 100%;
   }
+  .-bottom-0\.5 {
+    bottom: calc(var(--spacing) * -0.5);
+  }
   .bottom-0 {
     bottom: calc(var(--spacing) * 0);
   }
   .bottom-1 {
     bottom: calc(var(--spacing) * 1);
+  }
+  .bottom-20 {
+    bottom: calc(var(--spacing) * 20);
   }
   .bottom-24 {
     bottom: calc(var(--spacing) * 24);
@@ -822,6 +831,9 @@
   }
   .w-1\.5 {
     width: calc(var(--spacing) * 1.5);
+  }
+  .w-1\/2 {
+    width: calc(1/2 * 100%);
   }
   .w-2 {
     width: calc(var(--spacing) * 2);
@@ -1584,6 +1596,9 @@
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--border) 70%, transparent);
     }
+  }
+  .border-card {
+    border-color: var(--card);
   }
   .border-current {
     border-color: currentcolor;
@@ -4218,6 +4233,11 @@
   .md\:grid-cols-2 {
     @media (width >= 48rem) {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .lg\:bottom-4 {
+    @media (width >= 64rem) {
+      bottom: calc(var(--spacing) * 4);
     }
   }
   .lg\:col-span-2 {
