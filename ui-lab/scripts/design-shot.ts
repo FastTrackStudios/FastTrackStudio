@@ -1,8 +1,9 @@
 /**
  * Headless design screenshots over raw CDP (same zero-dep approach as
  * browser-probe.ts). Drives the project overview on the test org's
- * Hermes Integration project and captures the Overview lens (epic
- * expanded) + the Agents lens into design-shots/.
+ * Hermes Integration project and captures the Overview lens
+ * (workstream strip expanded), the Agents lens (claimant kanban), and
+ * the workstream detail route into design-shots/.
  *
  *   pnpm vite-node scripts/design-shot.ts [base-url]
  *
@@ -229,12 +230,12 @@ async function main(): Promise<void> {
     );
     await shoot(cdp, sessionId, "project-overview.png");
 
-    // Expand the biggest epic's swarm.
+    // Expand the biggest workstream's swarm strip.
     const expanded = await evalJson<boolean>(
       cdp,
       sessionId,
       `(() => {
-        // Epic rows live inside <section>; the header's dropdown
+        // Workstream rows live inside <section>; the header's dropdown
         // triggers also carry aria-expanded, so scope past them.
         const btn = [...document.querySelectorAll('section button[aria-expanded="false"]')][0];
         if (!btn) return false;
@@ -242,7 +243,19 @@ async function main(): Promise<void> {
         return true;
       })()`,
     );
-    if (expanded) await shoot(cdp, sessionId, "project-overview-epic-expanded.png");
+    if (expanded)
+      await shoot(cdp, sessionId, "project-overview-workstream-expanded.png");
+
+    // Grab a strip's detail-route link NOW — the Agents lens unmounts
+    // the Overview tab content (and the strips with it).
+    const wsHref = await evalJson<string | null>(
+      cdp,
+      sessionId,
+      `(() => {
+        const a = document.querySelector('a[href^="/workstreams/"]');
+        return a ? a.getAttribute("href") : null;
+      })()`,
+    );
 
     // Agents lens.
     await evalJson(
@@ -262,10 +275,24 @@ async function main(): Promise<void> {
     await waitFor(
       cdp,
       sessionId,
-      `[...document.querySelectorAll('h3')].some((h) => /running|open|done/i.test(h.textContent ?? ""))`,
+      // Claimant kanban: columns are agent refs ("hermes@h4") or the
+      // Unclaimed pool.
+      `[...document.querySelectorAll('h3')].some((h) => /@|unclaimed/i.test(h.textContent ?? ""))`,
       "agents board",
     );
     await shoot(cdp, sessionId, "project-agents-board.png");
+
+    // Workstream detail route — follow the strip link captured above.
+    if (wsHref) {
+      await cdp.send("Page.navigate", { url: `${BASE}${wsHref}` }, sessionId);
+      await waitFor(
+        cdp,
+        sessionId,
+        `document.querySelector('[data-slot="skeleton"]') === null && !!document.querySelector('h1')`,
+        "workstream detail painted",
+      );
+      await shoot(cdp, sessionId, "workstream-detail.png");
+    }
 
     console.log("design shots OK");
   } finally {
