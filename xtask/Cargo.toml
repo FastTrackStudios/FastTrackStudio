@@ -17,6 +17,8 @@ xshell          = "0.2"
 # The `vox` feature turns on the #[architect::rpc] descriptor fns.
 project = { workspace = true, features = ["vox"] }
 task = { workspace = true, features = ["vox"] }
+auth-proto = { workspace = true, features = ["vox"] }
+milestone-proto = { workspace = true, features = ["vox"] }
 
 [lints]
 workspace = true

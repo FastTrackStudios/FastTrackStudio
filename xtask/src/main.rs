@@ -76,6 +76,8 @@ fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
     vec![
         project::project_service_descriptor(),
         task::task_service_descriptor(),
+        auth_proto::auth_service_service_descriptor(),
+        milestone_proto::milestone_service_descriptor(),
     ]
 }
 

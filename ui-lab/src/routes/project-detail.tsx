@@ -1,5 +1,5 @@
 /**
- * /projects/$projectId — one project + its tasks. Canvas for the
+ * /projects/$org/$projectId — one project + its tasks. Canvas for the
  * project-detail redesign prototype (separate issue).
  */
 import { useQuery } from "@tanstack/react-query";
@@ -66,9 +66,11 @@ function ErrorNote({ error }: { error: unknown }) {
 }
 
 export function ProjectDetailPage() {
-  const { projectId } = useParams({ from: "/projects/$projectId" });
-  const project = useQuery(projectQuery(projectId));
-  const tasks = useQuery(projectTasksQuery(projectId));
+  const { org, projectId } = useParams({
+    from: "/projects/$org/$projectId",
+  });
+  const project = useQuery(projectQuery(org, projectId));
+  const tasks = useQuery(projectTasksQuery(org, projectId));
 
   const pct = project.data
     ? Number(project.data.progress_percent ?? 0)

@@ -6,15 +6,34 @@
  *   pnpm smoke            # expects the server on ws://127.0.0.1:18080
  *   VITE_TASK_ORG=... VITE_TASK_SERVER=... pnpm smoke
  *
- * Exercises exactly what the two lab routes exercise: connect, list
- * projects, get one project, list its tasks.
+ * Exercises what the lab routes exercise: discover orgs (well-known),
+ * connect per org, list projects, get one project, list its tasks +
+ * milestones, and a real AuthService sign-in against the home org.
  */
-import { projects, tasks, unwrap, VOX_URL } from "../src/lib/vox";
+import { fetchOrgs, homeSlug } from "../src/lib/orgs";
+import {
+  DEFAULT_ORG,
+  authFor,
+  milestonesFor,
+  projectsFor,
+  tasksFor,
+  unwrap,
+  voxUrlFor,
+} from "../src/lib/vox";
 
 async function main() {
-  console.log(`connecting to ${VOX_URL} ...`);
+  // Org discovery — the same well-known fetch the org switcher uses.
+  const orgs = await fetchOrgs();
+  console.log(
+    `well-known -> ${orgs.length} org(s): ${orgs.map((o) => o.slug).join(", ")}`,
+  );
+  if (orgs.length === 0) throw new Error("well-known returned zero orgs");
+  const home = homeSlug(orgs);
 
-  const projectClient = await projects();
+  const org = DEFAULT_ORG;
+  console.log(`connecting to ${voxUrlFor(org)} ...`);
+
+  const projectClient = await projectsFor(org);
   const all = unwrap(await projectClient.list());
   console.log(`ProjectServiceRpc.list -> ${all.length} project(s)`);
   for (const p of all.slice(0, 5)) {
@@ -23,9 +42,13 @@ async function main() {
     );
   }
 
-  const taskClient = await tasks();
+  const taskClient = await tasksFor(org);
   const allTasks = unwrap(await taskClient.list());
   console.log(`TaskServiceRpc.list -> ${allTasks.length} task(s)`);
+
+  const milestoneClient = await milestonesFor(org);
+  const allMilestones = unwrap(await milestoneClient.list());
+  console.log(`MilestoneServiceRpc.list -> ${allMilestones.length} milestone(s)`);
 
   // Find a project whose `get` round-trips. A vault page without a
   // persisted `id:` in its frontmatter gets a fresh backfilled UUID on
@@ -52,6 +75,22 @@ async function main() {
   if (all.length > 0 && !fetchedOne) {
     throw new Error("get() failed for every project returned by list()");
   }
+
+  // Real sign-in against the home org — the account switcher's path.
+  const auth = await authFor(home);
+  const bundle = unwrap(
+    await auth.signInEmailPassword({
+      email: "guest@fasttrackstudios.com",
+      password: "dev-guest-2026",
+      ip_address: null,
+      user_agent: "ui-lab-smoke",
+    }),
+  );
+  const who = unwrap(await auth.whoami(bundle.token));
+  console.log(
+    `AuthService.signInEmailPassword(guest) -> whoami ${who.email} (${who.name ?? "?"}) @ ${home}`,
+  );
+  unwrap(await auth.signOut(bundle.token));
 
   console.log("smoke OK");
   process.exit(0);

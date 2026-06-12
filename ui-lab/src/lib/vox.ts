@@ -1,9 +1,12 @@
 /**
- * Lazy singleton vox clients against the live task-server.
+ * Lazy per-org vox clients against the live task-server.
  *
- * Each generated `connect*` opens its own WebSocket session to the
- * per-org vox mount (`/org/<slug>/vox`); the server hosts every
- * feature service behind one LayerRouter, dispatching by method id.
+ * The server hosts several orgs, each behind its own vox mount
+ * (`/org/<slug>/vox`) with one LayerRouter dispatching every feature
+ * service by method id. The lab can look at ANY of them (see
+ * lib/orgs.tsx — the switcher fans queries out across orgs), so each
+ * generated client is cached per `(service, org)` in a Map rather
+ * than as a single module-level singleton.
  *
  * In the browser the socket is opened same-origin and vite's dev/
  * preview proxy forwards it to the task-server (see vite.config.ts —
@@ -20,6 +23,8 @@ import {
 } from "@bearcove/vox-core";
 import { wsConnector } from "@bearcove/vox-ws";
 
+import { AuthServiceClient } from "@/generated/authservice.generated";
+import { MilestoneServiceRpcClient } from "@/generated/milestoneservicerpc.generated";
 import { ProjectServiceRpcClient } from "@/generated/projectservicerpc.generated";
 import { TaskServiceRpcClient } from "@/generated/taskservicerpc.generated";
 import {
@@ -34,18 +39,27 @@ import {
 // the browser, this covers node/smoke).
 installTelemetry();
 
-const SERVER: string =
+export const SERVER: string =
   (import.meta.env.VITE_TASK_SERVER as string | undefined) ??
   (typeof location !== "undefined"
     ? location.origin.replace(/^http/, "ws") // browser: same-origin, proxied
     : "ws://127.0.0.1:18080"); // node smoke: direct
-const ORG: string =
+
+/** HTTP(S) origin for plain fetches (org discovery) — `ws→http`. */
+export const SERVER_HTTP: string = SERVER.replace(/^ws/, "http");
+
+/**
+ * Fallback org before discovery resolves (and the org the node smoke
+ * targets). The browser app itself never hardcodes an org — the
+ * switcher in lib/orgs.tsx decides what to fetch.
+ */
+export const DEFAULT_ORG: string =
   (import.meta.env.VITE_TASK_ORG as string | undefined) ?? "codywright";
 
-export const VOX_URL = `${SERVER}/org/${ORG}/vox`;
-
-let projectClient: Promise<ProjectServiceRpcClient> | null = null;
-let taskClient: Promise<TaskServiceRpcClient> | null = null;
+/** Per-org vox WebSocket endpoint. */
+export function voxUrlFor(org: string): string {
+  return `${SERVER}/org/${org}/vox`;
+}
 
 /**
  * Initial-connect policy. The vox runtime's ReconnectPolicy only
@@ -108,21 +122,23 @@ function attemptTimeout<T>(
  */
 async function connectInstrumented<T>(
   service: string,
+  org: string,
   make: (caller: Caller) => T,
 ): Promise<T> {
-  const end = span(`vox.connect.${service}`, VOX_URL);
+  const url = voxUrlFor(org);
+  const end = span(`vox.connect.${service}`, url);
   let lastError: unknown;
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt++) {
     try {
       const established = await attemptTimeout(
-        session.initiator(wsConnector(VOX_URL), {
+        session.initiator(wsConnector(url), {
           metadata: voxServiceMetadata(service),
         }),
         CONNECT_ATTEMPT_TIMEOUT_MS,
         // Late completion of an abandoned attempt: close the session so
         // the socket doesn't linger as a zombie connection.
         (late) => {
-          record("vox.connect.late-dispose", service);
+          record("vox.connect.late-dispose", `${service} @ ${org}`);
           (late as { close?: () => void }).close?.();
         },
       );
@@ -138,7 +154,7 @@ async function connectInstrumented<T>(
       // error was swallowed into a generic failure 15s later).
       record(
         "vox.connect.retry",
-        `${service} attempt ${attempt}/${CONNECT_MAX_ATTEMPTS} failed: ${errorMessage(e)}`,
+        `${service} @ ${org} attempt ${attempt}/${CONNECT_MAX_ATTEMPTS} failed: ${errorMessage(e)}`,
       );
       if (attempt < CONNECT_MAX_ATTEMPTS) {
         // 125-250ms, 250-500ms, ... (full jitter on a doubling base).
@@ -152,27 +168,49 @@ async function connectInstrumented<T>(
   throw lastError;
 }
 
-export function projects(): Promise<ProjectServiceRpcClient> {
-  projectClient ??= connectInstrumented(
-    "ProjectServiceRpc",
-    (caller) => new ProjectServiceRpcClient(caller),
-  ).catch((e) => {
-    projectClient = null; // retry on next call instead of caching the failure
-    throw e;
-  });
-  return projectClient;
+/**
+ * Per-`(service, org)` client cache. Caches the *promise* so
+ * concurrent callers share one in-flight connect; a failed connect
+ * evicts itself so the next call retries instead of replaying the
+ * cached rejection forever.
+ */
+function clientCache<T>(
+  service: string,
+  make: (caller: Caller) => T,
+): (org: string) => Promise<T> {
+  const byOrg = new Map<string, Promise<T>>();
+  return (org: string) => {
+    let client = byOrg.get(org);
+    if (!client) {
+      client = connectInstrumented(service, org, make).catch((e) => {
+        byOrg.delete(org); // retry on next call instead of caching the failure
+        throw e;
+      });
+      byOrg.set(org, client);
+    }
+    return client;
+  };
 }
 
-export function tasks(): Promise<TaskServiceRpcClient> {
-  taskClient ??= connectInstrumented(
-    "TaskServiceRpc",
-    (caller) => new TaskServiceRpcClient(caller),
-  ).catch((e) => {
-    taskClient = null;
-    throw e;
-  });
-  return taskClient;
-}
+export const projectsFor = clientCache(
+  "ProjectServiceRpc",
+  (caller) => new ProjectServiceRpcClient(caller),
+);
+
+export const tasksFor = clientCache(
+  "TaskServiceRpc",
+  (caller) => new TaskServiceRpcClient(caller),
+);
+
+export const milestonesFor = clientCache(
+  "MilestoneServiceRpc",
+  (caller) => new MilestoneServiceRpcClient(caller),
+);
+
+export const authFor = clientCache(
+  "AuthService",
+  (caller) => new AuthServiceClient(caller),
+);
 
 /** The generated fallible methods return `{ok,value}|{ok,error}`. */
 type VoxResult<T, E> = { ok: true; value: T } | { ok: false; error: E };

@@ -18,6 +18,12 @@ const voxProxy = {
     ws: true,
     changeOrigin: true,
   },
+  // Org discovery — the server's well-known endpoint lists the hosted
+  // orgs. Same-origin via the proxy for the same LNA reasons as /org.
+  "/.well-known": {
+    target: TASK_SERVER,
+    changeOrigin: true,
+  },
 } as const;
 
 export default defineConfig({

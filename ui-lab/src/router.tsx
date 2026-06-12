@@ -3,6 +3,10 @@
  * the prototype→port loop (see README.md). File-based routing + the
  * router vite plugin are deliberately skipped; a lab this size doesn't
  * need generated route trees.
+ *
+ * Detail routes are org-qualified (`/projects/$org/$projectId`) —
+ * with the org switcher fanning the list out across orgs, a project
+ * id alone no longer identifies where to fetch from.
  */
 import {
   Link,
@@ -14,18 +18,19 @@ import {
 } from "@tanstack/react-router";
 import { FlaskConical } from "lucide-react";
 
-import { ProjectsPage } from "./routes/projects";
-import { ProjectDetailPage } from "./routes/project-detail";
-import { VOX_URL } from "./lib/vox";
+import { AccountSwitcher } from "./components/account-switcher";
+import { OrgSwitcher } from "./components/org-switcher";
 import { Separator } from "./components/ui/separator";
 import { TooltipProvider } from "./components/ui/tooltip";
+import { ProjectDetailPage } from "./routes/project-detail";
+import { ProjectsPage } from "./routes/projects";
 
 const rootRoute = createRootRoute({
   component: () => (
     <TooltipProvider>
       <div className="min-h-screen flex flex-col">
         <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-          <div className="mx-auto flex max-w-5xl items-center gap-4 px-6 h-12">
+          <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 h-12">
             <div className="flex items-center gap-2">
               <FlaskConical className="size-4 text-muted-foreground" />
               <span className="text-sm font-semibold tracking-tight">
@@ -33,6 +38,7 @@ const rootRoute = createRootRoute({
               </span>
             </div>
             <Separator orientation="vertical" className="h-4" />
+            <OrgSwitcher />
             <nav className="flex items-center gap-1 text-sm">
               <Link
                 to="/projects"
@@ -41,12 +47,12 @@ const rootRoute = createRootRoute({
                 Projects
               </Link>
             </nav>
-            <span className="text-muted-foreground ml-auto font-mono text-[11px] hidden sm:block">
-              {VOX_URL}
-            </span>
+            <div className="ml-auto">
+              <AccountSwitcher />
+            </div>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-5xl px-6 py-8 flex-1">
+        <main className="mx-auto w-full max-w-6xl px-6 py-8 flex-1">
           <Outlet />
         </main>
       </div>
@@ -68,16 +74,16 @@ const projectsRoute = createRoute({
   component: ProjectsPage,
 });
 
-const projectDetailRoute = createRoute({
+const projectOverviewRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/projects/$projectId",
+  path: "/projects/$org/$projectId",
   component: ProjectDetailPage,
 });
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   projectsRoute,
-  projectDetailRoute,
+  projectOverviewRoute,
 ]);
 
 export function createAppRouter() {
