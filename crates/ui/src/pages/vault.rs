@@ -566,7 +566,10 @@ pub fn VaultView() -> Element {
                     div { class: "flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto",
                         if has_file {
                             div { class: "editor-app",
-                                div { class: "editor-frame",
+                                // --flush: no card chrome — the vault page is a
+                                // full-page embed; the editor sits directly on
+                                // the app background (Obsidian-style).
+                                div { class: "editor-frame editor-frame--flush",
                                     Editor {
                                         state: session.state,
                                         keymap: keymap.read().clone(),
