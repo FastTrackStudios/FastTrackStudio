@@ -63,7 +63,7 @@ full = ["vox", "server-seaorm", "server-axum", "fake", "platform", "schedule", "
 #   wasm    gloo-timers TimeoutFuture / wasm_bindgen_futures::spawn_local
 #
 # `web-time` provides a monotonic `Instant` on both targets.
-platform = ["dep:web-time", "dep:async-channel", "tokio/time", "tokio/rt", "dep:gloo-timers", "dep:wasm-bindgen-futures"]
+platform = ["dep:web-time", "dep:async-channel", "tokio/time", "tokio/rt", "dep:gloo-timers", "dep:wasm-bindgen-futures", "dep:tracing"]
 
 # Schedule layer (`architect::schedule`): composable retry/repeat policies
 # (exponential backoff, jitter, caps, recurrence limits) + drivers that run
@@ -217,3 +217,13 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 
 [dev-dependencies]
 futures-lite = "2"
+# The reconnect-supervisor integration test mounts a headless VirtualDom
+# over the in-process vox transport (LocalServer) and kills/recreates the
+# server side. Same minimal dioxus profile as architect-atom.
+dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
+vox-core = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[[test]]
+name = "reconnect_supervisor"
+required-features = ["atom", "platform", "local"]

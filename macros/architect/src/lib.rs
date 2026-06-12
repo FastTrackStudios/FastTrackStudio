@@ -101,6 +101,36 @@ where
     use_connect_reactive(connect)
 }
 
+/// [`use_app_reactive`] with **supervision**: in addition to the reactive
+/// connect contract, the established connection is watched for death —
+/// when `watch_death(c)` resolves, the connection flips back to
+/// `Connecting` and reconnects under a [`Backoff`] (exponential, full
+/// jitter, floor 250ms, cap 10s, reset on success), forever. The
+/// [`Connection::generation`](architect_atom::Connection::generation)
+/// counter bumps on every successful (re-)establish so hooks and caches
+/// can invalidate. See [`use_connect_supervised`] for the full contract.
+///
+/// ```ignore
+/// // app root: survives a server restart with no page refresh.
+/// use_app_supervised(
+///     move || { let slug = active_org(); async move { caller_for(&slug).await } },
+///     |caller: vox::Caller| async move { caller.closed().await },
+/// );
+/// ```
+#[cfg(all(feature = "atom", feature = "platform"))]
+pub fn use_app_supervised<C, F, Fut, W, WFut>(connect: F, watch_death: W) -> Connection<C>
+where
+    C: Clone + 'static,
+    F: Fn() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<C, String>> + 'static,
+    W: Fn(C) -> WFut + 'static,
+    WFut: std::future::Future<Output = ()> + 'static,
+{
+    provide_notifications();
+    provide_reactivity();
+    use_connect_supervised(connect, watch_death)
+}
+
 /// Loader-side connection guard: yields the connected value, or
 /// **early-returns from the enclosing function** with the loader's
 /// pending/failed shape.
@@ -285,6 +315,17 @@ pub use platform::{
     CancellationToken, Clock, Duration, Instant, JoinHandle, SystemClock, TestClock, now, sleep,
     spawn, timeout,
 };
+
+// Reconnect layer — the `Backoff` policy (exponential, full jitter,
+// floor/cap, reset-on-success) plus the supervised connect hooks that
+// keep a `Connection<C>` alive across server restarts. Policy needs only
+// `platform` (entropy seeding); the hooks additionally need `atom`.
+#[cfg(feature = "platform")]
+pub mod reconnect;
+#[cfg(feature = "platform")]
+pub use reconnect::Backoff;
+#[cfg(all(feature = "atom", feature = "platform"))]
+pub use reconnect::use_connect_supervised;
 
 // Schedule layer — composable retry/repeat policies (exponential backoff,
 // jitter, caps, recurrence limits) + drivers that run a plain
