@@ -23,6 +23,10 @@
 //! - `prop-set` / `prop-list-add` / `prop-list-remove` →
 //!   frontmatter property cell edits; routes through
 //!   `apply_property_change`.
+//! - `prop-focus` → a typing cell gained focus; flip vim to
+//!   Insert so the mode badge/painted caret agree with where
+//!   keystrokes land (otherwise "Normal" j/k types into the
+//!   cell).
 //! - `prop-leave` → cell blurred via Esc/Enter; flip vim back
 //!   to Normal and refocus the editor root.
 //! - `focus-pos` → click on a math/typst/property widget;
@@ -348,6 +352,17 @@ pub(crate) fn handle_bridge_msg(
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             widget_focus.set(focused);
+        }
+        "prop-focus" => {
+            if let Some(mut vs) = vim {
+                let cur = vs.peek().clone();
+                if cur.mode != editor_vim::Mode::Insert {
+                    let mut next = cur;
+                    next.mode = editor_vim::Mode::Insert;
+                    next.clear_pending();
+                    vs.set(next);
+                }
+            }
         }
         "prop-leave" => {
             if let Some(mut vs) = vim {

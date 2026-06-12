@@ -1563,8 +1563,20 @@ pub fn Editor(
                             // synchronously via an inline JS
                             // helper at the top of dispatch.
                             el.addEventListener('focusin', evt => {{
-                                if (evt.target.dataset.editRole) {{
+                                const role = evt.target.dataset.editRole;
+                                if (role) {{
                                     el.dataset.widgetFocused = '1';
+                                    // Typing cells put vim into
+                                    // Insert — the mode badge and
+                                    // the painted modal caret must
+                                    // agree with where keystrokes
+                                    // actually land. (Esc blurs +
+                                    // sends prop-leave → Normal.)
+                                    if (role === 'text' || role === 'number'
+                                        || role === 'date' || role === 'chip-add'
+                                        || role === 'row-add') {{
+                                        dioxus.send({{ kind: 'prop-focus' }});
+                                    }}
                                 }}
                             }}, true);
                             el.addEventListener('focusout', evt => {{

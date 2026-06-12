@@ -47,6 +47,18 @@
     min-height: 240px;
 }
 
+/* Flush variant for full-page embeds (e.g. a vault/notes page):
+   no card chrome — the editor sits directly on the host page's
+   background. Keep using BOTH classes ("editor-frame
+   editor-frame--flush"): the --ed-* theme vars cascade from the
+   .editor-frame selector above. */
+.editor-frame.editor-frame--flush {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 16px 16px 16px 0;
+}
+
 .editor-root {
     width: 100%;
     outline: none;
