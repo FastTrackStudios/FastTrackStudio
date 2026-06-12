@@ -18,6 +18,7 @@
 //! 3. `ws://127.0.0.1:9090/vox` default.
 
 mod brief;
+mod errors;
 mod json_out;
 mod mealprep;
 mod org_ctx;
@@ -34,13 +35,8 @@ struct Cli {
     /// Vox WebSocket URL (e.g. <ws://127.0.0.1:9090/vox>). Falls back
     /// to `TASK_VOX_URL` (loaded from .env) then to the localhost
     /// default.
-    #[arg(
-        long,
-        env = "TASK_VOX_URL",
-        default_value = "ws://127.0.0.1:9090/vox",
-        global = true
-    )]
-    server: String,
+    #[arg(long, env = "TASK_VOX_URL", global = true)]
+    server: Option<String>,
 
     /// Architect Auth session token for remote vox.
     #[arg(long, env = "TASK_SESSION_TOKEN", global = true)]
@@ -511,24 +507,24 @@ enum IntakeCmd {
 /// thread (topic); `post` adds a message; `list`/`show` read them.
 /// Anchored by `(entity_type, entity_id)` so the same primitive works
 /// for any entity later (forge issues, chats, ingested comms).
+///
+/// Org / server routing: uses the global `--org` / `--server` flags
+/// (no per-variant duplicates).
 enum ThreadsCmd {
     /// Open a new thread (topic) on a task or project.
     New {
         /// Host entity kind: `task` | `project`.
         #[arg(long)]
         entity_type: String,
-        /// Host entity id (the task/project frontmatter `id`).
+        /// Host entity — UUID, id prefix, vault path, or title
+        /// (resolved per `--entity-type`).
         #[arg(long)]
-        entity_id: uuid::Uuid,
+        entity_id: String,
         /// Topic / title. Quote multi-word.
         title: Vec<String>,
         /// Kind: `discussion` (default) | `question` | `decision` | `action` | `praise`.
         #[arg(long)]
         kind: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
     /// Post a message to a thread.
     Post {
@@ -545,52 +541,32 @@ enum ThreadsCmd {
         /// Author display label. Defaults to `cli` (or `agent` when `--source agent`).
         #[arg(long)]
         author: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
     /// List threads on a task or project.
     List {
         #[arg(long)]
         entity_type: String,
+        /// Host entity — UUID, id prefix, vault path, or title
+        /// (resolved per `--entity-type`).
         #[arg(long)]
-        entity_id: uuid::Uuid,
+        entity_id: String,
         #[arg(long)]
         json: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
     /// Show a thread's messages.
     Show {
         thread_id: uuid::Uuid,
         #[arg(long)]
         json: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
     /// Mark a thread resolved (or `--unresolve` to reopen).
     Resolve {
         thread_id: uuid::Uuid,
         #[arg(long)]
         unresolve: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
     /// Delete a thread and its messages.
-    Rm {
-        id: uuid::Uuid,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-    },
+    Rm { id: uuid::Uuid },
 }
 
 #[derive(Subcommand)]
@@ -1070,6 +1046,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set the project's target completion date (YYYY-MM-DD, or
     /// `none`/`clear` to unset). The Linear-style roadmap field.
@@ -1080,6 +1059,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Recompute + show the project's progress from its tasks
     /// (done / total of tasks whose `projectId` is this project).
@@ -1099,18 +1081,24 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear the project parent. Pass `none` / `null`
     /// to unparent.
     SetParent {
         target: String,
-        /// `none`, `null`, a project UUID, or a vault-relative
-        /// path.
+        /// `none`, `null`, a project UUID, name, or a
+        /// vault-relative path.
         parent: String,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Mark the project archived (kept on disk; timer refuses
     /// new sessions against it).
@@ -1120,6 +1108,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Reverse of `archive`.
     Unarchive {
@@ -1128,6 +1119,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Move the backing markdown file. Preserves `id` so
     /// downstream FKs (timer rows, links) survive.
@@ -1138,6 +1132,9 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the renamed project as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Delete the project. Refuses if any other project lists
     /// it as parent — reparent or delete children first.
@@ -1162,16 +1159,23 @@ enum ProjectCmd {
 /// `issue` verbs operate through `WorkflowAttrs`: filter / show
 /// / patch the workspace + cycle + project + estimate +
 /// assignees + blockers triplet.
+///
+/// Org / server routing: this command group relies on the global
+/// `--org` / `--server` flags (clap propagates them, so they can
+/// still be passed after the subcommand) instead of re-declaring
+/// per-variant duplicates like the older groups do.
 #[derive(Subcommand)]
 enum IssueCmd {
     /// List tasks filtered by their workflow attributes.
     List {
-        /// Filter by `workflow.cycle = <uuid>`.
+        /// Filter by cycle — UUID, `YYYY:Qn:Cm` / `YYYY-Qn-Cm`
+        /// label, or `current` for today's cycle.
         #[arg(long)]
-        cycle: Option<uuid::Uuid>,
-        /// Filter by `project_id = <uuid>`.
+        cycle: Option<String>,
+        /// Filter by project — UUID, id prefix, vault path, or
+        /// name (exact / unique prefix).
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Filter by an `AgentRef` in `workflow.assignees`.
         /// Accepts `agent:name`, `agent:name@version`,
         /// `human:user_id`, or a bare name (defaults to `agent:`).
@@ -1185,23 +1189,15 @@ enum IssueCmd {
         /// out of the issue view.
         #[arg(long)]
         has_workflow: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
         /// Emit JSON instead of the tabular default.
         #[arg(long)]
         json: bool,
     },
 
-    /// Show a single issue. Accepts a full UUID or the first
-    /// 8+ chars of one (`resolve_issue_id` does the prefix match).
+    /// Show a single issue. Accepts a UUID, an id prefix, a vault
+    /// path, or a title (exact / unique prefix).
     Show {
         id: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1211,13 +1207,7 @@ enum IssueCmd {
     /// an agent receives. The same renderer `task agent goal --task`
     /// feeds the loop, exposed standalone so you can inspect exactly
     /// what an agent will be handed.
-    Prompt {
-        id: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-    },
+    Prompt { id: String },
 
     /// Patch the issue's `WorkflowAttrs` in place. Repeatable
     /// `--add-assignee` / `--add-blocker` for set operations.
@@ -1225,10 +1215,12 @@ enum IssueCmd {
     /// task becomes a plain TaskNotes-shape task again).
     SetWorkflow {
         id: String,
-        /// UUID, or `"none"` / `""` to clear.
+        /// UUID, `YYYY:Qn:Cm`, `current`, or `"none"` / `""` to
+        /// clear.
         #[arg(long)]
         cycle: Option<String>,
-        /// UUID, or `"none"` / `""` to clear.
+        /// Project reference (UUID, name, path, prefix), or
+        /// `"none"` / `""` to clear.
         #[arg(long)]
         project: Option<String>,
         /// `xs`, `s`, `m`, `l`, `xl`, or a plain integer for
@@ -1239,17 +1231,18 @@ enum IssueCmd {
         add_assignee: Vec<String>,
         #[arg(long = "remove-assignee", value_name = "AGENT")]
         remove_assignee: Vec<String>,
-        #[arg(long = "add-blocker", value_name = "TASK_ID")]
-        add_blocker: Vec<uuid::Uuid>,
-        #[arg(long = "remove-blocker", value_name = "TASK_ID")]
-        remove_blocker: Vec<uuid::Uuid>,
+        /// Blocking issue (UUID, id prefix, path, or title).
+        #[arg(long = "add-blocker", value_name = "TASK")]
+        add_blocker: Vec<String>,
+        /// Blocking issue (UUID, id prefix, path, or title).
+        #[arg(long = "remove-blocker", value_name = "TASK")]
+        remove_blocker: Vec<String>,
         /// Drop the workflow block entirely.
         #[arg(long)]
         clear: bool,
+        /// Emit the resulting issue as JSON.
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        json: bool,
     },
 
     /// Atomically claim an issue for an agent — the core of the
@@ -1265,10 +1258,9 @@ enum IssueCmd {
         /// Steal the claim even if someone else holds it.
         #[arg(long)]
         force: bool,
+        /// Emit the claimed issue as JSON.
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        json: bool,
     },
 
     /// Triage an issue (PRD) into agent-sized subtasks — the
@@ -1294,10 +1286,6 @@ enum IssueCmd {
         /// Priority applied to every created subtask.
         #[arg(long, default_value = "normal")]
         priority: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// List the subtasks of a parent task with their claim +
@@ -1306,20 +1294,12 @@ enum IssueCmd {
         /// Parent task id (UUID or 8-char prefix).
         id: String,
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-        #[arg(long)]
         json: bool,
     },
 
     /// List the current assignees on an issue.
     Assignees {
         id: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1339,16 +1319,17 @@ enum IssueCmd {
         /// Initial priority. Default `normal`.
         #[arg(long)]
         priority: Option<String>,
-        /// Cycle UUID. Sets `workflow.cycle`.
+        /// Cycle (UUID, `YYYY:Qn:Cm`, or `current`). Sets
+        /// `workflow.cycle`.
         #[arg(long)]
-        cycle: Option<uuid::Uuid>,
-        /// Project UUID. Sets `project_id`.
+        cycle: Option<String>,
+        /// Project (UUID, name, path, prefix). Sets `project_id`.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
-        /// Parent task UUID — makes this a subtask. Sets
-        /// `workflow.parent`.
+        project: Option<String>,
+        /// Parent issue (UUID, id prefix, path, or title) — makes
+        /// this a subtask. Sets `workflow.parent`.
         #[arg(long)]
-        parent: Option<uuid::Uuid>,
+        parent: Option<String>,
         /// Estimate (`xs` / `s` / `m` / `l` / `xl` / integer).
         #[arg(long)]
         estimate: Option<String>,
@@ -1356,10 +1337,11 @@ enum IssueCmd {
         /// `human:user_id`. Bare names default to agent.
         #[arg(long = "assignee", value_name = "AGENT")]
         assignees: Vec<String>,
-        /// Repeatable blocker — `task issue ready` won't
-        /// surface this issue until each blocker closes.
-        #[arg(long = "blocker", value_name = "TASK_ID")]
-        blockers: Vec<uuid::Uuid>,
+        /// Repeatable blocker (UUID, id prefix, path, or title) —
+        /// `task issue ready` won't surface this issue until each
+        /// blocker closes.
+        #[arg(long = "blocker", value_name = "TASK")]
+        blockers: Vec<String>,
         /// Repeatable tag.
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
@@ -1367,20 +1349,18 @@ enum IssueCmd {
         #[arg(long)]
         body: Option<String>,
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-        #[arg(long)]
         json: bool,
     },
 
     /// Show issues ready to work — open, not done, with no
     /// unresolved blockers. The beads-equivalent of `bd ready`.
     Ready {
+        /// Cycle filter — UUID, `YYYY:Qn:Cm` label, or `current`.
         #[arg(long)]
-        cycle: Option<uuid::Uuid>,
+        cycle: Option<String>,
+        /// Project filter — UUID, id prefix, path, or name.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Show only issues claimable by this agent (no
         /// assignee yet, OR this agent is already listed).
         #[arg(long)]
@@ -1388,10 +1368,6 @@ enum IssueCmd {
         /// Max rows to show.
         #[arg(long, default_value = "20")]
         limit: usize,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1405,10 +1381,9 @@ enum IssueCmd {
         /// are preserved).
         #[arg(long = "as-agent")]
         as_agent: Option<String>,
+        /// Emit the resulting issue as JSON.
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        json: bool,
     },
 
     /// Close an issue — flips status to `done` and stamps
@@ -1417,10 +1392,9 @@ enum IssueCmd {
         id: String,
         #[arg(long)]
         undo: bool,
+        /// Emit the resulting issue as JSON.
         #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        json: bool,
     },
 
     /// Migrate beads issues into Task. Reads a `bd list --json`
@@ -1434,23 +1408,16 @@ enum IssueCmd {
         /// Parse + report what would be created without writing.
         #[arg(long)]
         dry_run: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Project-level overview — counts grouped by status,
     /// priority, workspace, and assignee. Beads-equivalent of
     /// `bd stats`.
     Stats {
-        /// Restrict to one project.
+        /// Restrict to one project (UUID, id prefix, path, or
+        /// name).
         #[arg(long)]
-        project: Option<uuid::Uuid>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
+        project: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1473,10 +1440,6 @@ enum IssueCmd {
         /// `issue` or `pull`. Default `issue`.
         #[arg(long, default_value = "issue")]
         kind: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Push a local TaskInfo upstream — creates a Forgejo issue
@@ -1495,10 +1458,6 @@ enum IssueCmd {
         /// Ignored when --github is set.
         #[arg(long)]
         base_url: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// On-demand bidirectional reconcile — no webhook needed.
@@ -1517,33 +1476,27 @@ enum IssueCmd {
         /// Forgejo host base URL. Falls back to `TASK_FORGEJO_BASE_URL`.
         #[arg(long)]
         base_url: Option<String>,
-        /// Optional project UUID to stamp on newly-pulled tasks.
+        /// Optional project (UUID, name, path, prefix) to stamp
+        /// on newly-pulled tasks.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Don't create local tasks for forge issues we don't
         /// track — only reconcile state of already-linked ones.
         #[arg(long)]
         no_pull: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Sync every linked repo in the org in one pass — one
     /// cron line keeps all your tracked repos fresh without
     /// webhooks.
     SyncAll {
-        /// Optional project UUID to stamp on newly-pulled tasks.
+        /// Optional project (UUID, name, path, prefix) to stamp
+        /// on newly-pulled tasks.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Only reconcile existing links; don't pull new issues.
         #[arg(long)]
         no_pull: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// List open pull requests on a repo.
@@ -1589,10 +1542,6 @@ enum IssueCmd {
         /// task so `pr-merge`/sync can finish the loop.
         #[arg(long)]
         close_task: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Merge a pull request by number. With `--close-task`,
@@ -1615,10 +1564,6 @@ enum IssueCmd {
         /// close-propagation path.
         #[arg(long)]
         close_task: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Serialize-merge a queue of open PRs (the parallel-agent
@@ -1649,10 +1594,6 @@ enum IssueCmd {
         /// instead of stopping at the first conflict.
         #[arg(long)]
         keep_going: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 
     /// Fetch all issues from a Forgejo repo and create local
@@ -1669,16 +1610,13 @@ enum IssueCmd {
         /// Ignored when --github is set.
         #[arg(long)]
         base_url: Option<String>,
-        /// Optional project UUID to stamp on pulled-in tasks.
+        /// Optional project (UUID, name, path, prefix) to stamp
+        /// on pulled-in tasks.
         #[arg(long)]
-        project: Option<uuid::Uuid>,
+        project: Option<String>,
         /// Filter by issue state: `open` (default), `closed`, or `all`.
         #[arg(long, default_value = "open")]
         state: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
     },
 }
 
@@ -1964,6 +1902,9 @@ enum GoalCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting goal as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear the parent goal (`none` clears).
     SetParent {
@@ -1973,6 +1914,9 @@ enum GoalCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting goal as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Anchor a goal to a specific cycle (by UUID, by
     /// `YYYY:Qn:Cm`, or `current` for today's cycle). Pass
@@ -1984,6 +1928,9 @@ enum GoalCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting goal as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Move the backing markdown file. `id` is preserved.
     Rename {
@@ -1993,6 +1940,9 @@ enum GoalCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the renamed goal as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Delete the goal. Refuses if any other goal lists it as
     /// parent.
@@ -2189,7 +2139,11 @@ enum AuthOrgCmd {
     /// Set the active org for subsequent commands. Updates
     /// both the local session file and the server-side
     /// `auth_session.active_organization_id`.
-    Use { org_id: uuid::Uuid },
+    Use {
+        /// Org reference — UUID, slug, or name (exact / unique
+        /// prefix), matched against your memberships.
+        org_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3203,6 +3157,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     SetStatus {
         target: String,
@@ -3211,6 +3168,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     SetPriority {
         target: String,
@@ -3219,6 +3179,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the due date.
     SetDue {
@@ -3228,6 +3191,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the scheduled date.
     SetScheduled {
@@ -3237,6 +3203,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the owning project.
     SetProject {
@@ -3246,6 +3215,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the milestone link.
     SetMilestone {
@@ -3255,6 +3227,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Replace the tag list.
     SetTags {
@@ -3265,6 +3240,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Move backing markdown file. `id` preserved.
     Rename {
@@ -3274,6 +3252,9 @@ enum TaskCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the renamed task as JSON.
+        #[arg(long)]
+        json: bool,
     },
     Delete {
         target: String,
@@ -3355,6 +3336,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the due date.
     SetDue {
@@ -3364,6 +3348,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the life-goal link.
     SetGoal {
@@ -3373,6 +3360,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Set or clear (`none`) the forge sync ref.
     SetForgeRef {
@@ -3382,6 +3372,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// `closed`. Just `set-status <target> closed`.
     Close {
@@ -3390,6 +3383,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Reopen (status = open).
     Reopen {
@@ -3398,6 +3394,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the resulting milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     Rename {
         target: String,
@@ -3406,6 +3405,9 @@ enum MilestoneCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+        /// Emit the renamed milestone as JSON.
+        #[arg(long)]
+        json: bool,
     },
     Delete {
         target: String,
@@ -4053,16 +4055,46 @@ enum FinanceCmd {
     },
 }
 
+/// Global `--org` / `--server` flags, captured once before dispatch.
+/// Subcommands that still declare local duplicates shadow these; the
+/// shared resolvers ([`resolve_active_org`], [`resolve_org_vox_url`],
+/// `org_ctx::resolve_active`) fall back here when a handler passes
+/// `None`, so `task --org foo <any subcommand>` works even where the
+/// local flag was removed (issue / threads) or never existed.
+static GLOBAL_ORG: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+static GLOBAL_SERVER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+pub(crate) fn global_org() -> Option<String> {
+    GLOBAL_ORG.get().cloned().flatten()
+}
+
+fn global_server() -> Option<String> {
+    GLOBAL_SERVER.get().cloned().flatten()
+}
+
 #[tokio::main]
-async fn main() -> eyre::Result<()> {
+async fn main() {
     // Best-effort .env load before clap reads env. Missing file is
     // not an error — we just fall through to the hard-coded default.
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
+    GLOBAL_ORG.set(cli.org.clone()).ok();
+    GLOBAL_SERVER.set(cli.server.clone()).ok();
+    // Error boundary: render the taxonomy line + hint and exit with
+    // the stable code (4 not-found / 5 conflict / 6 connection / 1).
+    if let Err(report) = run(cli).await {
+        errors::exit_with(&report);
+    }
+}
+
+async fn run(cli: Cli) -> eyre::Result<()> {
     match cli.command {
         Commands::Doctor => {
+            let server = cli
+                .server
+                .unwrap_or_else(|| "ws://127.0.0.1:9090/vox".to_owned());
             let remote =
-                RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
+                RemoteVoxConfig::from_args(server, cli.session_token, cli.organization_id)?;
             println!("Vox endpoint: {}", remote.display_url);
         }
         Commands::Vault { cmd } => match cmd {
@@ -4173,7 +4205,7 @@ async fn main() -> eyre::Result<()> {
 /// Mirror of the helper inside `run_vault_sync`, lifted out
 /// because project + goal share the same routing surface.
 fn resolve_org_vox_url(server: Option<String>, org_slug: &str) -> String {
-    let base = server.unwrap_or_else(|| {
+    let base = server.or_else(global_server).unwrap_or_else(|| {
         std::env::var("TASK_VOX_URL").unwrap_or_else(|_| "ws://127.0.0.1:18080".to_owned())
     });
     let stripped = base.trim_end_matches("/vox").trim_end_matches('/');
@@ -4223,8 +4255,17 @@ where
         let url = resolve_org_vox_url(server, slug);
         Box::pin(vox::connect(&url).establish())
             .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+            .map_err(|e| connect_error(&url, &e))
     }
+}
+
+/// Tag a vox connect/establish failure with the `Connection` exit
+/// class (6) and a "how do I point this somewhere else" hint.
+fn connect_error<E: std::fmt::Debug>(url: &str, e: &E) -> eyre::Report {
+    errors::connection(format!("connect `{url}`"))
+        .cause(format!("{e:?}"))
+        .hint("is task-server running? point the CLI elsewhere with --server or TASK_VOX_URL")
+        .report()
 }
 
 /// Establish a typed client given an already-resolved per-org vox URL
@@ -4247,7 +4288,7 @@ where
     } else {
         Box::pin(vox::connect(url).establish())
             .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+            .map_err(|e| connect_error(url, &e))
     }
 }
 
@@ -4270,12 +4311,15 @@ where
 /// stored session. Returns a friendly error if neither
 /// resolves.
 fn resolve_active_org(override_slug: Option<String>) -> eyre::Result<String> {
-    if let Some(s) = override_slug {
+    if let Some(s) = override_slug.or_else(global_org) {
         return Ok(s);
     }
-    session_store::load()?
-        .map(|s| s.active)
-        .ok_or_else(|| eyre::eyre!("no active org — pass --org or sign in first"))
+    session_store::load()?.map(|s| s.active).ok_or_else(|| {
+        errors::usage("resolve active org")
+            .cause("no org selected and no stored session")
+            .hint("pass --org <slug> or run `task auth login` first")
+            .report()
+    })
 }
 
 async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
@@ -4323,17 +4367,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
         } => {
             let slug = resolve_active_org(org)?;
             let client: ProjectServiceClient = establish_client(server, &slug).await?;
-            let p = if let Ok(id) = uuid::Uuid::parse_str(&target) {
-                client
-                    .get(id)
-                    .await
-                    .map_err(|e| eyre::eyre!("get(id): {e:?}"))?
-            } else {
-                client
-                    .get_by_path(target.clone())
-                    .await
-                    .map_err(|e| eyre::eyre!("get(path): {e:?}"))?
-            };
+            let p = resolve_project_target(&client, &target).await?;
 
             if json {
                 println!(
@@ -4424,14 +4458,16 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             status,
             org,
             server,
+            json,
         } => {
-            mutate_project(target, org, server, |p| p.status = status).await?;
+            mutate_project(target, org, server, json, |p| p.status = status).await?;
         }
         ProjectCmd::SetTarget {
             target,
             date,
             org,
             server,
+            json,
         } => {
             let parsed = if matches!(
                 date.trim().to_ascii_lowercase().as_str(),
@@ -4444,7 +4480,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                         .map_err(|e| eyre::eyre!("target date `{date}` (want YYYY-MM-DD): {e}"))?,
                 )
             };
-            mutate_project(target, org, server, |p| p.target_date = parsed).await?;
+            mutate_project(target, org, server, json, |p| p.target_date = parsed).await?;
         }
         ProjectCmd::Progress {
             target,
@@ -4497,14 +4533,16 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             priority,
             org,
             server,
+            json,
         } => {
-            mutate_project(target, org, server, |p| p.priority = priority).await?;
+            mutate_project(target, org, server, json, |p| p.priority = priority).await?;
         }
         ProjectCmd::SetParent {
             target,
             parent,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -4514,27 +4552,30 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             } else {
                 Some(resolve_project_target(&client, &parent).await?.id)
             };
-            mutate_project(target, org, server, |p| p.parent_id = new_parent).await?;
+            mutate_project(target, org, server, json, |p| p.parent_id = new_parent).await?;
         }
         ProjectCmd::Archive {
             target,
             org,
             server,
+            json,
         } => {
-            mutate_project(target, org, server, |p| p.archived = true).await?;
+            mutate_project(target, org, server, json, |p| p.archived = true).await?;
         }
         ProjectCmd::Unarchive {
             target,
             org,
             server,
+            json,
         } => {
-            mutate_project(target, org, server, |p| p.archived = false).await?;
+            mutate_project(target, org, server, json, |p| p.archived = false).await?;
         }
         ProjectCmd::Rename {
             target,
             new_path,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
@@ -4544,7 +4585,11 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 .rename(p.id, new_path.clone())
                 .await
                 .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
-            println!("renamed → {}", renamed.path);
+            if json {
+                json_out::print_json(&renamed)?;
+            } else {
+                println!("renamed → {}", renamed.path);
+            }
         }
         ProjectCmd::Delete {
             target,
@@ -4574,26 +4619,20 @@ async fn connect_project_client(url: &str) -> eyre::Result<project::ProjectServi
     establish_for_url(url).await
 }
 
+/// Resolve a project reference — uuid, vault path, title, or a
+/// unique prefix of either (shared flexible resolver).
 async fn resolve_project_target(
     client: &project::ProjectServiceClient,
     target: &str,
 ) -> eyre::Result<project::ProjectInfo> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    client
-        .get_by_path(target.to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+    json_out::resolve_project_flexible(client, target).await
 }
 
 async fn mutate_project<F>(
     target: String,
     org: Option<String>,
     server: Option<String>,
+    json: bool,
     apply: F,
 ) -> eyre::Result<()>
 where
@@ -4608,7 +4647,11 @@ where
         .update(p)
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    if json {
+        json_out::print_json(&updated)?;
+    } else {
+        println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    }
     Ok(())
 }
 
@@ -4736,17 +4779,7 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
         } => {
             let slug = resolve_active_org(org)?;
             let client: GoalServiceClient = establish_client(server, &slug).await?;
-            let g = if let Ok(id) = uuid::Uuid::parse_str(&target) {
-                client
-                    .get(id)
-                    .await
-                    .map_err(|e| eyre::eyre!("get(id): {e:?}"))?
-            } else {
-                client
-                    .get_by_path(target.clone())
-                    .await
-                    .map_err(|e| eyre::eyre!("get(path): {e:?}"))?
-            };
+            let g = resolve_goal_target(&client, &target).await?;
 
             if json {
                 println!(
@@ -4848,14 +4881,16 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
             status,
             org,
             server,
+            json,
         } => {
-            mutate_goal(target, org, server, |g| g.status = status).await?;
+            mutate_goal(target, org, server, json, |g| g.status = status).await?;
         }
         GoalCmd::SetParent {
             target,
             parent,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -4865,24 +4900,24 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
             } else {
                 Some(resolve_goal_target(&client, &parent).await?.id)
             };
-            mutate_goal(target, org, server, |g| g.parent_id = new_parent).await?;
+            mutate_goal(target, org, server, json, |g| g.parent_id = new_parent).await?;
         }
         GoalCmd::SetCycle {
             target,
             cycle,
             org,
             server,
+            json,
         } => {
-            let is_current = cycle == "current";
-            let arg = if is_current { None } else { Some(cycle) };
-            let new_cycle = resolve_cycle_arg(arg, is_current)?;
-            mutate_goal(target, org, server, |g| g.cycle_id = new_cycle).await?;
+            let new_cycle = resolve_cycle_arg(Some(cycle), false)?;
+            mutate_goal(target, org, server, json, |g| g.cycle_id = new_cycle).await?;
         }
         GoalCmd::Rename {
             target,
             new_path,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
@@ -4892,7 +4927,11 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
                 .rename(g.id, new_path)
                 .await
                 .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
-            println!("renamed → {}", renamed.path);
+            if json {
+                json_out::print_json(&renamed)?;
+            } else {
+                println!("renamed → {}", renamed.path);
+            }
         }
         GoalCmd::Delete {
             target,
@@ -4922,26 +4961,20 @@ async fn connect_goal_client(url: &str) -> eyre::Result<goal::GoalServiceClient>
     establish_for_url(url).await
 }
 
+/// Resolve a goal reference — uuid, vault path, title, or a unique
+/// prefix of either (shared flexible resolver).
 async fn resolve_goal_target(
     client: &goal::GoalServiceClient,
     target: &str,
 ) -> eyre::Result<goal::Goal> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    client
-        .get_by_path(target.to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+    json_out::resolve_goal_flexible(client, target).await
 }
 
 async fn mutate_goal<F>(
     target: String,
     org: Option<String>,
     server: Option<String>,
+    json: bool,
     apply: F,
 ) -> eyre::Result<()>
 where
@@ -4956,7 +4989,11 @@ where
         .update(g)
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    if json {
+        json_out::print_json(&updated)?;
+    } else {
+        println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    }
     Ok(())
 }
 
@@ -4971,7 +5008,7 @@ fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<
     use chrono::{Datelike, Local, Weekday};
     use cycle::FirstWeekRule;
 
-    if current {
+    if current || arg.as_deref() == Some("current") {
         let today = Local::now().date_naive();
         return Ok(cycle::cycle_for_date(
             today,
@@ -4989,8 +5026,10 @@ fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<
     if let Ok(id) = uuid::Uuid::parse_str(&s) {
         return Ok(Some(id));
     }
-    // Parse `YYYY:Qn:Cm`.
-    let parts: Vec<&str> = s.split(':').collect();
+    // Parse `YYYY:Qn:Cm` (also accepted with `-` separators, the
+    // form `cycle current` prints as its label: `2026-Q2-C3`).
+    let sep = if s.contains(':') { ':' } else { '-' };
+    let parts: Vec<&str> = s.split(sep).collect();
     if parts.len() == 3 {
         let year = parts[0].parse::<i32>().ok();
         let q = parts[1]
@@ -5017,16 +5056,20 @@ fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<
                     }
                 }
             }
-            return Err(eyre::eyre!(
-                "cycle `{s}` not found in surrounding years ({}..={})",
-                base - 1,
-                base + 2
-            ));
+            return Err(errors::not_found("resolve cycle", &s)
+                .cause(format!(
+                    "not found in surrounding years ({}..={})",
+                    base - 1,
+                    base + 2
+                ))
+                .report());
         }
     }
-    Err(eyre::eyre!(
-        "--cycle: expected UUID, `YYYY:Qn:Cm`, `current`, or `none` (got `{s}`)"
-    ))
+    Err(errors::usage("parse --cycle")
+        .cause(format!(
+            "expected UUID, `YYYY:Qn:Cm`, `current`, or `none` (got `{s}`)"
+        ))
+        .report())
 }
 
 fn print_goal_row(g: &goal::Goal, indent: usize, cycle: Option<String>) {
@@ -5637,13 +5680,23 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             let Some(active_entry) = sess.active_server() else {
                 return Err(eyre::eyre!("no active server in session"));
             };
-            // Membership check.
+            // Resolve the reference against the user's memberships:
+            // uuid / id prefix, slug, or name (exact / unique prefix)
+            // — same matcher as every other entity flag. Doubles as
+            // the membership check (non-members never match).
             let memberships = list_user_memberships(active_entry.user_id, &auth_db_path).await?;
-            if !memberships.iter().any(|(m, _)| m.organization_id == org_id) {
-                return Err(eyre::eyre!("user is not a member of org {org_id}"));
-            }
-            update_session_active_org(&active_entry.token, Some(org_id), &auth_db_path).await?;
-            println!("Architect-auth active membership set to {org_id}");
+            let cands: Vec<json_out::Candidate> = memberships
+                .iter()
+                .map(|(m, o)| (m.organization_id, o.name.clone(), o.slug.clone()))
+                .collect();
+            let resolved = match json_out::match_entity(&cands, &org_id, "organization") {
+                Ok(i) => cands[i].0,
+                Err(fail) => {
+                    return Err(fail.into_report("organization", &org_id));
+                }
+            };
+            update_session_active_org(&active_entry.token, Some(resolved), &auth_db_path).await?;
+            println!("Architect-auth active membership set to {resolved}");
         }
         AuthCmd::Users => {
             use architect_auth::db::AuthUserEntity;
@@ -5750,8 +5803,8 @@ async fn update_session_active_org(
 /// **Recipe (must match `architect-auth/crypto.rs`):**
 /// `base64url-no-pad(SHA256(secret || ":" || token))`.
 fn hash_session_token(secret: &str, token: &str) -> String {
-    use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(secret.as_bytes());
@@ -6284,7 +6337,8 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 })
                 .collect();
             if json {
-                let out: Vec<serde_json::Value> = filtered.iter().map(json_out::invoice_json).collect();
+                let out: Vec<serde_json::Value> =
+                    filtered.iter().map(json_out::invoice_json).collect();
                 json_out::print_json(&out)?;
                 return Ok(());
             }
@@ -7050,7 +7104,10 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
                 .unwrap_or_default();
             let task_note = if task_note.is_empty() {
-                task_info.as_ref().map(|t| t.path.clone()).unwrap_or_default()
+                task_info
+                    .as_ref()
+                    .map(|t| t.path.clone())
+                    .unwrap_or_default()
             } else {
                 task_note
             };
@@ -7190,7 +7247,10 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
                 .unwrap_or_default();
             let task_note = if task_note.is_empty() {
-                task_info.as_ref().map(|t| t.path.clone()).unwrap_or_default()
+                task_info
+                    .as_ref()
+                    .map(|t| t.path.clone())
+                    .unwrap_or_default()
             } else {
                 task_note
             };
@@ -7247,7 +7307,10 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 .or_else(|| task_info.as_ref().map(|t| t.title.clone()))
                 .unwrap_or_default();
             let task_note = if task_note.is_empty() {
-                task_info.as_ref().map(|t| t.path.clone()).unwrap_or_default()
+                task_info
+                    .as_ref()
+                    .map(|t| t.path.clone())
+                    .unwrap_or_default()
             } else {
                 task_note
             };
@@ -7312,8 +7375,9 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
             let (project_id, resolved_path) = resolve_project_flag(project).await?;
             // Reassigning the project also refreshes the cached
             // path (resolver-known path first, vault scan second).
-            let project_path = project_id
-                .map(|pid| resolved_path.unwrap_or_else(|| project_path_for(&vault_root, Some(pid))));
+            let project_path = project_id.map(|pid| {
+                resolved_path.unwrap_or_else(|| project_path_for(&vault_root, Some(pid)))
+            });
             let session = store
                 .update_session(timer_proto::service::UpdateSessionRequest {
                     id,
@@ -7891,7 +7955,7 @@ fn billed_cents(s: &timer_proto::WorkSession, elapsed: chrono::Duration) -> i64 
 
 async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
     use agent_codex::CodexBackend;
-    use agent_wiki::bridge::{IngestRequest, run_ingest};
+    use agent_wiki::bridge::{run_ingest, IngestRequest};
     use std::time::Duration;
     use wiki_live::WikiLive;
 
@@ -10223,8 +10287,8 @@ fn run_subprocess(
 ) -> eyre::Result<SubprocOut> {
     use std::io::{BufRead as _, BufReader, Write as _};
     use std::process::{Command, Stdio};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     let started = std::time::Instant::now();
     let mut child = Command::new("sh")
@@ -10729,8 +10793,9 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             undo,
             org,
             server,
+            json,
         } => {
-            mutate_task(target, org, server, |t| {
+            mutate_task(target, org, server, json, |t| {
                 if undo {
                     t.status = "open".into();
                     t.completed_date = None;
@@ -10746,44 +10811,49 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             status,
             org,
             server,
-        } => mutate_task(target, org, server, |t| t.status = status).await?,
+            json,
+        } => mutate_task(target, org, server, json, |t| t.status = status).await?,
         TaskCmd::SetPriority {
             target,
             priority,
             org,
             server,
-        } => mutate_task(target, org, server, |t| t.priority = priority).await?,
+            json,
+        } => mutate_task(target, org, server, json, |t| t.priority = priority).await?,
         TaskCmd::SetDue {
             target,
             due,
             org,
             server,
+            json,
         } => {
             let v = if matches!(due.as_str(), "none" | "null" | "") {
                 None
             } else {
                 Some(due)
             };
-            mutate_task(target, org, server, |t| t.due = v).await?;
+            mutate_task(target, org, server, json, |t| t.due = v).await?;
         }
         TaskCmd::SetScheduled {
             target,
             scheduled,
             org,
             server,
+            json,
         } => {
             let v = if matches!(scheduled.as_str(), "none" | "null" | "") {
                 None
             } else {
                 Some(scheduled)
             };
-            mutate_task(target, org, server, |t| t.scheduled = v).await?;
+            mutate_task(target, org, server, json, |t| t.scheduled = v).await?;
         }
         TaskCmd::SetProject {
             target,
             project,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -10793,13 +10863,14 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 let pc = connect_project_client(&url).await?;
                 Some(resolve_project_target(&pc, &project).await?.id)
             };
-            mutate_task(target, org, server, |t| t.project_id = new_proj).await?;
+            mutate_task(target, org, server, json, |t| t.project_id = new_proj).await?;
         }
         TaskCmd::SetMilestone {
             target,
             milestone,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -10810,7 +10881,7 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 let ms = resolve_milestone_target(&mc, &milestone).await?;
                 (Some(ms.id), Some(ms.project_id))
             };
-            mutate_task(target, org, server, |t| {
+            mutate_task(target, org, server, json, |t| {
                 t.milestone_id = new_ms;
                 if let Some(p) = new_proj {
                     // Auto-fix project link when it's missing or
@@ -10826,8 +10897,9 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             tags,
             org,
             server,
+            json,
         } => {
-            mutate_task(target, org, server, |t| {
+            mutate_task(target, org, server, json, |t| {
                 t.tags = task::model::StringList(tags);
             })
             .await?;
@@ -10837,6 +10909,7 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             new_path,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
@@ -10846,7 +10919,11 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 .rename(t.id, new_path)
                 .await
                 .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
-            println!("renamed → {}", renamed.path);
+            if json {
+                json_out::print_json(&renamed)?;
+            } else {
+                println!("renamed → {}", renamed.path);
+            }
         }
         TaskCmd::Delete {
             target,
@@ -10876,26 +10953,20 @@ async fn connect_task_client(url: &str) -> eyre::Result<task::TaskServiceClient>
     establish_for_url(url).await
 }
 
+/// Resolve a task reference — uuid, vault path, title, or a unique
+/// prefix of either (shared flexible resolver).
 async fn resolve_task_target(
     client: &task::TaskServiceClient,
     target: &str,
 ) -> eyre::Result<task::TaskInfo> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    client
-        .get_by_path(target.to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+    json_out::resolve_task_flexible(client, target).await
 }
 
 async fn mutate_task<F>(
     target: String,
     org: Option<String>,
     server: Option<String>,
+    json: bool,
     apply: F,
 ) -> eyre::Result<()>
 where
@@ -10910,7 +10981,11 @@ where
         .update(t)
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    if json {
+        json_out::print_json(&updated)?;
+    } else {
+        println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    }
     Ok(())
 }
 
@@ -10967,38 +11042,14 @@ fn parse_estimate(s: &str) -> eyre::Result<task::model::Estimate> {
     }
 }
 
-/// Resolve an issue id — accepts a full UUID or an 8-char
-/// (or longer) prefix. Falls back to a list-scan for the
-/// prefix case since the server only exposes exact lookups.
+/// Resolve an issue reference — uuid, id prefix, vault path, or
+/// title (issues and tasks are the same `TaskInfo` row, so this is
+/// the shared flexible task resolver).
 async fn resolve_issue_id(
     client: &task::TaskServiceClient,
     id: &str,
 ) -> eyre::Result<task::TaskInfo> {
-    if let Ok(uuid) = uuid::Uuid::parse_str(id) {
-        return client
-            .get(uuid)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    let prefix = id.trim().to_ascii_lowercase();
-    if prefix.is_empty() {
-        return Err(eyre::eyre!("empty id"));
-    }
-    let rows = client
-        .list()
-        .await
-        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
-    let mut hits: Vec<task::TaskInfo> = rows
-        .into_iter()
-        .filter(|t| t.id.to_string().to_ascii_lowercase().starts_with(&prefix))
-        .collect();
-    match hits.len() {
-        0 => Err(eyre::eyre!("no issue matches `{id}`")),
-        1 => Ok(hits.remove(0)),
-        n => Err(eyre::eyre!(
-            "`{id}` matches {n} issues — disambiguate with the full UUID"
-        )),
-    }
+    json_out::resolve_task_flexible(client, id).await
 }
 
 fn short_uuid(u: &uuid::Uuid) -> String {
@@ -11088,32 +11139,29 @@ async fn try_claim(
     })
 }
 
-/// Apply `set-workflow` style edits to a `TaskInfo` in-place.
+/// Apply `set-workflow` style edits to a `TaskInfo` in-place. The
+/// cycle / project / blocker references arrive pre-resolved (the
+/// caller ran the flexible resolvers): outer `None` = leave alone,
+/// `Some(None)` = clear, `Some(Some(id))` = set.
 #[allow(clippy::too_many_arguments)]
+// Option<Option<_>> is exactly the tri-state these patch fields
+// need (untouched / cleared / set) — a custom enum adds noise for
+// one private helper.
+#[allow(clippy::option_option)]
 fn apply_workflow_patch(
     t: &mut task::TaskInfo,
-    cycle: Option<String>,
-    project: Option<String>,
+    cycle: Option<Option<uuid::Uuid>>,
+    project: Option<Option<uuid::Uuid>>,
     estimate: Option<String>,
     add_assignee: Vec<workflows_proto::AgentRef>,
     remove_assignee: Vec<workflows_proto::AgentRef>,
     add_blocker: Vec<uuid::Uuid>,
     remove_blocker: Vec<uuid::Uuid>,
 ) -> eyre::Result<()> {
-    fn parse_uuid_field(field: &str, raw: &str) -> eyre::Result<Option<uuid::Uuid>> {
-        let r = raw.trim();
-        if matches!(r, "" | "none" | "null") {
-            return Ok(None);
-        }
-        uuid::Uuid::parse_str(r)
-            .map(Some)
-            .map_err(|e| eyre::eyre!("--{field} `{raw}`: {e}"))
-    }
-
     // Project membership lives on TaskInfo.project_id (the
     // canonical Project link), not in WorkflowAttrs.
     if let Some(v) = project {
-        t.project_id = parse_uuid_field("project", &v)?;
+        t.project_id = v;
     }
 
     let w = t
@@ -11121,7 +11169,7 @@ fn apply_workflow_patch(
         .get_or_insert_with(task::model::WorkflowAttrs::default);
 
     if let Some(v) = cycle {
-        w.cycle = parse_uuid_field("cycle", &v)?;
+        w.cycle = v;
     }
     if let Some(v) = estimate {
         w.estimate = Some(parse_estimate(&v)?);
@@ -11145,6 +11193,32 @@ fn apply_workflow_patch(
     Ok(())
 }
 
+/// Resolve an optional `--project` filter (uuid, id prefix, path,
+/// or name) into the project id, dialing the project service only
+/// when the flag is present.
+async fn resolve_project_filter(
+    url: &str,
+    project: Option<String>,
+) -> eyre::Result<Option<uuid::Uuid>> {
+    match project {
+        None => Ok(None),
+        Some(p) => {
+            let pc = connect_project_client(url).await?;
+            Ok(Some(json_out::resolve_project_flexible(&pc, &p).await?.id))
+        }
+    }
+}
+
+/// Org slug + per-org vox URL from the global `--org` / `--server`
+/// flags (the `issue` group dropped its per-variant duplicates).
+/// Called per-arm so org-free verbs (`pr-list`, dry runs) keep
+/// working without a session.
+fn issue_ctx() -> eyre::Result<(String, String)> {
+    let slug = resolve_active_org(None)?;
+    let url = resolve_org_vox_url(None, &slug);
+    Ok((slug, url))
+}
+
 async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
     match cmd {
         IssueCmd::List {
@@ -11153,12 +11227,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             assignee,
             status,
             has_workflow,
-            org,
-            server,
             json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
+            let cycle = resolve_cycle_arg(cycle, false)?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let rows = client
                 .list()
@@ -11218,14 +11291,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 );
             }
         }
-        IssueCmd::Show {
-            id,
-            org,
-            server,
-            json,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Show { id, json } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             if json {
@@ -11250,9 +11317,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 None => println!("  workflow: (none)"),
             }
         }
-        IssueCmd::Prompt { id, org, server } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Prompt { id } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             let parent = match t.workflow.as_ref().and_then(|w| w.parent) {
@@ -11271,11 +11337,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             add_blocker,
             remove_blocker,
             clear,
-            org,
-            server,
+            json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut t = resolve_issue_id(&client, &id).await?;
             if clear {
@@ -11289,21 +11353,37 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     .iter()
                     .map(|s| parse_agent_ref(s))
                     .collect::<eyre::Result<_>>()?;
-                apply_workflow_patch(
-                    &mut t,
-                    cycle,
-                    project,
-                    estimate,
-                    add,
-                    rm,
-                    add_blocker,
-                    remove_blocker,
-                )?;
+                // Resolve the entity references up-front: cycle
+                // accepts uuid / label / `current` / `none`; project
+                // accepts uuid / name / path / prefix / `none`;
+                // blockers accept any issue reference.
+                let cycle = match cycle {
+                    None => None,
+                    Some(c) => Some(resolve_cycle_arg(Some(c), false)?),
+                };
+                let project = match project.as_deref() {
+                    None => None,
+                    Some("" | "none" | "null") => Some(None),
+                    Some(p) => Some(resolve_project_filter(&url, Some(p.to_owned())).await?),
+                };
+                let mut add_b = Vec::with_capacity(add_blocker.len());
+                for b in &add_blocker {
+                    add_b.push(resolve_issue_id(&client, b).await?.id);
+                }
+                let mut rm_b = Vec::with_capacity(remove_blocker.len());
+                for b in &remove_blocker {
+                    rm_b.push(resolve_issue_id(&client, b).await?.id);
+                }
+                apply_workflow_patch(&mut t, cycle, project, estimate, add, rm, add_b, rm_b)?;
             }
             let updated = client
                 .update(t)
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            if json {
+                json_out::print_json(&updated)?;
+                return Ok(());
+            }
             println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
             if let Some(w) = &updated.workflow {
                 print_workflow_block(w);
@@ -11315,31 +11395,41 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             id,
             as_agent,
             force,
-            org,
-            server,
+            json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
             let t = resolve_issue_id(&client, &id).await?;
             match try_claim(&client, &t.id, &agent, force).await? {
                 ClaimOutcome::Won => {
-                    println!("claimed {} by {}", short_uuid(&t.id), agent.short_label());
+                    if !json {
+                        println!("claimed {} by {}", short_uuid(&t.id), agent.short_label());
+                    }
                 }
                 ClaimOutcome::AlreadyMine => {
-                    println!(
-                        "{} already claimed by {}",
-                        short_uuid(&t.id),
-                        agent.short_label()
-                    );
+                    if !json {
+                        println!(
+                            "{} already claimed by {}",
+                            short_uuid(&t.id),
+                            agent.short_label()
+                        );
+                    }
                 }
                 ClaimOutcome::Lost(holder) => {
-                    return Err(eyre::eyre!(
-                        "{} is already claimed by {holder} — pass --force to steal",
-                        short_uuid(&t.id)
-                    ));
+                    return Err(errors::conflict("claim issue", short_uuid(&t.id))
+                        .cause(format!("already claimed by {holder}"))
+                        .hint("pass --force to steal the claim")
+                        .report());
                 }
+            }
+            if json {
+                // Re-read so the emitted entity reflects the claim.
+                let after = client
+                    .get(t.id)
+                    .await
+                    .map_err(|e| eyre::eyre!("re-read after claim: {e:?}"))?;
+                json_out::print_json(&after)?;
             }
         }
         IssueCmd::Triage {
@@ -11348,11 +11438,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             from,
             parent_status,
             priority,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut parent = resolve_issue_id(&client, &id).await?;
 
@@ -11453,14 +11540,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 "\nparallel agents now: `task issue ready --as-agent <name>` → `task issue claim <id> --as-agent <name>`"
             );
         }
-        IssueCmd::Subtasks {
-            id,
-            org,
-            server,
-            json,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Subtasks { id, json } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let parent = resolve_issue_id(&client, &id).await?;
             let all = client
@@ -11508,14 +11589,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 );
             }
         }
-        IssueCmd::Assignees {
-            id,
-            org,
-            server,
-            json,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Assignees { id, json } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             let assignees: Vec<workflows_proto::AgentRef> = t
@@ -11553,14 +11628,26 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             blockers,
             tags,
             body,
-            org,
-            server,
             json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let body = resolve_body(body)?;
+
+            // Resolve entity references: cycle label / `current`,
+            // project name / path / prefix, parent + blockers by
+            // any issue reference.
+            let cycle = resolve_cycle_arg(cycle, false)?;
+            let project = resolve_project_filter(&url, project).await?;
+            let parent = match parent {
+                None => None,
+                Some(p) => Some(resolve_issue_id(&client, &p).await?.id),
+            };
+            let mut blocker_ids = Vec::with_capacity(blockers.len());
+            for b in &blockers {
+                blocker_ids.push(resolve_issue_id(&client, b).await?.id);
+            }
+            let blockers = blocker_ids;
 
             // Build the WorkflowAttrs from inline flags. Skip if
             // nothing was set — leaves `workflow: None`, preserving
@@ -11639,12 +11726,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             project,
             as_agent,
             limit,
-            org,
-            server,
             json,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
+            let cycle = resolve_cycle_arg(cycle, false)?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let rows = client
                 .list()
@@ -11733,14 +11819,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 );
             }
         }
-        IssueCmd::Start {
-            id,
-            as_agent,
-            org,
-            server,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Start { id, as_agent, json } => {
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut t = resolve_issue_id(&client, &id).await?;
             // Flip status; preserve completedDate semantics: if
@@ -11760,6 +11840,10 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .update(t)
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            if json {
+                json_out::print_json(&updated)?;
+                return Ok(());
+            }
             println!(
                 "started {}  [{}]  {}",
                 short_uuid(&updated.id),
@@ -11770,12 +11854,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 print_workflow_block(w);
             }
         }
-        IssueCmd::ImportBeads {
-            from,
-            dry_run,
-            org,
-            server,
-        } => {
+        IssueCmd::ImportBeads { from, dry_run } => {
             // 1. Get the beads JSON.
             let raw = match from.as_str() {
                 "bd" => {
@@ -11849,8 +11928,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 return Ok(());
             }
 
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut created = 0usize;
             for it in &items {
@@ -11906,16 +11984,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                  the beads ids don't survive into TaskInfo uuids. Re-link by hand if needed."
             );
         }
-        IssueCmd::Stats {
-            project,
-            org,
-            server,
-            json,
-        } => {
+        IssueCmd::Stats { project, json } => {
             use std::collections::BTreeMap;
 
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (_slug, url) = issue_ctx()?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let rows = client
                 .list()
@@ -12015,14 +12088,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 }
             }
         }
-        IssueCmd::Close {
-            id,
-            undo,
-            org,
-            server,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::Close { id, undo, json } => {
+            let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let mut t = resolve_issue_id(&client, &id).await?;
             if undo {
@@ -12041,17 +12108,23 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .update(t)
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-            let verb = if undo { "reopened" } else { "closed" };
-            println!(
-                "{verb} {}  [{}]  {}",
-                short_uuid(&updated.id),
-                updated.status,
-                updated.title
-            );
+            if json {
+                json_out::print_json(&updated)?;
+            } else {
+                let verb = if undo { "reopened" } else { "closed" };
+                println!(
+                    "{verb} {}  [{}]  {}",
+                    short_uuid(&updated.id),
+                    updated.status,
+                    updated.title
+                );
+            }
 
             // Propagate to any linked forge issues. Best-effort:
             // a forge that's unreachable / unauthenticated logs
-            // a warning but doesn't fail the local close.
+            // a warning but doesn't fail the local close. Under
+            // --json the note goes to stderr so stdout stays a
+            // single parseable entity.
             let new_state = if undo {
                 git_proto::IssueState::Open
             } else {
@@ -12059,6 +12132,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             };
             match propagate_state_to_forge(&slug, &updated.id, new_state).await {
                 Ok(0) => {}
+                Ok(n) if json => eprintln!("propagated to {n} linked forge issue(s)"),
                 Ok(n) => println!("  propagated to {n} linked forge issue(s)"),
                 Err(e) => eprintln!("  warning: forge propagation failed: {e}"),
             }
@@ -12069,11 +12143,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             number,
             base_url,
             kind,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             let (owner, repo_name) = parse_repo_slug(&repo)?;
@@ -12110,11 +12181,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             repo,
             github,
             base_url,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
             let repo_id = build_repo_id(&repo, github, base_url)?;
@@ -12174,11 +12242,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             base_url,
             project,
             state,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let repo_id = build_repo_id(&repo, github, base_url)?;
             let filter_state = match state.to_ascii_lowercase().as_str() {
@@ -12248,11 +12314,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             base_url,
             project,
             no_pull,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let repo_id = build_repo_id(&repo, github, base_url)?;
             let store = forge_link_store(&slug)?;
@@ -12260,14 +12324,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 sync_repo(&client, &store, &repo_id, project, no_pull).await?;
             println!("\nsync: {reconciled} reconciled, {pulled} pulled");
         }
-        IssueCmd::SyncAll {
-            project,
-            no_pull,
-            org,
-            server,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+        IssueCmd::SyncAll { project, no_pull } => {
+            let (slug, url) = issue_ctx()?;
+            let project = resolve_project_filter(&url, project).await?;
             let client = connect_task_client(&url).await?;
             let store = forge_link_store(&slug)?;
             let repos = store
@@ -12342,8 +12401,6 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             draft,
             closes,
             close_task,
-            org,
-            server,
         } => {
             let repo_id = build_repo_id(&repo, github, base_url)?;
             let mut body = resolve_body(body)?;
@@ -12352,8 +12409,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             // explicit --closes wins; else look up the linked
             // forge issue for --close-task. Capture the task id
             // so we can record a PR link afterward.
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
             let store = forge_link_store(&slug)?;
             use git_config::BindingStore as _;
             let mut closes_number = closes;
@@ -12439,8 +12495,6 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             number,
             method,
             close_task,
-            org,
-            server,
         } => {
             let repo_id = build_repo_id(&repo, github, base_url)?;
             let merge_method = match method.to_ascii_lowercase().as_str() {
@@ -12466,8 +12520,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             // The `task code merge` chain: close the linked task,
             // which propagates the close to its own forge issue.
             if let Some(tid) = close_task {
-                let slug = resolve_active_org(org)?;
-                let url = resolve_org_vox_url(server, &slug);
+                let (slug, url) = issue_ctx()?;
                 let client = connect_task_client(&url).await?;
                 let mut t = resolve_issue_id(&client, &tid).await?;
                 t.status = "done".into();
@@ -12501,8 +12554,6 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             issue,
             dry_run,
             keep_going,
-            org,
-            server,
         } => {
             use git_config::BindingStore as _;
             let repo_id = build_repo_id(&repo, github, base_url)?;
@@ -12512,8 +12563,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 "rebase" => git_proto::reviews::MergeMethod::Rebase,
                 _ => return Err(eyre::eyre!("--method must be merge, squash, or rebase")),
             };
-            let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
+            let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let store = forge_link_store(&slug)?;
 
@@ -14315,12 +14365,14 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
             status,
             org,
             server,
-        } => mutate_milestone(target, org, server, |m| m.status = status).await?,
+            json,
+        } => mutate_milestone(target, org, server, json, |m| m.status = status).await?,
         MilestoneCmd::SetDue {
             target,
             due,
             org,
             server,
+            json,
         } => {
             let v = if matches!(due.as_str(), "none" | "null" | "") {
                 None
@@ -14330,13 +14382,14 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
                         .map_err(|e| eyre::eyre!("--due: {e}"))?,
                 )
             };
-            mutate_milestone(target, org, server, |m| m.due_date = v).await?;
+            mutate_milestone(target, org, server, json, |m| m.due_date = v).await?;
         }
         MilestoneCmd::SetGoal {
             target,
             goal,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org.clone())?;
             let url = resolve_org_vox_url(server.clone(), &slug);
@@ -14346,36 +14399,40 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
                 let gc = connect_goal_client(&url).await?;
                 Some(resolve_goal_target(&gc, &goal).await?.id)
             };
-            mutate_milestone(target, org, server, |m| m.goal_id = new_goal).await?;
+            mutate_milestone(target, org, server, json, |m| m.goal_id = new_goal).await?;
         }
         MilestoneCmd::SetForgeRef {
             target,
             forge_ref,
             org,
             server,
+            json,
         } => {
             let v = if matches!(forge_ref.as_str(), "none" | "null" | "") {
                 None
             } else {
                 Some(forge_ref)
             };
-            mutate_milestone(target, org, server, |m| m.forge_ref = v).await?;
+            mutate_milestone(target, org, server, json, |m| m.forge_ref = v).await?;
         }
         MilestoneCmd::Close {
             target,
             org,
             server,
-        } => mutate_milestone(target, org, server, |m| m.status = "closed".into()).await?,
+            json,
+        } => mutate_milestone(target, org, server, json, |m| m.status = "closed".into()).await?,
         MilestoneCmd::Reopen {
             target,
             org,
             server,
-        } => mutate_milestone(target, org, server, |m| m.status = "open".into()).await?,
+            json,
+        } => mutate_milestone(target, org, server, json, |m| m.status = "open".into()).await?,
         MilestoneCmd::Rename {
             target,
             new_path,
             org,
             server,
+            json,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
@@ -14385,7 +14442,11 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
                 .rename(m.id, new_path)
                 .await
                 .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
-            println!("renamed → {}", renamed.path);
+            if json {
+                json_out::print_json(&renamed)?;
+            } else {
+                println!("renamed → {}", renamed.path);
+            }
         }
         MilestoneCmd::Delete {
             target,
@@ -14415,26 +14476,20 @@ async fn connect_milestone_client(url: &str) -> eyre::Result<milestone::Mileston
     establish_for_url(url).await
 }
 
+/// Resolve a milestone reference — uuid, vault path, title, or a
+/// unique prefix of either (shared flexible resolver).
 async fn resolve_milestone_target(
     client: &milestone::MilestoneServiceClient,
     target: &str,
 ) -> eyre::Result<milestone::Milestone> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
-    }
-    client
-        .get_by_path(target.to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+    json_out::resolve_milestone_flexible(client, target).await
 }
 
 async fn mutate_milestone<F>(
     target: String,
     org: Option<String>,
     server: Option<String>,
+    json: bool,
     apply: F,
 ) -> eyre::Result<()>
 where
@@ -14449,7 +14504,11 @@ where
         .update(m)
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    if json {
+        json_out::print_json(&updated)?;
+    } else {
+        println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    }
     Ok(())
 }
 
@@ -14469,25 +14528,54 @@ fn threads_local_ids(org_override: Option<&str>) -> (uuid::Uuid, uuid::Uuid) {
     (org_id, timer_owner_id(org_id))
 }
 
+/// Resolve a threads `--entity-id` reference (uuid, id prefix, path,
+/// or title) against the service named by `--entity-type`. Unknown
+/// entity types still take a literal UUID.
+async fn resolve_thread_entity(
+    url: &str,
+    entity_type: &str,
+    target: &str,
+) -> eyre::Result<uuid::Uuid> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return Ok(id);
+    }
+    match entity_type {
+        "task" => {
+            let tc = connect_task_client(url).await?;
+            Ok(json_out::resolve_task_flexible(&tc, target).await?.id)
+        }
+        "project" => {
+            let pc = connect_project_client(url).await?;
+            Ok(json_out::resolve_project_flexible(&pc, target).await?.id)
+        }
+        other => Err(errors::usage("resolve --entity-id")
+            .cause(format!(
+                "`{target}` is not a UUID and entity type `{other}` has no name resolver"
+            ))
+            .hint("pass a literal UUID, or use --entity-type task|project")
+            .report()),
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 async fn run_threads(cmd: ThreadsCmd) -> eyre::Result<()> {
+    // Global --org / --server routing, shared by every arm.
+    let slug = resolve_active_org(None)?;
+    let url = resolve_org_vox_url(None, &slug);
     match cmd {
         ThreadsCmd::New {
             entity_type,
             entity_id,
             title,
             kind,
-            org,
-            server,
         } => {
             let title = title.join(" ");
             if title.trim().is_empty() {
                 eyre::bail!("a thread needs a title — pass some text");
             }
-            let slug = resolve_active_org(org.clone())?;
-            let (org_id, user_id) = threads_local_ids(org.as_deref());
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_threads_client(&u).await?;
+            let entity_id = resolve_thread_entity(&url, &entity_type, &entity_id).await?;
+            let (org_id, user_id) = threads_local_ids(None);
+            let client = connect_threads_client(&url).await?;
             let t = client
                 .create_thread(threads::CreateThreadRequest {
                     org_id,
@@ -14510,17 +14598,13 @@ async fn run_threads(cmd: ThreadsCmd) -> eyre::Result<()> {
             reply_to,
             source,
             author,
-            org,
-            server,
         } => {
             let body = text.join(" ");
             if body.trim().is_empty() {
                 eyre::bail!("nothing to post — pass some message text");
             }
-            let slug = resolve_active_org(org.clone())?;
-            let (org_id, user_id) = threads_local_ids(org.as_deref());
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_threads_client(&u).await?;
+            let (org_id, user_id) = threads_local_ids(None);
+            let client = connect_threads_client(&url).await?;
             let source_kind = source.unwrap_or_else(|| "native".into());
             let author_label = author.unwrap_or_else(|| {
                 if source_kind == "agent" {
@@ -14551,12 +14635,9 @@ async fn run_threads(cmd: ThreadsCmd) -> eyre::Result<()> {
             entity_type,
             entity_id,
             json,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org)?;
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_threads_client(&u).await?;
+            let entity_id = resolve_thread_entity(&url, &entity_type, &entity_id).await?;
+            let client = connect_threads_client(&url).await?;
             let rows = client
                 .list_threads(entity_type, entity_id)
                 .await
@@ -14574,15 +14655,8 @@ async fn run_threads(cmd: ThreadsCmd) -> eyre::Result<()> {
                 println!("  {}  [{}]{}  {}", t.id, t.kind, r, t.title);
             }
         }
-        ThreadsCmd::Show {
-            thread_id,
-            json,
-            org,
-            server,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_threads_client(&u).await?;
+        ThreadsCmd::Show { thread_id, json } => {
+            let client = connect_threads_client(&url).await?;
             let msgs = client
                 .list_messages(thread_id)
                 .await
@@ -14607,23 +14681,17 @@ async fn run_threads(cmd: ThreadsCmd) -> eyre::Result<()> {
         ThreadsCmd::Resolve {
             thread_id,
             unresolve,
-            org,
-            server,
         } => {
-            let slug = resolve_active_org(org.clone())?;
-            let (_org_id, user_id) = threads_local_ids(org.as_deref());
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_threads_client(&u).await?;
+            let (_org_id, user_id) = threads_local_ids(None);
+            let client = connect_threads_client(&url).await?;
             let t = client
                 .set_resolved(thread_id, !unresolve, Some(user_id))
                 .await
                 .map_err(|e| eyre::eyre!("set_resolved: {e:?}"))?;
             println!("thread {} resolved={}", t.id, t.resolved);
         }
-        ThreadsCmd::Rm { id, org, server } => {
-            let slug = resolve_active_org(org)?;
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_threads_client(&u).await?;
+        ThreadsCmd::Rm { id } => {
+            let client = connect_threads_client(&url).await?;
             client
                 .delete_thread(id)
                 .await
@@ -14846,7 +14914,11 @@ async fn resolve_location_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|l| l.path == target || l.name == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_location(cmd: LocationCmd) -> eyre::Result<()> {
@@ -15121,9 +15193,11 @@ async fn resolve_meal_target(
         .list()
         .await
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
-    rows.into_iter()
-        .find(|m| m.path == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+    rows.into_iter().find(|m| m.path == target).ok_or_else(|| {
+        errors::not_found("resolve target", target)
+            .cause("no path or name match")
+            .report()
+    })
 }
 
 async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
@@ -15363,7 +15437,11 @@ async fn resolve_pantry_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|p| p.path == target || p.name == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_pantry(cmd: PantryCmd) -> eyre::Result<()> {
@@ -15811,7 +15889,11 @@ async fn resolve_body_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|m| m.path == target || m.name == target || m.kind == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_body(cmd: BodyCmd) -> eyre::Result<()> {
@@ -15990,7 +16072,11 @@ async fn resolve_exercise_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|e| e.path == target || e.name.eq_ignore_ascii_case(target))
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_exercise(cmd: ExerciseCmd) -> eyre::Result<()> {
@@ -16165,7 +16251,11 @@ async fn resolve_routine_target(
         .map_err(|e| eyre::eyre!("list_routines: {e:?}"))?;
     rows.into_iter()
         .find(|r| r.path == target || r.name.eq_ignore_ascii_case(target))
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn resolve_session_target(
@@ -16182,9 +16272,11 @@ async fn resolve_session_target(
         .list_sessions()
         .await
         .map_err(|e| eyre::eyre!("list_sessions: {e:?}"))?;
-    rows.into_iter()
-        .find(|s| s.path == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+    rows.into_iter().find(|s| s.path == target).ok_or_else(|| {
+        errors::not_found("resolve target", target)
+            .cause("no path or name match")
+            .report()
+    })
 }
 
 async fn run_workout(cmd: WorkoutCmd) -> eyre::Result<()> {
@@ -16448,7 +16540,11 @@ async fn resolve_intake_target(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     rows.into_iter()
         .find(|l| l.path == target || l.date.to_string() == target)
-        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+        .ok_or_else(|| {
+            errors::not_found("resolve target", target)
+                .cause("no path or name match")
+                .report()
+        })
 }
 
 async fn run_intake(cmd: IntakeCmd) -> eyre::Result<()> {
@@ -16925,7 +17021,7 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
 /// wrapper handles the I/O + the CLI's flag plumbing.
 async fn run_vault_sync(cmd: VaultCmd) -> eyre::Result<()> {
     use vault_proto::{IfMatch, VaultSyncClient};
-    use vault_sync_client::{LocalEntry, Side, SyncOp, SyncSummary, index_local, plan_sync};
+    use vault_sync_client::{index_local, plan_sync, LocalEntry, Side, SyncOp, SyncSummary};
 
     enum Mode {
         Sync,

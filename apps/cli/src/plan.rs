@@ -213,7 +213,11 @@ pub(crate) fn parse_time_of_day(s: &str) -> Result<TimeOfDay, String> {
                 return Err(format!("`{s}`: am/pm hours run 1-12"));
             }
             let base = if h == 12 { 0 } else { h };
-            if pm { base + 12 } else { base }
+            if pm {
+                base + 12
+            } else {
+                base
+            }
         }
         None => h,
     };
@@ -282,14 +286,11 @@ pub(crate) fn find_overlap(
     end: TimeOfDay,
     ignore: Option<usize>,
 ) -> Option<usize> {
-    blocks
-        .iter()
-        .enumerate()
-        .position(|(i, b)| {
-            Some(i) != ignore
-                && start.minutes_since_midnight < b.end.minutes_since_midnight
-                && b.start.minutes_since_midnight < end.minutes_since_midnight
-        })
+    blocks.iter().enumerate().position(|(i, b)| {
+        Some(i) != ignore
+            && start.minutes_since_midnight < b.end.minutes_since_midnight
+            && b.start.minutes_since_midnight < end.minutes_since_midnight
+    })
 }
 
 /// Resolve a block ref: a 1-based index as printed by `plan show`,
@@ -326,7 +327,12 @@ pub(crate) fn resolve_block_ref(blocks: &[PlannedBlock], r: &str) -> Result<usiz
         many => Err(format!(
             "`{r}` is ambiguous — matches: {}",
             many.iter()
-                .map(|&i| format!("{} \"{}\" ({})", i + 1, blocks[i].label, fmt_tod(blocks[i].start)))
+                .map(|&i| format!(
+                    "{} \"{}\" ({})",
+                    i + 1,
+                    blocks[i].label,
+                    fmt_tod(blocks[i].start)
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
@@ -421,8 +427,12 @@ pub(crate) fn parse_date_arg(s: &str) -> eyre::Result<String> {
     let today = chrono::Local::now().date_naive();
     let d = match s.trim().to_lowercase().as_str() {
         "today" => today,
-        "tomorrow" => today.succ_opt().ok_or_else(|| eyre::eyre!("date overflow"))?,
-        "yesterday" => today.pred_opt().ok_or_else(|| eyre::eyre!("date underflow"))?,
+        "tomorrow" => today
+            .succ_opt()
+            .ok_or_else(|| eyre::eyre!("date overflow"))?,
+        "yesterday" => today
+            .pred_opt()
+            .ok_or_else(|| eyre::eyre!("date underflow"))?,
         other => chrono::NaiveDate::parse_from_str(other, "%Y-%m-%d").map_err(|_| {
             eyre::eyre!("can't parse date `{s}` — use today, tomorrow, yesterday, or YYYY-MM-DD")
         })?,
@@ -475,45 +485,15 @@ fn require_plan(plan: Option<DayPlan>, date: &str) -> eyre::Result<DayPlan> {
     })
 }
 
-/// Resolve a task by uuid, id prefix, vault path, or title prefix.
-/// Ambiguous refs list the candidates.
+/// Resolve a task by uuid, id prefix, vault path, or title —
+/// delegates to the shared flexible resolver so `plan` references
+/// behave exactly like `task` / `issue` ones (and inherit the
+/// not-found / ambiguous exit-code tagging).
 async fn resolve_task(
     client: &task::TaskServiceClient,
     target: &str,
 ) -> eyre::Result<task::TaskInfo> {
-    if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre::eyre!("get task {id}: {e:?}"));
-    }
-    let all = client
-        .list()
-        .await
-        .map_err(|e| eyre::eyre!("list tasks: {e:?}"))?;
-    let needle = target.to_lowercase();
-    let hits: Vec<task::TaskInfo> = all
-        .into_iter()
-        .filter(|t| {
-            t.id.to_string().starts_with(&needle)
-                || t.path.to_lowercase() == needle
-                || t.title.to_lowercase().starts_with(&needle)
-        })
-        .collect();
-    match hits.len() {
-        1 => Ok(hits.into_iter().next().expect("len 1")),
-        0 => Err(eyre::eyre!(
-            "no task matching `{target}` (by id prefix, path, or title prefix) — \
-             run `task task list` to browse"
-        )),
-        _ => Err(eyre::eyre!(
-            "`{target}` is ambiguous — matches:\n{}",
-            hits.iter()
-                .map(|t| format!("  {}  {}", t.id, t.title))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )),
-    }
+    crate::json_out::resolve_task_flexible(client, target).await
 }
 
 /// `--assign task:<id>|project:<id>` for `block add`. Validates the
@@ -784,7 +764,9 @@ async fn run_show(
         let today = chrono::Local::now().date_naive();
         let mut days = Vec::with_capacity(7);
         for off in 0..7 {
-            let d = (today + chrono::Days::new(off)).format("%Y-%m-%d").to_string();
+            let d = (today + chrono::Days::new(off))
+                .format("%Y-%m-%d")
+                .to_string();
             days.push(fetch_day_view(&plans, &events, &d).await?);
         }
         if json {
@@ -826,7 +808,12 @@ async fn finish_mutation(
     Ok(())
 }
 
-fn overlap_bail(blocks: &[PlannedBlock], conflict: usize, start: TimeOfDay, end: TimeOfDay) -> eyre::Report {
+fn overlap_bail(
+    blocks: &[PlannedBlock],
+    conflict: usize,
+    start: TimeOfDay,
+    end: TimeOfDay,
+) -> eyre::Report {
     let c = &blocks[conflict];
     eyre::eyre!(
         "{}–{} overlaps block {} ({}–{} \"{}\") — pick a free range, move that block first, \
@@ -887,7 +874,11 @@ async fn run_block(cmd: BlockCmd) -> eyre::Result<()> {
                 assignment,
             });
             sort_blocks(&mut plan.blocks);
-            let msg = format!("added \"{label}\" {}–{} on {date}", fmt_tod(start), fmt_tod(end));
+            let msg = format!(
+                "added \"{label}\" {}–{} on {date}",
+                fmt_tod(start),
+                fmt_tod(end)
+            );
             finish_mutation(&client, plan, &msg, json).await
         }
         BlockCmd::Move {
@@ -905,7 +896,8 @@ async fn run_block(cmd: BlockCmd) -> eyre::Result<()> {
             let mut plan = require_plan(load_plan(&client, &date).await?, &date)?;
             let idx = resolve_block_ref(&plan.blocks, &block).map_err(|e| eyre::eyre!(e))?;
             let old = plan.blocks[idx].clone();
-            let dur = i32::from(old.end.minutes_since_midnight) - i32::from(old.start.minutes_since_midnight);
+            let dur = i32::from(old.end.minutes_since_midnight)
+                - i32::from(old.start.minutes_since_midnight);
             let new_start: i32 = match (&to, &by) {
                 (Some(t), None) => i32::from(
                     parse_time_of_day(t)
@@ -1035,7 +1027,10 @@ async fn run_assign(
         title: t.title.clone(),
         ref_id: Some(t.id.to_string()),
     });
-    let msg = format!("assigned task \"{}\" ({}) to block \"{label}\" on {date}", t.title, t.id);
+    let msg = format!(
+        "assigned task \"{}\" ({}) to block \"{label}\" on {date}",
+        t.title, t.id
+    );
     finish_mutation(&client, plan, &msg, json).await
 }
 
@@ -1086,7 +1081,10 @@ async fn run_from_template(
             [] => eyre::bail!("no template named `{want}` — available: {}", names()),
             _ => eyre::bail!(
                 "`{want}` is ambiguous — matches: {}",
-                hits.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ")
+                hits.iter()
+                    .map(|t| t.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         }
     } else {
@@ -1209,7 +1207,10 @@ pub async fn run_next(args: NextArgs) -> eyre::Result<()> {
                 println!("  assignment: {}: {}", a.kind, a.title);
             }
             if let Some(n) = &view.next {
-                println!("Next: {}", render_block_line(0, n).trim_start_matches(" 1. "));
+                println!(
+                    "Next: {}",
+                    render_block_line(0, n).trim_start_matches(" 1. ")
+                );
             }
         }
         (None, Some(n)) => {
@@ -1235,7 +1236,10 @@ pub async fn run_next(args: NextArgs) -> eyre::Result<()> {
                 );
             }
             None if plan.is_some() => {
-                println!("Now {} — the day's blocks are done. Nothing left on the plan.", view.now);
+                println!(
+                    "Now {} — the day's blocks are done. Nothing left on the plan.",
+                    view.now
+                );
             }
             None => {
                 println!(
@@ -1335,9 +1339,7 @@ async fn run_diff(
     let mut kept: Vec<&timer_proto::WorkSession> = Vec::new();
     for s in &sessions {
         let st = s.start_time.with_timezone(&chrono::Local);
-        let en = s
-            .end_time
-            .map_or(now, |e| e.with_timezone(&chrono::Local));
+        let en = s.end_time.map_or(now, |e| e.with_timezone(&chrono::Local));
         if en <= day_start || st >= day_end {
             continue;
         }
@@ -1417,7 +1419,11 @@ async fn run_diff(
             println!(
                 "      {}  {}",
                 fmt_min(s.overlap_min),
-                if s.description.is_empty() { "(no description)" } else { &s.description }
+                if s.description.is_empty() {
+                    "(no description)"
+                } else {
+                    &s.description
+                }
             );
         }
     }
@@ -1427,7 +1433,11 @@ async fn run_diff(
             println!(
                 "      {}  {}",
                 fmt_min(s.overlap_min),
-                if s.description.is_empty() { "(no description)" } else { &s.description }
+                if s.description.is_empty() {
+                    "(no description)"
+                } else {
+                    &s.description
+                }
             );
         }
     }
@@ -1515,7 +1525,10 @@ mod tests {
         // Straddles the first block.
         assert_eq!(find_overlap(&blocks, tod(10, 0), tod(11, 0), None), Some(0));
         // Fully inside the second.
-        assert_eq!(find_overlap(&blocks, tod(12, 15), tod(12, 45), None), Some(1));
+        assert_eq!(
+            find_overlap(&blocks, tod(12, 15), tod(12, 45), None),
+            Some(1)
+        );
         // Engulfs the second.
         assert_eq!(find_overlap(&blocks, tod(11, 0), tod(14, 0), None), Some(1));
     }
@@ -1531,13 +1544,13 @@ mod tests {
 
     #[test]
     fn overlap_ignores_the_block_being_edited() {
-        let blocks = vec![
-            block("a", (9, 0), (10, 0)),
-            block("b", (10, 0), (11, 0)),
-        ];
+        let blocks = vec![block("a", (9, 0), (10, 0)), block("b", (10, 0), (11, 0))];
         // Growing block 0 into its own old range is fine, but hitting b isn't.
         assert_eq!(find_overlap(&blocks, tod(9, 0), tod(10, 0), Some(0)), None);
-        assert_eq!(find_overlap(&blocks, tod(9, 0), tod(10, 30), Some(0)), Some(1));
+        assert_eq!(
+            find_overlap(&blocks, tod(9, 0), tod(10, 30), Some(0)),
+            Some(1)
+        );
     }
 
     // ── block-ref resolution ────────────────────────────────────
@@ -1570,7 +1583,10 @@ mod tests {
         ];
         let err = resolve_block_ref(&blocks, "block").unwrap_err();
         assert!(err.contains("ambiguous"), "got: {err}");
-        assert!(err.contains("Block 1") && err.contains("Block 2"), "got: {err}");
+        assert!(
+            err.contains("Block 1") && err.contains("Block 2"),
+            "got: {err}"
+        );
     }
 
     // ── diff attribution ────────────────────────────────────────
@@ -1630,8 +1646,8 @@ mod tests {
 
     #[test]
     fn next_due_prefers_earliest_due_then_scheduled() {
-        let mk = |title: &str, status: &str, due: Option<&str>, sched: Option<&str>| {
-            task::TaskInfo {
+        let mk =
+            |title: &str, status: &str, due: Option<&str>, sched: Option<&str>| task::TaskInfo {
                 id: uuid::Uuid::nil(),
                 path: String::new(),
                 title: title.to_owned(),
@@ -1656,8 +1672,7 @@ mod tests {
                 date_modified: None,
                 details: String::new(),
                 workflow: None,
-            }
-        };
+            };
         let tasks = vec![
             mk("done early", "done", Some("2026-01-01"), None),
             mk("later", "open", Some("2026-06-20"), None),

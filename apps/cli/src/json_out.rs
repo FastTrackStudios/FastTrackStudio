@@ -1,5 +1,6 @@
-//! `--json` output + flexible-reference resolution helpers for the
-//! timer / finance / code / cycle CLI surfaces.
+//! `--json` output + flexible-reference resolution helpers shared by
+//! every CLI surface (timer / finance / cycle / task / issue /
+//! project / goal / milestone / threads / auth).
 //!
 //! Lives in its own module (rather than `main.rs`) so concurrent
 //! edits to the giant command-arm file don't collide on helper code.
@@ -9,10 +10,14 @@
 //!    hand-built objects for storage models that don't derive
 //!    `Serialize` (the architect-generated SeaORM `Model`s).
 //! 2. Reference resolution — turning a human-typed `--task` /
-//!    `--project` value (uuid, id prefix, vault path, or title)
-//!    into the entity, with pure matching functions kept separate
-//!    from the async client plumbing so they unit-test cheaply.
+//!    `--project` / `--goal` / … value (uuid, id prefix, vault path,
+//!    or name) into the entity, with pure matching functions kept
+//!    separate from the async client plumbing so they unit-test
+//!    cheaply. Failures are tagged with the [`crate::errors`]
+//!    taxonomy (not-found vs ambiguous) so `main()` can map them to
+//!    stable exit codes.
 
+use crate::errors;
 use eyre::eyre;
 
 // ---------------------------------------------------------------
@@ -147,63 +152,88 @@ pub fn match_uuid_prefix(ids: &[uuid::Uuid], needle: &str) -> PrefixMatch {
     }
 }
 
-/// Candidate row for project matching: `(id, title, path)`.
-pub type ProjectCandidate = (uuid::Uuid, String, String);
+/// Candidate row for entity matching: `(id, name, key)` where `key`
+/// is the secondary exact-match handle — a vault path for tasks /
+/// projects / goals / milestones, a slug for auth orgs.
+pub type Candidate = (uuid::Uuid, String, String);
 
-/// Match a non-UUID `--project` target against the org's projects.
+/// Why [`match_entity`] failed — split so callers can map onto the
+/// exit-code taxonomy (`NotFound` → 4, `Ambiguous` → 5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchFailure {
+    NotFound(String),
+    Ambiguous(String),
+}
+
+impl MatchFailure {
+    /// Tag onto the error taxonomy as a "resolve <noun>" failure.
+    pub fn into_report(self, noun: &str, target: &str) -> eyre::Report {
+        match self {
+            MatchFailure::NotFound(msg) => errors::not_found(format!("resolve {noun}"), target)
+                .cause(msg)
+                .report(),
+            MatchFailure::Ambiguous(msg) => errors::conflict(format!("resolve {noun}"), target)
+                .cause(msg)
+                .hint("disambiguate with the full name, path, or uuid")
+                .report(),
+        }
+    }
+}
+
+/// Match a non-UUID target against an org's entity rows.
 /// Resolution order (first level with a hit wins):
-/// 1. exact path,
-/// 2. exact title (case-insensitive),
-/// 3. unique title prefix (case-insensitive),
+/// 1. exact key (path / slug),
+/// 2. exact name (case-insensitive),
+/// 3. unique name prefix (case-insensitive),
 /// 4. unique id prefix.
 ///
-/// Returns the index of the matched row, or a human-readable
-/// failure ("no match" / "ambiguous, here are the candidates").
-pub fn match_project(rows: &[ProjectCandidate], target: &str) -> Result<usize, String> {
+/// Returns the index of the matched row, or a structured failure
+/// ("no match" / "ambiguous, here are the candidates").
+pub fn match_entity(rows: &[Candidate], target: &str, noun: &str) -> Result<usize, MatchFailure> {
     let t = target.trim();
     if t.is_empty() {
-        return Err("empty project reference".into());
+        return Err(MatchFailure::NotFound(format!("empty {noun} reference")));
     }
-    // 1. exact path
-    if let Some(i) = rows.iter().position(|(_, _, path)| path == t) {
+    // 1. exact key (path / slug)
+    if let Some(i) = rows.iter().position(|(_, _, key)| key == t) {
         return Ok(i);
     }
-    // 2. exact title, case-insensitive
+    // 2. exact name, case-insensitive
     let lower = t.to_lowercase();
-    let title_eq: Vec<usize> = rows
+    let name_eq: Vec<usize> = rows
         .iter()
         .enumerate()
-        .filter(|(_, (_, title, _))| title.to_lowercase() == lower)
+        .filter(|(_, (_, name, _))| name.to_lowercase() == lower)
         .map(|(i, _)| i)
         .collect();
-    match title_eq.len() {
-        1 => return Ok(title_eq[0]),
+    match name_eq.len() {
+        1 => return Ok(name_eq[0]),
         n if n > 1 => {
-            return Err(format!(
-                "`{target}` matches {n} project titles — use the path or uuid"
-            ));
+            return Err(MatchFailure::Ambiguous(format!(
+                "`{target}` matches {n} {noun} names — use the path or uuid"
+            )));
         }
         _ => {}
     }
-    // 3. unique title prefix, case-insensitive
-    let title_pre: Vec<usize> = rows
+    // 3. unique name prefix, case-insensitive
+    let name_pre: Vec<usize> = rows
         .iter()
         .enumerate()
-        .filter(|(_, (_, title, _))| title.to_lowercase().starts_with(&lower))
+        .filter(|(_, (_, name, _))| name.to_lowercase().starts_with(&lower))
         .map(|(i, _)| i)
         .collect();
-    match title_pre.len() {
-        1 => return Ok(title_pre[0]),
+    match name_pre.len() {
+        1 => return Ok(name_pre[0]),
         n if n > 1 => {
-            let names: Vec<&str> = title_pre
+            let names: Vec<&str> = name_pre
                 .iter()
                 .take(5)
                 .map(|&i| rows[i].1.as_str())
                 .collect();
-            return Err(format!(
-                "`{target}` is an ambiguous title prefix ({n} matches: {})",
+            return Err(MatchFailure::Ambiguous(format!(
+                "`{target}` is an ambiguous {noun} name prefix ({n} matches: {})",
                 names.join(", ")
-            ));
+            )));
         }
         _ => {}
     }
@@ -211,12 +241,12 @@ pub fn match_project(rows: &[ProjectCandidate], target: &str) -> Result<usize, S
     let ids: Vec<uuid::Uuid> = rows.iter().map(|(id, _, _)| *id).collect();
     match match_uuid_prefix(&ids, t) {
         PrefixMatch::Unique(i) => Ok(i),
-        PrefixMatch::Ambiguous(n) => Err(format!(
-            "`{target}` matches {n} project ids — use the full uuid"
-        )),
-        PrefixMatch::None => Err(format!(
-            "`{target}` matches no project path, title, or id prefix"
-        )),
+        PrefixMatch::Ambiguous(n) => Err(MatchFailure::Ambiguous(format!(
+            "`{target}` matches {n} {noun} ids — use the full uuid"
+        ))),
+        PrefixMatch::None => Err(MatchFailure::NotFound(format!(
+            "`{target}` matches no {noun} path, name, or id prefix"
+        ))),
     }
 }
 
@@ -224,18 +254,19 @@ pub fn match_project(rows: &[ProjectCandidate], target: &str) -> Result<usize, S
 // Async resolvers (thin client plumbing over the pure matchers)
 // ---------------------------------------------------------------
 
-/// Resolve a `--task` value — full UUID, id prefix, or
-/// vault-relative path — to its [`task::TaskInfo`]. Validates the
-/// task exists (errors otherwise).
+/// Resolve a `--task` / issue value — full UUID, id prefix,
+/// vault-relative path, or title (exact / unique prefix) — to its
+/// [`task::TaskInfo`]. Validates the task exists (errors otherwise).
 pub async fn resolve_task_flexible(
     client: &task::TaskServiceClient,
     target: &str,
 ) -> eyre::Result<task::TaskInfo> {
     if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre!("task `{target}`: {e:?}"));
+        return client.get(id).await.map_err(|e| {
+            errors::not_found("resolve task", target)
+                .cause(format!("{e:?}"))
+                .report()
+        });
     }
     // Path-shaped input — try the exact lookup first.
     let md_ext = std::path::Path::new(target)
@@ -250,17 +281,13 @@ pub async fn resolve_task_flexible(
         .list()
         .await
         .map_err(|e| eyre!("list tasks: {e:?}"))?;
-    let ids: Vec<uuid::Uuid> = rows.iter().map(|t| t.id).collect();
-    match match_uuid_prefix(&ids, target) {
-        PrefixMatch::Unique(i) => Ok(rows.into_iter().nth(i).expect("index from enumerate")),
-        PrefixMatch::Ambiguous(n) => Err(eyre!(
-            "task `{target}` matches {n} ids — disambiguate with the full UUID"
-        )),
-        // Last resort: maybe it's a path without a slash.
-        PrefixMatch::None => client
-            .get_by_path(target.to_owned())
-            .await
-            .map_err(|_| eyre!("task `{target}` matches no id, id prefix, or path")),
+    let cands: Vec<Candidate> = rows
+        .iter()
+        .map(|t| (t.id, t.title.clone(), t.path.clone()))
+        .collect();
+    match match_entity(&cands, target, "task") {
+        Ok(i) => Ok(rows.into_iter().nth(i).expect("index from enumerate")),
+        Err(fail) => Err(fail.into_report("task", target)),
     }
 }
 
@@ -271,10 +298,11 @@ pub async fn resolve_project_flexible(
     target: &str,
 ) -> eyre::Result<project::ProjectInfo> {
     if let Ok(id) = uuid::Uuid::parse_str(target) {
-        return client
-            .get(id)
-            .await
-            .map_err(|e| eyre!("project `{target}`: {e:?}"));
+        return client.get(id).await.map_err(|e| {
+            errors::not_found("resolve project", target)
+                .cause(format!("{e:?}"))
+                .report()
+        });
     }
     if let Ok(p) = client.get_by_path(target.to_owned()).await {
         return Ok(p);
@@ -283,13 +311,73 @@ pub async fn resolve_project_flexible(
         .list()
         .await
         .map_err(|e| eyre!("list projects: {e:?}"))?;
-    let cands: Vec<ProjectCandidate> = rows
+    let cands: Vec<Candidate> = rows
         .iter()
         .map(|p| (p.id, p.title.clone(), p.path.clone()))
         .collect();
-    match match_project(&cands, target) {
+    match match_entity(&cands, target, "project") {
         Ok(i) => Ok(rows.into_iter().nth(i).expect("index from enumerate")),
-        Err(msg) => Err(eyre!("project: {msg}")),
+        Err(fail) => Err(fail.into_report("project", target)),
+    }
+}
+
+/// Resolve a `--goal` value — uuid, vault path, title, or a unique
+/// prefix of either — to its [`goal::Goal`].
+pub async fn resolve_goal_flexible(
+    client: &goal::GoalServiceClient,
+    target: &str,
+) -> eyre::Result<goal::Goal> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client.get(id).await.map_err(|e| {
+            errors::not_found("resolve goal", target)
+                .cause(format!("{e:?}"))
+                .report()
+        });
+    }
+    if let Ok(g) = client.get_by_path(target.to_owned()).await {
+        return Ok(g);
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre!("list goals: {e:?}"))?;
+    let cands: Vec<Candidate> = rows
+        .iter()
+        .map(|g| (g.id, g.title.clone(), g.path.clone()))
+        .collect();
+    match match_entity(&cands, target, "goal") {
+        Ok(i) => Ok(rows.into_iter().nth(i).expect("index from enumerate")),
+        Err(fail) => Err(fail.into_report("goal", target)),
+    }
+}
+
+/// Resolve a `--milestone` value — uuid, vault path, title, or a
+/// unique prefix of either — to its [`milestone::Milestone`].
+pub async fn resolve_milestone_flexible(
+    client: &milestone::MilestoneServiceClient,
+    target: &str,
+) -> eyre::Result<milestone::Milestone> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client.get(id).await.map_err(|e| {
+            errors::not_found("resolve milestone", target)
+                .cause(format!("{e:?}"))
+                .report()
+        });
+    }
+    if let Ok(m) = client.get_by_path(target.to_owned()).await {
+        return Ok(m);
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre!("list milestones: {e:?}"))?;
+    let cands: Vec<Candidate> = rows
+        .iter()
+        .map(|m| (m.id, m.title.clone(), m.path.clone()))
+        .collect();
+    match match_entity(&cands, target, "milestone") {
+        Ok(i) => Ok(rows.into_iter().nth(i).expect("index from enumerate")),
+        Err(fail) => Err(fail.into_report("milestone", target)),
     }
 }
 
@@ -358,9 +446,9 @@ mod tests {
         assert_eq!(match_uuid_prefix(&ids, "ABCDEF"), PrefixMatch::Unique(0));
     }
 
-    // -- match_project ------------------------------------------
+    // -- match_entity -------------------------------------------
 
-    fn rows() -> Vec<ProjectCandidate> {
+    fn rows() -> Vec<Candidate> {
         vec![
             (
                 uid(0xa1),
@@ -378,29 +466,38 @@ mod tests {
 
     #[test]
     fn project_exact_path_wins() {
-        assert_eq!(match_project(&rows(), "Projects/Task/Task.md"), Ok(1));
+        assert_eq!(
+            match_entity(&rows(), "Projects/Task/Task.md", "project"),
+            Ok(1)
+        );
     }
 
     #[test]
     fn project_exact_title_case_insensitive() {
         // "Task" is also a title-prefix of "Task Website" — exact
         // title must win before the prefix level sees it.
-        assert_eq!(match_project(&rows(), "task"), Ok(1));
-        assert_eq!(match_project(&rows(), "the band mosaic"), Ok(0));
+        assert_eq!(match_entity(&rows(), "task", "project"), Ok(1));
+        assert_eq!(match_entity(&rows(), "the band mosaic", "project"), Ok(0));
     }
 
     #[test]
     fn project_unique_title_prefix() {
-        assert_eq!(match_project(&rows(), "The Band"), Ok(0));
-        assert_eq!(match_project(&rows(), "task w"), Ok(2));
+        assert_eq!(match_entity(&rows(), "The Band", "project"), Ok(0));
+        assert_eq!(match_entity(&rows(), "task w", "project"), Ok(2));
     }
 
     #[test]
     fn project_ambiguous_title_prefix_errors() {
         let mut r = rows();
-        r.push((uid(0xc4), "The Bandsaw".into(), "Projects/Bandsaw.md".into()));
-        let err = match_project(&r, "The Band").unwrap_err();
-        assert!(err.contains("ambiguous"), "got: {err}");
+        r.push((
+            uid(0xc4),
+            "The Bandsaw".into(),
+            "Projects/Bandsaw.md".into(),
+        ));
+        match match_entity(&r, "The Band", "project").unwrap_err() {
+            MatchFailure::Ambiguous(msg) => assert!(msg.contains("ambiguous"), "got: {msg}"),
+            other => panic!("expected Ambiguous, got {other:?}"),
+        }
     }
 
     #[test]
@@ -409,18 +506,50 @@ mod tests {
         // form — same convention as `resolve_issue_id` (short
         // prefixes never reach a hyphen; long ones must include them).
         assert_eq!(
-            match_project(&rows(), "00000000-0000-0000-0000-0000000000b3"),
+            match_entity(&rows(), "00000000-0000-0000-0000-0000000000b3", "project"),
             Ok(2)
         );
         // All three ids share the "00000000" head → ambiguous.
-        assert!(match_project(&rows(), "00000000").is_err());
+        assert!(match_entity(&rows(), "00000000", "project").is_err());
     }
 
     #[test]
     fn project_no_match_errors() {
-        let err = match_project(&rows(), "zzz").unwrap_err();
-        assert!(err.contains("no project"), "got: {err}");
-        assert!(match_project(&rows(), "").is_err());
+        match match_entity(&rows(), "zzz", "project").unwrap_err() {
+            MatchFailure::NotFound(msg) => assert!(msg.contains("no project"), "got: {msg}"),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+        assert!(match_entity(&rows(), "", "project").is_err());
+    }
+
+    #[test]
+    fn entity_noun_lands_in_messages() {
+        // Same matcher serves goals / milestones / orgs — the noun
+        // parameter is the only difference.
+        let r = vec![(
+            uid(0x11),
+            "Fasttrack Studios".into(),
+            "fasttrackstudios".into(),
+        )];
+        match match_entity(&r, "zzz", "organization").unwrap_err() {
+            MatchFailure::NotFound(msg) => {
+                assert!(msg.contains("no organization"), "got: {msg}");
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+        // Slug (the key slot) exact-matches at level 1.
+        assert_eq!(match_entity(&r, "fasttrackstudios", "organization"), Ok(0));
+        // Name prefix matches at level 3.
+        assert_eq!(match_entity(&r, "fasttrack stu", "organization"), Ok(0));
+    }
+
+    #[test]
+    fn match_failure_maps_to_taxonomy() {
+        use crate::errors;
+        let nf = MatchFailure::NotFound("nope".into()).into_report("task", "zzz");
+        assert_eq!(errors::exit_code(&nf), 4);
+        let amb = MatchFailure::Ambiguous("many".into()).into_report("task", "00");
+        assert_eq!(errors::exit_code(&amb), 5);
     }
 
     // -- session_json -------------------------------------------
