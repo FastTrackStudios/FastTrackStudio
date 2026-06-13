@@ -2294,6 +2294,16 @@ enum AuthCmd {
     },
     /// Print the active session (email, user id, org id).
     Whoami,
+    /// Switch the active session entry (server profile) without
+    /// re-authenticating. `task auth whoami` lists the stored
+    /// entries; reference one by key (`slug@host`), bare slug, or
+    /// any unique prefix. Subsequent commands talk to that
+    /// entry's server unless `--server` / `TASK_VOX_URL` says
+    /// otherwise.
+    Use {
+        /// Session reference — key, slug, or unique prefix.
+        session: String,
+    },
     /// Invalidate the active session server-side AND remove
     /// the local session file.
     Logout,
@@ -6629,6 +6639,22 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
                 println!("Not signed in. Run `task auth login --email … --password …`.");
             }
         },
+        AuthCmd::Use { session } => {
+            let Some(mut sess) = session_store::load()? else {
+                return Err(errors::usage("auth use")
+                    .cause("no stored session")
+                    .hint("run `task auth login` first")
+                    .report());
+            };
+            let key = match_session_entry(&sess, &session)?;
+            sess.active = key.clone();
+            session_store::save(&sess)?;
+            let entry = &sess.servers[&key];
+            println!(
+                "Active session: {key} — org `{}` on {} ({})",
+                entry.slug, entry.url, entry.email
+            );
+        }
         AuthCmd::Logout => {
             let Some(mut sess) = session_store::load()? else {
                 println!("Not signed in — nothing to do.");
@@ -6785,6 +6811,55 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
         }
     }
     Ok(())
+}
+
+/// Resolve a `task auth use` reference against the stored session
+/// entries: exact key, exact slug (unique), then unique prefix of
+/// either. Ambiguity and misses list what IS stored.
+fn match_session_entry(sess: &session_store::CliSession, reference: &str) -> eyre::Result<String> {
+    if sess.servers.contains_key(reference) {
+        return Ok(reference.to_owned());
+    }
+    let slug_hits: Vec<&String> = sess
+        .servers
+        .iter()
+        .filter(|(_, e)| e.slug == reference)
+        .map(|(k, _)| k)
+        .collect();
+    if let [one] = slug_hits.as_slice() {
+        return Ok((*one).clone());
+    }
+    let prefix_hits: Vec<&String> = if slug_hits.is_empty() {
+        sess.servers
+            .iter()
+            .filter(|(k, e)| k.starts_with(reference) || e.slug.starts_with(reference))
+            .map(|(k, _)| k)
+            .collect()
+    } else {
+        slug_hits
+    };
+    let stored = || {
+        sess.servers
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match prefix_hits.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => Err(errors::not_found("auth use", reference)
+            .cause(format!("stored sessions: {}", stored()))
+            .hint("`task auth whoami` lists the stored entries")
+            .report()),
+        many => Err(errors::conflict("auth use", reference)
+            .cause(format!(
+                "matches {} entries: {}",
+                many.len(),
+                many.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")
+            ))
+            .hint("disambiguate with the full key (`slug@host`)")
+            .report()),
+    }
 }
 
 /// Resolve a LOCAL on-disk org for the auth verbs that read the
