@@ -2257,22 +2257,25 @@ enum AdminCmd {
 
 #[derive(Subcommand)]
 enum AuthCmd {
-    /// Sign in against the local `auth.sqlite`. Persists a
-    /// session token (+ `user_id`, `active_organization_id`)
-    /// to `$XDG_DATA_HOME/task/session.json` so future
-    /// commands no longer need `TASK_USER_ID` / `TASK_ORG_ID`.
+    /// Sign in over the server's per-org `AuthService`
+    /// (`<server>/org/<slug>/vox`) — works against a remote
+    /// server with NO local org dir. Persists the session
+    /// (token + user + org + server URL) to
+    /// `$XDG_DATA_HOME/task/session.json`, so subsequent
+    /// commands need nothing else: the stored server URL is
+    /// used whenever `--server` / `TASK_VOX_URL` is absent.
     Login {
         #[arg(long)]
         email: String,
         #[arg(long)]
         password: String,
     },
-    /// Create a new email/password user in the active org's
-    /// `auth.sqlite` and persist the resulting session. The
-    /// first user signed up in a fresh org is its de-facto
-    /// owner — architect-auth has no separate ownership
-    /// concept yet. Use `--org <slug>` to target a specific
-    /// on-disk org without `task auth org use` first.
+    /// Create a new email/password user over the org's
+    /// `AuthService` and persist the resulting session — like
+    /// `login`, purely remote. The first user signed up in a
+    /// fresh org is its de-facto owner — architect-auth has no
+    /// separate ownership concept yet. Use `--org <slug>` /
+    /// `--server <url>` to target a specific org.
     Signup {
         #[arg(long)]
         email: String,
@@ -4674,15 +4677,132 @@ async fn run(cli: Cli) -> eyre::Result<()> {
     Ok(())
 }
 
-/// Resolve the per-org vox URL from CLI flags + env.
+/// Resolve the per-org vox URL from CLI flags + env + session.
 /// Mirror of the helper inside `run_vault_sync`, lifted out
 /// because project + goal share the same routing surface.
 fn resolve_org_vox_url(server: Option<String>, org_slug: &str) -> String {
-    let base = server.or_else(global_server).unwrap_or_else(|| {
-        std::env::var("TASK_VOX_URL").unwrap_or_else(|_| "ws://127.0.0.1:18080".to_owned())
-    });
-    let stripped = base.trim_end_matches("/vox").trim_end_matches('/');
-    format!("{stripped}/org/{org_slug}/vox")
+    let base = resolve_server_base(server.as_deref());
+    format!("{base}/org/{org_slug}/vox")
+}
+
+/// Which server should this invocation talk to? Precedence:
+///
+/// 1. explicit `--server` (clap; the flag beats its env binding)
+/// 2. `TASK_VOX_URL` env (folded into the global flag by clap)
+/// 3. the active session's stored server URL (`task auth login`
+///    against a remote records where it signed in, so subsequent
+///    commands need nothing but the session)
+/// 4. the localhost default
+///
+/// Returns a normalized vox base (`ws(s)://host[:port]`, no
+/// trailing `/vox`).
+fn resolve_server_base(explicit: Option<&str>) -> String {
+    let flag_or_env = explicit
+        .map(str::to_owned)
+        .or_else(global_server)
+        .or_else(|| std::env::var("TASK_VOX_URL").ok())
+        .filter(|u| !u.trim().is_empty());
+    // Only consult the session file when nothing explicit is set —
+    // keeps the hot path off the filesystem.
+    let session_url = if flag_or_env.is_some() {
+        None
+    } else {
+        session_store::load()
+            .ok()
+            .flatten()
+            .and_then(|s| s.active_server().map(|e| e.url.clone()))
+    };
+    pick_server_base(flag_or_env.as_deref(), session_url.as_deref())
+}
+
+/// Pure core of [`resolve_server_base`] — unit-testable precedence
+/// fold. `flag_or_env` is `--server`/`TASK_VOX_URL` (already
+/// flag-over-env, courtesy of clap), `session_url` the active
+/// session entry's stored server.
+fn pick_server_base(flag_or_env: Option<&str>, session_url: Option<&str>) -> String {
+    if let Some(u) = flag_or_env.filter(|u| !u.trim().is_empty()) {
+        return session_store::normalize_server_base(u);
+    }
+    if let Some(u) = session_url.filter(|u| !u.trim().is_empty()) {
+        return session_store::normalize_server_base(u);
+    }
+    session_store::DEFAULT_LOCAL_VOX.to_owned()
+}
+
+#[cfg(test)]
+mod server_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn flag_or_env_beats_session() {
+        assert_eq!(
+            pick_server_base(
+                Some("wss://task.starcommand.live/vox"),
+                Some("ws://127.0.0.1:18080")
+            ),
+            "wss://task.starcommand.live"
+        );
+        // …and the flip: env pointing local wins over a stored
+        // remote session — the URL switch IS the selector.
+        assert_eq!(
+            pick_server_base(
+                Some("ws://127.0.0.1:18080/vox"),
+                Some("wss://task.starcommand.live")
+            ),
+            "ws://127.0.0.1:18080"
+        );
+    }
+
+    #[test]
+    fn session_beats_default() {
+        assert_eq!(
+            pick_server_base(None, Some("wss://task.starcommand.live/vox")),
+            "wss://task.starcommand.live"
+        );
+        // Legacy "local" session entries resolve to the default.
+        assert_eq!(
+            pick_server_base(None, Some("local")),
+            session_store::DEFAULT_LOCAL_VOX
+        );
+    }
+
+    #[test]
+    fn default_when_nothing_set() {
+        assert_eq!(
+            pick_server_base(None, None),
+            session_store::DEFAULT_LOCAL_VOX
+        );
+        // Blank values don't shadow lower-precedence sources.
+        assert_eq!(
+            pick_server_base(Some(""), Some(" ")),
+            session_store::DEFAULT_LOCAL_VOX
+        );
+    }
+
+    #[test]
+    fn org_url_appends_per_org_path() {
+        // resolve_org_vox_url rides the same fold; with an
+        // explicit server the env/session never enter.
+        assert_eq!(
+            resolve_org_vox_url(
+                Some("wss://task.starcommand.live/vox".into()),
+                "codywright"
+            ),
+            "wss://task.starcommand.live/org/codywright/vox"
+        );
+    }
+
+    #[test]
+    fn ws_http_derivation() {
+        assert_eq!(
+            ws_base_to_http("wss://task.starcommand.live"),
+            "https://task.starcommand.live"
+        );
+        assert_eq!(
+            ws_base_to_http("ws://127.0.0.1:18080"),
+            "http://127.0.0.1:18080"
+        );
+    }
 }
 
 /// Embedded backend, built once per process: a full `AppState` plus the
@@ -4783,16 +4903,35 @@ where
 /// Resolve the active org slug from `--org` flag or the
 /// stored session. Returns a friendly error if neither
 /// resolves.
+///
+/// Server-aware: when `--server` / `TASK_VOX_URL` targets a
+/// specific server, the session entry FOR THAT SERVER supplies the
+/// slug — switching the URL between the local dev server and a
+/// remote deployment flips to the matching signed-in session
+/// automatically, even though `active` still points elsewhere.
 fn resolve_active_org(override_slug: Option<String>) -> eyre::Result<String> {
     if let Some(s) = override_slug.or_else(global_org) {
         return Ok(s);
     }
-    session_store::load()?.map(|s| s.active).ok_or_else(|| {
+    let no_session = || {
         errors::usage("resolve active org")
             .cause("no org selected and no stored session")
             .hint("pass --org <slug> or run `task auth login` first")
             .report()
-    })
+    };
+    let sess = session_store::load()?.ok_or_else(no_session)?;
+    if let Some(target) = global_server().or_else(|| std::env::var("TASK_VOX_URL").ok()) {
+        if !target.trim().is_empty() {
+            if let Some((_, entry)) = sess.entry_for_server(&target) {
+                return Ok(entry.slug.clone());
+            }
+        }
+    }
+    let slug = sess.active_slug();
+    if slug.is_empty() {
+        return Err(no_session());
+    }
+    Ok(slug)
 }
 
 async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
@@ -6282,12 +6421,95 @@ async fn open_local_auth(
         .map_err(|e| eyre::eyre!("build ArchitectAuth: {e}"))
 }
 
+/// One hosted org row from a server's discovery document.
+#[derive(Debug, serde::Deserialize)]
+struct HostedOrg {
+    slug: String,
+    #[serde(default)]
+    is_home: bool,
+}
+
+/// `ws(s)://` vox base → `http(s)://` origin+path for the same
+/// server (the well-known + health endpoints live on plain HTTP).
+fn ws_base_to_http(base: &str) -> String {
+    base.replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1)
+}
+
+/// Fetch the server's `/.well-known/task-server.json` org list —
+/// the remote replacement for scanning `<data_root>/orgs/`.
+async fn fetch_hosted_orgs(base: &str) -> eyre::Result<Vec<HostedOrg>> {
+    let url = format!(
+        "{}/.well-known/task-server.json",
+        ws_base_to_http(&session_store::normalize_server_base(base))
+    );
+    let doc: serde_json::Value = reqwest::get(&url)
+        .await
+        .map_err(|e| eyre::eyre!("fetch {url}: {e}"))?
+        .json()
+        .await
+        .map_err(|e| eyre::eyre!("parse {url}: {e}"))?;
+    let orgs = doc
+        .get("orgs")
+        .cloned()
+        .ok_or_else(|| eyre::eyre!("{url}: no `orgs` field"))?;
+    serde_json::from_value(orgs).map_err(|e| eyre::eyre!("{url}: bad `orgs` shape: {e}"))
+}
+
+/// Resolve which (org slug, server base) the remote auth verbs
+/// operate on. Purely remote — requires NO local org dir:
+///
+/// - server: [`resolve_server_base`] precedence (flag > env >
+///   session > localhost).
+/// - slug: `--org` > the session entry for that server > the
+///   server's well-known org list (its home org, or the single
+///   hosted org).
+///
+/// When discovery works, an unknown slug fails here with the
+/// hosted list — clearer than a raw vox connect error. When the
+/// well-known endpoint is unreachable the vox connect downstream
+/// reports the connection failure with its own taxonomy.
+async fn resolve_auth_target(org_override: Option<&str>) -> eyre::Result<(String, String)> {
+    let base = resolve_server_base(None);
+    let hosted = fetch_hosted_orgs(&base).await.ok();
+    let chosen = if let Some(s) = org_override.map(str::to_owned).or_else(global_org) {
+        Some(s)
+    } else if let Some((_, entry)) = session_store::load()?
+        .as_ref()
+        .and_then(|s| s.entry_for_server(&base))
+    {
+        Some(entry.slug.clone())
+    } else {
+        // No flag, no session: let the server disambiguate — its
+        // home org, or the only org it hosts.
+        hosted.as_ref().and_then(|orgs| {
+            orgs.iter()
+                .find(|o| o.is_home)
+                .or_else(|| (orgs.len() == 1).then(|| &orgs[0]))
+                .map(|o| o.slug.clone())
+        })
+    };
+    let Some(slug) = chosen else {
+        return Err(errors::usage("resolve org for auth")
+            .cause(format!("no `--org` given and nothing to infer it from ({base})"))
+            .hint("pass --org <slug> (see `task org list --server …` for what the server hosts)")
+            .report());
+    };
+    if let Some(orgs) = &hosted {
+        if !orgs.iter().any(|o| o.slug == slug) {
+            let names: Vec<&str> = orgs.iter().map(|o| o.slug.as_str()).collect();
+            return Err(errors::not_found("resolve org on server", &slug)
+                .cause(format!("{base} hosts: {}", names.join(", ")))
+                .hint("pass --org <slug> from that list, or `task org create` it first")
+                .report());
+        }
+    }
+    Ok((slug, base))
+}
+
 async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> {
-    use architect_auth::commands::CreateEmailPasswordUser;
-    use architect_auth::commands::{CurrentSession, SignOut};
-    use architect_auth::proto::SignInEmailPassword;
-    let ctx = org_ctx::resolve_active(org_override)?;
-    let auth_db_path = ctx.root.auth_db();
+    use architect_auth::commands::CurrentSession;
+    use architect_auth::proto::{AuthServiceClient, SignInEmailPassword, SignUpEmailPassword};
     match cmd {
         AuthCmd::Signup {
             email,
@@ -6295,9 +6517,14 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             username,
             name,
         } => {
-            let auth = open_local_auth(&auth_db_path).await?;
-            let bundle = auth
-                .create_email_password_user(CreateEmailPasswordUser {
+            // Remote-first: sign up over the org's AuthService —
+            // the same per-org vox endpoint every other service
+            // rides. No local org dir required.
+            let (slug, base) = resolve_auth_target(org_override).await?;
+            let url = resolve_org_vox_url(Some(base.clone()), &slug);
+            let client: AuthServiceClient = establish_for_url(&url).await?;
+            let bundle = client
+                .sign_up_email_password(SignUpEmailPassword {
                     email: email.clone(),
                     password,
                     name: name.clone(),
@@ -6308,35 +6535,23 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
                     user_agent: Some("task-cli".into()),
                 })
                 .await
-                .map_err(|e| eyre::eyre!("create user: {e}"))?;
+                .map_err(|e| eyre::eyre!("sign up: {e}"))?;
             let resolved_email = bundle.user.email.clone().unwrap_or_else(|| email.clone());
-            // Persist session under this org's slug — same
+            // Persist the session keyed by (server, org) — same
             // shape as `Login` so subsequent commands work
             // without a follow-up `task auth login`.
-            let mut sess = session_store::load()?.unwrap_or_else(|| session_store::CliSession {
-                home: ctx.root.slug().to_owned(),
-                active: ctx.root.slug().to_owned(),
-                servers: std::collections::BTreeMap::new(),
-            });
-            sess.active = ctx.root.slug().to_owned();
-            if sess.home.is_empty() {
-                sess.home = ctx.root.slug().to_owned();
-            }
-            sess.servers.insert(
-                ctx.root.slug().to_owned(),
-                session_store::ServerEntry {
-                    url: "local".into(),
-                    user_id: bundle.user.id,
-                    email: resolved_email.clone(),
-                    token: bundle.token.clone(),
-                },
+            let mut sess = session_store::load()?.unwrap_or_else(session_store::CliSession::empty);
+            let key = sess.record_login(
+                &slug,
+                &base,
+                bundle.user.id,
+                resolved_email.clone(),
+                bundle.token.clone(),
             );
             session_store::save(&sess)?;
             println!(
-                "Created user {} ({}) in org `{}`",
-                resolved_email,
-                bundle.user.id,
-                ctx.root.slug(),
+                "Created user {} ({}) in org `{slug}`",
+                resolved_email, bundle.user.id,
             );
             if let Some(u) = username {
                 println!("  username: {u}");
@@ -6344,11 +6559,17 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             if let Some(n) = name {
                 println!("  name:     {n}");
             }
-            println!("  auth db:  {}", auth_db_path.display());
+            println!("  server:   {base}");
+            println!("  session:  {key}");
         }
         AuthCmd::Login { email, password } => {
-            let auth = open_local_auth(&auth_db_path).await?;
-            let bundle = auth
+            // Remote-first sign-in over the org's AuthService.
+            // The org is resolved via the server's well-known
+            // document — no `task org init` needed on this box.
+            let (slug, base) = resolve_auth_target(org_override).await?;
+            let url = resolve_org_vox_url(Some(base.clone()), &slug);
+            let client: AuthServiceClient = establish_for_url(&url).await?;
+            let bundle = client
                 .sign_in_email_password(SignInEmailPassword {
                     email: email.clone(),
                     password,
@@ -6358,35 +6579,25 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
                 .await
                 .map_err(|e| eyre::eyre!("sign in: {e}"))?;
             let resolved_email = bundle.user.email.clone().unwrap_or_else(|| email.clone());
-            // Multi-server session shape: insert/update the
-            // entry under this org's slug and set it active.
-            // `home` defaults to the first server signed into
-            // (the personal-org-as-home pattern).
-            let mut sess = session_store::load()?.unwrap_or_else(|| session_store::CliSession {
-                home: ctx.root.slug().to_owned(),
-                active: ctx.root.slug().to_owned(),
-                servers: std::collections::BTreeMap::new(),
-            });
-            sess.active = ctx.root.slug().to_owned();
-            if sess.home.is_empty() {
-                sess.home = ctx.root.slug().to_owned();
-            }
-            sess.servers.insert(
-                ctx.root.slug().to_owned(),
-                session_store::ServerEntry {
-                    url: "local".into(),
-                    user_id: bundle.user.id,
-                    email: resolved_email.clone(),
-                    token: bundle.token.clone(),
-                },
+            // Multi-server session: insert/update the entry keyed
+            // by (server, org) and make it active. The stored
+            // server URL is what later invocations resolve when
+            // neither `--server` nor `TASK_VOX_URL` is set.
+            let mut sess = session_store::load()?.unwrap_or_else(session_store::CliSession::empty);
+            let key = sess.record_login(
+                &slug,
+                &base,
+                bundle.user.id,
+                resolved_email.clone(),
+                bundle.token.clone(),
             );
             session_store::save(&sess)?;
             println!(
-                "Signed in as {} ({}) on org `{}`",
-                resolved_email,
-                bundle.user.id,
-                ctx.root.slug(),
+                "Signed in as {} ({}) on org `{slug}`",
+                resolved_email, bundle.user.id,
             );
+            println!("  server:   {base}");
+            println!("  session:  {key}");
             if let Some(member_org) = bundle.session.active_organization_id {
                 println!("Architect-auth active membership: {member_org}");
             }
@@ -6402,13 +6613,16 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
                     }
                 );
                 println!("active: {}", s.active);
-                for (slug, entry) in &s.servers {
-                    let marker = if *slug == s.active { "*" } else { " " };
+                for (key, entry) in &s.servers {
+                    let marker = if *key == s.active { "*" } else { " " };
                     println!(
-                        "{marker} {slug:<20}  {}  {}  url={}",
-                        entry.email, entry.user_id, entry.url
+                        "{marker} {key:<28}  org={}  {}  {}  server={}",
+                        entry.slug, entry.email, entry.user_id, entry.url
                     );
                 }
+                // Where the NEXT command will go, after the full
+                // precedence fold (flag > env > session > default).
+                println!("server: {} (this invocation)", resolve_server_base(None));
                 println!("session: {}", session_store::session_path()?.display());
             }
             None => {
@@ -6416,36 +6630,75 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             }
         },
         AuthCmd::Logout => {
-            if let Some(mut sess) = session_store::load()? {
-                // Sign out only the active org's session
-                // server-side. Other servers stay linked.
-                if let Some(entry) = sess.servers.remove(&sess.active) {
-                    let auth = open_local_auth(&auth_db_path).await?;
-                    if let Err(e) = auth.sign_out(SignOut { token: entry.token }).await {
-                        eprintln!("warning: server-side sign out failed: {e}");
-                    }
+            let Some(mut sess) = session_store::load()? else {
+                println!("Not signed in — nothing to do.");
+                return Ok(());
+            };
+            // Which entry? `--org` picks by slug (preferring the
+            // entry on the currently-resolved server); default is
+            // the active entry. Other servers stay linked.
+            let key = match org_override.map(str::to_owned).or_else(global_org) {
+                Some(slug) => {
+                    let base = resolve_server_base(None);
+                    sess.servers
+                        .iter()
+                        .find(|(_, e)| e.slug == slug && session_store::same_server(&e.url, &base))
+                        .or_else(|| sess.servers.iter().find(|(_, e)| e.slug == slug))
+                        .map(|(k, _)| k.clone())
+                        .ok_or_else(|| {
+                            errors::not_found("logout", &slug)
+                                .cause("no stored session for that org")
+                                .hint("`task auth whoami` lists the signed-in sessions")
+                                .report()
+                        })?
                 }
-                // If no servers left, clear the file entirely;
-                // else write the shrunken session back.
-                if sess.servers.is_empty() {
-                    session_store::clear()?;
+                None => sess.active.clone(),
+            };
+            if let Some(entry) = sess.servers.remove(&key) {
+                // Server-side revoke, best effort — over the
+                // entry's OWN server (remote logout). Legacy
+                // `"local"` entries go straight at the org's
+                // on-disk auth.sqlite.
+                let revoked: eyre::Result<()> = if entry.url == session_store::LOCAL_URL {
+                    revoke_local_session(&entry).await
                 } else {
-                    // Active falls back to home if home is
-                    // still present, otherwise pick the first
-                    // remaining server.
-                    if !sess.servers.contains_key(&sess.active) {
-                        sess.active = if sess.servers.contains_key(&sess.home) {
-                            sess.home.clone()
-                        } else {
-                            sess.servers.keys().next().cloned().unwrap_or_default()
-                        };
+                    let url = resolve_org_vox_url(Some(entry.url.clone()), &entry.slug);
+                    match Box::pin(establish_for_url::<AuthServiceClient>(&url)).await {
+                        Ok(client) => client
+                            .sign_out(entry.token.clone())
+                            .await
+                            .map_err(|e| eyre::eyre!("{e}")),
+                        Err(e) => Err(e),
                     }
-                    session_store::save(&sess)?;
+                };
+                if let Err(e) = revoked {
+                    eprintln!("warning: server-side sign out failed: {e:#}");
                 }
+                println!("Signed out of `{}` ({}).", entry.slug, entry.url);
+            } else {
+                println!("No stored session under `{key}`.");
             }
-            println!("Signed out of `{}`.", ctx.root.slug());
+            // If no servers left, clear the file entirely; else
+            // write the shrunken session back.
+            if sess.servers.is_empty() {
+                session_store::clear()?;
+            } else {
+                // Active falls back to home if home is still
+                // present, otherwise pick the first remaining
+                // server.
+                if !sess.servers.contains_key(&sess.active) {
+                    sess.active = if sess.servers.contains_key(&sess.home) {
+                        sess.home.clone()
+                    } else {
+                        sess.servers.keys().next().cloned().unwrap_or_default()
+                    };
+                }
+                session_store::save(&sess)?;
+            }
         }
         AuthCmd::Org(AuthOrgCmd::List) => {
+            let ctx = local_org_ctx(org_override, "auth org list")?;
+            let auth_db_path = ctx.root.auth_db();
             let Some(sess) = session_store::load()? else {
                 return Err(eyre::eyre!("not signed in — run `task auth login` first"));
             };
@@ -6475,6 +6728,8 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             }
         }
         AuthCmd::Org(AuthOrgCmd::Use { org_id }) => {
+            let ctx = local_org_ctx(org_override, "auth org use")?;
+            let auth_db_path = ctx.root.auth_db();
             let Some(sess) = session_store::load()? else {
                 return Err(eyre::eyre!("not signed in — run `task auth login` first"));
             };
@@ -6502,6 +6757,8 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
         AuthCmd::Users => {
             use architect_auth::db::AuthUserEntity;
             use sea_orm::{Database, EntityTrait};
+            let ctx = local_org_ctx(org_override, "auth users")?;
+            let auth_db_path = ctx.root.auth_db();
             if !auth_db_path.exists() {
                 return Err(eyre::eyre!("no auth.sqlite at {}", auth_db_path.display()));
             }
@@ -6527,6 +6784,43 @@ async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> 
             }
         }
     }
+    Ok(())
+}
+
+/// Resolve a LOCAL on-disk org for the auth verbs that read the
+/// org's `auth.sqlite` directly (`auth users`, `auth org …`).
+/// Distinguishes "this command is local-only" from "you're not
+/// signed in": a remote session can never serve these — they need
+/// an org dir under the data root.
+fn local_org_ctx(org_override: Option<&str>, what: &str) -> eyre::Result<org_ctx::ActiveOrg> {
+    org_ctx::resolve_active(org_override).map_err(|e| {
+        errors::usage(format!(
+            "{what} is a local-only command (it reads the org's on-disk auth.sqlite)"
+        ))
+        .cause(format!("{e:#}"))
+        .hint(
+            "run `task org init <slug>` to create a local org dir; a remote session \
+             (`task auth login --server …`) cannot serve this command",
+        )
+        .report()
+    })
+}
+
+/// Best-effort server-side revocation for a legacy `"local"`
+/// session entry: open the org's `auth.sqlite` directly, like the
+/// old local-first `auth logout` did.
+async fn revoke_local_session(entry: &session_store::ServerEntry) -> eyre::Result<()> {
+    use architect_auth::commands::SignOut;
+    let root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("resolve data root: {e}"))?;
+    let (org, _) = root
+        .load_org(&entry.slug)
+        .map_err(|e| eyre::eyre!("no local org dir for `{}`: {e}", entry.slug))?;
+    let auth = open_local_auth(&org.auth_db()).await?;
+    auth.sign_out(SignOut {
+        token: entry.token.clone(),
+    })
+    .await
+    .map_err(|e| eyre::eyre!("{e}"))?;
     Ok(())
 }
 
@@ -19239,7 +19533,8 @@ async fn run_vault_sync(cmd: VaultCmd) -> eyre::Result<()> {
     let org_slug = match org_slug {
         Some(s) => s,
         None => session_store::load()?
-            .map(|s| s.active)
+            .map(|s| s.active_slug())
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| eyre::eyre!("no active org — pass --org or sign in first"))?,
     };
 
