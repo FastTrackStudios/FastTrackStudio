@@ -116,28 +116,28 @@ jobs:
         run: |
           docker build --network=host \
             -f deploy/docker/server.Dockerfile \
-            -t 10.10.10.1:30050/task-server:${{ steps.tags.outputs.channel }} \
-            -t 10.10.10.1:30050/task-server:${{ steps.tags.outputs.sha }} \
+            -t registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.channel }} \
+            -t registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.sha }} \
             .
-          docker push 10.10.10.1:30050/task-server:${{ steps.tags.outputs.channel }}
-          docker push 10.10.10.1:30050/task-server:${{ steps.tags.outputs.sha }}
+          docker push registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.channel }}
+          docker push registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.sha }}
 
       - name: Build + push task-web
         run: |
           docker build --network=host \
             -f deploy/docker/web.Dockerfile \
-            -t 10.10.10.1:30050/task-web:${{ steps.tags.outputs.channel }} \
-            -t 10.10.10.1:30050/task-web:${{ steps.tags.outputs.sha }} \
+            -t registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.channel }} \
+            -t registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.sha }} \
             deploy/docker
-          docker push 10.10.10.1:30050/task-web:${{ steps.tags.outputs.channel }}
-          docker push 10.10.10.1:30050/task-web:${{ steps.tags.outputs.sha }}
+          docker push registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.channel }}
+          docker push registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.sha }}
 
       - name: Build + push task-ui-lab
         run: |
           docker build --network=host \
             -f deploy/docker/ui-lab.Dockerfile \
-            -t 10.10.10.1:30050/task-ui-lab:${{ steps.tags.outputs.channel }} \
-            -t 10.10.10.1:30050/task-ui-lab:${{ steps.tags.outputs.sha }} \
+            -t registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.channel }} \
+            -t registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.sha }} \
             deploy/docker
-          docker push 10.10.10.1:30050/task-ui-lab:${{ steps.tags.outputs.channel }}
-          docker push 10.10.10.1:30050/task-ui-lab:${{ steps.tags.outputs.sha }}
+          docker push registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.channel }}
+          docker push registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.sha }}
