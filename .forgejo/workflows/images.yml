@@ -28,34 +28,47 @@ on:
 jobs:
   images:
     runs-on: nix-host
+    # This runs on a SELF-HOSTED runner that already holds working
+    # copies of Task + every sibling repo. Pointing the checkout +
+    # sibling steps at those local repos makes the build offline and
+    # immune to the forge's intermittent git-transfer resets. The remote
+    # clone stays as the fallback (and the path for any other runner).
+    env:
+      SIBLINGS_LOCAL_ROOT: /run/media/Development
+      TASK_LOCAL_REPO: /run/media/Development/Task
     steps:
-      # Manual retried checkout instead of actions/checkout@v4: the
-      # action's internal fetch isn't retried, and codeberg
-      # intermittently resets git packfile transfers ("fetch-pack:
-      # unexpected disconnect"). A shallow clone of the exact ref with
-      # a retry loop rides that out. (Shallow is safe — the only git
-      # read below is HEAD's short sha for the image tag.)
-      - name: Checkout (retried shallow)
+      # Checkout from the local repo when it has the triggering commit
+      # (offline, instant); otherwise a retried shallow clone from the
+      # forge — actions/checkout@v4 has no internal retry and codeberg
+      # intermittently resets packfile transfers.
+      - name: Checkout
         run: |
           url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           branch="${GITHUB_REF_NAME:-dev}"
-          # Clone the event's branch tip into the (empty) workspace.
-          attempt=1
-          until git clone --depth 1 --no-tags --branch "$branch" "$url" .; do
-            [ "$attempt" -ge 8 ] && { echo "clone failed after 8 attempts"; exit 1; }
-            echo "clone attempt $attempt failed — retrying in 15s"
-            find . -mindepth 1 -delete 2>/dev/null || true
-            attempt=$((attempt + 1)); sleep 15
-          done
-          # Pin to the exact triggering commit if the branch tip moved.
-          if [ -n "$GITHUB_SHA" ] && [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$TASK_LOCAL_REPO" ] && [ -d "$TASK_LOCAL_REPO/.git" ] \
+              && [ -n "$sha" ] \
+              && git -C "$TASK_LOCAL_REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "local checkout @ ${sha} (from $TASK_LOCAL_REPO)"
+            git clone --quiet "$TASK_LOCAL_REPO" .
+            git checkout --quiet --detach "$sha"
+          else
             attempt=1
-            until git fetch --depth 1 --no-tags origin "$GITHUB_SHA"; do
-              [ "$attempt" -ge 8 ] && { echo "fetch sha failed"; exit 1; }
-              echo "fetch attempt $attempt failed — retrying in 15s"
+            until git clone --depth 1 --no-tags --branch "$branch" "$url" .; do
+              [ "$attempt" -ge 8 ] && { echo "clone failed after 8 attempts"; exit 1; }
+              echo "clone attempt $attempt failed — retrying in 15s"
+              find . -mindepth 1 -delete 2>/dev/null || true
               attempt=$((attempt + 1)); sleep 15
             done
-            git checkout --detach "$GITHUB_SHA"
+            if [ -n "$sha" ] && [ "$(git rev-parse HEAD)" != "$sha" ]; then
+              attempt=1
+              until git fetch --depth 1 --no-tags origin "$sha"; do
+                [ "$attempt" -ge 8 ] && { echo "fetch sha failed"; exit 1; }
+                echo "fetch attempt $attempt failed — retrying in 15s"
+                attempt=$((attempt + 1)); sleep 15
+              done
+              git checkout --detach "$sha"
+            fi
           fi
           echo "checked out $(git rev-parse --short HEAD)"
 

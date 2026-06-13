@@ -86,6 +86,12 @@ archive_into() { # src-checkout target
 
 case "$mode" in
 clone)
+    # SIBLINGS_LOCAL_ROOT (optional): a directory holding local sibling
+    # checkouts (e.g. the self-hosted runner's working copies). When the
+    # pinned sha is present in the local repo, clone from THERE — offline,
+    # instant, and immune to the forge's network flakiness. Falls back to
+    # the remote clone otherwise. Off by default (portable).
+    local_root="${SIBLINGS_LOCAL_ROOT:-}"
     each_pin | while read -r rel url sha; do
         target="$dest/$rel"
         if [ -e "$target" ]; then
@@ -95,7 +101,18 @@ clone)
                 || echo "!! $rel exists at ${have:0:10}, pin is ${sha:0:10} — using existing checkout as-is"
             continue
         fi
-        clone_at "$url" "$sha" "$target"
+        local_src="$local_root/$rel"
+        if [ -n "$local_root" ] && [ -d "$local_src/.git" ] \
+            && git -C "$local_src" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo ">> local $rel @ ${sha:0:10} (from $local_src)"
+            mkdir -p "$(dirname "$target")"
+            rm -rf "$target"
+            git clone --quiet "$local_src" "$target" \
+                && git -C "$target" checkout --quiet --detach "$sha" \
+                || { echo "!! local clone of $rel failed"; exit 1; }
+        else
+            clone_at "$url" "$sha" "$target"
+        fi
     done
     ;;
 context)
