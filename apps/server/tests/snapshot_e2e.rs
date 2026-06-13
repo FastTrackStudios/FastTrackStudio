@@ -216,3 +216,4 @@ async fn snapshot_under_concurrent_writes_restore_and_branch() {
 
     state.scope.close().await;
 }
+

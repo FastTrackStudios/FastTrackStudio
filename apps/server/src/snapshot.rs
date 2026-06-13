@@ -356,25 +356,186 @@ impl SnapshotService for SnapshotImpl {
     }
 }
 
+// ── Async status ──────────────────────────────────────────────────
+
+/// Phase of the most recent async snapshot kick-off.
+#[derive(Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotPhase {
+    /// No async snapshot has been started this process lifetime.
+    #[default]
+    Idle,
+    /// A cycle kicked off via `?wait=0` is running.
+    Running,
+    /// The last async cycle finished (see `repos` for per-repo results).
+    Done,
+    /// The last async cycle failed before producing a report.
+    Failed,
+}
+
+/// Pollable status for the async snapshot trigger
+/// (`GET /server/snapshot/status`). The synchronous trigger and the
+/// vox `snapshot()` verb don't touch this — it tracks only the
+/// `POST /server/snapshot?wait=0` kick-off.
+#[derive(Clone, Default, serde::Serialize)]
+pub struct SnapshotStatus {
+    pub phase: SnapshotPhase,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub stamp: Option<String>,
+    pub repos: Vec<serde_json::Value>,
+    pub error: Option<String>,
+}
+
+fn report_repos_json(report: &SnapshotReport) -> Vec<serde_json::Value> {
+    report
+        .repos
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "repo": r.repo,
+                "committed": r.committed,
+                "clean": r.clean,
+                "pushed": r.pushed,
+                "error": r.error,
+            })
+        })
+        .collect()
+}
+
 // ── HTTP trigger (CronJob-facing) ─────────────────────────────────
 
 /// `POST /server/snapshot` — run one snapshot cycle. Auth:
 /// `Authorization: Bearer <TASK_BACKUP_GIT_TOKEN>`. 503 when no
 /// backup token is configured (the endpoint is then disabled), 401
 /// on a bad token, 409 when a cycle is already running.
+///
+/// **Synchronous by default** (the in-cluster CronJob has no edge
+/// timeout): runs the full cycle and returns the report. With
+/// **`?wait=0`** it kicks the cycle off on a background task and
+/// returns `202 Accepted` immediately — for triggers behind a proxy
+/// (Cloudflare) whose request timeout is shorter than a full
+/// snapshot. Poll [`http_snapshot_status_handler`] for completion.
 pub async fn http_snapshot_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+
+    if let Err(resp) = check_backup_auth(&headers) {
+        return resp;
+    }
+
+    // `?wait=0` ⇒ kick off + return 202. Anything else ⇒ synchronous.
+    let async_kick = query
+        .as_deref()
+        .map(|q| q.split('&').any(|kv| kv == "wait=0"))
+        .unwrap_or(false);
+
+    if async_kick {
+        return kick_off_async(state).into_response();
+    }
+
+    match run_cycle(&state).await {
+        Ok(report) => axum::Json(serde_json::json!({
+            "stamp": report.stamp,
+            "repos": report_repos_json(&report),
+        }))
+        .into_response(),
+        Err(SnapshotError::Busy(m)) => (axum::http::StatusCode::CONFLICT, m).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// `GET /server/snapshot/status` — the last async snapshot's status.
+/// Same bearer auth as the trigger.
+pub async fn http_snapshot_status_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> axum::response::Response {
     use axum::response::IntoResponse as _;
 
+    if let Err(resp) = check_backup_auth(&headers) {
+        return resp;
+    }
+    let status = state.snapshot_status.read().unwrap().clone();
+    axum::Json(status).into_response()
+}
+
+/// Spawn the cycle, return `202 Accepted` now. `409` if a cycle is
+/// already in flight (the spawned task's first act — `run_cycle` —
+/// `try_lock`s `snapshot_cycle`, but we also short-circuit here so
+/// the caller gets an immediate, honest 409 instead of a phantom
+/// "started").
+fn kick_off_async(state: AppState) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+
+    {
+        let mut st = state.snapshot_status.write().unwrap();
+        if st.phase == SnapshotPhase::Running {
+            return (
+                axum::http::StatusCode::CONFLICT,
+                "a snapshot cycle is already running",
+            )
+                .into_response();
+        }
+        *st = SnapshotStatus {
+            phase: SnapshotPhase::Running,
+            started_at: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+            ..Default::default()
+        };
+    }
+
+    let started_at = state
+        .snapshot_status
+        .read()
+        .unwrap()
+        .started_at
+        .clone();
+
+    tokio::spawn(async move {
+        let outcome = run_cycle(&state).await;
+        let finished_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let mut st = state.snapshot_status.write().unwrap();
+        st.finished_at = Some(finished_at);
+        match outcome {
+            Ok(report) => {
+                st.phase = SnapshotPhase::Done;
+                st.stamp = Some(report.stamp.clone());
+                st.repos = report_repos_json(&report);
+            }
+            Err(e) => {
+                st.phase = SnapshotPhase::Failed;
+                st.error = Some(e.to_string());
+            }
+        }
+    });
+
+    (
+        axum::http::StatusCode::ACCEPTED,
+        axum::Json(serde_json::json!({
+            "phase": "running",
+            "started_at": started_at,
+            "poll": "GET /server/snapshot/status",
+        })),
+    )
+        .into_response()
+}
+
+/// Shared bearer-token gate for the snapshot HTTP routes.
+fn check_backup_auth(
+    headers: &axum::http::HeaderMap,
+) -> Result<(), axum::response::Response> {
+    use axum::response::IntoResponse as _;
+
     let expected = std::env::var("TASK_BACKUP_GIT_TOKEN").unwrap_or_default();
     if expected.is_empty() {
-        return (
+        return Err((
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "snapshot endpoint disabled — TASK_BACKUP_GIT_TOKEN is not configured",
         )
-            .into_response();
+            .into_response());
     }
     let provided = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -382,35 +543,11 @@ pub async fn http_snapshot_handler(
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
     if provided != expected {
-        return (
+        return Err((
             axum::http::StatusCode::UNAUTHORIZED,
             "bad or missing bearer token",
         )
-            .into_response();
+            .into_response());
     }
-
-    match run_cycle(&state).await {
-        Ok(report) => {
-            let repos: Vec<serde_json::Value> = report
-                .repos
-                .iter()
-                .map(|r| {
-                    serde_json::json!({
-                        "repo": r.repo,
-                        "committed": r.committed,
-                        "clean": r.clean,
-                        "pushed": r.pushed,
-                        "error": r.error,
-                    })
-                })
-                .collect();
-            axum::Json(serde_json::json!({
-                "stamp": report.stamp,
-                "repos": repos,
-            }))
-            .into_response()
-        }
-        Err(SnapshotError::Busy(m)) => (axum::http::StatusCode::CONFLICT, m).into_response(),
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    Ok(())
 }

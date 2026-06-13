@@ -250,6 +250,10 @@ pub struct AppState {
     pub write_gate: snapshot::WriteGate,
     /// Serializes snapshot/restore cycles (`try_lock` → `Busy`).
     pub snapshot_cycle: Arc<tokio::sync::Mutex<()>>,
+    /// Last (or in-flight) async snapshot's status — polled via
+    /// `GET /server/snapshot/status` after a `POST /server/snapshot?wait=0`
+    /// kick-off. The synchronous trigger doesn't touch it.
+    pub snapshot_status: Arc<std::sync::RwLock<snapshot::SnapshotStatus>>,
 }
 
 impl AppState {
@@ -375,6 +379,7 @@ impl AppState {
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
+            snapshot_status: Arc::new(std::sync::RwLock::new(snapshot::SnapshotStatus::default())),
         };
         // Background forge-sync: pull codeberg/Forgejo issue changes
         // back into linked tasks on an interval (outbound push is
@@ -409,6 +414,7 @@ impl AppState {
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
+            snapshot_status: Arc::new(std::sync::RwLock::new(snapshot::SnapshotStatus::default())),
         })
     }
 
@@ -434,6 +440,7 @@ impl AppState {
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
+            snapshot_status: Arc::new(std::sync::RwLock::new(snapshot::SnapshotStatus::default())),
         })
     }
 }
@@ -1004,6 +1011,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/server/snapshot",
             axum::routing::post(snapshot::http_snapshot_handler),
+        )
+        .route(
+            "/server/snapshot/status",
+            get(snapshot::http_snapshot_status_handler),
         )
         .with_state(state.clone());
 
