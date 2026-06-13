@@ -125,3 +125,26 @@ ingress:
   #     - secretName: task-tls
   #       hosts: [task.example.com]
   tls: []
+
+# ── Git snapshots of the data root ──────────────────────────────────
+# Two views over the same files via detached git dirs (/data/.gitstate):
+# one repo per org (orgs/<slug> → <orgRepoPrefix><slug>) and one
+# full-state repo (everything → fullRepo). Remote repos are auto-
+# created PRIVATE under remoteBase on first push. Restore = git
+# checkout from the matching repo + server restart; branching data is
+# plain git. sqlite snapshots are live/best-effort — the markdown
+# vault (source of truth) is file-atomic.
+backup:
+  git:
+    enabled: false
+    # Cron schedule for snapshot+push cycles.
+    schedule: "*/15 * * * *"
+    # https://<forge-host>/<owner> — repos are created/pushed here.
+    remoteBase: ""
+    # Full-state repo name.
+    fullRepo: task-data
+    # Per-org repos: <prefix><org-slug>.
+    orgRepoPrefix: task-org-
+    # Secret with GIT_USER + GIT_TOKEN (token: repo create + push).
+    existingSecret: ""
+    image: alpine/git:2.49.1

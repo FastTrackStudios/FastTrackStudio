@@ -1,0 +1,122 @@
+{{- if .Values.backup.git.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "task.fullname" . }}-git-backup
+  labels: {{- include "task.labels" . | nindent 4 }}
+data:
+  snapshot.sh: |
+    #!/bin/sh
+    # Git snapshot of the Task data root — two simultaneous views over
+    # the SAME files, no nested .git dirs (detached git dirs under
+    # /data/.gitstate, which the full-state repo excludes):
+    #
+    #   * full-state repo: everything under /data (orgs, blobs,
+    #     server key) — THE backup/rollback/branch point for the whole
+    #     server.
+    #   * one repo per org: orgs/<slug> as its own history, so a
+    #     single org's data can be cloned/branched/restored alone.
+    #
+    # Remote repos are auto-created (private) via the Forgejo API on
+    # first push. Pushes are plain fast-forwards — never --force; a
+    # rollback is a revert/branch operation done by a human.
+    #
+    # Restore (full): git --git-dir=/data/.gitstate/full.git --work-tree=/data \
+    #   checkout <commit> -- . ; then restart the server.
+    #
+    # NOTE: sqlite files are snapshotted live (best-effort point-in-
+    # time). The vault markdown — the source of truth — is file-atomic.
+    # Server-native consistent snapshots are the planned upgrade.
+    set -eu
+    BASE="$GIT_REMOTE_BASE"            # e.g. https://codeberg.org/FastTrackStudios
+    HOST_AND_OWNER="${BASE#https://}"  # codeberg.org/Owner
+    HOST="${HOST_AND_OWNER%%/*}"
+    OWNER="${HOST_AND_OWNER#*/}"
+    API="https://$HOST/api/v1"
+    AUTH_BASE="https://$GIT_USER:$GIT_TOKEN@$HOST/$OWNER"
+    STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    ensure_remote() { # $1 = repo name
+      wget -q -O /dev/null --header="Authorization: token $GIT_TOKEN" \
+        "$API/repos/$OWNER/$1" 2>/dev/null && return 0
+      body="{\"name\":\"$1\",\"private\":true,\"description\":\"Task data snapshots (automated)\"}"
+      wget -q -O /dev/null --header="Authorization: token $GIT_TOKEN" \
+        --header='Content-Type: application/json' --post-data="$body" \
+        "$API/orgs/$OWNER/repos" 2>/dev/null \
+      || wget -q -O /dev/null --header="Authorization: token $GIT_TOKEN" \
+        --header='Content-Type: application/json' --post-data="$body" \
+        "$API/user/repos" 2>/dev/null || true
+    }
+
+    snap() { # $1 = git-dir, $2 = work-tree, $3 = repo name, $4 = exclude file content (optional)
+      g="git --git-dir=$1 --work-tree=$2"
+      if [ ! -d "$1" ]; then
+        git init -q --bare "$1"
+        $g config core.bare false
+        $g config user.name  "task-backup"
+        $g config user.email "task-backup@noreply"
+        $g symbolic-ref HEAD refs/heads/main
+      fi
+      [ -n "${4:-}" ] && { for pat in $4; do echo "$pat"; done > "$1/info/exclude"; }
+      $g add -A
+      if $g diff --cached --quiet 2>/dev/null && $g rev-parse -q --verify HEAD >/dev/null 2>&1; then
+        echo "[$3] clean — skip"
+      else
+        $g commit -q -m "snapshot $STAMP"
+        echo "[$3] committed $($g rev-parse --short HEAD)"
+      fi
+      ensure_remote "$3"
+      $g push -q "$AUTH_BASE/$3.git" main:main && echo "[$3] pushed" || echo "[$3] PUSH FAILED"
+    }
+
+    mkdir -p /data/.gitstate/orgs
+    for d in /data/orgs/*/; do
+      slug="$(basename "$d")"
+      snap "/data/.gitstate/orgs/$slug.git" "$d" "$ORG_REPO_PREFIX$slug" ""
+    done
+    snap /data/.gitstate/full.git /data "$FULL_REPO" ".gitstate/ lost+found/"
+    echo "snapshot cycle complete: $STAMP"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "task.fullname" . }}-git-backup
+  labels: {{- include "task.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.git.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: git-backup
+              image: {{ .Values.backup.git.image }}
+              command: ["/bin/sh", "/scripts/snapshot.sh"]
+              env:
+                - name: GIT_REMOTE_BASE
+                  value: {{ .Values.backup.git.remoteBase | quote }}
+                - name: FULL_REPO
+                  value: {{ .Values.backup.git.fullRepo | quote }}
+                - name: ORG_REPO_PREFIX
+                  value: {{ .Values.backup.git.orgRepoPrefix | quote }}
+              envFrom:
+                - secretRef:
+                    name: {{ required "backup.git.existingSecret is required (GIT_USER + GIT_TOKEN)" .Values.backup.git.existingSecret }}
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: scripts
+                  mountPath: /scripts
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: {{ include "task.fullname" . }}-data
+            - name: scripts
+              configMap:
+                name: {{ include "task.fullname" . }}-git-backup
+{{- end }}
