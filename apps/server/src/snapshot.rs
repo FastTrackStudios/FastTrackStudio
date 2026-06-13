@@ -307,7 +307,9 @@ impl SnapshotService for SnapshotImpl {
         let mut pre_restore: Vec<RepoResult> = Vec::new();
         if force {
             if engine.full_tree_dirty().await.unwrap_or(true) {
-                tracing::warn!("forced restore over a dirty work tree — pre-restore state is NOT committed");
+                tracing::warn!(
+                    "forced restore over a dirty work tree — pre-restore state is NOT committed"
+                );
             }
         } else {
             // Default path: rescue snapshot first. The tree is clean
@@ -409,10 +411,6 @@ pub async fn http_snapshot_handler(
             .into_response()
         }
         Err(SnapshotError::Busy(m)) => (axum::http::StatusCode::CONFLICT, m).into_response(),
-        Err(e) => (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            e.to_string(),
-        )
-            .into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

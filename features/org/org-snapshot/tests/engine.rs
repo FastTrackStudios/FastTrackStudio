@@ -208,8 +208,14 @@ async fn branch_log_and_restore_round_trip() {
     assert_eq!(resolved, sha_a);
     let note = std::fs::read_to_string(org.join("vault/note.md")).unwrap();
     assert_eq!(note, "state A\n");
-    assert!(!org.join("auth.sqlite-wal").exists(), "wal sidecar must be cleaned");
-    assert!(!org.join("auth.sqlite-shm").exists(), "shm sidecar must be cleaned");
+    assert!(
+        !org.join("auth.sqlite-wal").exists(),
+        "wal sidecar must be cleaned"
+    );
+    assert!(
+        !org.join("auth.sqlite-shm").exists(),
+        "shm sidecar must be cleaned"
+    );
 
     // Unknown commit refuses cleanly.
     let err = engine.restore_checkout("deadbeef").await.unwrap_err();

@@ -150,8 +150,11 @@ pub trait SnapshotService {
 
     /// Create branch `name` at the full repo's HEAD (and push it
     /// when a remote is configured) — the "branch the data" verb.
-    async fn branch(&self, session_token: String, name: String)
-    -> Result<BranchResult, SnapshotError>;
+    async fn branch(
+        &self,
+        session_token: String,
+        name: String,
+    ) -> Result<BranchResult, SnapshotError>;
 
     /// Restore the data root to `commit` via the full repo
     /// (`git checkout <commit> -- .`), then **exit the server

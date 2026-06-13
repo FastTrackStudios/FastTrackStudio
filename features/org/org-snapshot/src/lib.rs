@@ -251,10 +251,7 @@ impl SnapshotEngine {
             .args(args)
             .output()
             .await
-            .map_err(|source| EngineError::Spawn {
-                bin: "git",
-                source,
-            })?;
+            .map_err(|source| EngineError::Spawn { bin: "git", source })?;
         if out.status.success() {
             Ok(String::from_utf8_lossy(&out.stdout).into_owned())
         } else {
@@ -290,10 +287,7 @@ impl SnapshotEngine {
                 .arg(&spec.git_dir)
                 .output()
                 .await
-                .map_err(|source| EngineError::Spawn {
-                    bin: "git",
-                    source,
-                })?;
+                .map_err(|source| EngineError::Spawn { bin: "git", source })?;
             if !out.status.success() {
                 return Err(EngineError::Git {
                     verb: "init".into(),
@@ -513,10 +507,7 @@ impl SnapshotEngine {
                     .arg(&bare)
                     .output()
                     .await
-                    .map_err(|source| EngineError::Spawn {
-                        bin: "git",
-                        source,
-                    })?;
+                    .map_err(|source| EngineError::Spawn { bin: "git", source })?;
                 if !out.status.success() {
                     return Err(EngineError::Git {
                         verb: "init remote".into(),
@@ -581,7 +572,10 @@ impl SnapshotEngine {
                 return;
             }
         }
-        tracing::warn!(repo = name, "could not auto-create remote repo — push may fail");
+        tracing::warn!(
+            repo = name,
+            "could not auto-create remote repo — push may fail"
+        );
     }
 
     // ── full-repo verbs ───────────────────────────────────────────
@@ -597,10 +591,7 @@ impl SnapshotEngine {
         }
         let n = if limit == 0 { 20 } else { limit }.to_string();
         let raw = self
-            .git(
-                &spec,
-                &["log", "-n", &n, "--pretty=format:%H%x1f%cI%x1f%s"],
-            )
+            .git(&spec, &["log", "-n", &n, "--pretty=format:%H%x1f%cI%x1f%s"])
             .await?;
         Ok(raw
             .lines()
