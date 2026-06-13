@@ -36,26 +36,46 @@ dest="$(cd "$dest" && pwd)"
 
 each_pin() { grep -Ev '^[[:space:]]*(#|$)' "$lock"; }
 
+# Retry a git command up to $RETRIES times with $BACKOFF backoff —
+# codeberg intermittently resets packfile transfers, so every fetch
+# here is wrapped. Generous budget: the degradation comes in waves.
+RETRIES="${SIBLINGS_RETRIES:-8}"
+BACKOFF="${SIBLINGS_BACKOFF:-15}"
+retry_git() {
+    local attempt=1
+    until "$@"; do
+        if [ "$attempt" -ge "$RETRIES" ]; then
+            echo "!! \`$*\` failed after $RETRIES attempts" >&2
+            return 1
+        fi
+        echo ">> attempt $attempt failed — retrying in ${BACKOFF}s: $*" >&2
+        attempt=$((attempt + 1)); sleep "$BACKOFF"
+    done
+}
+
 clone_at() { # url sha target
     local url="$1" sha="$2" target="$3"
     echo ">> clone $url @ ${sha:0:10} -> $target"
     mkdir -p "$(dirname "$target")"
-    # FULL clone, retried. A `--filter=blob:none` partial clone defers
-    # blob fetches to a promisor round-trip on checkout, and THAT fetch
-    # is what flaked under CI ("fetch-pack: unexpected disconnect …
-    # could not fetch <sha> from promisor remote"). A plain clone pulls
-    # everything in one shot; the retry rides out codeberg's
-    # intermittent disconnects.
-    local attempt=1
-    until git clone "$url" "$target"; do
-        if [ "$attempt" -ge 3 ]; then
-            echo "!! clone $url failed after 3 attempts"; exit 1
-        fi
-        echo ">> clone $url failed (attempt $attempt) — retrying in 5s"
-        rm -rf "$target"; attempt=$((attempt + 1)); sleep 5
-    done
-    git -C "$target" checkout --detach "$sha" \
-        || { echo "!! $sha not reachable on $url — push the sibling branch (see siblings.lock header)"; exit 1; }
+    # SHALLOW clone — minimal transfer, which is the whole point under
+    # codeberg's flapping git serving: less data per attempt = a
+    # smaller window for the connection reset. (NOT --filter=blob:none:
+    # that partial clone defers a promisor blob fetch to checkout time,
+    # which flaked separately.) The pin is usually the default-branch
+    # tip the shallow clone lands on; if not, fetch just that one commit
+    # shallowly. Every network op is retried.
+    rm -rf "$target"
+    retry_git git clone --depth 1 --no-tags "$url" "$target" || {
+        rm -rf "$target"; exit 1
+    }
+    if [ "$(git -C "$target" rev-parse HEAD)" != "$sha" ]; then
+        retry_git git -C "$target" fetch --depth 1 --no-tags origin "$sha" || {
+            echo "!! $sha not reachable on $url — push the sibling branch (see siblings.lock header)" >&2
+            exit 1
+        }
+        git -C "$target" checkout --detach "$sha" \
+            || { echo "!! checkout $sha failed on $url"; exit 1; }
+    fi
 }
 
 archive_into() { # src-checkout target
