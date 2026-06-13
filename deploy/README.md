@@ -195,9 +195,34 @@ A snapshot cycle (the `org-snapshot` engine inside task-server):
 The chart's CronJob is now just a scheduler: it POSTs
 `/server/snapshot` on the server service with
 `Authorization: Bearer <GIT_TOKEN>` (the same `existingSecret` the
-server gets as `TASK_BACKUP_GIT_TOKEN`). If the running image predates
+server gets as `TASK_BACKUP_GIT_TOKEN`). In-cluster it talks straight
+to the Service, so the synchronous cycle (which can outrun a public
+proxy's request timeout) completes fine. If the running image predates
 the endpoint the job fails with a clear upgrade hint instead of
 silently doing nothing.
+
+**Triggering from outside the cluster** (e.g. a manual snapshot via the
+public ingress): a full cycle — quiesce, checkpoint, commit, push every
+repo — can take longer than a CDN/proxy request timeout (Cloudflare cuts
+at ~100s), so the synchronous `POST /server/snapshot` returns a gateway
+error even though the snapshot succeeds. Use the **async kick-off**
+instead:
+
+```sh
+# fire it off — returns 202 immediately
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  "https://tasks.example.com/server/snapshot?wait=0"
+
+# poll until phase is "done" (or "failed")
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://tasks.example.com/server/snapshot/status"
+# → { "phase": "done", "stamp": "...", "repos": [ {repo,committed,pushed,...} ] }
+```
+
+`?wait=0` runs the cycle on a background task; `409` if one is already
+running. The status endpoint reports the last async cycle's per-repo
+results. (`task admin snapshot` over `/server/vox` doesn't need this —
+the websocket connection isn't subject to the proxy's request timeout.)
 
 On-demand admin verbs (over `<server>/server/vox`, same connection
 style as `task org create`):
