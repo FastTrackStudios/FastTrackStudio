@@ -4445,6 +4445,12 @@ fn global_server() -> Option<String> {
 
 #[tokio::main]
 async fn main() {
+    // wss:// (vox-websocket TLS) needs a process-level rustls
+    // CryptoProvider; this binary unifies both `ring` and
+    // `aws-lc-rs` in its graph, so rustls cannot infer one.
+    // Install ring once, before anything can open a TLS socket.
+    // Err just means a provider is already installed — fine.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     // Best-effort .env load before clap reads env. Missing file is
     // not an error — we just fall through to the hard-coded default.
     let _ = dotenvy::dotenv();

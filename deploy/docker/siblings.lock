@@ -23,8 +23,8 @@
 #
 # All pins below are published and clone-able (2026-06-12).
 Editor                          https://codeberg.org/FastTrackStudios/Editor.git           413b08fb42c1a97b27bdd6488542a660718f3cce
-architect                       https://codeberg.org/FastTrackStudios/architect.git        012ad9b2535c7821d28d0bae8064c563af156be3
+architect                       https://codeberg.org/FastTrackStudios/architect.git        e9006d6eee6c0bcd6ff5244b0a925b2eed230f92
 FastTrackStudio/fts-ui          https://codeberg.org/FastTrackStudios/fts-ui.git             1c62b19e95577f95d810f0285fec9753d837e16b
 FastTrackStudio/keyflow         https://codeberg.org/FastTrackStudios/keyflow.git           b45a62025d4369381d43ceaac074916966bd3cc2
-FastTrackStudio/input_actions   https://codeberg.org/FastTrackStudios/input_actions.git      4e7f9ebf971ca4cd285466ca15ad95a54d4ef916
-FastTrackStudio/daw             https://codeberg.org/FastTrackStudios/daw.git                263b546e26052306c1af37ad2265fbcd04c6cbfa
+FastTrackStudio/input_actions   https://codeberg.org/FastTrackStudios/input_actions.git      8018e6d514ae1b4e5cac673273290dac92a73a10
+FastTrackStudio/daw             https://codeberg.org/FastTrackStudios/daw.git                f2902b98527755609797437d2a3f93ea95341f3b

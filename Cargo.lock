@@ -5714,7 +5714,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "0.3.4"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-core",
@@ -15542,6 +15542,7 @@ dependencies = [
  "project",
  "recipe-import",
  "reqwest 0.12.28",
+ "rustls",
  "scheduling-proto",
  "sea-orm",
  "sea-orm-migration",
@@ -17463,7 +17464,7 @@ checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 [[package]]
 name = "vox"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-pretty",
@@ -17485,7 +17486,7 @@ dependencies = [
 [[package]]
 name = "vox-codegen"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet-cbor",
  "facet-core",
@@ -17496,7 +17497,7 @@ dependencies = [
 [[package]]
 name = "vox-core"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-cbor",
@@ -17519,7 +17520,7 @@ dependencies = [
 [[package]]
 name = "vox-jit"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -17541,7 +17542,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-abi"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "arc-swap",
  "facet-core",
@@ -17552,7 +17553,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-cal"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-core",
@@ -17561,7 +17562,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-core"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -17573,7 +17574,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-parse"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -17582,7 +17583,7 @@ dependencies = [
 [[package]]
 name = "vox-postcard"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-core",
@@ -17596,7 +17597,7 @@ dependencies = [
 [[package]]
 name = "vox-schema"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "blake3",
  "facet",
@@ -17608,7 +17609,7 @@ dependencies = [
 [[package]]
 name = "vox-service-macros"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "proc-macro2",
  "vox-macros-core",
@@ -17617,7 +17618,7 @@ dependencies = [
 [[package]]
 name = "vox-types"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -17643,7 +17644,7 @@ dependencies = [
 [[package]]
 name = "vox-websocket"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "futures-channel",
  "futures-util",
