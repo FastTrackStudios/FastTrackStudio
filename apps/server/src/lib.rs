@@ -23,6 +23,7 @@ pub mod connections;
 pub mod forge_sync;
 pub mod presence;
 pub mod server_mgmt;
+pub mod snapshot;
 pub mod webhooks;
 
 use std::path::PathBuf;
@@ -46,6 +47,10 @@ use crate::capability::ServerKeypair;
 #[derive(Clone)]
 pub struct AuthState {
     pub auth: ArchitectAuth<AuthSeaOrmStorage>,
+    /// The underlying pool, kept alongside the storage wrapper so
+    /// the snapshot engine can `PRAGMA wal_checkpoint(TRUNCATE)` the
+    /// auth db with the rest of the org's sqlites.
+    pub db: sea_orm::DatabaseConnection,
 }
 
 impl AuthState {
@@ -53,16 +58,17 @@ impl AuthState {
         let db = Database::connect(db_url)
             .await
             .map_err(|e| eyre::eyre!("connect auth db `{db_url}`: {e}"))?;
+        enable_wal(&db, "auth").await;
         AuthMigrator::up(&db, None)
             .await
             .map_err(|e| eyre::eyre!("auth migrations: {e}"))?;
-        let storage = AuthSeaOrmStorage::new(db);
+        let storage = AuthSeaOrmStorage::new(db.clone());
         let auth = ArchitectAuth::builder()
             .secret(secret)
             .storage(storage)
             .build()
             .map_err(|e| eyre::eyre!("build ArchitectAuth: {e}"))?;
-        Ok(Self { auth })
+        Ok(Self { auth, db })
     }
 }
 
@@ -202,6 +208,11 @@ pub struct OrgAppState {
     /// root as [`Self::vault_sync`] — backlinks / links / orphans /
     /// unresolved / deadends / tags for the web vault page.
     pub vault_graph: vault::GraphBackend,
+    /// Every open sqlite pool of this org (auth, agent-tasks, timer,
+    /// threads, finance). The snapshot engine walks these to
+    /// `PRAGMA wal_checkpoint(TRUNCATE)` under the write gate, so
+    /// the committed `.sqlite` files are complete + consistent.
+    pub sqlite_conns: Vec<sea_orm::DatabaseConnection>,
 }
 
 /// Top-level server state. Scans `<data_root>/orgs/` at
@@ -231,6 +242,14 @@ pub struct AppState {
     /// at shutdown tears them down in LIFO order. Shared across all
     /// hosted orgs.
     pub scope: std::sync::Arc<architect::Scope>,
+    /// Global write gate for snapshot cycles. Every vox request
+    /// (per-org and `/server/vox`) parks at this gate on dispatch
+    /// entry ([`snapshot::GatedRouter`]); a snapshot holds it
+    /// closed across checkpoint + commit so the on-disk state it
+    /// records is quiesced.
+    pub write_gate: snapshot::WriteGate,
+    /// Serializes snapshot/restore cycles (`try_lock` → `Busy`).
+    pub snapshot_cycle: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -354,6 +373,8 @@ impl AppState {
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
             scope,
+            write_gate: snapshot::WriteGate::new(),
+            snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
         };
         // Background forge-sync: pull codeberg/Forgejo issue changes
         // back into linked tasks on an interval (outbound push is
@@ -386,6 +407,8 @@ impl AppState {
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
             scope,
+            write_gate: snapshot::WriteGate::new(),
+            snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -409,7 +432,26 @@ impl AppState {
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
             scope,
+            write_gate: snapshot::WriteGate::new(),
+            snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
         })
+    }
+}
+
+/// Put a sqlite pool into WAL journal mode. WAL is what makes the
+/// server-native snapshot story work: writers append to the `-wal`
+/// sidecar (excluded from snapshots) while the main `.sqlite` file
+/// stays stable + consistent on disk, so `PRAGMA wal_checkpoint
+/// (TRUNCATE)` followed by `git add` captures a complete database.
+/// The mode is persistent (recorded in the db file), so script-era
+/// DELETE-mode databases are upgraded on first boot. Best-effort:
+/// sqlx leaves the journal mode untouched by default, and a failure
+/// here only degrades snapshot consistency back to the old
+/// best-effort behavior.
+async fn enable_wal(db: &sea_orm::DatabaseConnection, label: &str) {
+    use sea_orm::ConnectionTrait as _;
+    if let Err(e) = db.execute_unprepared("PRAGMA journal_mode=WAL;").await {
+        tracing::warn!(db = label, error = %e, "could not enable WAL journal mode");
     }
 }
 
@@ -442,6 +484,7 @@ where
             let db = Database::connect(&url)
                 .await
                 .map_err(|e| eyre::eyre!("connect {label} db `{url}`: {e}"))?;
+            enable_wal(&db, label).await;
             let db = migrate(db)
                 .await
                 .map_err(|e| eyre::eyre!("{label} migrations: {e}"))?;
@@ -768,6 +811,18 @@ pub(crate) async fn build_org_state(
         // the sync backend serves — read-only, so no dir creation.
         let vault_graph = vault::GraphBackend::single("default", vault_root.clone());
 
+        // Every open sqlite pool, for the snapshot engine's
+        // wal_checkpoint pass. Keep in lockstep with the pools
+        // opened above — a missing entry only costs checkpoint
+        // coverage for that db, never correctness of live serving.
+        let sqlite_conns = vec![
+            auth.db.clone(),
+            agent_tasks.conn().clone(),
+            timer.conn().clone(),
+            threads.conn().clone(),
+            finance_conn.clone(),
+        ];
+
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
             auth,
@@ -811,6 +866,7 @@ pub(crate) async fn build_org_state(
                 presence::PRESENCE_TIMEOUT_MS,
             ),
             vault_graph,
+            sqlite_conns,
         })
     }
 }
@@ -936,12 +992,19 @@ pub fn router(state: AppState) -> Router {
         )
         .with_state(state.clone());
 
-    // Server-management vox: `OrgManagementService` mounted on
-    // a top-level endpoint (not per-org). Lets a CLI connect
-    // once and ask the server to scaffold new orgs without
-    // touching the data root locally.
+    // Server-management vox: `OrgManagementService` +
+    // `SnapshotService` mounted on a top-level endpoint (not
+    // per-org). Lets a CLI connect once and ask the server to
+    // scaffold new orgs / run data snapshots without touching the
+    // data root locally. `POST /server/snapshot` is the HTTP
+    // trigger for the chart's backup CronJob (Bearer
+    // `TASK_BACKUP_GIT_TOKEN`).
     let server_mgmt = Router::new()
         .route("/server/vox", any(server_vox_handler))
+        .route(
+            "/server/snapshot",
+            axum::routing::post(snapshot::http_snapshot_handler),
+        )
         .with_state(state.clone());
 
     Router::new()
@@ -1028,7 +1091,7 @@ async fn per_org_vox_handler(
             format!("org `{slug}` not hosted"),
         ));
     };
-    serve_org_vox(org, ws)
+    serve_org_vox(org, state.write_gate.clone(), ws)
 }
 
 /// `/server/vox` — server-management WebSocket. Hosts the
@@ -1040,11 +1103,23 @@ async fn server_vox_handler(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
-    let mgmt = crate::server_mgmt::OrgManagementImpl::new(state);
-    let router = architect::LayerRouter::new().with(
-        org_proto::org_management_descriptor(),
-        org_proto::serve_org_management(mgmt),
-    );
+    let gate = state.write_gate.clone();
+    let mgmt = crate::server_mgmt::OrgManagementImpl::new(state.clone());
+    let snap = crate::snapshot::SnapshotImpl::new(state);
+    let router = architect::LayerRouter::new()
+        .with(
+            org_proto::org_management_descriptor(),
+            org_proto::serve_org_management(mgmt),
+        )
+        .with(
+            org_proto::snapshot_descriptor(),
+            org_proto::serve_snapshot(snap),
+        );
+    // Gated like the per-org endpoints: `create_org` writes to the
+    // data root, so it must quiesce during a snapshot too. The
+    // snapshot verbs themselves pass the entry gate before closing
+    // it — no self-deadlock.
+    let router = crate::snapshot::GatedRouter::new(router, gate);
     ws.on_upgrade(move |socket| async move {
         let acceptor = architect::axum_ws::acceptor_fn(move |_req, connection| {
             connection.handle_with(router.clone());
@@ -1075,7 +1150,7 @@ async fn legacy_vox_handler(
             "no org hosted on this server",
         ));
     };
-    serve_org_vox(org, ws)
+    serve_org_vox(org, state.write_gate.clone(), ws)
 }
 
 /// Build the per-org [`LayerRouter`]: every service this org hosts,
@@ -1465,8 +1540,15 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         )
 }
 
-fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Response {
-    let router = org_layer_router(&org);
+fn serve_org_vox(
+    org: OrgAppState,
+    gate: snapshot::WriteGate,
+    ws: WebSocketUpgrade,
+) -> axum::response::Response {
+    // Every request parks at the snapshot write gate on dispatch
+    // entry — see `snapshot::GatedRouter`. Free when no snapshot is
+    // running.
+    let router = snapshot::GatedRouter::new(org_layer_router(&org), gate);
     ws.on_upgrade(move |socket| async move {
         let acceptor = architect::axum_ws::acceptor_fn(move |_req, connection| {
             connection.handle_with(router.clone());
