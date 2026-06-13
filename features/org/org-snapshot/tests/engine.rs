@@ -221,3 +221,47 @@ async fn branch_log_and_restore_round_trip() {
     let err = engine.restore_checkout("deadbeef").await.unwrap_err();
     assert!(err.to_string().contains("unknown commit"));
 }
+
+/// The full-state repo MUST capture databases even when the org's
+/// own `.gitignore` excludes `*.sqlite` (the "rebuildable from vault"
+/// policy is correct for the per-org repo, fatal for the full
+/// backup — auth.sqlite is not rebuildable). Volatile WAL/SHM
+/// sidecars stay excluded.
+#[tokio::test]
+async fn full_repo_force_captures_gitignored_databases() {
+    let tmp = tempfile::tempdir().unwrap();
+    let org = scaffold(tmp.path());
+    // The vault-centric ignore the live orgs ship.
+    std::fs::write(
+        org.join(".gitignore"),
+        "*.sqlite\n*.sqlite-wal\n*.sqlite-shm\n",
+    )
+    .unwrap();
+    std::fs::write(org.join("auth.sqlite"), b"db bytes").unwrap();
+    std::fs::write(org.join("auth.sqlite-wal"), b"wal bytes").unwrap();
+
+    let engine = SnapshotEngine::new(tmp.path());
+    let report = engine.snapshot().await.unwrap();
+    for r in &report.repos {
+        assert!(r.error.is_empty(), "{}: {}", r.repo, r.error);
+    }
+
+    let full_git = tmp.path().join(".gitstate/full.git");
+    let full_files = detached(&full_git, tmp.path(), &["ls-files"]);
+    assert!(
+        full_files.contains("orgs/alpha/auth.sqlite"),
+        "full repo must capture the ignored db: {full_files}"
+    );
+    assert!(
+        !full_files.contains("auth.sqlite-wal"),
+        "volatile WAL sidecar must stay excluded: {full_files}"
+    );
+
+    // The per-org repo honors the ignore — db absent there.
+    let org_git = tmp.path().join(".gitstate/orgs/alpha.git");
+    let org_files = detached(&org_git, &org, &["ls-files"]);
+    assert!(
+        !org_files.contains("auth.sqlite"),
+        "per-org repo must respect its .gitignore: {org_files}"
+    );
+}

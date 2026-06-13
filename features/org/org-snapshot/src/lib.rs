@@ -111,6 +111,14 @@ pub struct RepoSpec {
     /// Patterns written to `<git_dir>/info/exclude` (the full repo
     /// excludes `.gitstate/` + `lost+found/`).
     pub excludes: Vec<String>,
+    /// Force-add gitignored files (minus volatile sidecars). The
+    /// FULL-STATE repo sets this: org dirs may carry user
+    /// `.gitignore`s excluding `*.sqlite` ("rebuildable from vault")
+    /// — a fine policy for the per-org repos, but the full backup
+    /// must contain the databases (auth.sqlite is NOT rebuildable).
+    /// Discovered the hard way: a restore from a full snapshot that
+    /// honored those ignores produced a server hosting zero orgs.
+    pub force_ignored: bool,
 }
 
 /// The snapshot engine. Cheap to construct per cycle; all state
@@ -197,6 +205,7 @@ impl SnapshotEngine {
             work_tree: self.data_root.clone(),
             name: self.full_repo.clone(),
             excludes,
+            force_ignored: true,
         }
     }
 
@@ -224,6 +233,9 @@ impl SnapshotEngine {
                 work_tree: entry.path(),
                 name: format!("{}{slug}", self.org_prefix),
                 excludes: Self::sidecar_excludes().into(),
+                // Per-org repos respect the org's own .gitignore —
+                // the user's vault-centric policy stands there.
+                force_ignored: false,
             });
         }
         specs.sort_by(|a, b| a.name.cmp(&b.name));
@@ -314,6 +326,36 @@ impl SnapshotEngine {
         Ok(())
     }
 
+    /// Force-add files excluded by in-worktree `.gitignore`s, minus
+    /// volatile sqlite sidecars (`-wal`/`-shm`/`-journal` — excluded
+    /// by design: the WAL-checkpointed main db is the consistent
+    /// artifact). `git add -f` would also drag the sidecars in, so
+    /// enumerate ignored files and filter.
+    async fn force_add_ignored(&self, spec: &RepoSpec) -> Result<(), EngineError> {
+        let out = self
+            .git(
+                spec,
+                &["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+            )
+            .await?;
+        let wanted: Vec<&str> = out
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .filter(|p| {
+                !p.ends_with("-wal")
+                    && !p.ends_with("-shm")
+                    && !p.ends_with("-journal")
+                    && !p.contains(".gitstate/")
+            })
+            .collect();
+        for chunk in wanted.chunks(64) {
+            let mut args: Vec<&str> = vec!["add", "-f", "--"];
+            args.extend(chunk);
+            self.git(spec, &args).await?;
+        }
+        Ok(())
+    }
+
     /// Index scrub before `add -A`:
     ///
     /// - **De-gitlink defense** — data migrated in from elsewhere
@@ -392,6 +434,9 @@ impl SnapshotEngine {
                 }
                 Err(e) => return Err(e),
             }
+        }
+        if spec.force_ignored {
+            self.force_add_ignored(spec).await?;
         }
         let staged_clean = self
             .git(spec, &["diff", "--cached", "--quiet"])
