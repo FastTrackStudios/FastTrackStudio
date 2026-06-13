@@ -106,47 +106,38 @@ jobs:
           rm -rf deploy/docker/ui-lab-dist
           cp -r ui-lab/dist deploy/docker/ui-lab-dist
 
-      - name: Registry login + CI builder
-        # The builder needs the network.host entitlement explicitly
-        # allowed — --network=host (systemd-resolved DNS inside
-        # BuildKit) is refused by an entitlement-default builder.
-        run: |
-          # Retry the login — codeberg's registry token endpoint
-          # intermittently resets (the same flakiness that hits git
-          # transfers). Without a retry the whole run dies on the first
-          # blip even though the build already succeeded.
-          attempt=1
-          until echo "${{ secrets.REGISTRY_TOKEN }}" | \
-              docker login codeberg.org -u "${{ secrets.REGISTRY_USER }}" --password-stdin; do
-            [ "$attempt" -ge 8 ] && { echo "registry login failed after 8 attempts"; exit 1; }
-            echo "login attempt $attempt failed — retrying in 15s"
-            attempt=$((attempt + 1)); sleep 15
-          done
-          docker buildx inspect ci >/dev/null 2>&1 || \
-            docker buildx create --name ci --driver docker-container \
-              --buildkitd-flags '--allow-insecure-entitlement network.host'
-          docker buildx use ci
+      # No registry login — the in-cluster registry on the LAN
+      # (REGISTRY env) is unauthenticated and trusted as insecure by
+      # this host's docker daemon, so plain `docker build`/`push`
+      # works. --network=host gives the server build host DNS to fetch
+      # the cargo git deps from codeberg during the Docker build.
 
       - name: Build + push task-server
         run: |
-          docker buildx build --network=host --push \
+          docker build --network=host \
             -f deploy/docker/server.Dockerfile \
-            -t codeberg.org/fasttrackstudios/task-server:${{ steps.tags.outputs.channel }} \
-            -t codeberg.org/fasttrackstudios/task-server:${{ steps.tags.outputs.sha }} \
+            -t 10.10.10.1:30050/task-server:${{ steps.tags.outputs.channel }} \
+            -t 10.10.10.1:30050/task-server:${{ steps.tags.outputs.sha }} \
             .
+          docker push 10.10.10.1:30050/task-server:${{ steps.tags.outputs.channel }}
+          docker push 10.10.10.1:30050/task-server:${{ steps.tags.outputs.sha }}
 
       - name: Build + push task-web
         run: |
-          docker buildx build --network=host --push \
+          docker build --network=host \
             -f deploy/docker/web.Dockerfile \
-            -t codeberg.org/fasttrackstudios/task-web:${{ steps.tags.outputs.channel }} \
-            -t codeberg.org/fasttrackstudios/task-web:${{ steps.tags.outputs.sha }} \
+            -t 10.10.10.1:30050/task-web:${{ steps.tags.outputs.channel }} \
+            -t 10.10.10.1:30050/task-web:${{ steps.tags.outputs.sha }} \
             deploy/docker
+          docker push 10.10.10.1:30050/task-web:${{ steps.tags.outputs.channel }}
+          docker push 10.10.10.1:30050/task-web:${{ steps.tags.outputs.sha }}
 
       - name: Build + push task-ui-lab
         run: |
-          docker buildx build --network=host --push \
+          docker build --network=host \
             -f deploy/docker/ui-lab.Dockerfile \
-            -t codeberg.org/fasttrackstudios/task-ui-lab:${{ steps.tags.outputs.channel }} \
-            -t codeberg.org/fasttrackstudios/task-ui-lab:${{ steps.tags.outputs.sha }} \
+            -t 10.10.10.1:30050/task-ui-lab:${{ steps.tags.outputs.channel }} \
+            -t 10.10.10.1:30050/task-ui-lab:${{ steps.tags.outputs.sha }} \
             deploy/docker
+          docker push 10.10.10.1:30050/task-ui-lab:${{ steps.tags.outputs.channel }}
+          docker push 10.10.10.1:30050/task-ui-lab:${{ steps.tags.outputs.sha }}
