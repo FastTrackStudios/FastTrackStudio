@@ -27,10 +27,45 @@ on:
 jobs:
   images:
     runs-on: nix-host
+    # Self-hosted runner: it holds a working copy of Task. Check out
+    # from there when it has the triggering commit (offline, instant),
+    # else a retried shallow clone from the forge — codeberg's git
+    # transfers intermittently reset and actions/checkout has no retry.
+    # This is only how CI gets THE SOURCE; the dependency graph is pure
+    # rev-pinned codeberg git deps (cargo fetches them, cached).
+    env:
+      TASK_LOCAL_REPO: /run/media/Development/Task
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+      - name: Checkout
+        run: |
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          branch="${GITHUB_REF_NAME:-dev}"
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$TASK_LOCAL_REPO" ] && [ -d "$TASK_LOCAL_REPO/.git" ] \
+              && [ -n "$sha" ] \
+              && git -C "$TASK_LOCAL_REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "local checkout @ ${sha} (from $TASK_LOCAL_REPO)"
+            git clone --quiet "$TASK_LOCAL_REPO" .
+            git checkout --quiet --detach "$sha"
+          else
+            attempt=1
+            until git clone --depth 1 --no-tags --branch "$branch" "$url" .; do
+              [ "$attempt" -ge 8 ] && { echo "clone failed after 8 attempts"; exit 1; }
+              echo "clone attempt $attempt failed — retrying in 15s"
+              find . -mindepth 1 -delete 2>/dev/null || true
+              attempt=$((attempt + 1)); sleep 15
+            done
+            if [ -n "$sha" ] && [ "$(git rev-parse HEAD)" != "$sha" ]; then
+              attempt=1
+              until git fetch --depth 1 --no-tags origin "$sha"; do
+                [ "$attempt" -ge 8 ] && { echo "fetch sha failed"; exit 1; }
+                echo "fetch attempt $attempt failed — retrying in 15s"
+                attempt=$((attempt + 1)); sleep 15
+              done
+              git checkout --detach "$sha"
+            fi
+          fi
+          echo "checked out $(git rev-parse --short HEAD)"
 
       - name: Compute tags
         id: tags
