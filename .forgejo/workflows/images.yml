@@ -29,13 +29,35 @@ jobs:
   images:
     runs-on: nix-host
     steps:
-      - uses: actions/checkout@v4
-        with:
-          # Shallow: the workflow only reads HEAD's short sha. A full
-          # history fetch of this repo is what flaked under codeberg's
-          # intermittent disconnects ("fetch-pack: unexpected
-          # disconnect"). depth 1 transfers a fraction of the data.
-          fetch-depth: 1
+      # Manual retried checkout instead of actions/checkout@v4: the
+      # action's internal fetch isn't retried, and codeberg
+      # intermittently resets git packfile transfers ("fetch-pack:
+      # unexpected disconnect"). A shallow clone of the exact ref with
+      # a retry loop rides that out. (Shallow is safe — the only git
+      # read below is HEAD's short sha for the image tag.)
+      - name: Checkout (retried shallow)
+        run: |
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          branch="${GITHUB_REF_NAME:-dev}"
+          # Clone the event's branch tip into the (empty) workspace.
+          attempt=1
+          until git clone --depth 1 --no-tags --branch "$branch" "$url" .; do
+            [ "$attempt" -ge 5 ] && { echo "clone failed after 5 attempts"; exit 1; }
+            echo "clone attempt $attempt failed — retrying in 10s"
+            find . -mindepth 1 -delete 2>/dev/null || true
+            attempt=$((attempt + 1)); sleep 10
+          done
+          # Pin to the exact triggering commit if the branch tip moved.
+          if [ -n "$GITHUB_SHA" ] && [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            attempt=1
+            until git fetch --depth 1 --no-tags origin "$GITHUB_SHA"; do
+              [ "$attempt" -ge 5 ] && { echo "fetch sha failed"; exit 1; }
+              echo "fetch attempt $attempt failed — retrying in 10s"
+              attempt=$((attempt + 1)); sleep 10
+            done
+            git checkout --detach "$GITHUB_SHA"
+          fi
+          echo "checked out $(git rev-parse --short HEAD)"
 
       - name: Sibling checkouts (workspace path deps)
         run: bash deploy/docker/siblings.sh clone "$(dirname "$PWD")"
