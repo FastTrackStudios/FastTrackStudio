@@ -6,25 +6,27 @@ Everything you need to self-host lives in this directory:
 deploy/
 ├── README.md            <- you are here
 ├── docker-compose.yml   <- smallest real deployment (server + web + edge proxy)
-├── docker/
-│   ├── server.Dockerfile    multi-stage rust build of task-server
-│   ├── web.Dockerfile       nginx around a prebuilt dx wasm bundle
-│   ├── ui-lab.Dockerfile    nginx around the ui-lab vite dist
-│   ├── web-nginx.conf       SPA fallback, wasm mime, cache headers
-│   └── ui-lab-nginx.conf
 └── chart/
     ├── task/                Helm 3 chart (generic defaults)
     ├── values-dev.yaml      EXAMPLE: the starcommand dev env
     └── values-prod.yaml     EXAMPLE: the starcommand prod env
 ```
 
-Prebuilt images (pushed by `.forgejo/workflows/images.yml`):
+The container images are **pure Nix** — there are no Dockerfiles. Each
+image is a `dockerTools.streamLayeredImage` defined in the repo-root
+`flake.nix` (`task-server-image`, `task-web-image`, `task-ui-lab-image`).
+The web/ui-lab bundles are themselves Nix derivations (`task-webapp`'s
+`dx build`, `ui-lab`'s pnpm/vite build), so the images self-contain their
+content with no out-of-band bundle step.
+
+Prebuilt images (pushed by `.forgejo/workflows/images.yml` via skopeo to
+the in-cluster LAN registry):
 
 | image | tags |
 |---|---|
-| `codeberg.org/fasttrackstudios/task-server` | `latest` (main), `dev`, `sha-<short>` |
-| `codeberg.org/fasttrackstudios/task-web`    | same |
-| `codeberg.org/fasttrackstudios/task-ui-lab` | same |
+| `registry.starcommand.live:30050/task-server` | `latest` (main), `dev`, `sha-<short>` |
+| `registry.starcommand.live:30050/task-web`    | same |
+| `registry.starcommand.live:30050/task-ui-lab` | same |
 
 ## The one architectural rule: same origin
 
@@ -108,33 +110,33 @@ On starcommand specifically, ArgoCD watches this repo: `dev` branch +
 
 ## Building the images yourself
 
-**Server** — every formerly-sibling crate (architect / Editor / fts-ui /
-daw / input_actions / keyflow) is a rev-pinned Codeberg git dependency,
-so the docker context is just the repo root and cargo fetches the deps
-itself at build time (the builder stage needs network access):
+The images are Nix derivations — no Docker daemon required to build them.
+Every formerly-sibling crate (architect / Editor / fts-ui / daw /
+input_actions / keyflow) is a rev-pinned git dependency that cargo (under
+crane) fetches itself, so the build needs network access for git deps.
+
+Each `streamLayeredImage` builds an executable that **streams a
+docker-archive tarball to stdout**. Pipe it wherever you want — into
+`docker load`, `podman load`, or `skopeo copy`:
 
 ```sh
-docker build -f deploy/docker/server.Dockerfile -t task-server:local .
+# Build + load locally:
+$(nix build --no-link --print-out-paths .#task-server-image) | docker load
+$(nix build --no-link --print-out-paths .#task-web-image)    | docker load
+$(nix build --no-link --print-out-paths .#task-ui-lab-image) | docker load
+
+# Build + push to the LAN registry (what CI does, sans daemon):
+$(nix build --no-link --print-out-paths .#task-web-image) \
+  | nix run nixpkgs#skopeo -- --insecure-policy copy --dest-tls-verify=false \
+      docker-archive:/dev/stdin \
+      docker://registry.starcommand.live:30050/task-web:dev
 ```
 
-**Web** — build the bundle in the repo's nix dev shell, *without*
-`TASK_VOX_URL_WEB` so it stays env-agnostic, then wrap it:
-
-```sh
-nix develop .#playwright --command bash -c \
-  'cd apps/web && env -u TASK_VOX_URL_WEB dx build --platform web --release'
-rm -rf deploy/docker/web-public
-cp -r target/dx/task-app-web/release/web/public deploy/docker/web-public
-docker build -f deploy/docker/web.Dockerfile -t task-web:local deploy/docker
-```
-
-**ui-lab**:
-
-```sh
-(cd ui-lab && pnpm install --frozen-lockfile && pnpm build)
-rm -rf deploy/docker/ui-lab-dist && cp -r ui-lab/dist deploy/docker/ui-lab-dist
-docker build -f deploy/docker/ui-lab.Dockerfile -t task-ui-lab:local deploy/docker
-```
+The web bundle is built **without** `TASK_VOX_URL_WEB` baked in (the
+`task-webapp` derivation in `flake.nix`), so it stays env-agnostic and
+one image serves any hostname. ui-lab is the same shape via its `ui-lab`
+derivation (nixpkgs pnpm support). All three images serve / listen on
+port **8080**.
 
 ## Env var reference (task-server)
 

@@ -9,14 +9,19 @@
 # bundle, so a tiny reverse proxy ("edge" below) fronts the pair the
 # same way the Helm chart's Ingress does in k8s.
 #
-# Images: pull from the Codeberg registry (tags: latest / dev /
-# sha-<short>) or build locally — see deploy/docker/*.Dockerfile
-# headers for build commands (the server build context is the repo
-# root; cargo fetches every git dep itself).
+# Images: pull from the in-cluster LAN registry (tags: latest / dev /
+# sha-<short>), or build them yourself with Nix — there are no
+# Dockerfiles. Each image is a `dockerTools.streamLayeredImage` in
+# flake.nix; to build + load one locally:
+#
+#   $(nix build --no-link --print-out-paths .#task-server-image) \
+#     | docker load        # or pipe into skopeo / podman load
+#
+# (build .#task-web-image / .#task-ui-lab-image the same way).
 
 services:
   server:
-    image: codeberg.org/fasttrackstudios/task-server:latest
+    image: registry.starcommand.live:30050/task-server:latest
     restart: unless-stopped
     environment:
       # Everything lives under /data (the volume below) — back that
@@ -33,7 +38,7 @@ services:
       - task-data:/data
 
   web:
-    image: codeberg.org/fasttrackstudios/task-web:latest
+    image: registry.starcommand.live:30050/task-web:latest
     restart: unless-stopped
 
   # Same-origin edge: API prefixes -> server, everything else -> web.
@@ -72,7 +77,7 @@ configs:
               proxy_send_timeout 1h;
           }
           location / {
-              proxy_pass http://web:80;
+              proxy_pass http://web:8080;
               proxy_set_header Host $$host;
           }
       }

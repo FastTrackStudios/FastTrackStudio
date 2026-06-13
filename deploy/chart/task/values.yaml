@@ -14,9 +14,10 @@
 # bundle is ever needed.
 
 image:
-  # Registry+namespace prefix for all three images. Override if you
-  # mirror them somewhere else.
-  registry: codeberg.org/fasttrackstudios
+  # Registry+namespace prefix for all three images. CI (the pure-Nix
+  # images.yml) pushes via skopeo to the in-cluster LAN registry below.
+  # Override if you mirror them somewhere else.
+  registry: registry.starcommand.live:30050
   pullPolicy: IfNotPresent
   # e.g. pullSecrets: [{ name: my-registry-cred }]
   pullSecrets: []
@@ -35,8 +36,8 @@ server:
   # ingress is enabled.
   publicUrl: ""
 
-  # Plain (non-secret) env vars, name -> value. See
-  # deploy/docker/server.Dockerfile for the full reference. Example:
+  # Plain (non-secret) env vars, name -> value. See deploy/README.md's
+  # "Env var reference (task-server)" for the full list. Example:
   #   env:
   #     TASK_SERVER_ORG: my-org
   #     RUST_LOG: info,task_server=debug

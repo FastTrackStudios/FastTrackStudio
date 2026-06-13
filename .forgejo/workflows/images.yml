@@ -1,28 +1,36 @@
-# Container images — builds + pushes task-server / task-web /
-# task-ui-lab to the Codeberg registry on every push to dev and main.
+# Container images — pure-Nix OCI builds, pushed to the in-cluster LAN
+# registry on every push to dev and main. No Docker daemon, no buildx.
 #
-#   dev  -> codeberg.org/fasttrackstudios/task-{server,web,ui-lab}:dev    + :sha-<short>
-#   main -> codeberg.org/fasttrackstudios/task-{server,web,ui-lab}:latest + :sha-<short>
+#   dev  -> registry.starcommand.live:30050/task-{server,web,ui-lab}:dev    + :sha-<short>
+#   main -> registry.starcommand.live:30050/task-{server,web,ui-lab}:latest + :sha-<short>
 #
 # ArgoCD deploys these via deploy/chart/task (targetRevision dev/main).
 #
-# Runner assumptions (header per deploy/README.md — verify on your
-# runner before trusting a green check):
-#   * runs-on: nix-host — THEBATTLESHIP's codeberg-org runner carries
-#     this HOST-mode label (a deliberate, documented relaxation of its
-#     docker-only sandbox for org repos; see the runner's nix config).
-#   * `nix` is available for the dev-shell wasm build, `docker` (with
-#     buildx/BuildKit) for image builds + pushes.
-#   * Every formerly-sibling dependency is a rev-pinned Codeberg git
-#     dep; cargo fetches them itself, so there is no sibling-checkout
-#     step. The build needs network access to fetch git deps.
-#   * Secrets REGISTRY_USER / REGISTRY_TOKEN must be set in the repo's
-#     Actions secrets: a Codeberg user (or org bot) + an access token
-#     with package:write scope.
+# How the images are built:
+#   * Each image is `pkgs.dockerTools.streamLayeredImage` in flake.nix —
+#     it builds an *executable* that streams a docker-archive tarball to
+#     stdout. We pipe that straight into skopeo. No Docker, no buildx, no
+#     BuildKit, no Dockerfiles. The image builds produce the web/ui-lab
+#     bundles themselves (task-webapp's dx build + ui-lab's pnpm/vite are
+#     nix derivations), so there is NO separate bundle step here.
+#
+# Runner assumptions (verify on your runner before trusting a green check):
+#   * runs-on: nix-host — THEBATTLESHIP's runner carries this HOST-mode
+#     label. `nix` is on PATH; the host resolves
+#     registry.starcommand.live:30050 to the in-cluster registry (LAN,
+#     10.10.10.1 via /etc/hosts) and trusts it as an insecure plain-HTTP
+#     registry. skopeo is run via `nix run nixpkgs#skopeo`.
+#   * The registry is UNAUTHENTICATED — no login step, no secrets.
+#   * Every formerly-sibling dependency is a rev-pinned Codeberg git dep;
+#     cargo (under crane) fetches them itself. The build needs network
+#     access to fetch git deps.
 name: images
 on:
   push:
     branches: [dev, main]
+
+env:
+  REGISTRY: registry.starcommand.live:30050
 
 jobs:
   images:
@@ -76,76 +84,41 @@ jobs:
           echo "sha=sha-$short" >> "$GITHUB_OUTPUT"
           echo "tags: $channel sha-$short"
 
-      - name: Build web bundle (env-agnostic)
-        # No TASK_VOX_URL_WEB in the environment: the bundle then
-        # derives its vox URL same-origin from window.location at
-        # runtime, so one image serves every hostname.
-        # wasm-opt: dx's downloaded prebuilt binaryen SIGABRTs under the
-        # runner's service environment (works interactively — same
-        # binary, same machine). Pre-seed dx's tool dir with a symlink to
-        # the dev shell's nix-built wasm-opt: dx prefers an installed
-        # tool, so the broken download never happens. (NO_DOWNLOADS is
-        # NOT used — it's global and breaks wasm-bindgen version
-        # resolution.) The binaryen-129 dir name is dx 0.7.9's pinned
-        # BINARYEN_VERSION (cli/src/wasm_opt.rs); a dx upgrade that bumps
-        # it just re-downloads and this seed becomes inert.
-        run: |
-          rm -rf ~/.local/share/.dx/tools/binaryen-*
-          nix develop .#playwright --command bash -c '
-            set -e
-            mkdir -p ~/.local/share/.dx/tools/binaryen-129/bin
-            ln -sf "$(command -v wasm-opt)" ~/.local/share/.dx/tools/binaryen-129/bin/wasm-opt
-            cd apps/web && env -u TASK_VOX_URL_WEB dx build --platform web --release'
-          rm -rf deploy/docker/web-public
-          cp -r target/dx/task-app-web/release/web/public deploy/docker/web-public
+      # ── Image builds + pushes ──────────────────────────────────────
+      #
+      # For each image: build the streamLayeredImage executable, run it
+      # to stream a docker-archive to stdout, and pipe that into skopeo,
+      # which copies it to the insecure plain-HTTP registry under both
+      # the channel tag (dev/latest) and the immutable sha-<short> tag.
+      #
+      # `nix build .#<image>` yields the streamer script in $out (it is
+      # the default output, runnable directly). We --print-out-paths it,
+      # execute it, and a single skopeo `copy` reads the archive once and
+      # writes both tags in one shot via additional-tag.
 
-      - name: Build ui-lab dist
+      - name: Push task-server
         run: |
-          nix develop .#playwright --command bash -c \
-            'cd ui-lab && pnpm install --frozen-lockfile && pnpm build'
-          rm -rf deploy/docker/ui-lab-dist
-          cp -r ui-lab/dist deploy/docker/ui-lab-dist
+          streamer="$(nix build .#task-server-image --no-link --print-out-paths)"
+          "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
+            --dest-tls-verify=false \
+            --additional-tag "task-server:${{ steps.tags.outputs.sha }}" \
+            docker-archive:/dev/stdin \
+            "docker://${REGISTRY}/task-server:${{ steps.tags.outputs.channel }}"
 
-      # No registry login — the in-cluster registry on the LAN is
-      # unauthenticated and trusted as insecure by this host's docker
-      # daemon, so plain `docker build`/`push` works. --network=host
-      # gives the server build host DNS to fetch the cargo git deps
-      # during the Docker build.
-      - name: BuildKit builder (network.host + insecure LAN registry)
-        # The server Dockerfile uses RUN --mount=type=cache (BuildKit),
-        # so we need buildx. The docker-container driver needs BOTH the
-        # network.host entitlement (cargo fetches git deps during the
-        # build) AND a buildkitd config marking the plain-HTTP LAN
-        # registry as http — the daemon's insecure-registries don't
-        # reach the docker-container builder. Recreate to pick up this
-        # config (the old codeberg-era builder lacks it).
+      - name: Push task-web
         run: |
-          printf '[registry."registry.starcommand.live:30050"]\n  http = true\n' > /tmp/buildkitd.toml
-          docker buildx rm ci 2>/dev/null || true
-          docker buildx create --name ci --driver docker-container \
-            --buildkitd-flags '--allow-insecure-entitlement network.host' \
-            --config /tmp/buildkitd.toml --use
+          streamer="$(nix build .#task-web-image --no-link --print-out-paths)"
+          "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
+            --dest-tls-verify=false \
+            --additional-tag "task-web:${{ steps.tags.outputs.sha }}" \
+            docker-archive:/dev/stdin \
+            "docker://${REGISTRY}/task-web:${{ steps.tags.outputs.channel }}"
 
-      - name: Build + push task-server
+      - name: Push task-ui-lab
         run: |
-          docker buildx build --builder ci --network=host --push \
-            -f deploy/docker/server.Dockerfile \
-            -t registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.channel }} \
-            -t registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.sha }} \
-            .
-
-      - name: Build + push task-web
-        run: |
-          docker buildx build --builder ci --network=host --push \
-            -f deploy/docker/web.Dockerfile \
-            -t registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.channel }} \
-            -t registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.sha }} \
-            deploy/docker
-
-      - name: Build + push task-ui-lab
-        run: |
-          docker buildx build --builder ci --network=host --push \
-            -f deploy/docker/ui-lab.Dockerfile \
-            -t registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.channel }} \
-            -t registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.sha }} \
-            deploy/docker
+          streamer="$(nix build .#task-ui-lab-image --no-link --print-out-paths)"
+          "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
+            --dest-tls-verify=false \
+            --additional-tag "task-ui-lab:${{ steps.tags.outputs.sha }}" \
+            docker-archive:/dev/stdin \
+            "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.channel }}"
