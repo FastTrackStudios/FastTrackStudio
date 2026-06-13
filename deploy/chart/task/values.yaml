@@ -126,14 +126,20 @@ ingress:
   #       hosts: [task.example.com]
   tls: []
 
-# ── Git snapshots of the data root ──────────────────────────────────
-# Two views over the same files via detached git dirs (/data/.gitstate):
-# one repo per org (orgs/<slug> → <orgRepoPrefix><slug>) and one
-# full-state repo (everything → fullRepo). Remote repos are auto-
-# created PRIVATE under remoteBase on first push. Restore = git
-# checkout from the matching repo + server restart; branching data is
-# plain git. sqlite snapshots are live/best-effort — the markdown
-# vault (source of truth) is file-atomic.
+# ── Git snapshots of the data root (server-native) ──────────────────
+# task-server runs the snapshot cycle itself: quiesce writes → WAL-
+# checkpoint every sqlite → commit the detached git dirs under
+# /data/.gitstate → push. Two views over the same files: one repo per
+# org (orgs/<slug> → <orgRepoPrefix><slug>, continuing pre-existing
+# vault histories) and one full-state repo (everything → fullRepo).
+# Remote repos are auto-created PRIVATE under remoteBase on first
+# push; pushes are plain fast-forwards, never --force. Committed
+# sqlites are CONSISTENT (checkpointed under the write gate).
+#
+# Enabling this (a) maps the secret + remote config into the server
+# env (TASK_BACKUP_*) and (b) schedules a CronJob that POSTs
+# /server/snapshot on the server service (Bearer GIT_TOKEN). On-demand
+# verbs: `task admin snapshot|log|branch <name>|restore <commit>`.
 backup:
   git:
     enabled: false
@@ -145,6 +151,8 @@ backup:
     fullRepo: task-data
     # Per-org repos: <prefix><org-slug>.
     orgRepoPrefix: task-org-
-    # Secret with GIT_USER + GIT_TOKEN (token: repo create + push).
+    # Secret with GIT_USER + GIT_TOKEN (token: repo create + push;
+    # GIT_TOKEN doubles as the /server/snapshot bearer token).
     existingSecret: ""
+    # Trigger-job image — anything with /bin/sh + wget works.
     image: alpine/git:2.49.1
