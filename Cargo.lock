@@ -1032,6 +1032,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-foundation"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2134,7 +2144,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "0.3.4"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-core",
@@ -4001,6 +4011,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
+name = "openssl-probe"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+
+[[package]]
 name = "ordered-float"
 version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4730,6 +4746,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-native-certs"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
+dependencies = [
+ "openssl-probe",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework",
+]
+
+[[package]]
 name = "rustls-pki-types"
 version = "1.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4780,6 +4808,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "schannel"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4964,6 +5001,29 @@ name = "seahash"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
+
+[[package]]
+name = "security-framework"
+version = "3.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
+dependencies = [
+ "bitflags 2.11.1",
+ "core-foundation",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
+
+[[package]]
+name = "security-framework-sys"
+version = "2.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
 
 [[package]]
 name = "semver"
@@ -5777,6 +5837,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-rustls"
+version = "0.26.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
+dependencies = [
+ "rustls",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-stream"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5795,7 +5865,11 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite 0.29.0",
 ]
 
@@ -6006,6 +6080,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.4",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 2.0.18",
 ]
@@ -6188,7 +6264,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vox"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-pretty",
@@ -6206,7 +6282,7 @@ dependencies = [
 [[package]]
 name = "vox-core"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-cbor",
@@ -6229,7 +6305,7 @@ dependencies = [
 [[package]]
 name = "vox-jit"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -6251,7 +6327,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-abi"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "arc-swap",
  "facet-core",
@@ -6262,7 +6338,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-cal"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-core",
@@ -6271,7 +6347,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-core"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -6283,7 +6359,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-parse"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -6292,7 +6368,7 @@ dependencies = [
 [[package]]
 name = "vox-postcard"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "facet",
  "facet-core",
@@ -6306,7 +6382,7 @@ dependencies = [
 [[package]]
 name = "vox-schema"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "blake3",
  "facet",
@@ -6318,7 +6394,7 @@ dependencies = [
 [[package]]
 name = "vox-service-macros"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "proc-macro2",
  "vox-macros-core",
@@ -6327,7 +6403,7 @@ dependencies = [
 [[package]]
 name = "vox-types"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -6353,7 +6429,7 @@ dependencies = [
 [[package]]
 name = "vox-websocket"
 version = "0.8.2"
-source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=b3d806f868c7b1247564d0c0b27fd35d1b41cfd8#b3d806f868c7b1247564d0c0b27fd35d1b41cfd8"
+source = "git+https://codeberg.org/FastTrackStudios/vox.git?rev=30ef2ffe6fd8681eac9e2bf97602e38bba8f688a#30ef2ffe6fd8681eac9e2bf97602e38bba8f688a"
 dependencies = [
  "futures-channel",
  "futures-util",
