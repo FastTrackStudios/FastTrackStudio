@@ -49,6 +49,15 @@ jobs:
           url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           branch="${GITHUB_REF_NAME:-dev}"
           sha="${GITHUB_SHA:-}"
+          # The local repo is owned by a different user than the runner,
+          # so git's dubious-ownership guard would otherwise reject both
+          # the precheck and the clone — silently degrading to a forge
+          # clone (the very codeberg flakiness this local-first path
+          # avoids). Trust it (the worktree AND its gitdir).
+          if [ -n "$TASK_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$TASK_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$TASK_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
           if [ -n "$TASK_LOCAL_REPO" ] && [ -d "$TASK_LOCAL_REPO/.git" ] \
               && [ -n "$sha" ] \
               && git -C "$TASK_LOCAL_REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
@@ -99,15 +108,21 @@ jobs:
       #
       # `nix build .#<image>` yields the streamer script in $out (it is
       # the default output, runnable directly).
+      #
+      # --src/--dest-no-creds: the LAN registry is unauthenticated, and
+      # without these flags skopeo probes /run/containers/$UID/auth.json
+      # for creds. As the gitea-runner user that path is present but
+      # unreadable (EACCES) — a *fatal* error (a missing file is fine).
+      # --no-creds skips the lookup entirely.
 
       - name: Push task-server
         run: |
           streamer="$(nix build .#task-server-image --no-link --print-out-paths)"
           "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --dest-tls-verify=false docker-archive:/dev/stdin \
+            --dest-tls-verify=false --dest-no-creds docker-archive:/dev/stdin \
             "docker://${REGISTRY}/task-server:${{ steps.tags.outputs.channel }}"
           nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --src-tls-verify=false --dest-tls-verify=false \
+            --src-tls-verify=false --src-no-creds --dest-tls-verify=false --dest-no-creds \
             "docker://${REGISTRY}/task-server:${{ steps.tags.outputs.channel }}" \
             "docker://${REGISTRY}/task-server:${{ steps.tags.outputs.sha }}"
 
@@ -115,10 +130,10 @@ jobs:
         run: |
           streamer="$(nix build .#task-web-image --no-link --print-out-paths)"
           "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --dest-tls-verify=false docker-archive:/dev/stdin \
+            --dest-tls-verify=false --dest-no-creds docker-archive:/dev/stdin \
             "docker://${REGISTRY}/task-web:${{ steps.tags.outputs.channel }}"
           nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --src-tls-verify=false --dest-tls-verify=false \
+            --src-tls-verify=false --src-no-creds --dest-tls-verify=false --dest-no-creds \
             "docker://${REGISTRY}/task-web:${{ steps.tags.outputs.channel }}" \
             "docker://${REGISTRY}/task-web:${{ steps.tags.outputs.sha }}"
 
@@ -126,9 +141,9 @@ jobs:
         run: |
           streamer="$(nix build .#task-ui-lab-image --no-link --print-out-paths)"
           "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --dest-tls-verify=false docker-archive:/dev/stdin \
+            --dest-tls-verify=false --dest-no-creds docker-archive:/dev/stdin \
             "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.channel }}"
           nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --src-tls-verify=false --dest-tls-verify=false \
+            --src-tls-verify=false --src-no-creds --dest-tls-verify=false --dest-no-creds \
             "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.channel }}" \
             "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.sha }}"
