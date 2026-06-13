@@ -30,6 +30,12 @@ jobs:
     runs-on: nix-host
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Shallow: the workflow only reads HEAD's short sha. A full
+          # history fetch of this repo is what flaked under codeberg's
+          # intermittent disconnects ("fetch-pack: unexpected
+          # disconnect"). depth 1 transfers a fraction of the data.
+          fetch-depth: 1
 
       - name: Sibling checkouts (workspace path deps)
         run: bash deploy/docker/siblings.sh clone "$(dirname "$PWD")"

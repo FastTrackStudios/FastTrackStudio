@@ -40,7 +40,20 @@ clone_at() { # url sha target
     local url="$1" sha="$2" target="$3"
     echo ">> clone $url @ ${sha:0:10} -> $target"
     mkdir -p "$(dirname "$target")"
-    git clone --filter=blob:none "$url" "$target"
+    # FULL clone, retried. A `--filter=blob:none` partial clone defers
+    # blob fetches to a promisor round-trip on checkout, and THAT fetch
+    # is what flaked under CI ("fetch-pack: unexpected disconnect …
+    # could not fetch <sha> from promisor remote"). A plain clone pulls
+    # everything in one shot; the retry rides out codeberg's
+    # intermittent disconnects.
+    local attempt=1
+    until git clone "$url" "$target"; do
+        if [ "$attempt" -ge 3 ]; then
+            echo "!! clone $url failed after 3 attempts"; exit 1
+        fi
+        echo ">> clone $url failed (attempt $attempt) — retrying in 5s"
+        rm -rf "$target"; attempt=$((attempt + 1)); sleep 5
+    done
     git -C "$target" checkout --detach "$sha" \
         || { echo "!! $sha not reachable on $url — push the sibling branch (see siblings.lock header)"; exit 1; }
 }
