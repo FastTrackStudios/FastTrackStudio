@@ -71,16 +71,32 @@ pub fn resolve_active(cli_override: Option<&str>) -> eyre::Result<ActiveOrg> {
         });
     }
 
-    // 2. session.json active slug.
+    // 2. session.json active entry's slug. A remote-only active
+    //    session (signed in against `wss://…` with no local org
+    //    dir) gets the distinguishing error: the COMMAND is
+    //    local-only, not the session.
     if let Some(session) = session_store::load()? {
-        let slug = session.active.as_str();
+        let slug = session.active_slug();
+        let remote_url = session
+            .active_server()
+            .map(|e| e.url.clone())
+            .filter(|u| u != session_store::LOCAL_URL);
         if !slug.is_empty() {
-            let (org, manifest) = root.load_org(slug).wrap_err_with(|| {
-                format!(
-                    "active org `{slug}` in session.json has no matching dir at {}; \
-                     either run `task org init {slug}` or update the session",
-                    root.orgs_dir().join(slug).display()
-                )
+            let (org, manifest) = root.load_org(&slug).wrap_err_with(|| {
+                if let Some(url) = &remote_url {
+                    format!(
+                        "active session targets org `{slug}` on remote server {url}, and this \
+                         command needs a LOCAL org dir (none at {}); run `task org init {slug}` \
+                         to create one, or pass --org <local-slug>",
+                        root.orgs_dir().join(&slug).display()
+                    )
+                } else {
+                    format!(
+                        "active org `{slug}` in session.json has no matching dir at {}; \
+                         either run `task org init {slug}` or update the session",
+                        root.orgs_dir().join(&slug).display()
+                    )
+                }
             })?;
             return Ok(ActiveOrg {
                 root: org,
