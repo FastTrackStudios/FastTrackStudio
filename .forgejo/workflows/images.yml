@@ -76,8 +76,17 @@ jobs:
         # allowed — --network=host (systemd-resolved DNS inside
         # BuildKit) is refused by an entitlement-default builder.
         run: |
-          echo "${{ secrets.REGISTRY_TOKEN }}" | \
-            docker login codeberg.org -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+          # Retry the login — codeberg's registry token endpoint
+          # intermittently resets (the same flakiness that hits git
+          # transfers). Without a retry the whole run dies on the first
+          # blip even though the build already succeeded.
+          attempt=1
+          until echo "${{ secrets.REGISTRY_TOKEN }}" | \
+              docker login codeberg.org -u "${{ secrets.REGISTRY_USER }}" --password-stdin; do
+            [ "$attempt" -ge 8 ] && { echo "registry login failed after 8 attempts"; exit 1; }
+            echo "login attempt $attempt failed — retrying in 15s"
+            attempt=$((attempt + 1)); sleep 15
+          done
           docker buildx inspect ci >/dev/null 2>&1 || \
             docker buildx create --name ci --driver docker-container \
               --buildkitd-flags '--allow-insecure-entitlement network.host'
