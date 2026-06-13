@@ -405,22 +405,22 @@ email-link = { path = "features/email/email-link" }
 # that. These crates are members of the Editor workspace; Cargo
 # builds them as path dependencies and resolves their own
 # `workspace = true` deps against Editor's manifest.
-editor-state = { path = "../Editor/crates/editor-state" }
-editor-syntax = { path = "../Editor/crates/editor-syntax" }
-editor-view = { path = "../Editor/crates/editor-view" }
-editor-vim = { path = "../Editor/crates/editor-vim" }
-editor-typst = { path = "../Editor/crates/editor-typst" }
-editor-mermaid = { path = "../Editor/crates/editor-mermaid" }
-editor-keyflow = { path = "../Editor/crates/editor-keyflow" }
+editor-state = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-syntax = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-view = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-vim = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-typst = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-mermaid = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-keyflow = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
 # Byte-offset `Changes` ⇄ scalar `TextOp` adapter for the CRDT
 # host (the vault page's collaborative editing path). Wasm-clean.
-editor-crdt = { path = "../Editor/crates/editor-crdt" }
-editor = { path = "../Editor/crates/editor" }
+editor-crdt = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
 
 # Keyflow's engraver, CPU-only `svg` tier (no wgpu/vello/PDF) — the
 # editor renders ```kf``` fences to inline SVG client-side. The `svg`
 # feature is selected per-consumer in `editor-keyflow`.
-engraver = { path = "../FastTrackStudio/keyflow/crates/engraver", default-features = false }
+engraver = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", rev = "b45a62025d4369381d43ceaac074916966bd3cc2", default-features = false }
 
 # Deps the editor's inner crates inherit via `workspace = true`.
 # `serde`, `serde_json` are already declared elsewhere in the
@@ -528,12 +528,12 @@ inbox-proto = { path = "features/inbox/inbox-proto", default-features = false }
 # General app-state persistence. Capability sub-traits
 # (`KvStore` / `LogStore`) so any feature can mount any backend.
 store-proto = { path = "crates/store-proto", default-features = false }
-architect-auth = { path = "../architect/features/auth/architect-auth" }
+architect-auth = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92" }
 # Wire contract for architect-auth — `AuthServiceClient` + the session
 # bundle types. wasm-clean with just the `vox` feature (uuid `js` flows
 # from architect), so the web UI drives the real sign-in flow over the
 # per-org endpoint.
-auth-proto = { path = "../architect/features/auth/auth-proto", default-features = false }
+auth-proto = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92", default-features = false }
 
 # Git feature — issue + PR workflow on top of forges
 # (GitHub now, Forgejo next). `git-proto` is the wire
@@ -567,7 +567,7 @@ nucleo-matcher = "0.3"
 # + `lucide_dioxus`. The `crates/* -> features/*` refactor moved fts-ui-core
 # behind this flag, so `default-features = false` alone strips the whole
 # design system. Opt `core` back in explicitly.
-fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui", default-features = false, features = ["core"] }
+fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", rev = "1c62b19e95577f95d810f0285fec9753d837e16b", default-features = false, features = ["core"] }
 
 # Ordered-map for round-trippable frontmatter key preservation
 # (needed by knowledge-proto's obsidian helpers).
@@ -603,7 +603,8 @@ version = "0.46"
 version = "0.46"
 
 [workspace.dependencies.keyflow]
-path = "../FastTrackStudio/keyflow/crates/keyflow"
+git = "https://codeberg.org/FastTrackStudios/keyflow.git"
+rev = "b45a62025d4369381d43ceaac074916966bd3cc2"
 
 [workspace.dependencies.lumen-blocks]
 git = "https://github.com/Leaf-Computer/lumen-blocks.git"
@@ -705,10 +706,12 @@ path = "crates/ui"
 # CRDT lib + SeaORM persistence — path deps pointing at architect's
 # in-repo libs. Same rev as the architect/macros/architect dep below.
 [workspace.dependencies.crdt]
-path = "../architect/libs/crdt"
+git = "https://codeberg.org/FastTrackStudios/architect.git"
+rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92"
 
 [workspace.dependencies.crdt-seaorm]
-path = "../architect/libs/crdt-seaorm"
+git = "https://codeberg.org/FastTrackStudios/architect.git"
+rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92"
 
 [workspace.dependencies.serde]
 version = "1"
@@ -922,17 +925,13 @@ inherits = "dev"
 debug = false
 strip = "debuginfo"
 
-# Use the local FastTrackStudio input_actions checkout during development so
-# dependent crates share the same updated vox/facet stack. The codeberg
-# variant is the live source (daw-proto → keyflow → editor reach
-# actions-proto through it on `branch=main`); without folding it to the
-# local checkout, that branch drags in the old vox 0.5.0 which collides
-# with the 0.8.2 the rest of the graph uses.
-[patch."https://github.com/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
-
+# keyflow @ b45a620 requests actions-proto from codeberg input_actions.git on
+# `branch=main`, whose tip pins a vox rev that splits the graph. Cargo forbids
+# patching a source to the SAME source, so we redirect to the FTS-owned GitHub
+# mirror at the rev whose workspace targets vox @ 30ef2ffe. Same content, the
+# only rev unification cargo will accept for a same-repo transitive pin.
 [patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
+actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", rev = "8018e6d514ae1b4e5cac673273290dac92a73a10" }
 
 # Unify vox onto a single source. `architect` (../architect) pins vox at
 # the codeberg fork (rev 30ef2ffe — matching architect's current pin, which
@@ -960,28 +959,15 @@ vox-types          = { git = "https://codeberg.org/FastTrackStudios/vox.git", re
 vox-websocket      = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
 facet-cbor         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
 
-# daw-proto reaches actions-proto through the starcommand host (not the
-# github mirror above), so redirect that source to the same local checkout.
-# The local input_actions now targets bearcove vox, which the bearcove
-# patch below folds into the single local vox — killing the old vox 0.5.0
-# that otherwise collides with 0.8.2 across the graph.
-[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
-
-# keyflow-proto pulls daw-proto (for its timing primitives) from the daw
-# git source. Redirect to the local checkout so daw-proto's runtime-only
-# vox profile applies — otherwise the git daw-proto requests vox's full
+# keyflow @ b45a620 pulls daw-proto (for its timing primitives) from codeberg
+# daw.git on `branch=main`, whose tip pins a vox rev that splits the graph.
+# Cargo forbids patching a source to the SAME source, so redirect to the
+# FTS-owned GitHub mirror at the daw rev (f2902b9) whose workspace targets
+# vox @ 30ef2ffe. This also gives daw-proto its runtime-only (wasm-friendly)
+# vox profile — otherwise an unpinned daw-proto requests vox's full
 # (tokio-net) features and the editor's wasm build can't link mio.
-[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
-daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
-
-# Current keyflow main pulls daw-proto from the codeberg daw mirror,
-# whose main still pins vox @ f31f1040 — incompatible with the
-# 30ef2ffe rev architect (and this workspace) now unify on. Redirect
-# to the local checkout, whose vox pins are bumped to 30ef2ffe, until
-# the daw repo's pins move on the remote.
 [patch."https://codeberg.org/FastTrackStudios/daw.git"]
-daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
+daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", rev = "f2902b98527755609797437d2a3f93ea95341f3b" }
 
 # keyflow still declares color-palette / music-catalog from the starcommand
 # dynamic-template host (branch = main). Redirect that source to the codeberg
@@ -1010,7 +996,8 @@ moire-wasm        = { git = "https://codeberg.org/FastTrackStudios/moire", rev =
 moire-wire        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
 
 [workspace.dependencies.architect]
-path = "../architect/macros/architect"
+git = "https://codeberg.org/FastTrackStudios/architect.git"
+rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92"
 
 [workspace.dependencies.printpdf]
 version = "0.7"
@@ -1039,8 +1026,11 @@ rev = "d01afa40d79227a4a2de85b50e76849300890766"
 # its layout pipeline, which panics on `wasm32-unknown-unknown`.
 # Our fork swaps that for `web_time::Instant` so editor-mermaid
 # can render diagrams in the browser. Lives in the Editor repo at
-# `../Editor/vendor/mermaid-rs-renderer`. `[patch]` only applies
-# from the build-root workspace, so Task carries this itself even
-# though Editor declares the same patch internally.
+# `vendor/mermaid-rs-renderer`. `[patch]` only applies from the
+# build-root workspace, so Task carries this itself even though Editor
+# declares the same patch internally. Pinned to the same Editor rev as
+# the editor-* deps above; cargo locates the `mermaid-rs-renderer`
+# package inside the repo by name.
 [patch.crates-io.mermaid-rs-renderer]
-path = "../Editor/vendor/mermaid-rs-renderer"
+git = "https://codeberg.org/FastTrackStudios/Editor.git"
+rev = "413b08fb42c1a97b27bdd6488542a660718f3cce"
