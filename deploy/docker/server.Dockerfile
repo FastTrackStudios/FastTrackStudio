@@ -1,20 +1,17 @@
 # task-server — multi-stage build.
 #
-# IMPORTANT — build context layout. The Task workspace path-depends on
-# sibling repos (`../Editor`, `../architect`, `../FastTrackStudio/*`),
-# so the context for this Dockerfile is NOT the repo root: it is a
-# directory that contains Task plus the siblings. Assemble it with:
+# Build context is the Task repo root (no sibling assembly):
 #
-#   deploy/docker/siblings.sh context /tmp/task-build-ctx
 #   docker build \
-#     -f /tmp/task-build-ctx/Task/deploy/docker/server.Dockerfile \
+#     -f deploy/docker/server.Dockerfile \
 #     -t codeberg.org/fasttrackstudios/task-server:dev \
-#     /tmp/task-build-ctx
+#     .
 #
-# The script prefers local sibling checkouts and falls back to cloning
-# the pins in deploy/docker/siblings.lock. Cargo additionally fetches
-# the [patch] git deps (vox / moire / dynamic-template on Codeberg) at
-# build time — network access is required in the builder stage.
+# Every formerly-sibling dependency (architect / Editor / fts-ui / daw /
+# input_actions / keyflow) is a rev-pinned Codeberg git dep, and cargo
+# fetches them — along with the [patch] git deps (vox / moire /
+# dynamic-template) — at build time. Network access is required in the
+# builder stage.
 #
 # Features: the default `task-server` feature set is what production
 # wants. Do NOT enable whisper / pdf extras here — they drag native
@@ -29,16 +26,16 @@ RUN apt-get update \
         git pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /build/Task
+WORKDIR /build
 
-# Whole-context copy: Task + sibling repos, preserving the ../ layout
-# the workspace manifests expect.
+# Copy just the Task repo. Cargo resolves all sibling crates from their
+# pinned Codeberg git revs over the network.
 COPY . /build/
 
 # Cache mounts keep the registry + git db + target dir across builds.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/build/Task/target \
+    --mount=type=cache,target=/build/target \
     cargo build --release -p task-server \
     && cp target/release/task-server /usr/local/bin/task-server
 

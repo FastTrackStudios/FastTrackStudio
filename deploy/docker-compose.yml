@@ -11,8 +11,8 @@
 #
 # Images: pull from the Codeberg registry (tags: latest / dev /
 # sha-<short>) or build locally — see deploy/docker/*.Dockerfile
-# headers for build commands (the server build needs the sibling
-# checkouts; deploy/docker/siblings.sh assembles the context).
+# headers for build commands (the server build context is the repo
+# root; cargo fetches every git dep itself).
 
 services:
   server:

@@ -13,10 +13,9 @@
 #     docker-only sandbox for org repos; see the runner's nix config).
 #   * `nix` is available for the dev-shell wasm build, `docker` (with
 #     buildx/BuildKit) for image builds + pushes.
-#   * The workspace path-depends on sibling repos; the clone step
-#     materializes them NEXT TO the checkout from the pins in
-#     deploy/docker/siblings.lock. If a pin is not pushed to its
-#     remote yet the build fails fast there — push the sibling first.
+#   * Every formerly-sibling dependency is a rev-pinned Codeberg git
+#     dep; cargo fetches them itself, so there is no sibling-checkout
+#     step. The build needs network access to fetch git deps.
 #   * Secrets REGISTRY_USER / REGISTRY_TOKEN must be set in the repo's
 #     Actions secrets: a Codeberg user (or org bot) + an access token
 #     with package:write scope.
@@ -28,52 +27,10 @@ on:
 jobs:
   images:
     runs-on: nix-host
-    # This runs on a SELF-HOSTED runner that already holds working
-    # copies of Task + every sibling repo. Pointing the checkout +
-    # sibling steps at those local repos makes the build offline and
-    # immune to the forge's intermittent git-transfer resets. The remote
-    # clone stays as the fallback (and the path for any other runner).
-    env:
-      SIBLINGS_LOCAL_ROOT: /run/media/Development
-      TASK_LOCAL_REPO: /run/media/Development/Task
     steps:
-      # Checkout from the local repo when it has the triggering commit
-      # (offline, instant); otherwise a retried shallow clone from the
-      # forge — actions/checkout@v4 has no internal retry and codeberg
-      # intermittently resets packfile transfers.
-      - name: Checkout
-        run: |
-          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          branch="${GITHUB_REF_NAME:-dev}"
-          sha="${GITHUB_SHA:-}"
-          if [ -n "$TASK_LOCAL_REPO" ] && [ -d "$TASK_LOCAL_REPO/.git" ] \
-              && [ -n "$sha" ] \
-              && git -C "$TASK_LOCAL_REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
-            echo "local checkout @ ${sha} (from $TASK_LOCAL_REPO)"
-            git clone --quiet "$TASK_LOCAL_REPO" .
-            git checkout --quiet --detach "$sha"
-          else
-            attempt=1
-            until git clone --depth 1 --no-tags --branch "$branch" "$url" .; do
-              [ "$attempt" -ge 8 ] && { echo "clone failed after 8 attempts"; exit 1; }
-              echo "clone attempt $attempt failed — retrying in 15s"
-              find . -mindepth 1 -delete 2>/dev/null || true
-              attempt=$((attempt + 1)); sleep 15
-            done
-            if [ -n "$sha" ] && [ "$(git rev-parse HEAD)" != "$sha" ]; then
-              attempt=1
-              until git fetch --depth 1 --no-tags origin "$sha"; do
-                [ "$attempt" -ge 8 ] && { echo "fetch sha failed"; exit 1; }
-                echo "fetch attempt $attempt failed — retrying in 15s"
-                attempt=$((attempt + 1)); sleep 15
-              done
-              git checkout --detach "$sha"
-            fi
-          fi
-          echo "checked out $(git rev-parse --short HEAD)"
-
-      - name: Sibling checkouts (workspace path deps)
-        run: bash deploy/docker/siblings.sh clone "$(dirname "$PWD")"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Compute tags
         id: tags
@@ -128,14 +85,11 @@ jobs:
 
       - name: Build + push task-server
         run: |
-          ctx="$(mktemp -d)"
-          bash deploy/docker/siblings.sh context "$ctx"
           docker buildx build --network=host --push \
-            -f "$ctx/Task/deploy/docker/server.Dockerfile" \
+            -f deploy/docker/server.Dockerfile \
             -t codeberg.org/fasttrackstudios/task-server:${{ steps.tags.outputs.channel }} \
             -t codeberg.org/fasttrackstudios/task-server:${{ steps.tags.outputs.sha }} \
-            "$ctx"
-          rm -rf "$ctx"
+            .
 
       - name: Build + push task-web
         run: |

@@ -1,8 +1,8 @@
 # task-web — static nginx image around a prebuilt dx web bundle.
 #
 # Artifact-copy style: the wasm build happens OUTSIDE docker (it needs
-# the repo's nix dev shell + the sibling checkouts), then the bundle is
-# staged into this directory and copied in. From the repo root:
+# the repo's nix dev shell; cargo fetches every git dep itself), then the
+# bundle is staged into this directory and copied in. From the repo root:
 #
 #   # 1. build the bundle WITHOUT TASK_VOX_URL_WEB so the app derives
 #   #    its vox URL same-origin from window.location at runtime
