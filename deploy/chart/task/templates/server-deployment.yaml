@@ -49,6 +49,29 @@ spec:
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- if .Values.backup.git.enabled }}
+            # Server-native git snapshots: the server runs the
+            # snapshot/push cycle itself (POST /server/snapshot +
+            # the SnapshotService verbs at /server/vox). The backup
+            # secret's GIT_USER/GIT_TOKEN map through to the
+            # TASK_BACKUP_* names the server reads.
+            - name: TASK_BACKUP_REMOTE_BASE
+              value: {{ .Values.backup.git.remoteBase | quote }}
+            - name: TASK_BACKUP_FULL_REPO
+              value: {{ .Values.backup.git.fullRepo | quote }}
+            - name: TASK_BACKUP_ORG_REPO_PREFIX
+              value: {{ .Values.backup.git.orgRepoPrefix | quote }}
+            - name: TASK_BACKUP_GIT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "backup.git.existingSecret is required (GIT_USER + GIT_TOKEN)" .Values.backup.git.existingSecret }}
+                  key: GIT_USER
+            - name: TASK_BACKUP_GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backup.git.existingSecret }}
+                  key: GIT_TOKEN
+            {{- end }}
           {{- with .Values.server.existingSecret }}
           envFrom:
             - secretRef:

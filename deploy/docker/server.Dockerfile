@@ -45,9 +45,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # ── runtime ─────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
+# git: the server-native snapshot engine (org-snapshot) shells out to
+# it for the /server/snapshot cycle + the SnapshotService verbs.
+# curl: healthcheck below + the engine's Forgejo remote auto-create.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates libssl3 curl \
+        ca-certificates libssl3 curl git \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/task task \
     && mkdir -p /data && chown task:task /data
@@ -76,6 +79,11 @@ COPY --from=builder /usr/local/bin/task-server /usr/local/bin/task-server
 #   TASK_FORGE_POLL_SECS  forge-sync poll interval
 #   HERMES_BASE_URL / HERMES_SESSION_TOKEN / HERMES_DEFAULT_BOARD /
 #   HERMES_DEFAULT_PROFILE / HERMES_WEBHOOK_SECRET
+# Server-native git snapshots (snapshot verbs always work locally;
+# these add the push target + enable POST /server/snapshot):
+#   TASK_BACKUP_REMOTE_BASE   https://<forge-host>/<owner>
+#   TASK_BACKUP_GIT_USER / TASK_BACKUP_GIT_TOKEN
+#   TASK_BACKUP_FULL_REPO (task-data) / TASK_BACKUP_ORG_REPO_PREFIX (task-org-)
 # Path overrides (rarely needed — default under TASK_DATA_ROOT):
 #   TASK_SERVER_VAULT_ROOT / TASK_SERVER_CRDT_ROOT /
 #   TASK_SERVER_WIKI_ROOT / TASK_SERVER_MAIL_ROOT

@@ -170,8 +170,60 @@ instance from scratch; lose it and it's gone. The chart marks the PVC
 `helm.sh/resource-policy: keep` so `helm uninstall` does not take your data
 with it.
 
-Prefer a cold copy (stop the server first) or a filesystem-level snapshot —
-sqlite files are not safe to `cp` mid-write.
+### Server-native git snapshots
+
+The server snapshots itself — `backup.git.*` in the chart turns it on.
+A snapshot cycle (the `org-snapshot` engine inside task-server):
+
+1. **quiesce** — a global write gate parks new vox requests at dispatch
+   entry;
+2. **checkpoint** — `PRAGMA wal_checkpoint(TRUNCATE)` on every open
+   sqlite pool (the server runs its sqlites in WAL mode), so each main
+   `.sqlite` file is complete and **consistent** — this is the
+   consistency story the old CronJob script could only approximate with
+   live file copies;
+3. **commit** — detached git dirs under `/data/.gitstate/`: one repo per
+   org (`orgs/<slug>` → `<orgRepoPrefix><slug>`, continuing any
+   pre-existing vault history — repos are never re-inited) plus a
+   full-state repo (`/data` minus `.gitstate/`, `lost+found/`, sqlite
+   WAL sidecars → `fullRepo`); stray embedded `.git` dirs are
+   de-gitlinked, clean trees skip the commit;
+4. **release + push** — the gate reopens before the network part; remote
+   repos are auto-created (private) via the Forgejo API on first push,
+   pushes are plain fast-forwards, never `--force`.
+
+The chart's CronJob is now just a scheduler: it POSTs
+`/server/snapshot` on the server service with
+`Authorization: Bearer <GIT_TOKEN>` (the same `existingSecret` the
+server gets as `TASK_BACKUP_GIT_TOKEN`). If the running image predates
+the endpoint the job fails with a clear upgrade hint instead of
+silently doing nothing.
+
+On-demand admin verbs (over `<server>/server/vox`, same connection
+style as `task org create`):
+
+```sh
+task admin snapshot                 # run a cycle now
+task admin log [--limit N]          # recent snapshot commits (full repo)
+task admin branch <name>            # branch the data at HEAD (and push)
+task admin restore <commit> --yes   # roll the data root back
+```
+
+`restore` checks out the commit over `/data` via the full-state repo
+(taking a rescue snapshot first unless `--force`), deletes stale sqlite
+WAL sidecars, then **exits the server process** — k8s/systemd restart it
+on the restored data. Local dev runs must restart `task-server` by
+hand. Roll *forward* again by restoring the rescue commit.
+
+**Future direction — storage backends beyond a forge.** The push target
+is deliberately one narrow function (`SnapshotEngine::push` in
+`features/org/org-snapshot`): today it speaks git-over-https with
+Forgejo auto-create, or a plain directory of bare repos (NAS mount).
+A Nextcloud / WebDAV / rclone-style remote slots in behind that same
+function without touching the snapshot machinery.
+
+A periodic filesystem-level snapshot of the PVC remains a fine
+belt-and-braces layer on top.
 
 ## Upgrades
 

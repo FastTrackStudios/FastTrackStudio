@@ -80,6 +80,12 @@ intake = { workspace = true, features = ["vox"] }
 # and routes all its sqlites + vault through OrgRoot. PR 4
 # will scan + serve every org under <data_root>/orgs/.
 org-proto = { workspace = true }
+# Server-native git snapshots over the data root — the engine
+# behind the `SnapshotService` verbs + `POST /server/snapshot`.
+org-snapshot = { workspace = true }
+# `GatedRouter`'s `vox::Handler` impl names `facet::Shape` in a
+# method signature.
+facet = { workspace = true }
 timer-proto = { workspace = true, features = ["server", "vox"] }
 timer = { workspace = true }
 threads = { workspace = true, features = ["server", "vox"] }

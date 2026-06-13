@@ -285,6 +285,11 @@ task-ui = { path = "features/task/task-ui" }
 # `id:` UUID, not the file path.
 project = { path = "features/project/project" }
 org-proto = { path = "features/org/org-proto" }
+# Server-native git snapshot engine over the data root — the
+# in-process replacement for the chart's CronJob git script.
+# Same detached-git-dir layout (`<data_root>/.gitstate/`) the
+# script established, so production histories continue.
+org-snapshot = { path = "features/org/org-snapshot" }
 # Timer feature — billable time tracking modeled on SolidTime.
 # `timer-proto` is the wire contract (Client / WorkSession /
 # Tag / Rate entities, `TimerService` slim trait for active-
