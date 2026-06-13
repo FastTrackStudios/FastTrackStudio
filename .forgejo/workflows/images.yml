@@ -106,11 +106,16 @@ jobs:
           rm -rf deploy/docker/ui-lab-dist
           cp -r ui-lab/dist deploy/docker/ui-lab-dist
 
-      # No registry login — the in-cluster registry on the LAN
-      # (REGISTRY env) is unauthenticated and trusted as insecure by
-      # this host's docker daemon, so plain `docker build`/`push`
-      # works. --network=host gives the server build host DNS to fetch
-      # the cargo git deps from codeberg during the Docker build.
+      # No registry login — the in-cluster registry on the LAN is
+      # unauthenticated and trusted as insecure by this host's docker
+      # daemon, so plain `docker build`/`push` works. --network=host
+      # gives the server build host DNS to fetch the cargo git deps
+      # during the Docker build.
+      - name: Use the default (daemon) builder
+        # A leftover docker-container buildx builder from the old setup
+        # refuses the network.host entitlement; the default `docker`
+        # driver (the daemon itself) allows host networking natively.
+        run: docker buildx use default
 
       - name: Build + push task-server
         run: |
