@@ -11546,6 +11546,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "org-snapshot"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "org-proto",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "ouroboros"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15587,6 +15600,7 @@ dependencies = [
  "email-proto",
  "exercises",
  "eyre",
+ "facet",
  "finance",
  "finance-db",
  "finance-proto",
@@ -15605,6 +15619,7 @@ dependencies = [
  "mealplan",
  "milestone",
  "org-proto",
+ "org-snapshot",
  "pantry",
  "project",
  "rand 0.8.6",
