@@ -11,9 +11,7 @@ deploy/
 │   ├── web.Dockerfile       nginx around a prebuilt dx wasm bundle
 │   ├── ui-lab.Dockerfile    nginx around the ui-lab vite dist
 │   ├── web-nginx.conf       SPA fallback, wasm mime, cache headers
-│   ├── ui-lab-nginx.conf
-│   ├── siblings.lock        pinned sibling-repo revisions (see below)
-│   └── siblings.sh          materializes the sibling checkouts
+│   └── ui-lab-nginx.conf
 └── chart/
     ├── task/                Helm 3 chart (generic defaults)
     ├── values-dev.yaml      EXAMPLE: the starcommand dev env
@@ -110,15 +108,13 @@ On starcommand specifically, ArgoCD watches this repo: `dev` branch +
 
 ## Building the images yourself
 
-**Server** — the workspace path-depends on sibling repos (`../Editor`,
-`../architect`, `../FastTrackStudio/*`), so the docker context is assembled
-first (pins in `deploy/docker/siblings.lock`; local checkouts win when
-present):
+**Server** — every formerly-sibling crate (architect / Editor / fts-ui /
+daw / input_actions / keyflow) is a rev-pinned Codeberg git dependency,
+so the docker context is just the repo root and cargo fetches the deps
+itself at build time (the builder stage needs network access):
 
 ```sh
-deploy/docker/siblings.sh context /tmp/task-ctx
-docker build -f /tmp/task-ctx/Task/deploy/docker/server.Dockerfile \
-  -t task-server:local /tmp/task-ctx
+docker build -f deploy/docker/server.Dockerfile -t task-server:local .
 ```
 
 **Web** — build the bundle in the repo's nix dev shell, *without*
