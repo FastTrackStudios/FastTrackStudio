@@ -88,37 +88,47 @@ jobs:
       #
       # For each image: build the streamLayeredImage executable, run it
       # to stream a docker-archive to stdout, and pipe that into skopeo,
-      # which copies it to the insecure plain-HTTP registry under both
-      # the channel tag (dev/latest) and the immutable sha-<short> tag.
+      # which copies it to the insecure plain-HTTP registry under the
+      # channel tag (dev/latest). Then a cheap registry-to-registry
+      # `skopeo copy` re-tags that same digest as the immutable
+      # sha-<short> tag.
+      #
+      # (`--additional-tag` is NOT used: for a docker:// destination it
+      # only names the source archive, so the extra tag never lands in
+      # the registry — hence the explicit second copy.)
       #
       # `nix build .#<image>` yields the streamer script in $out (it is
-      # the default output, runnable directly). We --print-out-paths it,
-      # execute it, and a single skopeo `copy` reads the archive once and
-      # writes both tags in one shot via additional-tag.
+      # the default output, runnable directly).
 
       - name: Push task-server
         run: |
           streamer="$(nix build .#task-server-image --no-link --print-out-paths)"
           "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --dest-tls-verify=false \
-            --additional-tag "task-server:${{ steps.tags.outputs.sha }}" \
-            docker-archive:/dev/stdin \
+            --dest-tls-verify=false docker-archive:/dev/stdin \
             "docker://${REGISTRY}/task-server:${{ steps.tags.outputs.channel }}"
+          nix run nixpkgs#skopeo -- --insecure-policy copy \
+            --src-tls-verify=false --dest-tls-verify=false \
+            "docker://${REGISTRY}/task-server:${{ steps.tags.outputs.channel }}" \
+            "docker://${REGISTRY}/task-server:${{ steps.tags.outputs.sha }}"
 
       - name: Push task-web
         run: |
           streamer="$(nix build .#task-web-image --no-link --print-out-paths)"
           "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --dest-tls-verify=false \
-            --additional-tag "task-web:${{ steps.tags.outputs.sha }}" \
-            docker-archive:/dev/stdin \
+            --dest-tls-verify=false docker-archive:/dev/stdin \
             "docker://${REGISTRY}/task-web:${{ steps.tags.outputs.channel }}"
+          nix run nixpkgs#skopeo -- --insecure-policy copy \
+            --src-tls-verify=false --dest-tls-verify=false \
+            "docker://${REGISTRY}/task-web:${{ steps.tags.outputs.channel }}" \
+            "docker://${REGISTRY}/task-web:${{ steps.tags.outputs.sha }}"
 
       - name: Push task-ui-lab
         run: |
           streamer="$(nix build .#task-ui-lab-image --no-link --print-out-paths)"
           "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
-            --dest-tls-verify=false \
-            --additional-tag "task-ui-lab:${{ steps.tags.outputs.sha }}" \
-            docker-archive:/dev/stdin \
+            --dest-tls-verify=false docker-archive:/dev/stdin \
             "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.channel }}"
+          nix run nixpkgs#skopeo -- --insecure-policy copy \
+            --src-tls-verify=false --dest-tls-verify=false \
+            "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.channel }}" \
+            "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.sha }}"
