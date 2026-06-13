@@ -790,12 +790,12 @@ rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.sea-orm]
 git = "https://github.com/FastTrackStudios/sea-orm"
-rev = "d01afa40d79227a4a2de85b50e76849300890766"
+rev = "5075dcaa5a3d0a6d7fba46abc00cb93cf916dd30"
 features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-chrono", "with-uuid", "with-json", "facet"]
 
 [workspace.dependencies.sea-orm-migration]
 git = "https://github.com/FastTrackStudios/sea-orm"
-rev = "d01afa40d79227a4a2de85b50e76849300890766"
+rev = "5075dcaa5a3d0a6d7fba46abc00cb93cf916dd30"
 
 [workspace.dependencies.crudcrate]
 git = "https://github.com/FastTrackStudios/crudcrate"
@@ -1015,22 +1015,24 @@ features = ["derive", "uuid", "chrono"]
 # RepoStorage type would be incompatible with our DatabaseConnection.
 [patch.crates-io.sea-orm]
 git = "https://github.com/FastTrackStudios/sea-orm"
-rev = "d01afa40d79227a4a2de85b50e76849300890766"
+rev = "5075dcaa5a3d0a6d7fba46abc00cb93cf916dd30"
 
 [patch.crates-io.sea-orm-migration]
 git = "https://github.com/FastTrackStudios/sea-orm"
-rev = "d01afa40d79227a4a2de85b50e76849300890766"
+rev = "5075dcaa5a3d0a6d7fba46abc00cb93cf916dd30"
 
-# Vendored fork of `mermaid-rs-renderer` 0.2.2 — the upstream
-# crate calls `std::time::Instant::now()` unconditionally from
-# its layout pipeline, which panics on `wasm32-unknown-unknown`.
-# Our fork swaps that for `web_time::Instant` so editor-mermaid
-# can render diagrams in the browser. Lives in the Editor repo at
-# `vendor/mermaid-rs-renderer`. `[patch]` only applies from the
-# build-root workspace, so Task carries this itself even though Editor
-# declares the same patch internally. Pinned to the same Editor rev as
-# the editor-* deps above; cargo locates the `mermaid-rs-renderer`
-# package inside the repo by name.
+# Fork of `mermaid-rs-renderer` 0.2.2 — the upstream crate calls
+# `std::time::Instant::now()` unconditionally from its layout
+# pipeline, which panics on `wasm32-unknown-unknown`. Our fork swaps
+# that for `web_time::Instant` so editor-mermaid can render diagrams
+# in the browser.
+#
+# Extracted to its own repo (was `Editor/vendor/mermaid-rs-renderer`,
+# a NON-member subdir of Editor.git). Regular `cargo build` could
+# locate the package inside Editor by name, but crane's offline
+# vendoring cannot resolve a `[patch]` git source that isn't a real
+# workspace member — so it lives standalone now. The crate is fully
+# self-contained (no path deps), so this is a clean lift.
 [patch.crates-io.mermaid-rs-renderer]
-git = "https://codeberg.org/FastTrackStudios/Editor.git"
-rev = "413b08fb42c1a97b27bdd6488542a660718f3cce"
+git = "https://codeberg.org/FastTrackStudios/mermaid-rs-renderer.git"
+rev = "6033d0a05b90875bde3d55ab9278bbc2ec54ca8d"
