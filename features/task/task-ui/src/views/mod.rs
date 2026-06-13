@@ -15,17 +15,17 @@ mod time;
 mod workflow;
 
 pub use detail_full::{
-    resolve_links, short_id, ClaimState, LinkedTaskRef, SubtaskRow, TaskDetailFull,
-    TaskDetailFullProps,
+    ClaimState, LinkedTaskRef, SubtaskRow, TaskDetailFull, TaskDetailFullProps, resolve_links,
+    short_id,
 };
 pub use links::{LinkChips, LinkChipsProps};
 pub use session_history::{
-    activity_label, merge_session_events, payload_preview, SessionEvent, SessionHistory,
-    SessionHistoryProps,
+    SessionEvent, SessionHistory, SessionHistoryProps, activity_label, merge_session_events,
+    payload_preview,
 };
-pub use subtasks::{subtask_summary, SubtasksBoard, SubtasksBoardProps};
+pub use subtasks::{SubtasksBoard, SubtasksBoardProps, subtask_summary};
 pub use tasks_app::{TasksApp, TasksAppProps};
 pub use time::{
-    format_minutes, recurrence_summary, sum_logged_minutes, TimeSection, TimeSectionProps,
+    TimeSection, TimeSectionProps, format_minutes, recurrence_summary, sum_logged_minutes,
 };
-pub use workflow::{estimate_label, WorkflowSection, WorkflowSectionProps};
+pub use workflow::{WorkflowSection, WorkflowSectionProps, estimate_label};

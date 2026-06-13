@@ -26,16 +26,17 @@ use crate::validate::validate_cook;
 /// Synthesize a `.cook` source without any LLM. Infallible.
 #[must_use]
 pub fn synthesize_heuristic(recipe: &NormalizedRecipe) -> String {
-    let parsed: Vec<ParsedIngredient> =
-        recipe.ingredients.iter().map(|l| parse_line(l)).collect();
+    let parsed: Vec<ParsedIngredient> = recipe.ingredients.iter().map(|l| parse_line(l)).collect();
     let steps: Vec<String> = recipe.steps.iter().map(|s| sanitize_step(s)).collect();
 
     let (annotated_steps, unmatched) = weave(&steps, &parsed);
 
     let mut body = annotated_steps.join("\n\n");
     if !unmatched.is_empty() {
-        let list: Vec<String> =
-            unmatched.iter().map(|i| format!("@{}{}", i.safe_name(), i.amount_token())).collect();
+        let list: Vec<String> = unmatched
+            .iter()
+            .map(|i| format!("@{}{}", i.safe_name(), i.amount_token()))
+            .collect();
         body.push_str(&format!(
             "\n\nTODO (import review): place these unmatched ingredients where they belong — {}.",
             list.join(", ")
@@ -51,8 +52,10 @@ pub fn synthesize_heuristic(recipe: &NormalizedRecipe) -> String {
     // plus one gather-step carrying every ingredient annotation.
     tracing::warn!("heuristic cooklang failed validation; falling back to plain rendering");
     let plain_steps: Vec<String> = recipe.steps.iter().map(|s| sanitize_hard(s)).collect();
-    let list: Vec<String> =
-        parsed.iter().map(|i| format!("@{}{}", i.safe_name(), i.amount_token())).collect();
+    let list: Vec<String> = parsed
+        .iter()
+        .map(|i| format!("@{}{}", i.safe_name(), i.amount_token()))
+        .collect();
     let fallback = format!(
         "---\n{}---\n\nGather the ingredients: {}.\n\n{}\n",
         frontmatter(recipe),
@@ -100,7 +103,11 @@ fn parse_line(line: &str) -> ParsedIngredient {
     let cleaned = strip_parens(line);
     let ing = ingredient::from_str(&cleaned);
     let name = ing.name.split_whitespace().collect::<Vec<_>>().join(" ");
-    let name = if name.is_empty() { cleaned.trim().to_string() } else { name };
+    let name = if name.is_empty() {
+        cleaned.trim().to_string()
+    } else {
+        name
+    };
 
     let amount = ing.amounts.first().map_or_else(String::new, |m| {
         let (value, upper) = m.values();
@@ -113,7 +120,10 @@ fn parse_line(line: &str) -> ParsedIngredient {
             None => qty,
         }
     });
-    ParsedIngredient { name, amount: format!("{{{amount}}}") }
+    ParsedIngredient {
+        name,
+        amount: format!("{{{amount}}}"),
+    }
 }
 
 /// Render the `ingredient` crate's unit as a cooklang-friendly short
@@ -177,7 +187,9 @@ fn weave<'a>(
         'candidates: for cand in candidates(&ing.name) {
             for (step_idx, step) in steps.iter().enumerate() {
                 if let Some(range) = find_word(step, &cand, |r| {
-                    !claims.iter().any(|(s, c, _)| *s == step_idx && overlaps(c, r))
+                    !claims
+                        .iter()
+                        .any(|(s, c, _)| *s == step_idx && overlaps(c, r))
                 }) {
                     claims.push((step_idx, range, ing_idx));
                     found = true;
@@ -237,7 +249,9 @@ fn candidates(name: &str) -> Vec<String> {
         push(singular);
     }
     for w in &words {
-        let w = w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+        let w = w
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
         if w.len() >= 4 && !STOPWORDS.contains(&w.as_str()) {
             let singular = w.strip_suffix('s').unwrap_or(&w).to_string();
             push(w.clone());
@@ -250,10 +264,42 @@ fn candidates(name: &str) -> Vec<String> {
 /// Words too generic (units, prep adjectives, glue) to identify an
 /// ingredient on their own in the word-level fallback.
 const STOPWORDS: [&str; 36] = [
-    "with", "from", "into", "over", "plus", "more", "optional", "taste", "fresh", "frozen",
-    "cold", "warm", "room", "temperature", "large", "small", "medium", "extra", "finely",
-    "coarsely", "grated", "chopped", "minced", "sliced", "diced", "melted", "softened",
-    "unsalted", "salted", "ground", "whole", "light", "dark", "heavy", "divided", "packed",
+    "with",
+    "from",
+    "into",
+    "over",
+    "plus",
+    "more",
+    "optional",
+    "taste",
+    "fresh",
+    "frozen",
+    "cold",
+    "warm",
+    "room",
+    "temperature",
+    "large",
+    "small",
+    "medium",
+    "extra",
+    "finely",
+    "coarsely",
+    "grated",
+    "chopped",
+    "minced",
+    "sliced",
+    "diced",
+    "melted",
+    "softened",
+    "unsalted",
+    "salted",
+    "ground",
+    "whole",
+    "light",
+    "dark",
+    "heavy",
+    "divided",
+    "packed",
 ];
 
 /// Drop `( … )` groups (non-nested is all recipes use).
@@ -289,9 +335,15 @@ fn find_word(
             && haystack.is_char_boundary(end)
             && haystack[start..end].eq_ignore_ascii_case(needle);
         let before_ok = start == 0
-            || haystack[..start].chars().next_back().is_some_and(|c| !c.is_alphanumeric());
-        let after_ok =
-            end >= haystack.len() || haystack[end..].chars().next().is_some_and(|c| !c.is_alphanumeric());
+            || haystack[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|c| !c.is_alphanumeric());
+        let after_ok = end >= haystack.len()
+            || haystack[end..]
+                .chars()
+                .next()
+                .is_some_and(|c| !c.is_alphanumeric());
         let range = start..end;
         if boundary_ok && before_ok && after_ok && free(&range) {
             return Some(range);
@@ -325,7 +377,9 @@ fn sanitize_step(s: &str) -> String {
         .collect();
     // `>` / `=` / `[` only matter at line starts; steps are single
     // lines, so trim them off the front.
-    s.trim_start_matches(['>', '=', '[', ' ']).trim().to_string()
+    s.trim_start_matches(['>', '=', '[', ' '])
+        .trim()
+        .to_string()
 }
 
 /// Even stricter: also drop braces/brackets entirely (used inside
@@ -444,7 +498,10 @@ mod tests {
         let src = synthesize_heuristic(&banana_bread());
         // bananas matched once, with the count.
         assert_eq!(src.matches("@banana").count(), 1, "{src}");
-        assert!(src.contains("@flour{1.5%cup") || src.contains("@flour{1.5%cups"), "{src}");
+        assert!(
+            src.contains("@flour{1.5%cup") || src.contains("@flour{1.5%cups"),
+            "{src}"
+        );
     }
 
     #[test]

@@ -64,7 +64,12 @@ pub fn App() -> Element {
 
     use_effect(move || {
         let slug = theme_org_slug();
-        let resolved_name: String = org_overrides.map.read().get(&slug).cloned().unwrap_or_default();
+        let resolved_name: String = org_overrides
+            .map
+            .read()
+            .get(&slug)
+            .cloned()
+            .unwrap_or_default();
         let preset = theme_preset(&resolved_name).unwrap_or_else(default_theme_preset);
         theme_state.write().set_preset(preset);
     });

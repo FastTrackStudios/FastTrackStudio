@@ -44,10 +44,10 @@ pub use error::VaultSyncError;
 // glob-safe names: `VaultGraphClient`, `VaultGraphRpcDispatcher`,
 // `vault_graph_rpc_service_descriptor`, `vault_graph_serve`,
 // `vault_graph_layer`, `VaultGraphService`.
-pub use graph::prelude::*;
-pub use graph::{GraphLink, GraphUnresolved, TagCount};
 pub use event::VaultEvent;
 pub use file::{FileBytes, IfMatch, PutAck};
+pub use graph::prelude::*;
+pub use graph::{GraphLink, GraphUnresolved, TagCount};
 pub use manifest::{Manifest, ManifestEntry};
 pub use page::VaultPage;
 pub use page_meta::{FolderIndex, PageMeta};

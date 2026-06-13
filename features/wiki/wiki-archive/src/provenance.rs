@@ -253,7 +253,10 @@ mod tests {
         p.duration_secs = Some(3622);
         let fm = p.frontmatter();
         assert!(fm.starts_with("---\n"));
-        assert!(fm.contains(r#"title: "How to do \"X\" — properly""#), "{fm}");
+        assert!(
+            fm.contains(r#"title: "How to do \"X\" — properly""#),
+            "{fm}"
+        );
         assert!(fm.contains("content_type: article"));
         assert!(fm.contains("duration: 3622"));
         assert!(fm.contains("media: \"https://www.youtube.com/watch?v=abc123xyz\""));

@@ -246,7 +246,10 @@ mod tests {
         .expect("parse");
         t.workflow = Some(WorkflowAttrs::default());
         let yaml = serialize_task(&t).expect("serialize");
-        assert!(!yaml.contains("relations:"), "spurious relations key:\n{yaml}");
+        assert!(
+            !yaml.contains("relations:"),
+            "spurious relations key:\n{yaml}"
+        );
     }
 
     #[test]

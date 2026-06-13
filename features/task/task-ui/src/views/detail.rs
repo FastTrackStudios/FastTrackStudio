@@ -10,13 +10,13 @@
 //! the quick-edit path for `/tasks` today.
 
 use dioxus::prelude::*;
-use uuid::Uuid;
 use fts_ui::lucide_dioxus::Trash2;
 use fts_ui::prelude::*;
+use uuid::Uuid;
 
-use crate::model::{Priority, Status};
 use crate::TaskInfo;
 use crate::TaskMutation;
+use crate::model::{Priority, Status};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TaskDetailProps {

@@ -100,9 +100,18 @@ pub fn item_to_source(item: &ImportedItem) -> Result<(Provenance, String), Archi
         lede.push(format!("tags: {}", item.tags.join(", ")));
     }
     if !lede.is_empty() {
-        body.push_str(&format!("_{} import · {}_\n\n", item.origin, lede.join(" · ")));
+        body.push_str(&format!(
+            "_{} import · {}_\n\n",
+            item.origin,
+            lede.join(" · ")
+        ));
     }
-    if let Some(note) = item.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+    if let Some(note) = item
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
         body.push_str(&format!("> [!note] Saver's note\n> {note}\n\n"));
     }
     if let Some(md) = &markdown {
@@ -122,7 +131,10 @@ pub fn item_to_source(item: &ImportedItem) -> Result<(Provenance, String), Archi
         }
     }
     if body.trim().is_empty() {
-        body = format!("_Bookmark imported from {} — content not fetched._", item.origin);
+        body = format!(
+            "_Bookmark imported from {} — content not fetched._",
+            item.origin
+        );
     }
     Ok((prov, body.trim_end().to_string()))
 }

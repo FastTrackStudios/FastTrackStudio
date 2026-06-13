@@ -6,8 +6,8 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::ChevronRight;
 use uuid::Uuid;
 
-use crate::model::Status;
 use crate::TaskInfo;
+use crate::model::Status;
 
 use super::row::TaskRow;
 

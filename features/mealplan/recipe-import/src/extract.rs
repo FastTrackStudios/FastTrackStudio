@@ -88,14 +88,22 @@ pub fn extract(html: &str, url: &str) -> Result<NormalizedRecipe, ImportError> {
         .collect();
     // The extractor stamps `source` from the URL it was handed; keep
     // ours authoritative and out of the free-form map.
-    let source_url = metadata.remove("source").or_else(|| {
-        url.starts_with("http").then(|| url.to_string())
-    });
+    let source_url = metadata
+        .remove("source")
+        .or_else(|| url.starts_with("http").then(|| url.to_string()));
 
     let name = collapse_ws(&raw.name);
     Ok(NormalizedRecipe {
-        name: if name.is_empty() { "Imported Recipe".into() } else { name },
-        description: raw.description.as_deref().map(collapse_ws).filter(|d| !d.is_empty()),
+        name: if name.is_empty() {
+            "Imported Recipe".into()
+        } else {
+            name
+        },
+        description: raw
+            .description
+            .as_deref()
+            .map(collapse_ws)
+            .filter(|d| !d.is_empty()),
         image: raw.image.first().cloned().filter(|i| !i.is_empty()),
         ingredients,
         steps,
@@ -145,7 +153,11 @@ fn jetpack_steps(doc: &scraper::Html) -> Vec<String> {
         return steps;
     }
     let whole = collapse_ws(&el.text().collect::<String>());
-    if whole.is_empty() { Vec::new() } else { vec![whole] }
+    if whole.is_empty() {
+        Vec::new()
+    } else {
+        vec![whole]
+    }
 }
 
 /// Collapse all whitespace runs (incl. newlines) to single spaces.
@@ -191,15 +203,21 @@ mod tests {
         assert_eq!(r.ingredients.len(), 4);
         assert_eq!(r.steps.len(), 3);
         assert!(r.steps[0].contains("Preheat"));
-        assert_eq!(r.metadata.get("servings").map(String::as_str), Some("8 servings"));
+        assert_eq!(
+            r.metadata.get("servings").map(String::as_str),
+            Some("8 servings")
+        );
         assert!(r.metadata.contains_key("prep time"), "{:?}", r.metadata);
         assert_eq!(r.source_url.as_deref(), Some("https://example.test/banana"));
     }
 
     #[test]
     fn no_recipe_markup_is_a_clear_error() {
-        let err = extract("<html><body><p>blog spam</p></body></html>", "https://x.test/")
-            .unwrap_err();
+        let err = extract(
+            "<html><body><p>blog spam</p></body></html>",
+            "https://x.test/",
+        )
+        .unwrap_err();
         assert!(matches!(err, ImportError::NoRecipeFound { .. }), "{err}");
     }
 

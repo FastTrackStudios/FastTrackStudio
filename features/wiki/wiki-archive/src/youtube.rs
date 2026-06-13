@@ -175,9 +175,7 @@ pub fn parse_probe_json(json: &str) -> Result<VideoMeta, ArchiveError> {
     let str_of = |k: &str| v.get(k).and_then(Value::as_str).map(ToString::to_string);
     let title = str_of("title").unwrap_or_default();
     if title.is_empty() {
-        return Err(ArchiveError::ImportParse(
-            "yt-dlp -J: missing title".into(),
-        ));
+        return Err(ArchiveError::ImportParse("yt-dlp -J: missing title".into()));
     }
 
     let chapters = v
@@ -237,8 +235,8 @@ fn pick_json3_track(v: &Value) -> Option<(String, String)> {
 /// word-level offsets (`segs[].tOffsetMs`); we keep event
 /// granularity — the coalescer below is what sets block size.
 pub fn parse_json3_cues(json: &str) -> Result<Vec<Cue>, ArchiveError> {
-    let v: Value = serde_json::from_str(json)
-        .map_err(|e| ArchiveError::ImportParse(format!("json3: {e}")))?;
+    let v: Value =
+        serde_json::from_str(json).map_err(|e| ArchiveError::ImportParse(format!("json3: {e}")))?;
     let events = v
         .get("events")
         .and_then(Value::as_array)

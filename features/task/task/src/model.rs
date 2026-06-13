@@ -476,13 +476,15 @@ impl RelationKind {
     #[allow(clippy::should_implement_trait)]
     #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
-        Some(match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
-            "blocks" | "block" => Self::Blocks,
-            "duplicate" | "duplicates" | "dup" => Self::Duplicate,
-            "implements" | "implement" => Self::Implements,
-            "relates" | "relates-to" | "related" => Self::Relates,
-            _ => return None,
-        })
+        Some(
+            match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+                "blocks" | "block" => Self::Blocks,
+                "duplicate" | "duplicates" | "dup" => Self::Duplicate,
+                "implements" | "implement" => Self::Implements,
+                "relates" | "relates-to" | "related" => Self::Relates,
+                _ => return None,
+            },
+        )
     }
 }
 

@@ -59,12 +59,11 @@ pub fn extract_article(html: &str, base_url: &str) -> Result<ExtractedArticle, A
         text_mode: TextMode::Markdown,
         ..Config::default()
     };
-    let mut readability = Readability::new(html, Some(base_url), Some(cfg)).map_err(|e| {
-        ArchiveError::Extract {
+    let mut readability =
+        Readability::new(html, Some(base_url), Some(cfg)).map_err(|e| ArchiveError::Extract {
             url: base_url.to_string(),
             message: format!("readability init: {e}"),
-        }
-    })?;
+        })?;
     let article = readability.parse().map_err(|e| ArchiveError::Extract {
         url: base_url.to_string(),
         message: format!("readability parse: {e}"),

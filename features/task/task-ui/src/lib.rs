@@ -22,10 +22,10 @@ pub mod mutation;
 pub mod store;
 pub mod views;
 
-pub use markdown::{parse_markdown, Markdown, MarkdownProps};
+pub use markdown::{Markdown, MarkdownProps, parse_markdown};
 pub use model::{Priority, Status, TaskInfo, TimeEntry};
 pub use mutation::TaskMutation;
-pub use store::{apply, TaskState};
+pub use store::{TaskState, apply};
 pub use views::{
     ClaimState, LinkChips, LinkedTaskRef, SessionEvent, SessionHistory, SubtaskRow, SubtasksBoard,
     TaskDetailFull, TaskDetailFullProps, TasksApp, TasksAppProps, TimeSection, WorkflowSection,

@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Link as LinkIcon, OctagonAlert};
 use uuid::Uuid;
 
-use crate::views::detail_full::{short_id, LinkedTaskRef, SectionLabel};
+use crate::views::detail_full::{LinkedTaskRef, SectionLabel, short_id};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct LinkChipsProps {

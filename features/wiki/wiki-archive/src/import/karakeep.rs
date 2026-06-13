@@ -198,10 +198,7 @@ mod tests {
         let page = parse_bookmarks_page(FIXTURE).unwrap();
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.skipped_non_links, 1);
-        assert_eq!(
-            page.next_cursor.as_deref(),
-            Some("v2:1709528827000_def456")
-        );
+        assert_eq!(page.next_cursor.as_deref(), Some("v2:1709528827000_def456"));
         let item = &page.items[0];
         assert_eq!(item.title, "Curator Title");
         assert_eq!(item.origin, "karakeep-api");

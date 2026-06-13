@@ -235,9 +235,9 @@ impl TaskService for TaskBackend {
             .into_iter()
             .filter(|t| filter.project.is_none_or(|pid| t.project_id == Some(pid)))
             .filter(|t| {
-                filter.workstream.is_none_or(|ws| {
-                    t.workflow.as_ref().and_then(|w| w.workstream) == Some(ws)
-                })
+                filter
+                    .workstream
+                    .is_none_or(|ws| t.workflow.as_ref().and_then(|w| w.workstream) == Some(ws))
             })
             .filter(|t| {
                 filter
@@ -442,7 +442,10 @@ mod tests {
             }]
         );
         assert!(got[1].relations.is_empty(), "no incoming edges");
-        assert!(got[2].relations.is_empty(), "unknown id -> empty, not error");
+        assert!(
+            got[2].relations.is_empty(),
+            "unknown id -> empty, not error"
+        );
 
         // Parity with the single-id verb.
         let single = be.reverse_relations(victim.id).expect("single");

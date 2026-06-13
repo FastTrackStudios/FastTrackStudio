@@ -74,9 +74,8 @@ pub async fn apple_lookup_episode_title(
     podcast_id: &str,
     episode_id: &str,
 ) -> Result<Option<String>, ArchiveError> {
-    let url = format!(
-        "https://itunes.apple.com/lookup?id={podcast_id}&entity=podcastEpisode&limit=200"
-    );
+    let url =
+        format!("https://itunes.apple.com/lookup?id={podcast_id}&entity=podcastEpisode&limit=200");
     let v = fetch_json(client, &url).await?;
     let Some(results) = v.get("results").and_then(serde_json::Value::as_array) else {
         return Ok(None);
@@ -133,7 +132,11 @@ pub async fn spotify_oembed_title(
 /// `(X-Auth-Key, X-Auth-Date, Authorization)`. Pure —
 /// fixture-tested against the documented sha1 scheme.
 #[must_use]
-pub fn podcastindex_auth(api_key: &str, api_secret: &str, now_unix: u64) -> (String, String, String) {
+pub fn podcastindex_auth(
+    api_key: &str,
+    api_secret: &str,
+    now_unix: u64,
+) -> (String, String, String) {
     let date = now_unix.to_string();
     let mut h = Sha1::new();
     h.update(api_key.as_bytes());
@@ -308,8 +311,7 @@ pub fn render_podcast_markdown(
 
     if let Some(desc) = &item.description {
         // Feed descriptions are routinely HTML.
-        let text = crate::article::clean_html_to_markdown(desc)
-            .unwrap_or_else(|_| desc.clone());
+        let text = crate::article::clean_html_to_markdown(desc).unwrap_or_else(|_| desc.clone());
         if !text.trim().is_empty() {
             out.push_str("## Show notes\n\n");
             out.push_str(text.trim());
@@ -428,17 +430,34 @@ mod tests {
             ..Default::default()
         };
         let blocks = vec![
-            TranscriptBlock { start_secs: 0, text: "Welcome to the show.".into() },
-            TranscriptBlock { start_secs: 47, text: "Deep dive time.".into() },
+            TranscriptBlock {
+                start_secs: 0,
+                text: "Welcome to the show.".into(),
+            },
+            TranscriptBlock {
+                start_secs: 47,
+                text: "Deep dive time.".into(),
+            },
         ];
         let md = render_podcast_markdown(Some("Test Show"), &item, &blocks, None);
-        assert!(md.contains("_Test Show · Tue, 10 Jun 2026 09:00:00 +0000 · 1:02:05_"), "{md}");
+        assert!(
+            md.contains("_Test Show · Tue, 10 Jun 2026 09:00:00 +0000 · 1:02:05_"),
+            "{md}"
+        );
         assert!(md.contains("## Show notes"), "{md}");
         assert!(md.contains("**bold**"), "{md}");
         assert!(md.contains("[0:00] Welcome to the show. ^t0"), "{md}");
         assert!(md.contains("[0:47] Deep dive time. ^t47"), "{md}");
 
-        let empty = render_podcast_markdown(None, &item, &[], Some("Spotify-exclusive: no public audio."));
-        assert!(empty.contains("_Spotify-exclusive: no public audio._"), "{empty}");
+        let empty = render_podcast_markdown(
+            None,
+            &item,
+            &[],
+            Some("Spotify-exclusive: no public audio."),
+        );
+        assert!(
+            empty.contains("_Spotify-exclusive: no public audio._"),
+            "{empty}"
+        );
     }
 }

@@ -31,10 +31,9 @@ const EMBED_ID: &str = "source-viewer-embed";
 // ── data ────────────────────────────────────────────────────
 
 async fn fetch_sources(slug: &str) -> Result<Vec<wiki_proto::raw::RawSourceRef>, String> {
-    let c = crate::vox_clients::establish_for::<wiki_proto::service::raw_layer::RawLayerClient>(
-        slug,
-    )
-    .await?;
+    let c =
+        crate::vox_clients::establish_for::<wiki_proto::service::raw_layer::RawLayerClient>(slug)
+            .await?;
     c.list_raw_sources(WIKI_ID.to_owned())
         .await
         .map_err(|e| format!("list_raw_sources: {e:?}"))
@@ -44,10 +43,9 @@ async fn fetch_source_text(slug: &str, name: &str) -> Result<String, String> {
     // `name` is the bare filename; sources are flat under
     // raw/sources/ by convention.
     let path = format!("raw/sources/{name}");
-    let c = crate::vox_clients::establish_for::<wiki_proto::service::raw_layer::RawLayerClient>(
-        slug,
-    )
-    .await?;
+    let c =
+        crate::vox_clients::establish_for::<wiki_proto::service::raw_layer::RawLayerClient>(slug)
+            .await?;
     let bytes = c
         .read_raw_source(WIKI_ID.to_owned(), path)
         .await
@@ -56,7 +54,9 @@ async fn fetch_source_text(slug: &str, name: &str) -> Result<String, String> {
 }
 
 fn first_slug(selection: &Signal<OrgSelection>, orgs: &Signal<Vec<OrgMeta>>) -> Option<String> {
-    selected_slugs(&selection.read(), &orgs.read()).first().cloned()
+    selected_slugs(&selection.read(), &orgs.read())
+        .first()
+        .cloned()
 }
 
 // ── parsed source shape ─────────────────────────────────────
@@ -99,7 +99,10 @@ enum Block {
     Bullet(String),
     /// Paragraph; `anchor` = the `^t<sec>` / `^p<page>` id
     /// when present.
-    Para { text: String, anchor: Option<Anchor> },
+    Para {
+        text: String,
+        anchor: Option<Anchor>,
+    },
 }
 
 fn parse_source(raw: &str) -> (Provenance, Vec<Block>) {
@@ -273,8 +276,8 @@ pub fn WikiSourcesView() -> Element {
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
 
     let sources = use_resource(move || async move {
-        let slug =
-            first_slug(&selection, &org_list).ok_or_else(|| "no organization selected".to_string())?;
+        let slug = first_slug(&selection, &org_list)
+            .ok_or_else(|| "no organization selected".to_string())?;
         let mut rows = fetch_sources(&slug).await?;
         rows.sort_by(|a, b| a.filename.cmp(&b.filename));
         Ok::<_, String>(rows)
@@ -335,8 +338,8 @@ pub fn WikiSourceView(name: String) -> Element {
 
     let fetch_name = name.clone();
     let source = use_resource(use_reactive!(|(fetch_name,)| async move {
-        let slug =
-            first_slug(&selection, &org_list).ok_or_else(|| "no organization selected".to_string())?;
+        let slug = first_slug(&selection, &org_list)
+            .ok_or_else(|| "no organization selected".to_string())?;
         fetch_source_text(&slug, &fetch_name).await
     }));
 
@@ -385,7 +388,12 @@ fn render_source(prov: &Provenance, blocks: &[Block]) -> Element {
     } else {
         Player::None
     };
-    let archived_day = prov.archived_at.split('T').next().unwrap_or_default().to_string();
+    let archived_day = prov
+        .archived_at
+        .split('T')
+        .next()
+        .unwrap_or_default()
+        .to_string();
     let duration = prov
         .duration
         .parse::<u64>()
@@ -479,7 +487,10 @@ fn render_block(key: usize, block: &Block, player: Player) -> Element {
                 span { "{text}" }
             }
         },
-        Block::Para { text, anchor: Some(Anchor::Time(sec)) } => {
+        Block::Para {
+            text,
+            anchor: Some(Anchor::Time(sec)),
+        } => {
             let sec = *sec;
             let stamp = mmss(sec);
             // Strip the leading `[mm:ss] ` the archive writes —
@@ -504,7 +515,10 @@ fn render_block(key: usize, block: &Block, player: Player) -> Element {
                 }
             }
         }
-        Block::Para { text, anchor: Some(Anchor::Page(page)) } => {
+        Block::Para {
+            text,
+            anchor: Some(Anchor::Page(page)),
+        } => {
             let page = *page;
             // Strip the `[p. N] ` prefix the archive writes —
             // the chip carries the page number. Nothing to
@@ -549,7 +563,10 @@ mod tests {
         let anchored: Vec<_> = blocks
             .iter()
             .filter_map(|b| match b {
-                Block::Para { anchor: Some(Anchor::Time(s)), .. } => Some(*s),
+                Block::Para {
+                    anchor: Some(Anchor::Time(s)),
+                    ..
+                } => Some(*s),
                 _ => None,
             })
             .collect();
@@ -564,7 +581,10 @@ mod tests {
         let pages: Vec<_> = blocks
             .iter()
             .filter_map(|b| match b {
-                Block::Para { anchor: Some(Anchor::Page(p)), .. } => Some(*p),
+                Block::Para {
+                    anchor: Some(Anchor::Page(p)),
+                    ..
+                } => Some(*p),
                 _ => None,
             })
             .collect();
@@ -584,7 +604,10 @@ mod tests {
         assert_eq!(youtube_id(&prov.media), None);
         assert!(matches!(
             blocks.last(),
-            Some(Block::Para { anchor: Some(Anchor::Time(0)), .. })
+            Some(Block::Para {
+                anchor: Some(Anchor::Time(0)),
+                ..
+            })
         ));
     }
 

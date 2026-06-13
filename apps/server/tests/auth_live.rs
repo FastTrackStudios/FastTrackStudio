@@ -21,8 +21,7 @@ const DEV_PASSWORD: &str = "dev-cody-2026";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn live_sign_in_and_whoami_for_cody() -> eyre::Result<()> {
-    let url =
-        std::env::var("TASK_LIVE_VOX_URL").unwrap_or_else(|_| DEFAULT_LIVE_URL.to_owned());
+    let url = std::env::var("TASK_LIVE_VOX_URL").unwrap_or_else(|_| DEFAULT_LIVE_URL.to_owned());
 
     let client: architect_auth::proto::AuthServiceClient =
         match vox::connect(&url).establish().await {

@@ -51,9 +51,7 @@ pub async fn fetch_tasks(slugs: &[String]) -> Result<Vec<DbTask>, String> {
 /// Projects across the selected orgs, each paired with the slug of the
 /// org it came from — feeds the shared project store so mutations and
 /// the detail page can route back to the owning org.
-pub async fn fetch_projects_tagged(
-    slugs: &[String],
-) -> Result<Vec<(String, ProjectInfo)>, String> {
+pub async fn fetch_projects_tagged(slugs: &[String]) -> Result<Vec<(String, ProjectInfo)>, String> {
     let futs = slugs.iter().map(|slug| async move {
         match crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await {
             Ok(client) => client

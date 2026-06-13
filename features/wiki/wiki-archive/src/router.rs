@@ -428,7 +428,10 @@ mod tests {
     #[test]
     fn video_hosts_route_to_video() {
         assert_eq!(route("https://vimeo.com/12345"), Route::Video);
-        assert_eq!(route("https://www.tiktok.com/@user/video/7123"), Route::Video);
+        assert_eq!(
+            route("https://www.tiktok.com/@user/video/7123"),
+            Route::Video
+        );
         assert_eq!(route("https://x.com/user"), Route::Article);
     }
 

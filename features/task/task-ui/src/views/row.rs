@@ -5,8 +5,8 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Check, Hash};
 use uuid::Uuid;
 
-use crate::model::{Priority, Status};
 use crate::TaskInfo;
+use crate::model::{Priority, Status};
 
 use super::palette::{priority_pill, status_pill};
 

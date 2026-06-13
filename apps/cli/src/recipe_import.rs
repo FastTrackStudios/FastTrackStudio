@@ -73,7 +73,10 @@ pub async fn recipe_import(a: RecipeImportArgs) -> eyre::Result<()> {
 
     if a.dry_run {
         println!("{source}");
-        eprintln!("{}", summary(&mode, &cov, todo_parked, "dry-run — nothing written"));
+        eprintln!(
+            "{}",
+            summary(&mode, &cov, todo_parked, "dry-run — nothing written")
+        );
         return Ok(());
     }
 
@@ -83,7 +86,10 @@ pub async fn recipe_import(a: RecipeImportArgs) -> eyre::Result<()> {
 
     // Re-import detection: same target path, same display name, or
     // same source URL.
-    let rows = client.list().await.map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     let existing = rows.into_iter().find(|r| {
         r.path == path
             || r.name.eq_ignore_ascii_case(&display_name)
@@ -92,15 +98,20 @@ pub async fn recipe_import(a: RecipeImportArgs) -> eyre::Result<()> {
 
     let saved = if let Some(existing) = existing {
         confirm_overwrite(&existing.name, &existing.path, a.yes)?;
-        let recipe = cookbook::parse_cook(&existing.path, &source)
-            .map_err(|e| eyre::eyre!("parse: {e}"))?;
-        let r = client.update(recipe).await.map_err(|e| eyre::eyre!("update: {e:?}"))?;
+        let recipe =
+            cookbook::parse_cook(&existing.path, &source).map_err(|e| eyre::eyre!("parse: {e}"))?;
+        let r = client
+            .update(recipe)
+            .await
+            .map_err(|e| eyre::eyre!("update: {e:?}"))?;
         println!("updated {}  ({})", r.name, r.path);
         r
     } else {
-        let recipe =
-            cookbook::parse_cook(&path, &source).map_err(|e| eyre::eyre!("parse: {e}"))?;
-        let r = client.create(recipe).await.map_err(|e| eyre::eyre!("create: {e:?}"))?;
+        let recipe = cookbook::parse_cook(&path, &source).map_err(|e| eyre::eyre!("parse: {e}"))?;
+        let r = client
+            .create(recipe)
+            .await
+            .map_err(|e| eyre::eyre!("create: {e:?}"))?;
         println!("created {}  ({})", r.name, r.path);
         r
     };
@@ -116,8 +127,8 @@ pub async fn recipe_import(a: RecipeImportArgs) -> eyre::Result<()> {
 /// structured-data extractors.
 async fn load_and_extract(a: &RecipeImportArgs) -> eyre::Result<NormalizedRecipe> {
     if let Some(p) = &a.from_file {
-        let html = std::fs::read_to_string(p)
-            .map_err(|e| eyre::eyre!("read {}: {e}", p.display()))?;
+        let html =
+            std::fs::read_to_string(p).map_err(|e| eyre::eyre!("read {}: {e}", p.display()))?;
         let label = a.url.clone().unwrap_or_else(|| p.display().to_string());
         return extract(&html, &label).map_err(|e| eyre::eyre!("{e}"));
     }
@@ -155,7 +166,10 @@ async fn synthesize(
         Err(e @ ImportError::LlmValidation(_)) => {
             eprintln!("warning: {e}");
             eprintln!("falling back to the offline heuristic (marked import: needs-review)");
-            Ok((synthesize_heuristic(normalized), "heuristic (llm fallback)".into()))
+            Ok((
+                synthesize_heuristic(normalized),
+                "heuristic (llm fallback)".into(),
+            ))
         }
         Err(e) => Err(eyre::eyre!("{e}")),
     }

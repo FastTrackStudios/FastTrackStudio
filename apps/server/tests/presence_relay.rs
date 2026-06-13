@@ -31,11 +31,13 @@ async fn presence_relays_between_two_peers() {
     let scope = Scope::new();
     let local = LocalServer::serve(router, scope.clone());
 
-    let (peer_a, mut driver_a) = crdt::sync::PresencePeer::new(PRESENCE_DOC_ID, PRESENCE_TIMEOUT_MS);
+    let (peer_a, mut driver_a) =
+        crdt::sync::PresencePeer::new(PRESENCE_DOC_ID, PRESENCE_TIMEOUT_MS);
     let client_a: crdt::sync::DocPresenceClient = local.establish().await.expect("establish a");
     tokio::spawn(async move { driver_a.run(&client_a).await });
 
-    let (peer_b, mut driver_b) = crdt::sync::PresencePeer::new(PRESENCE_DOC_ID, PRESENCE_TIMEOUT_MS);
+    let (peer_b, mut driver_b) =
+        crdt::sync::PresencePeer::new(PRESENCE_DOC_ID, PRESENCE_TIMEOUT_MS);
     let client_b: crdt::sync::DocPresenceClient = local.establish().await.expect("establish b");
     tokio::spawn(async move { driver_b.run(&client_b).await });
 
@@ -48,8 +50,9 @@ async fn presence_relays_between_two_peers() {
 
     peer_b.set("client-b", "bob");
     let pa = peer_a.clone();
-    eventually("a sees b's presence", move || {
-        matches!(pa.states().get("client-b"), Some(v) if format!("{v:?}").contains("bob"))
-    })
+    eventually(
+        "a sees b's presence",
+        move || matches!(pa.states().get("client-b"), Some(v) if format!("{v:?}").contains("bob")),
+    )
     .await;
 }

@@ -339,11 +339,13 @@ pub fn use_project_store() -> ProjectStore {
 /// the shared store, so `/projects/:id` is instant after a list visit.
 pub fn use_project_list() -> AtomResult<Vec<(Id<Uuid>, OrgProject)>, String> {
     use_multi_org_list(use_project_store(), |slugs| async move {
-        crate::feeds::fetch_projects_tagged(&slugs).await.map(|rows| {
-            rows.into_iter()
-                .map(|(slug, project)| OrgProject { slug, project })
-                .collect()
-        })
+        crate::feeds::fetch_projects_tagged(&slugs)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(slug, project)| OrgProject { slug, project })
+                    .collect()
+            })
     })
 }
 
@@ -438,7 +440,11 @@ pub fn use_location_list() -> AtomResult<Vec<(Id<Uuid>, locations_proto::Locatio
 
 /// Unsaved placeholder row for an optimistic location insert. The
 /// backend assigns the real `id` and vault `path` on create.
-pub fn draft_location(name: String, kind: String, address: Option<String>) -> locations_proto::Location {
+pub fn draft_location(
+    name: String,
+    kind: String,
+    address: Option<String>,
+) -> locations_proto::Location {
     locations_proto::Location {
         path: String::new(),
         id: Uuid::nil(),
@@ -621,7 +627,11 @@ pub fn use_body_metric_list() -> AtomResult<Vec<(Id<Uuid>, fitness_proto::body::
 }
 
 /// Unsaved placeholder row for an optimistic body-metric insert.
-pub fn draft_body_metric(name: String, kind: String, unit: String) -> fitness_proto::body::BodyMetric {
+pub fn draft_body_metric(
+    name: String,
+    kind: String,
+    unit: String,
+) -> fitness_proto::body::BodyMetric {
     fitness_proto::body::BodyMetric {
         path: String::new(),
         id: Uuid::nil(),
@@ -938,7 +948,13 @@ impl InboxMutations {
 
     /// Promote an item into a Task: optimistically mark it processed,
     /// then create the task and persist the provenance back-link.
-    pub fn promote_to_task(&self, slug: String, item: inbox_proto::InboxItem, title: String, details: String) {
+    pub fn promote_to_task(
+        &self,
+        slug: String,
+        item: inbox_proto::InboxItem,
+        title: String,
+        details: String,
+    ) {
         let mut done = item;
         done.status = inbox_proto::InboxItem::STATUS_PROCESSED.to_string();
         let id = done.id.clone();
@@ -959,7 +975,13 @@ impl InboxMutations {
 
     /// Promote an item into an atomic wiki note (same shape as
     /// [`Self::promote_to_task`], writing markdown to the vault).
-    pub fn promote_to_note(&self, slug: String, item: inbox_proto::InboxItem, path: String, markdown: String) {
+    pub fn promote_to_note(
+        &self,
+        slug: String,
+        item: inbox_proto::InboxItem,
+        path: String,
+        markdown: String,
+    ) {
         let mut done = item;
         done.status = inbox_proto::InboxItem::STATUS_PROCESSED.to_string();
         let id = done.id.clone();
@@ -1230,11 +1252,7 @@ impl TimerMutations {
         self.write.run(
             self.store,
             move |s| s.remove_optimistic(Id::Real(id)),
-            move || async move {
-                crate::feeds::delete_session(&slug, id)
-                    .await
-                    .map(|()| None)
-            },
+            move || async move { crate::feeds::delete_session(&slug, id).await.map(|()| None) },
         );
     }
 }
@@ -1383,8 +1401,7 @@ impl InvoiceMutations {
             move |s| {
                 s.update_optimistic(Id::Real(id), move |r| {
                     r.invoice.amount_paid_minor += amount_minor;
-                    r.invoice.balance_minor =
-                        r.invoice.total_minor - r.invoice.amount_paid_minor;
+                    r.invoice.balance_minor = r.invoice.total_minor - r.invoice.amount_paid_minor;
                     if r.invoice.balance_minor <= 0 {
                         r.invoice.status = finance_proto::invoice::InvoiceStatus::Paid;
                     } else {
@@ -1405,11 +1422,7 @@ impl InvoiceMutations {
         self.write.run(
             self.store,
             move |s| s.remove_optimistic(Id::Real(id)),
-            move || async move {
-                crate::feeds::invoice_delete(&slug, id)
-                    .await
-                    .map(|()| None)
-            },
+            move || async move { crate::feeds::invoice_delete(&slug, id).await.map(|()| None) },
         );
     }
 }

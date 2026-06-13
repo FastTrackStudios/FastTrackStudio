@@ -42,12 +42,11 @@ pub use backend::WorkstreamBackend;
 
 #[cfg(feature = "vox")]
 pub use workstream_proto::{
-    WorkstreamServiceBridge, WorkstreamServiceClient, WorkstreamServiceStreamClient,
-    serve_workstream_service, workstream_service_descriptor, workstream_service_layer,
-    workstream_service_stream_layer, workstream_stream_descriptor,
+    WorkstreamDispatcher, WorkstreamServiceRpc, WorkstreamServiceStreamSource,
 };
 #[cfg(feature = "vox")]
 pub use workstream_proto::{
-    WorkstreamServiceRpc, WorkstreamServiceStreamSource,
-    WorkstreamDispatcher,
+    WorkstreamServiceBridge, WorkstreamServiceClient, WorkstreamServiceStreamClient,
+    serve_workstream_service, workstream_service_descriptor, workstream_service_layer,
+    workstream_service_stream_layer, workstream_stream_descriptor,
 };

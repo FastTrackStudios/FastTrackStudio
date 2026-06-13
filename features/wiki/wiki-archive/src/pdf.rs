@@ -103,10 +103,7 @@ pub fn extract_with_pdfium(bytes: &[u8]) -> Result<PdfText, ArchiveError> {
 
     let mut pages = Vec::new();
     for page in document.pages().iter() {
-        let text = page
-            .text()
-            .map(|t| t.all())
-            .unwrap_or_default();
+        let text = page.text().map(|t| t.all()).unwrap_or_default();
         pages.push(text);
     }
     if pages.is_empty() {
@@ -120,10 +117,7 @@ pub fn extract_with_pdfium(bytes: &[u8]) -> Result<PdfText, ArchiveError> {
 
 /// `pdftotext -layout - -` subprocess fallback: PDF in via
 /// stdin, form-feed-separated pages out via stdout.
-pub async fn extract_with_pdftotext(
-    bytes: &[u8],
-    binary: &str,
-) -> Result<PdfText, ArchiveError> {
+pub async fn extract_with_pdftotext(bytes: &[u8], binary: &str) -> Result<PdfText, ArchiveError> {
     use tokio::io::AsyncWriteExt;
 
     let mut child = tokio::process::Command::new(binary)
@@ -285,7 +279,10 @@ mod tests {
         let md = render_pdf_markdown(&pages);
         for line in md.lines().filter(|l| l.contains("^p")) {
             let (_, id) = line.rsplit_once(" ^p").expect("anchor at line end");
-            assert!(!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()), "{line}");
+            assert!(
+                !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()),
+                "{line}"
+            );
         }
     }
 }

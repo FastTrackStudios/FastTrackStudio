@@ -88,17 +88,13 @@ pub fn TaskDetailPage(id: Uuid) -> Element {
                     title: Some(t.title.clone()),
                 })
                 .collect();
-            let org_of: HashMap<Uuid, String> = tagged
-                .iter()
-                .map(|(s, t)| (t.id, s.clone()))
-                .collect();
+            let org_of: HashMap<Uuid, String> =
+                tagged.iter().map(|(s, t)| (t.id, s.clone())).collect();
 
             let wf = task.workflow.clone().unwrap_or_default();
             let subtasks: Vec<SubtaskRow> = tagged
                 .iter()
-                .filter(|(_, t)| {
-                    t.workflow.as_ref().and_then(|w| w.parent) == Some(id)
-                })
+                .filter(|(_, t)| t.workflow.as_ref().and_then(|w| w.parent) == Some(id))
                 .map(|(_, t)| SubtaskRow {
                     task: t.clone(),
                     claimant: t

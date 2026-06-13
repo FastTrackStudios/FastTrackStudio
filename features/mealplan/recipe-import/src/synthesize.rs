@@ -58,7 +58,12 @@ pub async fn synthesize_llm<C: LlmClient>(
     let first = strip_fences(&client.complete(SYSTEM, &transcript).await?);
     let label = format!("{}.cook", recipe.name);
     let first_report = match validate_cook(&label, &first) {
-        Ok(()) => return Ok(SynthesisOutcome { source: first, attempts: 1 }),
+        Ok(()) => {
+            return Ok(SynthesisOutcome {
+                source: first,
+                attempts: 1,
+            });
+        }
         Err(report) => report,
     };
     tracing::warn!("llm cooklang failed validation, retrying with diagnostics");
@@ -71,7 +76,10 @@ pub async fn synthesize_llm<C: LlmClient>(
 
     let second = strip_fences(&client.complete(SYSTEM, &transcript).await?);
     match validate_cook(&label, &second) {
-        Ok(()) => Ok(SynthesisOutcome { source: second, attempts: 2 }),
+        Ok(()) => Ok(SynthesisOutcome {
+            source: second,
+            attempts: 2,
+        }),
         Err(report) => Err(ImportError::LlmValidation(report)),
     }
 }
@@ -84,7 +92,10 @@ fn strip_fences(s: &str) -> String {
     };
     // Drop the info string ("cooklang", "cook", …) on the fence line.
     let rest = rest.split_once('\n').map_or("", |(_, body)| body);
-    rest.trim_end().trim_end_matches("```").trim_end().to_string()
+    rest.trim_end()
+        .trim_end_matches("```")
+        .trim_end()
+        .to_string()
 }
 
 // ── Ingredient coverage ──────────────────────────────────────
@@ -115,7 +126,13 @@ pub fn coverage(recipe: &NormalizedRecipe, source: &str) -> Coverage {
     let annotated: Vec<String> = parser
         .parse(source)
         .into_result()
-        .map(|(parsed, _)| parsed.ingredients.iter().map(|i| i.name.to_lowercase()).collect())
+        .map(|(parsed, _)| {
+            parsed
+                .ingredients
+                .iter()
+                .map(|i| i.name.to_lowercase())
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut matched = 0usize;
@@ -131,7 +148,11 @@ pub fn coverage(recipe: &NormalizedRecipe, source: &str) -> Coverage {
             unmatched.push(line.clone());
         }
     }
-    Coverage { total: recipe.ingredients.len(), matched, unmatched }
+    Coverage {
+        total: recipe.ingredients.len(),
+        matched,
+        unmatched,
+    }
 }
 
 #[cfg(test)]
@@ -180,7 +201,8 @@ mod tests {
         }
     }
 
-    const GOOD: &str = "---\ntitle: Toast\n---\n\nToast the @bread{2%slices}.\n\nSpread the @butter{1%tbsp}.\n";
+    const GOOD: &str =
+        "---\ntitle: Toast\n---\n\nToast the @bread{2%slices}.\n\nSpread the @butter{1%tbsp}.\n";
     // Empty quantity before `%` → guaranteed hard parse error.
     const BAD: &str = "Toast the @bread{%}.\n\nSpread the @butter{1%tbsp}.\n";
 
@@ -228,7 +250,10 @@ mod tests {
         assert_eq!(cov.matched, 2);
         assert!(cov.complete());
 
-        let cov = coverage(&sample(), "---\ntitle: Toast\n---\n\nToast the @bread{2%slices}.\n");
+        let cov = coverage(
+            &sample(),
+            "---\ntitle: Toast\n---\n\nToast the @bread{2%slices}.\n",
+        );
         assert_eq!(cov.matched, 1);
         assert_eq!(cov.unmatched, vec!["1 tbsp butter".to_string()]);
     }

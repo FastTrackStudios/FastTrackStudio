@@ -4549,7 +4549,10 @@ async fn doctor_check_schema(ws_url: &str) -> eyre::Result<()> {
         );
     }
     if !stale.is_empty() {
-        println!("Schema check: STALE — stamp mismatch on: {}", stale.join(", "));
+        println!(
+            "Schema check: STALE — stamp mismatch on: {}",
+            stale.join(", ")
+        );
         println!(
             "  The running task-server was built against different `*-proto` \
              shapes than this CLI."
@@ -4794,10 +4797,7 @@ mod server_resolution_tests {
         // resolve_org_vox_url rides the same fold; with an
         // explicit server the env/session never enter.
         assert_eq!(
-            resolve_org_vox_url(
-                Some("wss://task.starcommand.live/vox".into()),
-                "codywright"
-            ),
+            resolve_org_vox_url(Some("wss://task.starcommand.live/vox".into()), "codywright"),
             "wss://task.starcommand.live/org/codywright/vox"
         );
     }
@@ -5169,12 +5169,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 };
                 for spec in &add {
                     let (name, group, color) = parse_state_spec(spec)?;
-                    let order = cfg
-                        .0
-                        .iter()
-                        .map(|s| s.order + 1)
-                        .max()
-                        .unwrap_or_default();
+                    let order = cfg.0.iter().map(|s| s.order + 1).max().unwrap_or_default();
                     match cfg
                         .0
                         .iter_mut()
@@ -5230,7 +5225,10 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 return Ok(());
             }
             if updated.states.is_none() {
-                println!("{}: custom registry cleared (default applies)", updated.title);
+                println!(
+                    "{}: custom registry cleared (default applies)",
+                    updated.title
+                );
             } else {
                 println!("{}: registry updated\n", updated.title);
                 for s in registry.ordered() {
@@ -6313,7 +6311,12 @@ async fn run_admin(cmd: AdminCmd) -> eyre::Result<()> {
                 return Ok(());
             }
             for e in entries {
-                println!("{}  {}  {}", &e.commit[..e.commit.len().min(12)], e.timestamp, e.message);
+                println!(
+                    "{}  {}  {}",
+                    &e.commit[..e.commit.len().min(12)],
+                    e.timestamp,
+                    e.message
+                );
             }
         }
         AdminCmd::Branch { name, server } => {
@@ -6341,7 +6344,9 @@ async fn run_admin(cmd: AdminCmd) -> eyre::Result<()> {
                 println!("server process exits so its supervisor restarts it (local dev: restart");
                 println!("task-server manually).");
                 if force {
-                    println!("--force: skips the rescue snapshot — pre-restore state is NOT saved.");
+                    println!(
+                        "--force: skips the rescue snapshot — pre-restore state is NOT saved."
+                    );
                 } else {
                     println!("A rescue snapshot of the current state runs first.");
                 }
@@ -6501,7 +6506,9 @@ async fn resolve_auth_target(org_override: Option<&str>) -> eyre::Result<(String
     };
     let Some(slug) = chosen else {
         return Err(errors::usage("resolve org for auth")
-            .cause(format!("no `--org` given and nothing to infer it from ({base})"))
+            .cause(format!(
+                "no `--org` given and nothing to infer it from ({base})"
+            ))
             .hint("pass --org <slug> (see `task org list --server …` for what the server hosts)")
             .report());
     };
@@ -6855,7 +6862,10 @@ fn match_session_entry(sess: &session_store::CliSession, reference: &str) -> eyr
             .cause(format!(
                 "matches {} entries: {}",
                 many.len(),
-                many.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")
+                many.iter()
+                    .map(|k| k.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))
             .hint("disambiguate with the full key (`slug@host`)")
             .report()),
@@ -6886,7 +6896,8 @@ fn local_org_ctx(org_override: Option<&str>, what: &str) -> eyre::Result<org_ctx
 /// old local-first `auth logout` did.
 async fn revoke_local_session(entry: &session_store::ServerEntry) -> eyre::Result<()> {
     use architect_auth::commands::SignOut;
-    let root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("resolve data root: {e}"))?;
+    let root =
+        org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("resolve data root: {e}"))?;
     let (org, _) = root
         .load_org(&entry.slug)
         .map_err(|e| eyre::eyre!("no local org dir for `{}`: {e}", entry.slug))?;
@@ -6973,8 +6984,8 @@ async fn update_session_active_org(
 /// **Recipe (must match `architect-auth/crypto.rs`):**
 /// `base64url-no-pad(SHA256(secret || ":" || token))`.
 fn hash_session_token(secret: &str, token: &str) -> String {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(secret.as_bytes());
@@ -9125,7 +9136,7 @@ fn billed_cents(s: &timer_proto::WorkSession, elapsed: chrono::Duration) -> i64 
 
 async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
     use agent_codex::CodexBackend;
-    use agent_wiki::bridge::{run_ingest, IngestRequest};
+    use agent_wiki::bridge::{IngestRequest, run_ingest};
     use std::time::Duration;
     use wiki_live::WikiLive;
 
@@ -10150,11 +10161,9 @@ async fn run_wiki_archive(mut args: WikiArchiveArgs) -> eyre::Result<()> {
             .list_raw_sources(args.wiki_id.clone())
             .await
             .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?;
-        let hit = wiki_archive::find_canonical_match(
-            existing.iter().map(|r| r.filename.as_str()),
-            c8,
-        )
-        .map(ToString::to_string);
+        let hit =
+            wiki_archive::find_canonical_match(existing.iter().map(|r| r.filename.as_str()), c8)
+                .map(ToString::to_string);
         if let Some(hit) = hit {
             let importing_stub = filename.starts_with("unarchived-");
             if importing_stub {
@@ -10238,7 +10247,12 @@ async fn run_wiki_archive(mut args: WikiArchiveArgs) -> eyre::Result<()> {
             })
         );
     } else {
-        println!("archived: {} ({} bytes, sha256 {})", r.path, r.size, &r.sha256[..12]);
+        println!(
+            "archived: {} ({} bytes, sha256 {})",
+            r.path,
+            r.size,
+            &r.sha256[..12]
+        );
         match task_id {
             Some(id) => println!("ingest task enqueued: {id}"),
             None => println!("ingest not enqueued (--no-enqueue)"),
@@ -10536,13 +10550,10 @@ async fn archive_extract_url(
             // returns 0 results.
             let episode_hint = match (&episode_id, &args.episode) {
                 (Some(ep), _) => {
-                    let hint = wiki_archive::podcast::apple_lookup_episode_title(
-                        &client,
-                        &podcast_id,
-                        ep,
-                    )
-                    .await
-                    .map_err(|e| eyre::eyre!("{e}"))?;
+                    let hint =
+                        wiki_archive::podcast::apple_lookup_episode_title(&client, &podcast_id, ep)
+                            .await
+                            .map_err(|e| eyre::eyre!("{e}"))?;
                     if hint.is_none() {
                         println!(
                             "note: episode id {ep} not in the show's latest 200 — archiving the latest episode instead (pass --episode <title> to pick)"
@@ -10571,9 +10582,12 @@ async fn archive_extract_url(
                 .map_err(|e| eyre::eyre!("{e}"))?;
             // Podcast Index title-search: the only route from a
             // Spotify URL back to public RSS. Best-effort.
-            let pi_key = std::env::var("PODCASTINDEX_API_KEY").ok().filter(|s| !s.is_empty());
-            let pi_secret =
-                std::env::var("PODCASTINDEX_API_SECRET").ok().filter(|s| !s.is_empty());
+            let pi_key = std::env::var("PODCASTINDEX_API_KEY")
+                .ok()
+                .filter(|s| !s.is_empty());
+            let pi_secret = std::env::var("PODCASTINDEX_API_SECRET")
+                .ok()
+                .filter(|s| !s.is_empty());
             if let (Some(key), Some(secret)) = (pi_key, pi_secret) {
                 match wiki_archive::podcast::podcastindex_feed_by_title(
                     &client,
@@ -10599,7 +10613,9 @@ async fn archive_extract_url(
                     Ok(None) => println!(
                         "podcastindex: no feed matched `{oembed_title}` — falling back to metadata-only"
                     ),
-                    Err(e) => println!("podcastindex lookup failed ({e}) — falling back to metadata-only"),
+                    Err(e) => {
+                        println!("podcastindex lookup failed ({e}) — falling back to metadata-only")
+                    }
                 }
             }
             // Honest metadata-only archive: Spotify exposes no
@@ -10664,13 +10680,8 @@ async fn archive_extract_url(
             });
             // `extractor:` records which ladder rung answered
             // — fragility honesty for later debugging.
-            let prov = wiki_archive::Provenance::new(
-                title,
-                target,
-                canonical,
-                content_type,
-                result.rung,
-            );
+            let prov =
+                wiki_archive::Provenance::new(title, target, canonical, content_type, result.rung);
             Ok((prov, body))
         }
         wiki_archive::Route::YouTube { .. } | wiki_archive::Route::Video => {
@@ -10764,9 +10775,18 @@ async fn archive_podcast_from_feed(
         .await
         .map_err(|e| eyre::eyre!("feed {feed_url}: {e}"))?;
     let feed = wiki_archive::feed::parse_feed(&xml).map_err(|e| eyre::eyre!("{e}"))?;
-    let show_title = show_title.or(if feed.title.is_empty() { None } else { Some(&feed.title) });
+    let show_title = show_title.or(if feed.title.is_empty() {
+        None
+    } else {
+        Some(&feed.title)
+    });
     let item = wiki_archive::feed::pick_episode(&feed, episode_hint).ok_or_else(|| {
-        let sample: Vec<&str> = feed.items.iter().take(5).map(|i| i.title.as_str()).collect();
+        let sample: Vec<&str> = feed
+            .items
+            .iter()
+            .take(5)
+            .map(|i| i.title.as_str())
+            .collect();
         eyre::eyre!(
             "no episode matched `{}` — recent episodes: {}",
             episode_hint.unwrap_or("<latest>"),
@@ -10780,11 +10800,13 @@ async fn archive_podcast_from_feed(
     let body =
         wiki_archive::podcast::render_podcast_markdown(show_title, item, &blocks, note.as_deref());
     let title = args.title.clone().unwrap_or_else(|| item.title.clone());
-    let mut prov =
-        wiki_archive::Provenance::new(title, target, canonical, "podcast", extractor);
+    let mut prov = wiki_archive::Provenance::new(title, target, canonical, "podcast", extractor);
     // `media:` = the playable enclosure — the SourceViewer's
     // audio player + seek-on-anchor reads this.
-    prov.media = item.enclosure_url.clone().or_else(|| Some(target.to_string()));
+    prov.media = item
+        .enclosure_url
+        .clone()
+        .or_else(|| Some(target.to_string()));
     prov.duration_secs = item.duration_secs;
     Ok((prov, body))
 }
@@ -10803,13 +10825,21 @@ async fn podcast_transcript_cues(
         ));
     }
     if mode == "none" {
-        return Ok((Vec::new(), "podcast-feed".into(), Some("Transcript skipped (--transcribe none).".into())));
+        return Ok((
+            Vec::new(),
+            "podcast-feed".into(),
+            Some("Transcript skipped (--transcribe none).".into()),
+        ));
     }
 
     // ── Fast path: the feed's own transcript tag ────────
     if matches!(mode, "auto" | "tag") {
         for tref in wiki_archive::transcript::pick_transcripts(&item.transcripts) {
-            let accept = if tref.mime.is_empty() { "*/*" } else { &tref.mime };
+            let accept = if tref.mime.is_empty() {
+                "*/*"
+            } else {
+                &tref.mime
+            };
             match wiki_archive::article::fetch_text(client, &tref.url, accept).await {
                 Ok(content) => {
                     match wiki_archive::transcript::parse_transcript(&content, &tref.mime) {
@@ -10856,7 +10886,10 @@ async fn podcast_transcript_cues(
             .filter(|s| !s.is_empty())
             .ok_or_else(|| eyre::eyre!("--transcribe groq needs GROQ_API_KEY"))?;
         let audio = fetch_audio().await?;
-        println!("transcribing via Groq ({} MB upload)…", audio.len() / 1_048_576);
+        println!(
+            "transcribing via Groq ({} MB upload)…",
+            audio.len() / 1_048_576
+        );
         let cues = wiki_archive::podcast::groq_transcribe(client, &key, audio, "episode.mp3")
             .await
             .map_err(|e| eyre::eyre!("{e}"))?;
@@ -10914,8 +10947,7 @@ async fn run_wiki_archive_import(cmd: WikiArchiveImportCmd) -> eyre::Result<()> 
 
     let client = wiki_archive::article::http_client().map_err(|e| eyre::eyre!("{e}"))?;
     let started_at = chrono::Utc::now();
-    let (items, common, next_cursor_hint): (Vec<imp::ImportedItem>, _, Option<String>) = match cmd
-    {
+    let (items, common, next_cursor_hint): (Vec<imp::ImportedItem>, _, Option<String>) = match cmd {
         WikiArchiveImportCmd::Readwise {
             token,
             updated_after,
@@ -12504,8 +12536,8 @@ fn run_subprocess(
 ) -> eyre::Result<SubprocOut> {
     use std::io::{BufRead as _, BufReader, Write as _};
     use std::process::{Command, Stdio};
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let started = std::time::Instant::now();
     let mut child = Command::new("sh")
@@ -12829,11 +12861,9 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             // --context / --milestone / --open would drop rows.
             let has_client_only_filters =
                 tag.is_some() || ctx_filter.is_some() || milestone_filter.is_some() || open;
-            let want_server_query = (status.is_some()
-                || project_id.is_some()
-                || limit.is_some()
-                || offset.is_some())
-                && !((limit.is_some() || offset.is_some()) && has_client_only_filters);
+            let want_server_query =
+                (status.is_some() || project_id.is_some() || limit.is_some() || offset.is_some())
+                    && !((limit.is_some() || offset.is_some()) && has_client_only_filters);
             let mut window_applied = false;
             let rows = if want_server_query {
                 let filter = task::TaskListFilter {
@@ -13859,9 +13889,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             // Derived rollup over the children — shared engine,
             // classified via each task's project state registry.
             let states = project_states_map(&url).await;
-            let rollup = ::workstream::subtask_rollup(parent.id, &all, |t| {
-                resolve_task_group(&states, t)
-            });
+            let rollup =
+                ::workstream::subtask_rollup(parent.id, &all, |t| resolve_task_group(&states, t));
             let mut subs: Vec<&task::TaskInfo> = all
                 .iter()
                 .filter(|t| t.workflow.as_ref().and_then(|w| w.parent) == Some(parent.id))
@@ -13920,9 +13949,8 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .await
                 .map_err(|e| eyre::eyre!("list: {e:?}"))?;
             let states = project_states_map(&url).await;
-            let rollup = ::workstream::subtask_rollup(parent.id, &all, |t| {
-                resolve_task_group(&states, t)
-            });
+            let rollup =
+                ::workstream::subtask_rollup(parent.id, &all, |t| resolve_task_group(&states, t));
             if json {
                 println!(
                     "{}",
@@ -13934,7 +13962,12 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 );
                 return Ok(());
             }
-            println!("{} [{}]  {}", short_uuid(&parent.id), parent.status, parent.title);
+            println!(
+                "{} [{}]  {}",
+                short_uuid(&parent.id),
+                parent.status,
+                parent.title
+            );
             println!("  done:        {}/{}", rollup.done, rollup.total);
             println!("  in-progress: {}", rollup.in_progress);
             println!("  blocked:     {}", rollup.blocked);
@@ -14563,7 +14596,9 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
 
             for t in filtered.drain(..) {
                 *by_status.entry(t.status.clone()).or_default() += 1;
-                *by_group.entry(group_of(t).as_str().to_string()).or_default() += 1;
+                *by_group
+                    .entry(group_of(t).as_str().to_string())
+                    .or_default() += 1;
                 *by_priority.entry(t.priority.clone()).or_default() += 1;
                 let p_label = t
                     .project_id
@@ -14577,9 +14612,11 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     // Blocked = has at least one blocker whose
                     // state *group* isn't closed (completed /
                     // cancelled), or that we can't resolve.
-                    let is_blocked = wf.blockers.0.iter().any(|bid| {
-                        by_id.get(bid).is_none_or(|b| !group_of(b).is_closed())
-                    });
+                    let is_blocked = wf
+                        .blockers
+                        .0
+                        .iter()
+                        .any(|bid| by_id.get(bid).is_none_or(|b| !group_of(b).is_closed()));
                     if is_blocked {
                         blocked += 1;
                     }
@@ -19571,7 +19608,7 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
 /// wrapper handles the I/O + the CLI's flag plumbing.
 async fn run_vault_sync(cmd: VaultCmd) -> eyre::Result<()> {
     use vault_proto::{IfMatch, VaultSyncClient};
-    use vault_sync_client::{index_local, plan_sync, LocalEntry, Side, SyncOp, SyncSummary};
+    use vault_sync_client::{LocalEntry, Side, SyncOp, SyncSummary, index_local, plan_sync};
 
     enum Mode {
         Sync,

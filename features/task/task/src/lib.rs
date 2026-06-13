@@ -60,11 +60,11 @@ pub use model::{Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry};
 pub use relations::ReverseRelation;
 // Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
 // so UI consumers don't need their own workflows-proto dep.
-pub use workflows_proto;
 pub use parse::{ParseError, parse_page, parse_str};
 pub use service::{
     TaskError, TaskEvent, TaskListFilter, TaskReverseRelations, TaskService, TaskServiceRpc,
 };
+pub use workflows_proto;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::TaskBackend;

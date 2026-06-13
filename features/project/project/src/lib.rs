@@ -54,7 +54,6 @@ pub mod write;
 
 pub use model::{ProjectInfo, Status};
 pub use parse::{ParseError, looks_like_project, parse_page, parse_str};
-pub use states::{StateDef, StateGroup, StatesConfig, default_states, resolve_state_group};
 pub use service::{ProjectError, ProjectService, ProjectServiceRpc};
 #[cfg(feature = "vox")]
 pub use service::{
@@ -63,6 +62,7 @@ pub use service::{
     project_service_rpc_service_descriptor as project_service_descriptor,
     serve as serve_project_service,
 };
+pub use states::{StateDef, StateGroup, StatesConfig, default_states, resolve_state_group};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::ProjectBackend;

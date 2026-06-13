@@ -138,8 +138,8 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ArchiveError> {
                 }
             }
             Ok(Event::End(end)) => {
-                let local = String::from_utf8_lossy(end.name().local_name().as_ref())
-                    .to_ascii_lowercase();
+                let local =
+                    String::from_utf8_lossy(end.name().local_name().as_ref()).to_ascii_lowercase();
                 if local == "item" {
                     if let Some(it) = item.take() {
                         feed.items.push(it);
@@ -308,7 +308,12 @@ mod tests {
         );
         assert_eq!(ep2.transcripts.len(), 2);
         assert_eq!(ep2.transcripts[0].mime, "text/vtt");
-        assert!(ep2.description.as_deref().unwrap().contains("<b>things</b>"));
+        assert!(
+            ep2.description
+                .as_deref()
+                .unwrap()
+                .contains("<b>things</b>")
+        );
         assert_eq!(feed.items[1].duration_secs, Some(3725));
     }
 
@@ -324,14 +329,22 @@ mod tests {
     fn episode_picking() {
         let feed = parse_feed(FEED_FIXTURE).unwrap();
         // No hint ⇒ newest (first).
-        assert_eq!(pick_episode(&feed, None).unwrap().title, "Episode 2: The Sequel");
+        assert_eq!(
+            pick_episode(&feed, None).unwrap().title,
+            "Episode 2: The Sequel"
+        );
         // Exact-normalized beats substring.
         assert_eq!(
-            pick_episode(&feed, Some("episode 2 the sequel")).unwrap().title,
+            pick_episode(&feed, Some("episode 2 the sequel"))
+                .unwrap()
+                .title,
             "Episode 2: The Sequel"
         );
         // Substring works.
-        assert_eq!(pick_episode(&feed, Some("sequel")).unwrap().title, "Episode 2: The Sequel");
+        assert_eq!(
+            pick_episode(&feed, Some("sequel")).unwrap().title,
+            "Episode 2: The Sequel"
+        );
         assert!(pick_episode(&feed, Some("episode 9")).is_none());
     }
 

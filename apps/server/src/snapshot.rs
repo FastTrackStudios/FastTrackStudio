@@ -487,12 +487,7 @@ fn kick_off_async(state: AppState) -> axum::response::Response {
         };
     }
 
-    let started_at = state
-        .snapshot_status
-        .read()
-        .unwrap()
-        .started_at
-        .clone();
+    let started_at = state.snapshot_status.read().unwrap().started_at.clone();
 
     tokio::spawn(async move {
         let outcome = run_cycle(&state).await;
@@ -524,9 +519,7 @@ fn kick_off_async(state: AppState) -> axum::response::Response {
 }
 
 /// Shared bearer-token gate for the snapshot HTTP routes.
-fn check_backup_auth(
-    headers: &axum::http::HeaderMap,
-) -> Result<(), axum::response::Response> {
+fn check_backup_auth(headers: &axum::http::HeaderMap) -> Result<(), axum::response::Response> {
     use axum::response::IntoResponse as _;
 
     let expected = std::env::var("TASK_BACKUP_GIT_TOKEN").unwrap_or_default();

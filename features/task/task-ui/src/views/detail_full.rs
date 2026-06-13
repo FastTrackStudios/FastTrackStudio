@@ -14,8 +14,8 @@
 //! writes, session fetch) happens in the page layer later.
 
 use dioxus::prelude::*;
-use task::model::Estimate;
 use task::TaskInfo as DbTask;
+use task::model::Estimate;
 use uuid::Uuid;
 use workflows_proto::{Activity, Transition};
 

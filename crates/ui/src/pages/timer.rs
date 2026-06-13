@@ -277,11 +277,7 @@ fn SessionRow(session: WorkSession, slug: String, pending: bool) -> Element {
         }
     };
 
-    let row_cls = if pending {
-        "opacity-60"
-    } else {
-        ""
-    };
+    let row_cls = if pending { "opacity-60" } else { "" };
 
     if editing() {
         rsx! {

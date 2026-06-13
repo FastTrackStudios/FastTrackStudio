@@ -125,7 +125,9 @@ pub fn nav_tabs() -> Vec<NavTab> {
         NavTab {
             label: "Vault",
             icon: icon_vault,
-            route: Route::VaultRoute { path: String::new() },
+            route: Route::VaultRoute {
+                path: String::new(),
+            },
         },
         NavTab {
             label: "Locations",

@@ -360,11 +360,7 @@ pub(crate) fn parse_time_of_day(s: &str) -> Result<TimeOfDay, String> {
                 return Err(format!("`{s}`: am/pm hours run 1-12"));
             }
             let base = if h == 12 { 0 } else { h };
-            if pm {
-                base + 12
-            } else {
-                base
-            }
+            if pm { base + 12 } else { base }
         }
         None => h,
     };
@@ -579,7 +575,9 @@ pub(crate) fn parse_time_range_wrap(s: &str) -> Result<(TimeOfDay, TimeOfDay, bo
     let mut end = parse_time_of_day(b)?;
     // `…-24:00` and `…-0:00` both mean "to midnight".
     if end.minutes_since_midnight == 24 * 60 {
-        end = TimeOfDay { minutes_since_midnight: 0 };
+        end = TimeOfDay {
+            minutes_since_midnight: 0,
+        };
     }
     if start.minutes_since_midnight == end.minutes_since_midnight {
         return Err(format!("`{s}` is zero-length"));
@@ -728,12 +726,7 @@ pub(crate) fn template_for_date<'a>(
 ) -> Option<&'a DayTemplate> {
     use chrono::Datelike as _;
     let weekend = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .map(|d| {
-            matches!(
-                d.weekday(),
-                chrono::Weekday::Sat | chrono::Weekday::Sun
-            )
-        })
+        .map(|d| matches!(d.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun))
         .unwrap_or(false);
     let want = if weekend { "weekend" } else { "weekday" };
     templates
@@ -1052,8 +1045,7 @@ fn render_day_view(v: &DayView) -> String {
     if v.resolved.is_empty() {
         out.push_str("  (no blocks — no saved plan and no day template)\n");
     }
-    let resolved_blocks: Vec<PlannedBlock> =
-        v.resolved.iter().map(|r| r.block.clone()).collect();
+    let resolved_blocks: Vec<PlannedBlock> = v.resolved.iter().map(|r| r.block.clone()).collect();
     for (i, rb) in v.resolved.iter().enumerate() {
         out.push_str("  ");
         out.push_str(&render_block_line(i, &rb.block));
@@ -1685,9 +1677,7 @@ async fn run_recurring(cmd: RecurringCmd) -> eyre::Result<()> {
             let today = chrono::Local::now().date_naive();
             let mut d = today;
             while chrono::Datelike::weekday(&d) != wd {
-                d = d
-                    .succ_opt()
-                    .ok_or_else(|| eyre::eyre!("date overflow"))?;
+                d = d.succ_opt().ok_or_else(|| eyre::eyre!("date overflow"))?;
             }
             let mk = |t: TimeOfDay| {
                 d.and_hms_opt(u32::from(t.hours()), u32::from(t.minutes()), 0)
@@ -1821,10 +1811,20 @@ fn fmt_span(span: (u16, u16)) -> String {
 fn fmt_change(c: &ReconcileChange) -> String {
     match &c.action {
         ChangeAction::Moved { from, to } => {
-            format!("moved   \"{}\" {} → {}", c.label, fmt_span(*from), fmt_span(*to))
+            format!(
+                "moved   \"{}\" {} → {}",
+                c.label,
+                fmt_span(*from),
+                fmt_span(*to)
+            )
         }
         ChangeAction::Shrunk { from, to } => {
-            format!("shrunk  \"{}\" {} → {}", c.label, fmt_span(*from), fmt_span(*to))
+            format!(
+                "shrunk  \"{}\" {} → {}",
+                c.label,
+                fmt_span(*from),
+                fmt_span(*to)
+            )
         }
         ChangeAction::Dropped { from, reason } => {
             format!("dropped \"{}\" {} — {}", c.label, fmt_span(*from), reason)
@@ -1908,9 +1908,7 @@ async fn run_reconcile(
         return print_json(&Out { plan, changes });
     }
     let fixed = plan.blocks.iter().filter(|b| b.fixed).count();
-    println!(
-        "reconciled {date} around {fixed} fixed block(s) + {n_events} event window(s)"
-    );
+    println!("reconciled {date} around {fixed} fixed block(s) + {n_events} event window(s)");
     if changes.is_empty() {
         println!("  nothing had to move");
     }
@@ -1935,8 +1933,7 @@ async fn run_event(cmd: EventCmd) -> eyre::Result<()> {
             json,
         } => {
             let date = parse_date_arg(&date)?;
-            let (start, end, wraps) =
-                parse_time_range_wrap(&range).map_err(|e| eyre::eyre!(e))?;
+            let (start, end, wraps) = parse_time_range_wrap(&range).map_err(|e| eyre::eyre!(e))?;
             let category = category
                 .as_deref()
                 .map(parse_category)
@@ -2082,7 +2079,6 @@ async fn run_event(cmd: EventCmd) -> eyre::Result<()> {
 }
 
 // ── task next ────────────────────────────────────────────────────────
-
 
 #[derive(serde::Serialize)]
 struct NextView {
@@ -2670,11 +2666,20 @@ mod tests {
         };
         let tpls = vec![mk("weekday"), mk("weekend")];
         // 2026-06-13 is a Saturday, 2026-06-12 a Friday.
-        assert_eq!(template_for_date("2026-06-13", &tpls).unwrap().id.0, "weekend");
-        assert_eq!(template_for_date("2026-06-12", &tpls).unwrap().id.0, "weekday");
+        assert_eq!(
+            template_for_date("2026-06-13", &tpls).unwrap().id.0,
+            "weekend"
+        );
+        assert_eq!(
+            template_for_date("2026-06-12", &tpls).unwrap().id.0,
+            "weekday"
+        );
         // Falls back to the first template when ids are absent.
         let only = vec![mk("custom")];
-        assert_eq!(template_for_date("2026-06-13", &only).unwrap().id.0, "custom");
+        assert_eq!(
+            template_for_date("2026-06-13", &only).unwrap().id.0,
+            "custom"
+        );
     }
 
     // ── overlap checker ─────────────────────────────────────────

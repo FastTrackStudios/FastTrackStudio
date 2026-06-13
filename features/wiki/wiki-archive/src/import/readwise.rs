@@ -189,7 +189,15 @@ pub async fn fetch_export(
     token: &str,
     updated_after: Option<&str>,
 ) -> Result<Vec<ImportedItem>, ArchiveError> {
-    fetch_paged(client, token, EXPORT_URL, "pageCursor", updated_after, parse_export_page).await
+    fetch_paged(
+        client,
+        token,
+        EXPORT_URL,
+        "pageCursor",
+        updated_after,
+        parse_export_page,
+    )
+    .await
 }
 
 /// Fetch every Reader v3 page (with stored HTML).

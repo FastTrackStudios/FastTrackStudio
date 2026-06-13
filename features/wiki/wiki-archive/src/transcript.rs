@@ -299,12 +299,27 @@ mod tests {
     #[test]
     fn ranking_prefers_vtt_then_srt_then_json() {
         let refs = vec![
-            TranscriptRef { url: "j".into(), mime: "application/json".into() },
-            TranscriptRef { url: "h".into(), mime: "text/html".into() },
-            TranscriptRef { url: "s".into(), mime: "application/srt".into() },
-            TranscriptRef { url: "v".into(), mime: "text/vtt".into() },
+            TranscriptRef {
+                url: "j".into(),
+                mime: "application/json".into(),
+            },
+            TranscriptRef {
+                url: "h".into(),
+                mime: "text/html".into(),
+            },
+            TranscriptRef {
+                url: "s".into(),
+                mime: "application/srt".into(),
+            },
+            TranscriptRef {
+                url: "v".into(),
+                mime: "text/vtt".into(),
+            },
         ];
-        let picked: Vec<&str> = pick_transcripts(&refs).iter().map(|r| r.url.as_str()).collect();
+        let picked: Vec<&str> = pick_transcripts(&refs)
+            .iter()
+            .map(|r| r.url.as_str())
+            .collect();
         assert_eq!(picked, vec!["v", "s", "j"]); // html dropped
     }
 

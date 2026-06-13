@@ -16,8 +16,8 @@
 
 use clap::{Args, Subcommand};
 use cookbook::CookbookServiceClient;
-use mealplan::shopping::{ShoppingList, ShoppingServiceClient};
 use mealplan::MealplanServiceClient;
+use mealplan::shopping::{ShoppingList, ShoppingServiceClient};
 use scheduling_proto::{
     BlockAssignment, BlockCategory, DayPlan, DayPlansClient, PlannedBlock, TimeBlockId, TimeOfDay,
 };

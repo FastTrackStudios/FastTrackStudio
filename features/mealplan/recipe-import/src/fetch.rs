@@ -79,13 +79,17 @@ pub(crate) fn classify(url: &str, status: u16, body: &str) -> Result<(), ImportE
 /// are tiny; real recipe pages put these strings nowhere near the top).
 fn challenge_marker(body: &str) -> Option<&'static str> {
     const MARKERS: [&str; 5] = [
-        "just a moment...",          // Cloudflare interstitial <title>
-        "cf-browser-verification",   // Cloudflare legacy challenge div
-        "challenge-platform",        // Cloudflare turnstile script path
-        "are you a robot",           // generic
-        "px-captcha",                // PerimeterX
+        "just a moment...",        // Cloudflare interstitial <title>
+        "cf-browser-verification", // Cloudflare legacy challenge div
+        "challenge-platform",      // Cloudflare turnstile script path
+        "are you a robot",         // generic
+        "px-captcha",              // PerimeterX
     ];
-    let head: String = body.chars().take(16 * 1024).collect::<String>().to_lowercase();
+    let head: String = body
+        .chars()
+        .take(16 * 1024)
+        .collect::<String>()
+        .to_lowercase();
     MARKERS.into_iter().find(|m| head.contains(m))
 }
 
@@ -105,7 +109,10 @@ mod tests {
     fn cloudflare_challenge_on_200_is_detected() {
         let body = "<html><title>Just a moment...</title></html>";
         let err = classify("https://x.test/r", 200, body).unwrap_err();
-        assert!(matches!(err, ImportError::BotProtected { status: 200, .. }), "{err}");
+        assert!(
+            matches!(err, ImportError::BotProtected { status: 200, .. }),
+            "{err}"
+        );
     }
 
     #[test]

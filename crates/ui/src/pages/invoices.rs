@@ -147,11 +147,7 @@ pub fn InvoicesView() -> Element {
 }
 
 #[component]
-fn UninvoicedRow(
-    slug: String,
-    group: finance_proto::UninvoicedGroup,
-    label: String,
-) -> Element {
+fn UninvoicedRow(slug: String, group: finance_proto::UninvoicedGroup, label: String) -> Element {
     let muts = stores::use_invoice_mutations();
     let mut open = use_signal(|| false);
     let mut client = use_signal(|| label.clone());

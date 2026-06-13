@@ -5,9 +5,9 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
-use crate::model::Status;
 use crate::TaskInfo;
 use crate::TaskMutation;
+use crate::model::Status;
 
 use super::detail::TaskDetail;
 use super::kanban::KanbanBoard;

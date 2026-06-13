@@ -42,9 +42,7 @@ pub fn ProjectDetailView(id: String) -> Element {
     // `(owning slug, project id)` once resolved — the key every
     // dependent fetch hangs off. Mirrored into a reactive memo so the
     // resources/hooks below re-run when it lands or changes.
-    let pkey: Option<(String, Uuid)> = project_res
-        .value()
-        .map(|r| (r.slug.clone(), r.project.id));
+    let pkey: Option<(String, Uuid)> = project_res.value().map(|r| (r.slug.clone(), r.project.id));
     let pkey_for_memo = pkey.clone();
     let pkey_memo = use_memo(use_reactive!(|(pkey_for_memo,)| pkey_for_memo));
 
@@ -109,7 +107,13 @@ pub fn ProjectDetailView(id: String) -> Element {
             let sessions = sessions.unwrap_or_default();
             let uninvoiced = uninvoiced.unwrap_or_default();
             let invoices = invoices.unwrap_or_default();
-            Some(build_budget(pid, &sessions, &uninvoiced, &invoices, Utc::now()))
+            Some(build_budget(
+                pid,
+                &sessions,
+                &uninvoiced,
+                &invoices,
+                Utc::now(),
+            ))
         }
     });
 
@@ -127,8 +131,7 @@ pub fn ProjectDetailView(id: String) -> Element {
             .await;
             let timers = timers.unwrap_or_default();
             let mut agents = agents.unwrap_or_default();
-            agents
-                .retain(|s| matches!(s.status, AgentStatus::Running | AgentStatus::AwaitingUser));
+            agents.retain(|s| matches!(s.status, AgentStatus::Running | AgentStatus::AwaitingUser));
             Some((timers, agents))
         }
     });
@@ -247,9 +250,8 @@ pub fn ProjectDetailView(id: String) -> Element {
                 .map(crate::chrome::owner_id);
             // Implied money budget: estimate × project default rate,
             // when both are set.
-            let implied_budget: Option<String> = (p.estimated_seconds > 0
-                && p.default_rate_cents > 0)
-                .then(|| {
+            let implied_budget: Option<String> =
+                (p.estimated_seconds > 0 && p.default_rate_cents > 0).then(|| {
                     let minor =
                         (p.estimated_seconds as f64 / 3600.0 * p.default_rate_cents as f64) as i64;
                     money_label(minor, &p.currency)
@@ -662,7 +664,11 @@ fn build_budget(
 ) -> BudgetData {
     let logged_seconds = sessions
         .iter()
-        .map(|s| (s.end_time.unwrap_or(now) - s.start_time).num_seconds().max(0))
+        .map(|s| {
+            (s.end_time.unwrap_or(now) - s.start_time)
+                .num_seconds()
+                .max(0)
+        })
         .sum();
     let unbilled = uninvoiced
         .iter()
@@ -796,9 +802,7 @@ fn AgentRow(session: AgentSession) -> Element {
         .pending
         .as_ref()
         .map(|pt| turn_summary(&pt.user_message));
-    let last = session
-        .last_message_at
-        .map(|t| ago_label(Utc::now(), t));
+    let last = session.last_message_at.map(|t| ago_label(Utc::now(), t));
     rsx! {
         div { class: "flex items-center justify-between gap-3 px-3 py-2.5",
             div { class: "flex min-w-0 flex-col gap-0.5",
@@ -1098,12 +1102,18 @@ mod tests {
         assert_eq!(ago_label(now, s(2 * 3_600 + 60)), "2h ago");
         assert_eq!(ago_label(now, s(3 * 86_400)), "3d ago");
         // Clock skew (event in the future) clamps to "just now".
-        assert_eq!(ago_label(now, now + chrono::Duration::seconds(30)), "just now");
+        assert_eq!(
+            ago_label(now, now + chrono::Duration::seconds(30)),
+            "just now"
+        );
     }
 
     #[test]
     fn turn_summary_first_line_clipped() {
-        assert_eq!(turn_summary("fix the build\nand then more"), "fix the build");
+        assert_eq!(
+            turn_summary("fix the build\nand then more"),
+            "fix the build"
+        );
         let long = "x".repeat(120);
         let clipped = turn_summary(&long);
         assert_eq!(clipped.chars().count(), 81); // 80 + ellipsis

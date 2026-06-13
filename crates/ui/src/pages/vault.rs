@@ -244,10 +244,13 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
         }
     });
     let collab_status = use_memo(move || {
-        collab
-            .read()
-            .as_ref()
-            .map(|c| if c.is_live() { "Collab: live" } else { "Collab: connecting…" })
+        collab.read().as_ref().map(|c| {
+            if c.is_live() {
+                "Collab: live"
+            } else {
+                "Collab: connecting…"
+            }
+        })
     });
     // Browser-conformance hook (tests/multiplayer): mirror the exact
     // editor buffer + collab state into `window.__taskVault`. The
@@ -290,11 +293,7 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
         set("rev", wasm_bindgen::JsValue::from_f64(rev as f64));
         set("replica", wasm_bindgen::JsValue::from_str(&replica));
         set("path", wasm_bindgen::JsValue::from_str(&path));
-        let _ = js_sys::Reflect::set(
-            &win,
-            &wasm_bindgen::JsValue::from_str("__taskVault"),
-            &obj,
-        );
+        let _ = js_sys::Reflect::set(&win, &wasm_bindgen::JsValue::from_str("__taskVault"), &obj);
     });
     // Editor → replica bridge + presence cursor publish.
     let on_transaction = use_callback(move |event: editor::TransactionEvent| {

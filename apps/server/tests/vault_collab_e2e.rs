@@ -18,8 +18,8 @@
 use std::time::Duration;
 
 use architect::{LayerRouter, LocalServer, Scope};
-use crdt::sync::{DocSyncClient, SyncedDoc};
 use crdt::CrdtDoc;
+use crdt::sync::{DocSyncClient, SyncedDoc};
 use uuid::Uuid;
 use vault_proto::{COLLAB_TEXT_CONTAINER, IfMatch, VaultSyncClient};
 
@@ -56,13 +56,19 @@ async fn two_synced_clients_plus_put_file_writer_converge() {
     let tmp = tempfile::tempdir().unwrap();
     let vault_dir = tmp.path().join("vault");
     let backend = vault::Backend::single("default", vault_dir.clone()).unwrap();
-    let collab =
-        vault_collab::VaultCollab::with_debounce(backend.clone(), tmp.path().join("crdt"), DEBOUNCE);
+    let collab = vault_collab::VaultCollab::with_debounce(
+        backend.clone(),
+        tmp.path().join("crdt"),
+        DEBOUNCE,
+    );
     collab.watch_vault("default");
 
     // The same two mounts `org_layer_router` adds for this feature.
     let router = LayerRouter::new()
-        .with(vault_proto::descriptor(), vault_proto::serve(backend.clone()))
+        .with(
+            vault_proto::descriptor(),
+            vault_proto::serve(backend.clone()),
+        )
         .with(
             crdt::sync::doc_sync_service_descriptor(),
             crdt::sync::DocSyncDispatcher::new(collab.registry().clone()),
@@ -86,7 +92,10 @@ async fn two_synced_clients_plus_put_file_writer_converge() {
         .open_collab("default".into(), "notes/shared.md".into())
         .await
         .unwrap();
-    assert_eq!(ack.doc_id, vault_proto::collab_doc_id("default", "notes/shared.md"));
+    assert_eq!(
+        ack.doc_id,
+        vault_proto::collab_doc_id("default", "notes/shared.md")
+    );
 
     // Two synced replicas join and receive the seeded content.
     let doc_a = join(&local, ack.doc_id).await;
@@ -170,8 +179,16 @@ async fn two_synced_clients_plus_put_file_writer_converge() {
         final_a,
         "disk diverged from replicas"
     );
-    assert_eq!(final_a.matches("from-file").count(), 1, "inbound applied twice");
-    assert_eq!(final_a.matches("alpha").count(), 1, "echo re-applied A's edit");
+    assert_eq!(
+        final_a.matches("from-file").count(),
+        1,
+        "inbound applied twice"
+    );
+    assert_eq!(
+        final_a.matches("alpha").count(),
+        1,
+        "echo re-applied A's edit"
+    );
 
     scope.close().await;
 }
@@ -192,10 +209,18 @@ async fn live_smoke_two_clients_plus_put_file() {
 
     let writer: VaultSyncClient = vox::connect(&url).establish().await.expect("ws connect");
     writer
-        .put_file("default".into(), path.clone(), b"smoke base\n".to_vec(), IfMatch::CreateOnly)
+        .put_file(
+            "default".into(),
+            path.clone(),
+            b"smoke base\n".to_vec(),
+            IfMatch::CreateOnly,
+        )
         .await
         .unwrap();
-    let ack = writer.open_collab("default".into(), path.clone()).await.unwrap();
+    let ack = writer
+        .open_collab("default".into(), path.clone())
+        .await
+        .unwrap();
     eprintln!("live smoke: doc_id {} for {path}", ack.doc_id);
 
     // Two ws replicas.
@@ -218,10 +243,17 @@ async fn live_smoke_two_clients_plus_put_file() {
     eventually("B seeded", async || text_of(&b) == "smoke base\n").await;
 
     // A types, B observes; write-behind commits to the real vault.
-    doc_a.loro().get_text(COLLAB_TEXT_CONTAINER).insert(0, "hello ").unwrap();
+    doc_a
+        .loro()
+        .get_text(COLLAB_TEXT_CONTAINER)
+        .insert(0, "hello ")
+        .unwrap();
     doc_a.loro().commit();
     let b = doc_b.clone();
-    eventually("B sees A's edit", async || text_of(&b) == "hello smoke base\n").await;
+    eventually("B sees A's edit", async || {
+        text_of(&b) == "hello smoke base\n"
+    })
+    .await;
     let w = writer.clone();
     let p = path.clone();
     eventually("server file matches (write-behind)", async || {
@@ -252,7 +284,11 @@ async fn live_smoke_two_clients_plus_put_file() {
     tokio::time::sleep(Duration::from_secs(2)).await;
     let final_a = text_of(&doc_a);
     assert_eq!(final_a, text_of(&doc_b));
-    let server_copy = writer.get_file("default".into(), path.clone()).await.unwrap().0;
+    let server_copy = writer
+        .get_file("default".into(), path.clone())
+        .await
+        .unwrap()
+        .0;
     assert_eq!(String::from_utf8(server_copy).unwrap(), final_a);
     assert_eq!(final_a.matches("from-file").count(), 1);
     // When the server runs on this machine, also assert the raw file
@@ -265,5 +301,7 @@ async fn live_smoke_two_clients_plus_put_file() {
     eprintln!("live smoke: converged text:\n{final_a}");
 
     // Tidy the smoke file.
-    let _ = writer.delete_file("default".into(), path, IfMatch::Force).await;
+    let _ = writer
+        .delete_file("default".into(), path, IfMatch::Force)
+        .await;
 }

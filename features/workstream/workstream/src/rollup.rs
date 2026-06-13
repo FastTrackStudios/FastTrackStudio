@@ -348,7 +348,9 @@ mod tests {
             child_task(None, "shipped"),          // not a child
             ws_task(None, "open"),                // unrelated
         ];
-        let r = subtask_rollup(parent, &tasks, |t| resolve_state_group(Some(&cfg), &t.status));
+        let r = subtask_rollup(parent, &tasks, |t| {
+            resolve_state_group(Some(&cfg), &t.status)
+        });
         assert_eq!(r.total, 3);
         assert_eq!(r.done, 1, "custom `shipped` classifies as completed");
         assert_eq!(r.in_progress, 1, "custom `building` classifies as started");
@@ -378,7 +380,9 @@ mod tests {
             default: false,
             order: 0,
         }]);
-        let r = subtask_rollup(parent, &tasks, |t| resolve_state_group(Some(&cfg), &t.status));
+        let r = subtask_rollup(parent, &tasks, |t| {
+            resolve_state_group(Some(&cfg), &t.status)
+        });
         assert_eq!((r.total, r.done, r.in_progress), (1, 0, 1));
     }
 

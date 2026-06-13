@@ -32,11 +32,17 @@ pub enum Role {
 impl ChatMessage {
     #[must_use]
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: Role::User, content: content.into() }
+        Self {
+            role: Role::User,
+            content: content.into(),
+        }
     }
     #[must_use]
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: content.into() }
+        Self {
+            role: Role::Assistant,
+            content: content.into(),
+        }
     }
 }
 
@@ -72,7 +78,9 @@ impl AnthropicClient {
     /// to either export a key or pass `--offline`.
     #[must_use]
     pub fn from_env() -> Option<Self> {
-        let api_key = std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.trim().is_empty())?;
+        let api_key = std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .filter(|k| !k.trim().is_empty())?;
         let model = std::env::var("TASK_RECIPE_IMPORT_MODEL")
             .ok()
             .filter(|m| !m.trim().is_empty())
@@ -92,7 +100,12 @@ impl AnthropicClient {
             .timeout(Duration::from_secs(300))
             .build()
             .expect("reqwest client");
-        Self { http, api_key, model, base_url: base_url.trim_end_matches('/').to_string() }
+        Self {
+            http,
+            api_key,
+            model,
+            base_url: base_url.trim_end_matches('/').to_string(),
+        }
     }
 
     #[must_use]
@@ -141,8 +154,8 @@ impl LlmClient for AnthropicClient {
             return Err(ImportError::Llm(format!("HTTP {status}: {text}")));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| ImportError::Llm(format!("bad json: {e}")))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| ImportError::Llm(format!("bad json: {e}")))?;
 
         if json["stop_reason"].as_str() == Some("refusal") {
             return Err(ImportError::Llm("model refused the request".into()));
@@ -169,7 +182,9 @@ impl LlmClient for AnthropicClient {
             )));
         }
         if json["stop_reason"].as_str() == Some("max_tokens") {
-            return Err(ImportError::Llm("completion truncated at max_tokens".into()));
+            return Err(ImportError::Llm(
+                "completion truncated at max_tokens".into(),
+            ));
         }
         Ok(out)
     }

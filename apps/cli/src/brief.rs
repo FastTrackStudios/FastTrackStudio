@@ -54,7 +54,10 @@ pub async fn run_brief(args: BriefArgs) -> eyre::Result<()> {
     let BriefArgs { org, server, json } = args;
     let slug = crate::resolve_active_org(org.clone())?;
     let url = crate::resolve_org_vox_url(server, &slug);
-    let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+    let today = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
 
     let mut view = BriefView {
         date: today.clone(),
@@ -84,7 +87,10 @@ pub async fn run_brief(args: BriefArgs) -> eyre::Result<()> {
             Ok(evs) => {
                 view.events = evs
                     .into_iter()
-                    .filter(|e| date_prefix(&e.start) <= today.as_str() && date_prefix(&e.end) >= today.as_str())
+                    .filter(|e| {
+                        date_prefix(&e.start) <= today.as_str()
+                            && date_prefix(&e.end) >= today.as_str()
+                    })
                     .collect();
             }
             Err(e) => view.errors.push(format!("calendar events: {e:?}")),
@@ -103,7 +109,9 @@ pub async fn run_brief(args: BriefArgs) -> eyre::Result<()> {
                     .iter()
                     .filter(|t| open(t))
                     .filter(|t| {
-                        t.due.as_deref().is_some_and(|d| date_prefix(d) <= today.as_str())
+                        t.due
+                            .as_deref()
+                            .is_some_and(|d| date_prefix(d) <= today.as_str())
                             || t.scheduled
                                 .as_deref()
                                 .is_some_and(|d| date_prefix(d) <= today.as_str())
@@ -112,7 +120,10 @@ pub async fn run_brief(args: BriefArgs) -> eyre::Result<()> {
                     .collect();
                 view.due_tasks.sort_by(|a, b| {
                     let key = |t: &task::TaskInfo| {
-                        t.due.clone().or_else(|| t.scheduled.clone()).unwrap_or_default()
+                        t.due
+                            .clone()
+                            .or_else(|| t.scheduled.clone())
+                            .unwrap_or_default()
                     };
                     key(a).cmp(&key(b))
                 });
@@ -241,11 +252,16 @@ fn render_human(v: &BriefView) {
     match &v.active_timer {
         Some(s) => {
             let elapsed = chrono::Utc::now().signed_duration_since(s.start_time);
-            let mins = u16::try_from(elapsed.num_minutes().clamp(0, i64::from(u16::MAX))).unwrap_or(0);
+            let mins =
+                u16::try_from(elapsed.num_minutes().clamp(0, i64::from(u16::MAX))).unwrap_or(0);
             println!(
                 "Timer: running {} — {}",
                 plan::fmt_min(mins),
-                if s.description.is_empty() { "(no description)" } else { &s.description }
+                if s.description.is_empty() {
+                    "(no description)"
+                } else {
+                    &s.description
+                }
             );
         }
         None => println!("Timer: idle"),
@@ -257,7 +273,10 @@ fn render_human(v: &BriefView) {
     for t in &v.due_tasks {
         println!(
             "  {}  {}  [{}]",
-            t.due.as_deref().or(t.scheduled.as_deref()).unwrap_or("????-??-??"),
+            t.due
+                .as_deref()
+                .or(t.scheduled.as_deref())
+                .unwrap_or("????-??-??"),
             t.title,
             t.status
         );
@@ -269,7 +288,10 @@ fn render_human(v: &BriefView) {
     println!();
 
     // Agent queue.
-    println!("Agent tasks awaiting input ({})", v.blocked_agent_tasks.len());
+    println!(
+        "Agent tasks awaiting input ({})",
+        v.blocked_agent_tasks.len()
+    );
     for t in &v.blocked_agent_tasks {
         println!("  {}  ({})", t.title, t.id);
     }

@@ -194,7 +194,13 @@ fn normalize(s: &str) -> String {
     s.trim()
         .to_ascii_lowercase()
         .chars()
-        .map(|c| if c == '_' || c.is_whitespace() { '-' } else { c })
+        .map(|c| {
+            if c == '_' || c.is_whitespace() {
+                '-'
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -256,7 +262,10 @@ mod tests {
     #[test]
     fn resolution_is_alias_tolerant() {
         // No config: built-in aliases.
-        assert_eq!(resolve_state_group(None, "In_Progress"), StateGroup::Started);
+        assert_eq!(
+            resolve_state_group(None, "In_Progress"),
+            StateGroup::Started
+        );
         assert_eq!(resolve_state_group(None, " DONE "), StateGroup::Completed);
         assert_eq!(resolve_state_group(None, "canceled"), StateGroup::Cancelled);
         // Custom config: name matching tolerates case + `_`.
@@ -289,12 +298,18 @@ mod tests {
             StateGroup::Backlog
         );
         // Unlisted canonical names still fall through to builtins.
-        assert_eq!(resolve_state_group(Some(&cfg), "done"), StateGroup::Completed);
+        assert_eq!(
+            resolve_state_group(Some(&cfg), "done"),
+            StateGroup::Completed
+        );
     }
 
     #[test]
     fn unknown_status_falls_back_to_unstarted() {
-        assert_eq!(resolve_state_group(None, "warp-speed"), StateGroup::Unstarted);
+        assert_eq!(
+            resolve_state_group(None, "warp-speed"),
+            StateGroup::Unstarted
+        );
         let cfg = default_states();
         assert_eq!(
             resolve_state_group(Some(&cfg), "qa-review"),
@@ -335,7 +350,14 @@ mod tests {
         let names: Vec<&str> = cfg.ordered().iter().map(|d| d.name.as_str()).collect();
         assert_eq!(
             names,
-            ["triage", "open", "in-progress", "waiting", "done", "cancelled"]
+            [
+                "triage",
+                "open",
+                "in-progress",
+                "waiting",
+                "done",
+                "cancelled"
+            ]
         );
     }
 }

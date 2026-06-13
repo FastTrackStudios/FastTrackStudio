@@ -198,7 +198,10 @@ pub fn FleetingModal() -> Element {
         };
         let id = uuid::Uuid::new_v4().to_string();
         let created = Utc::now().to_rfc3339();
-        muts.capture(slug, inbox_proto::InboxItem::capture(id, text, "ui", created));
+        muts.capture(
+            slug,
+            inbox_proto::InboxItem::capture(id, text, "ui", created),
+        );
         draft.set(String::new());
         open.set(false);
     };

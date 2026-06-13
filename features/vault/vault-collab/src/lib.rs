@@ -423,7 +423,11 @@ async fn flush(shared: &Arc<Shared>, doc_id: Uuid, weak: &WeakCrdtDoc, vault_id:
             doc.loro().commit();
         }
         Ok(Err(e)) => {
-            tracing::warn!(?doc_id, path, "vault-collab: write-behind put_file failed: {e}");
+            tracing::warn!(
+                ?doc_id,
+                path,
+                "vault-collab: write-behind put_file failed: {e}"
+            );
             restore_guard(shared, doc_id, &sha, prev);
         }
         Err(e) => {
@@ -540,13 +544,17 @@ fn is_echo(shared: &Shared, doc_id: Uuid, sha256: &str) -> bool {
 }
 
 fn set_flushed(shared: &Shared, doc_id: Uuid, sha: &str, text: &str) {
-    shared.flushed.lock().expect("flushed lock poisoned").insert(
-        doc_id,
-        FlushState {
-            sha: sha.to_string(),
-            text: text.to_string(),
-        },
-    );
+    shared
+        .flushed
+        .lock()
+        .expect("flushed lock poisoned")
+        .insert(
+            doc_id,
+            FlushState {
+                sha: sha.to_string(),
+                text: text.to_string(),
+            },
+        );
 }
 
 /// `meta.flushed_sha` on the doc — survives restarts so a re-opened
@@ -558,7 +566,7 @@ fn read_meta_flushed(doc: &CrdtDoc) -> Option<String> {
         .get_map(COLLAB_META_CONTAINER)
         .get(COLLAB_META_FLUSHED_SHA)
     {
-        Some(ValueOrContainer::Value(LoroValue::String(s))) => Some((*s).clone().into()),
+        Some(ValueOrContainer::Value(LoroValue::String(s))) => Some((*s).clone()),
         _ => None,
     }
 }
@@ -707,8 +715,14 @@ mod tests {
         let doc = collab.registry().doc(ack.doc_id).await.unwrap();
         let text = doc.loro().get_text(COLLAB_TEXT_CONTAINER).to_string();
         assert_eq!(text, "hello vault");
-        assert_eq!(collab.flushed_sha(ack.doc_id).as_deref(), Some(ack.sha256.as_str()));
-        assert_eq!(read_meta_flushed(&doc).as_deref(), Some(ack.sha256.as_str()));
+        assert_eq!(
+            collab.flushed_sha(ack.doc_id).as_deref(),
+            Some(ack.sha256.as_str())
+        );
+        assert_eq!(
+            read_meta_flushed(&doc).as_deref(),
+            Some(ack.sha256.as_str())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -749,11 +763,17 @@ mod tests {
             VaultEvent::Put { path, sha256, .. } => {
                 assert_eq!(path, "n.md");
                 assert_eq!(sha256, sha256_hex(b"hello world"));
-                assert!(collab.is_echo(ack.doc_id, &sha256), "own flush must be an echo");
+                assert!(
+                    collab.is_echo(ack.doc_id, &sha256),
+                    "own flush must be an echo"
+                );
             }
             other => panic!("expected Put, got {other:?}"),
         }
-        assert_eq!(read_meta_flushed(&doc).as_deref(), Some(sha256_hex(b"hello world").as_str()));
+        assert_eq!(
+            read_meta_flushed(&doc).as_deref(),
+            Some(sha256_hex(b"hello world").as_str())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -802,7 +822,10 @@ mod tests {
         // Let the broadcast → listener cycle drain, then assert the
         // doc didn't change again (no echo re-merge, no duplication).
         tokio::time::sleep(DEBOUNCE * 4).await;
-        assert_eq!(doc.loro().get_text(COLLAB_TEXT_CONTAINER).to_string(), "one two");
+        assert_eq!(
+            doc.loro().get_text(COLLAB_TEXT_CONTAINER).to_string(),
+            "one two"
+        );
         assert_eq!(read(&backend, "n.md"), "one two");
     }
 
@@ -849,7 +872,10 @@ mod tests {
         {
             let collab = VaultCollab::with_debounce(backend.clone(), crdt_root.clone(), DEBOUNCE);
             let doc = collab.registry().doc(ack.doc_id).await.unwrap();
-            assert_eq!(doc.loro().get_text(COLLAB_TEXT_CONTAINER).to_string(), "v1 text");
+            assert_eq!(
+                doc.loro().get_text(COLLAB_TEXT_CONTAINER).to_string(),
+                "v1 text"
+            );
             // Wait for the persistence writer to land the seed commit.
             eventually("seed persisted", async || {
                 crdt_root.join(ack.doc_id.to_string()).exists()
@@ -875,7 +901,10 @@ mod tests {
         assert!(diff_text_ops("same", "same").is_empty());
         assert_eq!(
             diff_text_ops("hello", "hello!"),
-            vec![TextOp::Insert { pos: 5, text: "!".into() }]
+            vec![TextOp::Insert {
+                pos: 5,
+                text: "!".into()
+            }]
         );
         assert_eq!(
             diff_text_ops("hello!", "hello"),
@@ -886,7 +915,10 @@ mod tests {
             diff_text_ops("a🦀b", "a🦁b"),
             vec![
                 TextOp::Delete { pos: 1, len: 1 },
-                TextOp::Insert { pos: 1, text: "🦁".into() }
+                TextOp::Insert {
+                    pos: 1,
+                    text: "🦁".into()
+                }
             ]
         );
     }

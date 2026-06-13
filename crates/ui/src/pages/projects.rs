@@ -44,8 +44,7 @@ pub fn ProjectsView() -> Element {
 
     let view = match (projects.value(), projects.error()) {
         (Some(rows), _) => {
-            let rows: Vec<ProjectInfo> =
-                rows.iter().map(|(_, r)| r.project.clone()).collect();
+            let rows: Vec<ProjectInfo> = rows.iter().map(|(_, r)| r.project.clone()).collect();
             render_loaded(&rows, view_mode)
         }
         (None, Some(e)) => render_error(e),

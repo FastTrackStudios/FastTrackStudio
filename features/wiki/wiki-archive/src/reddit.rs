@@ -185,16 +185,16 @@ async fn fetch_thread_curl(url: &str) -> Result<RedditThread, ArchiveError> {
     }
     let cookie_header = format!("cookie: {}", cookies.join("; "));
     let (head, body) = run_curl(&[
-        "-D", "-",
-        "-H", &cookie_header,
-        "-H", "accept: application/json",
+        "-D",
+        "-",
+        "-H",
+        &cookie_header,
+        "-H",
+        "accept: application/json",
         url,
     ])
     .await?;
-    let status_json = head
-        .lines()
-        .next()
-        .is_some_and(|l| l.contains(" 200"))
+    let status_json = head.lines().next().is_some_and(|l| l.contains(" 200"))
         && head.lines().any(|l| {
             l.to_ascii_lowercase().starts_with("content-type:")
                 && l.to_ascii_lowercase().contains("application/json")
@@ -235,7 +235,10 @@ async fn run_curl(args: &[&str]) -> Result<(String, String), ArchiveError> {
             message: format!(
                 "exit {}: {}",
                 out.status,
-                String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")
+                String::from_utf8_lossy(&out.stderr)
+                    .lines()
+                    .last()
+                    .unwrap_or("")
             ),
         });
     }
@@ -243,7 +246,10 @@ async fn run_curl(args: &[&str]) -> Result<(String, String), ArchiveError> {
     // With `-D -` the response headers precede the body on
     // stdout, separated by a blank line (last header block
     // wins across redirects).
-    match stdout.split_once("\r\n\r\n").or_else(|| stdout.split_once("\n\n")) {
+    match stdout
+        .split_once("\r\n\r\n")
+        .or_else(|| stdout.split_once("\n\n"))
+    {
         Some((head, body)) => Ok((head.to_string(), body.to_string())),
         None => Ok((stdout.to_string(), String::new())),
     }
@@ -292,9 +298,9 @@ async fn fetch_anon_cookies(client: &reqwest::Client) -> Result<String, ArchiveE
 pub fn parse_thread(json: &str) -> Result<RedditThread, ArchiveError> {
     let v: Value = serde_json::from_str(json)
         .map_err(|e| ArchiveError::ImportParse(format!("reddit json: {e}")))?;
-    let listings = v
-        .as_array()
-        .ok_or_else(|| ArchiveError::ImportParse("reddit: expected [post, comments] array".into()))?;
+    let listings = v.as_array().ok_or_else(|| {
+        ArchiveError::ImportParse("reddit: expected [post, comments] array".into())
+    })?;
     let post = listings
         .first()
         .and_then(|l| l.pointer("/data/children/0/data"))
@@ -314,8 +320,7 @@ pub fn parse_thread(json: &str) -> Result<RedditThread, ArchiveError> {
     // Link posts carry the outbound URL in `url`; self posts
     // point it back at the permalink — drop those.
     let link_url = str_of(post, "url").filter(|u| {
-        post.get("is_self").and_then(Value::as_bool) != Some(true)
-            && !u.contains("/comments/")
+        post.get("is_self").and_then(Value::as_bool) != Some(true) && !u.contains("/comments/")
     });
 
     let mut comments = Vec::new();
@@ -358,7 +363,9 @@ fn collect_comment(child: &Value, depth: usize, out: &mut Vec<RedditComment>) {
     if child.get("kind").and_then(Value::as_str) != Some("t1") {
         return;
     }
-    let Some(data) = child.get("data") else { return };
+    let Some(data) = child.get("data") else {
+        return;
+    };
     let body = data
         .get("body")
         .and_then(Value::as_str)
@@ -504,7 +511,10 @@ mod tests {
     fn renders_quote_digest() {
         let t = parse_thread(&fixture()).unwrap();
         let md = render_reddit_markdown(&t);
-        assert!(md.contains("_r/datahoarder · u/alice · 2025-12-11 · score 420 (97% upvoted)_"), "{md}");
+        assert!(
+            md.contains("_r/datahoarder · u/alice · 2025-12-11 · score 420 (97% upvoted)_"),
+            "{md}"
+        );
         assert!(md.contains("## Comments (showing 2 of 3)"), "{md}");
         assert!(md.contains("> **u/bob** · +99"), "{md}");
         assert!(md.contains("> ↳ **u/alice** · +12"), "{md}");

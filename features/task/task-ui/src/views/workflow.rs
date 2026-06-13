@@ -8,7 +8,7 @@ use task::model::Estimate;
 use uuid::Uuid;
 use workflows_proto::AgentRef;
 
-use super::detail_full::{short_id, ClaimState, SectionLabel};
+use super::detail_full::{ClaimState, SectionLabel, short_id};
 
 /// Display label for an estimate value.
 #[must_use]

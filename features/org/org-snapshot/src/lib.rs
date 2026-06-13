@@ -335,7 +335,13 @@ impl SnapshotEngine {
         let out = self
             .git(
                 spec,
-                &["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+                &[
+                    "ls-files",
+                    "--others",
+                    "--ignored",
+                    "--exclude-standard",
+                    "-z",
+                ],
             )
             .await?;
         let wanted: Vec<&str> = out

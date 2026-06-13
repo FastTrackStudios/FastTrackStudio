@@ -262,7 +262,12 @@ pub fn on_editor_transaction(
 /// viewer resolves it against their *own* current doc state
 /// (`get_cursor_pos`), so local edits move remote carets correctly
 /// in real time.
-fn publish_cursor(c: &CollabHandles, session: &DocumentSession, event: &TransactionEvent, who: &str) {
+fn publish_cursor(
+    c: &CollabHandles,
+    session: &DocumentSession,
+    event: &TransactionEvent,
+    who: &str,
+) {
     let primary = session.state.peek().selection.primary();
     let rope = event.doc_after.rope();
     let clamp = |byte: usize| rope.byte_to_char(byte.min(rope.len_bytes()));
@@ -283,7 +288,10 @@ fn publish_cursor(c: &CollabHandles, session: &DocumentSession, event: &Transact
         let key = c.key.peek().clone();
         let mut entries = vec![
             ("name".to_string(), crdt::loro::LoroValue::from(name)),
-            ("anchor".to_string(), crdt::loro::LoroValue::from(anchor as i64)),
+            (
+                "anchor".to_string(),
+                crdt::loro::LoroValue::from(anchor as i64),
+            ),
             ("head".to_string(), crdt::loro::LoroValue::from(head as i64)),
         ];
         // Mint stable cursors against the replica at publish time
@@ -294,9 +302,7 @@ fn publish_cursor(c: &CollabHandles, session: &DocumentSession, event: &Transact
             let text = doc.loro().get_text(COLLAB_TEXT_CONTAINER);
             let len = text.len_unicode();
             let mut mint = |label: &str, pos: usize| {
-                if let Some(cur) =
-                    text.get_cursor(pos.min(len), crdt::loro::cursor::Side::Left)
-                {
+                if let Some(cur) = text.get_cursor(pos.min(len), crdt::loro::cursor::Side::Left) {
                     entries.push((
                         label.to_string(),
                         crdt::loro::LoroValue::Binary(cur.encode().into()),
@@ -562,7 +568,8 @@ mod tests {
         let editor_state = EditorState::new("shared 🦀 doc");
         let remote = t.to_string();
         let changes = editor_crdt::remote_text_to_changes(editor_state.doc.rope(), &remote);
-        let next = editor_state.update(TransactionSpec::new().changes(changes).user_event("remote"));
+        let next =
+            editor_state.update(TransactionSpec::new().changes(changes).user_event("remote"));
         assert_eq!(next.doc.to_string(), remote);
     }
 

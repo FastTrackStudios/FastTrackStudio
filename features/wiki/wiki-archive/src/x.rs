@@ -139,31 +139,57 @@ pub async fn fetch_tweet(
     match fetch_syndication(client, status_id).await {
         Ok(tweet) => {
             if tweet.note.is_none() {
-                return Ok(LadderResult { tweet, rung: "x-syndication" });
+                return Ok(LadderResult {
+                    tweet,
+                    rung: "x-syndication",
+                });
             }
             // Truncated note tweet: prefer a rung with full
             // text, but keep this as a fallback.
             failures.push("syndication: note tweet truncated".into());
             match fetch_fxtwitter(client, status_id).await {
-                Ok(full) => return Ok(LadderResult { tweet: full, rung: "fxembed" }),
+                Ok(full) => {
+                    return Ok(LadderResult {
+                        tweet: full,
+                        rung: "fxembed",
+                    });
+                }
                 Err(e) => {
                     failures.push(format!("fxembed: {e}"));
-                    return Ok(LadderResult { tweet, rung: "x-syndication" });
+                    return Ok(LadderResult {
+                        tweet,
+                        rung: "x-syndication",
+                    });
                 }
             }
         }
         Err(e) => failures.push(format!("syndication: {e}")),
     }
     match fetch_fxtwitter(client, status_id).await {
-        Ok(tweet) => return Ok(LadderResult { tweet, rung: "fxembed" }),
+        Ok(tweet) => {
+            return Ok(LadderResult {
+                tweet,
+                rung: "fxembed",
+            });
+        }
         Err(e) => failures.push(format!("fxembed: {e}")),
     }
     match fetch_vxtwitter(client, status_id).await {
-        Ok(tweet) => return Ok(LadderResult { tweet, rung: "vxtwitter" }),
+        Ok(tweet) => {
+            return Ok(LadderResult {
+                tweet,
+                rung: "vxtwitter",
+            });
+        }
         Err(e) => failures.push(format!("vxtwitter: {e}")),
     }
     match fetch_oembed(client, status_id).await {
-        Ok(tweet) => return Ok(LadderResult { tweet, rung: "x-oembed" }),
+        Ok(tweet) => {
+            return Ok(LadderResult {
+                tweet,
+                rung: "x-oembed",
+            });
+        }
         Err(e) => failures.push(format!("oembed: {e}")),
     }
 
@@ -177,9 +203,9 @@ async fn fetch_syndication(
     client: &reqwest::Client,
     status_id: &str,
 ) -> Result<Tweet, ArchiveError> {
-    let id: u64 = status_id.parse().map_err(|_| ArchiveError::ImportParse(
-        format!("status id `{status_id}` is not numeric"),
-    ))?;
+    let id: u64 = status_id.parse().map_err(|_| {
+        ArchiveError::ImportParse(format!("status id `{status_id}` is not numeric"))
+    })?;
     let url = format!(
         "https://cdn.syndication.twimg.com/tweet-result?id={status_id}&token={}&lang=en",
         syndication_token(id)
@@ -235,10 +261,7 @@ pub fn parse_syndication(v: &Value) -> Option<Tweet> {
     })
 }
 
-async fn fetch_fxtwitter(
-    client: &reqwest::Client,
-    status_id: &str,
-) -> Result<Tweet, ArchiveError> {
+async fn fetch_fxtwitter(client: &reqwest::Client, status_id: &str) -> Result<Tweet, ArchiveError> {
     let url = format!("https://api.fxtwitter.com/i/status/{status_id}");
     let body = crate::article::fetch_text(client, &url, "application/json").await?;
     let v: Value = serde_json::from_str(&body)
@@ -286,10 +309,7 @@ pub fn parse_fxtwitter(v: &Value) -> Option<Tweet> {
     })
 }
 
-async fn fetch_vxtwitter(
-    client: &reqwest::Client,
-    status_id: &str,
-) -> Result<Tweet, ArchiveError> {
+async fn fetch_vxtwitter(client: &reqwest::Client, status_id: &str) -> Result<Tweet, ArchiveError> {
     let url = format!("https://api.vxtwitter.com/i/status/{status_id}");
     let body = crate::article::fetch_text(client, &url, "application/json").await?;
     let v: Value = serde_json::from_str(&body)
@@ -497,6 +517,9 @@ mod tests {
         assert!(md.contains("_Jane (@jane) · 2026-06-01_"), "{md}");
         assert!(md.contains("> Line one\n> Line two"), "{md}");
         assert!(md.contains("- <https://pbs.example/m.jpg>"), "{md}");
-        assert!(md.contains("Original: <https://x.com/jane/status/123>"), "{md}");
+        assert!(
+            md.contains("Original: <https://x.com/jane/status/123>"),
+            "{md}"
+        );
     }
 }

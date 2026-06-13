@@ -121,13 +121,25 @@ pub struct ResolvedBlock {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChangeAction {
-    Moved { from: (u16, u16), to: (u16, u16) },
-    Shrunk { from: (u16, u16), to: (u16, u16) },
-    Dropped { from: (u16, u16), reason: String },
+    Moved {
+        from: (u16, u16),
+        to: (u16, u16),
+    },
+    Shrunk {
+        from: (u16, u16),
+        to: (u16, u16),
+    },
+    Dropped {
+        from: (u16, u16),
+        reason: String,
+    },
     /// A meal compressed *inside* a covering fixed block instead
     /// of dropping (see the module docs). `to` overlaps the host
     /// fixed span by design.
-    Embedded { from: (u16, u16), to: (u16, u16) },
+    Embedded {
+        from: (u16, u16),
+        to: (u16, u16),
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,11 +293,7 @@ pub fn merge_template(saved: &[PlannedBlock], template: &[TimeBlock]) -> Vec<Res
             continue;
         }
         let (s, e) = day_span(tb.start, tb.end);
-        let Some(&(ps, pe)) = tl
-            .free_within(s, e)
-            .iter()
-            .max_by_key(|(ps, pe)| pe - ps)
-        else {
+        let Some(&(ps, pe)) = tl.free_within(s, e).iter().max_by_key(|(ps, pe)| pe - ps) else {
             continue;
         };
         if pe - ps < MIN_KEEP_MIN {
@@ -295,11 +303,20 @@ pub fn merge_template(saved: &[PlannedBlock], template: &[TimeBlock]) -> Vec<Res
         // evening segment still reaches 24:00.
         let wraps = tb.end.minutes_since_midnight <= tb.start.minutes_since_midnight;
         let (new_start, new_end) = if wraps && pe == DAY_END {
-            (TimeOfDay { minutes_since_midnight: ps }, tb.end)
+            (
+                TimeOfDay {
+                    minutes_since_midnight: ps,
+                },
+                tb.end,
+            )
         } else {
             (
-                TimeOfDay { minutes_since_midnight: ps },
-                TimeOfDay { minutes_since_midnight: pe },
+                TimeOfDay {
+                    minutes_since_midnight: ps,
+                },
+                TimeOfDay {
+                    minutes_since_midnight: pe,
+                },
             )
         };
         tl.occupy(ps, pe);
@@ -390,14 +407,20 @@ pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> Reconci
             tl.occupy(ns, ne);
             changes.push(ReconcileChange {
                 label: b.label.clone(),
-                action: ChangeAction::Moved { from: (s, e), to: (ns, ne) },
+                action: ChangeAction::Moved {
+                    from: (s, e),
+                    to: (ns, ne),
+                },
             });
             apply_span(&mut b, ns, ne);
             out.push(b);
             continue;
         }
         // Compress: largest free interval near the original span.
-        let window = (s.saturating_sub(MAX_SHIFT_MIN), (e + MAX_SHIFT_MIN).min(DAY_END));
+        let window = (
+            s.saturating_sub(MAX_SHIFT_MIN),
+            (e + MAX_SHIFT_MIN).min(DAY_END),
+        );
         let best_gap = tl
             .free_within(window.0, window.1)
             .into_iter()
@@ -410,7 +433,10 @@ pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> Reconci
                 tl.occupy(ns, ne);
                 changes.push(ReconcileChange {
                     label: b.label.clone(),
-                    action: ChangeAction::Shrunk { from: (s, e), to: (ns, ne) },
+                    action: ChangeAction::Shrunk {
+                        from: (s, e),
+                        to: (ns, ne),
+                    },
                 });
                 apply_span(&mut b, ns, ne);
                 out.push(b);
@@ -432,7 +458,10 @@ pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> Reconci
                 let ne = ns + len;
                 changes.push(ReconcileChange {
                     label: b.label.clone(),
-                    action: ChangeAction::Embedded { from: (s, e), to: (ns, ne) },
+                    action: ChangeAction::Embedded {
+                        from: (s, e),
+                        to: (ns, ne),
+                    },
                 });
                 apply_span(&mut b, ns, ne);
                 // Deliberately NOT occupied on the timeline: the
@@ -464,7 +493,10 @@ pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> Reconci
                 if (ps, pe) != (s, e) {
                     changes.push(ReconcileChange {
                         label: b.label.clone(),
-                        action: ChangeAction::Shrunk { from: (s, e), to: (ps, pe) },
+                        action: ChangeAction::Shrunk {
+                            from: (s, e),
+                            to: (ps, pe),
+                        },
                     });
                 }
                 apply_span(&mut b, ps, pe);
@@ -481,7 +513,10 @@ pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> Reconci
     }
 
     out.sort_by_key(|b| day_span(b.start, b.end).0);
-    ReconcileOutcome { blocks: out, changes }
+    ReconcileOutcome {
+        blocks: out,
+        changes,
+    }
 }
 
 /// Write a reflowed `[ns, ne)` day-span back onto a block,
@@ -490,9 +525,13 @@ pub fn reconcile(blocks: Vec<PlannedBlock>, obstacles: &[(u16, u16)]) -> Reconci
 fn apply_span(b: &mut PlannedBlock, ns: u16, ne: u16) {
     let wraps = b.end.minutes_since_midnight <= b.start.minutes_since_midnight
         && b.start.minutes_since_midnight < DAY_END;
-    b.start = TimeOfDay { minutes_since_midnight: ns };
+    b.start = TimeOfDay {
+        minutes_since_midnight: ns,
+    };
     if !(wraps && ne == DAY_END) {
-        b.end = TimeOfDay { minutes_since_midnight: ne };
+        b.end = TimeOfDay {
+            minutes_since_midnight: ne,
+        };
     }
 }
 
@@ -524,7 +563,9 @@ mod tests {
     use crate::time_block::TimeBlockId;
 
     fn tod(h: u16, m: u16) -> TimeOfDay {
-        TimeOfDay { minutes_since_midnight: h * 60 + m }
+        TimeOfDay {
+            minutes_since_midnight: h * 60 + m,
+        }
     }
 
     fn pb(id: &str, s: (u16, u16), e: (u16, u16), cat: BlockCategory, fixed: bool) -> PlannedBlock {
@@ -604,7 +645,13 @@ mod tests {
 
     #[test]
     fn template_row_overridden_by_same_id_is_skipped() {
-        let saved = vec![pb("block-1", (10, 0), (13, 0), BlockCategory::Allocatable, false)];
+        let saved = vec![pb(
+            "block-1",
+            (10, 0),
+            (13, 0),
+            BlockCategory::Allocatable,
+            false,
+        )];
         let template = vec![tb("block-1", (9, 0), (12, 0), BlockCategory::Allocatable)];
         let out = merge_template(&saved, &template);
         assert_eq!(out.len(), 1);
@@ -642,11 +689,29 @@ mod tests {
             pb("reset", (6, 0), (6, 30), BlockCategory::Reset, false),
             pb("breakfast", (7, 0), (8, 0), BlockCategory::Meal, false),
             pb("gym", (8, 0), (9, 0), BlockCategory::Exercise, false),
-            pb("block-1", (9, 30), (12, 30), BlockCategory::Allocatable, false),
+            pb(
+                "block-1",
+                (9, 30),
+                (12, 30),
+                BlockCategory::Allocatable,
+                false,
+            ),
             pb("lunch", (12, 30), (13, 30), BlockCategory::Meal, false),
-            pb("block-2", (13, 30), (16, 30), BlockCategory::Allocatable, false),
+            pb(
+                "block-2",
+                (13, 30),
+                (16, 30),
+                BlockCategory::Allocatable,
+                false,
+            ),
             pb("dinner", (17, 30), (19, 0), BlockCategory::Meal, false),
-            pb("block-3", (19, 0), (22, 0), BlockCategory::Allocatable, false),
+            pb(
+                "block-3",
+                (19, 0),
+                (22, 0),
+                BlockCategory::Allocatable,
+                false,
+            ),
             pb("sleep", (22, 30), (6, 0), BlockCategory::Sleep, false),
         ];
         let out = reconcile(blocks, &[]);
@@ -663,15 +728,21 @@ mod tests {
         assert_eq!(span(b2), (960, 990));
         // block-1 fully covered → dropped + reported.
         assert!(out.blocks.iter().all(|b| b.label != "block-1"));
-        assert!(out.changes.iter().any(|c| c.label == "block-1"
-            && matches!(c.action, ChangeAction::Dropped { .. })));
+        assert!(
+            out.changes
+                .iter()
+                .any(|c| c.label == "block-1" && matches!(c.action, ChangeAction::Dropped { .. }))
+        );
         // Lunch must survive: no free time anywhere near its span,
         // but the work block covers its natural window → embedded
         // compressed inside the fixed span (≥ MIN_KEEP_MIN).
         let lunch = out.blocks.iter().find(|b| b.label == "lunch").unwrap();
         assert_eq!(span(lunch), (750, 780)); // 12:30–13:00, inside work
-        assert!(out.changes.iter().any(|c| c.label == "lunch"
-            && matches!(c.action, ChangeAction::Embedded { .. })));
+        assert!(
+            out.changes
+                .iter()
+                .any(|c| c.label == "lunch" && matches!(c.action, ChangeAction::Embedded { .. }))
+        );
         let lunch_idx = out.blocks.iter().position(|b| b.label == "lunch").unwrap();
         assert!(is_embedded(&out.blocks, lunch_idx));
         // Sleep untouched.
@@ -691,7 +762,10 @@ mod tests {
         assert_eq!(span(&out.blocks[0]), (750, 780));
         assert!(matches!(
             out.changes[0].action,
-            ChangeAction::Embedded { from: (750, 810), to: (750, 780) }
+            ChangeAction::Embedded {
+                from: (750, 810),
+                to: (750, 780)
+            }
         ));
     }
 
@@ -732,8 +806,20 @@ mod tests {
             pb("concert", (19, 0), (23, 0), BlockCategory::Other, true),
             pb("dinner-out", (23, 0), (0, 30), BlockCategory::Other, true),
             pb("dinner", (17, 30), (19, 0), BlockCategory::Meal, false),
-            pb("block-3", (19, 0), (22, 0), BlockCategory::Allocatable, false),
-            pb("wind-down", (22, 0), (22, 30), BlockCategory::WindDown, false),
+            pb(
+                "block-3",
+                (19, 0),
+                (22, 0),
+                BlockCategory::Allocatable,
+                false,
+            ),
+            pb(
+                "wind-down",
+                (22, 0),
+                (22, 30),
+                BlockCategory::WindDown,
+                false,
+            ),
             pb("sleep", (22, 30), (6, 0), BlockCategory::Sleep, false),
         ];
         let out = reconcile(blocks, &[]);
@@ -761,10 +847,7 @@ mod tests {
         let blocks = vec![pb("lunch", (12, 30), (13, 30), BlockCategory::Meal, false)];
         let out = reconcile(blocks, &[(720, 780)]);
         assert_eq!(span(&out.blocks[0]), (780, 840));
-        assert!(matches!(
-            out.changes[0].action,
-            ChangeAction::Moved { .. }
-        ));
+        assert!(matches!(out.changes[0].action, ChangeAction::Moved { .. }));
     }
 
     #[test]

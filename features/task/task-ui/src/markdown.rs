@@ -532,9 +532,11 @@ mod tests {
         let MdBlock::Paragraph(inlines) = &blocks[0] else {
             panic!("expected paragraph");
         };
-        assert!(inlines
-            .iter()
-            .all(|i| matches!(i, MdInline::Text(_) | MdInline::Code(_))));
+        assert!(
+            inlines
+                .iter()
+                .all(|i| matches!(i, MdInline::Text(_) | MdInline::Code(_)))
+        );
         let joined: String = inlines
             .iter()
             .map(|i| match i {

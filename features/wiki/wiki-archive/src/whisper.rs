@@ -77,10 +77,7 @@ pub fn model_url(name: &str) -> String {
 /// Ensure the model exists locally, downloading by name when
 /// missing. A path spec that doesn't exist is an error (we
 /// never guess what to download for a path).
-pub async fn ensure_model(
-    client: &reqwest::Client,
-    spec: &str,
-) -> Result<PathBuf, ArchiveError> {
+pub async fn ensure_model(client: &reqwest::Client, spec: &str) -> Result<PathBuf, ArchiveError> {
     let path = model_path(spec);
     if path.exists() {
         return Ok(path);
@@ -128,9 +125,18 @@ pub async fn decode_to_pcm(audio: &[u8], ffmpeg: &str) -> Result<Vec<f32>, Archi
 
     let mut child = tokio::process::Command::new(ffmpeg)
         .args([
-            "-nostdin", "-hide_banner", "-loglevel", "error",
-            "-i", "pipe:0",
-            "-f", "f32le", "-ac", "1", "-ar", "16000",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-f",
+            "f32le",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
             "pipe:1",
         ])
         .stdin(std::process::Stdio::piped())
@@ -192,11 +198,12 @@ pub fn transcribe_pcm(
 ) -> Result<Vec<(i64, String)>, ArchiveError> {
     use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-    let ctx = WhisperContext::new_with_params(model, WhisperContextParameters::default())
-        .map_err(|e| ArchiveError::Extract {
+    let ctx = WhisperContext::new_with_params(model, WhisperContextParameters::default()).map_err(
+        |e| ArchiveError::Extract {
             url: String::new(),
             message: format!("whisper model load: {e}"),
-        })?;
+        },
+    )?;
     let mut state = ctx.create_state().map_err(|e| ArchiveError::Extract {
         url: String::new(),
         message: format!("whisper state: {e}"),

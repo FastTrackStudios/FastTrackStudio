@@ -42,10 +42,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use editor::EditorState;
 use editor::editor_view;
 use editor::editor_view::trigger::{Candidate, CompletionKind};
 use editor::markdown::{VaultBlockHit, VaultLookup, VaultPageHit};
-use editor::EditorState;
 use vault_proto::{PageMeta, TagCount};
 
 /// Max lazily-fetched file bodies kept in memory. Small on
@@ -183,19 +183,21 @@ pub fn use_vault_fetch_worker(
     lookup: Signal<Option<Rc<ClientVaultIndex>>>,
 ) -> Coroutine<String> {
     use futures_util::StreamExt;
-    use_coroutine(move |mut rx: dioxus::prelude::UnboundedReceiver<String>| async move {
-        while let Some(path) = rx.next().await {
-            let slug = org.peek().clone();
-            let fetched = crate::document_session::fetch_file(slug, path.clone()).await;
-            // The index may have been swapped (folder-index refresh)
-            // mid-fetch; landing on the current one still warms the
-            // right cache (path-keyed, same org family).
-            let Some(idx) = lookup.peek().clone() else {
-                continue;
-            };
-            idx.complete_fetch(&path, fetched);
-        }
-    })
+    use_coroutine(
+        move |mut rx: dioxus::prelude::UnboundedReceiver<String>| async move {
+            while let Some(path) = rx.next().await {
+                let slug = org.peek().clone();
+                let fetched = crate::document_session::fetch_file(slug, path.clone()).await;
+                // The index may have been swapped (folder-index refresh)
+                // mid-fetch; landing on the current one still warms the
+                // right cache (path-keyed, same org family).
+                let Some(idx) = lookup.peek().clone() else {
+                    continue;
+                };
+                idx.complete_fetch(&path, fetched);
+            }
+        },
+    )
 }
 
 impl VaultLookup for ClientVaultIndex {
@@ -521,7 +523,12 @@ mod tests {
     fn candidates_include_basenames_and_aliases_sorted() {
         let pages = vec![
             meta("Zeta.md", "Zeta", "Zeta", &[]),
-            meta("Wisdom/Plans.md", "Plans", "Plans rot", &["agenda", "Roadmap"]),
+            meta(
+                "Wisdom/Plans.md",
+                "Plans",
+                "Plans rot",
+                &["agenda", "Roadmap"],
+            ),
         ];
         let c = wikilink_candidates(&pages);
         let inserts: Vec<&str> = c.iter().map(|x| x.insert.as_str()).collect();

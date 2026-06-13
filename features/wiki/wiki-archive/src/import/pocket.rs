@@ -97,7 +97,10 @@ pub fn parse_csv(body: &str) -> Result<Vec<ImportedItem>, ArchiveError> {
     for record in reader.records() {
         let record =
             record.map_err(|e| ArchiveError::ImportParse(format!("pocket csv row: {e}")))?;
-        let Some(url) = record.get(url_col).map(str::trim).filter(|u| u.starts_with("http"))
+        let Some(url) = record
+            .get(url_col)
+            .map(str::trim)
+            .filter(|u| u.starts_with("http"))
         else {
             continue;
         };
@@ -212,10 +215,7 @@ https://example.com/old,Old Post,1500000000,abc123,history,archive
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].title, "A Post, With Comma");
         assert_eq!(items[0].tags, vec!["rust", "wiki", "pocket/unread"]);
-        assert_eq!(
-            items[0].saved_at.unwrap().timestamp(),
-            1_700_000_000
-        );
+        assert_eq!(items[0].saved_at.unwrap().timestamp(), 1_700_000_000);
         assert_eq!(items[1].tags, vec!["pocket/archive"]);
     }
 

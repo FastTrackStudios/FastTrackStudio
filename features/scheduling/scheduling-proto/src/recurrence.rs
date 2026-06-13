@@ -122,8 +122,7 @@ mod tests {
         // 6/14 and 6/28 — NOT 6/21.
         assert_eq!(june.len(), 2);
         assert_eq!(june[1] - june[0], chrono::Duration::days(14));
-        let off_week =
-            expand_rrule(rule, anchor, at(2026, 6, 21, 0), at(2026, 6, 22, 0)).unwrap();
+        let off_week = expand_rrule(rule, anchor, at(2026, 6, 21, 0), at(2026, 6, 22, 0)).unwrap();
         assert!(off_week.is_empty());
     }
 
@@ -145,7 +144,10 @@ mod tests {
 
     #[test]
     fn describes_common_cadences() {
-        assert_eq!(describe_rrule("FREQ=WEEKLY;BYDAY=SU").as_deref(), Some("weekly"));
+        assert_eq!(
+            describe_rrule("FREQ=WEEKLY;BYDAY=SU").as_deref(),
+            Some("weekly")
+        );
         assert_eq!(
             describe_rrule("FREQ=WEEKLY;INTERVAL=2;BYDAY=SU").as_deref(),
             Some("biweekly")
