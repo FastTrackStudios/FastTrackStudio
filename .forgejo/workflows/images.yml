@@ -111,38 +111,41 @@ jobs:
       # daemon, so plain `docker build`/`push` works. --network=host
       # gives the server build host DNS to fetch the cargo git deps
       # during the Docker build.
-      - name: Use the default (daemon) builder
-        # A leftover docker-container buildx builder from the old setup
-        # refuses the network.host entitlement; the default `docker`
-        # driver (the daemon itself) allows host networking natively.
-        run: docker buildx use default
+      - name: BuildKit builder (network.host + insecure LAN registry)
+        # The server Dockerfile uses RUN --mount=type=cache (BuildKit),
+        # so we need buildx. The docker-container driver needs BOTH the
+        # network.host entitlement (cargo fetches git deps during the
+        # build) AND a buildkitd config marking the plain-HTTP LAN
+        # registry as http — the daemon's insecure-registries don't
+        # reach the docker-container builder. Recreate to pick up this
+        # config (the old codeberg-era builder lacks it).
+        run: |
+          printf '[registry."registry.starcommand.live:30050"]\n  http = true\n' > /tmp/buildkitd.toml
+          docker buildx rm ci 2>/dev/null || true
+          docker buildx create --name ci --driver docker-container \
+            --buildkitd-flags '--allow-insecure-entitlement network.host' \
+            --config /tmp/buildkitd.toml --use
 
       - name: Build + push task-server
         run: |
-          docker build --network=host \
+          docker buildx build --builder ci --network=host --push \
             -f deploy/docker/server.Dockerfile \
             -t registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.channel }} \
             -t registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.sha }} \
             .
-          docker push registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.channel }}
-          docker push registry.starcommand.live:30050/task-server:${{ steps.tags.outputs.sha }}
 
       - name: Build + push task-web
         run: |
-          docker build --network=host \
+          docker buildx build --builder ci --network=host --push \
             -f deploy/docker/web.Dockerfile \
             -t registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.channel }} \
             -t registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.sha }} \
             deploy/docker
-          docker push registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.channel }}
-          docker push registry.starcommand.live:30050/task-web:${{ steps.tags.outputs.sha }}
 
       - name: Build + push task-ui-lab
         run: |
-          docker build --network=host \
+          docker buildx build --builder ci --network=host --push \
             -f deploy/docker/ui-lab.Dockerfile \
             -t registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.channel }} \
             -t registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.sha }} \
             deploy/docker
-          docker push registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.channel }}
-          docker push registry.starcommand.live:30050/task-ui-lab:${{ steps.tags.outputs.sha }}
