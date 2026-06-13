@@ -18,6 +18,7 @@ pub mod root;
 #[cfg(feature = "vox")]
 pub mod schema_stamp;
 pub mod service;
+pub mod snapshot;
 
 pub use issuer::{IssuerError, IssuerProfile};
 pub use manifest::{OrgManifest, ParseError};
@@ -32,4 +33,15 @@ pub use service::{
     Service as OrgManagementServiceBridge, layer as org_management_layer,
     org_management_service_rpc_service_descriptor as org_management_descriptor,
     serve as serve_org_management,
+};
+pub use snapshot::{
+    BranchResult, RepoResult, RestoreReport, SnapshotError, SnapshotLogEntry, SnapshotReport,
+    SnapshotService,
+};
+
+#[cfg(feature = "vox")]
+pub use snapshot::{
+    SnapshotServiceClient, SnapshotServiceRpcDispatcher as SnapshotDispatcher,
+    layer as snapshot_layer, serve as serve_snapshot,
+    snapshot_service_rpc_service_descriptor as snapshot_descriptor,
 };
