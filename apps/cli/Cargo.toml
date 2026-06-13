@@ -10,6 +10,12 @@ path = "src/main.rs"
 [dependencies]
 vox = { workspace = true, features = ["transport-websocket", "transport-websocket-tls"] }
 vox-core = { workspace = true }
+# vox-websocket's wss:// path needs a process-level rustls
+# CryptoProvider. This binary's graph unifies BOTH providers
+# (`ring` via octocrab/reqwest, `aws-lc-rs` via vox-websocket's
+# tls feature), so rustls cannot pick one automatically — main()
+# installs ring explicitly before any TLS connect.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { workspace = true }
 # Embedded mode (`TASK_EMBED=1`): the CLI hosts the backend in-process
 # over architect's `LocalServer` and establishes the same service

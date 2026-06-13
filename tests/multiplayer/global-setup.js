@@ -136,13 +136,6 @@ module.exports = async () => {
   const cli = (args) => execFileSync(cliBin, args, { env: cliEnv, stdio: "pipe" }).toString();
 
   cli(["org", "init", ORG_SLUG, "--name", "MP Conformance", "--home"]);
-  for (const a of DEV_ACCOUNTS) {
-    cli([
-      "auth", "signup", "--org", ORG_SLUG,
-      "--email", a.email, "--password", a.password,
-      "--username", a.username, "--name", a.name,
-    ]);
-  }
 
   const vaultDir = path.join(dataRoot, "orgs", ORG_SLUG, "vault");
   fs.mkdirSync(vaultDir, { recursive: true });
@@ -164,6 +157,19 @@ module.exports = async () => {
     detached: false,
   });
   await waitForHttp(`http://127.0.0.1:${SERVER_PORT}/.well-known/task-server.json`, 30_000);
+
+  // Dev-account signups go over the wire: the CLI's sqlite-direct
+  // signup was removed with the remote-login rework (sessions are
+  // server-aware now), so accounts are created via the org's
+  // AuthService once the server hosts the seeded org.
+  for (const a of DEV_ACCOUNTS) {
+    cli([
+      "auth", "signup", "--org", ORG_SLUG,
+      "--server", `ws://127.0.0.1:${SERVER_PORT}/vox`,
+      "--email", a.email, "--password", a.password,
+      "--username", a.username, "--name", a.name,
+    ]);
+  }
 
   // ── static web server ──────────────────────────────────────────
   const webLog = fs.openSync(path.join(dataRoot, "web.log"), "a");

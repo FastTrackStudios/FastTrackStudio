@@ -526,7 +526,7 @@ mod tests {
         ));
         match match_entity(&r, "The Band", "project").unwrap_err() {
             MatchFailure::Ambiguous(msg) => assert!(msg.contains("ambiguous"), "got: {msg}"),
-            other => panic!("expected Ambiguous, got {other:?}"),
+            other @ MatchFailure::NotFound(_) => panic!("expected Ambiguous, got {other:?}"),
         }
     }
 
@@ -547,7 +547,7 @@ mod tests {
     fn project_no_match_errors() {
         match match_entity(&rows(), "zzz", "project").unwrap_err() {
             MatchFailure::NotFound(msg) => assert!(msg.contains("no project"), "got: {msg}"),
-            other => panic!("expected NotFound, got {other:?}"),
+            other @ MatchFailure::Ambiguous(_) => panic!("expected NotFound, got {other:?}"),
         }
         assert!(match_entity(&rows(), "", "project").is_err());
     }
@@ -565,7 +565,7 @@ mod tests {
             MatchFailure::NotFound(msg) => {
                 assert!(msg.contains("no organization"), "got: {msg}");
             }
-            other => panic!("expected NotFound, got {other:?}"),
+            other @ MatchFailure::Ambiguous(_) => panic!("expected NotFound, got {other:?}"),
         }
         // Slug (the key slot) exact-matches at level 1.
         assert_eq!(match_entity(&r, "fasttrackstudios", "organization"), Ok(0));
