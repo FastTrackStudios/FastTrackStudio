@@ -171,8 +171,8 @@ pub fn ScheduleView() -> Element {
                 let mut w = plans.write();
                 let mut sw = soft_ids.write();
                 for (d, (p, soft)) in loaded {
-                    if !w.contains_key(&d) {
-                        w.insert(d, p);
+                    if let std::collections::hash_map::Entry::Vacant(e) = w.entry(d) {
+                        e.insert(p);
                         sw.insert(d, soft);
                     }
                 }

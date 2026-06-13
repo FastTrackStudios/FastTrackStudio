@@ -424,14 +424,13 @@ pub async fn http_snapshot_handler(
     use axum::response::IntoResponse as _;
 
     if let Err(resp) = check_backup_auth(&headers) {
-        return resp;
+        return *resp;
     }
 
     // `?wait=0` ⇒ kick off + return 202. Anything else ⇒ synchronous.
     let async_kick = query
         .as_deref()
-        .map(|q| q.split('&').any(|kv| kv == "wait=0"))
-        .unwrap_or(false);
+        .is_some_and(|q| q.split('&').any(|kv| kv == "wait=0"));
 
     if async_kick {
         return kick_off_async(state).into_response();
@@ -457,7 +456,7 @@ pub async fn http_snapshot_status_handler(
     use axum::response::IntoResponse as _;
 
     if let Err(resp) = check_backup_auth(&headers) {
-        return resp;
+        return *resp;
     }
     let status = state.snapshot_status.read().unwrap().clone();
     axum::Json(status).into_response()
@@ -519,16 +518,20 @@ fn kick_off_async(state: AppState) -> axum::response::Response {
 }
 
 /// Shared bearer-token gate for the snapshot HTTP routes.
-fn check_backup_auth(headers: &axum::http::HeaderMap) -> Result<(), axum::response::Response> {
+// Err is boxed: an axum `Response` is large, and `result_large_err`
+// flags returning it by value (the Ok path is the common one).
+fn check_backup_auth(headers: &axum::http::HeaderMap) -> Result<(), Box<axum::response::Response>> {
     use axum::response::IntoResponse as _;
 
     let expected = std::env::var("TASK_BACKUP_GIT_TOKEN").unwrap_or_default();
     if expected.is_empty() {
-        return Err((
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "snapshot endpoint disabled — TASK_BACKUP_GIT_TOKEN is not configured",
-        )
-            .into_response());
+        return Err(Box::new(
+            (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "snapshot endpoint disabled — TASK_BACKUP_GIT_TOKEN is not configured",
+            )
+                .into_response(),
+        ));
     }
     let provided = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -536,11 +539,13 @@ fn check_backup_auth(headers: &axum::http::HeaderMap) -> Result<(), axum::respon
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
     if provided != expected {
-        return Err((
-            axum::http::StatusCode::UNAUTHORIZED,
-            "bad or missing bearer token",
-        )
-            .into_response());
+        return Err(Box::new(
+            (
+                axum::http::StatusCode::UNAUTHORIZED,
+                "bad or missing bearer token",
+            )
+                .into_response(),
+        ));
     }
     Ok(())
 }

@@ -2330,6 +2330,10 @@ enum AuthOrgCmd {
     },
 }
 
+// A clap command enum: constructed once per invocation, so the
+// inter-variant size gap is irrelevant, and boxing a variant's
+// args fights the `Subcommand` derive / flattening.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum WikiCmd {
     /// Build the 4-signal wiki graph and dump it as JSON or
@@ -10614,7 +10618,9 @@ async fn archive_extract_url(
                         "podcastindex: no feed matched `{oembed_title}` — falling back to metadata-only"
                     ),
                     Err(e) => {
-                        println!("podcastindex lookup failed ({e}) — falling back to metadata-only")
+                        println!(
+                            "podcastindex lookup failed ({e}) — falling back to metadata-only"
+                        );
                     }
                 }
             }
@@ -10913,7 +10919,7 @@ async fn podcast_transcript_cues(
         .await
         .map_err(|e| eyre::eyre!("{e}"))?;
         let label = format!("whisper-rs-{}", args.whisper_model);
-        return Ok((cues, label, None));
+        Ok((cues, label, None))
     }
     #[cfg(not(feature = "whisper"))]
     {

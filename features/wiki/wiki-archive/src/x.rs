@@ -84,26 +84,24 @@ fn js_f64_to_radix36(value: f64) -> String {
             frac_buf.push(CHARS[digit as usize]);
             fraction -= f64::from(digit);
             // Round to even.
-            if fraction > 0.5 || (fraction == 0.5 && digit & 1 == 1) {
-                if fraction + delta > 1.0 {
-                    // Round up with carry back-propagation.
-                    loop {
-                        match frac_buf.pop() {
-                            None => {
-                                integer += 1.0;
+            if (fraction > 0.5 || (fraction == 0.5 && digit & 1 == 1)) && fraction + delta > 1.0 {
+                // Round up with carry back-propagation.
+                loop {
+                    match frac_buf.pop() {
+                        None => {
+                            integer += 1.0;
+                            break;
+                        }
+                        Some(c) => {
+                            let d = u32::from(if c > b'9' { c - b'a' + 10 } else { c - b'0' });
+                            if d + 1 < RADIX {
+                                frac_buf.push(CHARS[(d + 1) as usize]);
                                 break;
-                            }
-                            Some(c) => {
-                                let d = u32::from(if c > b'9' { c - b'a' + 10 } else { c - b'0' });
-                                if d + 1 < RADIX {
-                                    frac_buf.push(CHARS[(d + 1) as usize]);
-                                    break;
-                                }
                             }
                         }
                     }
-                    break;
                 }
+                break;
             }
             if fraction < delta {
                 break;

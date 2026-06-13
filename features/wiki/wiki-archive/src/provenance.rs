@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn canonical_match_ignores_title_drift() {
         let p = prov();
-        let existing = vec![
+        let existing = [
             "some-other-page-aaaaaaaa.md".to_string(),
             format!("totally-different-title-{}.md", p.canon8()),
         ];

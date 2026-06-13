@@ -66,7 +66,9 @@ async fn create_and_delete_reach_subscriber() {
             assert_eq!(t.title, "Live board event");
             assert_eq!(t.path, created.path, "payload is the post-write state");
         }
-        other => panic!("expected Upserted after create, got {other:?}"),
+        other @ TaskEvent::Deleted(_) => {
+            panic!("expected Upserted after create, got {other:?}")
+        }
     }
 
     // delete ⇒ Deleted carrying the id.

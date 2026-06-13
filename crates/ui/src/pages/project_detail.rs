@@ -96,11 +96,11 @@ pub fn ProjectDetailView(id: String) -> Element {
         let k = pkey_memo();
         async move {
             let (slug, pid) = k?;
-            let (sessions, uninvoiced, invoices) = futures_util::future::join3(
+            let (sessions, uninvoiced, invoices) = Box::pin(futures_util::future::join3(
                 crate::feeds::fetch_project_sessions(&slug, pid, false),
                 crate::feeds::fetch_uninvoiced(&slug),
                 crate::feeds::fetch_invoices(&slug),
-            )
+            ))
             .await;
             // Each piece is independently non-fatal: a finance hiccup
             // shouldn't hide the time budget (and vice versa).
@@ -124,10 +124,10 @@ pub fn ProjectDetailView(id: String) -> Element {
         let k = pkey_memo();
         async move {
             let (slug, pid) = k?;
-            let (timers, agents) = futures_util::future::join(
+            let (timers, agents) = Box::pin(futures_util::future::join(
                 crate::feeds::fetch_project_sessions(&slug, pid, true),
                 crate::feeds::fetch_project_agent_sessions(&slug, &pid.to_string()),
-            )
+            ))
             .await;
             let timers = timers.unwrap_or_default();
             let mut agents = agents.unwrap_or_default();

@@ -179,12 +179,18 @@ mod tests {
         tb.workflow.as_mut().unwrap().relates_to = UuidList(vec![c]);
 
         let tasks = vec![ta, tb, task(c), task(d)];
-        let e = edges(&tasks);
-        assert!(e.contains(&(a, RelationKind::Blocks, c)), "typed");
-        assert!(e.contains(&(a, RelationKind::Implements, d)), "typed");
-        assert!(e.contains(&(a, RelationKind::Blocks, b)), "legacy blockers");
-        assert!(e.contains(&(b, RelationKind::Relates, c)), "legacy relates");
-        assert_eq!(e.len(), 4);
+        let result = edges(&tasks);
+        assert!(result.contains(&(a, RelationKind::Blocks, c)), "typed");
+        assert!(result.contains(&(a, RelationKind::Implements, d)), "typed");
+        assert!(
+            result.contains(&(a, RelationKind::Blocks, b)),
+            "legacy blockers"
+        );
+        assert!(
+            result.contains(&(b, RelationKind::Relates, c)),
+            "legacy relates"
+        );
+        assert_eq!(result.len(), 4);
     }
 
     #[test]

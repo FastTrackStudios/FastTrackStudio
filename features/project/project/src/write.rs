@@ -86,6 +86,27 @@ pub fn write_project(
     Ok(abs)
 }
 
+/// Conventional path for a freshly captured project — slug
+/// from the title, dropped under `Projects/`.
+#[must_use]
+pub fn default_project_path(title: &str) -> String {
+    let slug = title
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>();
+    let cleaned = slug
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if cleaned.is_empty() {
+        "untitled-project.md".to_string()
+    } else {
+        format!("Projects/{cleaned}.md")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,26 +157,5 @@ mod tests {
         let back = crate::parse_str("Projects/demo.md", "demo", &raw).expect("re-parse");
         assert_eq!(back.states, p.states);
         assert_eq!(back.id, p.id);
-    }
-}
-
-/// Conventional path for a freshly captured project — slug
-/// from the title, dropped under `Projects/`.
-#[must_use]
-pub fn default_project_path(title: &str) -> String {
-    let slug = title
-        .to_ascii_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>();
-    let cleaned = slug
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    if cleaned.is_empty() {
-        "untitled-project.md".to_string()
-    } else {
-        format!("Projects/{cleaned}.md")
     }
 }

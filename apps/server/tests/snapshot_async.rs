@@ -81,7 +81,7 @@ async fn async_snapshot_kickoff_and_status() {
         let phase = s["phase"].as_str().unwrap_or("").to_string();
         if phase == "done" || phase == "failed" {
             final_phase = phase;
-            repos = s["repos"].as_array().map(Vec::len).unwrap_or(0);
+            repos = s["repos"].as_array().map_or(0, Vec::len);
             assert!(s["finished_at"].is_string());
             break;
         }
