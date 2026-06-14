@@ -811,6 +811,24 @@ pub async fn cook_recipe(
         .map_err(|e| format!("{slug}: cook recipe: {e:?}"))
 }
 
+/// "Can I cook this right now?" — the server checks the recipe (and any
+/// nested recipes) against current pantry stock for `servings` and
+/// returns the full `Fulfillment`: whether it's cookable, the
+/// have/need partition, and the per-shortage substitution suggestions.
+/// All derivation is server-side — this is a thin client call.
+pub async fn can_cook(
+    slug: &str,
+    recipe_path: String,
+    servings: u32,
+) -> Result<mealplan_proto::Fulfillment, String> {
+    let client =
+        crate::vox_clients::establish_for::<mealplan_proto::MealplanServiceClient>(slug).await?;
+    client
+        .can_cook(recipe_path, servings)
+        .await
+        .map_err(|e| format!("{slug}: can cook: {e:?}"))
+}
+
 /// Every planned meal in the org's vault, in the order the
 /// backend lists them.
 pub async fn fetch_meal_plans(slug: &str) -> Result<Vec<mealplan_proto::Meal>, String> {

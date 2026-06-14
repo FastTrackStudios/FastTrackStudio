@@ -17,10 +17,10 @@ use std::collections::HashSet;
 use cookbook_proto::{Recipe, RecipeTimer};
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    Check, Clock, Flame, Play, Receipt, TriangleAlert, Users, UtensilsCrossed, X,
+    Check, CircleCheck, Clock, Flame, Play, Receipt, TriangleAlert, Users, UtensilsCrossed, X,
 };
 use fts_ui::prelude::*;
-use mealplan_proto::{CookReceipt, SkipReason};
+use mealplan_proto::{CookReceipt, Fulfillment, SkipReason};
 
 use crate::orgs::{OrgMeta, OrgSelection};
 
@@ -90,6 +90,34 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
         });
     };
 
+    // "Can I cook this?" → ask the server (which owns the recipe +
+    // pantry + nested-recipe resolution) whether there's enough stock.
+    // The result is the full Fulfillment — have/missing + substitution
+    // suggestions — rendered as-is; no derivation client-side.
+    let mut checking = use_signal(|| false);
+    let mut precheck = use_signal(|| None::<Fulfillment>);
+    let precheck_path = recipe.path.clone();
+    let mut check_pantry = move || {
+        if checking() {
+            return;
+        }
+        let Some(s) = slug() else { return };
+        let path = precheck_path.clone();
+        let servings = target_servings();
+        checking.set(true);
+        spawn(async move {
+            match crate::feeds::can_cook(&s, path, servings).await {
+                Ok(f) => {
+                    precheck.set(Some(f));
+                }
+                Err(e) => {
+                    notices.error(format!("Pantry check failed: {e}"));
+                }
+            }
+            checking.set(false);
+        });
+    };
+
     // Keep the screen awake while cooking — phones lock mid-recipe
     // otherwise. Acquired on mount, released on unmount; re-acquired on
     // tab refocus (the lock drops when hidden). No-op off the web.
@@ -142,6 +170,7 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
 
     let running = timers.read().clone();
     let cooked = receipt.read().clone();
+    let prechecked = precheck.read().clone();
     let total_steps = recipe.cook_steps.len().max(recipe.steps.len());
     let done_count = done_steps.read().len();
 
@@ -172,6 +201,15 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                             span { "{done_count}/{total_steps} steps" }
                         }
                     }
+                }
+                // Can I cook this? → pantry-readiness check (no writes).
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    disabled: checking(),
+                    on_click: move |_| check_pantry(),
+                    CircleCheck { size: 14 }
+                    if checking() { "Checking…" } else { "Can I cook this?" }
                 }
                 // Cooked it → deduct ingredients from the pantry.
                 Button {
@@ -207,6 +245,75 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                                         aria_label: "Dismiss timer",
                                         onclick: move |_| { timers.write().retain(|x| x.id != id); },
                                         X { size: 13 }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Pantry check (pinned after "Can I cook this?") ───
+            // Renders the server's Fulfillment verbatim — have / missing
+            // partition + substitution suggestions, no client derivation.
+            if let Some(f) = prechecked {
+                div { class: "border-b border-border bg-card/60 px-3 py-2.5",
+                    div { class: "mx-auto flex w-full max-w-2xl flex-col gap-2",
+                        div { class: "flex items-center gap-2",
+                            if f.can_cook {
+                                span { class: "text-success", CircleCheck { size: 15 } }
+                            } else {
+                                span { class: "text-warning", TriangleAlert { size: 15 } }
+                            }
+                            Heading {
+                                level: HeadingLevel::H3,
+                                class: "flex-1 text-sm font-semibold",
+                                if f.can_cook { "You've got everything" } else { "Missing some ingredients" }
+                            }
+                            button {
+                                class: "flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground",
+                                aria_label: "Dismiss pantry check",
+                                onclick: move |_| precheck.set(None),
+                                X { size: 14 }
+                            }
+                        }
+                        if !f.missing.is_empty() {
+                            ul { class: "flex flex-col gap-1",
+                                for s in f.missing.iter() {
+                                    li { key: "{s.ingredient_idx}", class: "flex flex-col gap-0.5",
+                                        div { class: "flex items-baseline justify-between gap-3 text-sm",
+                                            span { class: "text-foreground", "{s.name}" }
+                                            span { class: "shrink-0 text-xs text-muted-foreground",
+                                                "{s.reason.label()}"
+                                            }
+                                        }
+                                        for sub in s.suggestions.iter() {
+                                            div { key: "{sub.name}", class: "pl-3 text-xs text-muted-foreground",
+                                                "↳ try {sub.name}"
+                                                if let Some(note) = &sub.note {
+                                                    " — {note}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if !f.have.is_empty() {
+                            details { class: "text-sm",
+                                summary { class: "cursor-pointer text-xs text-muted-foreground",
+                                    "Have {f.have.len()} ingredient(s)"
+                                }
+                                ul { class: "mt-1 flex flex-col gap-0.5",
+                                    for h in f.have.iter() {
+                                        li { key: "{h.name}", class: "flex items-baseline justify-between gap-3",
+                                            span { class: "text-foreground", "{h.name}" }
+                                            if let Some(need) = h.need {
+                                                span { class: "shrink-0 font-mono tabular-nums text-muted-foreground",
+                                                    "{fmt_num(need)} {h.unit}"
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

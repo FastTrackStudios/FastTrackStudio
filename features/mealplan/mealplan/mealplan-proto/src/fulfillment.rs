@@ -15,7 +15,26 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Fulfillment {
     pub can_cook: bool,
+    /// Ingredients already satisfied from current stock, scaled to
+    /// the requested servings. The flip side of `missing` — together
+    /// they partition the recipe's non-recipe-ref ingredients, so a
+    /// frontend can render "have / need" without re-deriving it.
+    #[serde(default)]
+    pub have: Vec<HaveLine>,
     pub missing: Vec<Shortage>,
+}
+
+/// One satisfied ingredient in [`Fulfillment::have`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct HaveLine {
+    /// Recipe ingredient name (cooklang `@name`).
+    pub name: String,
+    /// Amount the recipe calls for at the requested servings, if it
+    /// gives a quantity (`None` for "to taste" ingredients).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub need: Option<f64>,
+    #[serde(default)]
+    pub unit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
@@ -65,6 +84,20 @@ pub enum ShortageReason {
     InsufficientQty,
     UnitMismatch,
     OptionalNoQty,
+}
+
+impl ShortageReason {
+    /// Human label for the shortage — the single source of truth so
+    /// every frontend (CLI, UI) reads the same words.
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::NotInPantry => "not in pantry",
+            Self::InsufficientQty => "not enough in stock",
+            Self::UnitMismatch => "unit mismatch",
+            Self::OptionalNoQty => "optional, no amount given",
+        }
+    }
 }
 
 /// The outcome of cooking a recipe straight from the pantry —

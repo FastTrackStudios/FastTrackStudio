@@ -32,7 +32,7 @@ use pantry::PantryItem;
 // `mealplan::fulfillment::*` / `mealplan::Fulfillment` paths keep
 // working.
 pub use mealplan_proto::fulfillment::{
-    CookReceipt, DeductionLine, Fulfillment, Shortage, ShortageReason, SkipReason,
+    CookReceipt, DeductionLine, Fulfillment, HaveLine, Shortage, ShortageReason, SkipReason,
     SkippedIngredient, SubstitutionSource, SubstitutionSuggestion,
 };
 
@@ -45,6 +45,22 @@ pub fn check(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> Fulfillme
     for (idx, ing) in recipe.ingredients.iter().enumerate() {
         check_one(ing, idx, scale, pantry, &mut missing);
     }
+    // `have` is the complement of `missing`: every non-recipe-ref
+    // ingredient the check didn't flag short. Computed here, in the
+    // domain, so the CLI and UI both render it without re-deriving.
+    let short_idx: std::collections::HashSet<u32> =
+        missing.iter().map(|s| s.ingredient_idx).collect();
+    let have = recipe
+        .ingredients
+        .iter()
+        .enumerate()
+        .filter(|(idx, ing)| !ing.is_recipe_ref && !short_idx.contains(&(*idx as u32)))
+        .map(|(_, ing)| HaveLine {
+            name: ing.name.clone(),
+            need: ing.qty.map(|q| q * scale),
+            unit: ing.unit.clone(),
+        })
+        .collect();
     Fulfillment {
         can_cook: missing.iter().all(|s| {
             !matches!(
@@ -52,6 +68,7 @@ pub fn check(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> Fulfillme
                 ShortageReason::NotInPantry | ShortageReason::InsufficientQty
             )
         }),
+        have,
         missing,
     }
 }
@@ -470,7 +487,39 @@ mod tests {
     fn can_cook_when_stock_sufficient() {
         let r = recipe_with("Cookbook/X.cook", vec![ing("Pasta", 200.0, "g")], 2);
         let s = vec![pantry_row("Pasta", 500.0, "g")];
-        assert!(check(&r, &s, 2).can_cook);
+        let f = check(&r, &s, 2);
+        assert!(f.can_cook);
+        // The satisfied ingredient lands in `have` (the domain owns the
+        // have/missing partition; the CLI + UI just render it).
+        assert_eq!(f.have.len(), 1);
+        assert_eq!(f.have[0].name, "Pasta");
+        assert_eq!(f.have[0].need, Some(200.0));
+        assert!(f.missing.is_empty());
+    }
+
+    #[test]
+    fn have_and_missing_partition_ingredients() {
+        let r = recipe_with(
+            "Cookbook/X.cook",
+            vec![
+                ing("Pasta", 200.0, "g"), // in stock → have
+                ing("Saffron", 1.0, "g"), // not in pantry → missing
+            ],
+            2,
+        );
+        let s = vec![pantry_row("Pasta", 500.0, "g")];
+        let f = check(&r, &s, 2);
+        assert_eq!(
+            f.have.iter().map(|h| h.name.as_str()).collect::<Vec<_>>(),
+            ["Pasta"]
+        );
+        assert_eq!(
+            f.missing
+                .iter()
+                .map(|m| m.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Saffron"]
+        );
     }
 
     #[test]

@@ -317,43 +317,25 @@ pub struct CanCookArgs {
     pub json: bool,
 }
 
-#[derive(serde::Serialize)]
-struct HaveRow {
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    need: Option<f64>,
-    unit: String,
-}
-
 pub async fn recipe_can_cook(a: CanCookArgs) -> eyre::Result<()> {
     let url = a.remote.url()?;
     let cookbook_client: CookbookServiceClient = establish_for_url(&url).await?;
     let r = resolve_recipe(&cookbook_client, &a.name).await?;
     let servings = a.servings.or(r.servings).unwrap_or(1);
     let mealplan_client: MealplanServiceClient = establish_for_url(&url).await?;
+    // The service returns the full have/missing partition — no local
+    // re-derivation; the UI renders the same `Fulfillment`.
     let f = mealplan_client
         .can_cook(r.path.clone(), servings)
         .await
         .map_err(|e| eyre::eyre!("can_cook: {e:?}"))?;
-    let scale = f64::from(servings) / f64::from(r.servings.unwrap_or(1).max(1));
-    let missing_names: Vec<String> = f.missing.iter().map(|s| s.name.to_lowercase()).collect();
-    let have: Vec<HaveRow> = r
-        .ingredients
-        .iter()
-        .filter(|i| !i.is_recipe_ref && !missing_names.contains(&i.name.to_lowercase()))
-        .map(|i| HaveRow {
-            name: i.name.clone(),
-            need: i.qty.map(|q| q * scale),
-            unit: i.unit.clone(),
-        })
-        .collect();
     if a.json {
         let out = serde_json::json!({
             "recipe": r.name,
             "path": r.path,
             "servings": servings,
             "canCook": f.can_cook,
-            "have": have,
+            "have": f.have,
             "missing": f.missing,
         });
         println!("{}", serde_json::to_string_pretty(&out)?);
@@ -368,9 +350,9 @@ pub async fn recipe_can_cook(a: CanCookArgs) -> eyre::Result<()> {
             "CANNOT cook"
         }
     );
-    if !have.is_empty() {
+    if !f.have.is_empty() {
         println!("\n  have:");
-        for h in &have {
+        for h in &f.have {
             match h.need {
                 Some(n) => println!("    - {} ({n:.2} {})", h.name, h.unit),
                 None => println!("    - {}", h.name),
@@ -381,8 +363,12 @@ pub async fn recipe_can_cook(a: CanCookArgs) -> eyre::Result<()> {
         println!("\n  missing:");
         for s in &f.missing {
             println!(
-                "    - {}: need {:.2} {} (have {:.2}) — {:?}",
-                s.name, s.need, s.unit, s.have, s.reason
+                "    - {}: need {:.2} {} (have {:.2}) — {}",
+                s.name,
+                s.need,
+                s.unit,
+                s.have,
+                s.reason.label()
             );
             for sub in &s.suggestions {
                 println!(

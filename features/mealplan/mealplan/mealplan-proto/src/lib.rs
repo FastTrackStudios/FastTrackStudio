@@ -19,7 +19,7 @@ pub mod model;
 pub mod service;
 
 pub use fulfillment::{
-    CookReceipt, DeductionLine, Fulfillment, Shortage, ShortageReason, SkipReason,
+    CookReceipt, DeductionLine, Fulfillment, HaveLine, Shortage, ShortageReason, SkipReason,
     SkippedIngredient, SubstitutionSource, SubstitutionSuggestion,
 };
 pub use model::{Meal, PantryDeduction, PantryDeductions, Slot, Status, StringList};
