@@ -68,6 +68,21 @@ pub fn Calendar(props: CalendarProps) -> Element {
     });
     use_hook(super::drag::install_drag_image_suppressor);
 
+    // Phones can't fit the 7-column week grid — start in Day view on
+    // small screens. One-shot probe at mount that only ever switches
+    // *to* Day, so desktop keeps its `initial_view` and a failed/absent
+    // probe is a harmless no-op (the requested view stands).
+    use_hook(move || {
+        spawn(async move {
+            let mut probe = dioxus::document::eval(
+                "dioxus.send(window.matchMedia('(max-width: 640px)').matches)",
+            );
+            if let Ok(true) = probe.recv::<bool>().await {
+                view.set(ViewMode::Day);
+            }
+        });
+    });
+
     // Tell the consumer which dates are visible so it can load that
     // range's day plans. Fires on mount + every anchor/view change.
     let on_range = props.on_range;

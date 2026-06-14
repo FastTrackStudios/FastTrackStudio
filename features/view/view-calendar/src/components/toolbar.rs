@@ -29,47 +29,63 @@ pub fn Toolbar(props: ToolbarProps) -> Element {
     let cycle_label = cycle_label(props.anchor);
 
     rsx! {
-        div { class: "flex items-center gap-2 px-3 py-2 border-b border-border/40",
-            Button {
-                variant: ButtonVariant::Outline,
-                size: ButtonSize::Small,
-                on_click: move |_| props.on_today.call(()),
-                "Today"
-            }
-            div { class: "flex items-center",
+        // Mobile: two stacked rows (nav + label on top, view switch on
+        // its own full-width row for fat tap targets). `sm:` and up
+        // collapses back to the original single row.
+        div { class: "flex flex-col gap-2 border-b border-border/40 px-3 py-2 sm:flex-row sm:items-center",
+            // ── Nav + current range ──────────────────────────────
+            div { class: "flex min-w-0 items-center gap-1.5 sm:gap-2",
                 Button {
-                    variant: ButtonVariant::Ghost,
+                    variant: ButtonVariant::Outline,
                     size: ButtonSize::Small,
-                    on_click: move |_| props.on_prev.call(()),
-                    ChevronLeft { size: 16 }
+                    on_click: move |_| props.on_today.call(()),
+                    "Today"
                 }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    on_click: move |_| props.on_next.call(()),
-                    ChevronRight { size: 16 }
+                div { class: "flex items-center",
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        on_click: move |_| props.on_prev.call(()),
+                        ChevronLeft { size: 18 }
+                    }
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        on_click: move |_| props.on_next.call(()),
+                        ChevronRight { size: 18 }
+                    }
                 }
-            }
-            div { class: "flex flex-col px-2 leading-tight",
-                Heading { level: HeadingLevel::H2, class: "text-base font-medium", "{label}" }
-                if let Some(cl) = cycle_label.clone() {
-                    span {
-                        class: "text-xs text-muted-foreground tabular-nums",
-                        "{cl}"
+                div { class: "flex min-w-0 flex-col px-1 leading-tight sm:px-2",
+                    Heading { level: HeadingLevel::H2, class: "truncate text-base font-medium", "{label}" }
+                    if let Some(cl) = cycle_label.clone() {
+                        span { class: "truncate text-xs text-muted-foreground tabular-nums", "{cl}" }
+                    }
+                }
+                // Mobile-only icon button at the end of row one; the
+                // labelled button lives in the second cluster on `sm+`.
+                if !props.readonly {
+                    Button {
+                        size: ButtonSize::Small,
+                        class: "ml-auto shrink-0 sm:hidden",
+                        on_click: move |_| props.on_create.call(()),
+                        Plus { size: 16 }
                     }
                 }
             }
-            Spacer {}
-            ViewSwitch {
-                view: props.view,
-                on_change: props.on_view_change,
-            }
-            if !props.readonly {
-                Button {
-                    size: ButtonSize::Small,
-                    on_click: move |_| props.on_create.call(()),
-                    Plus { size: 14 }
-                    "New event"
+            // ── View switch (+ labelled new-event on desktop) ────
+            div { class: "flex items-center gap-2 sm:ml-auto",
+                ViewSwitch {
+                    view: props.view,
+                    on_change: props.on_view_change,
+                }
+                if !props.readonly {
+                    Button {
+                        size: ButtonSize::Small,
+                        class: "hidden shrink-0 sm:inline-flex",
+                        on_click: move |_| props.on_create.call(()),
+                        Plus { size: 14 }
+                        "New event"
+                    }
                 }
             }
         }
@@ -86,15 +102,17 @@ struct ViewSwitchProps {
 fn ViewSwitch(props: ViewSwitchProps) -> Element {
     let opts = [ViewMode::Day, ViewMode::Week, ViewMode::Month];
     rsx! {
-        div { class: "inline-flex items-center gap-0.5 rounded-lg bg-muted/40 p-0.5 text-xs",
+        // Full-width segmented control on mobile (each segment a fat tap
+        // target); shrinks to its content at `sm:` and up.
+        div { class: "flex w-full items-center gap-0.5 rounded-lg bg-muted/40 p-0.5 text-xs sm:inline-flex sm:w-auto",
             for v in opts.iter() {
                 {
                     let v = *v;
                     let active = v == props.view;
                     let cls = if active {
-                        "bg-background text-foreground shadow-sm font-medium px-3 py-1 rounded-md transition-all"
+                        "flex-1 text-center bg-background text-foreground shadow-sm font-medium px-3 py-1.5 rounded-md transition-all sm:flex-none sm:py-1"
                     } else {
-                        "text-muted-foreground hover:text-foreground px-3 py-1 rounded-md transition-colors"
+                        "flex-1 text-center text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors sm:flex-none sm:py-1"
                     };
                     let key = v.label();
                     rsx! {
