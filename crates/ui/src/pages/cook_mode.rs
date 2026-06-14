@@ -483,12 +483,9 @@ fn set_wake_lock(on: bool) {
 #[cfg(not(target_arch = "wasm32"))]
 fn set_wake_lock(_on: bool) {}
 
-#[cfg(target_arch = "wasm32")]
+/// One-second tick for the cook-mode timers. `architect::sleep` is the
+/// cross-platform sleep (gloo-timers on wasm, tokio on native), so the
+/// countdown advances on the desktop/mobile builds too — not just the web.
 async fn sleep_one_second() {
-    gloo_timers::future::TimeoutFuture::new(1000).await;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn sleep_one_second() {
-    futures_util::future::pending::<()>().await;
+    architect::sleep(architect::Duration::from_secs(1)).await;
 }
