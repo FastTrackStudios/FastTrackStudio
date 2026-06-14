@@ -2538,6 +2538,7 @@ dependencies = [
  "cooklang",
  "facet",
  "fake",
+ "recipe-import",
  "sea-orm",
  "serde",
  "serde_json",

@@ -48,4 +48,12 @@ pub trait CookbookService {
 
     /// Delete the backing file (and sibling images).
     fn delete(&self, path: &str) -> Result<(), CookbookError>;
+
+    /// Import a recipe from a web URL: fetch the page, extract the
+    /// recipe (JSON-LD / microdata / heuristics), and synthesize a
+    /// cooklang `.cook` draft. Returns the **parsed but unsaved** draft
+    /// (with a derived `Cookbook/<name>.cook` path) for review — the
+    /// caller saves it via [`CookbookService::create`]. Async: it does
+    /// network I/O server-side, so the wasm client just awaits it.
+    async fn import(&self, url: String) -> Result<Recipe, CookbookError>;
 }

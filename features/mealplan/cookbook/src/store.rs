@@ -91,4 +91,18 @@ impl CookbookService for Store {
     fn delete(&self, path: &str) -> Result<(), CookbookError> {
         delete_cook(self.vault_root.as_path(), path).map_err(map_io)
     }
+
+    async fn import(&self, url: String) -> Result<Recipe, CookbookError> {
+        // Fetch + extract + synthesize a `.cook` draft (heuristic — no
+        // LLM key required). Parsed but NOT written: the caller reviews
+        // and saves via `create`.
+        let html = recipe_import::fetch_html(&url)
+            .await
+            .map_err(|e| CookbookError::BadRequest(format!("fetch: {e}")))?;
+        let normalized = recipe_import::extract(&html, &url)
+            .map_err(|e| CookbookError::BadRequest(format!("extract: {e}")))?;
+        let source = recipe_import::synthesize_heuristic(&normalized);
+        let path = crate::write::default_recipe_path(&normalized.name, None);
+        parse_cook(&path, &source).map_err(map_io)
+    }
 }

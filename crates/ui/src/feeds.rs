@@ -741,6 +741,18 @@ pub async fn create_recipe(
         .map_err(|e| format!("{slug}: create recipe: {e:?}"))
 }
 
+/// Import a recipe from a web URL — the server fetches the page,
+/// extracts the recipe, and synthesizes a cooklang `.cook` draft (not
+/// yet saved). Returns the parsed draft for review.
+pub async fn import_recipe(slug: &str, url: String) -> Result<cookbook_proto::Recipe, String> {
+    let client =
+        crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
+    client
+        .import(url)
+        .await
+        .map_err(|e| format!("{slug}: import recipe: {e:?}"))
+}
+
 /// Save edits to a recipe's `.cook` source. The server writes the
 /// source verbatim then re-parses, so the returned recipe carries fresh
 /// structured steps / ingredients / timers.

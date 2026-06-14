@@ -20,6 +20,7 @@ architect = { workspace = true }
 cookbook-proto = { workspace = true }
 cooklang = { workspace = true }
 walkdir = { workspace = true }
+recipe-import = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }

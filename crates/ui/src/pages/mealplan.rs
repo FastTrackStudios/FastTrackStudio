@@ -116,6 +116,34 @@ fn RecipesSection(slug: Memo<Option<String>>) -> Element {
         muts.create(s, stores::draft_recipe(n));
     };
 
+    // Web import: the server fetches + extracts + synthesizes a `.cook`
+    // draft, which we then save through the normal optimistic create.
+    let mut import_url = use_signal(String::new);
+    let mut importing = use_signal(|| false);
+    let notices = architect::use_notifications();
+    let mut do_import = move || {
+        let u = import_url.read().trim().to_string();
+        if u.is_empty() || importing() {
+            return;
+        }
+        let Some(s) = slug() else { return };
+        importing.set(true);
+        spawn(async move {
+            match crate::feeds::import_recipe(&s, u).await {
+                Ok(draft) => {
+                    let name = draft.name.clone();
+                    import_url.set(String::new());
+                    muts.create(s, draft);
+                    notices.info(format!("Imported “{name}” — review, edit, or cook it."));
+                }
+                Err(e) => {
+                    notices.error(format!("Import failed: {e}"));
+                }
+            }
+            importing.set(false);
+        });
+    };
+
     let rows: Vec<(Id<String>, Recipe)> = result.value().cloned().unwrap_or_default();
     let load_err = result.error().cloned();
 
@@ -136,6 +164,29 @@ fn RecipesSection(slug: Memo<Option<String>>) -> Element {
                     },
                 }
                 Button { variant: ButtonVariant::Primary, on_click: move |_| create(), "Add" }
+            }
+
+            // Import from a recipe URL.
+            div { class: "flex flex-col gap-2 rounded-xl border border-dashed border-border bg-card/20 p-3 sm:flex-row sm:items-center",
+                input {
+                    class: "{INPUT_CLS} flex-1",
+                    r#type: "url",
+                    placeholder: "Paste a recipe URL to import…",
+                    value: "{import_url}",
+                    disabled: importing(),
+                    oninput: move |e| import_url.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter {
+                            do_import();
+                        }
+                    },
+                }
+                Button {
+                    variant: ButtonVariant::Secondary,
+                    disabled: importing(),
+                    on_click: move |_| do_import(),
+                    if importing() { "Importing…" } else { "Import" }
+                }
             }
 
             if let Some(err) = load_err {
