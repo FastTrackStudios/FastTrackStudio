@@ -59,6 +59,10 @@ pub struct StoreData<T: StoreEntity, E = String> {
     status: AtomResult<(), E>,
     rollback: HashMap<MutationId, Snapshot<T>>,
     seq: u64,
+    /// Re-runs the backing list/entity fetch — registered by
+    /// [`use_store_list`] / [`use_store_entry`] and invoked by
+    /// [`Store::reload`]. `None` until the first fetch hook mounts.
+    reloader: Option<Callback<()>>,
 }
 
 impl<T: StoreEntity, E> Default for StoreData<T, E> {
@@ -69,6 +73,7 @@ impl<T: StoreEntity, E> Default for StoreData<T, E> {
             status: AtomResult::Initial,
             rollback: HashMap::new(),
             seq: 0,
+            reloader: None,
         }
     }
 }
@@ -283,6 +288,27 @@ impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
         data.status = status.settle(Err(error));
     }
 
+    /// Register the restart for the fetch backing this store. Called by
+    /// [`use_store_list`] / [`use_store_entry`]; the latest registration
+    /// wins (a store backs one live fetch at a time).
+    pub fn set_reloader(&self, reloader: Callback<()>) {
+        let mut inner = self.inner;
+        inner.write().reloader = Some(reloader);
+    }
+
+    /// Re-run the backing fetch — a manual retry/refresh. Drives the
+    /// phase through `Reloading` (the last good value stays visible) to
+    /// a fresh `Success`/`Error`. No-op before any fetch hook has
+    /// mounted. Wire it to an error-state **Try again** button.
+    pub fn reload(&self) {
+        // Copy the callback out before calling so we don't hold a read
+        // borrow across the restart.
+        let reloader = self.inner.read().reloader;
+        if let Some(reload) = reloader {
+            reload.call(());
+        }
+    }
+
     /// Optimistically insert a row; returns `(ticket, temp_id)`.
     pub fn insert_optimistic(&self, value: T) -> (MutationId, Id<T::Key>) {
         let mut inner = self.inner;
@@ -404,7 +430,12 @@ where
     F: Fn() -> Fut + 'static,
     Fut: std::future::Future<Output = Option<Result<Vec<T>, E>>> + 'static,
 {
-    let fetched = use_resource(fetch);
+    let mut fetched = use_resource(fetch);
+    // Expose the resource's restart through the store so consumers can
+    // trigger a manual retry (`store.reload()`). Registered once on
+    // mount; the callback is render-stable, so no write churn.
+    let reload = use_callback(move |()| fetched.restart());
+    use_effect(move || store.set_reloader(reload));
     use_effect(move || match &*fetched.read() {
         Some(Some(Ok(items))) => store.hydrate(items.clone()),
         Some(Some(Err(e))) => store.set_failure(e.clone()),
@@ -451,7 +482,7 @@ where
 {
     let parsed = use_memo(use_reactive!(|id| parse(&id)));
 
-    let fetched = use_resource(move || {
+    let mut fetched = use_resource(move || {
         // Only fetch on a cache miss. (`T::Key` is only `Clone`, not
         // necessarily `Copy` — String keys — so the guard probes the
         // cache with a clone and the arm moves the key into `fetch`.)
@@ -466,6 +497,10 @@ where
             }
         }
     });
+
+    // Expose the resource's restart through the store (manual retry).
+    let reload = use_callback(move |()| fetched.restart());
+    use_effect(move || store.set_reloader(reload));
 
     use_effect(move || {
         if let Some(Some(Ok(value))) = &*fetched.read() {
