@@ -47,6 +47,7 @@ pub fn TimerView() -> Element {
 
     let mut description = use_signal(String::new);
 
+    let store = stores::use_session_store();
     let rows: Vec<(Id<Uuid>, stores::OrgSession)> = result.value().cloned().unwrap_or_default();
     let load_err = result.error().cloned();
     let first_load = result.is_waiting() && result.value().is_none();
@@ -101,17 +102,28 @@ pub fn TimerView() -> Element {
             if let Some(open) = active.as_ref() {
                 {running_card(&open.session, stop)}
             } else if first_load {
-                Text { variant: TextVariant::Muted, "Loading timer…" }
-            } else if let Some(e) = load_err.as_ref() {
-                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                    "Couldn't reach the timer service: {e}"
+                crate::states::LoadingState {}
+            } else if let Some(err) = load_err.clone() {
+                crate::states::ErrorState {
+                    title: "Couldn't reach the timer service",
+                    message: err,
+                    on_retry: move |()| store.reload(),
                 }
             } else {
                 {start_form(description, start)}
             }
-            // Recent sessions (all selected orgs).
-            if !rows.is_empty() {
-                {session_list(&rows)}
+            // Recent sessions (all selected orgs). Loading + service-error
+            // are owned by the running-card/start-form block above; here we
+            // only distinguish the empty list from a populated one.
+            if !first_load && load_err.is_none() {
+                if rows.is_empty() {
+                    crate::states::EmptyState {
+                        title: "No sessions yet",
+                        hint: "Start the timer above to log your first session.",
+                    }
+                } else {
+                    {session_list(&rows)}
+                }
             }
         }
     };

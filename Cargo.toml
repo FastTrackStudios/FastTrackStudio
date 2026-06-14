@@ -528,12 +528,12 @@ inbox-proto = { path = "features/inbox/inbox-proto", default-features = false }
 # General app-state persistence. Capability sub-traits
 # (`KvStore` / `LogStore`) so any feature can mount any backend.
 store-proto = { path = "crates/store-proto", default-features = false }
-architect-auth = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92" }
+architect-auth = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "f189018099c31f0e30f011463cd651c7dbb60ebd" }
 # Wire contract for architect-auth — `AuthServiceClient` + the session
 # bundle types. wasm-clean with just the `vox` feature (uuid `js` flows
 # from architect), so the web UI drives the real sign-in flow over the
 # per-org endpoint.
-auth-proto = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92", default-features = false }
+auth-proto = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "f189018099c31f0e30f011463cd651c7dbb60ebd", default-features = false }
 
 # Git feature — issue + PR workflow on top of forges
 # (GitHub now, Forgejo next). `git-proto` is the wire
@@ -707,11 +707,11 @@ path = "crates/ui"
 # in-repo libs. Same rev as the architect/macros/architect dep below.
 [workspace.dependencies.crdt]
 git = "https://codeberg.org/FastTrackStudios/architect.git"
-rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92"
+rev = "f189018099c31f0e30f011463cd651c7dbb60ebd"
 
 [workspace.dependencies.crdt-seaorm]
 git = "https://codeberg.org/FastTrackStudios/architect.git"
-rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92"
+rev = "f189018099c31f0e30f011463cd651c7dbb60ebd"
 
 [workspace.dependencies.serde]
 version = "1"
@@ -997,7 +997,7 @@ moire-wire        = { git = "https://codeberg.org/FastTrackStudios/moire", rev =
 
 [workspace.dependencies.architect]
 git = "https://codeberg.org/FastTrackStudios/architect.git"
-rev = "e9006d6eee6c0bcd6ff5244b0a925b2eed230f92"
+rev = "f189018099c31f0e30f011463cd651c7dbb60ebd"
 
 [workspace.dependencies.printpdf]
 version = "0.7"

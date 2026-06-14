@@ -48,7 +48,9 @@ pub fn BookingsView() -> Element {
     // Shared optimistic stores for both halves of the page.
     let types_result = stores::use_event_type_list();
     let type_muts = stores::use_event_type_mutations();
+    let event_type_store = stores::use_event_type_store();
     let bookings_result = stores::use_booking_list();
+    let booking_store = stores::use_booking_store();
 
     // Create the drafted event type: it appears instantly, then
     // reconciles against the persisted entity.
@@ -65,9 +67,11 @@ pub fn BookingsView() -> Element {
 
     let types: Vec<(Id<String>, EventType)> = types_result.value().cloned().unwrap_or_default();
     let types_err = types_result.error().cloned();
+    let types_first_load = types_result.is_waiting() && types_result.value().is_none();
 
     let rows: Vec<(Id<String>, Booking)> = bookings_result.value().cloned().unwrap_or_default();
     let bookings_err = bookings_result.error().cloned();
+    let bookings_first_load = bookings_result.is_waiting() && bookings_result.value().is_none();
 
     rsx! {
         div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-4 sm:p-6 lg:p-10",
@@ -113,17 +117,22 @@ pub fn BookingsView() -> Element {
                 }
             }
 
-            if let Some(err) = types_err {
-                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
-                    "Couldn't load event types: {err}"
-                }
-            }
-
             // ── Event types ────────────────────────────────────────
             Heading { level: HeadingLevel::H2, class: "text-base", "Event types" }
-            if types.is_empty() {
-                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
-                    Text { variant: TextVariant::Muted, "No event types yet — add your first one above." }
+            if types_first_load {
+                crate::states::LoadingState {}
+            } else if types.is_empty() {
+                if let Some(err) = types_err {
+                    crate::states::ErrorState {
+                        title: "Couldn't load event types",
+                        message: err,
+                        on_retry: move |()| event_type_store.reload(),
+                    }
+                } else {
+                    crate::states::EmptyState {
+                        title: "No event types yet",
+                        hint: "Add your first event type above.",
+                    }
                 }
             } else {
                 div { class: "flex flex-col gap-2",
@@ -135,14 +144,20 @@ pub fn BookingsView() -> Element {
 
             // ── Bookings ───────────────────────────────────────────
             Heading { level: HeadingLevel::H2, class: "text-base mt-2", "Upcoming bookings" }
-            if let Some(err) = bookings_err {
-                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
-                    "Couldn't load bookings: {err}"
-                }
-            }
-            if rows.is_empty() {
-                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
-                    Text { variant: TextVariant::Muted, "No bookings yet." }
+            if bookings_first_load {
+                crate::states::LoadingState {}
+            } else if rows.is_empty() {
+                if let Some(err) = bookings_err {
+                    crate::states::ErrorState {
+                        title: "Couldn't load bookings",
+                        message: err,
+                        on_retry: move |()| booking_store.reload(),
+                    }
+                } else {
+                    crate::states::EmptyState {
+                        title: "No bookings yet",
+                        hint: "Bookings people make will appear here.",
+                    }
                 }
             } else {
                 div { class: "flex flex-col gap-2",

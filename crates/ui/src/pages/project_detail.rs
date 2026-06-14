@@ -38,6 +38,7 @@ pub fn ProjectDetailView(id: String) -> Element {
     // change, cover image) reconcile straight into this value — no
     // page refresh counter.
     let project_res = stores::use_project(id.clone());
+    let project_store = stores::use_project_store();
     let project_muts = stores::use_project_mutations();
 
     // `(owning slug, project id)` once resolved — the key every
@@ -582,13 +583,13 @@ pub fn ProjectDetailView(id: String) -> Element {
             }
         }
         (None, Some(e)) => rsx! {
-            div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                "Couldn't load project: {e}"
+            crate::states::ErrorState {
+                title: "Couldn't load project",
+                message: e.clone(),
+                on_retry: move |()| project_store.reload(),
             }
         },
-        (None, None) => rsx! {
-            Text { variant: TextVariant::Muted, "Loading project…" }
-        },
+        (None, None) => rsx! { crate::states::LoadingState {} },
     };
 
     rsx! {

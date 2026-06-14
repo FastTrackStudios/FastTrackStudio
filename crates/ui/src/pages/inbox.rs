@@ -48,6 +48,7 @@ pub fn InboxView() -> Element {
     // The shared store: one AtomResult for the list; every mutation is
     // optimistic, so exiting process mode needs no reload.
     let result = stores::use_inbox_list();
+    let store = stores::use_inbox_store();
     let muts = stores::use_inbox_mutations();
 
     // Capture the current draft as a fresh fleeting note: it appears
@@ -68,6 +69,7 @@ pub fn InboxView() -> Element {
 
     let all_rows: Vec<(Id<String>, InboxItem)> = result.value().cloned().unwrap_or_default();
     let load_err = result.error().cloned();
+    let first_load = result.is_waiting() && result.value().is_none();
 
     let show_all_now = show_all();
     let rows: Vec<(Id<String>, InboxItem)> = all_rows
@@ -179,12 +181,6 @@ pub fn InboxView() -> Element {
                 }
             }
 
-            if let Some(err) = load_err {
-                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
-                    "Couldn't load the inbox: {err}"
-                }
-            }
-
             // ── Suggested (agent-proposed) — one-tap accept/dismiss ──
             if !suggested.is_empty() {
                 div { class: "flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3",
@@ -201,9 +197,20 @@ pub fn InboxView() -> Element {
             }
 
             // ── The queue ──────────────────────────────────────────
-            if rows.is_empty() {
-                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
-                    Text { variant: TextVariant::Muted, "Inbox empty — nothing to review. 🎉" }
+            if first_load {
+                crate::states::LoadingState {}
+            } else if rows.is_empty() {
+                if let Some(err) = load_err {
+                    crate::states::ErrorState {
+                        title: "Couldn't load inbox",
+                        message: err,
+                        on_retry: move |()| store.reload(),
+                    }
+                } else {
+                    crate::states::EmptyState {
+                        title: "Inbox empty",
+                        hint: "Capture a thought above — nothing to review right now.",
+                    }
                 }
             } else {
                 div { class: "flex flex-col gap-2",

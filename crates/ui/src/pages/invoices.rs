@@ -78,9 +78,12 @@ pub fn InvoicesView() -> Element {
             .collect::<HashMap<Uuid, String>>()
     });
 
+    let store = stores::use_invoice_store();
     let un_rows = uninvoiced.read().clone().unwrap_or_default();
     let inv_rows: Vec<(architect::Id<Uuid>, stores::OrgInvoice)> =
         invoices.value().cloned().unwrap_or_default();
+    let load_err = invoices.error().cloned();
+    let first_load = invoices.is_waiting() && invoices.value().is_none();
     let proj_names = projects.read().clone().unwrap_or_default();
 
     let selected_inv = selected().and_then(|id| {
@@ -119,9 +122,20 @@ pub fn InvoicesView() -> Element {
             // ── Persisted invoices ─────────────────────────────────
             div { class: "flex flex-col gap-2",
                 Heading { level: HeadingLevel::H3, "Invoices" }
-                if inv_rows.is_empty() {
-                    div { class: "rounded-lg border border-dashed border-border px-4 py-8 text-center",
-                        Text { variant: TextVariant::Muted, "No invoices yet — generate one from billable time above." }
+                if first_load {
+                    crate::states::LoadingState {}
+                } else if inv_rows.is_empty() {
+                    if let Some(err) = load_err {
+                        crate::states::ErrorState {
+                            title: "Couldn't load invoices",
+                            message: err,
+                            on_retry: move |()| store.reload(),
+                        }
+                    } else {
+                        crate::states::EmptyState {
+                            title: "No invoices yet",
+                            hint: "Generate one from billable time above.",
+                        }
                     }
                 } else {
                     div { class: "flex flex-col divide-y divide-border/50 rounded-xl border border-border/60 bg-card/40",

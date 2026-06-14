@@ -72,6 +72,7 @@ pub fn InventoryView() -> Element {
         muts.create(s, stores::draft_item(n, c));
     };
 
+    let store = stores::use_item_store();
     let rows: Vec<(Id<Uuid>, Item)> = result.value().cloned().unwrap_or_default();
     let load_err = result.error().cloned();
     let first_load = result.is_waiting() && result.value().is_none();
@@ -116,20 +117,21 @@ pub fn InventoryView() -> Element {
                 }
             }
 
-            if let Some(err) = load_err {
-                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
-                    "Couldn't load inventory: {err}"
-                }
-            }
-
             // ── The register ───────────────────────────────────────
             if first_load {
-                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
-                    Text { variant: TextVariant::Muted, "Loading inventory…" }
-                }
+                crate::states::LoadingState {}
             } else if rows.is_empty() {
-                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
-                    Text { variant: TextVariant::Muted, "No items yet — add your first piece of gear above." }
+                if let Some(err) = load_err {
+                    crate::states::ErrorState {
+                        title: "Couldn't load inventory",
+                        message: err,
+                        on_retry: move |()| store.reload(),
+                    }
+                } else {
+                    crate::states::EmptyState {
+                        title: "No items yet",
+                        hint: "Add your first piece of gear above.",
+                    }
                 }
             } else {
                 div { class: "flex flex-col gap-2",

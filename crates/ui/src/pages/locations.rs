@@ -65,6 +65,7 @@ pub fn LocationsView() -> Element {
         muts.create(s, stores::draft_location(n, k, addr));
     };
 
+    let store = stores::use_location_store();
     let rows: Vec<(Id<Uuid>, Location)> = result.value().cloned().unwrap_or_default();
     let load_err = result.error().cloned();
     let first_load = result.is_waiting() && result.value().is_none();
@@ -120,20 +121,21 @@ pub fn LocationsView() -> Element {
                 }
             }
 
-            if let Some(err) = load_err {
-                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
-                    "Couldn't load locations: {err}"
-                }
-            }
-
             // ── The register ───────────────────────────────────────
             if first_load {
-                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
-                    Text { variant: TextVariant::Muted, "Loading locations…" }
-                }
+                crate::states::LoadingState {}
             } else if rows.is_empty() {
-                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
-                    Text { variant: TextVariant::Muted, "No locations yet — add your first place above." }
+                if let Some(err) = load_err {
+                    crate::states::ErrorState {
+                        title: "Couldn't load locations",
+                        message: err,
+                        on_retry: move |()| store.reload(),
+                    }
+                } else {
+                    crate::states::EmptyState {
+                        title: "No locations yet",
+                        hint: "Add your first place above.",
+                    }
                 }
             } else {
                 div { class: "flex flex-col gap-2",

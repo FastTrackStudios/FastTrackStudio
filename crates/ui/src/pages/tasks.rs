@@ -22,6 +22,7 @@ pub fn TasksView() -> Element {
 
     let result = stores::use_task_list();
     let muts = stores::use_task_mutations();
+    let store = stores::use_task_store();
 
     let body = match (&result.value(), result.error()) {
         (Some(rows), _) => {
@@ -47,6 +48,7 @@ pub fn TasksView() -> Element {
             crate::states::ErrorState {
                 title: "Couldn't reach the task service",
                 message: e,
+                on_retry: move |()| store.reload(),
             }
         },
         (None, None) => rsx! { crate::states::LoadingState {} },

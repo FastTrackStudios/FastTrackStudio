@@ -41,6 +41,7 @@ pub fn ProjectsView() -> Element {
     // (stale-while-revalidate across org switches), and the cache that
     // makes `/projects/:id` instant after this visit.
     let projects = crate::stores::use_project_list();
+    let store = crate::stores::use_project_store();
     let view_mode = use_signal(ViewMode::default);
 
     let view = match (projects.value(), projects.error()) {
@@ -48,7 +49,14 @@ pub fn ProjectsView() -> Element {
             let rows: Vec<ProjectInfo> = rows.iter().map(|(_, r)| r.project.clone()).collect();
             render_loaded(&rows, view_mode)
         }
-        (None, Some(e)) => render_error(e),
+        (None, Some(e)) => rsx! {
+            page_header { count_line: None }
+            crate::states::ErrorState {
+                title: "Couldn't reach the project service",
+                message: e.clone(),
+                on_retry: move |()| store.reload(),
+            }
+        },
         (None, None) => render_loading(),
     };
 
@@ -96,19 +104,6 @@ fn render_loading() -> Element {
                         div { class: "h-3 w-20 animate-pulse rounded-full bg-muted" }
                     }
                 }
-            }
-        }
-    }
-}
-
-fn render_error(err: &str) -> Element {
-    rsx! {
-        page_header { count_line: None }
-        div { class: "flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3",
-            div { class: "mt-0.5 text-destructive", Flag { size: 18 } }
-            div { class: "flex flex-col gap-0.5",
-                span { class: "text-sm font-medium text-foreground", "Couldn't reach the project service" }
-                span { class: "text-xs text-muted-foreground", "{err}" }
             }
         }
     }

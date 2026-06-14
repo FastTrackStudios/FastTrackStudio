@@ -134,6 +134,7 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
     // The shared store: one AtomResult for the list, optimistic create.
     let result = stores::use_body_metric_list();
     let muts = stores::use_body_metric_mutations();
+    let metric_store = stores::use_body_metric_store();
 
     let mut create = move || {
         let n = name.read().trim().to_string();
@@ -149,6 +150,7 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
 
     let rows: Vec<(Id<Uuid>, BodyMetric)> = result.value().cloned().unwrap_or_default();
     let load_err = result.error().cloned();
+    let first_load = result.is_waiting() && result.value().is_none();
 
     rsx! {
         section { class: "flex flex-col gap-3",
@@ -188,12 +190,21 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
                 Button { variant: ButtonVariant::Primary, on_click: move |_| create(), "Add" }
             }
 
-            if let Some(err) = load_err {
-                LoadError { what: "body metrics".to_string(), err }
-            }
-
-            if rows.is_empty() {
-                EmptyState { message: "No body metrics yet — add one above.".to_string() }
+            if first_load {
+                crate::states::LoadingState {}
+            } else if rows.is_empty() {
+                if let Some(err) = load_err {
+                    crate::states::ErrorState {
+                        title: "Couldn't load body metrics",
+                        message: err,
+                        on_retry: move |()| metric_store.reload(),
+                    }
+                } else {
+                    crate::states::EmptyState {
+                        title: "No body metrics yet",
+                        hint: "Add your first metric above.",
+                    }
+                }
             } else {
                 div { class: "flex flex-col gap-2",
                     for (id, m) in rows {
@@ -246,6 +257,7 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
     // The shared store: one AtomResult for the list, optimistic create.
     let result = stores::use_exercise_list();
     let muts = stores::use_exercise_mutations();
+    let exercise_store = stores::use_exercise_store();
 
     let mut create = move || {
         let n = name.read().trim().to_string();
@@ -260,6 +272,7 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
 
     let rows: Vec<(Id<Uuid>, Exercise)> = result.value().cloned().unwrap_or_default();
     let load_err = result.error().cloned();
+    let first_load = result.is_waiting() && result.value().is_none();
 
     rsx! {
         section { class: "flex flex-col gap-3",
@@ -288,12 +301,21 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
                 Button { variant: ButtonVariant::Primary, on_click: move |_| create(), "Add" }
             }
 
-            if let Some(err) = load_err {
-                LoadError { what: "exercises".to_string(), err }
-            }
-
-            if rows.is_empty() {
-                EmptyState { message: "No exercises yet — add one above.".to_string() }
+            if first_load {
+                crate::states::LoadingState {}
+            } else if rows.is_empty() {
+                if let Some(err) = load_err {
+                    crate::states::ErrorState {
+                        title: "Couldn't load exercises",
+                        message: err,
+                        on_retry: move |()| exercise_store.reload(),
+                    }
+                } else {
+                    crate::states::EmptyState {
+                        title: "No exercises yet",
+                        hint: "Add your first exercise above.",
+                    }
+                }
             } else {
                 div { class: "flex flex-col gap-2",
                     for (id, ex) in rows {
