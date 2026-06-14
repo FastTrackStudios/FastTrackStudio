@@ -17,6 +17,9 @@ serde = { workspace = true, features = ["derive"] }
 chrono = { workspace = true, features = ["clock", "serde"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [features]
 default = []
 server = ["architect/server-seaorm", "dep:sea-orm"]

@@ -49,6 +49,13 @@ pub struct Label {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub group: Option<String>,
 
+    /// If `Some`, the label is scoped to one project and only
+    /// surfaces there. `None` means org-scoped — available across
+    /// every project in the workspace (the default).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(filterable)]
+    pub project_id: Option<Uuid>,
+
     #[architect(filterable, sortable)]
     pub created_at: DateTime<Utc>,
 
@@ -68,6 +75,7 @@ impl Label {
             description: None,
             color: None,
             group: None,
+            project_id: None,
             created_at: now,
             updated_at: now,
         }
@@ -85,5 +93,33 @@ mod tests {
         assert_eq!(l.workspace_id, ws);
         assert_eq!(l.name, "bug");
         assert!(l.color.is_none());
+    }
+
+    #[test]
+    fn new_label_is_org_scoped() {
+        let l = Label::new(Uuid::nil(), "bug");
+        assert!(l.project_id.is_none(), "fresh labels are org-scoped");
+    }
+
+    #[test]
+    fn project_id_omitted_when_none() {
+        // org-scoped labels don't serialize a `project_id` key, and
+        // legacy `labels.json` written before the field existed still
+        // deserializes (the missing key defaults to `None`).
+        let l = Label::new(Uuid::nil(), "bug");
+        let json = serde_json::to_string(&l).unwrap();
+        assert!(!json.contains("project_id"));
+        let back: Label = serde_json::from_str(&json).unwrap();
+        assert!(back.project_id.is_none());
+    }
+
+    #[test]
+    fn project_scoped_label_round_trips() {
+        let pid = Uuid::new_v4();
+        let mut l = Label::new(Uuid::nil(), "frontend");
+        l.project_id = Some(pid);
+        let json = serde_json::to_string(&l).unwrap();
+        let back: Label = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.project_id, Some(pid));
     }
 }
