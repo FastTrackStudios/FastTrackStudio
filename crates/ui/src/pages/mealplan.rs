@@ -182,17 +182,30 @@ fn RecipeRow(recipe: Recipe, pending: bool) -> Element {
             if let Some(c) = course {
                 span { class: "shrink-0 rounded bg-muted px-1.5 py-px text-[11px] text-muted-foreground", "{c}" }
             }
-            // Cook-along: deep-links into the full-screen step + timer
-            // view. Hidden for a not-yet-saved optimistic row (no parsed
-            // steps yet).
-            if !pending && steps > 0 {
-                Button {
-                    variant: ButtonVariant::Secondary,
-                    size: ButtonSize::Small,
-                    on_click: move |_| {
-                        nav.push(crate::routes::Route::RecipeCookRoute { path: path.clone() });
-                    },
-                    "Cook"
+            if !pending {
+                div { class: "flex shrink-0 items-center gap-1.5",
+                    // Author the cooklang source.
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        on_click: {
+                            let path = path.clone();
+                            move |_| { nav.push(crate::routes::Route::RecipeEditRoute { path: path.clone() }); }
+                        },
+                        "Edit"
+                    }
+                    // Cook-along: deep-links into the full-screen step +
+                    // timer view (only once there are parsed steps).
+                    if steps > 0 {
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Small,
+                            on_click: move |_| {
+                                nav.push(crate::routes::Route::RecipeCookRoute { path: path.clone() });
+                            },
+                            "Cook"
+                        }
+                    }
                 }
             }
         }

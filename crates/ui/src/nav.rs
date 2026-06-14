@@ -260,6 +260,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::FitnessRoute {} => "Fitness",
         Route::MealplanRoute {} => "Mealplan",
         Route::RecipeCookRoute { .. } => "Cook",
+        Route::RecipeEditRoute { .. } => "Edit recipe",
         Route::ScheduleRoute {} => "Schedule",
         Route::BookingsRoute {} => "Bookings",
         Route::GanttRoute {} => "Gantt",

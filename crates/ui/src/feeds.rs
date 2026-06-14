@@ -741,6 +741,21 @@ pub async fn create_recipe(
         .map_err(|e| format!("{slug}: create recipe: {e:?}"))
 }
 
+/// Save edits to a recipe's `.cook` source. The server writes the
+/// source verbatim then re-parses, so the returned recipe carries fresh
+/// structured steps / ingredients / timers.
+pub async fn update_recipe(
+    slug: &str,
+    recipe: cookbook_proto::Recipe,
+) -> Result<cookbook_proto::Recipe, String> {
+    let client =
+        crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
+    client
+        .update(recipe)
+        .await
+        .map_err(|e| format!("{slug}: update recipe: {e:?}"))
+}
+
 /// Every pantry item in the org's vault (food-on-hand pages), in
 /// the order the backend lists them.
 pub async fn fetch_pantry(slug: &str) -> Result<Vec<pantry_proto::PantryItem>, String> {

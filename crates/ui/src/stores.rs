@@ -795,6 +795,20 @@ impl RecipeMutations {
             crate::feeds::create_recipe(&slug, recipe).await
         });
     }
+
+    /// Save an edited recipe (keyed by vault `path`): patch the store
+    /// optimistically, write through, and reconcile the server's
+    /// re-parsed row (fresh steps / timers) back in — or roll back +
+    /// notify on failure.
+    pub fn update(&self, slug: String, recipe: cookbook_proto::Recipe) {
+        let key = recipe.path.clone();
+        let row = recipe.clone();
+        self.write.run(
+            self.store,
+            move |s| s.update_optimistic(Id::Real(key), move |r| *r = row),
+            move || async move { crate::feeds::update_recipe(&slug, recipe).await.map(Some) },
+        );
+    }
 }
 
 pub type PantryStore = Store<pantry_proto::PantryItem, String>;

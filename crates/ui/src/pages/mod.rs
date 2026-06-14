@@ -22,6 +22,7 @@ pub mod mealplan;
 pub mod milestones;
 pub mod project_detail;
 pub mod projects;
+pub mod recipe_edit;
 pub mod repos;
 pub mod schedule;
 pub mod settings;

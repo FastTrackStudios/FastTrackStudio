@@ -65,6 +65,10 @@ pub enum Route {
         #[route("/mealplan/recipe?:path")]
         RecipeCookRoute { path: String },
 
+        // Edit a recipe's cooklang source.
+        #[route("/mealplan/recipe/edit?:path")]
+        RecipeEditRoute { path: String },
+
         #[route("/schedule")]
         ScheduleRoute {},
 
@@ -178,6 +182,11 @@ fn MealplanRoute() -> Element {
 #[component]
 fn RecipeCookRoute(path: String) -> Element {
     rsx! { pages::cook_mode::RecipeCookView { path } }
+}
+
+#[component]
+fn RecipeEditRoute(path: String) -> Element {
+    rsx! { pages::recipe_edit::EditRecipeView { path } }
 }
 
 #[component]
