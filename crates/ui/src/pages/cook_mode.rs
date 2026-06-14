@@ -37,6 +37,12 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
     let mut done_steps = use_signal(HashSet::<usize>::new);
     let notices = architect::use_notifications();
 
+    // Servings scaler — multiplies ingredient quantities (timers are
+    // left alone; cooking time isn't proportional to batch size).
+    let base_servings = recipe.servings.unwrap_or(1).max(1);
+    let mut target_servings = use_signal(move || base_servings);
+    let factor = f64::from(target_servings()) / f64::from(base_servings);
+
     // One ticker for every running timer. Decrement once a second;
     // announce + beep the ones that just hit zero (kept in the list so
     // the "Done" chip stays visible until dismissed).
@@ -152,12 +158,35 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                     // Ingredients — tap to check off as you gather.
                     if !recipe.ingredients.is_empty() {
                         section { class: "flex flex-col gap-2",
-                            Heading { level: HeadingLevel::H3, class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground", "Ingredients" }
+                            div { class: "flex items-center justify-between gap-3",
+                                Heading { level: HeadingLevel::H3, class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground", "Ingredients" }
+                                // Servings scaler — only when the recipe declares a yield.
+                                if recipe.servings.is_some() {
+                                    div { class: "flex items-center gap-1.5 rounded-full border border-border bg-card/60 px-1 py-0.5",
+                                        button {
+                                            class: "flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-40",
+                                            disabled: target_servings() <= 1,
+                                            aria_label: "Fewer servings",
+                                            onclick: move |_| { let v = target_servings(); if v > 1 { target_servings.set(v - 1); } },
+                                            "−"
+                                        }
+                                        span { class: "min-w-[4.5rem] text-center text-xs tabular-nums text-foreground",
+                                            "{target_servings()} servings"
+                                        }
+                                        button {
+                                            class: "flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted",
+                                            aria_label: "More servings",
+                                            onclick: move |_| target_servings.set(target_servings() + 1),
+                                            "+"
+                                        }
+                                    }
+                                }
+                            }
                             div { class: "flex flex-col divide-y divide-border/50 overflow-hidden rounded-xl border border-border bg-card/40",
                                 for (i, ing) in recipe.ingredients.iter().enumerate() {
                                     {
                                         let checked = gathered.read().contains(&i);
-                                        let qty = ingredient_qty(ing);
+                                        let qty = scaled_qty(ing, factor);
                                         let name = ing.name.clone();
                                         rsx! {
                                             button {
@@ -261,13 +290,89 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
     }
 }
 
-/// `"200 g"` / `"2"` / `""` — the gather-list quantity prefix.
-fn ingredient_qty(ing: &cookbook_proto::Ingredient) -> String {
-    match (&ing.qty_display, ing.unit.as_str()) {
-        (Some(q), "") => q.clone(),
-        (Some(q), u) => format!("{q} {u}"),
-        (None, "") => String::new(),
-        (None, u) => u.to_string(),
+/// The gather-list quantity prefix, scaled by `factor`. Scales the
+/// numeric `qty` when present; otherwise keeps the original display
+/// form (ranges / fractions / text) unscaled — at `factor == 1` it
+/// reads exactly as written.
+fn scaled_qty(ing: &cookbook_proto::Ingredient, factor: f64) -> String {
+    match ing.qty {
+        Some(q) => {
+            let num = fmt_num(q * factor);
+            if ing.unit.is_empty() {
+                num
+            } else {
+                format!("{num} {}", ing.unit)
+            }
+        }
+        None => match (&ing.qty_display, ing.unit.as_str()) {
+            (Some(q), "") => q.clone(),
+            (Some(q), u) => format!("{q} {u}"),
+            (None, "") => String::new(),
+            (None, u) => u.to_string(),
+        },
+    }
+}
+
+/// Trim a scaled quantity to a tidy form — whole numbers lose the
+/// decimal, others keep up to two places without trailing zeros.
+fn fmt_num(v: f64) -> String {
+    if (v.fract()).abs() < 1e-9 {
+        format!("{}", v.round() as i64)
+    } else {
+        let s = format!("{v:.2}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+/// Route target for `/mealplan/recipe?:path` — resolves one recipe from
+/// the shared cookbook store (cache-first after a `/mealplan` visit)
+/// and drops straight into [`CookMode`]. Back closes to `/mealplan`.
+#[component]
+pub fn RecipeCookView(path: String) -> Element {
+    let nav = use_navigator();
+    let recipes = crate::stores::use_recipe_list();
+    let store = crate::stores::use_recipe_store();
+    let target = path.clone();
+    let found = recipes.value().and_then(|rows| {
+        rows.iter()
+            .find(|(_, r)| r.path == target)
+            .map(|(_, r)| r.clone())
+    });
+
+    let to_mealplan = move |()| {
+        nav.push(crate::routes::Route::MealplanRoute {});
+    };
+
+    match found {
+        Some(recipe) => rsx! {
+            CookMode { recipe, on_close: to_mealplan }
+        },
+        None if recipes.is_waiting() => rsx! {
+            div { class: "flex h-full items-center justify-center p-8",
+                crate::states::LoadingState {}
+            }
+        },
+        None => rsx! {
+            div { class: "mx-auto flex max-w-md flex-col gap-3 p-8 text-center",
+                if let Some(err) = recipes.error() {
+                    crate::states::ErrorState {
+                        title: "Couldn't load the recipe",
+                        message: err.clone(),
+                        on_retry: move |()| store.reload(),
+                    }
+                } else {
+                    crate::states::EmptyState {
+                        title: "Recipe not found",
+                        hint: "It may have been moved or renamed.",
+                    }
+                }
+                Button {
+                    variant: ButtonVariant::Secondary,
+                    on_click: move |_| to_mealplan(()),
+                    "Back to mealplan"
+                }
+            }
+        },
     }
 }
 

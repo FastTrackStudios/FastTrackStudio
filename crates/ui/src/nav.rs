@@ -259,6 +259,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::MilestonesRoute {} => "Milestones",
         Route::FitnessRoute {} => "Fitness",
         Route::MealplanRoute {} => "Mealplan",
+        Route::RecipeCookRoute { .. } => "Cook",
         Route::ScheduleRoute {} => "Schedule",
         Route::BookingsRoute {} => "Bookings",
         Route::GanttRoute {} => "Gantt",

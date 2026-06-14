@@ -160,11 +160,12 @@ fn RecipesSection(slug: Memo<Option<String>>) -> Element {
 /// back + notify.
 #[component]
 fn RecipeRow(recipe: Recipe, pending: bool) -> Element {
+    let nav = use_navigator();
     let name = recipe.name.clone();
     let course = recipe.course.clone();
     let ingredients = recipe.ingredients.len();
     let steps = recipe.cook_steps.len().max(recipe.steps.len());
-    let mut cooking = use_signal(|| false);
+    let path = recipe.path.clone();
 
     let state_cls = if pending {
         "border-border bg-card/40 opacity-60"
@@ -181,21 +182,18 @@ fn RecipeRow(recipe: Recipe, pending: bool) -> Element {
             if let Some(c) = course {
                 span { class: "shrink-0 rounded bg-muted px-1.5 py-px text-[11px] text-muted-foreground", "{c}" }
             }
-            // Cook-along: a full-screen step + timer view. Disabled for
-            // a not-yet-saved optimistic row (no parsed steps yet).
+            // Cook-along: deep-links into the full-screen step + timer
+            // view. Hidden for a not-yet-saved optimistic row (no parsed
+            // steps yet).
             if !pending && steps > 0 {
                 Button {
                     variant: ButtonVariant::Secondary,
                     size: ButtonSize::Small,
-                    on_click: move |_| cooking.set(true),
+                    on_click: move |_| {
+                        nav.push(crate::routes::Route::RecipeCookRoute { path: path.clone() });
+                    },
                     "Cook"
                 }
-            }
-        }
-        if cooking() {
-            super::cook_mode::CookMode {
-                recipe: recipe.clone(),
-                on_close: move |()| cooking.set(false),
             }
         }
     }

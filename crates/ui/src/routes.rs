@@ -60,6 +60,11 @@ pub enum Route {
         #[route("/mealplan")]
         MealplanRoute {},
 
+        // Deep-link straight into cook mode for one recipe (vault-relative
+        // `.cook` path as a query value, like `VaultRoute`).
+        #[route("/mealplan/recipe?:path")]
+        RecipeCookRoute { path: String },
+
         #[route("/schedule")]
         ScheduleRoute {},
 
@@ -168,6 +173,11 @@ fn FitnessRoute() -> Element {
 #[component]
 fn MealplanRoute() -> Element {
     rsx! { pages::mealplan::MealplanView {} }
+}
+
+#[component]
+fn RecipeCookRoute(path: String) -> Element {
+    rsx! { pages::cook_mode::RecipeCookView { path } }
 }
 
 #[component]
