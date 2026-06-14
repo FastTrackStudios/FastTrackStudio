@@ -20,6 +20,7 @@ pub mod presence;
 pub mod routes;
 pub mod server_registry;
 pub mod shell;
+pub mod states;
 pub mod stores;
 pub mod task_sort;
 pub mod theming;

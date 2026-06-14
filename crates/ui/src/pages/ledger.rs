@@ -59,25 +59,34 @@ pub fn LedgerView() -> Element {
     // are per-book). Use the first selected slug.
     let slug = use_memo(move || slugs().first().cloned());
 
-    let accounts = use_resource(move || async move {
+    // Keep the fetch `Result` intact (no in-closure `unwrap_or_default`)
+    // so a failed book read surfaces an error + retry instead of a
+    // silently-blank ledger.
+    let mut accounts = use_resource(move || async move {
         match slug() {
-            Some(s) => crate::feeds::fetch_ledger_accounts(&s)
-                .await
-                .unwrap_or_default(),
-            None => Vec::new(),
+            Some(s) => crate::feeds::fetch_ledger_accounts(&s).await,
+            None => Ok(Vec::new()),
         }
     });
-    let transactions = use_resource(move || async move {
+    let mut transactions = use_resource(move || async move {
         match slug() {
-            Some(s) => crate::feeds::fetch_ledger_transactions(&s)
-                .await
-                .unwrap_or_default(),
-            None => Vec::new(),
+            Some(s) => crate::feeds::fetch_ledger_transactions(&s).await,
+            None => Ok(Vec::new()),
         }
     });
 
-    let acct_rows: Vec<(Account, AccountBalance)> = accounts.read().clone().unwrap_or_default();
-    let txn_rows: Vec<Transaction> = transactions.read().clone().unwrap_or_default();
+    let acct_res = accounts.read().clone();
+    let txn_res = transactions.read().clone();
+    // First error from either fetch (if any), and whether we're still
+    // waiting on a selected org's data.
+    let error = match (&acct_res, &txn_res) {
+        (Some(Err(e)), _) | (_, Some(Err(e))) => Some(e.clone()),
+        _ => None,
+    };
+    let loading = slug().is_some() && (acct_res.is_none() || txn_res.is_none());
+    let acct_rows: Vec<(Account, AccountBalance)> =
+        acct_res.and_then(Result::ok).unwrap_or_default();
+    let txn_rows: Vec<Transaction> = txn_res.and_then(Result::ok).unwrap_or_default();
 
     // Account-name lookup for rendering splits in the transactions table.
     let acct_names: HashMap<Uuid, String> = acct_rows
@@ -108,6 +117,17 @@ pub fn LedgerView() -> Element {
                 div { class: "rounded-lg border border-dashed border-border px-4 py-8 text-center",
                     Text { variant: TextVariant::Muted, "Select an org to view its ledger." }
                 }
+            } else if let Some(e) = error {
+                crate::states::ErrorState {
+                    title: "Couldn't load the ledger",
+                    message: e,
+                    on_retry: move |()| {
+                        accounts.restart();
+                        transactions.restart();
+                    },
+                }
+            } else if loading {
+                crate::states::LoadingState {}
             } else {
                 // ── Accounts + balances ────────────────────────────
                 div { class: "flex flex-col gap-2",

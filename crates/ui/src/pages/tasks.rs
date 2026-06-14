@@ -9,7 +9,6 @@
 //! rollback + tray notification).
 
 use dioxus::prelude::*;
-use fts_ui::prelude::*;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
 
 use crate::orgs::{OrgMeta, OrgSelection};
@@ -45,11 +44,12 @@ pub fn TasksView() -> Element {
             }
         }
         (None, Some(e)) => rsx! {
-            div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                "Couldn't reach the task service: {e}"
+            crate::states::ErrorState {
+                title: "Couldn't reach the task service",
+                message: e,
             }
         },
-        (None, None) => rsx! { Text { variant: TextVariant::Muted, "Loading tasks…" } },
+        (None, None) => rsx! { crate::states::LoadingState {} },
     };
 
     rsx! {
