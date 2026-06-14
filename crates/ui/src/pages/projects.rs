@@ -21,6 +21,7 @@ use fts_ui::prelude::*;
 use project::ProjectInfo;
 
 use crate::routes::Route;
+use crate::task_sort::{priority_rank, status_rank};
 
 /// Page-scoped keyframes for the staggered card entrance. Injected once
 /// per render as a plain `<style>` (idempotent — identical content).
@@ -527,29 +528,6 @@ fn ProjectRow(props: ProjectRowProps) -> Element {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
-
-/// Sort key: active projects first, paused next, in-progress/other,
-/// then done, then cancelled.
-fn status_rank(status: &str) -> u8 {
-    match status {
-        "active" | "open" | "in_progress" => 0,
-        "on_hold" | "on-hold" | "paused" | "waiting" => 1,
-        "done" | "completed" | "shipped" => 3,
-        "cancelled" | "canceled" | "abandoned" => 4,
-        _ => 2,
-    }
-}
-
-/// Sort key: urgent → high → normal → low → lowest/unknown.
-fn priority_rank(pr: &str) -> u8 {
-    match pr {
-        "p0" | "urgent" => 0,
-        "p1" | "high" => 1,
-        "" | "p2" | "normal" => 2,
-        "p3" | "low" => 3,
-        _ => 4,
-    }
-}
 
 /// Accent for a project: its own stored `color` if set, else a stable
 /// pick from the chart palette by title hash. Always a CSS value safe

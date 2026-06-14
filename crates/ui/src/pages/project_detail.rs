@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::orgs::OrgMeta;
 use crate::routes::Route;
 use crate::stores::{self, to_ui};
+use crate::task_sort::{belongs, is_active_task};
 use threads::ui::ConversationsPanel;
 
 #[component]
@@ -595,17 +596,6 @@ pub fn ProjectDetailView(id: String) -> Element {
     }
 }
 
-/// A task belongs to a project if its `project_id` matches, or its
-/// `projects:` wikilink array references the project by `[[title]]`
-/// (or bare title).
-fn belongs(t: &DbTask, p: &ProjectInfo) -> bool {
-    if t.project_id == Some(p.id) {
-        return true;
-    }
-    let link = format!("[[{}]]", p.title);
-    t.projects.0.iter().any(|x| x == &link || x == &p.title)
-}
-
 /// A big-number overview tile (Tasks / Done / Progress / Due /
 /// Budget). `warn` renders the value amber — the over-budget signal.
 #[component]
@@ -880,16 +870,6 @@ async fn sleep_30s() {
 }
 
 // ── Active tasks ────────────────────────────────────────────────────
-
-/// "Active" = visibly in flight: the status says in-progress, or
-/// someone (human or agent) holds the task via `workflow.assignees`
-/// (a claim).
-fn is_active_task(t: &DbTask) -> bool {
-    t.status == "in-progress"
-        || t.workflow
-            .as_ref()
-            .is_some_and(|w| !w.assignees.0.is_empty())
-}
 
 /// Comma-joined holder labels from `workflow.assignees`.
 fn assignee_labels(t: &DbTask) -> String {

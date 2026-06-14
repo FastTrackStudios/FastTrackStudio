@@ -21,6 +21,7 @@ pub mod routes;
 pub mod server_registry;
 pub mod shell;
 pub mod stores;
+pub mod task_sort;
 pub mod theming;
 pub mod vault_lookup;
 pub mod vox_clients;

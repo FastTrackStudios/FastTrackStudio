@@ -12,6 +12,7 @@ use task::TaskInfo as DbTask;
 
 use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
 use crate::routes::Route;
+use crate::task_sort::{belongs, is_active, is_open_task, priority_rank};
 
 #[component]
 pub fn HomeView() -> Element {
@@ -161,37 +162,6 @@ fn NextTask(props: NextTaskProps) -> Element {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
-
-fn is_active(status: &str) -> bool {
-    matches!(status, "active" | "open" | "in_progress")
-}
-
-fn is_open_task(t: &DbTask) -> bool {
-    !matches!(
-        t.status.as_str(),
-        "done" | "complete" | "completed" | "shipped" | "cancelled" | "canceled" | "abandoned"
-    )
-}
-
-/// A task belongs to a project by `project_id` or a `[[title]]` /
-/// bare-title entry in its `projects:` list.
-fn belongs(t: &DbTask, p: &ProjectInfo) -> bool {
-    if t.project_id == Some(p.id) {
-        return true;
-    }
-    let link = format!("[[{}]]", p.title);
-    t.projects.0.iter().any(|x| x == &link || x == &p.title)
-}
-
-fn priority_rank(p: &str) -> u8 {
-    match p {
-        "p0" | "urgent" | "critical" => 0,
-        "p1" | "high" => 1,
-        "p2" | "normal" | "" => 2,
-        "p3" | "low" => 3,
-        _ => 4,
-    }
-}
 
 /// The single next task for a project: open, soonest due (None last),
 /// then highest priority, then title.
