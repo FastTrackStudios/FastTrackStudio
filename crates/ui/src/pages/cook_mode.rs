@@ -43,6 +43,12 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
     let mut target_servings = use_signal(move || base_servings);
     let factor = f64::from(target_servings()) / f64::from(base_servings);
 
+    // Keep the screen awake while cooking — phones lock mid-recipe
+    // otherwise. Acquired on mount, released on unmount; re-acquired on
+    // tab refocus (the lock drops when hidden). No-op off the web.
+    use_hook(|| set_wake_lock(true));
+    use_drop(|| set_wake_lock(false));
+
     // One ticker for every running timer. Decrement once a second;
     // announce + beep the ones that just hit zero (kept in the list so
     // the "Done" chip stays visible until dismissed).
@@ -404,6 +410,29 @@ fn beep() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn beep() {}
+
+/// Hold (or drop) a screen wake lock for the cook session. Uses the Web
+/// Wake Lock API; the lock self-drops when the tab is hidden, so a
+/// one-time `visibilitychange` hook re-acquires it on refocus while the
+/// session is still active.
+#[cfg(target_arch = "wasm32")]
+fn set_wake_lock(on: bool) {
+    let js = if on {
+        "window.__cookActive=true;\
+         (async()=>{try{window.__cookWL=await navigator.wakeLock.request('screen');}catch(e){}})();\
+         if(!window.__cookWLHooked){window.__cookWLHooked=true;\
+           document.addEventListener('visibilitychange',async()=>{\
+             if(document.visibilityState==='visible'&&window.__cookActive){\
+               try{window.__cookWL=await navigator.wakeLock.request('screen');}catch(e){}}});}"
+    } else {
+        "window.__cookActive=false;\
+         try{if(window.__cookWL){window.__cookWL.release();window.__cookWL=null;}}catch(e){}"
+    };
+    let _ = dioxus::document::eval(js);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn set_wake_lock(_on: bool) {}
 
 #[cfg(target_arch = "wasm32")]
 async fn sleep_one_second() {
