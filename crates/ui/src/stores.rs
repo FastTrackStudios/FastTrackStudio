@@ -767,6 +767,7 @@ pub fn draft_recipe(name: String) -> cookbook_proto::Recipe {
         servings: None,
         ingredients: cookbook_proto::Ingredients::default(),
         steps: cookbook_proto::StringList::default(),
+        cook_steps: cookbook_proto::CookSteps::default(),
         cookware: cookbook_proto::StringList::default(),
         nested_recipes: cookbook_proto::StringList::default(),
         tags: cookbook_proto::StringList::default(),

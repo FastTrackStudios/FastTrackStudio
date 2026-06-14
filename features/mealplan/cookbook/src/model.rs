@@ -8,4 +8,7 @@
 //! the existing `cookbook::model::Nutrition` / `cookbook::Nutrition`
 //! paths keep working.
 
-pub use cookbook_proto::model::{Course, Ingredient, Ingredients, Nutrition, Recipe, StringList};
+pub use cookbook_proto::model::{
+    CookStep, CookSteps, Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeTimer,
+    StringList,
+};

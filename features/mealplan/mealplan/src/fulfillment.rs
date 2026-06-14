@@ -363,6 +363,7 @@ mod tests {
 
     fn recipe_with(path: &str, ings: Vec<Ingredient>, servings: u32) -> Recipe {
         Recipe {
+            cook_steps: Default::default(),
             path: path.into(),
             name: "test".into(),
             description: None,

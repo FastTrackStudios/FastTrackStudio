@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use cooklang::{Converter, CooklangParser, Extensions, Value};
 use thiserror::Error;
 
-use crate::model::{Ingredient, Recipe};
+use crate::model::{CookStep, CookSteps, Ingredient, Recipe, RecipeTimer, StringList};
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -80,12 +80,16 @@ pub fn parse_cook_at(
         .filter_map(|i| i.reference.as_ref().map(|r| r.path("/")))
         .collect();
 
-    let steps = parsed
+    // Structured steps: ingredient / cookware / timer names kept inline
+    // (no more `·` placeholders) and timers extracted. `steps` is the
+    // same text, kept for the existing index/grep/wiki consumers.
+    let cook_steps: Vec<CookStep> = parsed
         .sections
         .iter()
         .flat_map(|s| s.content.iter())
-        .filter_map(render_content)
+        .filter_map(|c| project_content(c, &parsed))
         .collect();
+    let steps: StringList = cook_steps.iter().map(|s| s.text.clone()).collect();
 
     Ok(Recipe {
         path: path.to_string(),
@@ -98,6 +102,7 @@ pub fn parse_cook_at(
         servings,
         ingredients,
         steps,
+        cook_steps: CookSteps::from(cook_steps),
         cookware,
         nested_recipes,
         tags,
@@ -137,37 +142,89 @@ fn number_value(v: &Value) -> Option<f64> {
     }
 }
 
-fn render_content(c: &cooklang::Content) -> Option<String> {
+fn project_content(c: &cooklang::Content, recipe: &cooklang::Recipe) -> Option<CookStep> {
     match c {
-        cooklang::Content::Step(step) => Some(render_step(step)),
+        cooklang::Content::Step(step) => Some(project_step(step, recipe)),
         cooklang::Content::Text(t) => {
             let trimmed = t.trim();
             if trimmed.is_empty() {
                 None
             } else {
-                Some(trimmed.to_string())
+                Some(CookStep {
+                    text: trimmed.to_string(),
+                    timers: Vec::new(),
+                })
             }
         }
     }
 }
 
-fn render_step(step: &cooklang::Step) -> String {
-    // Items reference the recipe-level vecs by index. We don't
-    // have those vecs in scope; render plain text and drop a
-    // bullet for non-text items. Editors / UI re-parse via
-    // cooklang directly for the rich form. `Recipe::steps` is
-    // for index views + grep.
-    let mut out = String::new();
+/// Render one step to readable text, resolving each `Item`'s index into
+/// the recipe-level component vecs so ingredient / cookware / timer
+/// names land inline, and collecting the step's timers as structured
+/// [`RecipeTimer`]s for one-tap countdowns.
+fn project_step(step: &cooklang::Step, recipe: &cooklang::Recipe) -> CookStep {
+    let mut text = String::new();
+    let mut timers = Vec::new();
     for item in &step.items {
         match item {
-            cooklang::Item::Text { value } => out.push_str(value),
-            cooklang::Item::Ingredient { .. }
-            | cooklang::Item::Cookware { .. }
-            | cooklang::Item::Timer { .. }
-            | cooklang::Item::InlineQuantity { .. } => out.push('·'),
+            cooklang::Item::Text { value } => text.push_str(value),
+            cooklang::Item::Ingredient { index } => {
+                if let Some(ing) = recipe.ingredients.get(*index) {
+                    text.push_str(ing.alias.as_deref().unwrap_or(&ing.name));
+                }
+            }
+            cooklang::Item::Cookware { index } => {
+                if let Some(cw) = recipe.cookware.get(*index) {
+                    text.push_str(&cw.name);
+                }
+            }
+            cooklang::Item::Timer { index } => {
+                if let Some(timer) = recipe.timers.get(*index) {
+                    let projected = project_timer(timer);
+                    text.push_str(&projected.display);
+                    timers.push(projected);
+                }
+            }
+            cooklang::Item::InlineQuantity { index } => {
+                if let Some(q) = recipe.inline_quantities.get(*index) {
+                    text.push_str(&q.to_string());
+                }
+            }
         }
     }
-    out.trim().to_string()
+    CookStep {
+        text: text.trim().to_string(),
+        timers,
+    }
+}
+
+/// A cooklang `~name{qty%unit}` timer → our [`RecipeTimer`]. Converts
+/// the quantity to whole seconds (a bare/unknown unit is read as
+/// minutes — the cooking default).
+fn project_timer(t: &cooklang::Timer) -> RecipeTimer {
+    let (seconds, display) = match &t.quantity {
+        Some(q) => (timer_seconds(q), q.to_string()),
+        None => (0, t.name.clone().unwrap_or_default()),
+    };
+    RecipeTimer {
+        name: t.name.clone(),
+        seconds,
+        display,
+    }
+}
+
+fn timer_seconds(q: &cooklang::Quantity) -> u32 {
+    let Some(val) = number_value(q.value()) else {
+        return 0;
+    };
+    let mult = match q.unit().map(|u| u.trim().to_ascii_lowercase()).as_deref() {
+        Some("s" | "sec" | "secs" | "second" | "seconds") => 1.0,
+        Some("h" | "hr" | "hrs" | "hour" | "hours") => 3600.0,
+        // minutes, plus the unitless default
+        _ => 60.0,
+    };
+    (val * mult).round().clamp(0.0, f64::from(u32::MAX)) as u32
 }
 
 fn take_meta_str(m: &cooklang::Metadata, key: &str) -> Option<String> {
@@ -203,6 +260,39 @@ mod tests {
         assert_eq!(r.ingredients[0].qty, Some(200.0));
         assert_eq!(r.ingredients[0].unit, "g");
         assert_eq!(r.steps.len(), 1);
+        // Ingredient names are inlined into the step text now (no `·`).
+        assert_eq!(r.steps[0], "Boil pasta in salted water.");
+        assert!(!r.steps[0].contains('·'));
+    }
+
+    #[test]
+    fn extracts_timers_and_inlines_names() {
+        let src = "\
+>> title: Steeped Tea
+
+Boil @water{500%ml} in a #kettle, then steep the @tea bag{1} for ~steep{4%minutes}.
+
+Rest the cup for ~{30%seconds} before sipping.";
+        let r = parse_cook("Cookbook/Tea.cook", src).unwrap();
+        assert_eq!(r.cook_steps.len(), 2);
+
+        // Step 1: names inlined, one named timer = 4 minutes = 240s.
+        let s1 = &r.cook_steps[0];
+        assert!(s1.text.contains("Boil water"), "{}", s1.text);
+        assert!(s1.text.contains("kettle"), "{}", s1.text);
+        assert_eq!(s1.timers.len(), 1);
+        assert_eq!(s1.timers[0].name.as_deref(), Some("steep"));
+        assert_eq!(s1.timers[0].seconds, 240);
+
+        // Step 2: a bare timer in seconds.
+        let s2 = &r.cook_steps[1];
+        assert_eq!(s2.timers.len(), 1);
+        assert_eq!(s2.timers[0].name, None);
+        assert_eq!(s2.timers[0].seconds, 30);
+
+        // `steps` mirrors `cook_steps` text.
+        assert_eq!(r.steps.len(), r.cook_steps.len());
+        assert_eq!(r.steps[0], r.cook_steps[0].text);
     }
 
     #[test]

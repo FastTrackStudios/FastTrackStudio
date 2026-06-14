@@ -163,6 +163,7 @@ Toss with @butter{20%g} and shaved @truffles{5%g}.
 ";
     let recipe_path = "Cookbook/Truffle Pasta.cook";
     let mut draft = Recipe {
+        cook_steps: Default::default(),
         path: recipe_path.into(),
         name: "Truffle Pasta".into(),
         description: None,

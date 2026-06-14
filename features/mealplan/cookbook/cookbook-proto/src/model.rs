@@ -105,6 +105,58 @@ impl std::ops::Deref for Ingredients {
     }
 }
 
+/// A timer mentioned in a step (`~name{10%minutes}`). `seconds` is the
+/// countdown length; `display` keeps the written form for the label.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct RecipeTimer {
+    /// Optional label — `~rest{…}` → `"rest"`; `None` for a bare `~{…}`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub name: Option<String>,
+    /// Duration in whole seconds — what a countdown counts down.
+    pub seconds: u32,
+    /// Written form, e.g. `"10 minutes"`, for the timer label.
+    pub display: String,
+}
+
+/// One cooking step: readable text (ingredient / cookware / timer
+/// names kept inline, not stripped to `·`) plus the timers it
+/// mentions, each ready to wire straight to a countdown.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct CookStep {
+    pub text: String,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub timers: Vec<RecipeTimer>,
+}
+
+/// `Vec<CookStep>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct CookSteps(pub Vec<CookStep>);
+
+impl CookSteps {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<CookStep>> for CookSteps {
+    fn from(v: Vec<CookStep>) -> Self {
+        Self(v)
+    }
+}
+
+impl std::ops::Deref for CookSteps {
+    type Target = Vec<CookStep>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Wire shape for a parsed `.cook` file. The original source is
 /// preserved verbatim in `source` so editors can round-trip
 /// without re-rendering through the cooklang printer.
@@ -170,6 +222,17 @@ pub struct Recipe {
     #[serde(skip_serializing_if = "StringList::is_empty", default)]
     #[architect(json)]
     pub steps: StringList,
+
+    /// Structured steps — same order/text as [`Recipe::steps`], but
+    /// each step's timers (`~{…}`) extracted so a cook-along UI can
+    /// offer one-tap countdowns. Derived from `source` at parse time.
+    #[serde(
+        skip_serializing_if = "CookSteps::is_empty",
+        default,
+        rename = "cookSteps"
+    )]
+    #[architect(json)]
+    pub cook_steps: CookSteps,
 
     /// Cookware names from `#pan{}`.
     #[serde(skip_serializing_if = "StringList::is_empty", default)]

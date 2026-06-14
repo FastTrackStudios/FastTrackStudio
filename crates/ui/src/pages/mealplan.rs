@@ -163,6 +163,8 @@ fn RecipeRow(recipe: Recipe, pending: bool) -> Element {
     let name = recipe.name.clone();
     let course = recipe.course.clone();
     let ingredients = recipe.ingredients.len();
+    let steps = recipe.cook_steps.len().max(recipe.steps.len());
+    let mut cooking = use_signal(|| false);
 
     let state_cls = if pending {
         "border-border bg-card/40 opacity-60"
@@ -174,10 +176,26 @@ fn RecipeRow(recipe: Recipe, pending: bool) -> Element {
         div { class: "flex items-center gap-3 rounded-lg border px-3 py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
                 Text { class: "break-words text-sm font-medium", "{name}" }
-                span { class: "text-[11px] text-muted-foreground", "{ingredients} ingredients" }
+                span { class: "text-[11px] text-muted-foreground", "{ingredients} ingredients · {steps} steps" }
             }
             if let Some(c) = course {
                 span { class: "shrink-0 rounded bg-muted px-1.5 py-px text-[11px] text-muted-foreground", "{c}" }
+            }
+            // Cook-along: a full-screen step + timer view. Disabled for
+            // a not-yet-saved optimistic row (no parsed steps yet).
+            if !pending && steps > 0 {
+                Button {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Small,
+                    on_click: move |_| cooking.set(true),
+                    "Cook"
+                }
+            }
+        }
+        if cooking() {
+            super::cook_mode::CookMode {
+                recipe: recipe.clone(),
+                on_close: move |()| cooking.set(false),
             }
         }
     }

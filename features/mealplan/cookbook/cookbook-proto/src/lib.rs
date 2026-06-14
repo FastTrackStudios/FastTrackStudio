@@ -18,7 +18,10 @@
 pub mod model;
 pub mod service;
 
-pub use model::{Course, Ingredient, Ingredients, Nutrition, Recipe, StringList};
+pub use model::{
+    CookStep, CookSteps, Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeTimer,
+    StringList,
+};
 pub use service::{CookbookError, CookbookService, CookbookServiceRpc};
 
 #[cfg(feature = "vox")]

@@ -6,6 +6,7 @@
 
 pub mod agents;
 pub mod bookings;
+pub mod cook_mode;
 pub mod email;
 pub mod finances;
 pub mod fitness;
