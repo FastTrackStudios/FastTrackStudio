@@ -16,8 +16,10 @@ use std::collections::HashSet;
 
 use cookbook_proto::{Recipe, RecipeTimer};
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Check, Clock, Flame, Play, Users, X};
+use fts_ui::lucide_dioxus::{Check, Clock, Flame, Play, Users, UtensilsCrossed, X};
 use fts_ui::prelude::*;
+
+use crate::orgs::{OrgMeta, OrgSelection};
 
 /// A countdown started from a step's timer. `remaining` ticks down once
 /// a second; at zero it's `done` and stays pinned until dismissed.
@@ -42,6 +44,43 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
     let base_servings = recipe.servings.unwrap_or(1).max(1);
     let mut target_servings = use_signal(move || base_servings);
     let factor = f64::from(target_servings()) / f64::from(base_servings);
+
+    // "Cooked it" → deduct ingredients from the pantry, server-side.
+    let selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let slug = use_memo(move || {
+        crate::orgs::selected_slugs(&selection.read(), &org_list.read())
+            .into_iter()
+            .next()
+    });
+    let mut deducting = use_signal(|| false);
+    let recipe_path = recipe.path.clone();
+    let mut mark_cooked = move || {
+        if deducting() {
+            return;
+        }
+        let Some(s) = slug() else { return };
+        let path = recipe_path.clone();
+        let servings = target_servings();
+        deducting.set(true);
+        spawn(async move {
+            match crate::feeds::cook_recipe(&s, path, servings).await {
+                Ok(applied) if applied.is_empty() => {
+                    notices.info("Nothing to deduct — no matching pantry stock.");
+                }
+                Ok(applied) => {
+                    notices.info(format!(
+                        "Deducted {} ingredient(s) from the pantry.",
+                        applied.len()
+                    ));
+                }
+                Err(e) => {
+                    notices.error(format!("Pantry update failed: {e}"));
+                }
+            }
+            deducting.set(false);
+        });
+    };
 
     // Keep the screen awake while cooking — phones lock mid-recipe
     // otherwise. Acquired on mount, released on unmount; re-acquired on
@@ -109,6 +148,7 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                 }
                 div { class: "flex min-w-0 flex-1 flex-col",
                     Heading { level: HeadingLevel::H2, class: "truncate text-base font-semibold", "{recipe.name}" }
+                    // (meta line follows)
                     div { class: "flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground",
                         if let Some(s) = recipe.servings {
                             span { class: "inline-flex items-center gap-1", Users { size: 12 } "{s} servings" }
@@ -123,6 +163,15 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                             span { "{done_count}/{total_steps} steps" }
                         }
                     }
+                }
+                // Cooked it → deduct ingredients from the pantry.
+                Button {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Small,
+                    disabled: deducting(),
+                    on_click: move |_| mark_cooked(),
+                    UtensilsCrossed { size: 14 }
+                    if deducting() { "Deducting…" } else { "Cooked it" }
                 }
             }
 

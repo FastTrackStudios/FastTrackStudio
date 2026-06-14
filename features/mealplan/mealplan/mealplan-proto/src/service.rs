@@ -54,4 +54,15 @@ pub trait MealplanService {
     /// fulfillment result including per-ingredient
     /// shortages.
     fn can_cook(&self, recipe_path: &str, servings: u32) -> Result<Fulfillment, MealplanError>;
+
+    /// Cook a recipe directly (no planned meal): compute the pantry
+    /// deductions for `servings` and consume them from stock. Returns
+    /// the deductions actually applied (matched ingredients with
+    /// convertible units, capped at what's on hand) so the caller can
+    /// report what was used.
+    fn cook_recipe(
+        &self,
+        recipe_path: &str,
+        servings: u32,
+    ) -> Result<Vec<PantryDeduction>, MealplanError>;
 }

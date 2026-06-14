@@ -225,6 +225,28 @@ impl MealplanService for Store {
         self.update(meal)
     }
 
+    fn cook_recipe(
+        &self,
+        recipe_path: &str,
+        servings: u32,
+    ) -> Result<Vec<PantryDeduction>, MealplanError> {
+        let recipe = self
+            .cookbook
+            .get(recipe_path)
+            .map_err(|e| MealplanError::NotFound(format!("recipe {recipe_path}: {e}")))?;
+        let pantry_items = self
+            .pantry
+            .list()
+            .map_err(|e| MealplanError::Pantry(e.to_string()))?;
+        let deductions = crate::fulfillment::plan_deductions(&recipe, &pantry_items, servings);
+        for row in &deductions {
+            self.pantry
+                .consume_stock(&row.item_id.to_string(), row.qty)
+                .map_err(|e| MealplanError::Pantry(e.to_string()))?;
+        }
+        Ok(deductions)
+    }
+
     fn can_cook(&self, recipe_path: &str, servings: u32) -> Result<Fulfillment, MealplanError> {
         let recipe = self
             .cookbook

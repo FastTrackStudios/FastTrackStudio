@@ -55,6 +55,43 @@ pub fn check(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> Fulfillme
     }
 }
 
+/// The pantry deductions for cooking `recipe` at `servings`: for each
+/// ingredient matched to a pantry item with a convertible unit, the
+/// amount to consume **in the pantry item's unit**, capped at what's in
+/// stock. Ingredients with no quantity, no pantry match, or an
+/// inconvertible unit are skipped — cooking never invents a deduction
+/// it can't compute safely. The result feeds `PantryService::consume`.
+#[must_use]
+pub fn plan_deductions(
+    recipe: &Recipe,
+    pantry: &[PantryItem],
+    servings: u32,
+) -> Vec<crate::model::PantryDeduction> {
+    let scale = scale_factor(recipe, servings);
+    let mut out = Vec::new();
+    for ing in recipe.ingredients.iter() {
+        let Some(need) = ing.qty.map(|q| q * scale) else {
+            continue;
+        };
+        let Some(item) = match_pantry(ing, pantry) else {
+            continue;
+        };
+        let Some(in_item_unit) = pantry::convert_str(need, &ing.unit, &item.unit) else {
+            continue;
+        };
+        let available = item.stock_total().unwrap_or(0.0);
+        let qty = in_item_unit.min(available);
+        if qty > 1e-9 {
+            out.push(crate::model::PantryDeduction {
+                item_id: item.id,
+                qty,
+                unit: item.unit.clone(),
+            });
+        }
+    }
+    out
+}
+
 fn scale_factor(recipe: &Recipe, servings: u32) -> f64 {
     let base = recipe.servings.filter(|s| *s > 0).unwrap_or(1);
     f64::from(servings) / f64::from(base)
@@ -401,6 +438,34 @@ mod tests {
         let r = recipe_with("Cookbook/X.cook", vec![ing("Pasta", 200.0, "g")], 2);
         let s = vec![pantry_row("Pasta", 500.0, "g")];
         assert!(check(&r, &s, 2).can_cook);
+    }
+
+    #[test]
+    fn plan_deductions_scales_caps_and_skips() {
+        let r = recipe_with(
+            "Cookbook/X.cook",
+            vec![
+                ing("Pasta", 200.0, "g"), // matched, in stock
+                ing("Salt", 5.0, "g"),    // matched but only 2g in stock → capped
+                ing("Saffron", 1.0, "g"), // not in pantry → skipped
+            ],
+            2,
+        );
+        let pantry = vec![
+            pantry_row("Pasta", 500.0, "g"),
+            pantry_row("Salt", 2.0, "g"),
+        ];
+
+        // Doubling the servings (base 2 → 4) doubles the needs.
+        let plan = plan_deductions(&r, &pantry, 4);
+        assert_eq!(plan.len(), 2, "saffron has no pantry match → no deduction");
+
+        let pasta = plan.iter().find(|d| (d.qty - 400.0).abs() < 1e-6);
+        assert!(pasta.is_some(), "200g × 2 servings = 400g, 500g in stock");
+
+        // 5g × 2 = 10g needed, but only 2g on hand → capped at 2g.
+        let salt = plan.iter().find(|d| (d.qty - 2.0).abs() < 1e-6);
+        assert!(salt.is_some(), "deduction is capped at available stock");
     }
 
     #[test]
