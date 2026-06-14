@@ -61,6 +61,17 @@ pub struct TaskListFilter {
     /// (ASCII-case-insensitive). Raw string match — state-group
     /// classification stays a rollup concern.
     pub status: Option<String>,
+    /// Keep only open (non-terminal) tasks. Terminal status
+    /// classification is the domain's — see [`crate::status_is_open`]
+    /// — so callers don't hand-roll (and drift on) the done set.
+    #[serde(default)]
+    pub open_only: bool,
+    /// Keep tasks due on or before this date (ISO `YYYY-MM-DD`),
+    /// counting either the hard `due` or the soft `scheduled` date —
+    /// see [`crate::is_due_on_or_before`]. Powers agenda / brief
+    /// "what's due today" queries.
+    #[serde(default)]
+    pub due_on_or_before: Option<String>,
     /// Page size. `None` = no cap.
     pub limit: Option<u32>,
     /// Rows to skip (after filtering). `None` = 0.

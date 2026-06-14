@@ -44,10 +44,7 @@ pub fn is_active(status: &str) -> bool {
 
 /// Whether a task is still open (not in any terminal status).
 pub fn is_open_task(t: &DbTask) -> bool {
-    !matches!(
-        t.status.as_str(),
-        "done" | "complete" | "completed" | "shipped" | "cancelled" | "canceled" | "abandoned"
-    )
+    task::status_is_open(&t.status)
 }
 
 /// Whether a task is actively being worked: explicitly `in-progress`,

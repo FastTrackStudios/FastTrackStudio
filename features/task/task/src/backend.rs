@@ -245,6 +245,12 @@ impl TaskService for TaskBackend {
                     .as_deref()
                     .is_none_or(|s| t.status.eq_ignore_ascii_case(s))
             })
+            .filter(|t| !filter.open_only || crate::status_is_open(&t.status))
+            .filter(|t| {
+                filter.due_on_or_before.as_deref().is_none_or(|date| {
+                    crate::is_due_on_or_before(t.due.as_deref(), t.scheduled.as_deref(), date)
+                })
+            })
             .collect();
         // Stable page windows: order by vault-relative path
         // (unique per task) before slicing, so offset/limit
@@ -331,6 +337,47 @@ mod tests {
             });
         }
         be.create(t).expect("create")
+    }
+
+    #[test]
+    fn query_open_only_and_due_filter() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let be = TaskBackend::new(tmp.path());
+
+        let with_due = |title: &str, status: &str, due: Option<&str>, sched: Option<&str>| {
+            let mut t = crate::capture(title);
+            t.status = status.into();
+            t.due = due.map(str::to_owned);
+            t.scheduled = sched.map(str::to_owned);
+            be.create(t).expect("create");
+        };
+        with_due("overdue", "open", Some("2026-06-10"), None);
+        with_due("today-sched", "open", None, Some("2026-06-14T09:00:00Z"));
+        with_due("future", "open", Some("2026-06-20"), None);
+        with_due("done-overdue", "done", Some("2026-06-01"), None); // terminal
+        with_due("no-dates", "open", None, None);
+
+        // open_only drops terminal-status tasks.
+        let open = be
+            .query(TaskListFilter {
+                open_only: true,
+                ..Default::default()
+            })
+            .expect("open only");
+        assert_eq!(open.len(), 4);
+        assert!(open.iter().all(|t| t.status != "done"));
+
+        // due_on_or_before counts due OR scheduled, by date prefix, and
+        // composes with open_only (the terminal overdue task is excluded).
+        let due = be
+            .query(TaskListFilter {
+                open_only: true,
+                due_on_or_before: Some("2026-06-14".into()),
+                ..Default::default()
+            })
+            .expect("due");
+        let titles: std::collections::HashSet<_> = due.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, ["overdue", "today-sched"].into_iter().collect());
     }
 
     #[test]

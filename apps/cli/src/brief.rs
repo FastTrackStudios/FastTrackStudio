@@ -99,41 +99,45 @@ pub async fn run_brief(args: BriefArgs) -> eyre::Result<()> {
     }
 
     // ── Tasks: due/overdue + in-progress ────────────────────────
+    // "Open + due-on-or-before-today" and the open/terminal status set
+    // are domain rules — query them server-side (TaskService) so the
+    // brief and the web agenda agree. Display order (by due date) is a
+    // presentation choice and stays here.
     match crate::establish_for_url::<task::TaskServiceClient>(&url).await {
-        Ok(c) => match c.list().await {
-            Ok(all) => {
-                let open = |t: &task::TaskInfo| {
-                    !matches!(t.status.as_str(), "done" | "cancelled" | "archived")
-                };
-                view.due_tasks = all
-                    .iter()
-                    .filter(|t| open(t))
-                    .filter(|t| {
-                        t.due
-                            .as_deref()
-                            .is_some_and(|d| date_prefix(d) <= today.as_str())
-                            || t.scheduled
-                                .as_deref()
-                                .is_some_and(|d| date_prefix(d) <= today.as_str())
-                    })
-                    .cloned()
-                    .collect();
-                view.due_tasks.sort_by(|a, b| {
-                    let key = |t: &task::TaskInfo| {
-                        t.due
-                            .clone()
-                            .or_else(|| t.scheduled.clone())
-                            .unwrap_or_default()
-                    };
-                    key(a).cmp(&key(b))
-                });
-                view.in_progress = all
-                    .into_iter()
-                    .filter(|t| t.status == "in-progress")
-                    .collect();
+        Ok(c) => {
+            match c
+                .query(task::TaskListFilter {
+                    open_only: true,
+                    due_on_or_before: Some(today.clone()),
+                    ..Default::default()
+                })
+                .await
+            {
+                Ok(mut due) => {
+                    due.sort_by(|a, b| {
+                        let key = |t: &task::TaskInfo| {
+                            t.due
+                                .clone()
+                                .or_else(|| t.scheduled.clone())
+                                .unwrap_or_default()
+                        };
+                        key(a).cmp(&key(b))
+                    });
+                    view.due_tasks = due;
+                }
+                Err(e) => view.errors.push(format!("tasks: {e:?}")),
             }
-            Err(e) => view.errors.push(format!("tasks: {e:?}")),
-        },
+            match c
+                .query(task::TaskListFilter {
+                    status: Some("in-progress".into()),
+                    ..Default::default()
+                })
+                .await
+            {
+                Ok(rows) => view.in_progress = rows,
+                Err(e) => view.errors.push(format!("tasks: {e:?}")),
+            }
+        }
         Err(e) => view.errors.push(format!("tasks: {e}")),
     }
 
@@ -165,21 +169,12 @@ pub async fn run_brief(args: BriefArgs) -> eyre::Result<()> {
         Err(e) => view.errors.push(format!("agent queue: {e}")),
     }
 
-    // ── Inbox: open, not snoozed past today ─────────────────────
+    // ── Inbox: today's review queue (open, not snoozed) ─────────
+    // The queue rule (open + resurface ≤ today, oldest first) is the
+    // inbox domain's — ask the service for it rather than re-deriving.
     match crate::establish_for_url::<inbox_proto::InboxClient>(&url).await {
-        Ok(c) => match c.list_inbox().await {
-            Ok(items) => {
-                view.inbox_open = items
-                    .into_iter()
-                    .filter(|i| i.status == "open")
-                    .filter(|i| {
-                        i.resurface_on
-                            .as_deref()
-                            .is_none_or(|d| date_prefix(d) <= today.as_str())
-                    })
-                    .collect();
-                view.inbox_open.sort_by(|a, b| a.created.cmp(&b.created));
-            }
+        Ok(c) => match c.review_queue(today.clone()).await {
+            Ok(items) => view.inbox_open = items,
             Err(e) => view.errors.push(format!("inbox: {e:?}")),
         },
         Err(e) => view.errors.push(format!("inbox: {e}")),

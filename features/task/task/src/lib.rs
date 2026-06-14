@@ -56,7 +56,10 @@ pub mod write;
 pub mod backend;
 
 pub use capture::capture;
-pub use model::{Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry};
+pub use model::{
+    Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry, is_due_on_or_before,
+    status_is_open, status_is_terminal,
+};
 pub use relations::ReverseRelation;
 // Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
 // so UI consumers don't need their own workflows-proto dep.

@@ -106,6 +106,21 @@ impl InboxItem {
     pub fn is_open(&self) -> bool {
         self.status == Self::STATUS_OPEN
     }
+
+    /// Whether this item belongs in the daily review queue on `today`
+    /// (ISO `YYYY-MM-DD`): open, and either never snoozed or past its
+    /// `resurface_on` date. The one definition of "what surfaces
+    /// today", shared by the service query and any caller — so the CLI
+    /// brief and the web inbox can't drift on the snooze rule.
+    #[must_use]
+    pub fn in_review_queue(&self, today: &str) -> bool {
+        let day = |s: &str| s.get(..10).unwrap_or(s).to_owned();
+        self.is_open()
+            && self
+                .resurface_on
+                .as_deref()
+                .is_none_or(|d| day(d) <= day(today))
+    }
 }
 
 /// Client-side optimistic cache identity (`architect::Store`): keyed by
@@ -115,5 +130,30 @@ impl architect::StoreEntity for InboxItem {
     type Key = String;
     fn key(&self) -> String {
         self.id.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InboxItem;
+
+    fn item(status: &str, resurface: Option<&str>) -> InboxItem {
+        let mut i = InboxItem::capture("id", "body", "cli", "2026-06-01T00:00:00Z");
+        i.status = status.into();
+        i.resurface_on = resurface.map(str::to_owned);
+        i
+    }
+
+    #[test]
+    fn review_queue_rule() {
+        // open + never snoozed → in queue
+        assert!(item("open", None).in_review_queue("2026-06-14"));
+        // open + snoozed to the past → resurfaced
+        assert!(item("open", Some("2026-06-10")).in_review_queue("2026-06-14"));
+        // open + snoozed to the future → hidden
+        assert!(!item("open", Some("2026-06-20")).in_review_queue("2026-06-14"));
+        // not open → never in queue, even if resurfaced
+        assert!(!item("processed", None).in_review_queue("2026-06-14"));
+        assert!(!item("archived", Some("2026-06-01")).in_review_queue("2026-06-14"));
     }
 }

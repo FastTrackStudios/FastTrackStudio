@@ -11,9 +11,15 @@ use crate::inbox_item::InboxItem;
 
 #[architect::rpc]
 pub trait Inbox {
-    /// Every item in the inbox, processed or not. Consumers filter
-    /// by `status` / `resurface_on` for the daily-review queue.
+    /// Every item in the inbox, processed or not.
     fn list_inbox(&self) -> Result<Vec<InboxItem>, InboxError>;
+
+    /// The daily-review queue for `today` (ISO `YYYY-MM-DD`): open
+    /// items not snoozed past today, oldest capture first. The
+    /// "what surfaces today" rule (see [`InboxItem::in_review_queue`])
+    /// lives here so every surface — CLI brief, web inbox — gets the
+    /// same queue without re-implementing the snooze filter.
+    fn review_queue(&self, today: String) -> Result<Vec<InboxItem>, InboxError>;
     /// One item by id.
     fn get_inbox_item(&self, id: &str) -> Result<InboxItem, InboxError>;
     /// Create or replace an item (keyed by `id`). Capture, snooze,

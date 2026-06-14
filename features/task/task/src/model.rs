@@ -351,6 +351,54 @@ impl Status {
     pub fn is_done(self) -> bool {
         matches!(self, Self::Done)
     }
+
+    /// Whether the task is still open — i.e. not in a terminal
+    /// status. Defers to [`status_is_open`] so the typed and
+    /// raw-string paths classify identically.
+    #[must_use]
+    pub fn is_open(self) -> bool {
+        status_is_open(self.as_str())
+    }
+}
+
+/// Status strings that mean a task is finished and no longer open.
+///
+/// **The authoritative terminal set.** Raw-string aware (and broader
+/// than the [`Status`] enum) so legacy / synonym statuses that don't
+/// map to a variant — `shipped`, `abandoned`, `archived`, `complete` —
+/// still classify correctly. Every frontend (CLI brief, web lists)
+/// must route through here so "is this task done?" can't drift between
+/// surfaces, the way the hand-copied predicates had.
+#[must_use]
+pub fn status_is_terminal(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "done"
+            | "complete"
+            | "completed"
+            | "shipped"
+            | "cancelled"
+            | "canceled"
+            | "abandoned"
+            | "archived"
+    )
+}
+
+/// A task is open while its status isn't [`status_is_terminal`].
+#[must_use]
+pub fn status_is_open(status: &str) -> bool {
+    !status_is_terminal(status)
+}
+
+/// Whether `due` or `scheduled` falls on or before `date` (all
+/// compared by their `YYYY-MM-DD` prefix). The shared "what's due"
+/// rule behind agenda / brief views: a task counts as due when either
+/// its hard due date or its soft scheduled date has arrived.
+#[must_use]
+pub fn is_due_on_or_before(due: Option<&str>, scheduled: Option<&str>, date: &str) -> bool {
+    let day = |s: &str| s.get(..10).unwrap_or(s).to_owned();
+    let target = day(date);
+    due.map(day).is_some_and(|d| d <= target) || scheduled.map(day).is_some_and(|d| d <= target)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -651,4 +699,45 @@ pub struct WorkflowAttrs {
     /// if work is in progress. Cleared on Finish/Cancel.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub session: Option<Uuid>,
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::{is_due_on_or_before, status_is_open, status_is_terminal};
+
+    #[test]
+    fn terminal_set_covers_synonyms_and_is_case_insensitive() {
+        for s in [
+            "done",
+            "completed",
+            "shipped",
+            "cancelled",
+            "abandoned",
+            "archived",
+            "DONE",
+        ] {
+            assert!(status_is_terminal(s), "{s} should be terminal");
+            assert!(!status_is_open(s));
+        }
+        for s in ["open", "in-progress", "waiting", "blocked", ""] {
+            assert!(!status_is_terminal(s), "{s} should be open");
+            assert!(status_is_open(s));
+        }
+    }
+
+    #[test]
+    fn due_counts_due_or_scheduled_by_date_prefix() {
+        assert!(is_due_on_or_before(Some("2026-06-10"), None, "2026-06-14"));
+        assert!(is_due_on_or_before(
+            None,
+            Some("2026-06-14T09:00:00Z"),
+            "2026-06-14"
+        ));
+        assert!(!is_due_on_or_before(
+            Some("2026-06-20"),
+            Some("2026-06-21"),
+            "2026-06-14"
+        ));
+        assert!(!is_due_on_or_before(None, None, "2026-06-14"));
+    }
 }

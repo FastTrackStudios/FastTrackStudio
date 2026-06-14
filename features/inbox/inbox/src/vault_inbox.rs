@@ -112,6 +112,16 @@ impl Inbox for VaultInbox {
         Ok(out)
     }
 
+    fn review_queue(&self, today: String) -> Result<Vec<InboxItem>, InboxError> {
+        // list_inbox already returns oldest-first; keep only what
+        // surfaces today per the shared InboxItem rule.
+        Ok(self
+            .list_inbox()?
+            .into_iter()
+            .filter(|i| i.in_review_queue(&today))
+            .collect())
+    }
+
     fn get_inbox_item(&self, id: &str) -> Result<InboxItem, InboxError> {
         let rel = format!("{INBOX_DIR}/{}.md", sanitize(id));
         let abs = self.root.join(&rel);

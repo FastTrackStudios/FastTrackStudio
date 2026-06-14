@@ -12888,6 +12888,7 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     status: status.clone(),
                     limit,
                     offset,
+                    ..Default::default()
                 };
                 match client.query(filter).await {
                     Ok(rows) => {
