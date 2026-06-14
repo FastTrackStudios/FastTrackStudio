@@ -795,13 +795,14 @@ pub async fn create_pantry_item(
 }
 
 /// Cook a recipe directly: the server computes the pantry deductions
-/// for `servings` and consumes them from stock, returning what was
-/// actually deducted (matched + convertible + in-stock ingredients).
+/// for `servings` and consumes them from stock, returning a receipt of
+/// what was deducted (matched + convertible + in-stock ingredients) and
+/// what was skipped (with the reason).
 pub async fn cook_recipe(
     slug: &str,
     recipe_path: String,
     servings: u32,
-) -> Result<Vec<mealplan_proto::PantryDeduction>, String> {
+) -> Result<mealplan_proto::CookReceipt, String> {
     let client =
         crate::vox_clients::establish_for::<mealplan_proto::MealplanServiceClient>(slug).await?;
     client

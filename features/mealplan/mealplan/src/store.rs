@@ -11,7 +11,7 @@ use pantry::{PantryService, Store as PantryStore};
 use uuid::Uuid;
 use vault::Vault;
 
-use crate::fulfillment::{self, Fulfillment};
+use crate::fulfillment::{self, CookReceipt, Fulfillment};
 use crate::model::{Meal, MealNutrition, PantryDeduction};
 use crate::parse::{looks_like_meal, parse_page};
 use crate::scan::scan_vault;
@@ -225,11 +225,7 @@ impl MealplanService for Store {
         self.update(meal)
     }
 
-    fn cook_recipe(
-        &self,
-        recipe_path: &str,
-        servings: u32,
-    ) -> Result<Vec<PantryDeduction>, MealplanError> {
+    fn cook_recipe(&self, recipe_path: &str, servings: u32) -> Result<CookReceipt, MealplanError> {
         let recipe = self
             .cookbook
             .get(recipe_path)
@@ -238,13 +234,13 @@ impl MealplanService for Store {
             .pantry
             .list()
             .map_err(|e| MealplanError::Pantry(e.to_string()))?;
-        let deductions = crate::fulfillment::plan_deductions(&recipe, &pantry_items, servings);
-        for row in &deductions {
+        let receipt = crate::fulfillment::plan_cook(&recipe, &pantry_items, servings);
+        for line in &receipt.deducted {
             self.pantry
-                .consume_stock(&row.item_id.to_string(), row.qty)
+                .consume_stock(&line.item_id.to_string(), line.qty)
                 .map_err(|e| MealplanError::Pantry(e.to_string()))?;
         }
-        Ok(deductions)
+        Ok(receipt)
     }
 
     fn can_cook(&self, recipe_path: &str, servings: u32) -> Result<Fulfillment, MealplanError> {

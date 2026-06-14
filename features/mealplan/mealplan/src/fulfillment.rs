@@ -32,7 +32,8 @@ use pantry::PantryItem;
 // `mealplan::fulfillment::*` / `mealplan::Fulfillment` paths keep
 // working.
 pub use mealplan_proto::fulfillment::{
-    Fulfillment, Shortage, ShortageReason, SubstitutionSource, SubstitutionSuggestion,
+    CookReceipt, DeductionLine, Fulfillment, Shortage, ShortageReason, SkipReason,
+    SkippedIngredient, SubstitutionSource, SubstitutionSuggestion,
 };
 
 const MAX_NEST_DEPTH: u32 = 8;
@@ -55,41 +56,73 @@ pub fn check(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> Fulfillme
     }
 }
 
-/// The pantry deductions for cooking `recipe` at `servings`: for each
-/// ingredient matched to a pantry item with a convertible unit, the
-/// amount to consume **in the pantry item's unit**, capped at what's in
-/// stock. Ingredients with no quantity, no pantry match, or an
-/// inconvertible unit are skipped — cooking never invents a deduction
-/// it can't compute safely. The result feeds `PantryService::consume`.
+/// A full cook receipt for `recipe` at `servings`: for each ingredient
+/// matched to a pantry item with a convertible unit, the amount to
+/// consume **in the pantry item's unit**, capped at what's in stock.
+/// Cooking never invents a deduction it can't compute safely — but
+/// instead of silently dropping those ingredients it records each in
+/// [`CookReceipt::skipped`] with the reason (no quantity, no pantry
+/// match, inconvertible unit, or out of stock) so the cook can see what
+/// to top up by hand. The `deducted` rows feed `PantryService::consume`.
+#[must_use]
+pub fn plan_cook(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> CookReceipt {
+    let scale = scale_factor(recipe, servings);
+    let mut receipt = CookReceipt::default();
+    for ing in recipe.ingredients.iter() {
+        // Resolve the deduction (pushed inline), or the reason it
+        // can't be made. `None` ⇒ deducted; `Some(reason)` ⇒ skipped.
+        let skip = 'plan: {
+            let Some(need) = ing.qty.map(|q| q * scale) else {
+                break 'plan Some(SkipReason::NoQuantity);
+            };
+            let Some(item) = match_pantry(ing, pantry) else {
+                break 'plan Some(SkipReason::NoPantryMatch);
+            };
+            let Some(in_item_unit) = pantry::convert_str(need, &ing.unit, &item.unit) else {
+                break 'plan Some(SkipReason::InconvertibleUnit);
+            };
+            let available = item.stock_total().unwrap_or(0.0);
+            let qty = in_item_unit.min(available);
+            if qty <= 1e-9 {
+                break 'plan Some(SkipReason::OutOfStock);
+            }
+            receipt.deducted.push(DeductionLine {
+                item_id: item.id,
+                ingredient: ing.name.clone(),
+                qty,
+                unit: item.unit.clone(),
+            });
+            None
+        };
+        if let Some(reason) = skip {
+            receipt.skipped.push(SkippedIngredient {
+                ingredient: ing.name.clone(),
+                reason,
+            });
+        }
+    }
+    receipt
+}
+
+/// The pantry deductions for cooking `recipe` at `servings`, as the
+/// plain `PantryDeduction` rows the meal-`cook` path stamps onto a
+/// meal. A thin projection of [`plan_cook`] — see it for the matching
+/// rules and the skipped-ingredient accounting.
 #[must_use]
 pub fn plan_deductions(
     recipe: &Recipe,
     pantry: &[PantryItem],
     servings: u32,
 ) -> Vec<crate::model::PantryDeduction> {
-    let scale = scale_factor(recipe, servings);
-    let mut out = Vec::new();
-    for ing in recipe.ingredients.iter() {
-        let Some(need) = ing.qty.map(|q| q * scale) else {
-            continue;
-        };
-        let Some(item) = match_pantry(ing, pantry) else {
-            continue;
-        };
-        let Some(in_item_unit) = pantry::convert_str(need, &ing.unit, &item.unit) else {
-            continue;
-        };
-        let available = item.stock_total().unwrap_or(0.0);
-        let qty = in_item_unit.min(available);
-        if qty > 1e-9 {
-            out.push(crate::model::PantryDeduction {
-                item_id: item.id,
-                qty,
-                unit: item.unit.clone(),
-            });
-        }
-    }
-    out
+    plan_cook(recipe, pantry, servings)
+        .deducted
+        .into_iter()
+        .map(|line| crate::model::PantryDeduction {
+            item_id: line.item_id,
+            qty: line.qty,
+            unit: line.unit,
+        })
+        .collect()
 }
 
 fn scale_factor(recipe: &Recipe, servings: u32) -> f64 {
@@ -466,6 +499,46 @@ mod tests {
         // 5g × 2 = 10g needed, but only 2g on hand → capped at 2g.
         let salt = plan.iter().find(|d| (d.qty - 2.0).abs() < 1e-6);
         assert!(salt.is_some(), "deduction is capped at available stock");
+    }
+
+    #[test]
+    fn plan_cook_surfaces_skipped_ingredients() {
+        let mut to_taste = ing("Pepper", 0.0, "g");
+        to_taste.qty = None; // "@pepper" with no amount
+        let r = recipe_with(
+            "Cookbook/X.cook",
+            vec![
+                ing("Pasta", 200.0, "g"),     // matched, in stock → deducted
+                ing("Salt", 5.0, "g"),        // matched but 0g on hand → out of stock
+                ing("Garlic", 2.0, "cloves"), // matched but unit won't convert
+                ing("Saffron", 1.0, "g"),     // no pantry match
+                to_taste,                     // no quantity
+            ],
+            2,
+        );
+        let pantry = vec![
+            pantry_row("Pasta", 500.0, "g"),
+            pantry_row("Salt", 0.0, "g"),
+            pantry_row("Garlic", 100.0, "g"),
+        ];
+
+        let receipt = plan_cook(&r, &pantry, 2);
+
+        assert_eq!(receipt.deducted.len(), 1, "only pasta is deductible");
+        assert_eq!(receipt.deducted[0].ingredient, "Pasta");
+        assert!((receipt.deducted[0].qty - 200.0).abs() < 1e-6);
+
+        let reason = |name: &str| {
+            receipt
+                .skipped
+                .iter()
+                .find(|s| s.ingredient == name)
+                .map(|s| s.reason)
+        };
+        assert_eq!(reason("Salt"), Some(SkipReason::OutOfStock));
+        assert_eq!(reason("Garlic"), Some(SkipReason::InconvertibleUnit));
+        assert_eq!(reason("Saffron"), Some(SkipReason::NoPantryMatch));
+        assert_eq!(reason("Pepper"), Some(SkipReason::NoQuantity));
     }
 
     #[test]

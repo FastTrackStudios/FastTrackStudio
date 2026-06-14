@@ -5,7 +5,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::fulfillment::Fulfillment;
+use crate::fulfillment::{CookReceipt, Fulfillment};
 use crate::model::{Meal, PantryDeduction};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
@@ -57,12 +57,9 @@ pub trait MealplanService {
 
     /// Cook a recipe directly (no planned meal): compute the pantry
     /// deductions for `servings` and consume them from stock. Returns
-    /// the deductions actually applied (matched ingredients with
-    /// convertible units, capped at what's on hand) so the caller can
-    /// report what was used.
-    fn cook_recipe(
-        &self,
-        recipe_path: &str,
-        servings: u32,
-    ) -> Result<Vec<PantryDeduction>, MealplanError>;
+    /// a [`CookReceipt`] — the per-ingredient deductions actually
+    /// applied (matched, convertible, capped at what's on hand) plus
+    /// the ingredients that were skipped and why — so the caller can
+    /// show what was used and what wasn't.
+    fn cook_recipe(&self, recipe_path: &str, servings: u32) -> Result<CookReceipt, MealplanError>;
 }

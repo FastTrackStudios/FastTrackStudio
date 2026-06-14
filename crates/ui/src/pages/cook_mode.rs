@@ -16,8 +16,11 @@ use std::collections::HashSet;
 
 use cookbook_proto::{Recipe, RecipeTimer};
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Check, Clock, Flame, Play, Users, UtensilsCrossed, X};
+use fts_ui::lucide_dioxus::{
+    Check, Clock, Flame, Play, Receipt, TriangleAlert, Users, UtensilsCrossed, X,
+};
 use fts_ui::prelude::*;
+use mealplan_proto::{CookReceipt, SkipReason};
 
 use crate::orgs::{OrgMeta, OrgSelection};
 
@@ -54,6 +57,10 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
             .next()
     });
     let mut deducting = use_signal(|| false);
+    // The last cook receipt — the per-ingredient deductions + the
+    // ingredients we couldn't touch. Pinned under the header until
+    // dismissed so the cook can see what was used and what wasn't.
+    let mut receipt = use_signal(|| None::<CookReceipt>);
     let recipe_path = recipe.path.clone();
     let mut mark_cooked = move || {
         if deducting() {
@@ -65,14 +72,15 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
         deducting.set(true);
         spawn(async move {
             match crate::feeds::cook_recipe(&s, path, servings).await {
-                Ok(applied) if applied.is_empty() => {
+                Ok(r) if r.deducted.is_empty() && r.skipped.is_empty() => {
                     notices.info("Nothing to deduct — no matching pantry stock.");
                 }
-                Ok(applied) => {
+                Ok(r) => {
                     notices.info(format!(
                         "Deducted {} ingredient(s) from the pantry.",
-                        applied.len()
+                        r.deducted.len()
                     ));
+                    receipt.set(Some(r));
                 }
                 Err(e) => {
                     notices.error(format!("Pantry update failed: {e}"));
@@ -133,6 +141,7 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
     };
 
     let running = timers.read().clone();
+    let cooked = receipt.read().clone();
     let total_steps = recipe.cook_steps.len().max(recipe.steps.len());
     let done_count = done_steps.read().len();
 
@@ -198,6 +207,54 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                                         aria_label: "Dismiss timer",
                                         onclick: move |_| { timers.write().retain(|x| x.id != id); },
                                         X { size: 13 }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Cook receipt (pinned after "Cooked it") ──────────
+            if let Some(r) = cooked {
+                div { class: "border-b border-border bg-card/60 px-3 py-2.5",
+                    div { class: "mx-auto flex w-full max-w-2xl flex-col gap-2",
+                        div { class: "flex items-center gap-2",
+                            Receipt { size: 15 }
+                            Heading { level: HeadingLevel::H3, class: "flex-1 text-sm font-semibold", "Pantry receipt" }
+                            button {
+                                class: "flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground",
+                                aria_label: "Dismiss receipt",
+                                onclick: move |_| receipt.set(None),
+                                X { size: 14 }
+                            }
+                        }
+                        if r.deducted.is_empty() {
+                            p { class: "text-xs text-muted-foreground", "Nothing was deducted from the pantry." }
+                        } else {
+                            ul { class: "flex flex-col gap-0.5",
+                                for line in r.deducted.iter() {
+                                    li { key: "{line.item_id}-{line.ingredient}", class: "flex items-baseline justify-between gap-3 text-sm",
+                                        span { class: "text-foreground", "{line.ingredient}" }
+                                        span { class: "shrink-0 font-mono tabular-nums text-muted-foreground",
+                                            "−{fmt_num(line.qty)} {line.unit}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if !r.skipped.is_empty() {
+                            div { class: "flex flex-col gap-1 rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-2",
+                                div { class: "flex items-center gap-1.5 text-xs font-medium text-warning",
+                                    TriangleAlert { size: 13 }
+                                    "Not deducted — top up by hand"
+                                }
+                                ul { class: "flex flex-col gap-0.5",
+                                    for skip in r.skipped.iter() {
+                                        li { key: "{skip.ingredient}", class: "flex items-baseline justify-between gap-3 text-sm",
+                                            span { class: "text-foreground", "{skip.ingredient}" }
+                                            span { class: "shrink-0 text-xs text-muted-foreground", "{skip_reason_label(skip.reason)}" }
+                                        }
                                     }
                                 }
                             }
@@ -365,6 +422,16 @@ fn scaled_qty(ing: &cookbook_proto::Ingredient, factor: f64) -> String {
             (None, "") => String::new(),
             (None, u) => u.to_string(),
         },
+    }
+}
+
+/// Human label for why an ingredient wasn't deducted from the pantry.
+fn skip_reason_label(reason: SkipReason) -> &'static str {
+    match reason {
+        SkipReason::NoQuantity => "no quantity given",
+        SkipReason::NoPantryMatch => "not in pantry",
+        SkipReason::InconvertibleUnit => "unit mismatch",
+        SkipReason::OutOfStock => "out of stock",
     }
 }
 
