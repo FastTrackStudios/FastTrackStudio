@@ -48,7 +48,7 @@ pub fn GoalsView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto w-full max-w-5xl flex flex-col gap-6 p-6 lg:p-10",
+        div { class: "mx-auto w-full max-w-5xl flex flex-col gap-6 p-4 sm:p-6 lg:p-10",
             div { class: "flex items-start justify-between gap-4 flex-wrap",
                 div { class: "flex flex-col gap-1",
                     Heading { level: HeadingLevel::H1, "Goals" }

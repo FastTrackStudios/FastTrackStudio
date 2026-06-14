@@ -14,6 +14,31 @@ use crate::orgs::{OrgMeta, OrgSelection, fetch_orgs, home_slug};
 use crate::routes::Route;
 use crate::theming::{OrgThemeOverrides, ProjectThemeOverrides, state_from_preset_name};
 
+/// App-wide mobile baseline, injected once at the root. Plain
+/// (unlayered) CSS so it outranks Tailwind's `@layer utilities` on the
+/// cascade regardless of specificity — that's what lets the `font-size`
+/// rule beat per-input `text-sm` classes.
+///
+/// - **iOS zoom:** Mobile Safari zooms the viewport when a focused
+///   control's font is < 16px. Every form here uses `text-sm` (14px),
+///   so tapping any field jumped the zoom. Floor controls at 16px on
+///   phones; desktop keeps the denser look (the rule is `max-width`
+///   gated).
+/// - **Sideways bleed:** `overflow-x: clip` on the root stops a stray
+///   wide child from scrolling the whole page horizontally. `clip`
+///   (not `hidden`) doesn't create a scroll container, so it leaves the
+///   shell's sticky header / fixed tab bar intact.
+/// - **Touch polish:** kill the grey tap-flash; momentum-scroll the
+///   horizontal scrollers (kanban board, chip rows) and contain their
+///   overscroll so a swipe doesn't bounce the page.
+const MOBILE_BASELINE_CSS: &str = "\
+html,body{overflow-x:clip;-webkit-text-size-adjust:100%}\
+*{-webkit-tap-highlight-color:transparent}\
+.overflow-x-auto,.overflow-x-scroll{-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}\
+@media (max-width:640px){\
+input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px!important}\
+}";
+
 #[component]
 pub fn App() -> Element {
     // App-wide architect registries (notifications + reactivity) and
@@ -128,6 +153,7 @@ pub fn App() -> Element {
     crate::presence::provide_org_presence();
 
     rsx! {
+        style { dangerous_inner_html: MOBILE_BASELINE_CSS }
         ThemeProvider { state: theme_state,
             div { class: "min-h-screen bg-background text-foreground",
                 Router::<Route> {}

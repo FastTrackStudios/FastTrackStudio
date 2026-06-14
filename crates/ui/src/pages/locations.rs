@@ -70,7 +70,7 @@ pub fn LocationsView() -> Element {
     let first_load = result.is_waiting() && result.value().is_none();
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-6 lg:p-10",
+        div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-4 sm:p-6 lg:p-10",
             div { class: "flex items-center justify-between gap-3",
                 Heading { level: HeadingLevel::H1, "Locations" }
                 Text { variant: TextVariant::Muted, class: "text-sm", "{rows.len()} places" }

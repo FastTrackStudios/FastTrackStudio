@@ -75,7 +75,7 @@ pub fn EmailView() -> Element {
     let loading = envelopes.read().is_none() && current.is_some();
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-6 lg:p-10",
+        div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-4 sm:p-6 lg:p-10",
             Heading { level: HeadingLevel::H1, "Email" }
             Text {
                 variant: TextVariant::Muted,

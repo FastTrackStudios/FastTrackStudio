@@ -46,7 +46,7 @@ pub fn MealplanView() -> Element {
     });
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-8 p-6 lg:p-10",
+        div { class: "mx-auto flex max-w-3xl flex-col gap-8 p-4 sm:p-6 lg:p-10",
             div { class: "flex flex-col gap-1",
                 Heading { level: HeadingLevel::H1, "Mealplan" }
                 Text {
