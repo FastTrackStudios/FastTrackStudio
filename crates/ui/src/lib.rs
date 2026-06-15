@@ -22,6 +22,7 @@ pub mod server_registry;
 pub mod shell;
 pub mod states;
 pub mod stores;
+pub mod tag_icon;
 pub mod task_sort;
 pub mod theming;
 pub mod vault_lookup;

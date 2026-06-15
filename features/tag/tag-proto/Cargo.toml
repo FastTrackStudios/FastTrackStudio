@@ -1,0 +1,19 @@
+[package]
+name = "tag-proto"
+description = "Tag wire types. Starts with TagIcon (the user-chosen icon a Tag carries); the Tag entity + service move here when the `label` feature is evolved into general tagging. See plans/tagging-and-icons.md."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+facet = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

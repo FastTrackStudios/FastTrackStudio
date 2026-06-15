@@ -267,6 +267,9 @@ workflows-orchestrator = { path = "features/workflows/workflows-orchestrator" }
 # added target_date + progress_percent to it rather than fork a
 # second type. See `plans/issue-tracker-integration.md`.
 label-proto = { path = "features/label/label-proto" }
+# Tagging: TagIcon now; the Tag entity + service move here when `label`
+# is evolved into general tagging. See plans/tagging-and-icons.md.
+tag-proto = { path = "features/tag/tag-proto" }
 # Bridge between task notes (file-backed) and agent-tasks (DB-backed).
 # Writes both sides of the dispatch link on create; folds the agent
 # result back into the source task note on completion.
@@ -664,6 +667,12 @@ features = ["lib"]
 [workspace.dependencies.dioxus-router]
 version = "0.7.9"
 default-features = false
+
+# Icon foundation (plans/tagging-and-icons.md): dioxus-icons is the
+# default set (Lucide as components, tree-shaken). dioxus-free-icons is
+# added on demand for any icon Lucide lacks.
+[workspace.dependencies.dioxus-icons]
+version = "0.1"
 
 [workspace.dependencies.dioxus-ssr]
 version = "0.7.9"
