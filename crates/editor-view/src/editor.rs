@@ -2355,10 +2355,12 @@ pub fn Editor(
         #[cfg(feature = "native")]
         {
             if crate::native::handle_navigation(state, &cur, &press, sink_for_keys) {
+                tracing::debug!(?press, "editor.native.nav");
                 evt.prevent_default();
                 return;
             }
             if crate::native::handle_text_input(state, &cur, &press, sink_for_keys) {
+                tracing::debug!(?press, "editor.native.input");
                 evt.prevent_default();
             }
         }
@@ -2630,7 +2632,20 @@ pub fn Editor(
         decos.extend(crate::native::native_caret_decoration(&s, vim, editor_focused));
         decos.sort_by_key(|d| d.from);
         let (arena, root) = build_tiles(&s.doc.to_string(), &decos);
-        crate::tile::render_dx::render_tile(&arena, root)
+        // Click-to-position: Blitz has no contenteditable, so each rendered
+        // element reports its doc offset here. Route through `push_selection`
+        // so the caret snaps off atomic/hidden ranges the same way the web
+        // selection bridge does.
+        let on_click = {
+            let click_deco = decorations.clone();
+            let click_sink = on_transaction;
+            let mut click_state = state;
+            Callback::new(move |pos: usize| {
+                let cur = click_state.read().clone();
+                push_selection(&mut click_state, &cur, click_deco.as_ref(), click_sink, pos, pos);
+            })
+        };
+        crate::tile::render_dx::render_tile(&arena, root, on_click)
     };
 
     // The root div differs by renderer: native emits the tile tree as rsx
@@ -2646,8 +2661,11 @@ pub fn Editor(
             spellcheck: "false",
             tabindex: "0",
             // Native: Blitz routes key events to the focused node, so the
-            // editor must hold focus to be typable at all. Grab it on mount
-            // (and paint the caret) rather than requiring a click first.
+            // editor must hold focus to be typable. `autofocus` requests
+            // focus-on-mount; clicking the editor also focuses it (Blitz
+            // sets focus on pointerdown). We can't call `set_focus` from
+            // `onmounted` — it borrows the doc, which is already borrowed
+            // mid-mount (RefCell panic) — so we rely on those two paths.
             autofocus: "true",
             onkeydown: on_keydown,
             onfocusin: move |_| {

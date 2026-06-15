@@ -23,7 +23,10 @@ tracing = { workspace = true }
 # the `dioxus` crate the web/desktop builds use.
 [dependencies.dioxus-native]
 path = "/run/media/Development/FastTrackStudio/blitz/packages/dioxus-native"
-features = ["prelude"]
+# `autofocus` lets the editor's `autofocus` attribute take effect so the
+# root div holds focus on launch — Blitz routes key events to the focused
+# node, so without it the editor isn't typable until clicked.
+features = ["prelude", "autofocus"]
 optional = true
 
 # File / stdout logging is desktop-only — wasm can't open files.
