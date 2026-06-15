@@ -119,6 +119,21 @@
     vertical-align: baseline;
 }
 
+/* Native (Blitz) insert caret. There's no OS caret on a plain div, so we
+   paint a thin bar as a zero-width inline widget at the selection head.
+   1.5px wide, full line height, the accent color. Steady (no blink): Blitz
+   has no CSS animation timeline parity with the browser, and a steady bar
+   reads fine. Web/desktop keep the real `caret-color` bar instead — this
+   class is only emitted by the native renderer. */
+.ed-native-caret {
+    display: inline-block;
+    width: 0;
+    height: 1.1em;
+    margin: 0 -0.75px;
+    border-left: 1.5px solid var(--ed-accent);
+    vertical-align: text-bottom;
+}
+
 /* Reading mode: dim the editor frame so it's clearly distinct
    from edit mode, and hide the gutter (nothing to navigate to
    when input is disabled). */

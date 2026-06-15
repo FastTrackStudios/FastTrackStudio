@@ -44,6 +44,9 @@ use editor_state::{
 };
 
 use crate::tile::build::build_tiles;
+// Only the web/desktop JS-patch effect serializes the tile tree this way;
+// native renders it as rsx via `tile::render_dx` instead.
+#[cfg(not(feature = "native"))]
 use crate::tile::patch::build_patch;
 
 /// Decoration source — a callable that produces decorations for
@@ -149,6 +152,7 @@ static EDITOR_INSTANCE: AtomicU64 = AtomicU64::new(0);
 /// patcher to find the first changed line. Position-inclusive (the
 /// patch embeds `data-tile-pos`), so an edit busts the hash of the
 /// edited line and every line after it (their offsets shifted).
+#[cfg(not(feature = "native"))]
 fn hash_patch(p: &crate::tile::patch::Patch) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -178,7 +182,7 @@ fn is_edit_kind(kind: &str) -> bool {
 /// Wall-clock milliseconds. wasm-safe: `Instant::now()` traps on
 /// `wasm32-unknown-unknown`, so we hop through `performance.now()`
 /// there. Used by perf-trace spans.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "native")))]
 fn now_ms() -> f64 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     let s = START.get_or_init(std::time::Instant::now);
@@ -219,7 +223,7 @@ fn widget_focused_dom() -> bool {
     false
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(feature = "native")))]
 fn now_ms() -> f64 {
     // Cheap call — browsers cache it. Falls back to 0 if for
     // some reason there's no `performance` (Workers etc.).
@@ -315,6 +319,9 @@ pub fn Editor(
     // there — the unchanged prefix stays untouched in the DOM. (The hash
     // is position-inclusive, so an edit on line K busts K and every line
     // after it, whose absolute positions shifted.)
+    // (Native renders rsx directly and has no JS patch step, so this hash
+    // cache goes unused there — kept as a hook so hook order matches web.)
+    #[cfg_attr(feature = "native", allow(unused_variables))]
     let prev_line_hashes = use_signal(Vec::<u64>::new);
     // Force the next patch to be a full (prefix=0) reconcile. Set on the
     // first render and after IME composition — the one path where
@@ -2004,6 +2011,8 @@ pub fn Editor(
     let vim_for_keys = vim;
     let slash_for_keys = slash;
     let widget_focus_for_keys = widget_focus;
+    // Only the web visual-arrow `Selection.modify` eval references this.
+    #[cfg(not(feature = "native"))]
     let editor_id_for_keys = editor_id.clone();
     let on_keydown = move |evt: Event<KeyboardData>| {
         // Widget cell has focus (e.g. a frontmatter property
@@ -2150,6 +2159,11 @@ pub fn Editor(
             // matching Obsidian / VSCode wrap behavior. Count-
             // prefixed motions (`3j`, `5k`) still go through
             // vim for logical-line semantics.
+            // Native renderer skips this wrap-aware shortcut — no JS
+            // `Selection.modify` exists; `vim::handle_key` below owns
+            // h/j/k/l with logical-line semantics instead.
+            #[cfg(not(feature = "native"))]
+            {
             let vim_snap = vim_sig.peek().clone();
             let is_visual_arrow_key = !vim_snap.is_inserting()
                 && vim_snap.pending_count.is_none()
@@ -2191,6 +2205,7 @@ pub fn Editor(
                 evt.prevent_default();
                 return;
             }
+            } // end #[cfg(not(feature = "native"))] visual-arrow block
             // ── Frontmatter row-nav override ──────────────
             //
             // When the caret sits inside the YAML frontmatter
@@ -2308,6 +2323,15 @@ pub fn Editor(
                     evt.prevent_default();
                     return;
                 }
+                // Native renderer: there's no contenteditable to move the
+                // caret on Arrow/Home/End in Normal mode, so drive it from
+                // state before the blanket swallow. (Vim already had its
+                // pass at h/j/k/l + motions above.)
+                #[cfg(feature = "native")]
+                if crate::native::handle_navigation(state, &cur, &press, sink_for_keys) {
+                    evt.prevent_default();
+                    return;
+                }
                 evt.prevent_default();
                 return;
             }
@@ -2317,6 +2341,25 @@ pub fn Editor(
                 evt.prevent_default();
                 tracing::debug!(?press, "editor.keymap.fire");
                 crate::event::apply_tx(state, &cur, spec, sink_for_keys);
+                return;
+            }
+        }
+        // ── Native default-input fallthrough ─────────────────────────
+        //
+        // The web path stops here: an unclaimed key (a printable char, an
+        // arrow in Insert mode, Enter) is left to the browser's
+        // contenteditable, and the `bridge` observes the resulting DOM
+        // mutation. Blitz has no contenteditable, so we *are* the default
+        // action — move the caret, or insert the typed text, straight into
+        // `editor-state`.
+        #[cfg(feature = "native")]
+        {
+            if crate::native::handle_navigation(state, &cur, &press, sink_for_keys) {
+                evt.prevent_default();
+                return;
+            }
+            if crate::native::handle_text_input(state, &cur, &press, sink_for_keys) {
+                evt.prevent_default();
             }
         }
     };
@@ -2415,6 +2458,11 @@ pub fn Editor(
         });
     }
 
+    // Web/desktop only: ship the tile tree to the JS patcher via
+    // `document::eval`. The native renderer has no JS engine (eval no-ops)
+    // and renders the tile tree as rsx children instead (`native_content`
+    // below), so it skips this whole effect.
+    #[cfg(not(feature = "native"))]
     {
         let id = editor_id.clone();
         let deco_source_patch = decorations.clone();
@@ -2558,27 +2606,95 @@ pub fn Editor(
     };
     let contenteditable = if read_only { "false" } else { "plaintext-only" };
 
-    rsx! {
+    // ── Native render content ────────────────────────────────────
+    //
+    // On the web/desktop path the root div is empty and the JS patcher
+    // fills it (above). The native renderer has no patcher, so we build the
+    // tile tree here and emit it as rsx children — the Dioxus reconciler
+    // diffs it against Blitz's DOM. Decorations are assembled the same way
+    // the patch effect does, plus the always-on painted caret (Blitz draws
+    // no OS caret on a plain div).
+    #[cfg(feature = "native")]
+    let native_content: Element = {
+        let s = state.read();
+        editor_state::set_deco_phase(if idle() {
+            editor_state::DecoPhase::Full
+        } else {
+            editor_state::DecoPhase::Structural
+        });
+        let mut decos: Vec<DecoratedRange> = decorations
+            .as_ref()
+            .map(|src| src.run(&s))
+            .unwrap_or_default();
+        decos.extend(modal_caret_decoration(&s, vim, editor_focused));
+        decos.extend(crate::native::native_caret_decoration(&s, vim, editor_focused));
+        decos.sort_by_key(|d| d.from);
+        let (arena, root) = build_tiles(&s.doc.to_string(), &decos);
+        crate::tile::render_dx::render_tile(&arena, root)
+    };
+
+    // The root div differs by renderer: native emits the tile tree as rsx
+    // children; web leaves it empty for the JS patcher to own. rsx can't
+    // `#[cfg]` an individual child node, so the two variants are whole
+    // blocks. Everything else (focus tracking, overlays) is identical.
+    #[cfg(feature = "native")]
+    let rendered = rsx! {
         div {
             class: "{root_class}",
             "data-editor-id": "{editor_id}",
             contenteditable: "{contenteditable}",
             spellcheck: "false",
+            tabindex: "0",
+            // Native: Blitz routes key events to the focused node, so the
+            // editor must hold focus to be typable at all. Grab it on mount
+            // (and paint the caret) rather than requiring a click first.
+            autofocus: "true",
+            onkeydown: on_keydown,
+            onfocusin: move |_| {
+                let mut focused = editor_focused;
+                if !*focused.peek() { focused.set(true); }
+            },
+            onfocusout: move |_| {
+                let mut focused = editor_focused;
+                if *focused.peek() { focused.set(false); }
+            },
+            // Rendered tile tree — the Dioxus reconciler diffs it against
+            // Blitz's DOM (no JS patcher on native).
+            {native_content}
+        }
+        if let Some(popup) = hover_state.read().clone() {
+            crate::hover::HoverTooltipView { popup }
+        }
+        if completion.is_some() {
+            crate::trigger::CompletionMenu {
+                state,
+                completion: completion_state,
+                on_transaction,
+            }
+        }
+    };
+
+    #[cfg(not(feature = "native"))]
+    let rendered = rsx! {
+        div {
+            class: "{root_class}",
+            "data-editor-id": "{editor_id}",
+            contenteditable: "{contenteditable}",
+            spellcheck: "false",
+            // Focusable so tab order is sane; the contenteditable is
+            // already focusable, so this is harmless.
+            tabindex: "0",
             onkeydown: on_keydown,
             // Focus tracking for the painted modal caret: like the
             // native caret, it must not render until the user
             // actually focuses (clicks into) the editor.
             onfocusin: move |_| {
                 let mut focused = editor_focused;
-                if !*focused.peek() {
-                    focused.set(true);
-                }
+                if !*focused.peek() { focused.set(true); }
             },
             onfocusout: move |_| {
                 let mut focused = editor_focused;
-                if *focused.peek() {
-                    focused.set(false);
-                }
+                if *focused.peek() { focused.set(false); }
             },
         }
         if let Some(popup) = hover_state.read().clone() {
@@ -2591,7 +2707,9 @@ pub fn Editor(
                 on_transaction,
             }
         }
-    }
+    };
+
+    rendered
 }
 
 /// The painted modal caret: a block over the char under the cursor

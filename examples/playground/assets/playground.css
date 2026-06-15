@@ -128,6 +128,34 @@ section h2 {
     counter-increment: cm-line;
     position: relative;
 }
+
+/* Native (Blitz) renderer carets. Blitz draws no OS caret on a plain div,
+   so the editor paints its own as in-flow decorations. The web build keeps
+   the browser's `caret-color` bar and doesn't emit `.ed-native-caret`. */
+.ed-native-caret {
+    display: inline-block;
+    width: 0;
+    height: 1.1em;
+    margin: 0 -0.75px;
+    border-left: 1.5px solid var(--accent, #6b9eff);
+    vertical-align: text-bottom;
+}
+/* Painted vim modal carets — also used by the web build for non-insert
+   modes (CSS `caret-shape` is Chromium-only). */
+.ed-modal-caret-block {
+    background: var(--accent, #6b9eff);
+    color: #11131a;
+    border-radius: 1px;
+}
+.ed-modal-caret-underscore {
+    box-shadow: inset 0 -2px 0 var(--accent, #6b9eff);
+}
+.ed-modal-caret-empty {
+    display: inline-block;
+    width: 0.6ch;
+    line-height: inherit;
+    vertical-align: baseline;
+}
 /* Line number rendered into the gutter column. Reserved width
    matches the editor-root's left padding. */
 .editor-root .cm-line::before {

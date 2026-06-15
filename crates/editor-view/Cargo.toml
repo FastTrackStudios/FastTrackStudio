@@ -15,6 +15,23 @@ tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { version = "1", features = ["v7", "js"] }
+# Native caret movement walks the doc's rope by char/line (the web path
+# delegates this to contenteditable). `Doc::rope()` hands back a
+# `&ropey::Rope`, so we name the type directly here.
+ropey = { workspace = true }
+
+# Renderer seam. `web` (default) is the contenteditable + `document::eval`
+# bridge path that drives both the wasm browser build and the desktop
+# webview — a real DOM does the text editing and our JS bridge observes
+# it. `native` is the Blitz / `dioxus-native` path: no contenteditable, no
+# JS engine, so the component renders the tile tree as rsx (`tile::render_dx`),
+# paints its own caret, and drives `editor-state` directly from key/mouse
+# events. The two are mutually exclusive within a single binary — a build
+# selects one renderer.
+[features]
+default = ["web"]
+web = []
+native = []
 
 # wasm-only: `performance.now()` for our perf spans (the std
 # `Instant::now` traps on wasm32-unknown-unknown).

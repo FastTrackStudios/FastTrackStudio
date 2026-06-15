@@ -54,11 +54,20 @@ fn demo_completion(
         .collect()
 }
 
+// Web/desktop link this bundled asset; native inlines the CSS via
+// `include_str!` (see `App`), so the asset handle is unused there.
+#[cfg(not(feature = "native"))]
 const STYLE: Asset = asset!("/assets/playground.css");
 
 fn main() {
     init_tracing();
     tracing::info!("playground starting");
+    // Native uses the fork's `dioxus_native::launch` (Blitz window + vello).
+    // Web/desktop use the `dioxus` crate's launcher. `App` returns a
+    // dioxus-core `Element` either way — both renderers share that core.
+    #[cfg(feature = "native")]
+    dioxus_native::launch(App);
+    #[cfg(not(feature = "native"))]
     dioxus::launch(App);
 }
 
@@ -445,8 +454,19 @@ fn App() -> Element {
     // renders the popup directly inside the editor frame.
     let slash = use_signal(|| None::<editor::editor_view::slash::SlashState>);
 
+    // Stylesheet node. Web/desktop link the bundled asset (served by `dx`).
+    // Native inlines the CSS: a raw Blitz binary (run outside `dx`) can't
+    // resolve the bundled `asset!` URL, so a link 404s and the doc renders as
+    // unstyled HTML — `include_str!` bakes the CSS into the binary instead.
+    // (rsx can't `#[cfg]` a child node, so the variant is chosen here.)
+    #[cfg(not(feature = "native"))]
+    let style_node = rsx! { document::Link { rel: "stylesheet", href: STYLE } };
+    #[cfg(feature = "native")]
+    let style_node =
+        rsx! { style { dangerous_inner_html: include_str!("../assets/playground.css") } };
+
     rsx! {
-        document::Link { rel: "stylesheet", href: STYLE }
+        {style_node}
         div { class: "page",
             header { class: "page-header",
                 h1 { "Editor" }
