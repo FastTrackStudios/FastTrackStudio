@@ -253,10 +253,18 @@ impl<T: StoreEntity, E: 'static> Copy for Store<T, E> {}
 /// Create a fresh, empty store. Provide it once at the app root via
 /// `use_context_provider`, alongside the connection signal, and pull it in
 /// screens with `use_context`.
+///
+/// The backing signal is owned by [`ScopeId::ROOT`], not the calling
+/// component's scope. A store is read and written by detached tasks that
+/// outlive any screen — the `spawn_forever` reconcile/rollback in
+/// [`Mutation::run`](crate::Mutation::run) runs in the root context, so a
+/// store owned by a transient provider scope would trip the dioxus
+/// "value used outside its owning scope" warning (and risk a
+/// use-after-drop) once that provider unmounts. Rooting it makes the
+/// "the store lives at the app root" contract real.
 pub fn use_store<T: StoreEntity, E: 'static>() -> Store<T, E> {
-    Store {
-        inner: use_signal(StoreData::default),
-    }
+    let inner = use_hook(|| Signal::new_in_scope(StoreData::default(), ScopeId::ROOT));
+    Store { inner }
 }
 
 impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
