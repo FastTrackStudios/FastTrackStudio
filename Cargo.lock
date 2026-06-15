@@ -15407,12 +15407,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tag"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "serde",
+ "serde_json",
+ "tag-proto",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "tag-proto"
 version = "0.1.0"
 dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
  "facet",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -15682,6 +15700,8 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "store-proto",
+ "tag",
+ "tag-proto",
  "task",
  "tempfile",
  "thiserror 2.0.18",

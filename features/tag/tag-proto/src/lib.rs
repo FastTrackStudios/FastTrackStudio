@@ -1,80 +1,35 @@
-//! `tag-proto` — wire types for the tagging feature.
+// architect's rpc/derive macros emit cfg-gated blocks; allow at crate
+// scope.
+#![allow(unexpected_cfgs)]
+
+//! Wire contract for the tagging feature.
 //!
-//! For now this is just [`TagIcon`], the icon a `Tag` carries. The full
-//! `Tag` entity + `TagService` land here when the half-built `label`
-//! feature is evolved into general tagging — see
-//! `plans/tagging-and-icons.md`. Kept wasm-clean (no architect / sea-orm
-//! yet) so the web UI's icon picker + render helper can depend on it.
+//! Owns [`TagIcon`] (the user-chosen icon a tag carries), the [`Tag`]
+//! registry entity (name → icon/color decoration), and the
+//! [`service::TagService`] CRUD surface. Tags are referenced by **name**
+//! from entity markdown frontmatter (`tags: [food]`); this registry just
+//! decorates those names so the calendar / lists can show an icon.
+//!
+//! Wasm-clean baseline (Facet types) so the web UI's icon picker +
+//! render helper bind directly; enable `vox` for the architect-emitted
+//! RPC client + dispatcher. Evolved from the half-built `label` feature
+//! — see plans/tagging-and-icons.md.
 
-use facet::Facet;
-use serde::{Deserialize, Serialize};
+pub mod error;
+pub mod service;
+pub mod tag;
+pub mod tag_icon;
 
-/// The icon a [`Tag`](https://docs) carries — chosen once by the user
-/// when they define the tag, not derived per use.
-///
-/// Open by design: pick a curated library icon by key, or paste raw SVG.
-/// A free-form key (rather than a closed enum of variants) is what lets
-/// the set grow and lets users bring their own icon.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
-#[repr(u8)]
-pub enum TagIcon {
-    /// A key into the supported icon set — a Lucide icon name the UI's
-    /// render helper knows (e.g. `"utensils"`, `"dumbbell"`). Unknown
-    /// keys fall back to a neutral icon. Expand the set by adding the key
-    /// to the picker's curated list + an arm in the render helper; no
-    /// proto change needed (the key is just a string).
-    Named(String),
-    /// Raw inline SVG markup — the "paste your own" path. Rendered inline
-    /// by the UI, so any icon works without a library entry.
-    Svg(String),
-}
+pub use error::TagError;
+pub use service::TagService;
+pub use tag::Tag;
+pub use tag_icon::TagIcon;
 
-impl TagIcon {
-    /// A named library icon by key.
-    #[must_use]
-    pub fn named(key: impl Into<String>) -> Self {
-        Self::Named(key.into())
-    }
-
-    /// The key, if this is a [`TagIcon::Named`].
-    #[must_use]
-    pub fn key(&self) -> Option<&str> {
-        match self {
-            Self::Named(k) => Some(k),
-            Self::Svg(_) => None,
-        }
-    }
-}
-
-impl Default for TagIcon {
-    /// The generic tag icon — a safe fallback before the user picks one.
-    fn default() -> Self {
-        Self::Named("tag".to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::TagIcon;
-
-    #[test]
-    fn named_and_key_roundtrip() {
-        let i = TagIcon::named("utensils");
-        assert_eq!(i.key(), Some("utensils"));
-        assert!(matches!(i, TagIcon::Named(_)));
-    }
-
-    #[test]
-    fn svg_has_no_key() {
-        assert_eq!(TagIcon::Svg("<svg/>".into()).key(), None);
-    }
-
-    #[test]
-    fn json_roundtrip() {
-        for icon in [TagIcon::named("heart"), TagIcon::Svg("<svg></svg>".into())] {
-            let s = serde_json::to_string(&icon).unwrap();
-            let back: TagIcon = serde_json::from_str(&s).unwrap();
-            assert_eq!(icon, back);
-        }
-    }
-}
+// architect-emitted vox bits: the async client / dispatcher / descriptor
+// for the capability. Mount sites stitch the descriptor + `serve` into
+// the org router.
+#[cfg(feature = "vox")]
+pub use service::tags::{
+    Service as TagServiceBridge, TagServiceClient, TagServiceRpc, TagServiceRpcDispatcher,
+    layer as tag_service_layer, serve as serve_tag_service,
+};
