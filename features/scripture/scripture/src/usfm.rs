@@ -8,16 +8,16 @@
 //!
 //! - footnotes `\f … \f*` and cross-references `\x … \x*` — dropped whole;
 //! - word tags `\w word|strong="G…"\w*` (and nested `\+w …\+w*`) — the
-//!   word is kept, the Strong's attribute dropped *(slice 1 keeps reading
-//!   text; the lemma/Strong's data is the slice-4 word-study hook —
-//!   see `// FUTURE` below)*;
+//!   word is kept in the reading text, and separately captured by
+//!   [`extract_words`] with its Strong's code for word study;
 //! - remaining character/paragraph markers (`\wj`, `\nd`, `\p`, `\q1`, …)
 //!   — markers removed, inner text kept.
 //!
-//! FUTURE: a richer `parse_words` that retains each `\w` token's
-//! `strong="…"` lemma so word-level study (Strong's → lexicon →
-//! every-occurrence concordance) can be built on the same ingest. The
-//! data is already in the WEB USFM; slice 1 just doesn't surface it.
+//! So each [`Verse`] carries both the clean reading `text` and the
+//! ordered Strong's-tagged `words` that power lexicon lookup + the
+//! concordance. Note eBible WEB/BSB tagging is *partial* — not every word
+//! carries a `strong=` tag (e.g. "love" is untagged); complete coverage
+//! comes from a fully-tagged original-language dataset (STEPBible).
 
 use std::sync::LazyLock;
 

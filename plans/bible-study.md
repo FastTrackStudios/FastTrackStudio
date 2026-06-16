@@ -343,6 +343,18 @@ build on per-keystroke string CRDT writes until that upgrade lands.
      differently-numbered edition is added); optional small bounded cache for API reads.
 4. **Strong's + lexicons.** Bundle STEP TAGNT/TAHOT + Strong's/BDB/Thayer's; click-word →
    lexicon page; every-occurrence concordance (backlinks query).
+   - ✅ **Phase 1 — foundation on existing tags (2026-06-16).** `usfm::extract_words`
+     captures the per-word `strong=` tags already in WEB/BSB; `Bible` stores words + a
+     concordance index. Bundled the **public-domain OpenScriptures Strong's lexicon**
+     (5,523 Greek + 8,674 Hebrew) at `<org>/resources/lexicon/strongs/{greek,hebrew}.json`.
+     Service: `lexicon(code)`, `word_study(tx, ref)` (per-word lemma/translit/gloss),
+     `occurrences(code, tx, limit)` concordance. Verified on real WEB — John 3:16 parses
+     word-by-word with Greek lemmas. **Known data gap:** eBible WEB/BSB tagging is
+     partial (e.g. "love" G25/G26 is untagged) — Phase 2 fixes coverage.
+   - ⬜ **Phase 2 — STEPBible TAGNT + TAHOT:** the full, completely-tagged Greek NT +
+     Hebrew OT *text* with morphology (parsing) → true reverse-interlinear + complete
+     concordance. ⬜ **Phase 3 — SBLGNT + OSHB** as alternate critical editions.
+   - ⬜ **UI:** clickable words in the reader → lexicon + occurrences panel (next).
 5. **Annotations.** Typed (NET) + two-level (ESV) anchoring; vault-markdown bodies.
 6. **TSK cross-references.** Phrase-keyed, target text inlined.
 7. **Entities.** TIPNR → wiki ingest; entity-tag the text; Factbook pages.
