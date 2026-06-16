@@ -20,6 +20,8 @@ thiserror = { workspace = true }
 reqwest = { workspace = true, default-features = false, features = ["json", "rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# OSHB ships as OSIS XML; roxmltree is a light read-only DOM parser.
+roxmltree = "0.20"
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }

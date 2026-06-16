@@ -9,13 +9,13 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use scripture::{OrigMeta, OrigText, OrigWord, VerseId, stepbible};
+use scripture::{OrigMeta, OrigText, OrigWord, VerseId, morphgnt, oshb, stepbible};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 8 {
         eprintln!(
-            "usage: install_stepbible <tagnt|tahot> <id> <name> <language> <license> <dest> <file...>"
+            "usage: install_stepbible <tagnt|tahot|morphgnt|oshb> <id> <name> <language> <license> <dest> <file...>"
         );
         std::process::exit(2);
     }
@@ -24,10 +24,12 @@ fn main() {
 
     let mut map: BTreeMap<VerseId, Vec<OrigWord>> = BTreeMap::new();
     for file in &args[7..] {
-        let tsv = std::fs::read_to_string(file).expect("read source");
+        let raw = std::fs::read_to_string(file).expect("read source");
         let rows = match kind.as_str() {
-            "tahot" => stepbible::parse_tahot_rows(&tsv),
-            _ => stepbible::parse_tagnt_rows(&tsv),
+            "tahot" => stepbible::parse_tahot_rows(&raw),
+            "morphgnt" => morphgnt::parse_morphgnt_rows(&raw),
+            "oshb" => oshb::parse_oshb_xml(&raw),
+            _ => stepbible::parse_tagnt_rows(&raw),
         };
         let n = rows.len();
         for (vid, w) in rows {
