@@ -331,9 +331,16 @@ build on per-keystroke string CRDT writes until that upgrade lands.
      (`ScriptureRef`). A markdown `compare` fenced block declares a comparison
      (`extract_compare_specs` / `CompareSpec`) for a future inline renderer. Works
      across single verses and cross-book ranges; verified on WEB + BSB.
-   - ⬜ **Remaining:** translation swap re-fetch is done; **wire ESV/NIV API** behind a
-     user key (API-only editions); inline rendering of `compare` blocks inside notes;
-     versification mapping (needed once a differently-numbered edition is added).
+   - ✅ **ESV + NIV via API (2026-06-16).** `scripture::api` adds `Provider {Esv,
+     ApiBible{bible_id}}` + `ApiTranslation`; the store routes bundled→memory,
+     API→live HTTP fetch (`chapter`/`verse`/`compare` are now async). Nothing persisted
+     (stays inside ESV/API.Bible caching terms). Keys from env at server start:
+     `TASK_ESV_API_KEY` (ESV); `TASK_API_BIBLE_KEY` + `TASK_API_BIBLE_NIV_ID` (NIV via
+     API.Bible — only works if the key has NIV access). Verse parsing unit-tested; live
+     fetch not yet exercised (no key in this env).
+   - ⬜ **Remaining:** confirm the NIV `bible_id` + live-fetch once a key is available;
+     inline rendering of `compare` blocks inside notes; versification mapping (once a
+     differently-numbered edition is added); optional small bounded cache for API reads.
 4. **Strong's + lexicons.** Bundle STEP TAGNT/TAHOT + Strong's/BDB/Thayer's; click-word →
    lexicon page; every-occurrence concordance (backlinks query).
 5. **Annotations.** Typed (NET) + two-level (ESV) anchoring; vault-markdown bodies.
