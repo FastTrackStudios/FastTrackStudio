@@ -32,6 +32,7 @@ pub mod refs;
 pub mod stepbible;
 pub mod store;
 pub mod usfm;
+pub mod versification;
 
 pub use api::{ApiTranslation, Provider};
 pub use backlinks::{RangeBacklink, scan_vault};
@@ -49,6 +50,7 @@ pub use scripture_proto::{
 };
 pub use store::Store;
 pub use usfm::{UsfmError, Verse, Word, parse_book};
+pub use versification::{Versification, scheme_for_language};
 
 // architect-emitted vox bits, re-exported for the server mount.
 #[cfg(feature = "vox")]

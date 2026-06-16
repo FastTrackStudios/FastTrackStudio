@@ -822,7 +822,15 @@ pub(crate) async fn build_org_state(
                 .with_lexicon(scripture_lexicon)
                 // Original-language editions (TAGNT/TAHOT/SBLGNT/OSHB),
                 // loaded lazily per edition on first interlinear request.
-                .with_originals_root(org_root.resources_dir().join("original"));
+                .with_originals_root(org_root.resources_dir().join("original"))
+                // Versification mappings reconcile Hebrew vs English
+                // verse numbering for the interlinear.
+                .with_versification(
+                    scripture::Versification::load_dir(
+                        &org_root.resources_dir().join("versification"),
+                    )
+                    .map_err(|e| eyre::eyre!("load versification: {e}"))?,
+                );
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.

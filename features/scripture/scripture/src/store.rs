@@ -21,6 +21,7 @@ use crate::api::{ApiTranslation, fetch_chapter};
 use crate::bible::{Bible, LoadError};
 use crate::lexicon::Lexicon;
 use crate::original::OrigText;
+use crate::versification::{Versification, scheme_for_language};
 
 /// Default cap on concordance results when the caller passes `limit = 0`.
 const DEFAULT_OCCURRENCE_LIMIT: usize = 150;
@@ -39,6 +40,8 @@ pub struct Store {
     originals_root: Option<PathBuf>,
     /// Lazily-loaded original-language editions, keyed by id (uppercase).
     originals: Arc<Mutex<HashMap<String, Arc<OrigText>>>>,
+    /// Versification mappings — reconcile English vs Hebrew numbering.
+    versification: Arc<Versification>,
     /// Vault to scan for `[[John 3:16]]` backlinks. `None` ⇒ no backlinks.
     vault_root: Option<PathBuf>,
 }
@@ -58,8 +61,16 @@ impl Store {
             lexicon: Arc::new(Lexicon::default()),
             originals_root: None,
             originals: Arc::new(Mutex::new(HashMap::new())),
+            versification: Arc::new(Versification::default()),
             vault_root: None,
         }
+    }
+
+    /// Attach versification mappings (English↔Hebrew numbering).
+    #[must_use]
+    pub fn with_versification(mut self, versification: Versification) -> Self {
+        self.versification = Arc::new(versification);
+        self
     }
 
     /// Point the store at the original-language editions root
@@ -494,7 +505,20 @@ impl ScriptureService for Store {
         let id = VerseId::parse(reference)
             .map_err(|e| ScriptureError::BadRequest(format!("{reference:?}: {e}")))?;
         let text = self.original(edition)?;
-        let words = text.words_of(id);
+
+        // The reader's reference is English; map it into this edition's
+        // versification (Hebrew editions use `org`). One English verse can
+        // map to several, so gather words across all mapped verses.
+        let scheme = text
+            .meta
+            .as_ref()
+            .map_or("eng", |m| scheme_for_language(&m.language));
+        let words: Vec<_> = self
+            .versification
+            .map(id, "eng", scheme)
+            .into_iter()
+            .flat_map(|vid| text.words_of(vid).iter().cloned())
+            .collect();
         if words.is_empty() {
             return Err(ScriptureError::NotFound(format!(
                 "{reference} in {edition}"
