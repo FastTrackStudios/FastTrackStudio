@@ -1,11 +1,16 @@
 //! [`Bible`] — an in-memory, ordered store of one translation's verses.
 //!
 //! Keyed by [`VerseId`] in a `BTreeMap`, so iteration and chapter slices
-//! come out in canonical order for free. Read-only after ingest: insert
-//! books, then look verses up. This is the slice-1 backbone the reader
-//! (slice 2) will serve over the `scripture-proto` RPC surface.
+//! come out in canonical order for free. Read-only after ingest.
+//!
+//! The verses are loaded from the **resource library** on disk
+//! ([`Bible::load_dir`]) — a translation directory of per-book USFM
+//! files, e.g. `<org>/resources/bible/WEB/JHN.usfm`. The corpus is not
+//! bundled in the repo; it's primary-source data that the vault and wiki
+//! link *into*. See [`crate::install`] for putting USFM there.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use scripture_proto::{Book, VerseId};
 
@@ -17,6 +22,18 @@ pub struct Bible {
     /// Translation id, e.g. `WEB`.
     pub translation: String,
     verses: BTreeMap<VerseId, String>,
+}
+
+/// Failure loading a translation directory.
+#[derive(Debug, thiserror::Error)]
+pub enum LoadError {
+    #[error("io reading {path:?}: {source}")]
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
+    #[error("parsing {path:?}: {source}")]
+    Usfm { path: String, source: UsfmError },
 }
 
 impl Bible {
@@ -38,6 +55,40 @@ impl Bible {
             self.verses.insert(v.id, v.text);
         }
         Ok(n)
+    }
+
+    /// Load every `*.usfm` file in a translation directory (e.g.
+    /// `<org>/resources/bible/WEB/`) into a fresh store. `translation`
+    /// is the id to tag the store with (typically the directory name).
+    pub fn load_dir(dir: &Path, translation: impl Into<String>) -> Result<Self, LoadError> {
+        let mut bible = Self::new(translation);
+        let entries = std::fs::read_dir(dir).map_err(|source| LoadError::Io {
+            path: dir.display().to_string(),
+            source,
+        })?;
+        // Collect + sort so ingest order is deterministic.
+        let mut files: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("usfm"))
+            })
+            .collect();
+        files.sort();
+        for path in files {
+            let src = std::fs::read_to_string(&path).map_err(|source| LoadError::Io {
+                path: path.display().to_string(),
+                source,
+            })?;
+            bible
+                .insert_usfm_book(&src)
+                .map_err(|source| LoadError::Usfm {
+                    path: path.display().to_string(),
+                    source,
+                })?;
+        }
+        Ok(bible)
     }
 
     /// Clean reading text for one verse, if present.
@@ -68,22 +119,6 @@ impl Bible {
     pub fn is_empty(&self) -> bool {
         self.verses.is_empty()
     }
-
-    /// The bundled WEB Gospel of John (public domain) — slice-1's
-    /// end-to-end proof. Later slices bundle the full WEB + BSB corpus
-    /// from the same `assets/<translation>/<BOOK>.usfm` layout.
-    ///
-    /// # Panics
-    /// Never in practice: the fixture is a valid USFM book checked in
-    /// with the crate.
-    #[must_use]
-    pub fn web_sample() -> Self {
-        let mut bible = Self::new("WEB");
-        bible
-            .insert_usfm_book(include_str!("../assets/web/JHN.usfm"))
-            .expect("bundled WEB John fixture parses");
-        bible
-    }
 }
 
 #[cfg(test)]
@@ -91,29 +126,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_a_verse_end_to_end() {
-        let bible = Bible::web_sample();
+    fn insert_and_resolve_a_verse() {
+        let mut bible = Bible::new("WEB");
+        bible.insert_usfm_book(crate::usfm::tests::SAMPLE).unwrap();
         let id = VerseId::parse("John 3:16").unwrap();
-        let text = bible.get(id).expect("John 3:16 resolves");
-        assert!(text.starts_with("For God so loved the world"));
-        assert_eq!(bible.translation, "WEB");
+        assert!(
+            bible
+                .get(id)
+                .unwrap()
+                .starts_with("For God so loved the world")
+        );
+        assert!(bible.get(VerseId::parse("Genesis 1:1").unwrap()).is_none());
     }
 
     #[test]
-    fn chapter_slice_is_ordered_and_contiguous() {
-        let bible = Bible::web_sample();
+    fn chapter_slice_is_ordered() {
+        let mut bible = Bible::new("WEB");
+        bible.insert_usfm_book(crate::usfm::tests::SAMPLE).unwrap();
         let john = Book::lookup("John").unwrap();
         let ch3 = bible.chapter(john, 3);
-        assert!(!ch3.is_empty());
-        // First verse is 1; verse numbers ascend.
-        assert_eq!(ch3[0].0, 1);
-        assert!(ch3.windows(2).all(|w| w[0].0 < w[1].0));
+        assert_eq!(
+            ch3.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            vec![16, 17]
+        );
     }
 
     #[test]
-    fn unknown_verse_is_none() {
-        let bible = Bible::web_sample();
-        // Genesis isn't loaded in the sample.
-        assert!(bible.get(VerseId::parse("Genesis 1:1").unwrap()).is_none());
+    fn load_dir_reads_a_translation_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("JHN.usfm"), crate::usfm::tests::SAMPLE).unwrap();
+        let bible = Bible::load_dir(dir.path(), "WEB").unwrap();
+        assert_eq!(bible.translation, "WEB");
+        assert_eq!(bible.len(), 3);
+        assert!(bible.get(VerseId::parse("John 4:1").unwrap()).is_some());
     }
 }

@@ -96,7 +96,7 @@ fn flush(verses: &mut Vec<Verse>, book: Book, chapter: u16, current: Option<(u16
 }
 
 /// Read the `\id` line and resolve its 3-letter book code.
-fn detect_book(src: &str) -> Result<Book, UsfmError> {
+pub(crate) fn detect_book(src: &str) -> Result<Book, UsfmError> {
     let id_line = src
         .lines()
         .map(str::trim)
@@ -135,29 +135,43 @@ fn clean_verse_text(raw: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    const JOHN: &str = include_str!("../assets/web/JHN.usfm");
+    /// A few real WEB verses (public domain) carrying the full markup
+    /// menagerie — words of Jesus (`\wj`), nested word tags with
+    /// `strong=`, a mid-verse footnote, and a chapter break — so the
+    /// parser is exercised against actual USFM without bundling a whole
+    /// book. The corpus itself lives in the resource library, not the
+    /// repo (see `plans/bible-study.md`).
+    pub(crate) const SAMPLE: &str = r#"\id JHN test fixture
+\h John
+\mt1 John
+\c 3
+\p
+\v 16 \wj \+w For|strong="G1063"\+w* \+w God|strong="G2316"\+w* \+w so|strong="G3779"\+w* loved \+w the|strong="G1519"\+w* \+w world|strong="G2889"\+w*, \+w that|strong="G2443"\+w* \+w he|strong="G3588"\+w* \+w gave|strong="G1325"\+w* \+w his|strong="G3956"\+w* \+w only|strong="G3439"\+w* born\wj*\f + \fr 3:16 \ft The phrase "only born" is from the Greek word.\f* \wj \+w Son|strong="G5207"\+w*, \+w that|strong="G2443"\+w* \+w whoever|strong="G3956"\+w* \+w believes|strong="G4100"\+w* \+w in|strong="G1519"\+w* \+w him|strong="G3588"\+w* \+w should|strong="G2316"\+w* \+w not|strong="G3361"\+w* perish, \+w but|strong="G3361"\+w* \+w have|strong="G2192"\+w* eternal \+w life|strong="G2222"\+w*. \wj*
+\v 17 \w For|strong="G1063"\w* God didn't send his Son into the world to judge the world.
+\c 4
+\p
+\v 1 Therefore when the Lord knew that the Pharisees had heard.
+"#;
 
     #[test]
-    fn parses_the_whole_book() {
-        let verses = parse_book(JOHN).unwrap();
-        // John has 21 chapters; spot-check the count is in the right
-        // ballpark (879 verses in WEB John) and ordering holds.
-        assert!(verses.len() > 800, "got {} verses", verses.len());
+    fn parses_chapters_and_orders_verses() {
+        let verses = parse_book(SAMPLE).unwrap();
+        assert_eq!(verses.len(), 3);
         assert!(
             verses.windows(2).all(|w| w[0].id < w[1].id),
-            "verses are sorted"
+            "verses sorted"
         );
         let chapters: std::collections::BTreeSet<u16> =
             verses.iter().map(|v| v.id.chapter).collect();
-        assert_eq!(*chapters.iter().max().unwrap(), 21);
+        assert_eq!(chapters, [3, 4].into_iter().collect());
     }
 
     #[test]
     fn john_3_16_resolves_to_clean_text() {
-        let verses = parse_book(JOHN).unwrap();
+        let verses = parse_book(SAMPLE).unwrap();
         let target = VerseId::parse("John 3:16").unwrap();
         let v = verses
             .iter()
@@ -172,9 +186,7 @@ mod tests {
 
     #[test]
     fn markup_is_fully_stripped() {
-        let verses = parse_book(JOHN).unwrap();
-        // No residual backslash markers or strong tags anywhere.
-        for v in &verses {
+        for v in parse_book(SAMPLE).unwrap() {
             assert!(
                 !v.text.contains('\\'),
                 "{} still has markup: {}",
@@ -183,5 +195,10 @@ mod tests {
             );
             assert!(!v.text.contains("strong="), "{} leaked a strong tag", v.id);
         }
+    }
+
+    #[test]
+    fn missing_id_is_an_error() {
+        assert_eq!(parse_book("\\c 1\n\\v 1 hi\n"), Err(UsfmError::NoId));
     }
 }

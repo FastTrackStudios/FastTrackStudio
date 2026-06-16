@@ -13,25 +13,43 @@
 
 ## 0. The thesis (what we're actually building)
 
-Three knowledge layers that already exist in this app, plus a new one:
+**Three tiers, one-directional linking** — and a Bible is just the first citizen of
+the third tier:
 
-| Layer | Holds | Backed by |
+| Tier | Holds | Backed by |
 |---|---|---|
-| **Vault** | your personal thoughts, experiences, questions, devotional notes | `features/vault/*` (markdown + block IDs on disk) |
-| **Wiki** | LLM-generated facts, entity pages, deep studies | `features/wiki/*` (`<vault>/Wiki/` markdown) |
-| **Scripture spine** *(new)* | the Bible text itself + original languages + lexicons + cross-refs | new `scripture` feature (**read-only** bundled data) |
-| **Annotations** *(new)* | your verse-anchored study notes, typed like NET/ESV apparatus | hybrid: structured refs in CRDT, prose in vault markdown |
+| **Vault** | your personal thoughts, experiences, questions, devotional notes | `features/vault/*` (markdown + block IDs, `<org>/vault/`) |
+| **Wiki** | curated LLM knowledge — facts, entity pages, deep studies | `features/wiki/*` (`<org>/wiki/Knowledge/`) |
+| **Resources Library** *(new tier)* | **primary sources**: books, epub, txt, markdown — and the Bible | `<org>/resources/` — large read-only corpora, link-in only |
+| **Annotations** *(cross-cutting)* | verse/locator-anchored study notes, highlights, typed like NET/ESV | hybrid: structured anchors in CRDT, prose in vault markdown |
 
-The central design move — and the thing that beats Obsidian — is to **separate the
-scripture spine from the thought graph**. Scripture is a stable, addressable,
-**read-only** substrate. Your notes, the wiki, and cross-references all *link
-into* it by stable verse/word ID. They are never written *inside* the Bible files
-(the #1 mistake every Obsidian setup makes).
+```
+vault/      your notes        ──┐ link into
+wiki/       curated knowledge ──┤ link into
+resources/  primary sources   ◄─┘  self-contained; the link-in target
+```
 
-> **Read-only by design (confirmed).** Users cannot edit the Bible text — the reader
-> and verse blocks are immutable from the UI. Only the *system* (ingest/generation
-> tooling) writes scripture files. Annotations, highlights, and links live in separate
-> layers that reference verses; the text itself is never mutated by a user action.
+### The Resources Library (the key architecture)
+
+Large primary-source material does **not** belong in the vault or the repo — it's a
+separate **Resources Library** tier (promoting what the wiki called `raw/sources/` to a
+first-class layer). It holds books in markdown / epub / txt and the Bible. Both the
+vault and the wiki link *into* resources; resources never link out (same one-directional
+rule as `wiki/Knowledge/`). We process **highlights/annotations** against a resource and
+link to an **exact location** inside it.
+
+The Bible is therefore not special — it's the **first resource type**. Its handler is the
+`scripture` feature: a Bible resource is a folder of per-book USFM, its location key is a
+[`VerseId`]; an epub resource would have its own locator (CFI / chapter+offset), a
+markdown book its block IDs. Generic resource concerns (epub parsing, highlight
+extraction, a uniform locator trait, a `resources` tier feature) are their own follow-up
+slices — see §10.
+
+> **Read-only + not-in-repo (confirmed).** Bible text is immutable from the UI; only
+> system ingest writes it. The corpus is **installed into the resource library on disk**
+> (`<org>/resources/bible/<TX>/`), which syncs to the server like the vault/wiki — it is
+> never committed to the git repo (a full tagged translation is ~18 MB). Notes anchor to
+> [`VerseId`], not to text, so they stay valid and shareable across translations.
 
 Because this app already has a `BlockIndex` (`features/vault/vault-live/src/blocks.rs`,
 `uuid → (page, offset)`, O(1)), **per-verse clean backlinks come for free** — which
@@ -265,13 +283,18 @@ build on per-keystroke string CRDT writes until that upgrade lands.
    - ✅ **Started (2026-06-16).** New `features/scripture/` crates:
      `scripture-proto` (wasm-clean keystone — 66-book canon, `VerseId` with OSIS +
      BBCCCVVV keys, human/OSIS reference parsing, translation/licensing registry) and
-     `scripture` (native USFM ingest → in-memory `Bible` store). Real WEB Gospel of John
-     bundled as `assets/web/JHN.usfm`; `John 3:16` resolves end-to-end to clean text. 17
-     unit tests pass, clippy clean. WEB USFM carries per-word `\w …|strong="G…"\w*` tags —
-     captured as the slice-4 word-study hook (`// FUTURE` in `usfm.rs`).
-   - ⬜ **Remaining:** bundle the *full* WEB corpus (all 66 books, same
-     `assets/<tx>/<BOOK>.usfm` layout) + **BSB**; add the versification map (Copenhagen
-     Alliance JSON or STEP TVTMS); decide bundled-assets vs feature-trio for the store.
+     `scripture` (native USFM ingest → in-memory `Bible` store). `John 3:16` resolves
+     end-to-end to clean text. WEB USFM carries per-word `\w …|strong="G…"\w*` tags —
+     preserved on install, surfaced in slice 4 (`// FUTURE` in `usfm.rs`).
+   - ✅ **Corpus out of the repo (2026-06-16).** Per the Resources Library decision, the
+     corpus is not bundled. `scripture::install_usfm_dir` normalizes a source USFM dir
+     (noisy `73-JHNengwebp.usfm` names, front matter) into a clean `<TX>/<BOOK>.usfm`
+     translation folder; `Bible::load_dir` loads it. Tests use a tiny inline fixture.
+     19 tests pass, clippy clean.
+   - ⬜ **Remaining:** decide resource placement (shared `<data_root>/resources/` vs
+     per-org `<org>/resources/`) + add the `OrgRoot` path helper; **install the full WEB
+     corpus** there (have it staged) and **BSB**; add the versification map (Copenhagen
+     Alliance JSON or STEP TVTMS).
 2. **Reader + permalinks.** Chapter reader route, verse blocks, `[[John 3:16]]` linking,
    backlinks per verse via `BlockIndex`.
 3. **Translation layer.** Swap + side-by-side parallel; wire ESV API behind a user key.
