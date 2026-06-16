@@ -124,6 +124,9 @@ pub struct OrgAppState {
     pub locations: locations::Store,
     /// Inventory backend — `type: item` gear/equipment pages.
     pub inventory: inventory::Store,
+    /// Scripture backend — read-only Bible spine from the resource
+    /// library (`<org>/resources/bible/<TX>/`).
+    pub scripture: scripture::Store,
     /// Cookbook (cooklang recipes under `Wiki/Cookbook/`).
     pub cookbook: cookbook::Store,
     /// Mealplan — scheduled meals + their fulfillment math.
@@ -776,6 +779,13 @@ pub(crate) async fn build_org_state(
         let inventory_vault = vault::Vault::open(&vault_root)
             .map_err(|e| eyre::eyre!("open inventory vault: {e}"))?;
         let inventory = inventory::Store::new(inventory_vault);
+        // Scripture — read-only Bible spine loaded from the resource
+        // library (`<org>/resources/bible/<TX>/`). A missing root yields
+        // an empty store, so orgs without an installed corpus just show
+        // no translations.
+        let scripture =
+            scripture::Store::load_resource_root(&org_root.resources_dir().join("bible"))
+                .map_err(|e| eyre::eyre!("load scripture: {e}"))?;
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.
@@ -837,6 +847,7 @@ pub(crate) async fn build_org_state(
             vault_sync: vault_sync_state,
             vault_collab,
             vault_watcher,
+            scripture,
             wiki,
             projects,
             goals,
@@ -1230,6 +1241,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         task::task_stream_descriptor(),
         locations::locations_service_descriptor(),
         inventory::inventory_service_descriptor(),
+        scripture::scripture_service_descriptor(),
         cookbook::cookbook_service_descriptor(),
         mealplan::mealplan_service_descriptor(),
         pantry::pantry_service_descriptor(),
@@ -1446,6 +1458,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             inventory::inventory_service_descriptor(),
             inventory::serve_inventory_service(org.inventory.clone()),
+        )
+        .with(
+            scripture::scripture_service_descriptor(),
+            scripture::serve_scripture_service(org.scripture.clone()),
         )
         .with(
             cookbook::cookbook_service_descriptor(),
