@@ -127,6 +127,9 @@ pub struct OrgAppState {
     /// Scripture backend — read-only Bible spine from the resource
     /// library (`<org>/resources/bible/<TX>/`).
     pub scripture: scripture::Store,
+    /// Typed-link store — verse↔verse, note↔verse, idea↔wiki links with
+    /// confidence + visibility (`<org>/links.jsonl`).
+    pub links: links::Store,
     /// Cookbook (cooklang recipes under `Wiki/Cookbook/`).
     pub cookbook: cookbook::Store,
     /// Mealplan — scheduled meals + their fulfillment math.
@@ -831,6 +834,8 @@ pub(crate) async fn build_org_state(
                     )
                     .map_err(|e| eyre::eyre!("load versification: {e}"))?,
                 );
+        // Typed-link store (user-asserted verse/note/wiki links).
+        let links = links::Store::open(org_root.path().join("links.jsonl"));
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.
@@ -893,6 +898,7 @@ pub(crate) async fn build_org_state(
             vault_collab,
             vault_watcher,
             scripture,
+            links,
             wiki,
             projects,
             goals,
@@ -1287,6 +1293,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         locations::locations_service_descriptor(),
         inventory::inventory_service_descriptor(),
         scripture::scripture_service_descriptor(),
+        links::links_service_descriptor(),
         cookbook::cookbook_service_descriptor(),
         mealplan::mealplan_service_descriptor(),
         pantry::pantry_service_descriptor(),
@@ -1507,6 +1514,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             scripture::scripture_service_descriptor(),
             scripture::serve_scripture_service(org.scripture.clone()),
+        )
+        .with(
+            links::links_service_descriptor(),
+            links::serve_links_service(org.links.clone()),
         )
         .with(
             cookbook::cookbook_service_descriptor(),

@@ -68,6 +68,7 @@ workstream = { workspace = true, features = ["vox"] }
 locations = { workspace = true, features = ["vox"] }
 inventory = { workspace = true, features = ["vox"] }
 scripture = { workspace = true, features = ["vox"] }
+links = { workspace = true, features = ["vox"] }
 cookbook = { workspace = true, features = ["vox"] }
 mealplan = { workspace = true, features = ["vox"] }
 pantry = { workspace = true, features = ["vox"] }

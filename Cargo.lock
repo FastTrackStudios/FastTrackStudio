@@ -9785,6 +9785,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "links"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "chrono",
+ "links-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "links-proto"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "facet",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "linux-keyutils"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13895,17 +13924,31 @@ dependencies = [
 name = "scripture"
 version = "0.1.0"
 dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
  "regex",
+ "reqwest 0.12.28",
+ "roxmltree",
  "scripture-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
 name = "scripture-proto"
 version = "0.1.0"
 dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "facet",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -15661,6 +15704,7 @@ dependencies = [
  "inbox-proto",
  "intake",
  "inventory 0.1.0",
+ "links",
  "locations",
  "mealplan",
  "milestone",
@@ -15672,6 +15716,7 @@ dependencies = [
  "reqwest 0.12.28",
  "scheduling",
  "scheduling-proto",
+ "scripture",
  "sea-orm",
  "sea-orm-migration",
  "serde",
@@ -16894,6 +16939,7 @@ dependencies = [
  "project",
  "scheduling-proto",
  "scheduling-ui",
+ "scripture-proto",
  "serde",
  "serde_json",
  "task",

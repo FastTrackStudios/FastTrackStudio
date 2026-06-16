@@ -459,6 +459,12 @@ inventory-proto = { path = "features/inventory/inventory-proto", default-feature
 # in by stable verse id. See `plans/bible-study.md`.
 scripture-proto = { path = "features/scripture/scripture-proto", default-features = false }
 scripture = { path = "features/scripture/scripture" }
+# `links` — generalized typed-link primitive (verse↔verse, note↔verse,
+# idea↔wiki entry) with confidence + visibility for quality filtering and
+# private-vs-public publishing. `links-proto` is wasm-clean; the `links`
+# crate owns the backing store. See plans/knowledge-primitives.md.
+links-proto = { path = "features/links/links-proto", default-features = false }
+links = { path = "features/links/links" }
 # `mealplan` slice — vault-superset trio for food/cooking.
 # `cookbook` owns cooklang `.cook` files under `<vault>/Cookbook/`
 # (single file per recipe, no sidecar; ingredient names ARE
