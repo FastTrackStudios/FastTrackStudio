@@ -21,9 +21,18 @@
 
 pub mod bible;
 pub mod install;
+pub mod store;
 pub mod usfm;
 
 pub use bible::{Bible, LoadError};
 pub use install::{InstallError, install_usfm_dir};
-pub use scripture_proto::{Availability, Book, RefError, Translation, VerseId};
+pub use scripture_proto::{
+    Availability, Book, ChapterView, RefError, ScriptureError, ScriptureService, Translation,
+    TranslationInfo, VerseId, VerseLine,
+};
+pub use store::Store;
 pub use usfm::{UsfmError, Verse, parse_book};
+
+// architect-emitted vox bits, re-exported for the server mount.
+#[cfg(feature = "vox")]
+pub use scripture_proto::{scripture_service_descriptor, serve_scripture_service};

@@ -21,8 +21,21 @@
 
 pub mod book;
 pub mod reference;
+pub mod service;
 pub mod translation;
 
 pub use book::Book;
 pub use reference::{RefError, VerseId};
+pub use service::{ChapterView, ScriptureError, ScriptureService, TranslationInfo, VerseLine};
 pub use translation::{Availability, Translation};
+
+// architect-emitted vox bits: the async client / dispatcher / descriptor
+// / serve helpers. The server stitches the descriptor + `serve` into the
+// org router; the web reader binds the client.
+#[cfg(feature = "vox")]
+pub use service::{
+    ScriptureServiceClient, ScriptureServiceRpcDispatcher as ScriptureDispatcher,
+    Service as ScriptureServiceBridge, layer as scripture_service_layer,
+    scripture_service_rpc_service_descriptor as scripture_service_descriptor,
+    serve as serve_scripture_service,
+};

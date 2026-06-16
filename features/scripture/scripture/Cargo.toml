@@ -13,8 +13,17 @@ repository.workspace = true
 # part the web reader binds to directly.
 [dependencies]
 scripture-proto = { workspace = true }
+architect = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }
+
+vox = { workspace = true, optional = true }
+vox-types = { workspace = true, optional = true }
+
+[features]
+default = ["vox"]
+vox = ["dep:vox", "dep:vox-types", "architect/vox", "scripture-proto/vox"]
+full = ["vox"]
 
 [dev-dependencies]
 tempfile = "3"
