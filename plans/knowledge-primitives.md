@@ -93,18 +93,30 @@ These populate the link/tag graph with authoritative data (the resource-library 
 - Join key: a single canonical verse id (we have `VerseId` OSIS + BBCCCVVV) — normalize
   all sources to it. The vote/score columns become link `confidence`.
 
-## Build order (proposed)
+## Build order
 
-1. **Bible link/tag data** — bundle OpenBible cross-refs + topics + TIPNR entities into the
-   resource library; expose `cross_refs(verse)`, `topics(verse)`, `verses_for_topic`,
-   `entity(verse)` via `ScriptureService`. Concrete, authoritative, weighted (→ confidence).
-2. **Generalized typed-link primitive** — lift `Relation`/`Confidence`, add `visibility`;
-   a link is a first-class object in the vault/wiki graph. Page properties for
-   confidence/visibility/maturity.
-3. **Quality-filtered graph view** — extend `GraphFilterState` with confidence/relation/
-   visibility; the verse↔verse↔entity graph.
-4. **Publishing** — visibility-filtered export (extend vault-publisher / federation), with
-   the public→private redaction policy.
+> User chose **generalized primitives first**, then pour Bible data in.
+
+1. ✅ **Generalized typed-link primitive (2026-06-16).** New `features/links/` feature.
+   `links-proto`: `NodeRef {kind, id}` (verse/note/wiki/topic/entity/block/external,
+   `kind:id` tokens) + `TypedLink {source, target, relation, confidence, visibility,
+   provenance, note}`. Vocab: SKOS + argument-mapping + Breadcrumbs + scripture relations;
+   ordinal `Confidence`; opt-in `Visibility` (Private default). `LinksService`:
+   create/delete/get/`links_for(node)`/`graph(min_confidence, include_private)` — the last
+   is the publishable, quality-filtered view. `links`: file-backed store
+   (`<org>/links.jsonl`), mounted per org. 8 tests, clippy clean.
+2. ⬜ **Node properties** — `maturity`/`confidence`/`visibility` on vault/wiki pages via
+   `property_schema` (EnumWithMetadata, colors/icons).
+3. ⬜ **Bible link/tag data** — bundle OpenBible cross-refs + topics + TIPNR entities into
+   the resource library; expose `cross_refs(verse)`, `topics(verse)`, `verses_for_topic`,
+   `entity(verse)`. Authoritative + weighted (votes → `confidence`, derived provenance).
+   These feed the same graph the user-asserted links do.
+4. ⬜ **Quality-filtered graph view** — extend `view-knowledge-graph` `GraphFilterState`
+   with confidence/relation/visibility; render the verse↔verse↔entity graph.
+5. ⬜ **Publishing** — visibility-filtered export (extend vault-publisher / federation),
+   with the public→private redaction policy.
+6. ⬜ **Authoring UI** — create a typed link from a verse/note (relation + confidence
+   picker); the private-journal flow.
 
 ## Open design questions (need the user)
 
