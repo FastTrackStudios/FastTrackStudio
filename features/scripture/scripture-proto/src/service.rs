@@ -59,6 +59,28 @@ pub struct ChapterView {
     pub verses: Vec<VerseLine>,
 }
 
+/// One vault note that links to a verse, with context.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct VerseBacklink {
+    /// Vault-relative path of the linking note.
+    pub note_path: String,
+    /// Display title (first heading, else file stem).
+    pub note_title: String,
+    /// The line the link appears on, trimmed — the "inline thesis".
+    pub excerpt: String,
+}
+
+/// Backlinks for one verse — every vault note that references it.
+///
+/// Translation-independent: keyed by the verse address, so a note that
+/// links `John 3:16` shows up no matter which edition you're reading.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct VerseBacklinks {
+    pub verse: u16,
+    pub osis: String,
+    pub notes: Vec<VerseBacklink>,
+}
+
 #[architect::rpc]
 pub trait ScriptureService {
     /// Installed translations, bundled editions first.
@@ -77,4 +99,14 @@ pub trait ScriptureService {
     /// A single verse. `reference` is a human or OSIS reference such as
     /// `John 3:16` or `John.3.16`.
     fn verse(&self, translation: &str, reference: &str) -> Result<VerseLine, ScriptureError>;
+
+    /// Per-verse backlinks for a whole chapter: every vault note that
+    /// links a verse in `book` `chapter` via a `[[John 3:16]]`-style
+    /// wikilink. Only verses with at least one backlink are returned.
+    /// Translation-independent (keyed by verse address).
+    fn chapter_backlinks(
+        &self,
+        book: &str,
+        chapter: u16,
+    ) -> Result<Vec<VerseBacklinks>, ScriptureError>;
 }

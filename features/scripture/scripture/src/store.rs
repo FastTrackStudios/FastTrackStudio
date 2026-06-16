@@ -6,21 +6,25 @@
 //! (`<org>/resources/bible/<TX>/`) at startup; immutable thereafter, so
 //! no lock is needed — the scripture spine is read-only.
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scripture_proto::{
-    Book, ChapterView, ScriptureError, ScriptureService, Translation, TranslationInfo, VerseId,
-    VerseLine,
+    Book, ChapterView, ScriptureError, ScriptureService, Translation, TranslationInfo,
+    VerseBacklink, VerseBacklinks, VerseId, VerseLine,
 };
 
 use crate::bible::{Bible, LoadError};
 
-/// Read-only scripture backend: translation id → [`Bible`].
+/// Read-only scripture backend: translation id → [`Bible`], plus an
+/// optional vault root for verse backlinks.
 #[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
     bibles: Arc<BTreeMap<String, Bible>>,
+    /// Vault to scan for `[[John 3:16]]` backlinks. `None` ⇒ the reader
+    /// just shows no backlinks.
+    vault_root: Option<PathBuf>,
 }
 
 impl Store {
@@ -33,7 +37,16 @@ impl Store {
             .collect();
         Self {
             bibles: Arc::new(map),
+            vault_root: None,
         }
+    }
+
+    /// Point the store at a vault root so [`ScriptureService::chapter_backlinks`]
+    /// can surface notes that link verses.
+    #[must_use]
+    pub fn with_vault(mut self, vault_root: impl Into<PathBuf>) -> Self {
+        self.vault_root = Some(vault_root.into());
+        self
     }
 
     /// Load every translation subdirectory of a Bible resource root
@@ -148,6 +161,44 @@ impl ScriptureService for Store {
             text: text.to_string(),
         })
     }
+
+    fn chapter_backlinks(
+        &self,
+        book: &str,
+        chapter: u16,
+    ) -> Result<Vec<VerseBacklinks>, ScriptureError> {
+        let book = Book::lookup(book)
+            .ok_or_else(|| ScriptureError::BadRequest(format!("unknown book {book:?}")))?;
+        let Some(vault_root) = self.vault_root.as_deref() else {
+            return Ok(Vec::new());
+        };
+        // Numeric base for this chapter; a verse `v` is `base + v`.
+        let base = u32::from(book.ordinal()) * 1_000_000 + u32::from(chapter) * 1_000;
+
+        // verse number → (notes, note paths already seen for dedup).
+        let mut per_verse: BTreeMap<u16, (Vec<VerseBacklink>, BTreeSet<String>)> = BTreeMap::new();
+        for rb in crate::backlinks::scan_vault(vault_root) {
+            // Intersect the referenced range with this chapter.
+            let lo = rb.range.start.numeric().max(base + 1);
+            let hi = rb.range.end.numeric().min(base + 999);
+            for n in lo..=hi {
+                let verse = (n - base) as u16;
+                let entry = per_verse.entry(verse).or_default();
+                if entry.1.insert(rb.link.note_path.clone()) {
+                    entry.0.push(rb.link.clone());
+                }
+            }
+        }
+
+        Ok(per_verse
+            .into_iter()
+            .map(|(verse, (notes, _))| VerseBacklinks {
+                verse,
+                osis: VerseId::new(book, chapter, verse).osis(),
+                notes,
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +229,52 @@ mod tests {
         assert_eq!(ch.verses[0].verse, 16);
         assert_eq!(ch.verses[0].osis, "John.3.16");
         assert!(ch.verses[0].text.starts_with("For God so loved"));
+    }
+
+    #[test]
+    fn chapter_backlinks_from_a_vault() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::write(
+            vault.path().join("note.md"),
+            "# Grace\nSee [[John 3:16]] and [[John 3:17]].\n",
+        )
+        .unwrap();
+        let mut web = Bible::new("WEB");
+        web.insert_usfm_book(crate::usfm::tests::SAMPLE).unwrap();
+        let s = Store::from_bibles([web]).with_vault(vault.path().to_path_buf());
+
+        let bl = s.chapter_backlinks("John", 3).unwrap();
+        let verses: Vec<u16> = bl.iter().map(|b| b.verse).collect();
+        assert_eq!(verses, vec![16, 17]);
+        assert_eq!(bl[0].osis, "John.3.16");
+        assert_eq!(bl[0].notes.len(), 1);
+        assert_eq!(bl[0].notes[0].note_title, "Grace");
+        // A chapter nobody links to comes back empty.
+        assert!(s.chapter_backlinks("John", 4).unwrap().is_empty());
+    }
+
+    #[test]
+    fn range_links_backlink_every_covered_verse() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::write(
+            vault.path().join("structure.md"),
+            "# Discourse\nStructural unit: [[John 3:16-18]].\n",
+        )
+        .unwrap();
+        let mut web = Bible::new("WEB");
+        web.insert_usfm_book(crate::usfm::tests::SAMPLE).unwrap();
+        let s = Store::from_bibles([web]).with_vault(vault.path().to_path_buf());
+
+        let bl = s.chapter_backlinks("John", 3).unwrap();
+        // The span [[John 3:16-18]] surfaces on 16, 17, and 18.
+        assert_eq!(
+            bl.iter().map(|b| b.verse).collect::<Vec<_>>(),
+            vec![16, 17, 18]
+        );
+        assert!(
+            bl.iter()
+                .all(|b| b.notes.len() == 1 && b.notes[0].note_title == "Discourse")
+        );
     }
 
     #[test]

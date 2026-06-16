@@ -25,8 +25,11 @@ pub mod service;
 pub mod translation;
 
 pub use book::Book;
-pub use reference::{RefError, VerseId};
-pub use service::{ChapterView, ScriptureError, ScriptureService, TranslationInfo, VerseLine};
+pub use reference::{RefError, VerseId, VerseRange};
+pub use service::{
+    ChapterView, ScriptureError, ScriptureService, TranslationInfo, VerseBacklink, VerseBacklinks,
+    VerseLine,
+};
 pub use translation::{Availability, Translation};
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor

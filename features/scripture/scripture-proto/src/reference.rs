@@ -127,6 +127,119 @@ fn parse_chapter_verse(tail: &str) -> Option<(u16, u16)> {
     Some((c.trim().parse().ok()?, v.trim().parse().ok()?))
 }
 
+/// An inclusive span of verses — `John 3:16`, `John 3:16-20`,
+/// `John 3:20-7:26`, or `Genesis 4:3-Exodus 15:17`.
+///
+/// A single verse is the degenerate range with `start == end`. Ordering
+/// uses the global `BBCCCVVV` key, so [`VerseRange::contains`] works
+/// across chapter and book boundaries — handy for structural analysis of
+/// a passage that spans books.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerseRange {
+    pub start: VerseId,
+    pub end: VerseId,
+}
+
+impl VerseRange {
+    /// A range covering a single verse.
+    #[must_use]
+    pub fn single(verse: VerseId) -> Self {
+        Self {
+            start: verse,
+            end: verse,
+        }
+    }
+
+    /// Does this range cover `verse`? Inclusive, by canonical order.
+    #[must_use]
+    pub fn contains(&self, verse: VerseId) -> bool {
+        let n = verse.numeric();
+        self.start.numeric() <= n && n <= self.end.numeric()
+    }
+
+    /// Whether the range is a single verse.
+    #[must_use]
+    pub fn is_single(&self) -> bool {
+        self.start == self.end
+    }
+
+    /// Parse a reference that may be a single verse or a range. The left
+    /// side is a full reference (`John 3:16`); the right side of a `-`
+    /// (or `–`) may be a bare verse (`20`, same book+chapter), a
+    /// `chapter:verse` (`7:26`, same book), or a full reference
+    /// (`Exodus 15:17`).
+    pub fn parse(s: &str) -> Result<Self, RefError> {
+        let s = s.trim();
+        let Some((left, right)) = s.split_once(['-', '\u{2013}']) else {
+            return Ok(Self::single(VerseId::parse(s)?));
+        };
+        let start = VerseId::parse(left.trim())?;
+        let end = parse_range_end(right.trim(), start)?;
+        if end.numeric() < start.numeric() {
+            return Err(RefError::BadNumbers(s.to_string()));
+        }
+        Ok(Self { start, end })
+    }
+
+    /// `OSIS` form: `John.3.16` for a single verse, else
+    /// `John.3.16-John.3.20`.
+    #[must_use]
+    pub fn osis(&self) -> String {
+        if self.is_single() {
+            self.start.osis()
+        } else {
+            format!("{}-{}", self.start.osis(), self.end.osis())
+        }
+    }
+}
+
+/// Resolve the right-hand side of a range against the start reference,
+/// filling in an omitted book and/or chapter.
+fn parse_range_end(right: &str, start: VerseId) -> Result<VerseId, RefError> {
+    if right.chars().any(|c| c.is_ascii_alphabetic()) {
+        // Full reference, e.g. `Exodus 15:17` or `Exod.15.17`.
+        VerseId::parse(right)
+    } else if let Some((c, v)) = parse_chapter_verse(right) {
+        // `chapter:verse` in the start's book.
+        Ok(VerseId::new(start.book, c, v))
+    } else if let Ok(v) = right.parse::<u16>() {
+        // Bare verse number in the start's book + chapter.
+        Ok(VerseId::new(start.book, start.chapter, v))
+    } else {
+        Err(RefError::BadNumbers(right.to_string()))
+    }
+}
+
+impl std::fmt::Display for VerseRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (s, e) = (self.start, self.end);
+        if self.is_single() {
+            write!(f, "{s}")
+        } else if s.book == e.book && s.chapter == e.chapter {
+            write!(
+                f,
+                "{} {}:{}\u{2013}{}",
+                s.book.name(),
+                s.chapter,
+                s.verse,
+                e.verse
+            )
+        } else if s.book == e.book {
+            write!(
+                f,
+                "{} {}:{}\u{2013}{}:{}",
+                s.book.name(),
+                s.chapter,
+                s.verse,
+                e.chapter,
+                e.verse
+            )
+        } else {
+            write!(f, "{s}\u{2013}{e}")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,6 +293,60 @@ mod tests {
             VerseId::parse("John x:y"),
             Err(RefError::BadNumbers(_))
         ));
+    }
+
+    #[test]
+    fn range_parses_all_four_shapes() {
+        // single verse
+        let r = VerseRange::parse("John 3:16").unwrap();
+        assert!(r.is_single());
+        assert_eq!(r.start, john_3_16());
+
+        // same chapter: John 3:16-20
+        let r = VerseRange::parse("John 3:16-20").unwrap();
+        assert_eq!(r.start, VerseId::parse("John 3:16").unwrap());
+        assert_eq!(r.end, VerseId::parse("John 3:20").unwrap());
+
+        // cross-chapter, same book: John 3:20-7:26
+        let r = VerseRange::parse("John 3:20-7:26").unwrap();
+        assert_eq!(r.start, VerseId::parse("John 3:20").unwrap());
+        assert_eq!(r.end, VerseId::parse("John 7:26").unwrap());
+
+        // cross-book: Genesis 4:3-Exodus 15:17
+        let r = VerseRange::parse("Genesis 4:3-Exodus 15:17").unwrap();
+        assert_eq!(r.start, VerseId::parse("Genesis 4:3").unwrap());
+        assert_eq!(r.end, VerseId::parse("Exodus 15:17").unwrap());
+    }
+
+    #[test]
+    fn range_contains_across_boundaries() {
+        let r = VerseRange::parse("Genesis 4:3-Exodus 15:17").unwrap();
+        assert!(r.contains(VerseId::parse("Genesis 50:1").unwrap()));
+        assert!(r.contains(VerseId::parse("Exodus 15:17").unwrap()));
+        assert!(!r.contains(VerseId::parse("Exodus 15:18").unwrap()));
+        assert!(!r.contains(VerseId::parse("Genesis 4:2").unwrap()));
+    }
+
+    #[test]
+    fn range_display_and_rejects_backwards() {
+        assert_eq!(
+            VerseRange::parse("John 3:16-20").unwrap().to_string(),
+            "John 3:16\u{2013}20"
+        );
+        assert_eq!(
+            VerseRange::parse("John 3:20-7:26").unwrap().to_string(),
+            "John 3:20\u{2013}7:26"
+        );
+        assert_eq!(
+            VerseRange::parse("Genesis 4:3-Exodus 15:17")
+                .unwrap()
+                .to_string(),
+            "Genesis 4:3\u{2013}Exodus 15:17"
+        );
+        assert!(
+            VerseRange::parse("John 3:20-3:16").is_err(),
+            "backwards range rejected"
+        );
     }
 
     #[test]

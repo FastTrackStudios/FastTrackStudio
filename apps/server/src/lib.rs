@@ -785,7 +785,10 @@ pub(crate) async fn build_org_state(
         // no translations.
         let scripture =
             scripture::Store::load_resource_root(&org_root.resources_dir().join("bible"))
-                .map_err(|e| eyre::eyre!("load scripture: {e}"))?;
+                .map_err(|e| eyre::eyre!("load scripture: {e}"))?
+                // The vault powers per-verse backlinks: notes that link
+                // `[[John 3:16]]` surface in the reader.
+                .with_vault(vault_root.clone());
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.

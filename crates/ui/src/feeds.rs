@@ -560,6 +560,20 @@ pub async fn fetch_chapter(
         .map_err(|e| format!("{slug}: chapter {book} {chapter}: {e:?}"))
 }
 
+/// Per-verse backlinks for a chapter — vault notes that link each verse.
+pub async fn fetch_chapter_backlinks(
+    slug: &str,
+    book: &str,
+    chapter: u16,
+) -> Result<Vec<scripture_proto::VerseBacklinks>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .chapter_backlinks(book.to_owned(), chapter)
+        .await
+        .map_err(|e| format!("{slug}: backlinks {book} {chapter}: {e:?}"))
+}
+
 // ── Inventory ───────────────────────────────────────────────────────
 
 /// Every inventory item in the org's vault (`type: item` gear /

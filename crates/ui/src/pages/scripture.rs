@@ -9,11 +9,14 @@
 //! Read-only: there's no editing here. Verses come from `ChapterView`
 //! DTOs; the heavy `VerseId`/`Book` logic stays server-side.
 
+use std::collections::BTreeMap;
+
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use scripture_proto::{Book, ChapterView};
+use scripture_proto::{Book, ChapterView, VerseBacklinks};
 
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::routes::Route;
 
 const CTRL_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
      focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
@@ -54,6 +57,24 @@ pub fn ScriptureView() -> Element {
     let pending = view.read().is_none();
     let chapter_view: Option<ChapterView> = view.read().clone().flatten();
     let chapter_count = chapter_view.as_ref().map_or(1, |c| c.chapter_count);
+
+    // Per-verse backlinks for this chapter (vault notes that link a
+    // verse, including span links like `[[John 3:16-20]]`). Independent
+    // of translation, so it doesn't re-fetch when the edition changes.
+    let backlinks = use_resource(move || async move {
+        let s = slug()?;
+        crate::feeds::fetch_chapter_backlinks(&s, &book(), chapter())
+            .await
+            .ok()
+    });
+    let backlink_map: BTreeMap<u16, VerseBacklinks> = backlinks
+        .read()
+        .clone()
+        .flatten()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| (b.verse, b))
+        .collect();
 
     let books: Vec<&'static str> = (1..=66)
         .filter_map(Book::from_ordinal)
@@ -117,12 +138,34 @@ pub fn ScriptureView() -> Element {
                     }
                     div { class: "mt-3 flex flex-col gap-2 leading-relaxed",
                         for v in c.verses.iter() {
-                            p { id: "{v.osis}", class: "scroll-mt-20",
-                                span {
-                                    class: "mr-2 select-none align-super text-xs font-semibold text-muted-foreground",
-                                    "{v.verse}"
+                            div { class: "flex flex-col",
+                                p { id: "{v.osis}", class: "scroll-mt-20",
+                                    span {
+                                        class: "mr-2 select-none align-super text-xs font-semibold text-muted-foreground",
+                                        "{v.verse}"
+                                    }
+                                    span { "{v.text}" }
+                                    if let Some(bl) = backlink_map.get(&v.verse) {
+                                        span {
+                                            class: "ml-2 select-none align-super text-xs text-primary",
+                                            title: "{bl.notes.len()} linked note(s)",
+                                            "🔗{bl.notes.len()}"
+                                        }
+                                    }
                                 }
-                                span { "{v.text}" }
+                                // Linked notes — click through to the note.
+                                if let Some(bl) = backlink_map.get(&v.verse) {
+                                    div { class: "ml-6 mt-1 flex flex-col gap-0.5 border-l border-border pl-3",
+                                        for n in bl.notes.iter() {
+                                            Link {
+                                                to: Route::VaultRoute { path: n.note_path.clone() },
+                                                class: "text-xs text-muted-foreground hover:text-foreground",
+                                                title: "{n.excerpt}",
+                                                "↳ {n.note_title}"
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
