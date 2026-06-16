@@ -291,10 +291,17 @@ build on per-keystroke string CRDT writes until that upgrade lands.
      (noisy `73-JHNengwebp.usfm` names, front matter) into a clean `<TX>/<BOOK>.usfm`
      translation folder; `Bible::load_dir` loads it. Tests use a tiny inline fixture.
      19 tests pass, clippy clean.
-   - ⬜ **Remaining:** decide resource placement (shared `<data_root>/resources/` vs
-     per-org `<org>/resources/`) + add the `OrgRoot` path helper; **install the full WEB
-     corpus** there (have it staged) and **BSB**; add the versification map (Copenhagen
-     Alliance JSON or STEP TVTMS).
+   - ✅ **Resources Library tier + corpus installed (2026-06-16).**
+     `OrgRoot::resources_dir()` / `bible_dir(tx)` establish the tier (sibling of `vault/`
+     + `wiki/`). Full **WEB** (66 books, 31,098 verses) and **BSB** (66 books, 31,086
+     verses) installed into `~/.task/orgs/codywright/resources/bible/<TX>/` via the
+     `scripture` `install_bible` example — ~37MB on disk, **not** in the repo. Both
+     resolve `John 3:16`; cross-translation comparison works (same `VerseId`, different
+     text). Per-org placement (rides per-org sync); sync wiring for `resources/` is a
+     later step.
+   - ⬜ **Slice-1 leftover (deferred):** versification map. WEB + BSB share English
+     versification so they align directly today; the Copenhagen/TVTMS map is only needed
+     once we add a differently-numbered text (LXX/Hebrew/Vulgate) — do it then.
 2. **Reader + permalinks.** Chapter reader route, verse blocks, `[[John 3:16]]` linking,
    backlinks per verse via `BlockIndex`.
 3. **Translation layer.** Swap + side-by-side parallel; wire ESV API behind a user key.
