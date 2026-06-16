@@ -27,8 +27,9 @@ pub mod translation;
 pub use book::Book;
 pub use reference::{RefError, ScriptureRef, VerseId, VerseRange};
 pub use service::{
-    ChapterView, ComparisonRow, ComparisonView, LexiconEntry, Occurrence, ScriptureError,
-    ScriptureService, TranslationInfo, VerseBacklink, VerseBacklinks, VerseLine, WordToken,
+    ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry, Occurrence,
+    OrigEditionInfo, ScriptureError, ScriptureService, TranslationInfo, VerseBacklink,
+    VerseBacklinks, VerseLine, WordToken,
 };
 pub use translation::{Availability, Translation};
 

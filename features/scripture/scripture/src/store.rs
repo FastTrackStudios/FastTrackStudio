@@ -7,19 +7,20 @@
 //! `compare` happily mixes the two. Bundled text is immutable, so the
 //! in-memory side needs no lock.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use scripture_proto::{
-    Book, ChapterView, ComparisonRow, ComparisonView, LexiconEntry, Occurrence, ScriptureError,
-    ScriptureService, Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId,
-    VerseLine, VerseRange, WordToken,
+    Book, ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry, Occurrence,
+    OrigEditionInfo, ScriptureError, ScriptureService, Translation, TranslationInfo, VerseBacklink,
+    VerseBacklinks, VerseId, VerseLine, VerseRange, WordToken,
 };
 
 use crate::api::{ApiTranslation, fetch_chapter};
 use crate::bible::{Bible, LoadError};
 use crate::lexicon::Lexicon;
+use crate::original::OrigText;
 
 /// Default cap on concordance results when the caller passes `limit = 0`.
 const DEFAULT_OCCURRENCE_LIMIT: usize = 150;
@@ -33,6 +34,11 @@ pub struct Store {
     http: reqwest::Client,
     /// Strong's lexicon for word study (`None` ⇒ not installed).
     lexicon: Arc<Lexicon>,
+    /// Resource root holding original-language editions
+    /// (`<org>/resources/original/`), loaded lazily.
+    originals_root: Option<PathBuf>,
+    /// Lazily-loaded original-language editions, keyed by id (uppercase).
+    originals: Arc<Mutex<HashMap<String, Arc<OrigText>>>>,
     /// Vault to scan for `[[John 3:16]]` backlinks. `None` ⇒ no backlinks.
     vault_root: Option<PathBuf>,
 }
@@ -50,8 +56,36 @@ impl Store {
             api: Arc::new(Vec::new()),
             http: reqwest::Client::new(),
             lexicon: Arc::new(Lexicon::default()),
+            originals_root: None,
+            originals: Arc::new(Mutex::new(HashMap::new())),
             vault_root: None,
         }
+    }
+
+    /// Point the store at the original-language editions root
+    /// (`<org>/resources/original/`). Editions load lazily on first use.
+    #[must_use]
+    pub fn with_originals_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.originals_root = Some(root.into());
+        self
+    }
+
+    /// Load (and cache) one original-language edition by id.
+    fn original(&self, edition: &str) -> Result<Arc<OrigText>, ScriptureError> {
+        let key = edition.trim().to_ascii_uppercase();
+        let mut cache = self.originals.lock().expect("originals cache poisoned");
+        if let Some(text) = cache.get(&key) {
+            return Ok(text.clone());
+        }
+        let root = self
+            .originals_root
+            .as_ref()
+            .ok_or_else(|| ScriptureError::NotFound("no original-language editions".into()))?;
+        let text = OrigText::load_dir(&root.join(&key))
+            .map_err(|_| ScriptureError::NotFound(format!("edition {key:?}")))?;
+        let arc = Arc::new(text);
+        cache.insert(key, arc.clone());
+        Ok(arc)
     }
 
     /// Register API-backed editions (ESV / NIV).
@@ -416,6 +450,89 @@ impl ScriptureService for Store {
             })
             .collect())
     }
+
+    fn original_editions(&self) -> Result<Vec<OrigEditionInfo>, ScriptureError> {
+        let Some(root) = &self.originals_root else {
+            return Ok(Vec::new());
+        };
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return Ok(Vec::new());
+        };
+        let mut out: Vec<OrigEditionInfo> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .map(|dir| {
+                let id = dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                OrigText::read_meta(&dir).map_or_else(
+                    || OrigEditionInfo {
+                        id: id.clone(),
+                        name: id.clone(),
+                        language: String::new(),
+                    },
+                    |m| OrigEditionInfo {
+                        id: m.id,
+                        name: m.name,
+                        language: m.language,
+                    },
+                )
+            })
+            .collect();
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(out)
+    }
+
+    fn interlinear(
+        &self,
+        edition: &str,
+        reference: &str,
+    ) -> Result<Vec<InterlinearWord>, ScriptureError> {
+        let id = VerseId::parse(reference)
+            .map_err(|e| ScriptureError::BadRequest(format!("{reference:?}: {e}")))?;
+        let text = self.original(edition)?;
+        let words = text.words_of(id);
+        if words.is_empty() {
+            return Err(ScriptureError::NotFound(format!(
+                "{reference} in {edition}"
+            )));
+        }
+        Ok(words
+            .iter()
+            .map(|w| {
+                // Fill lemma / translit / gloss from the lexicon where the
+                // edition itself doesn't carry them (e.g. OSHB).
+                let lex = self.lexicon.get(&w.strong);
+                let fill = |own: &str, from: Option<&str>| {
+                    if own.is_empty() {
+                        from.unwrap_or_default().to_string()
+                    } else {
+                        own.to_string()
+                    }
+                };
+                InterlinearWord {
+                    word: w.word.clone(),
+                    translit: fill(&w.translit, lex.map(|e| e.translit.as_str())),
+                    lemma: fill(&w.lemma, lex.map(|e| e.lemma.as_str())),
+                    strong: w.strong.clone(),
+                    morph: w.morph.clone(),
+                    gloss: fill(
+                        &w.gloss,
+                        lex.map(|e| {
+                            if e.kjv_def.is_empty() {
+                                e.definition.as_str()
+                            } else {
+                                e.kjv_def.as_str()
+                            }
+                        }),
+                    ),
+                }
+            })
+            .collect())
+    }
 }
 
 /// Every `(book, chapter)` whose verses intersect `start..=end`,
@@ -570,6 +687,56 @@ mod tests {
         assert!(matches!(
             s.word_study("NIV", "John 3:16"),
             Err(ScriptureError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn interlinear_enriches_from_lexicon() {
+        use crate::original::{OrigText, OrigWord};
+        let dir = tempfile::tempdir().unwrap();
+        let ed = dir.path().join("OSHB");
+        std::fs::create_dir_all(&ed).unwrap();
+        // An OSHB-style word: Strong's present, lemma/translit/gloss empty.
+        let text = OrigText::from_verses([(
+            VerseId::parse("Genesis 1:1").unwrap(),
+            vec![OrigWord {
+                word: "אֱלֹהִים".into(),
+                translit: String::new(),
+                lemma: String::new(),
+                strong: "H0430".into(),
+                morph: "HNcmpa".into(),
+                gloss: String::new(),
+            }],
+        )]);
+        std::fs::write(ed.join("text.jsonl"), text.to_jsonl()).unwrap();
+        std::fs::write(
+            ed.join("meta.json"),
+            r#"{"id":"OSHB","name":"Westminster Hebrew","language":"Hebrew","license":"x"}"#,
+        )
+        .unwrap();
+        let lex = Lexicon::from_json(
+            r#"{"H430":{"lemma":"אֱלֹהִים","translit":"'Elohiym","strongs_def":" God","kjv_def":"God"}}"#,
+        )
+        .unwrap();
+        let s = Store::from_bibles([])
+            .with_lexicon(lex)
+            .with_originals_root(dir.path().to_path_buf());
+
+        assert!(
+            s.original_editions()
+                .unwrap()
+                .iter()
+                .any(|e| e.id == "OSHB")
+        );
+        let il = s.interlinear("oshb", "Genesis 1:1").unwrap(); // case-insensitive id
+        assert_eq!(il.len(), 1);
+        assert_eq!(il[0].word, "אֱלֹהִים");
+        assert_eq!(il[0].strong, "H0430"); // source-faithful preserved
+        assert_eq!(il[0].lemma, "אֱלֹהִים"); // filled via H0430 → H430 normalization
+        assert_eq!(il[0].gloss, "God");
+        assert!(matches!(
+            s.interlinear("OSHB", "John 3:16"),
+            Err(ScriptureError::NotFound(_))
         ));
     }
 

@@ -67,11 +67,14 @@ impl Lexicon {
         Ok(Self { entries })
     }
 
-    /// Look up one code (case-insensitive on the `G`/`H` prefix isn't
-    /// needed — codes are stored as upper-case `G25`).
+    /// Look up one code. Accepts source-faithful forms (`G0025`,
+    /// `H0376G`) by normalizing to the lexicon key (`G25`, `H376`).
     #[must_use]
     pub fn get(&self, strongs: &str) -> Option<&LexiconEntry> {
-        self.entries.get(strongs.trim())
+        let key = normalize_strongs(strongs);
+        self.entries
+            .get(&key)
+            .or_else(|| self.entries.get(strongs.trim()))
     }
 
     #[must_use]
@@ -107,6 +110,24 @@ fn load_json(text: &str, out: &mut BTreeMap<String, LexiconEntry>) -> Result<(),
     Ok(())
 }
 
+/// Canonicalize a Strong's code to the OpenScriptures lexicon key form:
+/// strip leading zeros and any trailing disambiguation letter, keep the
+/// `G`/`H` prefix. `G0025` → `G25`, `H0376G` → `H376`, `G2424G` → `G2424`.
+/// Non-Strong's input is returned trimmed and unchanged.
+#[must_use]
+pub fn normalize_strongs(raw: &str) -> String {
+    let raw = raw.trim();
+    let prefix = match raw.chars().next() {
+        Some(c @ ('G' | 'H' | 'g' | 'h')) => c.to_ascii_uppercase(),
+        _ => return raw.to_string(),
+    };
+    let digits: String = raw[1..].chars().take_while(char::is_ascii_digit).collect();
+    match digits.parse::<u32>() {
+        Ok(n) => format!("{prefix}{n}"),
+        Err(_) => raw.to_string(),
+    }
+}
+
 /// Extract the embedded JSON object from an OpenScriptures `.js` module
 /// (`… var x = { … }; module.exports = x;`). Returns the `{ … }` slice.
 #[must_use]
@@ -134,6 +155,23 @@ mod tests {
         assert_eq!(g26.translit, "agápē");
         assert_eq!(g26.definition, "love");
         assert!(lex.get("G999").is_none());
+    }
+
+    #[test]
+    fn normalizes_strongs_forms() {
+        assert_eq!(normalize_strongs("G0025"), "G25");
+        assert_eq!(normalize_strongs("H0376G"), "H376");
+        assert_eq!(normalize_strongs("G2424G"), "G2424");
+        assert_eq!(normalize_strongs("H7225"), "H7225");
+        assert_eq!(normalize_strongs("g25"), "G25");
+        assert_eq!(normalize_strongs(""), "");
+    }
+
+    #[test]
+    fn get_accepts_source_faithful_codes() {
+        let lex = Lexicon::from_json(SAMPLE).unwrap();
+        // SAMPLE has G25; a STEPBible-style "G0025" must still resolve.
+        assert_eq!(lex.get("G0025").unwrap().lemma, "ἀγαπάω");
     }
 
     #[test]

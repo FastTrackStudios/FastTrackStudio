@@ -73,6 +73,15 @@ impl OrigText {
         }
     }
 
+    /// Read just an edition's `meta.json` (cheap — no `text.jsonl`).
+    /// Used to list editions without loading their words.
+    #[must_use]
+    pub fn read_meta(dir: &Path) -> Option<OrigMeta> {
+        std::fs::read_to_string(dir.join("meta.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+    }
+
     /// Load an edition directory (`text.jsonl` + optional `meta.json`).
     pub fn load_dir(dir: &Path) -> Result<Self, LoadError> {
         let jsonl = dir.join("text.jsonl");

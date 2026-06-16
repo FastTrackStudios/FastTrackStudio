@@ -38,13 +38,14 @@ pub use backlinks::{RangeBacklink, scan_vault};
 pub use bible::{Bible, LoadError};
 pub use compare::{CompareSpec, extract_compare_specs};
 pub use install::{InstallError, install_usfm_dir};
-pub use lexicon::{Lexicon, js_to_json};
+pub use lexicon::{Lexicon, js_to_json, normalize_strongs};
 pub use original::{OrigMeta, OrigText, OrigVerse, OrigWord};
 pub use refs::{VerseRefHit, extract_verse_refs};
 pub use scripture_proto::{
-    Availability, Book, ChapterView, ComparisonRow, ComparisonView, LexiconEntry, Occurrence,
-    RefError, ScriptureError, ScriptureRef, ScriptureService, Translation, TranslationInfo,
-    VerseBacklink, VerseBacklinks, VerseId, VerseLine, VerseRange, WordToken,
+    Availability, Book, ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry,
+    Occurrence, OrigEditionInfo, RefError, ScriptureError, ScriptureRef, ScriptureService,
+    Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine, VerseRange,
+    WordToken,
 };
 pub use store::Store;
 pub use usfm::{UsfmError, Verse, Word, parse_book};

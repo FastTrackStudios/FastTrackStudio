@@ -819,7 +819,10 @@ pub(crate) async fn build_org_state(
                 // `[[John 3:16]]` surface in the reader.
                 .with_vault(vault_root.clone())
                 .with_api(scripture_api)
-                .with_lexicon(scripture_lexicon);
+                .with_lexicon(scripture_lexicon)
+                // Original-language editions (TAGNT/TAHOT/SBLGNT/OSHB),
+                // loaded lazily per edition on first interlinear request.
+                .with_originals_root(org_root.resources_dir().join("original"));
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.

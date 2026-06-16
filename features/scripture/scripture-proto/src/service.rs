@@ -150,6 +150,30 @@ pub struct Occurrence {
     pub text: String,
 }
 
+/// One installed original-language edition, for the picker.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct OrigEditionInfo {
+    pub id: String,
+    pub name: String,
+    pub language: String,
+}
+
+/// One word in an interlinear line — the original word with its lemma,
+/// parsing, and gloss (filled from the lexicon where the edition itself
+/// doesn't carry them).
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct InterlinearWord {
+    /// Surface form (Greek / pointed Hebrew).
+    pub word: String,
+    pub translit: String,
+    pub lemma: String,
+    /// Source-faithful Strong's (`G0025`, `H0376G`), or empty.
+    pub strong: String,
+    /// Morphology / parsing code.
+    pub morph: String,
+    pub gloss: String,
+}
+
 #[architect::rpc]
 pub trait ScriptureService {
     /// Installed translations, bundled editions first.
@@ -211,4 +235,16 @@ pub trait ScriptureService {
         translation: &str,
         limit: u32,
     ) -> Result<Vec<Occurrence>, ScriptureError>;
+
+    /// Installed original-language editions (TAGNT / TAHOT / SBLGNT / OSHB).
+    fn original_editions(&self) -> Result<Vec<OrigEditionInfo>, ScriptureError>;
+
+    /// The interlinear breakdown of a verse in an original-language
+    /// edition — each original word with lemma, parsing and gloss, the
+    /// gaps filled from the lexicon.
+    fn interlinear(
+        &self,
+        edition: &str,
+        reference: &str,
+    ) -> Result<Vec<InterlinearWord>, ScriptureError>;
 }
