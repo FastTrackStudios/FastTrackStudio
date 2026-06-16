@@ -325,6 +325,15 @@ build on per-keystroke string CRDT writes until that upgrade lands.
      last-read position. (Note: backlinks use a vault scan, not `BlockIndex` — verses
      aren't vault blocks; the scan keys by `VerseId`, which is the right model here.)
 3. **Translation layer.** Swap + side-by-side parallel; wire ESV API behind a user key.
+   - ✅ **Comparison + translation-qualified refs (2026-06-16).** Reader has a Compare
+     panel (reference + translations → parallel verse×translation table), backed by
+     `ScriptureService::compare`. References can pin an edition: `[[John 3:16@ESV]]`
+     (`ScriptureRef`). A markdown `compare` fenced block declares a comparison
+     (`extract_compare_specs` / `CompareSpec`) for a future inline renderer. Works
+     across single verses and cross-book ranges; verified on WEB + BSB.
+   - ⬜ **Remaining:** translation swap re-fetch is done; **wire ESV/NIV API** behind a
+     user key (API-only editions); inline rendering of `compare` blocks inside notes;
+     versification mapping (needed once a differently-numbered edition is added).
 4. **Strong's + lexicons.** Bundle STEP TAGNT/TAHOT + Strong's/BDB/Thayer's; click-word →
    lexicon page; every-occurrence concordance (backlinks query).
 5. **Annotations.** Typed (NET) + two-level (ESV) anchoring; vault-markdown bodies.
