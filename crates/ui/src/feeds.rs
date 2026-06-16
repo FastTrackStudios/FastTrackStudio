@@ -530,6 +530,36 @@ pub async fn create_location(
         .map_err(|e| format!("{slug}: create location: {e:?}"))
 }
 
+// ── Scripture ───────────────────────────────────────────────────────
+
+/// Installed Bible translations for the org (bundled editions first).
+pub async fn fetch_translations(
+    slug: &str,
+) -> Result<Vec<scripture_proto::TranslationInfo>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .translations()
+        .await
+        .map_err(|e| format!("{slug}: translations: {e:?}"))
+}
+
+/// One chapter of one translation. `book` accepts any spelling.
+pub async fn fetch_chapter(
+    slug: &str,
+    translation: &str,
+    book: &str,
+    chapter: u16,
+) -> Result<scripture_proto::ChapterView, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    // The generated vox client takes owned `String` args.
+    client
+        .chapter(translation.to_owned(), book.to_owned(), chapter)
+        .await
+        .map_err(|e| format!("{slug}: chapter {book} {chapter}: {e:?}"))
+}
+
 // ── Inventory ───────────────────────────────────────────────────────
 
 /// Every inventory item in the org's vault (`type: item` gear /

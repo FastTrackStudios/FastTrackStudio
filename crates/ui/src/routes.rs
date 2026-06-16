@@ -51,6 +51,9 @@ pub enum Route {
         #[route("/inventory")]
         InventoryRoute {},
 
+        #[route("/scripture")]
+        ScriptureRoute {},
+
         #[route("/milestones")]
         MilestonesRoute {},
 
@@ -162,6 +165,11 @@ fn LocationsRoute() -> Element {
 #[component]
 fn InventoryRoute() -> Element {
     rsx! { pages::inventory::InventoryView {} }
+}
+
+#[component]
+fn ScriptureRoute() -> Element {
+    rsx! { pages::scripture::ScriptureView {} }
 }
 
 #[component]

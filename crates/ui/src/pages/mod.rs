@@ -25,6 +25,7 @@ pub mod projects;
 pub mod recipe_edit;
 pub mod repos;
 pub mod schedule;
+pub mod scripture;
 pub mod settings;
 pub mod task_detail;
 pub mod tasks;
