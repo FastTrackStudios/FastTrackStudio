@@ -783,12 +783,37 @@ pub(crate) async fn build_org_state(
         // library (`<org>/resources/bible/<TX>/`). A missing root yields
         // an empty store, so orgs without an installed corpus just show
         // no translations.
+        // Copyright-restricted editions, fetched live with the user's key
+        // (never bundled). ESV needs a Crossway key; NIV rides API.Bible
+        // and additionally needs that edition's `bible_id` (NIV is tightly
+        // licensed — only works if the key has NIV access).
+        let mut scripture_api = Vec::new();
+        if let Ok(key) = std::env::var("TASK_ESV_API_KEY").or_else(|_| std::env::var("ESV_API_KEY"))
+        {
+            if !key.is_empty() {
+                scripture_api.push(scripture::ApiTranslation::esv(key));
+            }
+        }
+        if let (Ok(key), Ok(bible_id)) = (
+            std::env::var("TASK_API_BIBLE_KEY").or_else(|_| std::env::var("API_BIBLE_KEY")),
+            std::env::var("TASK_API_BIBLE_NIV_ID"),
+        ) {
+            if !key.is_empty() && !bible_id.is_empty() {
+                scripture_api.push(scripture::ApiTranslation::api_bible(
+                    "NIV",
+                    "New International Version",
+                    bible_id,
+                    key,
+                ));
+            }
+        }
         let scripture =
             scripture::Store::load_resource_root(&org_root.resources_dir().join("bible"))
                 .map_err(|e| eyre::eyre!("load scripture: {e}"))?
                 // The vault powers per-verse backlinks: notes that link
                 // `[[John 3:16]]` surface in the reader.
-                .with_vault(vault_root.clone());
+                .with_vault(vault_root.clone())
+                .with_api(scripture_api);
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.

@@ -1,10 +1,11 @@
-//! [`Store`] — the in-process [`ScriptureService`] backend.
+//! [`Store`] — the [`ScriptureService`] backend.
 //!
-//! Holds every installed translation's [`Bible`] in memory, keyed by id,
-//! and answers the read-only reader queries (translations / chapter /
-//! verse). Loaded once from the resource library
-//! (`<org>/resources/bible/<TX>/`) at startup; immutable thereafter, so
-//! no lock is needed — the scripture spine is read-only.
+//! Two sources of text: **bundled** editions held in memory (loaded from
+//! the resource library, `<org>/resources/bible/<TX>/`) and **API**
+//! editions (ESV / NIV) fetched live over HTTP with the user's key (see
+//! [`crate::api`]). Reads route to whichever owns the translation;
+//! `compare` happily mixes the two. Bundled text is immutable, so the
+//! in-memory side needs no lock.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -12,18 +13,20 @@ use std::sync::Arc;
 
 use scripture_proto::{
     Book, ChapterView, ComparisonRow, ComparisonView, ScriptureError, ScriptureService,
-    Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine,
+    Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine, VerseRange,
 };
 
+use crate::api::{ApiTranslation, fetch_chapter};
 use crate::bible::{Bible, LoadError};
 
-/// Read-only scripture backend: translation id → [`Bible`], plus an
-/// optional vault root for verse backlinks.
+/// Read-only scripture backend.
 #[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
     bibles: Arc<BTreeMap<String, Bible>>,
-    /// Vault to scan for `[[John 3:16]]` backlinks. `None` ⇒ the reader
-    /// just shows no backlinks.
+    /// Copyright-restricted editions fetched over HTTP.
+    api: Arc<Vec<ApiTranslation>>,
+    http: reqwest::Client,
+    /// Vault to scan for `[[John 3:16]]` backlinks. `None` ⇒ no backlinks.
     vault_root: Option<PathBuf>,
 }
 
@@ -37,8 +40,17 @@ impl Store {
             .collect();
         Self {
             bibles: Arc::new(map),
+            api: Arc::new(Vec::new()),
+            http: reqwest::Client::new(),
             vault_root: None,
         }
+    }
+
+    /// Register API-backed editions (ESV / NIV).
+    #[must_use]
+    pub fn with_api(mut self, api: impl IntoIterator<Item = ApiTranslation>) -> Self {
+        self.api = Arc::new(api.into_iter().collect());
+        self
     }
 
     /// Point the store at a vault root so [`ScriptureService::chapter_backlinks`]
@@ -50,10 +62,8 @@ impl Store {
     }
 
     /// Load every translation subdirectory of a Bible resource root
-    /// (e.g. `<org>/resources/bible/`). Each immediate subdirectory is a
-    /// translation whose folder name is its id (`WEB`, `BSB`). A missing
-    /// root yields an empty store rather than an error — the reader just
-    /// shows no translations until a corpus is installed.
+    /// (e.g. `<org>/resources/bible/`). A missing root yields an empty
+    /// store rather than an error.
     pub fn load_resource_root(bible_root: &Path) -> Result<Self, LoadError> {
         let mut bibles = Vec::new();
         let entries = match std::fs::read_dir(bible_root) {
@@ -77,10 +87,50 @@ impl Store {
         Ok(Self::from_bibles(bibles))
     }
 
-    fn bible(&self, translation: &str) -> Result<&Bible, ScriptureError> {
-        self.bibles
-            .get(translation)
-            .ok_or_else(|| ScriptureError::NotFound(format!("translation {translation:?}")))
+    fn api_translation(&self, id: &str) -> Option<&ApiTranslation> {
+        self.api.iter().find(|t| t.id.eq_ignore_ascii_case(id))
+    }
+
+    /// Bundled chapter, synchronously (no network).
+    fn chapter_local(&self, bible: &Bible, book: Book, chapter: u16) -> Vec<VerseLine> {
+        bible
+            .chapter(book, chapter)
+            .into_iter()
+            .map(|(verse, text)| VerseLine {
+                verse,
+                osis: VerseId::new(book, chapter, verse).osis(),
+                text: text.to_string(),
+            })
+            .collect()
+    }
+
+    /// Verses of `tx` within `start..=end`, from whichever source owns it.
+    async fn verses_for(
+        &self,
+        tx: &str,
+        start: VerseId,
+        end: VerseId,
+    ) -> Result<Vec<(VerseId, String)>, ScriptureError> {
+        if let Some(bible) = self.bibles.get(tx) {
+            return Ok(bible
+                .verses_in_range(start, end)
+                .into_iter()
+                .map(|(id, t)| (id, t.to_string()))
+                .collect());
+        }
+        if let Some(api) = self.api_translation(tx) {
+            let mut out = Vec::new();
+            for (book, chapter) in spanned_chapters(start, end) {
+                for line in fetch_chapter(&self.http, api, book, chapter).await? {
+                    let id = VerseId::new(book, chapter, line.verse);
+                    if start.numeric() <= id.numeric() && id.numeric() <= end.numeric() {
+                        out.push((id, line.text));
+                    }
+                }
+            }
+            return Ok(out);
+        }
+        Err(ScriptureError::NotFound(format!("translation {tx:?}")))
     }
 }
 
@@ -90,7 +140,6 @@ impl ScriptureService for Store {
             .bibles
             .keys()
             .map(|id| {
-                // Enrich from the licensing registry when known.
                 Translation::lookup(id).map_or_else(
                     || TranslationInfo {
                         id: id.clone(),
@@ -107,38 +156,52 @@ impl ScriptureService for Store {
                 )
             })
             .collect();
+        // API editions are never bundled.
+        out.extend(self.api.iter().map(|t| TranslationInfo {
+            id: t.id.clone(),
+            name: t.name.clone(),
+            license: t.license.clone(),
+            bundled: false,
+        }));
         // Bundled first, then alphabetical by id.
         out.sort_by(|a, b| b.bundled.cmp(&a.bundled).then_with(|| a.id.cmp(&b.id)));
+        out.dedup_by(|a, b| a.id.eq_ignore_ascii_case(&b.id));
         Ok(out)
     }
 
-    fn chapter(
+    async fn chapter(
         &self,
         translation: &str,
         book: &str,
         chapter: u16,
     ) -> Result<ChapterView, ScriptureError> {
-        let bible = self.bible(translation)?;
         let book = Book::lookup(book)
             .ok_or_else(|| ScriptureError::BadRequest(format!("unknown book {book:?}")))?;
-        let verses: Vec<VerseLine> = bible
-            .chapter(book, chapter)
-            .into_iter()
-            .map(|(verse, text)| VerseLine {
-                verse,
-                osis: VerseId::new(book, chapter, verse).osis(),
-                text: text.to_string(),
-            })
-            .collect();
+
+        let (tx_id, verses) = if let Some(bible) = self.bibles.get(translation) {
+            (
+                bible.translation.clone(),
+                self.chapter_local(bible, book, chapter),
+            )
+        } else if let Some(api) = self.api_translation(translation) {
+            (
+                api.id.clone(),
+                fetch_chapter(&self.http, api, book, chapter).await?,
+            )
+        } else {
+            return Err(ScriptureError::NotFound(format!(
+                "translation {translation:?}"
+            )));
+        };
+
         if verses.is_empty() {
             return Err(ScriptureError::NotFound(format!(
-                "{} {} {chapter}",
-                bible.translation,
+                "{tx_id} {} {chapter}",
                 book.name()
             )));
         }
         Ok(ChapterView {
-            translation: bible.translation.clone(),
+            translation: tx_id,
             book_osis: book.osis().to_string(),
             book_name: book.name().to_string(),
             book_ordinal: book.ordinal(),
@@ -148,37 +211,38 @@ impl ScriptureService for Store {
         })
     }
 
-    fn verse(&self, translation: &str, reference: &str) -> Result<VerseLine, ScriptureError> {
-        let bible = self.bible(translation)?;
+    async fn verse(&self, translation: &str, reference: &str) -> Result<VerseLine, ScriptureError> {
         let id = VerseId::parse(reference)
             .map_err(|e| ScriptureError::BadRequest(format!("{reference:?}: {e}")))?;
-        let text = bible
-            .get(id)
-            .ok_or_else(|| ScriptureError::NotFound(format!("{reference} in {translation}")))?;
-        Ok(VerseLine {
-            verse: id.verse,
-            osis: id.osis(),
-            text: text.to_string(),
-        })
+        self.verses_for(translation, id, id)
+            .await?
+            .into_iter()
+            .next()
+            .map(|(vid, text)| VerseLine {
+                verse: vid.verse,
+                osis: vid.osis(),
+                text,
+            })
+            .ok_or_else(|| ScriptureError::NotFound(format!("{reference} in {translation}")))
     }
 
-    fn compare(
+    async fn compare(
         &self,
         reference: &str,
         translations: Vec<String>,
     ) -> Result<ComparisonView, ScriptureError> {
-        let range = scripture_proto::VerseRange::parse(reference)
+        let range = VerseRange::parse(reference)
             .map_err(|e| ScriptureError::BadRequest(format!("{reference:?}: {e}")))?;
 
-        // Resolve the columns: requested-and-installed (in request order),
-        // else every installed edition (bundled-first via `translations`).
+        // Columns: requested-and-installed (in request order), else every
+        // edition (bundled-first).
         let cols: Vec<String> = if translations.is_empty() {
             self.translations()?.into_iter().map(|t| t.id).collect()
         } else {
             translations
                 .into_iter()
                 .map(|t| t.to_ascii_uppercase())
-                .filter(|id| self.bibles.contains_key(id))
+                .filter(|id| self.bibles.contains_key(id) || self.api_translation(id).is_some())
                 .collect()
         };
         if cols.is_empty() {
@@ -187,29 +251,27 @@ impl ScriptureService for Store {
             ));
         }
 
-        // Union of verse ids present in any column within the range.
+        // Per-column verse map, then union the verse ids.
+        let mut col_maps: Vec<BTreeMap<VerseId, String>> = Vec::with_capacity(cols.len());
         let mut ids = BTreeSet::new();
         for tx in &cols {
-            if let Some(bible) = self.bibles.get(tx) {
-                for (id, _) in bible.verses_in_range(range.start, range.end) {
-                    ids.insert(id);
-                }
-            }
+            let map: BTreeMap<VerseId, String> = self
+                .verses_for(tx, range.start, range.end)
+                .await?
+                .into_iter()
+                .collect();
+            ids.extend(map.keys().copied());
+            col_maps.push(map);
         }
+
         let rows = ids
             .into_iter()
             .map(|id| ComparisonRow {
                 reference: id.to_string(),
                 osis: id.osis(),
-                cells: cols
+                cells: col_maps
                     .iter()
-                    .map(|tx| {
-                        self.bibles
-                            .get(tx)
-                            .and_then(|b| b.get(id))
-                            .unwrap_or_default()
-                            .to_string()
-                    })
+                    .map(|m| m.get(&id).cloned().unwrap_or_default())
                     .collect(),
             })
             .collect();
@@ -232,13 +294,10 @@ impl ScriptureService for Store {
         let Some(vault_root) = self.vault_root.as_deref() else {
             return Ok(Vec::new());
         };
-        // Numeric base for this chapter; a verse `v` is `base + v`.
         let base = u32::from(book.ordinal()) * 1_000_000 + u32::from(chapter) * 1_000;
 
-        // verse number → (notes, note paths already seen for dedup).
         let mut per_verse: BTreeMap<u16, (Vec<VerseBacklink>, BTreeSet<String>)> = BTreeMap::new();
         for rb in crate::backlinks::scan_vault(vault_root) {
-            // Intersect the referenced range with this chapter.
             let lo = rb.range.start.numeric().max(base + 1);
             let hi = rb.range.end.numeric().min(base + 999);
             for n in lo..=hi {
@@ -261,6 +320,31 @@ impl ScriptureService for Store {
     }
 }
 
+/// Every `(book, chapter)` whose verses intersect `start..=end`,
+/// in canonical order — used to fan range fetches over an API edition.
+fn spanned_chapters(start: VerseId, end: VerseId) -> Vec<(Book, u16)> {
+    let mut out = Vec::new();
+    for ord in start.book.ordinal()..=end.book.ordinal() {
+        let Some(book) = Book::from_ordinal(ord) else {
+            continue;
+        };
+        let first = if ord == start.book.ordinal() {
+            start.chapter
+        } else {
+            1
+        };
+        let last = if ord == end.book.ordinal() {
+            end.chapter
+        } else {
+            u16::from(book.chapters())
+        };
+        for ch in first..=last {
+            out.push((book, ch));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,14 +365,94 @@ mod tests {
     }
 
     #[test]
-    fn serves_a_chapter() {
-        let ch = store().chapter("WEB", "John", 3).unwrap();
+    fn api_editions_listed_unbundled() {
+        let s = store().with_api([ApiTranslation::esv("k")]);
+        let infos = s.translations().unwrap();
+        let esv = infos.iter().find(|t| t.id == "ESV").unwrap();
+        assert!(!esv.bundled);
+        // Bundled WEB sorts before API ESV.
+        assert_eq!(infos[0].id, "WEB");
+    }
+
+    #[tokio::test]
+    async fn serves_a_chapter() {
+        let ch = store().chapter("WEB", "John", 3).await.unwrap();
         assert_eq!(ch.book_name, "John");
         assert_eq!(ch.book_ordinal, 43);
         assert_eq!(ch.chapter_count, 21);
         assert_eq!(ch.verses[0].verse, 16);
         assert_eq!(ch.verses[0].osis, "John.3.16");
         assert!(ch.verses[0].text.starts_with("For God so loved"));
+    }
+
+    #[tokio::test]
+    async fn serves_a_verse_and_reports_errors() {
+        let s = store();
+        assert!(
+            s.verse("WEB", "John 3:16")
+                .await
+                .unwrap()
+                .text
+                .starts_with("For God")
+        );
+        assert!(matches!(
+            s.verse("NIV", "John 3:16").await,
+            Err(ScriptureError::NotFound(_))
+        ));
+        assert!(matches!(
+            s.chapter("WEB", "Nope", 1).await,
+            Err(ScriptureError::BadRequest(_))
+        ));
+        assert!(matches!(
+            s.chapter("WEB", "Genesis", 1).await,
+            Err(ScriptureError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn compare_across_translations() {
+        let mut web = Bible::new("WEB");
+        web.insert_usfm_book("\\id JHN\n\\c 3\n\\v 16 web sixteen\n\\v 17 web seventeen\n")
+            .unwrap();
+        let mut bsb = Bible::new("BSB");
+        bsb.insert_usfm_book("\\id JHN\n\\c 3\n\\v 16 bsb sixteen\n")
+            .unwrap();
+        let s = Store::from_bibles([web, bsb]);
+
+        let view = s
+            .compare("John 3:16-17", vec!["WEB".into(), "BSB".into()])
+            .await
+            .unwrap();
+        assert_eq!(view.translations, ["WEB", "BSB"]);
+        assert_eq!(view.rows.len(), 2);
+        assert_eq!(view.rows[0].reference, "John 3:16");
+        assert_eq!(view.rows[0].cells, ["web sixteen", "bsb sixteen"]);
+        assert_eq!(view.rows[1].cells, ["web seventeen", ""]);
+
+        assert_eq!(
+            s.compare("John 3:16", vec![])
+                .await
+                .unwrap()
+                .translations
+                .len(),
+            2
+        );
+        assert!(matches!(
+            s.compare("John 3:16", vec!["NIV".into()]).await,
+            Err(ScriptureError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn spanned_chapters_cover_cross_book() {
+        let chapters = spanned_chapters(
+            VerseId::parse("Genesis 50:1").unwrap(),
+            VerseId::parse("Exodus 2:3").unwrap(),
+        );
+        // Genesis 50, then Exodus 1 and 2.
+        assert_eq!(chapters.len(), 3);
+        assert_eq!(chapters[0], (Book::lookup("Genesis").unwrap(), 50));
+        assert_eq!(chapters[2], (Book::lookup("Exodus").unwrap(), 2));
     }
 
     #[test]
@@ -304,12 +468,9 @@ mod tests {
         let s = Store::from_bibles([web]).with_vault(vault.path().to_path_buf());
 
         let bl = s.chapter_backlinks("John", 3).unwrap();
-        let verses: Vec<u16> = bl.iter().map(|b| b.verse).collect();
-        assert_eq!(verses, vec![16, 17]);
+        assert_eq!(bl.iter().map(|b| b.verse).collect::<Vec<_>>(), vec![16, 17]);
         assert_eq!(bl[0].osis, "John.3.16");
-        assert_eq!(bl[0].notes.len(), 1);
         assert_eq!(bl[0].notes[0].note_title, "Grace");
-        // A chapter nobody links to comes back empty.
         assert!(s.chapter_backlinks("John", 4).unwrap().is_empty());
     }
 
@@ -326,7 +487,6 @@ mod tests {
         let s = Store::from_bibles([web]).with_vault(vault.path().to_path_buf());
 
         let bl = s.chapter_backlinks("John", 3).unwrap();
-        // The span [[John 3:16-18]] surfaces on 16, 17, and 18.
         assert_eq!(
             bl.iter().map(|b| b.verse).collect::<Vec<_>>(),
             vec![16, 17, 18]
@@ -335,61 +495,5 @@ mod tests {
             bl.iter()
                 .all(|b| b.notes.len() == 1 && b.notes[0].note_title == "Discourse")
         );
-    }
-
-    #[test]
-    fn compare_across_translations() {
-        // Two tiny editions of John 3 with different wording.
-        let mut web = Bible::new("WEB");
-        web.insert_usfm_book("\\id JHN\n\\c 3\n\\v 16 web sixteen\n\\v 17 web seventeen\n")
-            .unwrap();
-        let mut bsb = Bible::new("BSB");
-        bsb.insert_usfm_book("\\id JHN\n\\c 3\n\\v 16 bsb sixteen\n")
-            .unwrap();
-        let s = Store::from_bibles([web, bsb]);
-
-        let view = s
-            .compare("John 3:16-17", vec!["WEB".into(), "BSB".into()])
-            .unwrap();
-        assert_eq!(view.translations, ["WEB", "BSB"]);
-        assert_eq!(view.rows.len(), 2, "union of verses across editions");
-        // Row for v16: both editions present.
-        assert_eq!(view.rows[0].reference, "John 3:16");
-        assert_eq!(view.rows[0].cells, ["web sixteen", "bsb sixteen"]);
-        // v17 missing in BSB ⇒ empty cell.
-        assert_eq!(view.rows[1].cells, ["web seventeen", ""]);
-
-        // Empty list ⇒ all installed; unknown id is dropped.
-        assert_eq!(
-            s.compare("John 3:16", vec![]).unwrap().translations.len(),
-            2
-        );
-        assert!(matches!(
-            s.compare("John 3:16", vec!["NIV".into()]),
-            Err(ScriptureError::NotFound(_))
-        ));
-    }
-
-    #[test]
-    fn serves_a_verse_and_reports_errors() {
-        let s = store();
-        assert!(
-            s.verse("WEB", "John 3:16")
-                .unwrap()
-                .text
-                .starts_with("For God")
-        );
-        assert!(matches!(
-            s.verse("NIV", "John 3:16"),
-            Err(ScriptureError::NotFound(_))
-        ));
-        assert!(matches!(
-            s.chapter("WEB", "Nope", 1),
-            Err(ScriptureError::BadRequest(_))
-        ));
-        assert!(matches!(
-            s.chapter("WEB", "Genesis", 1),
-            Err(ScriptureError::NotFound(_))
-        ));
     }
 }

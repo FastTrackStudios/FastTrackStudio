@@ -18,6 +18,11 @@ pub enum ScriptureError {
     NotFound(String),
     #[error("bad request: {0}")]
     BadRequest(String),
+    /// An API-backed edition (ESV / NIV) failed upstream — network
+    /// error, bad/missing key, rate limit, or the edition isn't on the
+    /// configured key.
+    #[error("upstream: {0}")]
+    Upstream(String),
 }
 
 /// One installed translation, for the picker.
@@ -113,7 +118,8 @@ pub trait ScriptureService {
     /// One chapter. `book` accepts any spelling (name / OSIS / USFM id /
     /// common abbreviation); `BadRequest` if it doesn't resolve to a
     /// canonical book, `NotFound` if the translation or chapter is absent.
-    fn chapter(
+    /// Async because API-backed editions (ESV / NIV) fetch over HTTP.
+    async fn chapter(
         &self,
         translation: &str,
         book: &str,
@@ -122,14 +128,15 @@ pub trait ScriptureService {
 
     /// A single verse. `reference` is a human or OSIS reference such as
     /// `John 3:16` or `John.3.16`.
-    fn verse(&self, translation: &str, reference: &str) -> Result<VerseLine, ScriptureError>;
+    async fn verse(&self, translation: &str, reference: &str) -> Result<VerseLine, ScriptureError>;
 
     /// Compare a verse or range across translations — the engine behind a
     /// `compare` block. `reference` may span chapters or books
     /// (`Genesis 4:3-Exodus 15:17`). An empty `translations` list compares
     /// every installed edition (bundled-first); otherwise only the listed
-    /// ids that are installed, in the given order.
-    fn compare(
+    /// ids that are installed, in the given order. Mixed bundled + API
+    /// editions are fine.
+    async fn compare(
         &self,
         reference: &str,
         translations: Vec<String>,

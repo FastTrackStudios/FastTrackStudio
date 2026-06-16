@@ -16,6 +16,9 @@ scripture-proto = { workspace = true }
 architect = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }
+# API-backed editions (ESV / NIV) fetch over HTTP.
+reqwest = { workspace = true, default-features = false, features = ["json", "rustls-tls"] }
+serde = { workspace = true, features = ["derive"] }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
@@ -27,6 +30,7 @@ full = ["vox"]
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]
 workspace = true

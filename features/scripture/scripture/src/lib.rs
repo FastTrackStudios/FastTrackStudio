@@ -19,6 +19,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod api;
 pub mod backlinks;
 pub mod bible;
 pub mod compare;
@@ -27,6 +28,7 @@ pub mod refs;
 pub mod store;
 pub mod usfm;
 
+pub use api::{ApiTranslation, Provider};
 pub use backlinks::{RangeBacklink, scan_vault};
 pub use bible::{Bible, LoadError};
 pub use compare::{CompareSpec, extract_compare_specs};
