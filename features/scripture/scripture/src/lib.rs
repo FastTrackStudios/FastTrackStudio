@@ -25,7 +25,9 @@ pub mod bible;
 pub mod compare;
 pub mod install;
 pub mod lexicon;
+pub mod original;
 pub mod refs;
+pub mod stepbible;
 pub mod store;
 pub mod usfm;
 
@@ -35,6 +37,7 @@ pub use bible::{Bible, LoadError};
 pub use compare::{CompareSpec, extract_compare_specs};
 pub use install::{InstallError, install_usfm_dir};
 pub use lexicon::{Lexicon, js_to_json};
+pub use original::{OrigMeta, OrigText, OrigVerse, OrigWord};
 pub use refs::{VerseRefHit, extract_verse_refs};
 pub use scripture_proto::{
     Availability, Book, ChapterView, ComparisonRow, ComparisonView, LexiconEntry, Occurrence,
