@@ -807,13 +807,19 @@ pub(crate) async fn build_org_state(
                 ));
             }
         }
+        // Strong's lexicon for word study (`<org>/resources/lexicon/strongs/`);
+        // empty if not installed.
+        let scripture_lexicon =
+            scripture::Lexicon::load_dir(&org_root.resources_dir().join("lexicon").join("strongs"))
+                .map_err(|e| eyre::eyre!("load lexicon: {e}"))?;
         let scripture =
             scripture::Store::load_resource_root(&org_root.resources_dir().join("bible"))
                 .map_err(|e| eyre::eyre!("load scripture: {e}"))?
                 // The vault powers per-verse backlinks: notes that link
                 // `[[John 3:16]]` surface in the reader.
                 .with_vault(vault_root.clone())
-                .with_api(scripture_api);
+                .with_api(scripture_api)
+                .with_lexicon(scripture_lexicon);
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.

@@ -14,7 +14,7 @@ use std::path::Path;
 
 use scripture_proto::{Book, VerseId};
 
-use crate::usfm::{UsfmError, parse_book};
+use crate::usfm::{UsfmError, Word, parse_book};
 
 /// One translation's verses, addressable by [`VerseId`].
 #[derive(Debug, Clone, Default)]
@@ -22,6 +22,10 @@ pub struct Bible {
     /// Translation id, e.g. `WEB`.
     pub translation: String,
     verses: BTreeMap<VerseId, String>,
+    /// Strong's-tagged words per verse (empty for untagged editions).
+    words: BTreeMap<VerseId, Vec<Word>>,
+    /// Concordance: Strong's code → verses that use it, in order.
+    concordance: BTreeMap<String, Vec<VerseId>>,
 }
 
 /// Failure loading a translation directory.
@@ -43,18 +47,51 @@ impl Bible {
         Self {
             translation: translation.into(),
             verses: BTreeMap::new(),
+            words: BTreeMap::new(),
+            concordance: BTreeMap::new(),
         }
     }
 
     /// Parse a USFM book and merge its verses in. Returns the number of
-    /// verses added.
+    /// verses added. Also indexes each Strong's-tagged word into the
+    /// concordance (a word tagged with several codes lands under each).
     pub fn insert_usfm_book(&mut self, src: &str) -> Result<usize, UsfmError> {
         let parsed = parse_book(src)?;
         let n = parsed.len();
         for v in parsed {
+            for word in &v.words {
+                for code in word.strongs.split_whitespace() {
+                    let entry = self.concordance.entry(code.to_string()).or_default();
+                    if entry.last() != Some(&v.id) {
+                        entry.push(v.id);
+                    }
+                }
+            }
+            if !v.words.is_empty() {
+                self.words.insert(v.id, v.words);
+            }
             self.verses.insert(v.id, v.text);
         }
         Ok(n)
+    }
+
+    /// The Strong's-tagged words of a verse, in order (empty if the verse
+    /// is absent or the edition is untagged).
+    #[must_use]
+    pub fn words_of(&self, id: VerseId) -> &[Word] {
+        self.words.get(&id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every verse using a Strong's code, in canonical order.
+    #[must_use]
+    pub fn occurrences(&self, strongs: &str) -> &[VerseId] {
+        self.concordance.get(strongs).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether this edition carries Strong's tags.
+    #[must_use]
+    pub fn is_tagged(&self) -> bool {
+        !self.concordance.is_empty()
     }
 
     /// Load every `*.usfm` file in a translation directory (e.g.

@@ -24,11 +24,23 @@ use std::sync::LazyLock;
 use regex::Regex;
 use scripture_proto::{Book, VerseId};
 
-/// One parsed verse: its stable id and clean reading text.
+/// One Strong's-tagged word: the surface form as printed and its
+/// Strong's number(s) (`G25`, or occasionally several space-separated).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Word {
+    pub surface: String,
+    pub strongs: String,
+}
+
+/// One parsed verse: its stable id, clean reading text, and the
+/// Strong's-tagged words in order (the untagged connective words don't
+/// appear — only those carrying a `strong=` tag, which are the ones
+/// word study cares about).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Verse {
     pub id: VerseId,
     pub text: String,
+    pub words: Vec<Word>,
 }
 
 /// Why USFM ingest failed.
@@ -90,6 +102,7 @@ fn flush(verses: &mut Vec<Verse>, book: Book, chapter: u16, current: Option<(u16
             verses.push(Verse {
                 id: VerseId::new(book, chapter, num),
                 text,
+                words: extract_words(&raw),
             });
         }
     }
@@ -110,6 +123,28 @@ pub(crate) fn detect_book(src: &str) -> Result<Book, UsfmError> {
 fn leading_u16(s: &str) -> Option<u16> {
     let digits: String = s.trim().chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
+}
+
+/// Pull the Strong's-tagged words out of a raw verse span, in order.
+/// Matches `\w surface|…strong="G25"…\w*` (and the nested `\+w` form);
+/// untagged `\w` runs and plain text are skipped.
+fn extract_words(raw: &str) -> Vec<Word> {
+    // surface = group 1 (up to the `|`), attributes = group 2.
+    static TAGGED: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\\\+?w ([^|\\]+?)\|([^\\]*?)\\\+?w\*").unwrap());
+    static STRONG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"strong="([^"]+)""#).unwrap());
+
+    TAGGED
+        .captures_iter(raw)
+        .filter_map(|c| {
+            let surface = c.get(1)?.as_str().trim();
+            let strongs = STRONG.captures(c.get(2)?.as_str())?.get(1)?.as_str().trim();
+            (!surface.is_empty() && !strongs.is_empty()).then(|| Word {
+                surface: surface.to_string(),
+                strongs: strongs.to_string(),
+            })
+        })
+        .collect()
 }
 
 /// Strip USFM inline markup to plain reading text. See the module docs
@@ -200,5 +235,29 @@ pub(crate) mod tests {
     #[test]
     fn missing_id_is_an_error() {
         assert_eq!(parse_book("\\c 1\n\\v 1 hi\n"), Err(UsfmError::NoId));
+    }
+
+    #[test]
+    fn extracts_strongs_tagged_words() {
+        let verses = parse_book(SAMPLE).unwrap();
+        let v = verses
+            .iter()
+            .find(|v| v.id == VerseId::parse("John 3:16").unwrap())
+            .unwrap();
+        // First tagged word is "For" → G1063 (the nested \+w form).
+        assert_eq!(
+            v.words[0],
+            Word {
+                surface: "For".into(),
+                strongs: "G1063".into()
+            }
+        );
+        assert!(
+            v.words
+                .iter()
+                .any(|w| w.surface == "loved" || w.strongs == "G2316")
+        );
+        // Untagged words (e.g. "born", "perish") aren't in the list.
+        assert!(v.words.iter().all(|w| !w.strongs.is_empty()));
     }
 }

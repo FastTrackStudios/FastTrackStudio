@@ -12,12 +12,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scripture_proto::{
-    Book, ChapterView, ComparisonRow, ComparisonView, ScriptureError, ScriptureService,
-    Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine, VerseRange,
+    Book, ChapterView, ComparisonRow, ComparisonView, LexiconEntry, Occurrence, ScriptureError,
+    ScriptureService, Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId,
+    VerseLine, VerseRange, WordToken,
 };
 
 use crate::api::{ApiTranslation, fetch_chapter};
 use crate::bible::{Bible, LoadError};
+use crate::lexicon::Lexicon;
+
+/// Default cap on concordance results when the caller passes `limit = 0`.
+const DEFAULT_OCCURRENCE_LIMIT: usize = 150;
 
 /// Read-only scripture backend.
 #[derive(Clone, architect::HasDispatcher)]
@@ -26,6 +31,8 @@ pub struct Store {
     /// Copyright-restricted editions fetched over HTTP.
     api: Arc<Vec<ApiTranslation>>,
     http: reqwest::Client,
+    /// Strong's lexicon for word study (`None` ⇒ not installed).
+    lexicon: Arc<Lexicon>,
     /// Vault to scan for `[[John 3:16]]` backlinks. `None` ⇒ no backlinks.
     vault_root: Option<PathBuf>,
 }
@@ -42,6 +49,7 @@ impl Store {
             bibles: Arc::new(map),
             api: Arc::new(Vec::new()),
             http: reqwest::Client::new(),
+            lexicon: Arc::new(Lexicon::default()),
             vault_root: None,
         }
     }
@@ -51,6 +59,26 @@ impl Store {
     pub fn with_api(mut self, api: impl IntoIterator<Item = ApiTranslation>) -> Self {
         self.api = Arc::new(api.into_iter().collect());
         self
+    }
+
+    /// Attach the Strong's lexicon for word study.
+    #[must_use]
+    pub fn with_lexicon(mut self, lexicon: Lexicon) -> Self {
+        self.lexicon = Arc::new(lexicon);
+        self
+    }
+
+    /// A bundled, Strong's-tagged edition for word study, by id.
+    fn tagged_bible(&self, translation: &str) -> Result<&Bible, ScriptureError> {
+        let bible = self.bibles.get(translation).ok_or_else(|| {
+            ScriptureError::BadRequest(format!("{translation:?} is not a bundled edition"))
+        })?;
+        if !bible.is_tagged() {
+            return Err(ScriptureError::BadRequest(format!(
+                "{translation} carries no Strong's tags"
+            )));
+        }
+        Ok(bible)
     }
 
     /// Point the store at a vault root so [`ScriptureService::chapter_backlinks`]
@@ -318,6 +346,76 @@ impl ScriptureService for Store {
             })
             .collect())
     }
+
+    fn lexicon(&self, strongs: &str) -> Result<LexiconEntry, ScriptureError> {
+        self.lexicon
+            .get(strongs.trim())
+            .cloned()
+            .ok_or_else(|| ScriptureError::NotFound(format!("lexicon entry {strongs:?}")))
+    }
+
+    fn word_study(
+        &self,
+        translation: &str,
+        reference: &str,
+    ) -> Result<Vec<WordToken>, ScriptureError> {
+        let id = VerseId::parse(reference)
+            .map_err(|e| ScriptureError::BadRequest(format!("{reference:?}: {e}")))?;
+        let bible = self.tagged_bible(translation)?;
+        let words = bible.words_of(id);
+        if words.is_empty() {
+            return Err(ScriptureError::NotFound(format!(
+                "{reference} in {translation}"
+            )));
+        }
+        Ok(words
+            .iter()
+            .map(|w| {
+                // Enrich from the first Strong's code's lexicon entry.
+                let first = w.strongs.split_whitespace().next().unwrap_or_default();
+                let entry = self.lexicon.get(first);
+                WordToken {
+                    surface: w.surface.clone(),
+                    strongs: w.strongs.clone(),
+                    lemma: entry.map(|e| e.lemma.clone()).unwrap_or_default(),
+                    translit: entry.map(|e| e.translit.clone()).unwrap_or_default(),
+                    gloss: entry
+                        .map(|e| {
+                            if e.kjv_def.is_empty() {
+                                e.definition.clone()
+                            } else {
+                                e.kjv_def.clone()
+                            }
+                        })
+                        .unwrap_or_default(),
+                }
+            })
+            .collect())
+    }
+
+    fn occurrences(
+        &self,
+        strongs: &str,
+        translation: &str,
+        limit: u32,
+    ) -> Result<Vec<Occurrence>, ScriptureError> {
+        let bible = self.tagged_bible(translation)?;
+        let cap = if limit == 0 {
+            DEFAULT_OCCURRENCE_LIMIT
+        } else {
+            limit as usize
+        };
+        Ok(bible
+            .occurrences(strongs.trim())
+            .iter()
+            .take(cap)
+            .map(|id| Occurrence {
+                osis: id.osis(),
+                reference: id.to_string(),
+                text: bible.get(*id).unwrap_or_default().to_string(),
+            })
+            .collect())
+    }
 }
 
 /// Every `(book, chapter)` whose verses intersect `start..=end`,
@@ -440,6 +538,38 @@ mod tests {
         assert!(matches!(
             s.compare("John 3:16", vec!["NIV".into()]).await,
             Err(ScriptureError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn word_study_lexicon_and_concordance() {
+        let mut web = Bible::new("WEB");
+        web.insert_usfm_book(crate::usfm::tests::SAMPLE).unwrap();
+        let lex = Lexicon::from_json(
+            r#"{"G2316":{"lemma":"θεός","translit":"theós","strongs_def":" God","kjv_def":"God"}}"#,
+        )
+        .unwrap();
+        let s = Store::from_bibles([web]).with_lexicon(lex);
+
+        let tokens = s.word_study("WEB", "John 3:16").unwrap();
+        assert_eq!(tokens[0].surface, "For");
+        let god = tokens.iter().find(|t| t.strongs == "G2316").unwrap();
+        assert_eq!(god.lemma, "θεός");
+        assert_eq!(god.gloss, "God");
+
+        assert_eq!(s.lexicon("G2316").unwrap().lemma, "θεός");
+        assert!(matches!(
+            s.lexicon("G9999"),
+            Err(ScriptureError::NotFound(_))
+        ));
+
+        let occ = s.occurrences("G2316", "WEB", 0).unwrap();
+        assert!(occ.iter().any(|o| o.reference == "John 3:16"));
+
+        // Word study needs a tagged bundled edition.
+        assert!(matches!(
+            s.word_study("NIV", "John 3:16"),
+            Err(ScriptureError::BadRequest(_))
         ));
     }
 

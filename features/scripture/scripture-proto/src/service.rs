@@ -110,6 +110,46 @@ pub struct ComparisonView {
     pub rows: Vec<ComparisonRow>,
 }
 
+/// A Strong's lexicon entry — what a Strong's number means.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct LexiconEntry {
+    /// Strong's code, e.g. `G25`.
+    pub strongs: String,
+    /// Original-language headword, e.g. `ἀγάπη`.
+    pub lemma: String,
+    /// Transliteration, e.g. `agápē`.
+    pub translit: String,
+    /// Strong's definition.
+    pub definition: String,
+    /// KJV translation glosses.
+    pub kjv_def: String,
+    /// Etymology / derivation note.
+    pub derivation: String,
+}
+
+/// One word of a verse, broken out for interlinear / word study. The
+/// lexicon fields are filled in when the Strong's code is known.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct WordToken {
+    /// Surface form as printed in the translation.
+    pub surface: String,
+    /// Strong's code(s), e.g. `G25`.
+    pub strongs: String,
+    pub lemma: String,
+    pub translit: String,
+    /// Short gloss (KJV glosses, else the definition).
+    pub gloss: String,
+}
+
+/// One concordance hit — a verse using a Strong's code.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct Occurrence {
+    pub osis: String,
+    /// Display reference, e.g. `John 3:16`.
+    pub reference: String,
+    pub text: String,
+}
+
 #[architect::rpc]
 pub trait ScriptureService {
     /// Installed translations, bundled editions first.
@@ -151,4 +191,24 @@ pub trait ScriptureService {
         book: &str,
         chapter: u16,
     ) -> Result<Vec<VerseBacklinks>, ScriptureError>;
+
+    /// The lexicon entry for a Strong's code (`G25` / `H1`).
+    fn lexicon(&self, strongs: &str) -> Result<LexiconEntry, ScriptureError>;
+
+    /// Word-by-word breakdown of a verse from a Strong's-tagged edition —
+    /// each tagged word with its lemma, transliteration, and gloss.
+    fn word_study(
+        &self,
+        translation: &str,
+        reference: &str,
+    ) -> Result<Vec<WordToken>, ScriptureError>;
+
+    /// Every verse using a Strong's code (the concordance), drawn from
+    /// `translation`'s tagged text, capped at `limit` (0 ⇒ a default cap).
+    fn occurrences(
+        &self,
+        strongs: &str,
+        translation: &str,
+        limit: u32,
+    ) -> Result<Vec<Occurrence>, ScriptureError>;
 }
