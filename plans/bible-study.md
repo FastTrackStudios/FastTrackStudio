@@ -361,11 +361,17 @@ build on per-keystroke string CRDT writes until that upgrade lands.
      Greek NT, lemma+morph, no Strong's) and `oshb::parse_oshb_xml` (Westminster Hebrew,
      OSIS XML via `roxmltree`; Strong's from the lemma attr). Installed **SBLGNT**
      (7,927 v) + **OSHB** (23,213 v). All four editions ~97MB, one schema, not in repo.
-   - ⬜ **Remaining (data → feature):** wire `OrigText` into `Store`/service (interlinear
-     endpoint), normalize Strong's across schemes (STEP `G0025`/`H0376G` vs OpenScriptures
-     `G25`/`H376`) for lexicon cross-ref, reconcile versification between editions (OSHB
-     23k vs TAHOT 21k), then the word-study **UI** (clickable words → lexicon/occurrences,
-     interlinear toggle).
+   - ✅ **Wired into the service (2026-06-16).** `lexicon::normalize_strongs`
+     (`G0025`→`G25`, `H0376G`→`H376`) bridges STEPBible/OSHB codes to the OpenScriptures
+     lexicon; `Lexicon::get` accepts source-faithful forms. `Store` loads editions lazily
+     per-edition (big files) + caches. `ScriptureService::original_editions()` lists them;
+     `interlinear(edition, ref)` returns the per-word breakdown, filling lemma/translit/
+     gloss from the lexicon where the edition lacks them (OSHB glosses now resolve).
+     Verified on real TAGNT + OSHB. Mounted in the server (`with_originals_root`).
+   - ⬜ **Remaining:** reconcile versification between editions (OSHB 23k vs TAHOT 21k —
+     needs the Copenhagen/TVTMS map); word-study **UI** (clickable words →
+     lexicon/occurrences, interlinear toggle); optional memory tuning (offset-index the
+     JSONL instead of full per-edition load).
 5. **Annotations.** Typed (NET) + two-level (ESV) anchoring; vault-markdown bodies.
 6. **TSK cross-references.** Phrase-keyed, target text inlined.
 7. **Entities.** TIPNR → wiki ingest; entity-tag the text; Factbook pages.
