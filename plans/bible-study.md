@@ -311,9 +311,19 @@ build on per-keystroke string CRDT writes until that upgrade lands.
      prev/next chapter nav, verse list. Each verse renders with its OSIS id as the
      element `id` (permalink anchor). Both verify gates pass (task-ui native +
      task-app-web wasm); 22 scripture tests pass.
-   - ⬜ **Remaining:** real `[[John 3:16]]` wikilink resolution from vault notes +
-     per-verse **backlinks via `BlockIndex`** (the Obsidian-killer); click-a-verse to
-     copy/permalink; remember last-read position.
+   - ✅ **Vault→verse backlinks + ranges (2026-06-16).** Notes link a verse with a
+     normal wikilink (`[[John 3:16]]`); the reader surfaces every note that touches a
+     verse — no per-verse files. `VerseRange` parses single verses and spans:
+     `[[John 3:16-20]]` (same chapter), `[[John 3:20-7:26]]` (cross-chapter),
+     `[[Genesis 4:3-Exodus 15:17]]` (cross-book). A span backlinks every verse it
+     covers (overlap computed at query time). `ScriptureService::chapter_backlinks`
+     scans the org vault (`Store::with_vault`); reader shows a per-verse link count +
+     click-through to the linking notes. Verified end-to-end on the real vault.
+   - ⬜ **Remaining:** forward rendering (`[[John 3:16]]` in a *note* renders as a verse
+     link/hover-preview — the vault editor side); cached/watched backlink index instead
+     of per-query scan; click-a-verse in the reader to copy a `[[ref]]`; remember
+     last-read position. (Note: backlinks use a vault scan, not `BlockIndex` — verses
+     aren't vault blocks; the scan keys by `VerseId`, which is the right model here.)
 3. **Translation layer.** Swap + side-by-side parallel; wire ESV API behind a user key.
 4. **Strong's + lexicons.** Bundle STEP TAGNT/TAHOT + Strong's/BDB/Thayer's; click-word →
    lexicon page; every-occurrence concordance (backlinks query).
