@@ -351,10 +351,21 @@ build on per-keystroke string CRDT writes until that upgrade lands.
      `occurrences(code, tx, limit)` concordance. Verified on real WEB — John 3:16 parses
      word-by-word with Greek lemmas. **Known data gap:** eBible WEB/BSB tagging is
      partial (e.g. "love" G25/G26 is untagged) — Phase 2 fixes coverage.
-   - ⬜ **Phase 2 — STEPBible TAGNT + TAHOT:** the full, completely-tagged Greek NT +
-     Hebrew OT *text* with morphology (parsing) → true reverse-interlinear + complete
-     concordance. ⬜ **Phase 3 — SBLGNT + OSHB** as alternate critical editions.
-   - ⬜ **UI:** clickable words in the reader → lexicon + occurrences panel (next).
+   - ✅ **Phase 2 — STEPBible (2026-06-16).** Unified original-language schema
+     `OrigWord {word, translit, lemma, strong, morph, gloss}`; an edition is
+     `<org>/resources/original/<ID>/text.jsonl` + `meta.json` (`OrigText` load/serialize).
+     `stepbible::parse_tagnt_rows`/`parse_tahot_rows`. Installed **TAGNT** (Greek NT,
+     7,948 v / 141k words) + **TAHOT** (Hebrew OT, 21,178 v / 283k words). Complete
+     tagging — John 3:16 now has ἠγάπησεν (G0025) with full morphology.
+   - ✅ **Phase 3 — SBLGNT + OSHB (2026-06-16).** `morphgnt::parse_morphgnt_rows` (SBL
+     Greek NT, lemma+morph, no Strong's) and `oshb::parse_oshb_xml` (Westminster Hebrew,
+     OSIS XML via `roxmltree`; Strong's from the lemma attr). Installed **SBLGNT**
+     (7,927 v) + **OSHB** (23,213 v). All four editions ~97MB, one schema, not in repo.
+   - ⬜ **Remaining (data → feature):** wire `OrigText` into `Store`/service (interlinear
+     endpoint), normalize Strong's across schemes (STEP `G0025`/`H0376G` vs OpenScriptures
+     `G25`/`H376`) for lexicon cross-ref, reconcile versification between editions (OSHB
+     23k vs TAHOT 21k), then the word-study **UI** (clickable words → lexicon/occurrences,
+     interlinear toggle).
 5. **Annotations.** Typed (NET) + two-level (ESV) anchoring; vault-markdown bodies.
 6. **TSK cross-references.** Phrase-keyed, target text inlined.
 7. **Entities.** TIPNR → wiki ingest; entity-tag the text; Factbook pages.
