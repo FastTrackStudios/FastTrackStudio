@@ -193,6 +193,41 @@ impl VerseRange {
     }
 }
 
+/// A verse range with an optional translation qualifier — the parsed
+/// form of a `[[John 3:16@ESV]]` link. The translation is a *display*
+/// choice; the [`range`](Self::range) is still translation-independent,
+/// so backlinks and comparisons key on the range and the qualifier just
+/// says "show me this edition".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptureRef {
+    pub range: VerseRange,
+    /// Uppercased translation id (`ESV`), or `None` for the reader's
+    /// current edition.
+    pub translation: Option<String>,
+}
+
+impl ScriptureRef {
+    /// Parse `John 3:16`, `John 3:16-20`, or a translation-qualified
+    /// `John 3:16@ESV`.
+    pub fn parse(s: &str) -> Result<Self, RefError> {
+        let s = s.trim();
+        if let Some((ref_part, tx)) = s.rsplit_once('@') {
+            let tx = tx.trim();
+            // A bare `@` with no edition is just a malformed ref.
+            let translation = (!tx.is_empty()).then(|| tx.to_ascii_uppercase());
+            Ok(Self {
+                range: VerseRange::parse(ref_part.trim())?,
+                translation,
+            })
+        } else {
+            Ok(Self {
+                range: VerseRange::parse(s)?,
+                translation: None,
+            })
+        }
+    }
+}
+
 /// Resolve the right-hand side of a range against the start reference,
 /// filling in an omitted book and/or chapter.
 fn parse_range_end(right: &str, start: VerseId) -> Result<VerseId, RefError> {
@@ -347,6 +382,24 @@ mod tests {
             VerseRange::parse("John 3:20-3:16").is_err(),
             "backwards range rejected"
         );
+    }
+
+    #[test]
+    fn scripture_ref_parses_translation_qualifier() {
+        let r = ScriptureRef::parse("John 3:16@ESV").unwrap();
+        assert_eq!(r.range, VerseRange::parse("John 3:16").unwrap());
+        assert_eq!(r.translation.as_deref(), Some("ESV"));
+
+        let r = ScriptureRef::parse("John 3:1-21@web").unwrap();
+        assert_eq!(r.range, VerseRange::parse("John 3:1-21").unwrap());
+        assert_eq!(
+            r.translation.as_deref(),
+            Some("WEB"),
+            "translation upper-cased"
+        );
+
+        let r = ScriptureRef::parse("John 3:16").unwrap();
+        assert_eq!(r.translation, None);
     }
 
     #[test]

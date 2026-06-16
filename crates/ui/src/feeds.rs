@@ -560,6 +560,20 @@ pub async fn fetch_chapter(
         .map_err(|e| format!("{slug}: chapter {book} {chapter}: {e:?}"))
 }
 
+/// Compare a verse/range across translations (empty list ⇒ all).
+pub async fn fetch_comparison(
+    slug: &str,
+    reference: &str,
+    translations: Vec<String>,
+) -> Result<scripture_proto::ComparisonView, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .compare(reference.to_owned(), translations)
+        .await
+        .map_err(|e| format!("{slug}: compare {reference}: {e:?}"))
+}
+
 /// Per-verse backlinks for a chapter — vault notes that link each verse.
 pub async fn fetch_chapter_backlinks(
     slug: &str,

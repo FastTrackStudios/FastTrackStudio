@@ -21,6 +21,7 @@
 
 pub mod backlinks;
 pub mod bible;
+pub mod compare;
 pub mod install;
 pub mod refs;
 pub mod store;
@@ -28,11 +29,13 @@ pub mod usfm;
 
 pub use backlinks::{RangeBacklink, scan_vault};
 pub use bible::{Bible, LoadError};
+pub use compare::{CompareSpec, extract_compare_specs};
 pub use install::{InstallError, install_usfm_dir};
 pub use refs::{VerseRefHit, extract_verse_refs};
 pub use scripture_proto::{
-    Availability, Book, ChapterView, RefError, ScriptureError, ScriptureService, Translation,
-    TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine,
+    Availability, Book, ChapterView, ComparisonRow, ComparisonView, RefError, ScriptureError,
+    ScriptureRef, ScriptureService, Translation, TranslationInfo, VerseBacklink, VerseBacklinks,
+    VerseId, VerseLine, VerseRange,
 };
 pub use store::Store;
 pub use usfm::{UsfmError, Verse, parse_book};

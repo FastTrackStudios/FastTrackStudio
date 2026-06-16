@@ -97,6 +97,16 @@ impl Bible {
         self.verses.get(&id).map(String::as_str)
     }
 
+    /// Every verse whose id falls in `start..=end` (inclusive), in order
+    /// — may span chapters and books. Powers range comparisons.
+    #[must_use]
+    pub fn verses_in_range(&self, start: VerseId, end: VerseId) -> Vec<(VerseId, &str)> {
+        self.verses
+            .range(start..=end)
+            .map(|(id, text)| (*id, text.as_str()))
+            .collect()
+    }
+
     /// All verses of a chapter, in order, as `(verse_number, text)`.
     #[must_use]
     pub fn chapter(&self, book: Book, chapter: u16) -> Vec<(u16, &str)> {

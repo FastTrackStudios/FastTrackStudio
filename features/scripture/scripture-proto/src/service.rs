@@ -81,6 +81,30 @@ pub struct VerseBacklinks {
     pub notes: Vec<VerseBacklink>,
 }
 
+/// One verse across the compared translations — a row in a parallel
+/// view. `cells` aligns with [`ComparisonView::translations`]; a missing
+/// verse in some edition is an empty string.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct ComparisonRow {
+    /// Display reference, e.g. `John 3:16`.
+    pub reference: String,
+    pub osis: String,
+    pub cells: Vec<String>,
+}
+
+/// A resolved translation comparison — the data a `compare` block
+/// renders. Row-oriented (verse × translation) so a parallel table drops
+/// straight in.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct ComparisonView {
+    /// Display reference for the whole span, e.g. `John 3:1–21`.
+    pub reference: String,
+    pub osis: String,
+    /// Column order — the translations actually compared.
+    pub translations: Vec<String>,
+    pub rows: Vec<ComparisonRow>,
+}
+
 #[architect::rpc]
 pub trait ScriptureService {
     /// Installed translations, bundled editions first.
@@ -99,6 +123,17 @@ pub trait ScriptureService {
     /// A single verse. `reference` is a human or OSIS reference such as
     /// `John 3:16` or `John.3.16`.
     fn verse(&self, translation: &str, reference: &str) -> Result<VerseLine, ScriptureError>;
+
+    /// Compare a verse or range across translations — the engine behind a
+    /// `compare` block. `reference` may span chapters or books
+    /// (`Genesis 4:3-Exodus 15:17`). An empty `translations` list compares
+    /// every installed edition (bundled-first); otherwise only the listed
+    /// ids that are installed, in the given order.
+    fn compare(
+        &self,
+        reference: &str,
+        translations: Vec<String>,
+    ) -> Result<ComparisonView, ScriptureError>;
 
     /// Per-verse backlinks for a whole chapter: every vault note that
     /// links a verse in `book` `chapter` via a `[[John 3:16]]`-style

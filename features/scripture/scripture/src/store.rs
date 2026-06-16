@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scripture_proto::{
-    Book, ChapterView, ScriptureError, ScriptureService, Translation, TranslationInfo,
-    VerseBacklink, VerseBacklinks, VerseId, VerseLine,
+    Book, ChapterView, ComparisonRow, ComparisonView, ScriptureError, ScriptureService,
+    Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine,
 };
 
 use crate::bible::{Bible, LoadError};
@@ -162,6 +162,66 @@ impl ScriptureService for Store {
         })
     }
 
+    fn compare(
+        &self,
+        reference: &str,
+        translations: Vec<String>,
+    ) -> Result<ComparisonView, ScriptureError> {
+        let range = scripture_proto::VerseRange::parse(reference)
+            .map_err(|e| ScriptureError::BadRequest(format!("{reference:?}: {e}")))?;
+
+        // Resolve the columns: requested-and-installed (in request order),
+        // else every installed edition (bundled-first via `translations`).
+        let cols: Vec<String> = if translations.is_empty() {
+            self.translations()?.into_iter().map(|t| t.id).collect()
+        } else {
+            translations
+                .into_iter()
+                .map(|t| t.to_ascii_uppercase())
+                .filter(|id| self.bibles.contains_key(id))
+                .collect()
+        };
+        if cols.is_empty() {
+            return Err(ScriptureError::NotFound(
+                "no matching translations installed".into(),
+            ));
+        }
+
+        // Union of verse ids present in any column within the range.
+        let mut ids = BTreeSet::new();
+        for tx in &cols {
+            if let Some(bible) = self.bibles.get(tx) {
+                for (id, _) in bible.verses_in_range(range.start, range.end) {
+                    ids.insert(id);
+                }
+            }
+        }
+        let rows = ids
+            .into_iter()
+            .map(|id| ComparisonRow {
+                reference: id.to_string(),
+                osis: id.osis(),
+                cells: cols
+                    .iter()
+                    .map(|tx| {
+                        self.bibles
+                            .get(tx)
+                            .and_then(|b| b.get(id))
+                            .unwrap_or_default()
+                            .to_string()
+                    })
+                    .collect(),
+            })
+            .collect();
+
+        Ok(ComparisonView {
+            reference: range.to_string(),
+            osis: range.osis(),
+            translations: cols,
+            rows,
+        })
+    }
+
     fn chapter_backlinks(
         &self,
         book: &str,
@@ -275,6 +335,39 @@ mod tests {
             bl.iter()
                 .all(|b| b.notes.len() == 1 && b.notes[0].note_title == "Discourse")
         );
+    }
+
+    #[test]
+    fn compare_across_translations() {
+        // Two tiny editions of John 3 with different wording.
+        let mut web = Bible::new("WEB");
+        web.insert_usfm_book("\\id JHN\n\\c 3\n\\v 16 web sixteen\n\\v 17 web seventeen\n")
+            .unwrap();
+        let mut bsb = Bible::new("BSB");
+        bsb.insert_usfm_book("\\id JHN\n\\c 3\n\\v 16 bsb sixteen\n")
+            .unwrap();
+        let s = Store::from_bibles([web, bsb]);
+
+        let view = s
+            .compare("John 3:16-17", vec!["WEB".into(), "BSB".into()])
+            .unwrap();
+        assert_eq!(view.translations, ["WEB", "BSB"]);
+        assert_eq!(view.rows.len(), 2, "union of verses across editions");
+        // Row for v16: both editions present.
+        assert_eq!(view.rows[0].reference, "John 3:16");
+        assert_eq!(view.rows[0].cells, ["web sixteen", "bsb sixteen"]);
+        // v17 missing in BSB ⇒ empty cell.
+        assert_eq!(view.rows[1].cells, ["web seventeen", ""]);
+
+        // Empty list ⇒ all installed; unknown id is dropped.
+        assert_eq!(
+            s.compare("John 3:16", vec![]).unwrap().translations.len(),
+            2
+        );
+        assert!(matches!(
+            s.compare("John 3:16", vec!["NIV".into()]),
+            Err(ScriptureError::NotFound(_))
+        ));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use scripture_proto::{Book, ChapterView, VerseBacklinks};
+use scripture_proto::{Book, ChapterView, ComparisonView, VerseBacklinks};
 
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::routes::Route;
@@ -35,6 +35,11 @@ pub fn ScriptureView() -> Element {
     let mut translation = use_signal(|| "WEB".to_string());
     let mut book = use_signal(|| "John".to_string());
     let mut chapter = use_signal(|| 1u16);
+
+    // Compare panel state.
+    let mut compare_ref = use_signal(String::new);
+    let mut compare_tx = use_signal(String::new);
+    let mut compare_query = use_signal(|| None::<(String, Vec<String>)>);
 
     // Installed translations for the picker.
     let translations = use_resource(move || async move {
@@ -75,6 +80,16 @@ pub fn ScriptureView() -> Element {
         .into_iter()
         .map(|b| (b.verse, b))
         .collect();
+
+    // The on-demand translation comparison.
+    let comparison = use_resource(move || async move {
+        let (reference, txs) = compare_query()?;
+        let s = slug()?;
+        crate::feeds::fetch_comparison(&s, &reference, txs)
+            .await
+            .ok()
+    });
+    let comparison_view: Option<ComparisonView> = comparison.read().clone().flatten();
 
     let books: Vec<&'static str> = (1..=66)
         .filter_map(Book::from_ordinal)
@@ -174,6 +189,74 @@ pub fn ScriptureView() -> Element {
                 crate::states::EmptyState {
                     title: "Nothing to show",
                     hint: "Pick a translation and book — install a corpus into the org's resource library if the list is empty.",
+                }
+            }
+
+            // ── Compare translations ──
+            div { class: "mt-6 flex flex-col gap-3 border-t border-border pt-4",
+                Heading { level: HeadingLevel::H2, "Compare translations" }
+                div { class: "flex flex-wrap items-center gap-2",
+                    input {
+                        class: CTRL_CLS,
+                        placeholder: "John 3:16-18 or Genesis 4:3-Exodus 15:17",
+                        value: "{compare_ref}",
+                        oninput: move |e| compare_ref.set(e.value()),
+                    }
+                    input {
+                        class: CTRL_CLS,
+                        placeholder: "translations (optional, e.g. WEB, BSB)",
+                        value: "{compare_tx}",
+                        oninput: move |e| compare_tx.set(e.value()),
+                    }
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        on_click: move |_| {
+                            let r = compare_ref.read().trim().to_string();
+                            if r.is_empty() {
+                                return;
+                            }
+                            let txs: Vec<String> = compare_tx
+                                .read()
+                                .split([',', ' '])
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.to_uppercase())
+                                .collect();
+                            compare_query.set(Some((r, txs)));
+                        },
+                        "Compare"
+                    }
+                }
+                if let Some(cv) = comparison_view {
+                    div { class: "overflow-x-auto",
+                        table { class: "w-full border-collapse text-sm",
+                            thead {
+                                tr {
+                                    th { class: "border-b border-border px-2 py-1 text-left align-bottom text-xs text-muted-foreground",
+                                        "{cv.reference}"
+                                    }
+                                    for t in cv.translations.iter() {
+                                        th { class: "border-b border-border px-2 py-1 text-left align-bottom text-xs font-semibold",
+                                            "{t}"
+                                        }
+                                    }
+                                }
+                            }
+                            tbody {
+                                for row in cv.rows.iter() {
+                                    tr {
+                                        td { class: "whitespace-nowrap border-b border-border/40 px-2 py-1 align-top text-xs text-muted-foreground",
+                                            "{row.reference}"
+                                        }
+                                        for cell in row.cells.iter() {
+                                            td { class: "border-b border-border/40 px-2 py-1 align-top leading-relaxed",
+                                                "{cell}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

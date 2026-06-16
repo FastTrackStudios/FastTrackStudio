@@ -25,10 +25,10 @@ pub mod service;
 pub mod translation;
 
 pub use book::Book;
-pub use reference::{RefError, VerseId, VerseRange};
+pub use reference::{RefError, ScriptureRef, VerseId, VerseRange};
 pub use service::{
-    ChapterView, ScriptureError, ScriptureService, TranslationInfo, VerseBacklink, VerseBacklinks,
-    VerseLine,
+    ChapterView, ComparisonRow, ComparisonView, ScriptureError, ScriptureService, TranslationInfo,
+    VerseBacklink, VerseBacklinks, VerseLine,
 };
 pub use translation::{Availability, Translation};
 

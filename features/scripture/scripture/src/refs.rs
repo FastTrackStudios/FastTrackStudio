@@ -15,15 +15,18 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use scripture_proto::VerseRange;
+use scripture_proto::{ScriptureRef, VerseRange};
 
 /// One verse reference found in a note, with the line it sits on.
 ///
 /// `range` is a single verse (`[[John 3:16]]`) or a span
-/// (`[[John 3:16-20]]`, `[[Genesis 4:3-Exodus 15:17]]`).
+/// (`[[John 3:16-20]]`, `[[Genesis 4:3-Exodus 15:17]]`); `translation`
+/// is the optional `@ESV` qualifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerseRefHit {
     pub range: VerseRange,
+    /// Optional `@`-qualified edition (`ESV`), uppercased.
+    pub translation: Option<String>,
     /// The whole line the link appears on, trimmed — the surrounding
     /// "inline thesis" that makes a backlink meaningful.
     pub excerpt: String,
@@ -43,9 +46,10 @@ pub fn extract_verse_refs(markdown: &str) -> Vec<VerseRefHit> {
             // Drop an alias (`John 3:16|label`); a verse target has no
             // heading/block anchor, so `#`/`^` forms simply won't parse.
             let target = inner.split('|').next().unwrap_or(inner).trim();
-            if let Ok(range) = VerseRange::parse(target) {
+            if let Ok(sref) = ScriptureRef::parse(target) {
                 hits.push(VerseRefHit {
-                    range,
+                    range: sref.range,
+                    translation: sref.translation,
                     excerpt: line.trim().to_string(),
                 });
             }
