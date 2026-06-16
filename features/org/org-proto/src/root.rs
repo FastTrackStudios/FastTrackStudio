@@ -341,6 +341,34 @@ impl OrgRoot {
         self.path.join("attachments")
     }
 
+    /// `<org>/resources/` — the **Resources Library**: a sibling tree of
+    /// `vault/` and `wiki/` holding large primary-source material (books
+    /// in markdown / epub / txt, and the Bible). It is the third
+    /// knowledge tier and the link-in target:
+    ///
+    /// - `vault/` ← can link → `wiki/Knowledge/`, `resources/`
+    /// - `wiki/`  ← can link → `resources/` (its primary sources)
+    /// - `resources/` ← self-contained; never links out.
+    ///
+    /// Corpora are too large for the vault (they'd drown the user's
+    /// files) and never live in the git repo. They install here and
+    /// sync to the server like the rest of the org tree.
+    ///
+    /// A resource is a typed subtree; the Bible lives at
+    /// `resources/bible/<TRANSLATION>/` as per-book USFM, located by a
+    /// `scripture_proto::VerseId`. See `plans/bible-study.md`.
+    #[must_use]
+    pub fn resources_dir(&self) -> PathBuf {
+        self.path.join("resources")
+    }
+
+    /// `<org>/resources/bible/<translation>/` — one Bible edition's
+    /// per-book USFM (e.g. `WEB/JHN.usfm`).
+    #[must_use]
+    pub fn bible_dir(&self, translation: &str) -> PathBuf {
+        self.resources_dir().join("bible").join(translation)
+    }
+
     pub fn manifest(&self) -> Result<OrgManifest, ParseError> {
         OrgManifest::load_from_dir(&self.path)
     }
