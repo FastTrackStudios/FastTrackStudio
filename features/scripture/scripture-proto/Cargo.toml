@@ -1,0 +1,20 @@
+[package]
+name = "scripture-proto"
+description = "Wasm-clean verse-addressing keystone for the Bible-study feature: the 66-book Protestant canon, `VerseId` (OSIS string + sortable BBCCCVVV integer keys), and human/OSIS reference parsing. Every later layer (reader, annotations, cross-refs, word study) anchors to these stable ids. The sibling `scripture` crate owns USFM ingest + the in-memory store."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Pure value types — no IO, no async, no architect surface yet.
+# Wasm-clean so the web reader binds to it directly. The RPC
+# service trait lands with the reader slice (slice 2), when there
+# is a backend to serve.
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

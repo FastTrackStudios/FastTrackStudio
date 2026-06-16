@@ -13892,6 +13892,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "scripture"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "scripture-proto",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "scripture-proto"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "sea-bae"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

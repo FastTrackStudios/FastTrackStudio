@@ -451,6 +451,14 @@ inventory = { path = "features/inventory/inventory" }
 # `inventory` crate owns the vault-backed parse / write / scan /
 # store side and re-exports it. Mirrors the `locations-proto` split.
 inventory-proto = { path = "features/inventory/inventory-proto", default-features = false }
+# `scripture` — read-only Bible spine. `scripture-proto` is
+# wasm-clean (verse addressing: 66-book canon + `VerseId` OSIS /
+# `BBCCCVVV` keys + reference parsing); the native `scripture`
+# crate owns USFM ingest + the in-memory `Bible` store. Bible
+# text is never user-editable — notes / wiki / cross-refs link
+# in by stable verse id. See `plans/bible-study.md`.
+scripture-proto = { path = "features/scripture/scripture-proto", default-features = false }
+scripture = { path = "features/scripture/scripture" }
 # `mealplan` slice — vault-superset trio for food/cooking.
 # `cookbook` owns cooklang `.cook` files under `<vault>/Cookbook/`
 # (single file per recipe, no sidecar; ingredient names ARE
