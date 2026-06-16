@@ -46,7 +46,7 @@ pub use scripture_proto::{
     Availability, Book, ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry,
     Occurrence, OrigEditionInfo, RefError, ScriptureError, ScriptureRef, ScriptureService,
     Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine, VerseRange,
-    WordToken,
+    WordStudyReport, WordToken,
 };
 pub use store::Store;
 pub use usfm::{UsfmError, Verse, Word, parse_book};

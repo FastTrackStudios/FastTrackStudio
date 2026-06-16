@@ -61,16 +61,30 @@ pub struct OrigMeta {
 pub struct OrigText {
     pub meta: Option<OrigMeta>,
     verses: BTreeMap<VerseId, Vec<OrigWord>>,
+    /// Concordance: normalized Strong's code → verses using it.
+    concordance: BTreeMap<String, Vec<VerseId>>,
 }
 
 impl OrigText {
     /// Build from verses in memory (install / tests).
     #[must_use]
     pub fn from_verses(verses: impl IntoIterator<Item = (VerseId, Vec<OrigWord>)>) -> Self {
+        let verses: BTreeMap<VerseId, Vec<OrigWord>> = verses.into_iter().collect();
+        let concordance = build_concordance(&verses);
         Self {
             meta: None,
-            verses: verses.into_iter().collect(),
+            verses,
+            concordance,
         }
+    }
+
+    /// Every verse using a Strong's code, in canonical order. Accepts
+    /// source-faithful codes (normalized internally).
+    #[must_use]
+    pub fn occurrences(&self, strongs: &str) -> &[VerseId] {
+        self.concordance
+            .get(&crate::lexicon::normalize_strongs(strongs))
+            .map_or(&[], Vec::as_slice)
     }
 
     /// Read just an edition's `meta.json` (cheap — no `text.jsonl`).
@@ -102,7 +116,12 @@ impl OrigText {
         let meta = std::fs::read_to_string(dir.join("meta.json"))
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok());
-        Ok(Self { meta, verses })
+        let concordance = build_concordance(&verses);
+        Ok(Self {
+            meta,
+            verses,
+            concordance,
+        })
     }
 
     /// The words of a verse (empty if absent).
@@ -122,6 +141,14 @@ impl OrigText {
         self.verses.is_empty()
     }
 
+    /// The edition's versification scheme, derived from its language.
+    #[must_use]
+    pub fn scheme(&self) -> &'static str {
+        self.meta.as_ref().map_or("eng", |m| {
+            crate::versification::scheme_for_language(&m.language)
+        })
+    }
+
     /// Serialize to `text.jsonl` form (one verse per line), in canonical
     /// verse order. Used by the installer.
     #[must_use]
@@ -139,4 +166,25 @@ impl OrigText {
         }
         out
     }
+}
+
+/// Build the normalized Strong's → verses concordance from the loaded
+/// verses (each word's code may carry several; a verse lands under each).
+fn build_concordance(verses: &BTreeMap<VerseId, Vec<OrigWord>>) -> BTreeMap<String, Vec<VerseId>> {
+    let mut conc: BTreeMap<String, Vec<VerseId>> = BTreeMap::new();
+    for (id, words) in verses {
+        for w in words {
+            for code in w.strong.split_whitespace() {
+                let key = crate::lexicon::normalize_strongs(code);
+                if key.is_empty() {
+                    continue;
+                }
+                let entry = conc.entry(key).or_default();
+                if entry.last() != Some(id) {
+                    entry.push(*id);
+                }
+            }
+        }
+    }
+    conc
 }

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use scripture_proto::{
     Book, ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry, Occurrence,
     OrigEditionInfo, ScriptureError, ScriptureService, Translation, TranslationInfo, VerseBacklink,
-    VerseBacklinks, VerseId, VerseLine, VerseRange, WordToken,
+    VerseBacklinks, VerseId, VerseLine, VerseRange, WordStudyReport, WordToken,
 };
 
 use crate::api::{ApiTranslation, fetch_chapter};
@@ -460,6 +460,82 @@ impl ScriptureService for Store {
                 text: bible.get(*id).unwrap_or_default().to_string(),
             })
             .collect())
+    }
+
+    fn study(&self, strongs: &str, limit: u32) -> Result<WordStudyReport, ScriptureError> {
+        let normalized = crate::lexicon::normalize_strongs(strongs);
+        if normalized.len() < 2 {
+            return Err(ScriptureError::BadRequest(format!(
+                "not a Strong's code: {strongs:?}"
+            )));
+        }
+        let lex = self.lexicon.get(strongs);
+
+        // Draw the concordance from the fully-tagged original-language
+        // edition for the code's language (Greek `G…` / Hebrew `H…`),
+        // preferring STEPBible's complete amalgam.
+        let candidates: &[&str] = if normalized.starts_with('H') {
+            &["TAHOT", "OSHB"]
+        } else {
+            &["TAGNT", "SBLGNT"]
+        };
+        let mut occ_ids: Vec<VerseId> = Vec::new();
+        let mut scheme = "eng";
+        for ed in candidates {
+            if let Ok(text) = self.original(ed) {
+                let ids = text.occurrences(&normalized);
+                if !ids.is_empty() {
+                    occ_ids = ids.to_vec();
+                    scheme = text.scheme();
+                    break;
+                }
+            }
+        }
+        let total = occ_ids.len();
+
+        // English text per occurrence: map the (edition-scheme) verse to
+        // English and pull the reading text from WEB (or any bundled).
+        let eng_bible = self
+            .bibles
+            .get("WEB")
+            .or_else(|| self.bibles.values().next());
+        let cap = if limit == 0 {
+            DEFAULT_OCCURRENCE_LIMIT
+        } else {
+            limit as usize
+        };
+        let occurrences = occ_ids
+            .iter()
+            .take(cap)
+            .map(|&oid| {
+                let eid = self
+                    .versification
+                    .map(oid, scheme, "eng")
+                    .first()
+                    .copied()
+                    .unwrap_or(oid);
+                Occurrence {
+                    osis: eid.osis(),
+                    reference: eid.to_string(),
+                    text: eng_bible
+                        .and_then(|b| b.get(eid))
+                        .unwrap_or_default()
+                        .to_string(),
+                }
+            })
+            .collect();
+
+        Ok(WordStudyReport {
+            strongs: strongs.trim().to_string(),
+            normalized,
+            lemma: lex.map(|e| e.lemma.clone()).unwrap_or_default(),
+            translit: lex.map(|e| e.translit.clone()).unwrap_or_default(),
+            definition: lex.map(|e| e.definition.clone()).unwrap_or_default(),
+            kjv_def: lex.map(|e| e.kjv_def.clone()).unwrap_or_default(),
+            derivation: lex.map(|e| e.derivation.clone()).unwrap_or_default(),
+            total_occurrences: u32::try_from(total).unwrap_or(u32::MAX),
+            occurrences,
+        })
     }
 
     fn original_editions(&self) -> Result<Vec<OrigEditionInfo>, ScriptureError> {

@@ -174,6 +174,26 @@ pub struct InterlinearWord {
     pub gloss: String,
 }
 
+/// The full word study for a Strong's number — lexicon entry plus the
+/// complete concordance (every occurrence), drawn from the fully-tagged
+/// original-language text and shown with English verse text.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct WordStudyReport {
+    /// The code as queried (`G25`, `G0025`, `H0376G`).
+    pub strongs: String,
+    /// Canonical lexicon key (`G25`).
+    pub normalized: String,
+    pub lemma: String,
+    pub translit: String,
+    pub definition: String,
+    pub kjv_def: String,
+    pub derivation: String,
+    /// Total verses where the lemma occurs (before any cap).
+    pub total_occurrences: u32,
+    /// Each occurrence (capped), with English verse text where available.
+    pub occurrences: Vec<Occurrence>,
+}
+
 #[architect::rpc]
 pub trait ScriptureService {
     /// Installed translations, bundled editions first.
@@ -247,4 +267,10 @@ pub trait ScriptureService {
         edition: &str,
         reference: &str,
     ) -> Result<Vec<InterlinearWord>, ScriptureError>;
+
+    /// The full word study for a Strong's code: lexicon entry + the
+    /// complete concordance (drawn from the fully-tagged original-language
+    /// text, so coverage is complete even where the English edition's tags
+    /// are sparse), capped at `limit` (0 ⇒ a default cap).
+    fn study(&self, strongs: &str, limit: u32) -> Result<WordStudyReport, ScriptureError>;
 }

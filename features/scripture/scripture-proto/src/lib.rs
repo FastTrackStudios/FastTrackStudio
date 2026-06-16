@@ -29,7 +29,7 @@ pub use reference::{RefError, ScriptureRef, VerseId, VerseRange};
 pub use service::{
     ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry, Occurrence,
     OrigEditionInfo, ScriptureError, ScriptureService, TranslationInfo, VerseBacklink,
-    VerseBacklinks, VerseLine, WordToken,
+    VerseBacklinks, VerseLine, WordStudyReport, WordToken,
 };
 pub use translation::{Availability, Translation};
 
