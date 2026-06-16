@@ -116,6 +116,7 @@ web-sys = { workspace = true, features = [
     "Location",
     "History",
     "Navigator",
+    "MediaQueryList",
     "WebSocket",
     "MessageEvent",
     "BinaryType",
