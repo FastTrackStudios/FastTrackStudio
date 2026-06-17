@@ -156,6 +156,45 @@ pub fn GraphFilters(props: GraphFiltersProps) -> Element {
                     }
                 }
 
+                // Link quality — the confidence / typed-link filters.
+                div { class: "space-y-1.5",
+                    div { class: "font-medium text-muted-foreground", "Link quality" }
+                    label { class: "flex items-center gap-2",
+                        input {
+                            r#type: "checkbox",
+                            checked: filters.typed_only,
+                            onchange: {
+                                let f0 = filters.clone();
+                                move |_| {
+                                    let mut f = f0.clone();
+                                    f.typed_only = !f.typed_only;
+                                    on_change.call(f);
+                                }
+                            },
+                        }
+                        span { "Only typed links (hide plain wikilinks)" }
+                    }
+                    label { class: "block space-y-1",
+                        span { "Minimum confidence" }
+                        select {
+                            class: "h-7 w-full rounded border border-border bg-background px-2 text-xs",
+                            value: filters.min_confidence.map(|c| c.to_string()).unwrap_or_default(),
+                            onchange: {
+                                let f0 = filters.clone();
+                                move |evt: Event<FormData>| {
+                                    let mut f = f0.clone();
+                                    f.min_confidence = evt.value().trim().parse::<u8>().ok();
+                                    on_change.call(f);
+                                }
+                            },
+                            option { value: "", "Any" }
+                            option { value: "2", "Possible and up" }
+                            option { value: "3", "Likely and up" }
+                            option { value: "4", "Certain only" }
+                        }
+                    }
+                }
+
                 // Display tuning
                 div { class: "space-y-2",
                     div { class: "font-medium text-muted-foreground", "Display tuning" }
