@@ -115,7 +115,12 @@ These populate the link/tag graph with authoritative data (the resource-library 
    bundled into `<org>/resources/{crossref,topics}/` (CC BY). `ScriptureService`:
    `cross_refs(ref, min_votes)`, `topics_of(ref)`, `verses_for_topic(topic, limit)` —
    votes are the confidence signal. Verified: John 3:16 → Romans 5:8 (972); "money" →
-   Hebrews 13:5. ⬜ *Still to add:* TIPNR entities (people/places → verses).
+   Hebrews 13:5.
+   - ✅ **Entities as WIKI pages, not a parallel store (2026-06-16).** People/places are
+     generated as `type: entity` wiki pages (reusing the wiki's entity infrastructure),
+     bodies linking the verses (`[[Genesis 1:1]]`) so the wiki + link + backlink machinery
+     handles verse↔entity. `entities::from_bible_data` parses BibleData CSVs (CC BY); the
+     `generate_entity_pages` example emits them. 3090 pages → `wiki/Knowledge/Entities/`.
 4. ⬜ **Quality-filtered graph view** — extend `view-knowledge-graph` `GraphFilterState`
    with confidence/relation/visibility; render the verse↔verse↔entity graph.
 5. ⬜ **Publishing** — visibility-filtered export (extend vault-publisher / federation),
