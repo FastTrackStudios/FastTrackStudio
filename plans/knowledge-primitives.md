@@ -121,8 +121,15 @@ These populate the link/tag graph with authoritative data (the resource-library 
      bodies linking the verses (`[[Genesis 1:1]]`) so the wiki + link + backlink machinery
      handles verse↔entity. `entities::from_bible_data` parses BibleData CSVs (CC BY); the
      `generate_entity_pages` example emits them. 3090 pages → `wiki/Knowledge/Entities/`.
-4. ⬜ **Quality-filtered graph view** — extend `view-knowledge-graph` `GraphFilterState`
-   with confidence/relation/visibility; render the verse↔verse↔entity graph.
+4. 🟡 **Quality-filtered graph view (core done 2026-06-16).** `view-knowledge-graph`:
+   `GraphEdge` carries `relation` + `confidence`; `GraphFilterState` gains
+   `min_confidence`/`typed_only`/`hidden_relations` + `edge_passes`/`apply_filters`;
+   `build_link_graph(links, include_private)` turns `TypedLink`s into the
+   verse↔verse↔entity graph (private dropped when publishing). Filters panel UI has the
+   "Link quality" section (typed-only toggle + min-confidence selector). 26 tests.
+   - ⬜ **Remaining:** a live view — a feed (`LinksService.graph`) + page/route that builds
+     and renders the typed-link graph; a focal-node subgraph that pulls a verse's bundled
+     cross-refs/topics/entities (so the graph has content before the user authors links).
 5. ⬜ **Publishing** — visibility-filtered export (extend vault-publisher / federation),
    with the public→private redaction policy.
 6. ⬜ **Authoring UI** — create a typed link from a verse/note (relation + confidence
