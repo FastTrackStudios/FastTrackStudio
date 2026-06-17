@@ -421,6 +421,7 @@ fn looks_like_datetime(s: &str) -> bool {
 #[must_use]
 pub fn builtins() -> Vec<KindSchema> {
     vec![
+        node_schema(),
         person_schema(),
         area_schema(),
         project_schema(),
@@ -429,10 +430,90 @@ pub fn builtins() -> Vec<KindSchema> {
     ]
 }
 
+/// Build an [`EnumOption`] with a color + icon + order (weight = order).
+fn enum_opt(value: &str, label: &str, color: &str, icon: &str, order: u32) -> EnumOption {
+    EnumOption {
+        value: value.into(),
+        label: label.into(),
+        color: Some(color.into()),
+        icon: Some(icon.into()),
+        order,
+        is_completed: false,
+        auto_archive_delay_days: None,
+        weight: Some(order as i32),
+    }
+}
+
+/// The epistemic / knowledge-graph node properties — `confidence`,
+/// `visibility`, `maturity` — shared by every page via the `node` base
+/// schema. These mark how sure a note is (facts vs opinions), whether it
+/// publishes, and how mature it is. See `plans/knowledge-primitives.md`.
+#[must_use]
+pub fn epistemic_properties() -> Vec<PropertyDef> {
+    vec![
+        PropertyDef {
+            key: "confidence".into(),
+            ty: PropertyType::EnumWithMetadata {
+                options: vec![
+                    enum_opt("speculative", "Speculative", "muted", "circle-help", 0),
+                    enum_opt("unlikely", "Unlikely", "muted", "circle-dashed", 1),
+                    enum_opt("possible", "Possible", "amber", "circle-dot", 2),
+                    enum_opt("likely", "Likely", "sky", "circle-check", 3),
+                    enum_opt("certain", "Certain", "emerald", "badge-check", 4),
+                ],
+            },
+            required: false,
+            default: None,
+            display_name: Some("Confidence".into()),
+            icon: Some("gauge".into()),
+        },
+        PropertyDef {
+            key: "visibility".into(),
+            ty: PropertyType::EnumWithMetadata {
+                options: vec![
+                    enum_opt("private", "Private", "muted", "lock", 0),
+                    enum_opt("unlisted", "Unlisted", "amber", "eye-off", 1),
+                    enum_opt("public", "Public", "emerald", "globe", 2),
+                ],
+            },
+            required: false,
+            // Opt-in: private by default, so nothing publishes by accident.
+            default: Some(serde_json::Value::String("private".into())),
+            display_name: Some("Visibility".into()),
+            icon: Some("eye".into()),
+        },
+        PropertyDef {
+            key: "maturity".into(),
+            ty: PropertyType::EnumWithMetadata {
+                options: vec![
+                    enum_opt("seedling", "Seedling", "amber", "sprout", 0),
+                    enum_opt("budding", "Budding", "lime", "leaf", 1),
+                    enum_opt("evergreen", "Evergreen", "emerald", "trees", 2),
+                ],
+            },
+            required: false,
+            default: None,
+            display_name: Some("Maturity".into()),
+            icon: Some("sprout".into()),
+        },
+    ]
+}
+
+/// The `node` base schema every page kind extends — carries the
+/// epistemic properties so any vault note or wiki page can declare its
+/// confidence / visibility / maturity.
+fn node_schema() -> KindSchema {
+    KindSchema {
+        kind: "node".into(),
+        extends: None,
+        properties: epistemic_properties(),
+    }
+}
+
 fn person_schema() -> KindSchema {
     KindSchema {
         kind: "person".into(),
-        extends: None,
+        extends: Some("node".into()),
         properties: vec![
             PropertyDef {
                 key: "auth_user_id".into(),
@@ -465,7 +546,7 @@ fn person_schema() -> KindSchema {
 fn area_schema() -> KindSchema {
     KindSchema {
         kind: "area".into(),
-        extends: None,
+        extends: Some("node".into()),
         properties: vec![
             PropertyDef {
                 key: "up".into(),
@@ -574,7 +655,7 @@ fn project_schema() -> KindSchema {
 fn task_schema() -> KindSchema {
     KindSchema {
         kind: "task".into(),
-        extends: None,
+        extends: Some("node".into()),
         properties: vec![
             PropertyDef {
                 key: "title".into(),
@@ -792,7 +873,7 @@ fn task_schema() -> KindSchema {
 fn daily_schema() -> KindSchema {
     KindSchema {
         kind: "daily".into(),
-        extends: None,
+        extends: Some("node".into()),
         properties: vec![
             PropertyDef {
                 key: "previous".into(),
@@ -828,10 +909,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtins_load_all_five_kinds() {
+    fn builtins_load_all_kinds() {
         let r = PropertySchemaRegistry::with_builtins();
-        for kind in &["task", "project", "area", "person", "daily"] {
+        for kind in &["node", "task", "project", "area", "person", "daily"] {
             assert!(r.get(kind).is_some(), "missing {kind} schema");
+        }
+    }
+
+    #[test]
+    fn page_kinds_inherit_epistemic_node_properties() {
+        let r = PropertySchemaRegistry::with_builtins();
+        // Direct (person → node) and transitive (project → area → node).
+        for kind in &["person", "project", "daily", "task"] {
+            let schema = r.get(kind).unwrap_or_else(|| panic!("{kind} schema"));
+            let keys: Vec<&str> = schema.properties.iter().map(|p| p.key.as_str()).collect();
+            for prop in &["confidence", "visibility", "maturity"] {
+                assert!(keys.contains(prop), "{kind} should inherit {prop}");
+            }
         }
     }
 
