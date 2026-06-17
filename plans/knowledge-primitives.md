@@ -105,12 +105,17 @@ These populate the link/tag graph with authoritative data (the resource-library 
    create/delete/get/`links_for(node)`/`graph(min_confidence, include_private)` — the last
    is the publishable, quality-filtered view. `links`: file-backed store
    (`<org>/links.jsonl`), mounted per org. 8 tests, clippy clean.
-2. ⬜ **Node properties** — `maturity`/`confidence`/`visibility` on vault/wiki pages via
-   `property_schema` (EnumWithMetadata, colors/icons).
-3. ⬜ **Bible link/tag data** — bundle OpenBible cross-refs + topics + TIPNR entities into
-   the resource library; expose `cross_refs(verse)`, `topics(verse)`, `verses_for_topic`,
-   `entity(verse)`. Authoritative + weighted (votes → `confidence`, derived provenance).
-   These feed the same graph the user-asserted links do.
+2. ✅ **Node properties (2026-06-16).** `vault-live/property_schema.rs`: a reusable
+   `node` base schema (`epistemic_properties`: `confidence` ordinal, `visibility`
+   opt-in private-default, `maturity` seedling/budding/evergreen — `EnumWithMetadata`
+   with colors + icons). Page kinds (person/area/task/daily, project via area) `extends`
+   it, so every page inherits the three and the properties pane renders them.
+3. ✅ **Bible link/tag data (2026-06-16).** OpenBible cross-references (`crossref.rs`,
+   ~340k, signed votes) + topics (`topics.rs`, ~470k, bidirectional, vote-weighted),
+   bundled into `<org>/resources/{crossref,topics}/` (CC BY). `ScriptureService`:
+   `cross_refs(ref, min_votes)`, `topics_of(ref)`, `verses_for_topic(topic, limit)` —
+   votes are the confidence signal. Verified: John 3:16 → Romans 5:8 (972); "money" →
+   Hebrews 13:5. ⬜ *Still to add:* TIPNR entities (people/places → verses).
 4. ⬜ **Quality-filtered graph view** — extend `view-knowledge-graph` `GraphFilterState`
    with confidence/relation/visibility; render the verse↔verse↔entity graph.
 5. ⬜ **Publishing** — visibility-filtered export (extend vault-publisher / federation),
