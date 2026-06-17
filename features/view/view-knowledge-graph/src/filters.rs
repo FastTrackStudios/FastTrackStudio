@@ -17,6 +17,14 @@ pub struct GraphFilterState {
     pub hide_isolated: bool,
     /// Hide nodes with `link_count` above this cap.
     pub max_links: Option<u32>,
+    /// Hide rated edges below this ordinal confidence (`0..=4`). Unrated
+    /// (wikilink) edges are unaffected — gate those with `typed_only`.
+    pub min_confidence: Option<u8>,
+    /// Show only typed/rated edges — hide plain wikilinks. Combined with
+    /// `min_confidence`, this is the "only strongly-established links" view.
+    pub typed_only: bool,
+    /// Hide edges with these relation types.
+    pub hidden_relations: HashSet<String>,
 }
 
 impl Default for GraphFilterState {
@@ -28,6 +36,9 @@ impl Default for GraphFilterState {
             hide_structural: true,
             hide_isolated: false,
             max_links: None,
+            min_confidence: None,
+            typed_only: false,
+            hidden_relations: HashSet::new(),
         }
     }
 }
@@ -40,6 +51,26 @@ impl GraphFilterState {
             || !self.hidden_kinds.is_empty()
             || !self.hidden_node_ids.is_empty()
             || self.max_links.is_some()
+            || self.min_confidence.is_some()
+            || self.typed_only
+            || !self.hidden_relations.is_empty()
+    }
+
+    /// Whether an edge survives the relation / confidence filters.
+    #[must_use]
+    pub fn edge_passes(&self, edge: &GraphEdge) -> bool {
+        if self.hidden_relations.contains(&edge.relation) {
+            return false;
+        }
+        if self.typed_only && edge.confidence.is_none() {
+            return false;
+        }
+        if let (Some(min), Some(c)) = (self.min_confidence, edge.confidence) {
+            if c < min {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -99,7 +130,9 @@ pub fn apply_filters(
     let visible_edges: Vec<GraphEdge> = edges
         .iter()
         .filter(|e| {
-            visible_ids.contains(e.source.as_str()) && visible_ids.contains(e.target.as_str())
+            visible_ids.contains(e.source.as_str())
+                && visible_ids.contains(e.target.as_str())
+                && filters.edge_passes(e)
         })
         .cloned()
         .collect();
@@ -133,6 +166,46 @@ mod tests {
         let f = apply_filters(&nodes, &edges, &GraphFilterState::default());
         assert_eq!(f.nodes.len(), 1);
         assert_eq!(f.nodes[0].id, "acme");
+    }
+
+    fn edge(source: &str, target: &str, relation: &str, confidence: Option<u8>) -> GraphEdge {
+        GraphEdge {
+            source: source.into(),
+            target: target.into(),
+            weight: 1.0,
+            relation: relation.into(),
+            confidence,
+        }
+    }
+
+    #[test]
+    fn confidence_and_relation_edge_filters() {
+        let nodes = vec![
+            node("a", "verse", 3),
+            node("b", "verse", 1),
+            node("c", "verse", 1),
+        ];
+        let edges = vec![
+            edge("a", "b", "cross-ref", Some(4)), // certain typed
+            edge("a", "c", "related", Some(1)),   // speculative typed
+            edge("b", "c", "", None),             // plain wikilink
+        ];
+        // Strongly-established view: typed only, confidence >= likely(3).
+        let mut f = GraphFilterState {
+            typed_only: true,
+            min_confidence: Some(3),
+            ..Default::default()
+        };
+        f.hide_structural = false;
+        let g = apply_filters(&nodes, &edges, &f);
+        assert_eq!(g.edges.len(), 1);
+        assert_eq!(g.edges[0].relation, "cross-ref");
+
+        // Hide a relation type.
+        let mut f2 = GraphFilterState::default();
+        f2.hide_structural = false;
+        f2.hidden_relations.insert("related".into());
+        assert_eq!(apply_filters(&nodes, &edges, &f2).edges.len(), 2);
     }
 
     #[test]

@@ -40,6 +40,7 @@ pub mod components;
 pub mod filters;
 pub mod insights;
 pub mod layout;
+pub mod link_build;
 pub mod model;
 pub mod parse;
 pub mod relevance;
@@ -54,6 +55,7 @@ pub use filters::{FilteredGraph, GraphFilterState, apply_filters};
 pub use insights::{
     GapKind, KnowledgeGap, SurprisingConnection, knowledge_gaps, surprising_connections,
 };
+pub use link_build::build_link_graph;
 pub use model::{ColorMode, CommunityInfo, GraphEdge, GraphNode, NodeKind, WikiGraph};
 pub use parse::WikiFile;
 pub use search::{SearchResult, apply_search};

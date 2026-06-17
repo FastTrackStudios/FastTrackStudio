@@ -33,6 +33,28 @@ pub struct GraphEdge {
     pub target: String,
     /// Relevance score (see [`crate::relevance`]); defaults to `1.0`.
     pub weight: f32,
+    /// Typed relation (`cross-ref`, `supports`, `mentions`, …). Empty for
+    /// a plain wikilink.
+    #[serde(default)]
+    pub relation: String,
+    /// Ordinal confidence `0..=4` (Speculative→Certain) for typed links.
+    /// `None` = an unrated structural wikilink, always shown.
+    #[serde(default)]
+    pub confidence: Option<u8>,
+}
+
+impl GraphEdge {
+    /// A plain (unrated) wikilink edge.
+    #[must_use]
+    pub fn wikilink(source: String, target: String, weight: f32) -> Self {
+        Self {
+            source,
+            target,
+            weight,
+            relation: String::new(),
+            confidence: None,
+        }
+    }
 }
 
 /// Summary of one detected community.

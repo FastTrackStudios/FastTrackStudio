@@ -253,11 +253,7 @@ mod tests {
     #[test]
     fn cross_community_edge_is_surprising() {
         let nodes = vec![node("a", "concept", 0, 5), node("b", "entity", 1, 5)];
-        let edges = vec![GraphEdge {
-            source: "a".into(),
-            target: "b".into(),
-            weight: 5.0,
-        }];
+        let edges = vec![GraphEdge::wikilink("a".into(), "b".into(), 5.0)];
         let s = surprising_connections(&nodes, &edges, 5);
         assert_eq!(s.len(), 1);
         assert!(s[0].score >= 3);

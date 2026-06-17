@@ -168,11 +168,7 @@ mod tests {
     use super::*;
 
     fn edge(s: &str, t: &str) -> GraphEdge {
-        GraphEdge {
-            source: s.to_string(),
-            target: t.to_string(),
-            weight: 1.0,
-        }
+        GraphEdge::wikilink(s.to_string(), t.to_string(), 1.0)
     }
 
     #[test]

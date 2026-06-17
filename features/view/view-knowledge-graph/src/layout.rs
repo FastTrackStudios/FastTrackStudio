@@ -244,11 +244,7 @@ mod tests {
     #[test]
     fn deterministic_layout() {
         let nodes = vec![node("a"), node("b"), node("c")];
-        let edges = vec![GraphEdge {
-            source: "a".into(),
-            target: "b".into(),
-            weight: 1.0,
-        }];
+        let edges = vec![GraphEdge::wikilink("a".into(), "b".into(), 1.0)];
         let a = layout(&nodes, &edges, LayoutConfig::default());
         let b = layout(&nodes, &edges, LayoutConfig::default());
         assert_eq!(a["a"], b["a"]);
@@ -259,11 +255,7 @@ mod tests {
     fn positions_are_finite() {
         let nodes: Vec<GraphNode> = (0..30).map(|i| node(&format!("n{i}"))).collect();
         let edges: Vec<GraphEdge> = (0..29)
-            .map(|i| GraphEdge {
-                source: format!("n{i}"),
-                target: format!("n{}", i + 1),
-                weight: 1.0,
-            })
+            .map(|i| GraphEdge::wikilink(format!("n{i}"), format!("n{}", i + 1), 1.0))
             .collect();
         let pos = layout(&nodes, &edges, LayoutConfig::default());
         for p in pos.values() {

@@ -86,11 +86,7 @@ pub fn build_wiki_graph(files: &[WikiFile]) -> WikiGraph {
                 (Some(a), Some(b)) => calculate_relevance(a, b, &retrieval),
                 _ => 1.0,
             };
-            GraphEdge {
-                source: s,
-                target: t,
-                weight,
-            }
+            GraphEdge::wikilink(s, t, weight)
         })
         .collect();
 

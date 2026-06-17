@@ -13925,6 +13925,7 @@ name = "scripture"
 version = "0.1.0"
 dependencies = [
  "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "csv",
  "regex",
  "reqwest 0.12.28",
  "roxmltree",
@@ -17518,6 +17519,7 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "fts-ui",
+ "links-proto",
  "serde",
  "tracing",
 ]
