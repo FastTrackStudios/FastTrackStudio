@@ -194,6 +194,25 @@ pub struct WordStudyReport {
     pub occurrences: Vec<Occurrence>,
 }
 
+/// A weighted verse reference — a cross-reference target or a topic
+/// member. `votes` is the OpenBible weight (negative = downvoted), the
+/// confidence signal for the graph.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct WeightedRef {
+    /// OSIS id or range (`John.3.16`, `Prov.8.22-Prov.8.30`).
+    pub osis: String,
+    /// Display reference.
+    pub reference: String,
+    pub votes: i32,
+}
+
+/// A topic a verse is tagged with, and its weight.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct TopicTag {
+    pub topic: String,
+    pub votes: i32,
+}
+
 #[architect::rpc]
 pub trait ScriptureService {
     /// Installed translations, bundled editions first.
@@ -273,4 +292,20 @@ pub trait ScriptureService {
     /// text, so coverage is complete even where the English edition's tags
     /// are sparse), capped at `limit` (0 ⇒ a default cap).
     fn study(&self, strongs: &str, limit: u32) -> Result<WordStudyReport, ScriptureError>;
+
+    /// Cross-references from a verse (OpenBible, votes-desc), keeping only
+    /// links with votes ≥ `min_votes` (use 1 to drop downvoted links).
+    fn cross_refs(
+        &self,
+        reference: &str,
+        min_votes: i32,
+    ) -> Result<Vec<WeightedRef>, ScriptureError>;
+
+    /// Topics a verse is tagged with (OpenBible, votes-desc).
+    fn topics_of(&self, reference: &str) -> Result<Vec<TopicTag>, ScriptureError>;
+
+    /// Verses about a topic (OpenBible, votes-desc), capped at `limit`
+    /// (0 ⇒ a default cap). Case-insensitive topic name.
+    fn verses_for_topic(&self, topic: &str, limit: u32)
+    -> Result<Vec<WeightedRef>, ScriptureError>;
 }

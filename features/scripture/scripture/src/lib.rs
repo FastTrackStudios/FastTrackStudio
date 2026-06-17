@@ -23,6 +23,7 @@ pub mod api;
 pub mod backlinks;
 pub mod bible;
 pub mod compare;
+pub mod crossref;
 pub mod install;
 pub mod lexicon;
 pub mod morphgnt;
@@ -31,6 +32,7 @@ pub mod oshb;
 pub mod refs;
 pub mod stepbible;
 pub mod store;
+pub mod topics;
 pub mod usfm;
 pub mod versification;
 
@@ -38,6 +40,7 @@ pub use api::{ApiTranslation, Provider};
 pub use backlinks::{RangeBacklink, scan_vault};
 pub use bible::{Bible, LoadError};
 pub use compare::{CompareSpec, extract_compare_specs};
+pub use crossref::{CrossRefEntry, CrossRefs};
 pub use install::{InstallError, install_usfm_dir};
 pub use lexicon::{Lexicon, js_to_json, normalize_strongs};
 pub use original::{OrigMeta, OrigText, OrigVerse, OrigWord};
@@ -45,10 +48,11 @@ pub use refs::{VerseRefHit, extract_verse_refs};
 pub use scripture_proto::{
     Availability, Book, ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry,
     Occurrence, OrigEditionInfo, RefError, ScriptureError, ScriptureRef, ScriptureService,
-    Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine, VerseRange,
-    WordStudyReport, WordToken,
+    TopicTag, Translation, TranslationInfo, VerseBacklink, VerseBacklinks, VerseId, VerseLine,
+    VerseRange, WeightedRef, WordStudyReport, WordToken,
 };
 pub use store::Store;
+pub use topics::{TopicVerse, Topics};
 pub use usfm::{UsfmError, Verse, Word, parse_book};
 pub use versification::{Versification, scheme_for_language};
 

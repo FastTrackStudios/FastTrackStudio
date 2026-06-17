@@ -13,14 +13,17 @@ use std::sync::{Arc, Mutex};
 
 use scripture_proto::{
     Book, ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry, Occurrence,
-    OrigEditionInfo, ScriptureError, ScriptureService, Translation, TranslationInfo, VerseBacklink,
-    VerseBacklinks, VerseId, VerseLine, VerseRange, WordStudyReport, WordToken,
+    OrigEditionInfo, ScriptureError, ScriptureService, TopicTag, Translation, TranslationInfo,
+    VerseBacklink, VerseBacklinks, VerseId, VerseLine, VerseRange, WeightedRef, WordStudyReport,
+    WordToken,
 };
 
 use crate::api::{ApiTranslation, fetch_chapter};
 use crate::bible::{Bible, LoadError};
+use crate::crossref::CrossRefs;
 use crate::lexicon::Lexicon;
 use crate::original::OrigText;
+use crate::topics::Topics;
 use crate::versification::{Versification, scheme_for_language};
 
 /// Default cap on concordance results when the caller passes `limit = 0`.
@@ -42,6 +45,12 @@ pub struct Store {
     originals: Arc<Mutex<HashMap<String, Arc<OrigText>>>>,
     /// Versification mappings — reconcile English vs Hebrew numbering.
     versification: Arc<Versification>,
+    /// OpenBible cross-references file; loaded lazily.
+    crossref_path: Option<PathBuf>,
+    crossrefs: Arc<Mutex<Option<Arc<CrossRefs>>>>,
+    /// OpenBible topic-votes file; loaded lazily.
+    topics_path: Option<PathBuf>,
+    topics: Arc<Mutex<Option<Arc<Topics>>>>,
     /// Vault to scan for `[[John 3:16]]` backlinks. `None` ⇒ no backlinks.
     vault_root: Option<PathBuf>,
 }
@@ -62,6 +71,10 @@ impl Store {
             originals_root: None,
             originals: Arc::new(Mutex::new(HashMap::new())),
             versification: Arc::new(Versification::default()),
+            crossref_path: None,
+            crossrefs: Arc::new(Mutex::new(None)),
+            topics_path: None,
+            topics: Arc::new(Mutex::new(None)),
             vault_root: None,
         }
     }
@@ -71,6 +84,50 @@ impl Store {
     pub fn with_versification(mut self, versification: Versification) -> Self {
         self.versification = Arc::new(versification);
         self
+    }
+
+    /// Point at the OpenBible cross-references file (lazy-loaded).
+    #[must_use]
+    pub fn with_crossref(mut self, path: impl Into<PathBuf>) -> Self {
+        self.crossref_path = Some(path.into());
+        self
+    }
+
+    /// Point at the OpenBible topic-votes file (lazy-loaded).
+    #[must_use]
+    pub fn with_topics(mut self, path: impl Into<PathBuf>) -> Self {
+        self.topics_path = Some(path.into());
+        self
+    }
+
+    fn crossrefs(&self) -> Arc<CrossRefs> {
+        let mut slot = self.crossrefs.lock().expect("crossrefs poisoned");
+        if let Some(c) = slot.as_ref() {
+            return c.clone();
+        }
+        let loaded = self
+            .crossref_path
+            .as_ref()
+            .and_then(|p| CrossRefs::load(p).ok())
+            .unwrap_or_default();
+        let arc = Arc::new(loaded);
+        *slot = Some(arc.clone());
+        arc
+    }
+
+    fn topics_idx(&self) -> Arc<Topics> {
+        let mut slot = self.topics.lock().expect("topics poisoned");
+        if let Some(t) = slot.as_ref() {
+            return t.clone();
+        }
+        let loaded = self
+            .topics_path
+            .as_ref()
+            .and_then(|p| Topics::load(p).ok())
+            .unwrap_or_default();
+        let arc = Arc::new(loaded);
+        *slot = Some(arc.clone());
+        arc
     }
 
     /// Point the store at the original-language editions root
@@ -536,6 +593,62 @@ impl ScriptureService for Store {
             total_occurrences: u32::try_from(total).unwrap_or(u32::MAX),
             occurrences,
         })
+    }
+
+    fn cross_refs(
+        &self,
+        reference: &str,
+        min_votes: i32,
+    ) -> Result<Vec<WeightedRef>, ScriptureError> {
+        let id = VerseId::parse(reference)
+            .map_err(|e| ScriptureError::BadRequest(format!("{reference:?}: {e}")))?;
+        Ok(self
+            .crossrefs()
+            .from(id, min_votes)
+            .into_iter()
+            .map(|e| WeightedRef {
+                osis: e.target.osis(),
+                reference: e.target.to_string(),
+                votes: e.votes,
+            })
+            .collect())
+    }
+
+    fn topics_of(&self, reference: &str) -> Result<Vec<TopicTag>, ScriptureError> {
+        let id = VerseId::parse(reference)
+            .map_err(|e| ScriptureError::BadRequest(format!("{reference:?}: {e}")))?;
+        Ok(self
+            .topics_idx()
+            .of_verse(id)
+            .into_iter()
+            .map(|(topic, votes)| TopicTag {
+                topic: topic.to_string(),
+                votes,
+            })
+            .collect())
+    }
+
+    fn verses_for_topic(
+        &self,
+        topic: &str,
+        limit: u32,
+    ) -> Result<Vec<WeightedRef>, ScriptureError> {
+        let cap = if limit == 0 {
+            DEFAULT_OCCURRENCE_LIMIT
+        } else {
+            limit as usize
+        };
+        Ok(self
+            .topics_idx()
+            .verses_for(topic)
+            .iter()
+            .take(cap)
+            .map(|tv| WeightedRef {
+                osis: tv.range.osis(),
+                reference: tv.range.to_string(),
+                votes: tv.votes,
+            })
+            .collect())
     }
 
     fn original_editions(&self) -> Result<Vec<OrigEditionInfo>, ScriptureError> {

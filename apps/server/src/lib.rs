@@ -833,6 +833,20 @@ pub(crate) async fn build_org_state(
                         &org_root.resources_dir().join("versification"),
                     )
                     .map_err(|e| eyre::eyre!("load versification: {e}"))?,
+                )
+                // OpenBible cross-references + topical tags (CC BY,
+                // vote-weighted), lazy-loaded on first query.
+                .with_crossref(
+                    org_root
+                        .resources_dir()
+                        .join("crossref")
+                        .join("cross_references.txt"),
+                )
+                .with_topics(
+                    org_root
+                        .resources_dir()
+                        .join("topics")
+                        .join("topic-votes.txt"),
                 );
         // Typed-link store (user-asserted verse/note/wiki links).
         let links = links::Store::open(org_root.path().join("links.jsonl"));

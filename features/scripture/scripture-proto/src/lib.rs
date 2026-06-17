@@ -28,8 +28,8 @@ pub use book::Book;
 pub use reference::{RefError, ScriptureRef, VerseId, VerseRange};
 pub use service::{
     ChapterView, ComparisonRow, ComparisonView, InterlinearWord, LexiconEntry, Occurrence,
-    OrigEditionInfo, ScriptureError, ScriptureService, TranslationInfo, VerseBacklink,
-    VerseBacklinks, VerseLine, WordStudyReport, WordToken,
+    OrigEditionInfo, ScriptureError, ScriptureService, TopicTag, TranslationInfo, VerseBacklink,
+    VerseBacklinks, VerseLine, WeightedRef, WordStudyReport, WordToken,
 };
 pub use translation::{Availability, Translation};
 
