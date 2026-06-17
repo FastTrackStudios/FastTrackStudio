@@ -22,6 +22,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # OSHB ships as OSIS XML; roxmltree is a light read-only DOM parser.
 roxmltree = "0.20"
+# Entity datasets (BibleData) ship as quoted CSV.
+csv = "1"
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
