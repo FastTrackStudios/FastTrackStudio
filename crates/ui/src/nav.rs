@@ -7,7 +7,8 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     BookOpen, Bot, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
     FolderKanban, GitBranch, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package,
-    ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Utensils, Wallet,
+    ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Utensils, Wallet, Waypoints,
+    Youtube,
 };
 
 use crate::routes::Route;
@@ -85,6 +86,12 @@ fn icon_repos() -> Element {
 }
 fn icon_wiki() -> Element {
     rsx! { BookOpen { size: 16 } }
+}
+fn icon_connections() -> Element {
+    rsx! { Waypoints { size: 16 } }
+}
+fn icon_watch() -> Element {
+    rsx! { Youtube { size: 16 } }
 }
 fn icon_goals() -> Element {
     rsx! { Target { size: 18 } }
@@ -203,6 +210,21 @@ pub fn nav_tabs() -> Vec<NavTab> {
             route: Route::WikiRoute {},
         },
         NavTab {
+            label: "Connections",
+            icon: icon_connections,
+            route: Route::ConnectionsRoute {},
+        },
+        // Bases now open inside the vault (selecting a `.base` file
+        // renders its tables), so no dedicated tab — Obsidian-style.
+        NavTab {
+            label: "Watch",
+            icon: icon_watch,
+            route: Route::WatchRoute {
+                v: String::new(),
+                node: String::new(),
+            },
+        },
+        NavTab {
             label: "Agents",
             icon: icon_agents,
             route: Route::AgentsRoute {},
@@ -278,6 +300,9 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::InvoicesRoute {} => "Invoices",
         Route::LedgerRoute {} => "Ledger",
         Route::WikiRoute {} => "Wiki",
+        Route::ConnectionsRoute {} => "Connections",
+        Route::BasesRoute {} => "Bases",
+        Route::WatchRoute { .. } => "Watch",
         Route::WikiSourcesRoute {} => "Archived sources",
         Route::WikiSourceRoute { .. } => "Source",
         Route::AgentsRoute {} => "Agents",

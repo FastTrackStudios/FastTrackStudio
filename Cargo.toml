@@ -465,6 +465,15 @@ scripture = { path = "features/scripture/scripture" }
 # crate owns the backing store. See plans/knowledge-primitives.md.
 links-proto = { path = "features/links/links-proto", default-features = false }
 links = { path = "features/links/links" }
+# `resources` — Resource Library + annotations. Read-only primary sources
+# (songs, PDFs, books, videos) annotated + linked into without editing;
+# the anchor string keys the link graph, geometry lives in a per-resource
+# `<slug>.annotations.json` sidecar (Logseq's two-layer model). See
+# plans/resource-annotations.md.
+resources = { path = "features/resources/resources" }
+# `resources-proto` is wasm-clean (the watch/reader UI binds to it for
+# transcripts); the `resources` crate owns the file-reading backend.
+resources-proto = { path = "features/resources/resources-proto", default-features = false }
 # `mealplan` slice — vault-superset trio for food/cooking.
 # `cookbook` owns cooklang `.cook` files under `<vault>/Cookbook/`
 # (single file per recipe, no sidecar; ingredient names ARE

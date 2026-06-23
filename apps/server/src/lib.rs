@@ -130,6 +130,9 @@ pub struct OrgAppState {
     /// Typed-link store — verse↔verse, note↔verse, idea↔wiki links with
     /// confidence + visibility (`<org>/links.jsonl`).
     pub links: links::Store,
+    /// Resource Library reader — serves transcript sidecars under
+    /// `<org>/resources/` to the watch/reader UI.
+    pub resources: resources::ResourcesBackend,
     /// Cookbook (cooklang recipes under `Wiki/Cookbook/`).
     pub cookbook: cookbook::Store,
     /// Mealplan — scheduled meals + their fulfillment math.
@@ -850,6 +853,8 @@ pub(crate) async fn build_org_state(
                 );
         // Typed-link store (user-asserted verse/note/wiki links).
         let links = links::Store::open(org_root.path().join("links.jsonl"));
+        // Resource Library reader (transcript sidecars under resources/).
+        let resources = resources::ResourcesBackend::new(org_root.resources_dir());
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.
@@ -913,6 +918,7 @@ pub(crate) async fn build_org_state(
             vault_watcher,
             scripture,
             links,
+            resources,
             wiki,
             projects,
             goals,
@@ -1308,6 +1314,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         inventory::inventory_service_descriptor(),
         scripture::scripture_service_descriptor(),
         links::links_service_descriptor(),
+        resources_proto::resources_service_rpc_service_descriptor(),
         cookbook::cookbook_service_descriptor(),
         mealplan::mealplan_service_descriptor(),
         pantry::pantry_service_descriptor(),
@@ -1532,6 +1539,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             links::links_service_descriptor(),
             links::serve_links_service(org.links.clone()),
+        )
+        .with(
+            resources_proto::resources_service_rpc_service_descriptor(),
+            resources_proto::serve(org.resources.clone()),
         )
         .with(
             cookbook::cookbook_service_descriptor(),

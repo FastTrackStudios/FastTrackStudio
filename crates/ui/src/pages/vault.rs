@@ -407,6 +407,41 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
         }
     });
 
+    // Whole-vault connections graph, and per-`.base` raw-source editing.
+    let mut show_graph = use_signal(|| false);
+    let mut edit_base_source = use_signal(|| false);
+
+    // Verses the open note references (from synced note→verse links), with
+    // their text — the inline scripture reader.
+    let verses = use_resource(move || {
+        let slug = home();
+        let path = selected();
+        let _refresh = session.save_count();
+        async move {
+            let Some(p) = path else { return Vec::new() };
+            let links = crate::feeds::fetch_links_for(&slug, &format!("note:{p}"))
+                .await
+                .unwrap_or_default();
+            let mut refs: Vec<String> = links
+                .iter()
+                .filter(|l| l.target.kind == links_proto::NodeKind::Verse)
+                .map(|l| l.target.id.clone())
+                .collect();
+            refs.sort();
+            refs.dedup();
+            refs.truncate(16);
+            let mut out = Vec::new();
+            for osis in refs {
+                let human = osis_to_ref(&osis);
+                let text = crate::feeds::fetch_verse_text(&slug, "WEB", &human)
+                    .await
+                    .ok();
+                out.push((osis, human, text));
+            }
+            out
+        }
+    });
+
     let sidebar_body = match &*files.read_unchecked() {
         Some(Ok(_)) => {
             let Some(t) = tree() else { unreachable!() };
@@ -446,6 +481,18 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
 
     let has_file = selected.read().is_some();
     let current = selected.read().clone().unwrap_or_default();
+    // Frontmatter `type:` of the open note (from the tree index) — lets the
+    // content pane open `type: video` notes in the player, Obsidian-style.
+    let current_type = tree().and_then(|t| {
+        t.0.iter()
+            .find(|n| n.meta.path == current)
+            .map(|n| n.meta.page_type.to_lowercase())
+    });
+    let is_video = current_type.as_deref() == Some("video");
+    let is_base = current
+        .rsplit_once('.')
+        .is_some_and(|(_, e)| e.eq_ignore_ascii_case("base"));
+    let verse_list = verses.read().clone();
     let is_dirty = session.dirty();
     let status_msg = match session.status() {
         SaveStatus::Idle => String::new(),
@@ -550,6 +597,26 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                         if !status_msg.is_empty() {
                             Text { variant: TextVariant::Muted, class: "text-xs", "{status_msg}" }
                         }
+                        if is_base && !show_graph() {
+                            Button {
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Small,
+                                on_click: move |_| {
+                                    let cur = *edit_base_source.peek();
+                                    edit_base_source.set(!cur);
+                                },
+                                if edit_base_source() { "View table" } else { "Edit source" }
+                            }
+                        }
+                        Button {
+                            variant: if show_graph() { ButtonVariant::Primary } else { ButtonVariant::Ghost },
+                            size: ButtonSize::Small,
+                            on_click: move |_| {
+                                let cur = *show_graph.peek();
+                                show_graph.set(!cur);
+                            },
+                            "Graph"
+                        }
                         Button {
                             variant: ButtonVariant::Primary,
                             size: ButtonSize::Small,
@@ -591,7 +658,29 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                 }
                 div { class: "flex min-h-0 flex-1",
                     div { class: "flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto",
-                        if has_file {
+                        if show_graph() {
+                            // Whole-vault connections graph as a pane.
+                            crate::pages::connections::ConnectionsView {}
+                        } else if has_file && is_base && !edit_base_source() {
+                            // A `.base` renders as its live tables, in place
+                            // of the editor — Obsidian-style. Row clicks open
+                            // the target note in this same vault view.
+                            crate::pages::bases::BaseDoc {
+                                base_path: current.clone(),
+                                on_open: move |p: String| on_open.call(FileMeta {
+                                    path: p,
+                                    sha256: String::new(),
+                                }),
+                            }
+                        } else if has_file && is_video && !show_graph() {
+                            // A `type: video` note opens in the player (its
+                            // basename is the YouTube id). Timestamped notes +
+                            // transcript live right here in the vault.
+                            crate::pages::watch::WatchView {
+                                v: basename_of(&current).to_string(),
+                                node: format!("video:{}", basename_of(&current)),
+                            }
+                        } else if has_file {
                             div { class: "editor-app",
                                 // --flush: no card chrome — the vault page is a
                                 // full-page embed; the editor sits directly on
@@ -617,9 +706,25 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                             }
                         }
                     }
-                    // ── Backlinks panel ───────────────────
+                    // ── Backlinks + verses panel ───────────
                     if has_file && panel_open {
                         aside { class: "flex w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/30",
+                            // Inline scripture reader: verses this note references.
+                            if let Some(vs) = verse_list.as_ref().filter(|v| !v.is_empty()) {
+                                div { class: "border-b border-border/60 px-3 py-3",
+                                    Heading { level: HeadingLevel::H3, class: "mb-2", "Referenced verses" }
+                                    div { class: "flex flex-col gap-2",
+                                        for (osis, human, text) in vs.clone() {
+                                            div { key: "{osis}", class: "rounded-md bg-background/60 p-2",
+                                                span { class: "text-xs font-semibold text-primary", "{human}" }
+                                                if let Some(t) = text {
+                                                    p { class: "mt-0.5 text-xs leading-snug text-muted-foreground", "{t}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             div { class: "flex items-center justify-between px-3 py-3",
                                 Heading { level: HeadingLevel::H3, "Backlinks" }
                                 button {
@@ -859,6 +964,17 @@ fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
 fn basename_of(path: &str) -> &str {
     let file = path.rsplit('/').next().unwrap_or(path);
     file.strip_suffix(".md").unwrap_or(file)
+}
+
+/// OSIS verse id → a human reference the scripture service parses
+/// (`John.3.16` → `John 3:16`; a range keeps its start). Best-effort.
+fn osis_to_ref(osis: &str) -> String {
+    let first = osis.split('-').next().unwrap_or(osis);
+    let mut it = first.rsplitn(3, '.');
+    match (it.next(), it.next(), it.next()) {
+        (Some(v), Some(c), Some(b)) => format!("{b} {c}:{v}"),
+        _ => first.to_string(),
+    }
 }
 
 /// Frontmatter-derived page index for the folder tree.

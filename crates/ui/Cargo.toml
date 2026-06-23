@@ -41,6 +41,12 @@ inventory-proto = { workspace = true, features = ["vox", "atom"] }
 # Scripture wire surface — `ScriptureService` client + verse DTOs
 # for the `/scripture` reader. Read-only, `vox` feature only.
 scripture-proto = { workspace = true, features = ["vox"] }
+# Typed-link wire surface — `LinksService` client + `TypedLink`/`NodeRef`
+# for the `/connections` graph (verse↔song↔sermon↔topic web). `vox` only.
+links-proto = { workspace = true, features = ["vox"] }
+# Resource Library wire surface — `ResourcesService` client + transcript
+# DTOs for the `/watch` synced transcript. `vox` only.
+resources-proto = { workspace = true, features = ["vox"] }
 milestone-proto = { workspace = true, features = ["vox", "atom"] }
 finance-proto = { workspace = true, features = ["vox"] }
 # Fitness suite wire surface — body / exercises / workouts /

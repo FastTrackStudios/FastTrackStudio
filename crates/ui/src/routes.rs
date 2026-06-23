@@ -99,6 +99,17 @@ pub enum Route {
         #[route("/wiki")]
         WikiRoute {},
 
+        #[route("/connections")]
+        ConnectionsRoute {},
+
+        #[route("/bases")]
+        BasesRoute {},
+
+        // `v` = YouTube id, `node` = the NodeRef token the timestamped
+        // notes hang on (empty → the paste-a-URL landing).
+        #[route("/watch?:v&:node")]
+        WatchRoute { v: String, node: String },
+
         #[route("/wiki/sources")]
         WikiSourcesRoute {},
 
@@ -170,6 +181,21 @@ fn InventoryRoute() -> Element {
 #[component]
 fn ScriptureRoute() -> Element {
     rsx! { pages::scripture::ScriptureView {} }
+}
+
+#[component]
+fn ConnectionsRoute() -> Element {
+    rsx! { pages::connections::ConnectionsView {} }
+}
+
+#[component]
+fn BasesRoute() -> Element {
+    rsx! { pages::bases::BasesView {} }
+}
+
+#[component]
+fn WatchRoute(v: String, node: String) -> Element {
+    rsx! { pages::watch::WatchView { v, node } }
 }
 
 #[component]

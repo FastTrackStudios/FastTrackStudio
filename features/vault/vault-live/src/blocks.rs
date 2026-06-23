@@ -78,6 +78,16 @@ impl BlockIndex {
         Some(&raw[loc.anchor..end])
     }
 
+    /// String-keyed [`Self::block_preview`] — the shape the links layer
+    /// injects into `resources::resolve_with` to turn a
+    /// `block:<uuid>` / `note:p.md#^<uuid>` reference into a preview.
+    /// Returns an owned `String` (a closure can't borrow the vault).
+    #[must_use]
+    pub fn preview_str(&self, vault: &Vault, uuid: &str) -> Option<String> {
+        let parsed = Uuid::parse_str(uuid).ok()?;
+        self.block_preview(vault, &parsed).map(str::to_string)
+    }
+
     /// How many blocks across the whole vault have ids.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -234,6 +244,20 @@ mod tests {
         )]);
         let idx = BlockIndex::build(&v);
         assert_eq!(idx.len(), 1);
+    }
+
+    #[test]
+    fn preview_str_resolves_by_uuid_string() {
+        let uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
+        let v = vault_with(vec![page(&format!(
+            "Cast your cares on Him\nid:: {uuid}\nmore"
+        ))]);
+        let idx = BlockIndex::build(&v);
+        assert_eq!(
+            idx.preview_str(&v, uuid).as_deref(),
+            Some("Cast your cares on Him")
+        );
+        assert_eq!(idx.preview_str(&v, "not-a-uuid"), None);
     }
 
     #[test]

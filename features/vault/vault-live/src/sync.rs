@@ -42,8 +42,8 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 use vault_proto::{
-    CollabAck, FileBytes, FolderIndex, IfMatch, Manifest, ManifestEntry, PageMeta, PutAck,
-    VaultEvent, VaultSync, VaultSyncError, collab_doc_id,
+    BaseGroup, BaseRowView, BaseView, CollabAck, FileBytes, FolderIndex, IfMatch, Manifest,
+    ManifestEntry, PageMeta, PutAck, VaultEvent, VaultSync, VaultSyncError, collab_doc_id,
 };
 
 use crate::vault::Vault;
@@ -421,6 +421,80 @@ impl VaultSync for Backend {
         })
     }
 
+    fn base_views(&self, vault_id: &str, base_path: &str) -> Result<Vec<BaseView>, VaultSyncError> {
+        let dir = self.root(vault_id)?;
+        let vault = Vault::open(&dir).map_err(|e| VaultSyncError::Internal(e.to_string()))?;
+
+        // Find + resolve the requested base.
+        let parsed = vault
+            .bases
+            .iter()
+            .find(|b| b.rel_path == base_path)
+            .ok_or(VaultSyncError::NotFound)?
+            .parsed
+            .as_ref()
+            .map_err(|e| VaultSyncError::Internal(format!("base parse: {e}")))?;
+
+        // Every page → an executor row (frontmatter parsed once).
+        let rows: Vec<crate::bases::BaseRow> = vault
+            .pages
+            .iter()
+            .map(|p| {
+                let fm_json = frontmatter_json(&p.raw);
+                let ext = p.rel_path.rsplit_once('.').map_or("", |(_, e)| e);
+                crate::bases::BaseRow::from_parts_full(
+                    Uuid::new_v4(),
+                    &p.basename,
+                    &p.rel_path,
+                    &p.folder,
+                    ext,
+                    &fm_json,
+                    &[],
+                )
+            })
+            .collect();
+
+        // Run + project each view.
+        let views = parsed
+            .views
+            .iter()
+            .map(|v| {
+                let executed = crate::bases::execute_view(parsed, v, rows.clone());
+                let columns = v.order.clone();
+                let groups = executed
+                    .groups
+                    .into_iter()
+                    .map(|(label, group_rows)| BaseGroup {
+                        label,
+                        rows: group_rows
+                            .iter()
+                            .map(|r| BaseRowView {
+                                path: r.path.clone(),
+                                basename: r.basename.clone(),
+                                title: r
+                                    .frontmatter
+                                    .get("title")
+                                    .and_then(serde_json::Value::as_str)
+                                    .map_or_else(|| r.basename.clone(), str::to_string),
+                                cells: columns
+                                    .iter()
+                                    .map(|c| crate::bases::cell_value(r, c))
+                                    .collect(),
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                BaseView {
+                    name: v.name.clone(),
+                    view_type: v.kind.as_str().to_string(),
+                    columns,
+                    groups,
+                }
+            })
+            .collect();
+        Ok(views)
+    }
+
     fn set_folder(
         &self,
         vault_id: &str,
@@ -527,6 +601,28 @@ impl VaultSync for Backend {
                 }
             }
         }
+    }
+}
+
+/// A page's YAML frontmatter (the leading `---` … `---` block) as a JSON
+/// object string for [`crate::bases::BaseRow::from_parts_full`]. Empty
+/// object when there's no frontmatter or it doesn't parse to a map.
+fn frontmatter_json(raw: &str) -> String {
+    let Some(rest) = raw.strip_prefix("---") else {
+        return "{}".into();
+    };
+    let Some(rest) = rest
+        .strip_prefix('\n')
+        .or_else(|| rest.strip_prefix("\r\n"))
+    else {
+        return "{}".into();
+    };
+    let Some(end) = rest.find("\n---") else {
+        return "{}".into();
+    };
+    match serde_yaml::from_str::<serde_json::Value>(&rest[..end]) {
+        Ok(v @ serde_json::Value::Object(_)) => v.to_string(),
+        _ => "{}".into(),
     }
 }
 

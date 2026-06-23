@@ -1209,6 +1209,141 @@ pub async fn fetch_uninvoiced_multi(
 /// Fetch one org's vault markdown as `WikiFile`s for the knowledge
 /// graph: pull the manifest, then read every `.md` file concurrently
 /// over the one socket. Pure graph-building happens caller-side.
+/// Every `.base` file in an org's vault (vault-relative paths), sorted.
+pub async fn fetch_bases(slug: &str) -> Result<Vec<String>, String> {
+    let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
+    let manifest = client
+        .manifest("default".to_owned())
+        .await
+        .map_err(|e| format!("manifest: {e:?}"))?;
+    let mut bases: Vec<String> = manifest
+        .files
+        .into_iter()
+        .map(|f| f.path)
+        .filter(|p| {
+            std::path::Path::new(p)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("base"))
+        })
+        .collect();
+    bases.sort();
+    Ok(bases)
+}
+
+/// The executed views of one `.base` file — server-rendered tables.
+pub async fn fetch_base_views(
+    slug: &str,
+    base_path: &str,
+) -> Result<Vec<vault_proto::BaseView>, String> {
+    let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
+    client
+        .base_views("default".to_owned(), base_path.to_owned())
+        .await
+        .map_err(|e| format!("{base_path}: {e:?}"))
+}
+
+/// Every typed link touching `node_token` (a `kind:id` NodeRef token,
+/// e.g. `sermon:god-restores-broken-people`) — the timestamped notes for
+/// the watch view.
+pub async fn fetch_links_for(
+    slug: &str,
+    node_token: &str,
+) -> Result<Vec<links_proto::TypedLink>, String> {
+    let node = links_proto::NodeRef::parse(node_token)
+        .ok_or_else(|| format!("bad node token: {node_token}"))?;
+    let client = crate::vox_clients::establish_for::<links_proto::LinksServiceClient>(slug).await?;
+    client
+        .links_for(node)
+        .await
+        .map_err(|e| format!("{slug}: links_for: {e:?}"))
+}
+
+/// One verse's text (`translation` defaults handled by the caller).
+/// `reference` is a human/OSIS-ish ref like `John 3:16` or `1John 3:16`.
+pub async fn fetch_verse_text(
+    slug: &str,
+    translation: &str,
+    reference: &str,
+) -> Result<String, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .verse(translation.to_owned(), reference.to_owned())
+        .await
+        .map(|v| v.text)
+        .map_err(|e| format!("{slug}: verse {reference}: {e:?}"))
+}
+
+/// A resource's transcript cues (`resources/<rel_path>`), for the watch
+/// view's synced transcript. Empty vec on a missing sidecar.
+pub async fn fetch_transcript(
+    slug: &str,
+    rel_path: &str,
+) -> Result<Vec<resources_proto::TranscriptSegment>, String> {
+    let client =
+        crate::vox_clients::establish_for::<resources_proto::ResourcesServiceClient>(slug).await?;
+    // A missing / unreadable transcript just means no cues — never fatal.
+    Ok(client
+        .transcript(rel_path.to_owned())
+        .await
+        .map(|doc| doc.segments)
+        .unwrap_or_default())
+}
+
+/// Save a watched video to the library as a `type: video` vault note
+/// (`Videos/<id>.md`) so `[[id]]` resolves and it shows in a Videos base.
+/// `CreateOnly`, so re-saving an existing video is a no-op (the title
+/// stays whatever you renamed it to).
+pub async fn save_video_note(
+    slug: &str,
+    video_id: &str,
+    url: &str,
+    title: &str,
+) -> Result<(), String> {
+    let title = if title.trim().is_empty() {
+        video_id
+    } else {
+        title
+    };
+    let md = format!(
+        "---\ntitle: {title}\ntype: video\nkind: video\nvideo_id: {video_id}\nurl: {url}\ntags: [video]\n---\n\n# {title}\n\nTimestamped notes are typed links on `video:{video_id}`. Watch + annotate at `/watch?v={video_id}&node=video:{video_id}`.\n"
+    );
+    let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
+    client
+        .put_file(
+            "default".to_owned(),
+            format!("Videos/{video_id}.md"),
+            md.into_bytes(),
+            vault_proto::IfMatch::CreateOnly,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("{slug}: save video: {e:?}"))
+}
+
+/// Persist one typed link (the watch view's "add note at current time").
+pub async fn create_link(
+    slug: &str,
+    link: links_proto::TypedLink,
+) -> Result<links_proto::TypedLink, String> {
+    let client = crate::vox_clients::establish_for::<links_proto::LinksServiceClient>(slug).await?;
+    client
+        .create(link)
+        .await
+        .map_err(|e| format!("{slug}: create link: {e:?}"))
+}
+
+/// Every typed link in an org's graph — the verse↔song↔sermon↔topic web
+/// for the `/connections` page. Fetches at the lowest confidence and
+/// includes private links; the page filters client-side.
+pub async fn fetch_link_graph(slug: &str) -> Result<Vec<links_proto::TypedLink>, String> {
+    let client = crate::vox_clients::establish_for::<links_proto::LinksServiceClient>(slug).await?;
+    client
+        .graph(links_proto::Confidence::Speculative, true)
+        .await
+        .map_err(|e| format!("{slug}: link graph: {e:?}"))
+}
+
 pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
     use view_knowledge_graph::WikiFile;
 

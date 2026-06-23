@@ -5,7 +5,9 @@
 //! layout; pages only render the content area.
 
 pub mod agents;
+pub mod bases;
 pub mod bookings;
+pub mod connections;
 pub mod cook_mode;
 pub mod email;
 pub mod finances;
@@ -31,5 +33,6 @@ pub mod task_detail;
 pub mod tasks;
 pub mod timer;
 pub mod vault;
+pub mod watch;
 pub mod wiki;
 pub mod wiki_source;

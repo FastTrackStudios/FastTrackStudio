@@ -105,6 +105,21 @@ These populate the link/tag graph with authoritative data (the resource-library 
    create/delete/get/`links_for(node)`/`graph(min_confidence, include_private)` — the last
    is the publishable, quality-filtered view. `links`: file-backed store
    (`<org>/links.jsonl`), mounted per org. 8 tests, clippy clean.
+   - ✅ **Sub-node anchors (2026-06-17).** `NodeRef` gained `anchor` (`#[serde(default)]`,
+     legacy tokens still round-trip) — generalizes Logseq/Obsidian `[[page#^block]]` to
+     verses, words, and blocks uniformly. Token form `kind:id#anchor`; first `#` splits the
+     anchor so verse-range ids (`John.3.16-18`) survive intact. Helpers: `block(uuid)`,
+     `word(osis, n)` → `verse:John.3.16#word:5`, `with_anchor`, `has_anchor`. Block-kind
+     refs resolve through the vault's `BlockIndex` (`lookup_str`/`block_preview`) at the
+     service layer (needs the live `Vault`; kept out of wasm-clean proto).
+   - ✅ **Resource / media anchors (2026-06-17).** `NodeKind::Song` (a song's
+     YouTube/audio/lyrics are one node, addressed by anchor), `Relation::AlludesTo` (the
+     echo relation worship lyrics use far more than `Quotes`), `song()`/`at(secs)` helpers,
+     and an `Anchor` classifier (`Whole`/`Timestamp`/`Word`/`Block`/`Region`/`Span`) so the
+     graph/UI renders seek-chips vs region-jumps vs line-spans. PDF region + media timestamp
+     **geometry** lives in a per-resource annotation sidecar keyed by the anchor (Logseq's
+     two-layer model), not on the wire. Full design + Recall/Logseq research:
+     **`plans/resource-annotations.md`**. 9 tests, clippy clean.
 2. ✅ **Node properties (2026-06-16).** `vault-live/property_schema.rs`: a reusable
    `node` base schema (`epistemic_properties`: `confidence` ordinal, `visibility`
    opt-in private-default, `maturity` seedling/budding/evergreen — `EnumWithMetadata`
@@ -127,13 +142,31 @@ These populate the link/tag graph with authoritative data (the resource-library 
    `build_link_graph(links, include_private)` turns `TypedLink`s into the
    verse↔verse↔entity graph (private dropped when publishing). Filters panel UI has the
    "Link quality" section (typed-only toggle + min-confidence selector). 26 tests.
-   - ⬜ **Remaining:** a live view — a feed (`LinksService.graph`) + page/route that builds
-     and renders the typed-link graph; a focal-node subgraph that pulls a verse's bundled
-     cross-refs/topics/entities (so the graph has content before the user authors links).
-5. ⬜ **Publishing** — visibility-filtered export (extend vault-publisher / federation),
-   with the public→private redaction policy.
-6. ⬜ **Authoring UI** — create a typed link from a verse/note (relation + confidence
-   picker); the private-journal flow.
+   - ✅ **Live view (2026-06-17).** `/connections` route (`crates/ui/src/pages/connections.rs`)
+     + `feeds::fetch_link_graph` (calls `LinksServiceClient.graph`) → `build_link_graph` →
+     `KnowledgeGraphView` with the quality `GraphFilters` panel (confidence floor + typed-only).
+     Nav tab "Connections" (Waypoints icon). Server already serves `LinksService`
+     (apps/server lib.rs). Compiles native + wasm. Renders the 136 seeded song/sermon/verse
+     links as the force-directed web.
+   - ⬜ **Remaining:** focal-node subgraph (click a verse → pull its bundled
+     cross-refs/topics/entities); deep-link node clicks to `/scripture`.
+5. 🟡 **Publishing (export done 2026-06-18).** `links` `examples/publish_graph.rs`: exports
+   the publishable subset (`graph(include_private=false)` → drops Private links) to
+   `<org>/published/links.jsonl`, redacting private-`note:` endpoints (id → `private`) so a
+   public edge can't leak a note path. Verified: 136 public links exported, 0 withheld (the
+   seeded analysis is all Public; private watch-view journal notes would be withheld). The
+   `/connections` page with the private toggle off is the viewer.
+   - ✅ **Static HTML export (2026-06-18).** `publish_graph` also emits a self-contained
+     `published/index.html` — the public interconnections grouped by source node (relation +
+     target + confidence + note), inline CSS, no JS. 136 links / 65 groups.
+   - ⬜ **Remaining:** wire into the federation/vault-publisher path; node-level visibility
+     (publish-time lint for public→private targets beyond `note:`).
+6. 🟡 **Authoring (2026-06-17/18).** Two paths landed: (a) the `/watch` view creates typed
+   links live ("add note/clip at current time" + optional verse/topic target); (b) the
+   `sync_vault_links` example turns `[[wikilinks]]` in note prose into `note→verse`/`note→video`
+   links automatically (the private-journal layer, `Visibility::Private`). ⬜ Remaining: a
+   general in-app "link this to that" picker (relation + confidence) from any verse/note, and
+   running the wikilink sync server-side on save.
 
 ## Open design questions (need the user)
 

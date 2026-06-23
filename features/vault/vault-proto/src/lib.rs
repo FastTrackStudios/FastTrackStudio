@@ -22,6 +22,7 @@
 //! Mount the server-side backend with [`serve`], or compose
 //! through [`Service`] into an `architect::Services` bundle.
 
+mod base_view;
 mod collab;
 mod error;
 mod event;
@@ -34,6 +35,7 @@ mod service;
 
 // Per-file CRDT collaboration identity: the uuid-v5 doc-id scheme,
 // the doc's container names, and the `open_collab` ack payload.
+pub use base_view::{BaseGroup, BaseRowView, BaseView};
 pub use collab::{
     COLLAB_META_CONTAINER, COLLAB_META_FLUSHED_SHA, COLLAB_TEXT_CONTAINER, CollabAck,
     VAULT_DOC_NAMESPACE, collab_doc_id,

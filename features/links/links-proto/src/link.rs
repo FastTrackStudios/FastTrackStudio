@@ -39,6 +39,10 @@ pub enum Relation {
     Fulfills,
     Mentions,
     Tagged,
+    /// An indirect echo — a lyric, note, or text evokes a verse / concept
+    /// without quoting it. The dominant relation for worship lyrics and
+    /// literary allusion (where [`Self::Quotes`] is a verbatim citation).
+    AlludesTo,
 }
 
 impl Relation {
@@ -79,6 +83,7 @@ impl Relation {
             Self::Fulfills => "fulfills",
             Self::Mentions => "mentions",
             Self::Tagged => "tagged",
+            Self::AlludesTo => "alludes-to",
         }
     }
 }

@@ -171,6 +171,9 @@ pub struct ViewSpec {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ViewKind {
     Table,
+    /// Obsidian's grid-of-cards view (`type: cards`). `Gallery` is kept
+    /// as a back-compat alias for the same renderer.
+    Cards,
     Board,
     Gallery,
     Calendar,
@@ -181,6 +184,23 @@ pub enum ViewKind {
     /// behavior — it lists `.base` files with unknown view types
     /// rather than rejecting them.
     Other(String),
+}
+
+impl ViewKind {
+    /// Canonical lowercase tag (`table`, `board`, …) — what the UI keys
+    /// its renderer on.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            ViewKind::Table => "table",
+            ViewKind::Cards => "cards",
+            ViewKind::Board => "board",
+            ViewKind::Gallery => "gallery",
+            ViewKind::Calendar => "calendar",
+            ViewKind::List => "list",
+            ViewKind::Other(s) => s,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -382,6 +402,7 @@ fn parse_view(v: &serde_yaml::Value) -> Result<ViewSpec, BaseParseError> {
         .ok_or_else(|| BaseParseError::View("view missing `type`".into()))?;
     let kind = match kind_str {
         "table" => ViewKind::Table,
+        "cards" => ViewKind::Cards,
         "board" => ViewKind::Board,
         "gallery" => ViewKind::Gallery,
         "calendar" => ViewKind::Calendar,
@@ -436,10 +457,17 @@ fn parse_view(v: &serde_yaml::Value) -> Result<ViewSpec, BaseParseError> {
         .get(serde_yaml::Value::String("limit".into()))
         .and_then(serde_yaml::Value::as_u64)
         .map(|n| n as u32);
-    let group_by = m
-        .get(serde_yaml::Value::String("groupBy".into()))
-        .and_then(yaml_str)
-        .map(str::to_string);
+    // `groupBy` is an object `{ property, direction }` in current
+    // Obsidian; older/our files used a bare string. Accept both (we key
+    // grouping on the property; the group direction isn't applied yet).
+    let group_by = match m.get(serde_yaml::Value::String("groupBy".into())) {
+        Some(serde_yaml::Value::Mapping(gm)) => gm
+            .get(serde_yaml::Value::String("property".into()))
+            .and_then(yaml_str)
+            .map(str::to_string),
+        Some(other) => yaml_str(other).map(str::to_string),
+        None => None,
+    };
 
     // Extras = everything we didn't claim. Convert to JSON via yaml→json.
     let mut extras_map = serde_yaml::Mapping::new();
@@ -474,6 +502,7 @@ fn view_to_yaml(v: &ViewSpec) -> Result<serde_yaml::Value, BaseParseError> {
     let mut m = serde_yaml::Mapping::new();
     let kind_str: &str = match &v.kind {
         ViewKind::Table => "table",
+        ViewKind::Cards => "cards",
         ViewKind::Board => "board",
         ViewKind::Gallery => "gallery",
         ViewKind::Calendar => "calendar",
@@ -2069,6 +2098,31 @@ fn value_to_string(v: &serde_json::Value) -> String {
     }
 }
 
+/// Display string for one `order` column of a row — resolves `file.*`
+/// props, `formula.*` (null for now), and bare / `note.` frontmatter
+/// keys, then stringifies (arrays comma-joined). The base renderer uses
+/// this to project a [`BaseRow`] onto a view's columns.
+#[must_use]
+pub fn cell_value(row: &BaseRow, column: &str) -> String {
+    let v = if let Some(name) = column.strip_prefix("file.") {
+        eval_file_prop(name, row)
+    } else if let Some(name) = column.strip_prefix("note.") {
+        eval_note_prop(name, row)
+    } else if column.starts_with("formula.") {
+        serde_json::Value::Null
+    } else {
+        eval_note_prop(column, row)
+    };
+    match &v {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(value_to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => value_to_string(&v),
+    }
+}
+
 fn eval_file_prop(name: &str, row: &BaseRow) -> serde_json::Value {
     use serde_json::Value as V;
     match name {
@@ -2170,6 +2224,15 @@ fn eval_call(
                     None => return V::Bool(false),
                 };
                 V::Bool(tags.iter().any(|t| t == &needle))
+            }
+            // Obsidian `file.inFolder("Path")` — the note's path is under
+            // the given folder (or a subfolder of it).
+            "inFolder" if arg_vals.len() == 1 => {
+                let needle = arg_vals[0].as_str().unwrap_or("").trim_matches('/');
+                let path = row.path.trim_start_matches('/');
+                V::Bool(
+                    needle.is_empty() || path == needle || path.starts_with(&format!("{needle}/")),
+                )
             }
             "floor" => recv_v.as_f64().map_or(V::Null, |f| json_num(f.floor())),
             "round" => recv_v.as_f64().map_or(V::Null, |f| json_num(f.round())),

@@ -16,7 +16,8 @@
 //! for tests / in-process callers.
 
 use crate::{
-    CollabAck, FileBytes, FolderIndex, IfMatch, Manifest, PutAck, VaultEvent, VaultSyncError,
+    BaseView, CollabAck, FileBytes, FolderIndex, IfMatch, Manifest, PutAck, VaultEvent,
+    VaultSyncError,
 };
 use vox::Tx;
 
@@ -84,6 +85,13 @@ pub trait VaultSync {
     /// Idempotent — re-opening an already-registered file refreshes
     /// the sha and returns the same id.
     fn open_collab(&self, vault_id: &str, path: &str) -> Result<CollabAck, VaultSyncError>;
+
+    /// Run every view of the `.base` file at `base_path` against
+    /// `vault_id`'s pages, returning the rendered tables (column headers
+    /// + grouped, projected rows) for the in-app bases view. The query
+    /// engine is native, so this is server-only;
+    /// [`VaultSyncError::NotFound`] if the base doesn't exist.
+    fn base_views(&self, vault_id: &str, base_path: &str) -> Result<Vec<BaseView>, VaultSyncError>;
 
     /// Subscribe to live change events for `vault_id`. The
     /// server keeps sending until the caller drops `tx`. On
