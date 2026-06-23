@@ -6410,7 +6410,7 @@ dependencies = [
 [[package]]
 name = "fts-ui"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/fts-ui.git?rev=1c62b19e95577f95d810f0285fec9753d837e16b#1c62b19e95577f95d810f0285fec9753d837e16b"
+source = "git+https://codeberg.org/FastTrackStudios/fts-ui.git?rev=d27fe12bc69f1e0f3b058df843797a637abaef69#d27fe12bc69f1e0f3b058df843797a637abaef69"
 dependencies = [
  "fts-ui-core",
 ]
@@ -6418,7 +6418,7 @@ dependencies = [
 [[package]]
 name = "fts-ui-core"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/fts-ui.git?rev=1c62b19e95577f95d810f0285fec9753d837e16b#1c62b19e95577f95d810f0285fec9753d837e16b"
+source = "git+https://codeberg.org/FastTrackStudios/fts-ui.git?rev=d27fe12bc69f1e0f3b058df843797a637abaef69#d27fe12bc69f1e0f3b058df843797a637abaef69"
 dependencies = [
  "chrono",
  "clsx",
