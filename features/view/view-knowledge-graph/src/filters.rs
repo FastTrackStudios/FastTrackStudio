@@ -202,8 +202,10 @@ mod tests {
         assert_eq!(g.edges[0].relation, "cross-ref");
 
         // Hide a relation type.
-        let mut f2 = GraphFilterState::default();
-        f2.hide_structural = false;
+        let mut f2 = GraphFilterState {
+            hide_structural: false,
+            ..Default::default()
+        };
         f2.hidden_relations.insert("related".into());
         assert_eq!(apply_filters(&nodes, &edges, &f2).edges.len(), 2);
     }

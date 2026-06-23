@@ -82,9 +82,9 @@ mod tests {
     use super::*;
     use links_proto::{Confidence, NodeKind, Relation};
 
-    fn link(a: &str, b: &str, rel: Relation, c: Confidence, v: Visibility) -> TypedLink {
-        let mut l = TypedLink::new(NodeRef::verse(a), NodeRef::verse(b), rel, c);
-        l.visibility = v;
+    fn link(from: &str, to: &str, rel: Relation, conf: Confidence, vis: Visibility) -> TypedLink {
+        let mut l = TypedLink::new(NodeRef::verse(from), NodeRef::verse(to), rel, conf);
+        l.visibility = vis;
         l
     }
 
