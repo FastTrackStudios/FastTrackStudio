@@ -267,6 +267,11 @@ workflows-orchestrator = { path = "features/workflows/workflows-orchestrator" }
 # added target_date + progress_percent to it rather than fork a
 # second type. See `plans/issue-tracker-integration.md`.
 label-proto = { path = "features/label/label-proto" }
+# Tagging (plans/tagging-and-icons.md): `tag-proto` is the wasm-clean
+# wire contract (TagIcon + Tag + TagService); `tag` is the native
+# vault-backed registry backend the server mounts.
+tag-proto = { path = "features/tag/tag-proto" }
+tag = { path = "features/tag/tag" }
 # Bridge between task notes (file-backed) and agent-tasks (DB-backed).
 # Writes both sides of the dispatch link on create; folds the agent
 # result back into the source task note on completion.
@@ -551,12 +556,12 @@ inbox-proto = { path = "features/inbox/inbox-proto", default-features = false }
 # General app-state persistence. Capability sub-traits
 # (`KvStore` / `LogStore`) so any feature can mount any backend.
 store-proto = { path = "crates/store-proto", default-features = false }
-architect-auth = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "f189018099c31f0e30f011463cd651c7dbb60ebd" }
+architect-auth = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf" }
 # Wire contract for architect-auth — `AuthServiceClient` + the session
 # bundle types. wasm-clean with just the `vox` feature (uuid `js` flows
 # from architect), so the web UI drives the real sign-in flow over the
 # per-org endpoint.
-auth-proto = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "f189018099c31f0e30f011463cd651c7dbb60ebd", default-features = false }
+auth-proto = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf", default-features = false }
 
 # Git feature — issue + PR workflow on top of forges
 # (GitHub now, Forgejo next). `git-proto` is the wire
@@ -688,6 +693,12 @@ features = ["lib"]
 version = "0.7.9"
 default-features = false
 
+# Icon foundation (plans/tagging-and-icons.md): dioxus-icons is the
+# default set (Lucide as components, tree-shaken). dioxus-free-icons is
+# added on demand for any icon Lucide lacks.
+[workspace.dependencies.dioxus-icons]
+version = "0.1"
+
 [workspace.dependencies.dioxus-ssr]
 version = "0.7.9"
 
@@ -730,11 +741,11 @@ path = "crates/ui"
 # in-repo libs. Same rev as the architect/macros/architect dep below.
 [workspace.dependencies.crdt]
 git = "https://codeberg.org/FastTrackStudios/architect.git"
-rev = "f189018099c31f0e30f011463cd651c7dbb60ebd"
+rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 
 [workspace.dependencies.crdt-seaorm]
 git = "https://codeberg.org/FastTrackStudios/architect.git"
-rev = "f189018099c31f0e30f011463cd651c7dbb60ebd"
+rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 
 [workspace.dependencies.serde]
 version = "1"
@@ -1020,7 +1031,7 @@ moire-wire        = { git = "https://codeberg.org/FastTrackStudios/moire", rev =
 
 [workspace.dependencies.architect]
 git = "https://codeberg.org/FastTrackStudios/architect.git"
-rev = "f189018099c31f0e30f011463cd651c7dbb60ebd"
+rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 
 [workspace.dependencies.printpdf]
 version = "0.7"

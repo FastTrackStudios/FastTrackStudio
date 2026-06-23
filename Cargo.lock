@@ -53,7 +53,7 @@ name = "agent-codex"
 version = "0.1.0"
 dependencies = [
  "agent-proto",
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "futures",
  "serde",
@@ -88,7 +88,7 @@ dependencies = [
 name = "agent-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -540,12 +540,12 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "architect-atom",
- "architect-derive 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect-derive 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "architect-form",
- "architect-rpc-derive 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect-rpc-derive 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "async-channel 2.5.0",
  "async-trait",
  "axum",
@@ -570,7 +570,7 @@ dependencies = [
 [[package]]
 name = "architect-atom"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "dioxus",
 ]
@@ -578,7 +578,7 @@ dependencies = [
 [[package]]
 name = "architect-auth"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "auth",
  "auth-client",
@@ -600,7 +600,7 @@ dependencies = [
 [[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -611,7 +611,7 @@ dependencies = [
 [[package]]
 name = "architect-form"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "architect-atom",
  "dioxus",
@@ -630,7 +630,7 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1148,9 +1148,9 @@ dependencies = [
 [[package]]
 name = "auth"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "argon2",
  "async-trait",
  "auth-db",
@@ -1178,7 +1178,7 @@ dependencies = [
 [[package]]
 name = "auth-client"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "serde",
  "serde_json",
@@ -1189,7 +1189,7 @@ dependencies = [
 [[package]]
 name = "auth-db"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "auth-proto",
  "sea-orm",
@@ -1199,9 +1199,9 @@ dependencies = [
 [[package]]
 name = "auth-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -1597,7 +1597,7 @@ dependencies = [
 name = "body"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -2532,7 +2532,7 @@ dependencies = [
 name = "cookbook"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "cookbook-proto",
  "cooklang",
@@ -2555,7 +2555,7 @@ dependencies = [
 name = "cookbook-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -2935,9 +2935,9 @@ dependencies = [
 [[package]]
 name = "crdt"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "async-trait",
  "chrono",
  "crdt-derive",
@@ -2955,7 +2955,7 @@ dependencies = [
 [[package]]
 name = "crdt-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd#f189018099c31f0e30f011463cd651c7dbb60ebd"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf#6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3190,7 +3190,7 @@ dependencies = [
 name = "cycle"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -4527,6 +4527,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dioxus-icons"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ae929a4cdde2e51fca98ccb8a8fe2ea11640e5026c57486b15dbd5618ba7e56"
+dependencies = [
+ "dioxus",
+ "dioxus-signals",
+ "lazy-js-bundle",
+]
+
+[[package]]
 name = "dioxus-interpreter-js"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5132,7 +5143,7 @@ dependencies = [
 name = "email-imap"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "async-imap",
  "async-native-tls",
  "email-config",
@@ -5171,7 +5182,7 @@ dependencies = [
 name = "email-jmap"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "email-config",
  "email-proto",
  "email-secret",
@@ -5205,7 +5216,7 @@ dependencies = [
 name = "email-maildir"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "email-config",
  "email-proto",
  "mail-parser",
@@ -5220,7 +5231,7 @@ dependencies = [
 name = "email-nextcloud"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "email-proto",
  "thiserror 2.0.18",
  "tracing",
@@ -5230,7 +5241,7 @@ dependencies = [
 name = "email-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "facet",
  "serde",
  "thiserror 2.0.18",
@@ -5285,7 +5296,7 @@ dependencies = [
 name = "email-sync"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "email-config",
  "email-maildir",
  "email-proto",
@@ -5666,7 +5677,7 @@ dependencies = [
 name = "exercises"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -6029,7 +6040,7 @@ dependencies = [
 name = "finance"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "async-trait",
  "chrono",
  "finance-db",
@@ -6071,7 +6082,7 @@ dependencies = [
 name = "finance-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -6115,7 +6126,7 @@ checksum = "9844ddc3a6e533d62bba727eb6c28b5d360921d5175e9ff0f1e621a5c590a4d5"
 name = "fitness"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "body",
  "chrono",
  "exercises",
@@ -6138,7 +6149,7 @@ dependencies = [
 name = "fitness-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "cookbook-proto",
  "facet",
@@ -6851,7 +6862,7 @@ dependencies = [
 name = "git-forgejo"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "git-proto",
  "reqwest 0.12.28",
  "serde",
@@ -6867,7 +6878,7 @@ dependencies = [
 name = "git-github"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "git-proto",
  "octocrab",
  "rustls",
@@ -6881,7 +6892,7 @@ dependencies = [
 name = "git-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "facet",
  "serde",
  "thiserror 2.0.18",
@@ -7015,7 +7026,7 @@ dependencies = [
 name = "goal"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -8100,7 +8111,7 @@ checksum = "7a46645bbd70538861a90d0f26c31537cdf1e44aae99a794fb75a664b70951bc"
 name = "inbox"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "inbox-proto",
  "serde",
@@ -8115,7 +8126,7 @@ dependencies = [
 name = "inbox-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "facet",
  "fake",
  "sea-orm",
@@ -8222,7 +8233,7 @@ dependencies = [
 name = "intake"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fitness-proto",
@@ -8255,7 +8266,7 @@ dependencies = [
 name = "inventory"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -8286,7 +8297,7 @@ dependencies = [
 name = "inventory-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -8825,7 +8836,7 @@ dependencies = [
 name = "label-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "sea-orm",
@@ -9867,7 +9878,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 name = "locations"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -9889,7 +9900,7 @@ dependencies = [
 name = "locations-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -10502,7 +10513,7 @@ checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
 name = "mealplan"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "cookbook",
  "facet",
@@ -10527,7 +10538,7 @@ dependencies = [
 name = "mealplan-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -10595,7 +10606,7 @@ dependencies = [
 name = "milestone"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -10618,7 +10629,7 @@ dependencies = [
 name = "milestone-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -10814,7 +10825,7 @@ dependencies = [
 name = "mount-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -11589,7 +11600,7 @@ dependencies = [
 name = "org-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "eyre",
  "facet",
@@ -11706,7 +11717,7 @@ dependencies = [
 name = "pantry"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "cookbook",
  "facet",
@@ -11731,7 +11742,7 @@ dependencies = [
 name = "pantry-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "cookbook-proto",
  "facet",
@@ -11886,7 +11897,7 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "image",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "js-sys",
  "libloading 0.9.0",
  "log",
@@ -12597,7 +12608,7 @@ dependencies = [
 name = "project"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -12651,7 +12662,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "petgraph 0.8.3",
@@ -12670,7 +12681,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -13842,7 +13853,7 @@ dependencies = [
 name = "scheduling"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "indexmap 2.14.0",
  "scheduling-proto",
@@ -13860,7 +13871,7 @@ dependencies = [
 name = "scheduling-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -15135,7 +15146,7 @@ dependencies = [
 name = "store-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "facet",
  "thiserror 2.0.18",
  "vox",
@@ -15489,6 +15500,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "tag"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
+ "serde",
+ "serde_json",
+ "tag-proto",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "tag-proto"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
+ "facet",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "tagptr"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15577,7 +15615,7 @@ checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 name = "task"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -15630,7 +15668,7 @@ dependencies = [
  "agent-codex",
  "agent-proto",
  "agent-wiki",
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "architect-auth",
  "base64",
  "body",
@@ -15706,7 +15744,7 @@ dependencies = [
  "agent-dispatch",
  "agent-proto",
  "agent-tasks",
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "architect-auth",
  "async-trait",
  "attachments-proto",
@@ -15759,6 +15797,8 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "store-proto",
+ "tag",
+ "tag-proto",
  "task",
  "tempfile",
  "thiserror 2.0.18",
@@ -15980,7 +16020,7 @@ dependencies = [
 name = "threads-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -16076,7 +16116,7 @@ dependencies = [
 name = "timer-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -16944,13 +16984,14 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "agent-proto",
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "auth-proto",
  "chrono",
  "cookbook-proto",
  "crdt",
  "cycle",
  "dioxus",
+ "dioxus-icons",
  "dioxus-router",
  "editor",
  "editor-crdt",
@@ -16979,6 +17020,7 @@ dependencies = [
  "scripture-proto",
  "serde",
  "serde_json",
+ "tag-proto",
  "task",
  "task-ui",
  "threads",
@@ -17367,7 +17409,7 @@ dependencies = [
 name = "vault-live"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "editor-state",
  "facet",
@@ -17393,7 +17435,7 @@ dependencies = [
 name = "vault-obsidian"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "futures",
@@ -17418,7 +17460,7 @@ dependencies = [
 name = "vault-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -18342,7 +18384,7 @@ dependencies = [
 name = "wiki-live"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "mime_guess",
  "serde",
@@ -18363,7 +18405,7 @@ dependencies = [
 name = "wiki-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -19012,7 +19054,7 @@ dependencies = [
 name = "workflows-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -19027,7 +19069,7 @@ dependencies = [
 name = "workouts"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -19049,7 +19091,7 @@ dependencies = [
 name = "workstream"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",
@@ -19075,7 +19117,7 @@ dependencies = [
 name = "workstream-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=f189018099c31f0e30f011463cd651c7dbb60ebd)",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
  "chrono",
  "facet",
  "fake",

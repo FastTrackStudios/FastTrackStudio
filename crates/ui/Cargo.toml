@@ -16,6 +16,11 @@ license.workspace = true
 dioxus = { workspace = true, features = ["router"] }
 dioxus-router.workspace = true
 fts-ui = { workspace = true, features = ["router"] }
+# Icon foundation: dioxus-icons (Lucide-as-components) is the default
+# set; `tag-proto::TagIcon` is the persisted user choice the render
+# helper maps to a component. See plans/tagging-and-icons.md.
+dioxus-icons.workspace = true
+tag-proto.workspace = true
 
 # The editor + the byte⇄scalar adapter for its CRDT host: the
 # vault page wires `Editor`'s `on_transaction` sink through
@@ -116,9 +121,11 @@ wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
 web-sys = { workspace = true, features = [
     "Window",
+    "MediaQueryList",
     "Location",
     "History",
     "Navigator",
+    "MediaQueryList",
     "WebSocket",
     "MessageEvent",
     "BinaryType",

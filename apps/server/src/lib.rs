@@ -171,6 +171,10 @@ pub struct OrgAppState {
     /// Mounted for `Inbox` so the capture UIs + daily review can
     /// round-trip fleeting notes.
     pub inbox: inbox::VaultInbox,
+    /// Tag registry — name → icon/color decorations at
+    /// `vault/Records/tags.json`. Mounted for `TagService` so the
+    /// calendar / lists decorate markdown tag names with an icon.
+    pub tags: tag::VaultTags,
     pub finance_conn: sea_orm::DatabaseConnection,
     /// Invoicing backend — persists invoices in `finance.sqlite` and
     /// links billed sessions in the timer DB. Mounted for `Invoicing`.
@@ -656,6 +660,10 @@ pub(crate) async fn build_org_state(
         let inbox = inbox::VaultInbox::new(vault_root.clone())
             .map_err(|e| eyre::eyre!("inbox backend: {e}"))?;
 
+        // Tag registry rooted at the same vault — `Records/tags.json`.
+        let tags =
+            tag::VaultTags::new(vault_root.clone()).map_err(|e| eyre::eyre!("tag backend: {e}"))?;
+
         // Finance store. SQLite at
         // `<data_root>/orgs/<slug>/finance.sqlite`
         // (override via `TASK_SERVER_FINANCE_URL`). Services
@@ -943,6 +951,7 @@ pub(crate) async fn build_org_state(
             threads,
             scheduling,
             inbox,
+            tags,
             finance_conn,
             finance_backend,
             ledger_backend,
@@ -1291,6 +1300,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         scheduling_proto::service::slots::slots_rpc_service_descriptor(),
         scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
         inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
+        tag_proto::service::tags::tag_service_rpc_service_descriptor(),
         finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
         finance_proto::service::ledger::ledger_rpc_service_descriptor(),
         wiki_proto::service::schema::schema_rpc_service_descriptor(),
@@ -1425,6 +1435,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
             inbox_proto::service::inbox::serve(org.inbox.clone()),
+        )
+        .with(
+            tag_proto::service::tags::tag_service_rpc_service_descriptor(),
+            tag_proto::service::tags::serve(org.tags.clone()),
         )
         .with(
             finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),

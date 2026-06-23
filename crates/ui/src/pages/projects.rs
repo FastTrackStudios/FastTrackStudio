@@ -16,7 +16,9 @@
 //! it tracks light/dark automatically — dark is the default.
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{CalendarDays, Flag, FolderKanban, Layers, User};
+use fts_ui::lucide_dioxus::{
+    CalendarDays, Flag, FolderKanban, Layers, LayoutGrid, LayoutList, User,
+};
 use fts_ui::prelude::*;
 use project::ProjectInfo;
 
@@ -35,6 +37,26 @@ enum ViewMode {
     List,
 }
 
+fn initial_view_mode() -> ViewMode {
+    if is_mobile_viewport() {
+        ViewMode::List
+    } else {
+        ViewMode::Cards
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_mobile_viewport() -> bool {
+    web_sys::window()
+        .and_then(|w| w.match_media("(max-width: 767px)").ok().flatten())
+        .is_some_and(|query| query.matches())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_mobile_viewport() -> bool {
+    false
+}
+
 #[component]
 pub fn ProjectsView() -> Element {
     // The shared optimistic project store: one AtomResult for the list
@@ -42,7 +64,7 @@ pub fn ProjectsView() -> Element {
     // makes `/projects/:id` instant after this visit.
     let projects = crate::stores::use_project_list();
     let store = crate::stores::use_project_store();
-    let view_mode = use_signal(ViewMode::default);
+    let view_mode = use_signal(initial_view_mode);
 
     let view = match (projects.value(), projects.error()) {
         (Some(rows), _) => {
@@ -182,7 +204,7 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>) -> Element {
         page_header { count_line: Some(count_line), view_mode: Some(view_mode) }
 
         // ── live stats band — hairline-divided tiles ───────────────
-        div { class: "grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border/70 bg-border/70 sm:grid-cols-4",
+        div { class: "hidden grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border/70 bg-border/70 md:grid md:grid-cols-4",
             Stat { value: "{total}", label: "Projects".to_string(), hint: None }
             Stat { value: "{active}", label: "Active".to_string(), hint: None }
             Stat { value: "{on_hold}", label: "On hold".to_string(), hint: None }
@@ -191,6 +213,10 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>) -> Element {
                 label: "Avg progress".to_string(),
                 hint: None,
             }
+        }
+
+        div { class: "pointer-events-none fixed right-3 top-20 z-40 md:hidden",
+            MobileViewToggle { view: view_mode }
         }
 
         match view_mode() {
@@ -235,7 +261,7 @@ struct PageHeaderProps {
 #[component]
 fn page_header(props: PageHeaderProps) -> Element {
     rsx! {
-        header { class: "flex flex-col gap-2",
+        header { class: "hidden flex-col gap-2 md:flex",
             span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
                 "Workspace"
             }
@@ -256,6 +282,32 @@ fn page_header(props: PageHeaderProps) -> Element {
                 variant: TextVariant::Muted,
                 class: "max-w-prose",
                 "Everything in flight across the org, live from the project service."
+            }
+        }
+    }
+}
+
+#[component]
+fn MobileViewToggle(props: ViewToggleProps) -> Element {
+    let mut view = props.view;
+    let next = match view() {
+        ViewMode::Cards => ViewMode::List,
+        ViewMode::List => ViewMode::Cards,
+    };
+    let label = match next {
+        ViewMode::Cards => "Switch to cards",
+        ViewMode::List => "Switch to list",
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            class: "pointer-events-auto flex size-8 items-center justify-center rounded-full border border-border/50 bg-background/55 text-muted-foreground/75 shadow-sm backdrop-blur transition-colors hover:bg-background hover:text-foreground",
+            title: "{label}",
+            aria_label: "{label}",
+            onclick: move |_| view.set(next),
+            match next {
+                ViewMode::Cards => rsx! { LayoutGrid { size: 15 } },
+                ViewMode::List => rsx! { LayoutList { size: 15 } },
             }
         }
     }
