@@ -9,6 +9,27 @@ use crate::{
 
 use super::PluginApi;
 
+/// Information about the host track / channel this plugin instance is inserted
+/// on, when the host exposes it (CLAP `track-info`). Editors can use this to
+/// adapt their UI — e.g. an EQ showing instrument-specific frequency guides
+/// based on the track name. All fields are best-effort: a host may provide only
+/// some of them (signalled by the `has_*` flags it sets), so each is optional.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TrackInfo {
+    /// The track / channel name (e.g. "Kick In", "Lead Vox"), if provided.
+    pub name: Option<String>,
+    /// Track color as RGBA, if provided.
+    pub color: Option<(u8, u8, u8, u8)>,
+    /// Number of audio channels on the track, if provided.
+    pub channel_count: Option<i32>,
+    /// The track is a return / FX track.
+    pub is_return: bool,
+    /// The track is a bus / group.
+    pub is_bus: bool,
+    /// The track is the master / main output.
+    pub is_master: bool,
+}
+
 /// Callbacks the plugin can make when the user interacts with its GUI such as updating parameter
 /// values. This is passed to the plugin during [`Editor::spawn()`][crate::editor::Editor::spawn()].
 /// All of these functions assume they're being called from the main GUI thread.
@@ -83,6 +104,15 @@ pub trait GuiContext: Send + Sync + 'static {
     /// (deactivate → rescan → activate). The host will call `request_restart()` automatically.
     fn rescan_param_all(&self) {
         // Default no-op for hosts/wrappers that don't support this
+    }
+
+    /// Information about the host track / channel this instance is on, if the
+    /// host exposes it (CLAP `track-info`). Returns `None` when unknown or
+    /// unsupported. Read fresh each time — the wrapper updates the cached value
+    /// when the host signals a change. Corresponds to `CLAP_EXT_TRACK_INFO`.
+    fn track_info(&self) -> Option<TrackInfo> {
+        // Default: hosts/wrappers without track-info support report nothing.
+        None
     }
 }
 

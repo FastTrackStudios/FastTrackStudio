@@ -80,6 +80,52 @@ pub use dioxus_native::prelude::dioxus_elements;
 pub use dioxus_native::prelude::dioxus_signals;
 pub use dioxus_native::prelude::document;
 
+// Re-export wgpu so consumers share this crate's exact version.
+pub use wgpu;
+
+/// Custom-paint `<canvas>` support for the standalone / dx-serve path, using
+/// anyrender 0.10's texture-registration model.
+///
+/// To back a `<canvas src="{id}">` with GPU content: pull the active
+/// [`DioxusNativeWindowRenderer`] from Dioxus context, obtain its
+/// [`DeviceHandle`] via [`RenderContext::renderer_specific_context`], create a
+/// `wgpu::Texture`, register it with
+/// [`RenderContext::try_register_custom_resource`] (pass `Box::new(texture)`),
+/// and use the returned [`ResourceId`]'s `into_ffi()` as the canvas `src`. Render
+/// into the texture on your own schedule; the renderer composites it each frame.
+/// Call [`RenderContext::unregister_resource`] on teardown.
+pub mod wgpu_canvas {
+    pub use anyrender::{RenderContext, ResourceId};
+    pub use anyrender_vello::DeviceHandle;
+    pub use dioxus_native::DioxusNativeWindowRenderer;
+}
+
+/// Blitz native custom-DOM-widget support (the `custom-widget` mechanism).
+///
+/// A DOM node becomes a custom-painted widget whose [`Widget::paint`] records
+/// into an anyrender [`Scene`] that blitz composites into its own paint pass at
+/// the node's layout box — no separate renderer, offscreen texture, `<canvas>`,
+/// or scene-overlay required, and it works identically in the plugin editor and
+/// standalone. Attach it declaratively to an `object` element:
+///
+/// ```ignore
+/// use nice_plug_dioxus::widget::{CustomWidgetAttr, Widget, Scene, PaintScene as _};
+///
+/// let w = use_memo(|| CustomWidgetAttr::new(MyWidget::new()));
+/// rsx! { object { "data": w } }
+/// ```
+///
+/// Implement [`Widget::paint`] to draw via the [`PaintScene`] trait (vello is the
+/// backend), [`Widget::handle_event`] for input ([`UiEvent`]), and
+/// [`Widget::can_create_surfaces`] to grab the wgpu device/queue for GPU-texture
+/// widgets via the [`RenderContext`].
+pub mod widget {
+    pub use anyrender::{PaintScene, RenderContext, Scene};
+    pub use blitz_dom::node::ComputedStyles;
+    pub use blitz_traits::events::UiEvent;
+    pub use dioxus_native::{CustomWidgetAttr, Widget};
+}
+
 /// A type-erased wrapper for shared UI state.
 ///
 /// This allows the framework to store arbitrary state types while preserving

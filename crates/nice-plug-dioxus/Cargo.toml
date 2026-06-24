@@ -16,9 +16,9 @@ hot-reload = ["dep:dioxus-devtools"]
 # NOT YET AVAILABLE in the nice-plug port: requires the embedded-editor API to be
 # ported into nice-plug-core first (see src/embedded.rs). Enabling this currently
 # emits a compile_error with instructions.
-embedded = ["dep:anyrender_vello_cpu", "dep:anyrender"]
+embedded = ["dep:anyrender_vello_cpu"]
 # Use CPU rendering with softbuffer (works on Linux/XWayland where wgpu surfaces fail)
-cpu-rendering = ["dep:anyrender_vello_cpu", "dep:anyrender", "dep:softbuffer"]
+cpu-rendering = ["dep:anyrender_vello_cpu", "dep:softbuffer"]
 # Use wgpu offscreen rendering + softbuffer blit (works on Linux/XWayland, keeps GPU rendering)
 softbuffer-blit = ["dep:softbuffer"]
 
@@ -44,9 +44,12 @@ vello = { version = "0.9", features = ["wgpu"] }
 wgpu = "29"
 wgpu_context = "0.6"  # For DeviceHandle type used by CustomPaintSource
 
+# anyrender base traits (RenderContext / ResourceId) — re-exported for consumers
+# implementing wgpu custom-paint <canvas> sources via the 0.10 texture-registration API.
+anyrender = "0.10"
+
 # CPU rendering for embedded editor (optional)
 anyrender_vello_cpu = { version = "0.12", optional = true }
-anyrender = { version = "0.10", optional = true }
 softbuffer = { version = "0.4", optional = true }
 
 # Window management - using fork with raw-window-handle 0.6 for softbuffer compatibility.

@@ -18,7 +18,7 @@ pub use crate::audio_setup::{
 };
 pub use crate::buffer::Buffer;
 pub use crate::context::PluginApi;
-pub use crate::context::gui::{AsyncExecutor, GuiContext, ParamSetter};
+pub use crate::context::gui::{AsyncExecutor, GuiContext, ParamSetter, TrackInfo};
 pub use crate::context::init::InitContext;
 pub use crate::context::process::{ProcessContext, Transport};
 pub use crate::context::remote_controls::{
