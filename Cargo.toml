@@ -71,16 +71,14 @@ neural-amp-modeler = { path = "../neural-amp-modeler-rs" }
 cpal = "0.17"
 
 # ── Facet reflection ─────────────────────────────────────────────────
-# Pinned to 0.46 to match the daw + vox (bearcove) stack. facet-styx 4.0
-# resolves against facet ^0.46.
-facet = { version = "0.46" }
-facet-styx = { version = "4.0" }
-facet-toml = { version = "0.46" }
+# Upstream facet/facet-styx from crates.io (migrated off the FTS codeberg fork).
+facet = { version = "0.50.0-rc.1" }
+facet-styx = { version = "5.0.0-rc.1" }
+facet-toml = { version = "0.50.0-rc.1" }
 
 # ── ROAM service framework ───────────────────────────────────────────
-# vox 0.8.2 fork, direct from Codeberg @ f31f104 — the exact rev daw +
-# architect pin, so the graph contains a single vox/facet source.
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+# Upstream vox from crates.io (migrated off the FTS codeberg fork).
+vox = { version = "0.10.0-rc.1" }
 ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # ── DAW facade crate (sibling repo — single public API surface) ──────
@@ -171,6 +169,29 @@ clap = { version = "4", features = ["derive"] }
 # [patch."https://codeberg.org/FastTrackStudios/fts-ui.git"]
 # fts-ui = { path = "../fts-ui/crates/fts-ui" }
 #
+# ── daw local override (cross-repo audio-engine work) ───────────────────
+# The DAW audio engine is being migrated to own all of signal's audio I/O
+# (device selection + live duplex monitor in the new `daw-audio-io` crate).
+# Point the codeberg `daw` git dep at the local checkout so both repos build
+# together. Drop this block + bump the git pin once the daw changes land on
+# codeberg `feat/ui-showcase`. `audio-controls` (branch=main) is intentionally
+# NOT patched — it was removed on feat/ui-showcase, so it stays on git main.
+[patch."https://codeberg.org/FastTrackStudios/daw.git"]
+daw = { path = "../daw/crates/daw" }
+daw-cli = { path = "../daw/apps/daw/cli" }
+daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-runtime" }
+
+# ── architect + input_actions local overrides (migrated siblings) ───────
+# signal's graph reaches architect / actions-proto transitively (through daw's
+# `#[architect::rpc]` dispatchers and input_actions). The local checkouts are
+# already migrated to upstream facet 0.50 / vox 0.10; patch them in here so the
+# whole graph resolves against the migrated sources.
+[patch."https://codeberg.org/FastTrackStudios/architect.git"]
+architect = { path = "/run/media/Development/architect/macros/architect" }
+
+[patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "/run/media/Development/FastTrackStudio/input_actions/crates/actions-proto" }
+
 # ── Split FTS plugin repo local overrides ───────────────────────────────
 [patch."https://git.starcommand.live/FastTrackStudios/FTS-Plugins.git"]
 eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
