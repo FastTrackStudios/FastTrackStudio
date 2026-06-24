@@ -64,6 +64,24 @@ impl RigAudioPrefs {
     }
 }
 
+/// Convert the rig's device prefs into daw's engine-global [`AudioIoPrefs`].
+///
+/// The rig is always duplex (live monitoring needs the input), so `want_input`
+/// is forced on. The per-track input *channel* lives on [`RigAudioPrefs`] but
+/// not on [`AudioIoPrefs`] (which is engine-global) — it's passed to
+/// [`LiveRig::open`](daw::live::LiveRig::open) separately.
+impl From<&RigAudioPrefs> for daw_audio_io::AudioIoPrefs {
+    fn from(p: &RigAudioPrefs) -> Self {
+        daw_audio_io::AudioIoPrefs {
+            input_device: p.input_device.clone(),
+            output_device: p.output_device.clone(),
+            sample_rate: p.sample_rate,
+            buffer_size: p.buffer_size,
+            want_input: true,
+        }
+    }
+}
+
 /// Signal's user config directory: `$XDG_CONFIG_HOME/signal`, falling back to
 /// `$HOME/.config/signal`, then `./signal`.
 pub fn signal_config_dir() -> PathBuf {

@@ -1,56 +1,37 @@
-//! Live guitar-rig audio path — the standalone amp-modeler rig, running ON
-//! daw's audio engine.
+//! Live guitar-rig audio path — the standalone amp-modeler rig, a thin wrapper
+//! over daw's [`LiveRig`].
 //!
-//! The rig is **one input-armed track in a tiny daw project**: a single track
-//! whose record input is a hardware channel (`RecordInput::Audio { channel }`),
-//! whose FX chain is the active patch's chain ([NAM amp, cab IR, optional hosted
-//! CLAP/VST3]), routed to master. signal builds and drives this project;
-//! daw's [`AudioEngine`] opens the output device + a live input stream and, every
-//! block, mixes the armed input channel into the track's bus, runs its FX chain,
-//! and outputs the result. There is no signal-owned cpal stream, ring buffer, or
-//! resident-bank any more — that work now lives in daw's engine.
+//! The rig is **one input-armed track in a tiny daw project** whose FX chain is
+//! the active patch's chain ([NAM amp, cab IR, optional hosted CLAP/VST3]),
+//! routed to master. All of that plumbing — seeding the project, arming the
+//! input channel, reserving FX slots, opening the engine + live input stream,
+//! metering, transport — lives in daw's [`LiveRig`] now; [`GuitarRig`] just
+//! owns one and builds chains for it. There is no signal-owned cpal stream,
+//! ring buffer, project/track/slot wiring, `Identity`/`InputProbe`, or
+//! resident-bank any more — that work lives in daw's engine.
 //!
 //! ## Instant, GigPerformer-style patch switching
 //!
-//! Each FX block is a [`PluginInstance`](signal_plugin_host::PluginInstance):
-//! [`NamProcessor`] / [`Convolver`] (native) implement it directly; hosted
-//! plugins go through daw's own loader. daw's renderer pulls the boxed instance
-//! backing each fx-guid out of `Standalone`'s `plugin_instances` map **per block,
-//! under a lock**. So swapping a *pre-prepared* box in under that lock
-//! ([`Standalone::insert_plugin_instance`]) is glitch-free.
-//!
-//! The track reserves a fixed number of fx slots up front (constant guids, so
-//! the project's `fx_chain` never changes → the renderer never rebuilds its
-//! snapshot). A "chain" install pre-builds + prepares its boxes and stores them
-//! control-side. [`set_active`](GuitarRig::set_active) swaps the active chain's
-//! boxes into the slot guids (and identity pass-throughs into the unused slots)
-//! — a handful of map inserts under the renderer's lock. The returned old boxes
-//! are dropped off the audio thread.
+//! Each FX block is a [`PluginInstance`]: [`NamProcessor`] / [`Convolver`]
+//! (native) implement it directly; hosted plugins go through daw's own loader.
+//! A "chain" install pre-builds + prepares its boxes and stores them
+//! control-side. [`set_active`](GuitarRig::set_active) hands the active chain's
+//! boxes to [`LiveRig::set_chain`], which swaps them into the reserved slot
+//! guids under the renderer's per-block lock (glitch-free) and returns the
+//! displaced boxes — dropped here, off the audio thread.
 //!
 //! ## Metering
 //!
-//! daw's renderer writes one post-fader peak per track into a [`Meters`] bank;
-//! that is the **output** meter. The first reserved fx slot is an
-//! [`InputProbe`] pass-through that records the **input** peak it sees
-//! (post-input-trim, pre-amp) into a shared atomic.
+//! [`LiveRig`] exposes the track's post-fader peak (output) and a built-in
+//! input-probe peak (pre-FX input); [`GuitarRig`] delegates both.
 
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use facet::Facet;
 
-use daw::service::{
-    FxChainContext, FxChains, ProjectContext, ProjectInfo, RecordInput, TrackRef, Tracks,
-};
-use daw::standalone::Standalone;
-use daw::standalone::audio_engine::AudioEngine;
-use daw::standalone::metering::{Meters, linear_to_db};
-use daw::standalone::transport_engine::{PlayStateRepr, TransportShared};
-use daw_audio_io::AudioIoPrefs;
-use signal_plugin_host::{
-    PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
-};
+use daw::live::LiveRig;
+use daw::standalone::metering::linear_to_db;
+use signal_plugin_host::PluginInstance;
 
 use crate::convolver::Convolver;
 use crate::mixer::FX_PREPARE_BLOCK;
@@ -62,20 +43,14 @@ use crate::rig_prefs::RigAudioPrefs;
 /// against larger backend buffers without per-block re-preparation.
 const MAX_BLOCK: usize = FX_PREPARE_BLOCK as usize;
 
-/// Fixed number of FX slots reserved on the rig track. Slot 0 is the
-/// [`InputProbe`] (input meter); slots `1..=MAX_CHAIN_SLOTS` carry the active
-/// chain's blocks (identity pass-throughs fill unused ones). Reserving a
-/// constant count keeps the project's `fx_chain` (guids) immutable, so patch
-/// switches never rebuild the renderer's snapshot — the swap is pure box-insert.
+/// Number of chain FX slots reserved on the rig track via [`LiveRig`]. Chains
+/// longer than this are rejected at install time. (LiveRig reserves one extra
+/// hidden slot for its input probe.)
 const MAX_CHAIN_SLOTS: usize = 8;
 
 /// Identifies a chain resident control-side. Assigned on install; opaque
 /// elsewhere.
 pub type ModelId = u32;
-
-fn db_to_lin(db: f32) -> f32 {
-    if db == 0.0 { 1.0 } else { 10f32.powf(db / 20.0) }
-}
 
 /// One block in a patch's FX chain — a backend kind plus a file path.
 ///
@@ -172,159 +147,6 @@ pub struct DeviceInfo {
     pub default_sample_rate: u32,
 }
 
-// ── Shared meter state written by audio-thread plugin instances ──────────────
-
-/// Shared atomic the [`InputProbe`] writes the per-block input peak into, read
-/// by the UI input meter. Held by both the rig (reader) and the probe instance
-/// (audio-thread writer).
-#[derive(Debug, Default)]
-struct InputMeterShared {
-    /// Latest block input peak (linear), as `f32` bits.
-    peak: AtomicU32,
-    /// When set, the probe writes silence (clean-DI bypass is handled by
-    /// swapping the chain out, but the probe still meters the live input).
-    _reserved: AtomicBool,
-}
-
-impl InputMeterShared {
-    fn store(&self, peak: f32) {
-        self.peak.store(peak.to_bits(), Ordering::Relaxed);
-    }
-    fn load(&self) -> f32 {
-        f32::from_bits(self.peak.load(Ordering::Relaxed))
-    }
-}
-
-/// A unity pass-through [`PluginInstance`] that records the input peak it sees.
-/// Sits at slot 0 of the rig track so the UI gets an input meter (daw's renderer
-/// only meters the post-fader *output* per track). Pure copy + max — cheap.
-struct InputProbe {
-    shared: Arc<InputMeterShared>,
-    prepared: bool,
-}
-
-impl InputProbe {
-    fn new(shared: Arc<InputMeterShared>) -> Self {
-        Self { shared, prepared: true }
-    }
-}
-
-impl PluginInstance for InputProbe {
-    fn descriptor(&self) -> PluginDescriptor {
-        PluginDescriptor {
-            id: "signal.rig.input_probe".into(),
-            name: "Input".into(),
-            vendor: "Signal".into(),
-            version: String::new(),
-            format: PluginFormat::Synthetic,
-        }
-    }
-    fn params(&mut self) -> Vec<PluginParamInfo> {
-        Vec::new()
-    }
-    fn param_value(&mut self, _id: u32) -> Option<f64> {
-        None
-    }
-    fn value_to_text(&mut self, _id: u32, _v: f64) -> Option<String> {
-        None
-    }
-    fn text_to_value(&mut self, _id: u32, _t: &str) -> Option<f64> {
-        None
-    }
-    fn latency(&mut self) -> u32 {
-        0
-    }
-    fn prepare(&mut self, _sr: f64, _bs: u32) -> Result<(), PluginError> {
-        self.prepared = true;
-        Ok(())
-    }
-    fn is_prepared(&self) -> bool {
-        self.prepared
-    }
-    fn process_block(
-        &mut self,
-        in_l: &[f32],
-        in_r: &[f32],
-        out_l: &mut [f32],
-        out_r: &mut [f32],
-        _events: &PluginEvents<'_>,
-    ) -> Result<(), PluginError> {
-        let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
-        let mut pk = 0.0f32;
-        for i in 0..frames {
-            out_l[i] = in_l[i];
-            out_r[i] = in_r[i];
-            pk = pk.max(in_l[i].abs()).max(in_r[i].abs());
-        }
-        self.shared.store(pk);
-        Ok(())
-    }
-    fn deactivate(&mut self) {
-        self.prepared = false;
-    }
-}
-
-/// A unity pass-through [`PluginInstance`] used to fill the rig track's unused
-/// FX slots (chains shorter than [`MAX_CHAIN_SLOTS`]). Copies input → output.
-struct Identity {
-    prepared: bool,
-}
-
-impl Identity {
-    fn new() -> Self {
-        Self { prepared: true }
-    }
-}
-
-impl PluginInstance for Identity {
-    fn descriptor(&self) -> PluginDescriptor {
-        PluginDescriptor {
-            id: "signal.rig.identity".into(),
-            name: "—".into(),
-            vendor: "Signal".into(),
-            version: String::new(),
-            format: PluginFormat::Synthetic,
-        }
-    }
-    fn params(&mut self) -> Vec<PluginParamInfo> {
-        Vec::new()
-    }
-    fn param_value(&mut self, _id: u32) -> Option<f64> {
-        None
-    }
-    fn value_to_text(&mut self, _id: u32, _v: f64) -> Option<String> {
-        None
-    }
-    fn text_to_value(&mut self, _id: u32, _t: &str) -> Option<f64> {
-        None
-    }
-    fn latency(&mut self) -> u32 {
-        0
-    }
-    fn prepare(&mut self, _sr: f64, _bs: u32) -> Result<(), PluginError> {
-        self.prepared = true;
-        Ok(())
-    }
-    fn is_prepared(&self) -> bool {
-        self.prepared
-    }
-    fn process_block(
-        &mut self,
-        in_l: &[f32],
-        in_r: &[f32],
-        out_l: &mut [f32],
-        out_r: &mut [f32],
-        _events: &PluginEvents<'_>,
-    ) -> Result<(), PluginError> {
-        let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
-        out_l[..frames].copy_from_slice(&in_l[..frames]);
-        out_r[..frames].copy_from_slice(&in_r[..frames]);
-        Ok(())
-    }
-    fn deactivate(&mut self) {
-        self.prepared = false;
-    }
-}
 
 /// Build a prepared box for one [`RigBlock`] at `sample_rate`.
 fn build_block(
@@ -383,12 +205,13 @@ fn build_block(
 }
 
 /// A resident chain: its pre-built + prepared boxes (one per chain slot, in
-/// order) plus its control-side [`SlotInfo`]. Switching to it inserts these
-/// boxes into the track's slot guids.
+/// order) plus its control-side [`SlotInfo`]. Switching to it hands these boxes
+/// to [`LiveRig::set_chain`].
 struct ResidentChain {
     #[allow(dead_code)]
     info: SlotInfo,
-    /// Boxes for chain slots `0..boxes.len()`. Taken out (`Option`) when active.
+    /// Boxes for chain slots `0..boxes.len()`. Taken out (`Option`) when active
+    /// (handed to the live rig); reclaimed when another chain is selected.
     boxes: Vec<Option<Box<dyn PluginInstance>>>,
 }
 
@@ -396,8 +219,8 @@ struct ResidentChain {
 /// ([`set_active`](GuitarRig::set_active) / bypass / trims) can stay `&self`
 /// (the original API), while installs (`&mut self`) lock it briefly. The
 /// resident chains live here because both install (write) and activate (swap)
-/// touch them; the actual box-swap goes through `daw.insert_plugin_instance`,
-/// which is itself `&self`.
+/// touch them; the actual box-swap goes through [`LiveRig::set_chain`], which
+/// is itself `&self`.
 struct SwapState {
     /// Resident chains keyed by [`ModelId`].
     chains: std::collections::HashMap<ModelId, ResidentChain>,
@@ -410,22 +233,11 @@ struct SwapState {
 }
 
 /// A live guitar rig: a single input-armed daw track whose FX chain is the
-/// active patch, running on daw's [`AudioEngine`].
+/// active patch, running on daw's [`LiveRig`].
 pub struct GuitarRig {
-    daw: Standalone,
-    // The engine owns the cpal output + live-input streams; drop = stop.
-    _engine: AudioEngine,
-    #[allow(dead_code)]
-    shared: Arc<TransportShared>,
-    meters: Arc<Meters>,
-    #[allow(dead_code)]
-    project_guid: String,
-    track_guid: String,
-    /// Fixed fx-guids for the chain slots (constant for the project's life).
-    slot_guids: Vec<String>,
-    /// Input-meter atomic written by the [`InputProbe`] at slot 0.
-    input_meter: Arc<InputMeterShared>,
-
+    /// The live-monitor engine (owns the daw project/track/slots, cpal output +
+    /// live-input streams, meters; drop = stop).
+    live: LiveRig,
     pub sample_rate: u32,
     /// Mutable swap state (resident chains + active selection + trims/bypass).
     swap: std::sync::Mutex<SwapState>,
@@ -434,10 +246,6 @@ pub struct GuitarRig {
     next_id: ModelId,
     prefs: RigAudioPrefs,
 }
-
-/// Project/track names for the rig's tiny daw project.
-const RIG_PROJECT_NAME: &str = "Signal Guitar Rig";
-const RIG_TRACK_NAME: &str = "Guitar In";
 
 impl GuitarRig {
     /// Open the system default input + output devices.
@@ -461,10 +269,9 @@ impl GuitarRig {
         })
     }
 
-    /// Open the rig from [`RigAudioPrefs`]. Builds a one-track daw project (the
-    /// track armed to monitor `prefs.input_channel`), starts daw's
-    /// [`AudioEngine`] with live input, reserves the track's FX slots, and
-    /// begins transport so the renderer runs every block.
+    /// Open the rig from [`RigAudioPrefs`]. Stands up a daw [`LiveRig`] — one
+    /// input-armed track monitoring `prefs.input_channel`, with reserved FX
+    /// slots, the engine + live input running, transport rolling.
     pub fn open(prefs: &RigAudioPrefs) -> eyre::Result<Self> {
         // Low latency under JACK/PipeWire: ask PipeWire for the quantum before
         // the JACK client connects (the client can't set the buffer there).
@@ -479,88 +286,14 @@ impl GuitarRig {
             }
         }
 
-        let daw = Standalone::new();
-
-        // 1. Seed a one-track project; make it current so the FX-chain service
-        //    (which resolves the current project) targets it.
-        let project_guid = uuid::new_v4_string();
-        daw.seed_project(ProjectInfo {
-            guid: project_guid.clone(),
-            name: RIG_PROJECT_NAME.to_string(),
-            path: String::new(),
-        });
-        daw.set_current_project(&project_guid);
-
-        let track_guid = <Standalone as Tracks>::add(&daw, ProjectContext::Current, RIG_TRACK_NAME, None)
-            .map_err(|e| eyre::eyre!("rig: add track failed: {e}"))?;
-
-        // 2. Arm the track to monitor the hardware input channel — this is what
-        //    makes daw's engine open a live input stream and feed the bus.
-        <Standalone as Tracks>::set_record_input(
-            &daw,
-            ProjectContext::Current,
-            TrackRef::guid(track_guid.as_str()),
-            RecordInput::Audio { channel: prefs.input_channel as u32 },
-        )
-        .map_err(|e| eyre::eyre!("rig: set record input failed: {e}"))?;
-
-        // 3. Reserve the fixed FX slots on the track (constant guids). Slot 0 is
-        //    the input probe; the rest start as identity pass-throughs.
-        let fx_ctx = FxChainContext::track(track_guid.clone());
-        let mut slot_guids = Vec::with_capacity(MAX_CHAIN_SLOTS + 1);
-        for i in 0..=MAX_CHAIN_SLOTS {
-            let idx = <Standalone as FxChains>::add(&daw, fx_ctx.clone(), &format!("rig-slot-{i}"))
-                .map_err(|e| eyre::eyre!("rig: reserve fx slot {i} failed: {e}"))?;
-            // The standalone FxChains service assigns the entry's guid; fetch it.
-            let guid = <Standalone as FxChains>::get(&daw, fx_ctx.clone(), idx)
-                .map(|fx| fx.guid)
-                .ok_or_else(|| eyre::eyre!("rig: fx slot {i} vanished after add"))?;
-            slot_guids.push(guid);
-        }
-
-        // 4. Build the shared transport + audio engine with live input.
-        let req_rate = prefs.sample_rate_opt().unwrap_or(48_000);
-        let shared = Arc::new(TransportShared::new(req_rate, 120.0));
-        let io = AudioIoPrefs {
-            input_device: prefs.input_device.clone(),
-            output_device: prefs.output_device.clone(),
-            sample_rate: prefs.sample_rate,
-            buffer_size: prefs.buffer_size,
-            want_input: true,
-        };
-        let engine =
-            AudioEngine::with_project_prefs(daw.clone(), project_guid.clone(), shared.clone(), &io)
-                .map_err(|e| eyre::eyre!("rig: audio engine failed: {e}"))?;
-        let sample_rate = engine.sample_rate();
-
-        // Per-track meter bank (one cell, post-fader output peak). Install AFTER
-        // the engine opens so it's sized for the device; the renderer reads
-        // `daw.meters()` fresh each block.
-        let meters = Meters::new(1);
-        daw.set_meters(meters.clone());
-
-        // 5. Populate the reserved slots: input probe at 0, identities elsewhere.
-        let input_meter = Arc::new(InputMeterShared::default());
-        {
-            let mut probe = InputProbe::new(input_meter.clone());
-            let _ = probe.prepare(sample_rate as f64, FX_PREPARE_BLOCK);
-            daw.insert_plugin_instance(slot_guids[0].clone(), Box::new(probe));
-            for guid in &slot_guids[1..] {
-                let mut id = Identity::new();
-                let _ = id.prepare(sample_rate as f64, FX_PREPARE_BLOCK);
-                daw.insert_plugin_instance(guid.clone(), Box::new(id));
-            }
-        }
-
-        // 6. Roll the transport so the renderer runs (and the live input flows
-        //    through the chain to master) every block.
-        shared.set_play_state(PlayStateRepr::Playing);
+        let live = LiveRig::open(&prefs.into(), prefs.input_channel as u32, MAX_CHAIN_SLOTS)
+            .map_err(|e| eyre::eyre!("rig: {e}"))?;
+        let sample_rate = live.sample_rate();
 
         tracing::info!(
             input_channel = prefs.input_channel,
             sample_rate,
-            project = %project_guid,
-            "signal-sampler: guitar rig started on daw engine"
+            "signal-sampler: guitar rig started on daw LiveRig"
         );
         eprintln!(
             "Guitar rig (daw engine): in ch{} → FX chain → master @ {} Hz",
@@ -576,14 +309,7 @@ impl GuitarRig {
         };
 
         Ok(Self {
-            daw,
-            _engine: engine,
-            shared,
-            meters,
-            project_guid,
-            track_guid,
-            slot_guids,
-            input_meter,
+            live,
             sample_rate,
             swap: std::sync::Mutex::new(SwapState {
                 chains: std::collections::HashMap::new(),
@@ -692,62 +418,62 @@ impl GuitarRig {
         self.slots.retain(|s| s.id != id);
     }
 
-    /// Select the active chain — swaps the chain's pre-prepared boxes into the
-    /// track's fixed slot guids under daw's renderer per-block lock
-    /// (glitch-free), filling unused slots with identity pass-throughs. `None`
-    /// = clean DI passthrough (all chain slots → identity). The old boxes are
-    /// dropped on this (control) thread, off the audio thread. `&self` (via an
-    /// internal `Mutex`) so footswitch / UI paths needn't hold the rig `&mut`.
+    /// Select the active chain — hands the chain's pre-prepared boxes to
+    /// [`LiveRig::set_chain`], which swaps them into the reserved slot guids
+    /// under the renderer's per-block lock (glitch-free). `None` = clean DI
+    /// passthrough (chain slots → identity). Boxes displaced from the previously
+    /// active chain are reclaimed so it can be re-armed; any others are dropped
+    /// on this (control) thread, off the audio thread. `&self` (via an internal
+    /// `Mutex`) so footswitch / UI paths needn't hold the rig `&mut`.
     pub fn set_active(&self, id: Option<ModelId>) {
         let mut swap = self.swap.lock().unwrap();
-        let chain_guids = &self.slot_guids[1..]; // slot 0 is the input probe
-        let sr = self.sample_rate as f64;
         let bypass = swap.bypass;
 
-        // 1. Reclaim the previously-active chain's boxes back into the resident
-        //    map so it can be re-armed (replace each live box with an identity).
-        if let Some(prev) = swap.active.take() {
-            if let Some(chain) = swap.chains.get_mut(&prev) {
-                for (slot, guid) in chain_guids.iter().enumerate() {
-                    if slot < chain.boxes.len() {
-                        let reclaimed = self
-                            .daw
-                            .insert_plugin_instance(guid.clone(), Self::fresh_identity(sr));
-                        chain.boxes[slot] = reclaimed;
-                    }
-                }
-            }
-        }
-
-        // 2. Arm the requested chain — unless bypassed, or the id is unknown.
+        // Build the chain to install: take the requested chain's boxes out of
+        // the resident map (unless bypassed / unknown → empty = all identities).
         let known = id.filter(|i| swap.chains.contains_key(i));
-        match known.filter(|_| !bypass) {
+        let to_install = known.filter(|_| !bypass);
+        let new_chain: Vec<Box<dyn PluginInstance>> = match to_install {
             Some(cid) => {
                 let chain = swap.chains.get_mut(&cid).expect("checked contains_key");
-                for (slot, guid) in chain_guids.iter().enumerate() {
-                    let new_box: Box<dyn PluginInstance> = match chain.boxes.get_mut(slot) {
-                        Some(slot_box) if slot_box.is_some() => slot_box.take().unwrap(),
-                        _ => Self::fresh_identity(sr),
-                    };
-                    drop(self.daw.insert_plugin_instance(guid.clone(), new_box));
-                }
-                swap.active = Some(cid);
+                chain.boxes.iter_mut().filter_map(|b| b.take()).collect()
             }
-            None => {
-                for guid in chain_guids {
-                    drop(self.daw.insert_plugin_instance(guid.clone(), Self::fresh_identity(sr)));
+            None => Vec::new(),
+        };
+
+        // Swap under the renderer's lock; reclaim what the previous chain left.
+        let prev = swap.active.take();
+        let displaced = self.live.set_chain(new_chain);
+
+        // Reclaim displaced boxes into the previously-active chain's slots (in
+        // order) so it can be re-armed later. Identity fillers are dropped here.
+        if let Some(prev_id) = prev {
+            if let Some(prev_chain) = swap.chains.get_mut(&prev_id) {
+                let mut it = displaced.into_iter();
+                for slot in prev_chain.boxes.iter_mut() {
+                    match it.next() {
+                        Some(b) => *slot = Some(b),
+                        None => break,
+                    }
                 }
-                // When bypassed, remember the requested (known) id so toggling
-                // bypass off re-arms it; otherwise we're cleanly passthrough.
-                swap.active = if bypass { known } else { None };
+                // Remaining displaced boxes (identity fillers) drop here.
             }
         }
-    }
+        // (When there was no previous chain, `displaced` are all identity
+        // fillers — they drop at end of scope, off the audio thread.)
 
-    fn fresh_identity(sr: f64) -> Box<dyn PluginInstance> {
-        let mut id = Identity::new();
-        let _ = id.prepare(sr, FX_PREPARE_BLOCK);
-        Box::new(id)
+        // When bypassed, remember the requested (known) id so toggling bypass
+        // off re-arms it; otherwise reflect the actually-armed selection.
+        swap.active = match to_install {
+            Some(cid) => Some(cid),
+            None => {
+                if bypass {
+                    known
+                } else {
+                    None
+                }
+            }
+        };
     }
 
     pub fn active(&self) -> Option<ModelId> {
@@ -789,14 +515,8 @@ impl GuitarRig {
 
     pub fn set_output_trim_db(&self, db: f32) {
         self.swap.lock().unwrap().output_trim_db = db;
-        // Output trim → the track's post-fader gain (linear).
-        let out_lin = db_to_lin(db) as f64;
-        let _ = <Standalone as Tracks>::set_volume(
-            &self.daw,
-            ProjectContext::Current,
-            TrackRef::guid(self.track_guid.as_str()),
-            out_lin,
-        );
+        // Output trim → the live track's post-fader gain.
+        self.live.set_output_gain_db(db);
     }
 
     pub fn set_bypass(&self, bypass: bool) {
@@ -825,17 +545,14 @@ impl GuitarRig {
         self.swap.lock().unwrap().output_trim_db
     }
 
-    /// Post-input peak (linear) — from the [`InputProbe`] at slot 0.
+    /// Post-input peak (linear) — from the live rig's built-in input probe.
     pub fn input_peak(&self) -> f32 {
-        self.input_meter.load()
+        self.live.input_peak()
     }
 
     /// Output peak (linear) — the track's post-fader meter cell.
     pub fn output_peak(&self) -> f32 {
-        self.meters
-            .cell(0)
-            .map(|c| c.peak(0).max(c.peak(1)))
-            .unwrap_or(0.0)
+        self.live.output_peak()
     }
 
     /// Input-stream overruns. daw's engine counts these internally; not yet
@@ -888,29 +605,10 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
-mod uuid {
-    //! Minimal UUIDv4 string generator — avoids pulling the `uuid` crate just
-    //! for the rig's project guid. Not cryptographically strong; only needs to
-    //! be unique within this process.
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    pub fn new_v4_string() -> String {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        let c = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let pid = std::process::id() as u64;
-        format!("signal-rig-{nanos:x}-{pid:x}-{c:x}")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use signal_plugin_host::PluginEvents;
 
     #[test]
     fn rig_block_kind_predicates() {
@@ -950,29 +648,7 @@ mod tests {
         assert!(energy > 1e-9, "NAM block should produce audio");
     }
 
-    #[test]
-    fn identity_passthrough_copies_input() {
-        let mut id = Identity::new();
-        let il = [0.1, -0.2, 0.3];
-        let ir = [0.4, -0.5, 0.6];
-        let (mut ol, mut or_) = ([0.0f32; 3], [0.0f32; 3]);
-        id.process_block(&il, &ir, &mut ol, &mut or_, &PluginEvents::default())
-            .unwrap();
-        assert_eq!(ol, il);
-        assert_eq!(or_, ir);
-    }
-
-    #[test]
-    fn input_probe_records_peak() {
-        let shared = Arc::new(InputMeterShared::default());
-        let mut probe = InputProbe::new(shared.clone());
-        let il = [0.1, -0.8, 0.3];
-        let ir = [0.2, 0.4, -0.5];
-        let (mut ol, mut or_) = ([0.0f32; 3], [0.0f32; 3]);
-        probe
-            .process_block(&il, &ir, &mut ol, &mut or_, &PluginEvents::default())
-            .unwrap();
-        assert!((shared.load() - 0.8).abs() < 1e-6, "probe records the block peak");
-        assert_eq!(ol, il, "probe passes input through unchanged");
-    }
+    // NB: the `Identity` / `InputProbe` pass-through PluginInstances moved to
+    // daw (`daw::live`), where their unit tests now live. signal no longer
+    // defines them.
 }
