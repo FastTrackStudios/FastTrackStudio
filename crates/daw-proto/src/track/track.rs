@@ -280,6 +280,12 @@ pub enum RecordInput {
         device_id: Option<u8>,
         channel: Option<u8>,
     },
+    /// Live audio input from a hardware input channel.
+    ///
+    /// `channel` is the 0-based input-device channel the track records /
+    /// monitors from. The engine taps this channel of its open input
+    /// stream and feeds it into the track's bus (and FX chain).
+    Audio { channel: u32 },
     /// Raw I_RECINPUT value for other input types.
     Raw(i32),
 }

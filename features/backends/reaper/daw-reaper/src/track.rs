@@ -410,6 +410,9 @@ fn record_input_to_raw(input: RecordInput) -> i32 {
             let channel_low = channel.map(|ch| u32::from(ch) + 1).unwrap_or(0);
             (4096 + (device_high * 32 + channel_low)) as i32
         }
+        // REAPER `I_RECINPUT`: a mono hardware input on channel N is
+        // encoded as N (0-based). Stereo / MIDI use higher ranges.
+        RecordInput::Audio { channel } => channel as i32,
         RecordInput::Raw(value) => value,
     }
 }
