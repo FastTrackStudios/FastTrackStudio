@@ -32,14 +32,12 @@ actions-keybindings = { path = "crates/actions-keybindings" }
 actions-registry = { path = "crates/actions-registry" }
 input = { path = "crates/input" }
 
-# Roam RPC framework. Pinned to the FastTrackStudios vox fork @ f31f1040 on
-# Codeberg (vox 0.8.2, latest) — a single vox across the graph, carrying the
-# vox-jit-abi __rust_alloc-scan fix. `runtime` (no default tokio-net transport)
-# keeps the wasm build mio-free.
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a", default-features = false, features = ["runtime"] }
+# Roam RPC framework. Consumed from crates.io (upstream facet/vox monorepo).
+# `runtime` (no default tokio-net transport) keeps the wasm build mio-free.
+vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
 
-# Facet reflection — align the whole stack to the current 0.46 line.
-facet = { version = "0.46" }
+# Facet reflection — align the whole stack to the current 0.50 line.
+facet = { version = "0.50.0-rc.1" }
 
 # REAPER bindings (FTS fork with v7.63 ruler lane APIs)
 reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
