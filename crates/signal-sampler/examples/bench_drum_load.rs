@@ -18,7 +18,7 @@
 
 use std::time::{Duration, Instant};
 
-use signal_sampler::{PreloadProfile, SamplerPlayer};
+use signal_sampler::{PreloadProfile, SamplerRig};
 
 const DEFAULT_PRESET: &str = "/run/media/AudioHaven/Signal/Libraries/Drum Kits/\
 GGD Modern and Massive 2/Presets/Metal Monster.signalpreset";
@@ -45,7 +45,7 @@ fn main() {
     println!("preset:  {}", preset.display());
     println!("profile: {profile:?}");
 
-    let player = SamplerPlayer::new_offline(48_000);
+    let player = SamplerRig::new_offline(48_000);
     player.set_preload_profile(profile);
 
     // ── Phase 1: parse + build engines ──

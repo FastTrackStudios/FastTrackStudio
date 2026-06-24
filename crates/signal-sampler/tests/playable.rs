@@ -1,10 +1,10 @@
 //! Verify that real packs load and produce non-zero audio when triggered.
 //!
 //! Skips when AudioHaven isn't mounted. Walks one representative pack from
-//! each library family, calls `SamplerPlayer::load_pack`, fires note_on, and
+//! each library family, calls `SamplerRig::load_pack`, fires note_on, and
 //! asserts the rendered audio buffer has non-zero RMS.
 
-use signal_sampler::{PlayerPatch, SampleEngine, SamplerBank, SamplerPlayer, read_pack_header};
+use signal_sampler::{PlayerPatch, SampleEngine, SamplerBank, SamplerRig, read_pack_header};
 use std::path::Path;
 
 const SAMPLES: &[(&str, &str, u8)] = &[
@@ -403,7 +403,7 @@ fn rhodes_la_custom_audible() {
     if !path.exists() {
         return;
     }
-    let player = match SamplerPlayer::new() {
+    let player = match SamplerRig::new() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("skip: cpal failed: {e}");
@@ -443,7 +443,7 @@ fn keyscape_via_player_full_chain() {
         eprintln!("skip (missing)");
         return;
     }
-    let player = match SamplerPlayer::new() {
+    let player = match SamplerRig::new() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("skip — cpal output unavailable: {e}");
@@ -495,7 +495,7 @@ fn keyscape_background_preload_streams_in() {
         eprintln!("skip (missing)");
         return;
     }
-    let player = match SamplerPlayer::new() {
+    let player = match SamplerRig::new() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("skip — cpal output unavailable: {e}");
@@ -558,7 +558,7 @@ fn keyscape_middle_out_priority() {
         return;
     }
 
-    let player = match SamplerPlayer::new() {
+    let player = match SamplerRig::new() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("skip — cpal output unavailable: {e}");

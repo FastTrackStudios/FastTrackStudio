@@ -3,7 +3,7 @@
 //! Renders the list of plugins discovered in standard install dirs
 //! (`signal_plugin_host::scan_plugins`) plus a "Browse…" button for ad-hoc
 //! paths. The selection callback receives the chosen `path` so the parent
-//! can call `SamplerPlayer::load_preset_master_plugin` (or its mixer
+//! can call `SamplerRig::load_preset_master_plugin` (or its mixer
 //! variant) and refresh its layout.
 //!
 //! The scan runs once on first mount (and on explicit refresh) — on a

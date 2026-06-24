@@ -20,7 +20,7 @@ use signal::SignalController;
 use signal::profile::{Patch, PatchId};
 use signal::traits::Collection;
 use signal_sampler::{
-    LibrarySpec, PlayerPatch, PreloadProfile, SamplerPlayer,
+    LibrarySpec, PlayerPatch, PreloadProfile, SamplerRig,
     engine::cache::{
         create_signal_pack, default_prepared_cache_dir, extract_signal_pack, load_sample,
         prepare_sample_cache,
@@ -1198,7 +1198,7 @@ async fn run_sampler(cmd: &SamplerCommand) -> Result<()> {
                 Some(*buffer_size)
             };
             let cache_budget_bytes = cache_budget_mib.map(|mib| mib.saturating_mul(1024 * 1024));
-            let player = SamplerPlayer::with_device_config_and_cache_budget(
+            let player = SamplerRig::with_device_config_and_cache_budget(
                 device.as_deref(),
                 Some(*sample_rate),
                 buffer_size,

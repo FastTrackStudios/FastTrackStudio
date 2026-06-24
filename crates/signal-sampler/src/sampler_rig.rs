@@ -1,8 +1,8 @@
 //! Live **sample-instrument** rig — the MIDI analog of [`GuitarRig`](crate::rig::GuitarRig),
 //! running signal's [`SampleEngine`]s ON daw's realtime [`AudioEngine`].
 //!
-//! [`SamplerRig`] is the daw-backed replacement for [`SamplerPlayer`]
-//! (`player.rs`): same load / MIDI / drum-mixer / preload / stats surface,
+//! [`SamplerRig`] is the daw-backed replacement for the retired `SamplerPlayer`
+//! (`player.rs`, deleted): same load / MIDI / drum-mixer / preload / stats surface,
 //! but the cpal output stream + bespoke render callback are gone. Instead a
 //! single **bank track** in a tiny daw project carries a [`BankInstrument`]
 //! (a [`SamplerBank`] wrapped as a [`PluginInstance`]); daw's renderer runs
@@ -66,7 +66,7 @@ use crate::engine::SampleEngine;
 use crate::engine::cache::{EvictStats, PreloadStats};
 use crate::instrument::SamplerInstrument;
 use crate::mixer::{FX_PREPARE_BLOCK, MixerLayout};
-use crate::player::AudioStatsSnapshot;
+use crate::stats::AudioStatsSnapshot;
 
 /// Stable identifier for a loaded instrument within the rig (e.g. a piece id
 /// like `"kick"`, or `"kick:Overhead"` for a per-mic instrument).
@@ -311,7 +311,7 @@ struct TrackTables {
 }
 
 /// A live sample-instrument rig backed by daw's [`AudioEngine`] — the
-/// daw-native replacement for [`SamplerPlayer`](crate::SamplerPlayer). Cheap
+/// daw-native replacement for the retired `SamplerPlayer`. Cheap
 /// to clone; all clones share one audio engine + bank.
 #[derive(Clone)]
 pub struct SamplerRig {
@@ -321,15 +321,15 @@ pub struct SamplerRig {
 impl SamplerRig {
     // ── Constructors (SamplerPlayer-equivalent) ──────────────────────────────
 
-    /// Open the system default output device (replaces
-    /// [`SamplerPlayer::new`](crate::SamplerPlayer::new)).
+    /// Open the system default output device (replaces the retired
+    /// `SamplerPlayer::new`).
     pub fn new() -> eyre::Result<Self> {
         Self::open(&AudioIoPrefs { sample_rate: 0, buffer_size: 256, ..Default::default() })
     }
 
     /// Open a specific output device by substring + optional rate / buffer /
-    /// cache budget (replaces
-    /// [`SamplerPlayer::with_device_config_and_cache_budget`](crate::SamplerPlayer)).
+    /// cache budget (replaces the retired
+    /// `SamplerPlayer::with_device_config_and_cache_budget`).
     /// `device_name` empty / `None` = system default.
     pub fn with_device_config_and_cache_budget(
         device_name: Option<&str>,
@@ -439,7 +439,7 @@ impl SamplerRig {
     /// Create an offline rig (no device, no daw engine). Use the normal load /
     /// MIDI APIs, then [`render_offline`](Self::render_offline) /
     /// [`render_offline_buses`](Self::render_offline_buses) to pull blocks.
-    /// Replaces [`SamplerPlayer::new_offline`](crate::SamplerPlayer).
+    /// Replaces the retired `SamplerPlayer::new_offline`.
     pub fn new_offline(sample_rate: u32) -> Self {
         Self::new_offline_with_cache_budget(sample_rate, None)
     }
@@ -636,6 +636,35 @@ impl SamplerRig {
             daw.push_cc(&track, 123, 0);
         } else if let Ok(mut bank) = self.bank().lock() {
             bank.panic(id);
+        }
+    }
+
+    /// Dispatch a raw MIDI message, routed by channel assignment
+    /// (`SamplerPlayer::midi_message`-equivalent).
+    ///
+    /// Offline: applied to the bank directly, so the bank's full
+    /// per-channel routing (`set_midi_channel`) is honoured. Live: the raw
+    /// status is decoded and pushed onto the bank track via daw's
+    /// monotimbral channel-0 push primitives (same documented divergence as
+    /// [`note_on`](Self::note_on) — the bank-track plays its loaded
+    /// instrument id; channel routing isn't reachable through `push_*`).
+    pub fn midi_message(&self, channel: u8, status: u8, data1: u8, data2: u8) {
+        if let Some((daw, track)) = self.bank_io() {
+            match status & 0xF0 {
+                0x90 if data2 > 0 => {
+                    daw.push_note_on(&track, data1, data2);
+                }
+                // Note-on velocity 0 is a note-off by convention.
+                0x90 | 0x80 => {
+                    daw.push_note_off(&track, data1);
+                }
+                0xB0 => {
+                    daw.push_cc(&track, data1, data2);
+                }
+                _ => {}
+            }
+        } else if let Ok(mut bank) = self.bank().lock() {
+            bank.midi_message(channel, status, data1, data2);
         }
     }
 

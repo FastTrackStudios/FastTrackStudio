@@ -19,7 +19,7 @@ use daw_standalone::plugin::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
 };
 use daw_standalone::sync::Standalone;
-use signal_sampler::SamplerPlayer;
+use signal_sampler::SamplerRig;
 
 /// Instrument slot inside the wrapped offline player. MIDI + the rendered
 /// output both key off this single id (the Block hosts one piece).
@@ -83,7 +83,7 @@ fn default_preset() -> Option<PathBuf> {
 
 /// A signal sampler hosted as a daw generator Block.
 pub struct SamplerBlock {
-    player: SamplerPlayer,
+    player: SamplerRig,
     prepared: bool,
     preset_path: Option<PathBuf>,
     /// Interleaved stereo render scratch (frames * 2). Resized on block-size
@@ -100,7 +100,7 @@ impl SamplerBlock {
         Self {
             // Offline player (no cpal stream); daw owns audio output. The real
             // sample rate is applied in `prepare`.
-            player: SamplerPlayer::new_offline(48_000),
+            player: SamplerRig::new_offline(48_000),
             prepared: false,
             preset_path: default_preset(),
             scratch: Vec::new(),
@@ -170,7 +170,7 @@ impl PluginInstance for SamplerBlock {
     fn prepare(&mut self, sample_rate: f64, _block_size: u32) -> Result<(), PluginError> {
         // Rebuild the offline player at the host's sample rate, then load the
         // preset so its engines + note routing are live.
-        self.player = SamplerPlayer::new_offline(sample_rate.max(1.0) as u32);
+        self.player = SamplerRig::new_offline(sample_rate.max(1.0) as u32);
         if let Some(p) = &self.preset_path {
             if let Err(e) = self.player.load_preset(SLOT, p) {
                 tracing::warn!(err = %e, "SamplerBlock: preset load failed");

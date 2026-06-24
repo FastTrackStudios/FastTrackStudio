@@ -108,7 +108,7 @@ pub fn PianoView(chain: ProcessingChain) -> Element {
 
                         waterfall.write().spawn(note, None);
 
-                        // TODO: trigger SamplerPlayer / ProcessingChain note-on
+                        // TODO: trigger SamplerRig / ProcessingChain note-on
                         tracing::debug!("note-on: {note}");
                     },
                     on_note_off: move |note: u8| {

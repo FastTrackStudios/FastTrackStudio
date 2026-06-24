@@ -20,7 +20,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
-use signal_sampler::{AudioStatsSnapshot, PreloadProfile, SamplerPlayer};
+use signal_sampler::{AudioStatsSnapshot, PreloadProfile, SamplerRig};
 
 use crossbeam_channel::{Receiver, bounded};
 use midir::{MidiInput as MidirInput, MidiInputConnection};
@@ -599,7 +599,7 @@ impl App {
         }
     }
 
-    fn load_selected(&mut self, player: &SamplerPlayer) {
+    fn load_selected(&mut self, player: &SamplerRig) {
         let patch = match self.current_item() {
             Some(Item::Patch(p)) => p.clone(),
             Some(Item::Folder { name, .. }) => {
@@ -665,7 +665,7 @@ impl App {
         }
     }
 
-    fn schedule_preview(&self, player: &SamplerPlayer) {
+    fn schedule_preview(&self, player: &SamplerRig) {
         if !self.preview_on_load {
             return;
         }
@@ -1167,7 +1167,7 @@ impl Drop for TerminalGuard {
     }
 }
 
-fn voice_count(player: &SamplerPlayer) -> usize {
+fn voice_count(player: &SamplerRig) -> usize {
     player.active_voices(INSTRUMENT_ID)
 }
 
@@ -1226,7 +1226,7 @@ fn run() -> Result<()> {
     let cache_budget_bytes = args
         .cache_budget_mib
         .map(|mib| mib.saturating_mul(1024 * 1024));
-    let player = SamplerPlayer::with_device_config_and_cache_budget(
+    let player = SamplerRig::with_device_config_and_cache_budget(
         None,
         None,
         // 1024 frames = ~23 ms latency at 44.1 kHz. Larger than the

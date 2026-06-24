@@ -9,7 +9,7 @@
 //! **Anti-flash design:** only the meters animate (~20 fps). The panel renders
 //! its structure once per load; a small [`MeterBar`] child reads the meter tick
 //! + handle from context, so meter repaints don't re-render the whole tree.
-//! `SamplerPlayer`/`Arc<MixerMeters>` aren't `PartialEq`, so they can't be
+//! `SamplerRig`/`Arc<MixerMeters>` aren't `PartialEq`, so they can't be
 //! props — the player comes from context, meters via the [`MeterCtx`] context.
 
 use std::collections::HashSet;
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use signal_plugin_host::PluginParamInfo;
 use signal_sampler::mixer::FxTarget;
-use signal_sampler::{MixerLayout, MixerMeters, SamplerPlayer};
+use signal_sampler::{MixerLayout, MixerMeters, SamplerRig};
 
 /// PartialEq-friendly mirror of [`PluginParamInfo`] (the upstream type from
 /// the `daw::plugin` trait doesn't derive `PartialEq`; Dioxus `#[component]`
@@ -93,7 +93,7 @@ fn target_peak(m: &MixerMeters, target: Target) -> f32 {
 /// fresh layout/meters fetch.
 #[component]
 pub fn MixerPanel(reload: u64) -> Element {
-    let sampler = use_context::<SamplerPlayer>();
+    let sampler = use_context::<SamplerRig>();
     let layout = use_signal(|| Option::<MixerLayout>::None);
     let meters = use_signal(|| Option::<Arc<MixerMeters>>::None);
     let tick = use_signal(|| 0u64);
@@ -410,7 +410,7 @@ fn Strip(
     show_solo: bool,
     wide: bool,
 ) -> Element {
-    let sampler = use_context::<SamplerPlayer>();
+    let sampler = use_context::<SamplerRig>();
     let mut db = use_signal(|| init_db);
     let mut muted = use_signal(|| init_muted);
     let mut soloed = use_signal(|| init_soloed);
@@ -616,7 +616,7 @@ fn FxSlotRow(
     params_open: Signal<Option<(FxTarget, usize, Vec<ParamInfo>)>>,
     fx_version: Signal<u64>,
 ) -> Element {
-    let sampler = use_context::<SamplerPlayer>();
+    let sampler = use_context::<SamplerRig>();
     let mut by = use_signal(|| bypassed);
     let mut p_open = params_open;
     let mut fxv = fx_version;
@@ -764,7 +764,7 @@ fn ParamsEditor(
 
 #[component]
 fn ParamSlider(target: FxTarget, slot_idx: usize, info: ParamInfo) -> Element {
-    let sampler = use_context::<SamplerPlayer>();
+    let sampler = use_context::<SamplerRig>();
     let mut value = use_signal(|| info.default);
     let min = info.min;
     let max = info.max;

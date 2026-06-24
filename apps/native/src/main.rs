@@ -1,7 +1,7 @@
 //! Signal Native — standalone Dioxus-native (Blitz) player harness.
 //!
 //! A focused app for developing the Dioxus UI and exercising the
-//! [`SamplerPlayer`]: browse the on-disk library, load a
+//! [`SamplerRig`]: browse the on-disk library, load a
 //! preset/pack/engine/block, and play it via the on-screen piano or a live
 //! MIDI controller — with a live voice / pending-event readout.
 //!
@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use dioxus::prelude::*;
 use signal_audio::MidiInput;
-use signal_sampler::{PreloadProfile, SamplerPlayer};
+use signal_sampler::{PreloadProfile, SamplerRig};
 use signal_ui::components::Piano;
 
 mod mixer_view;
@@ -66,11 +66,11 @@ fn main() {
 #[component]
 fn App() -> Element {
     // Initialise shared state once and publish it to children. The
-    // SamplerPlayer owns the native cpal output stream; MIDI's connection
+    // SamplerRig owns the native cpal output stream; MIDI's connection
     // handle lives here for the app lifetime (cloning it clones only the
     // receiver).
     use_context_provider(|| {
-        let player = SamplerPlayer::new().expect("init SamplerPlayer (cpal output)");
+        let player = SamplerRig::new().expect("init SamplerRig (cpal output)");
         // DrumKit: loads ALL samples (no cap — unlike FastAudition/Performance,
         // which truncate and leave velocity layers / RR / mics missing), ordered
         // kick/snare-first so the kit is playable quickly while the rest stream
@@ -99,7 +99,7 @@ fn App() -> Element {
 
 #[component]
 fn PlayerPanel() -> Element {
-    let sampler = use_context::<SamplerPlayer>();
+    let sampler = use_context::<SamplerRig>();
     let midi_opt = use_context::<Option<MidiInput>>();
     let root = use_context::<LibraryRoot>().0;
 
@@ -430,7 +430,7 @@ fn default_favorites() -> Vec<(String, PathBuf)> {
 /// state immediately; the worker deposits the result into `slot` for the poll
 /// future to apply. `loading`/`status` are Copy signals (called from the UI).
 fn start_load(
-    sampler: SamplerPlayer,
+    sampler: SamplerRig,
     slot: LoadSlot,
     mut loading: Signal<bool>,
     mut status: Signal<String>,

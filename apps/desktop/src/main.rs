@@ -19,7 +19,7 @@ use signal_audio::MidiInput;
 #[cfg(not(feature = "dev"))]
 use signal_audio::ProcessingChain;
 #[cfg(not(feature = "dev"))]
-use signal_sampler::SamplerPlayer;
+use signal_sampler::SamplerRig;
 use signal_ui::SignalRoot;
 
 /// Compiled Tailwind CSS for signal-ui components.
@@ -73,7 +73,7 @@ fn db_path() -> String {
 struct AppState {
     signal: Signal,
     chain: ProcessingChain,
-    sampler: SamplerPlayer,
+    sampler: SamplerRig,
 }
 
 #[cfg(not(feature = "dev"))]
@@ -101,9 +101,9 @@ fn main() {
     let chain = ProcessingChain::new(48000.0);
     let _engine = signal_audio::LiveAudioEngine::disabled();
 
-    // Create the sampler player. It owns the native cpal output stream; keep
+    // Create the sampler rig. It runs the SamplerBank on daw's AudioEngine; keep
     // the processing-chain engine disabled until both paths share one mixer.
-    let sampler = SamplerPlayer::new().expect("Failed to initialise SamplerPlayer");
+    let sampler = SamplerRig::new().expect("Failed to initialise SamplerRig");
 
     let app_state = AppState {
         signal: controller,

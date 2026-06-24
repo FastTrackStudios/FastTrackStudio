@@ -11,7 +11,7 @@
 //!   = PlayerPatch  (combined playback context)
 //!       → SampleEngine  (MIDI-driven voice engine, one per section/instrument)
 //!           → SamplerBank  (N engines, MIDI channel routing, stereo mix)
-//!               → SamplerPlayer  (owns cpal output stream)
+//!               → SamplerRig  (daw-backed: SamplerBank on daw's AudioEngine)
 //! ```
 //!
 //! # Library specs
@@ -29,18 +29,18 @@
 //! # Quick start
 //!
 //! ```rust,no_run
-//! use signal_sampler::SamplerPlayer;
+//! use signal_sampler::SamplerRig;
 //! use std::path::Path;
 //!
-//! let player = SamplerPlayer::new()?;
-//! player.load_instrument(
+//! let rig = SamplerRig::new()?;
+//! rig.load_instrument(
 //!     "strings_1v",
 //!     Path::new("specs/cinematic-strings.styx"),
 //!     Some(Path::new("/path/to/wavs")),
 //!     "1v", "Mix",
 //! )?;
-//! player.note_on("strings_1v", 60, 100);
-//! player.cc("strings_1v", 1, 80);
+//! rig.note_on("strings_1v", 60, 100);
+//! rig.cc("strings_1v", 1, 80);
 //! # Ok::<(), eyre::Error>(())
 //! ```
 
@@ -56,7 +56,6 @@ pub mod mixer;
 pub mod module_spec;
 pub mod nam;
 pub mod pack_rewrite;
-pub mod player;
 pub mod preset_spec;
 pub mod retag;
 pub mod rig;
@@ -65,6 +64,7 @@ pub mod rig_prefs;
 pub mod rig_profile;
 pub mod runtime;
 pub mod sampler_rig;
+pub mod stats;
 pub mod sample_map;
 pub mod spec;
 
@@ -80,7 +80,7 @@ pub use mixer::{
 };
 pub use module_spec::{ModulePort, ModuleSpec};
 pub use nam::NamProcessor;
-pub use player::{AudioStatsSnapshot, SamplerPlayer};
+pub use stats::AudioStatsSnapshot;
 pub use convolver::Convolver;
 pub use rig::{DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
 pub use sampler_rig::{BusTrack, InstrumentTrack, SamplerRig};

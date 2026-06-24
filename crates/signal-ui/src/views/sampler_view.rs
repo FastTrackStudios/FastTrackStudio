@@ -36,7 +36,7 @@ const TEXT_DIM: &str = "#777779";
 const BORDER: &str = "#3a3a3c";
 const BORDER_LIGHT: &str = "#4a4a4c";
 
-// ── Domain model stubs (will be replaced with real SamplerPlayer state) ───
+// ── Domain model stubs (will be replaced with real SamplerRig state) ───
 
 #[derive(Clone, PartialEq)]
 struct LibraryEntry {
