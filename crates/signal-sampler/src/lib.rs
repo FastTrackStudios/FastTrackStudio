@@ -63,6 +63,7 @@ pub mod rig_manager;
 pub mod rig_prefs;
 pub mod rig_profile;
 pub mod runtime;
+pub mod sampler_rig;
 pub mod sample_map;
 pub mod spec;
 
@@ -81,6 +82,7 @@ pub use nam::NamProcessor;
 pub use player::{AudioStatsSnapshot, SamplerPlayer};
 pub use convolver::Convolver;
 pub use rig::{DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
+pub use sampler_rig::{BusTrack, InstrumentTrack, SamplerRig};
 pub use rig_manager::RigManager;
 pub use rig_prefs::RigAudioPrefs;
 pub use rig_profile::{ProfileRig, RigPatch, RigProfile};

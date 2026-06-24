@@ -887,6 +887,12 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Process-unique guid string — shared by [`GuitarRig`] and
+/// [`SamplerRig`](crate::sampler_rig::SamplerRig) for their project guids.
+pub(crate) fn uuid_string() -> String {
+    uuid::new_v4_string()
+}
+
 mod uuid {
     //! Minimal UUIDv4-ish string generator — avoids pulling the `uuid` crate just
     //! for the rig's project guid. Not cryptographically strong; only needs to
