@@ -451,6 +451,46 @@ impl ProfileRig {
     pub fn rig_mut(&mut self) -> &mut GuitarRig {
         &mut self.rig
     }
+
+    // ── Live block addressing (delegates to the underlying GuitarRig) ────────
+
+    /// Block ids of the active patch's chain, in order. See
+    /// [`GuitarRig::active_block_ids`].
+    pub fn active_block_ids(&self) -> Vec<String> {
+        self.rig.active_block_ids()
+    }
+
+    /// Run `f` against the live instance backing the active patch's block
+    /// `block_id`. See [`GuitarRig::with_active_block_instance`].
+    pub fn with_active_block_instance<R>(
+        &self,
+        block_id: &str,
+        f: impl FnOnce(&mut dyn signal_plugin_host::PluginInstance) -> R,
+    ) -> Option<R> {
+        self.rig.with_active_block_instance(block_id, f)
+    }
+
+    /// Per-block bypass on the active patch's chain. See
+    /// [`GuitarRig::set_block_slot_bypass`].
+    pub fn set_block_bypass(&self, block_id: &str, on: bool) -> bool {
+        self.rig.set_block_slot_bypass(block_id, on)
+    }
+
+    /// Set a named param on the active patch's block `block_id`. See
+    /// [`GuitarRig::set_active_block_param`].
+    pub fn set_block_param(&self, block_id: &str, param_name: &str, value: f32) -> bool {
+        self.rig.set_active_block_param(block_id, param_name, value)
+    }
+
+    /// Mono input samples for pitch detection. See [`GuitarRig::input_samples`].
+    pub fn input_samples(&self) -> Vec<f32> {
+        self.rig.input_samples()
+    }
+
+    /// The rig's running sample rate (Hz).
+    pub fn sample_rate(&self) -> u32 {
+        self.rig.sample_rate
+    }
 }
 
 /// Sentinel stored in `patch_ids` for a patch whose chain failed to build.

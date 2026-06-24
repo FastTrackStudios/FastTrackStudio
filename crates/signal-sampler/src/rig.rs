@@ -42,7 +42,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use facet::Facet;
 
 use daw::service::{
-    FxChainContext, FxChains, ProjectContext, ProjectInfo, RecordInput, TrackRef, Tracks,
+    FxChainContext, FxChains, FxParams, ProjectContext, ProjectInfo, RecordInput, TrackRef, Tracks,
 };
 use daw::standalone::Standalone;
 use daw::standalone::audio_engine::AudioEngine;
@@ -184,7 +184,16 @@ struct InputMeterShared {
     /// When set, the probe writes silence (clean-DI bypass is handled by
     /// swapping the chain out, but the probe still meters the live input).
     _reserved: AtomicBool,
+    /// Most-recent mono input samples (L+R averaged), newest-last, for the
+    /// tuner's pitch detection. Written once per block by the probe; read
+    /// (cloned) by the control thread. Capacity is fixed at `TUNER_WINDOW`.
+    samples: std::sync::Mutex<Vec<f32>>,
 }
+
+/// Mono window the tuner runs autocorrelation over. At 48 kHz this covers
+/// ~85 ms — long enough to resolve a low-E (~82 Hz, ~12 ms period) several
+/// times over.
+const TUNER_WINDOW: usize = 4096;
 
 impl InputMeterShared {
     fn store(&self, peak: f32) {
@@ -192,6 +201,20 @@ impl InputMeterShared {
     }
     fn load(&self) -> f32 {
         f32::from_bits(self.peak.load(Ordering::Relaxed))
+    }
+    /// Push this block's mono samples into the rolling tuner window.
+    fn push_samples(&self, mono: &[f32]) {
+        if let Ok(mut buf) = self.samples.try_lock() {
+            buf.extend_from_slice(mono);
+            let len = buf.len();
+            if len > TUNER_WINDOW {
+                buf.drain(0..len - TUNER_WINDOW);
+            }
+        }
+    }
+    /// Snapshot the current tuner window (cloned for the control thread).
+    fn snapshot_samples(&self) -> Vec<f32> {
+        self.samples.lock().map(|b| b.clone()).unwrap_or_default()
     }
 }
 
@@ -201,11 +224,13 @@ impl InputMeterShared {
 struct InputProbe {
     shared: Arc<InputMeterShared>,
     prepared: bool,
+    /// Per-block mono scratch (reused) for the tuner window push.
+    mono: Vec<f32>,
 }
 
 impl InputProbe {
     fn new(shared: Arc<InputMeterShared>) -> Self {
-        Self { shared, prepared: true }
+        Self { shared, prepared: true, mono: Vec::with_capacity(MAX_BLOCK) }
     }
 }
 
@@ -251,12 +276,18 @@ impl PluginInstance for InputProbe {
     ) -> Result<(), PluginError> {
         let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
         let mut pk = 0.0f32;
+        // Reused mono scratch for the tuner window push (off the steady-state
+        // alloc path after the first block).
+        self.mono.clear();
+        self.mono.reserve(frames);
         for i in 0..frames {
             out_l[i] = in_l[i];
             out_r[i] = in_r[i];
             pk = pk.max(in_l[i].abs()).max(in_r[i].abs());
+            self.mono.push((in_l[i] + in_r[i]) * 0.5);
         }
         self.shared.store(pk);
+        self.shared.push_samples(&self.mono);
         Ok(())
     }
     fn deactivate(&mut self) {
@@ -390,6 +421,10 @@ struct ResidentChain {
     info: SlotInfo,
     /// Boxes for chain slots `0..boxes.len()`. Taken out (`Option`) when active.
     boxes: Vec<Option<Box<dyn PluginInstance>>>,
+    /// Stable per-block id for each chain slot, parallel to `boxes`. Lets the
+    /// live-rig layer address a running block by id (snapshot / per-block
+    /// bypass / per-block param). Defaults to the block's file stem.
+    block_ids: Vec<String>,
 }
 
 /// Mutable swap state shared behind a [`Mutex`] so the patch-switch surface
@@ -634,6 +669,20 @@ impl GuitarRig {
     /// [`set_active`](Self::set_active). A failed block load fails the whole
     /// install.
     pub fn install_chain(&mut self, blocks: &[RigBlock]) -> Result<ModelId, String> {
+        let ids: Vec<String> = blocks.iter().map(|b| default_block_id(&b.path)).collect();
+        self.install_chain_with_ids(blocks, &ids)
+    }
+
+    /// Like [`install_chain`](Self::install_chain) but records an explicit
+    /// stable id for each block (parallel to `blocks`), so the live-rig layer
+    /// can address a running block by id ([`with_active_block_instance`],
+    /// [`set_block_slot_bypass`]). `block_ids` shorter than `blocks` falls back
+    /// to file-stem ids for the remainder.
+    pub fn install_chain_with_ids(
+        &mut self,
+        blocks: &[RigBlock],
+        block_ids: &[String],
+    ) -> Result<ModelId, String> {
         if blocks.is_empty() {
             return Err("chain has no blocks".into());
         }
@@ -645,16 +694,23 @@ impl GuitarRig {
         }
         let mut boxes: Vec<Option<Box<dyn PluginInstance>>> = Vec::with_capacity(blocks.len());
         let mut names = Vec::with_capacity(blocks.len());
+        let mut ids = Vec::with_capacity(blocks.len());
         let mut primary_loudness = None;
         let mut primary_expected_sr = None;
 
-        for b in blocks {
+        for (i, b) in blocks.iter().enumerate() {
             let (boxed, name, loud, exp_sr) = build_block(b, self.sample_rate)?;
             if primary_loudness.is_none() && loud.is_some() {
                 primary_loudness = loud;
                 primary_expected_sr = exp_sr;
             }
             names.push(name);
+            ids.push(
+                block_ids
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| default_block_id(&b.path)),
+            );
             boxes.push(Some(boxed));
         }
 
@@ -672,7 +728,7 @@ impl GuitarRig {
             .lock()
             .unwrap()
             .chains
-            .insert(id, ResidentChain { info, boxes });
+            .insert(id, ResidentChain { info, boxes, block_ids: ids });
         Ok(id)
     }
 
@@ -702,6 +758,15 @@ impl GuitarRig {
         let chain_guids = &self.slot_guids[1..]; // slot 0 is the input probe
         let sr = self.sample_rate as f64;
         let bypass = swap.bypass;
+
+        // Clear any per-block bypass (daw `fx_enabled`) from the previous patch:
+        // re-enable every chain slot so a new chain starts with all blocks live.
+        // (Per-block bypass via `set_block_slot_bypass` flips these flags; they
+        // must not leak across a patch switch.)
+        let fx_ctx = FxChainContext::track(self.track_guid.clone());
+        for slot in 1..self.slot_guids.len() {
+            let _ = <Standalone as FxChains>::set_enabled(&self.daw, fx_ctx.clone(), slot as u32, true);
+        }
 
         // 1. Reclaim the previously-active chain's boxes back into the resident
         //    map so it can be re-armed (replace each live box with an identity).
@@ -829,6 +894,13 @@ impl GuitarRig {
         self.input_meter.load()
     }
 
+    /// A snapshot of the most-recent mono input samples (post-input-trim,
+    /// pre-amp), newest-last, for pitch detection (the tuner). Up to
+    /// [`TUNER_WINDOW`] frames. Empty until the first block runs.
+    pub fn input_samples(&self) -> Vec<f32> {
+        self.input_meter.snapshot_samples()
+    }
+
     /// Output peak (linear) — the track's post-fader meter cell.
     pub fn output_peak(&self) -> f32 {
         self.meters
@@ -877,6 +949,150 @@ impl GuitarRig {
     pub fn output_peak_db(&self) -> f64 {
         linear_to_db(self.output_peak())
     }
+
+    // ── Live block addressing (Phase B) ─────────────────────────────────────
+    //
+    // The active chain's blocks live in `daw`'s `plugin_instances` map under the
+    // track's fixed slot guids (`slot_guids[1..]`, slot 0 = input probe). These
+    // methods resolve a block by its stable id to the right slot, then reach the
+    // live instance (param edits) or flip the daw `fx_enabled` flag on that slot
+    // (per-block bypass) — both honored by the renderer with no chain rebuild.
+
+    /// Resolve, for the currently-active chain, a block id → `(chain_slot_index,
+    /// fx_guid)`. `chain_slot_index` is 0-based within the chain (slot 0 of the
+    /// chain maps to `slot_guids[1]`, the renderer fx_idx is `index + 1`).
+    fn active_block_slot(&self, block_id: &str) -> Option<(usize, String)> {
+        let swap = self.swap.lock().unwrap();
+        let active = swap.active?;
+        let chain = swap.chains.get(&active)?;
+        let slot = chain.block_ids.iter().position(|b| b == block_id)?;
+        // chain slot 0 → slot_guids[1] (slot_guids[0] is the input probe).
+        let guid = self.slot_guids.get(slot + 1)?.clone();
+        Some((slot, guid))
+    }
+
+    /// Block ids of the active chain, in order. Empty when nothing is active.
+    pub fn active_block_ids(&self) -> Vec<String> {
+        let swap = self.swap.lock().unwrap();
+        swap.active
+            .and_then(|a| swap.chains.get(&a))
+            .map(|c| c.block_ids.clone())
+            .unwrap_or_default()
+    }
+
+    /// Run `f` against the live [`PluginInstance`] backing the active chain's
+    /// block `block_id`, under daw's renderer lock. `None` if no chain is active
+    /// or the id isn't in it. The control seam for per-block params (e.g. NAM
+    /// amp trims via [`PluginInstance::as_any_mut`]).
+    pub fn with_active_block_instance<R>(
+        &self,
+        block_id: &str,
+        f: impl FnOnce(&mut dyn PluginInstance) -> R,
+    ) -> Option<R> {
+        let (_slot, guid) = self.active_block_slot(block_id)?;
+        self.daw.with_plugin_instance(&guid, f)
+    }
+
+    /// Per-block bypass on the active chain: flips daw's `fx_enabled` flag on the
+    /// block's slot (the renderer skips disabled slots — no chain rebuild, no
+    /// box swap). `on = true` bypasses the block. Returns `true` if the block was
+    /// found and the flag was set.
+    pub fn set_block_slot_bypass(&self, block_id: &str, on: bool) -> bool {
+        let Some((slot, _guid)) = self.active_block_slot(block_id) else {
+            return false;
+        };
+        // Renderer fx_idx = chain slot + 1 (slot 0 is the input probe). Bypass =
+        // disabled; enabled = !on.
+        let fx_ctx = FxChainContext::track(self.track_guid.clone());
+        <Standalone as FxChains>::set_enabled(&self.daw, fx_ctx, (slot + 1) as u32, !on).is_ok()
+    }
+
+    /// Set a named parameter on the active chain's block `block_id` to `value`.
+    ///
+    /// Routing, by block backend:
+    /// - **NAM** (amp/drive/neural-cab): `"input_trim"` / `"output_trim"` set the
+    ///   live `NamProcessor`'s gain (dB) in place under the renderer lock.
+    /// - **Hosted CLAP/VST3**: matches `param_name` against the plugin's reported
+    ///   parameter names and pushes the value through daw's `FxParams::set`
+    ///   (stored in project `fx_params`, forwarded to `process_block` each block).
+    ///   `value` is treated as already-normalized 0..1 for the param's range.
+    ///
+    /// Returns `true` if the param was found and applied. A param that can't be
+    /// addressed yet (e.g. an IR cab, which has no continuous params) returns
+    /// `false`.
+    pub fn set_active_block_param(&self, block_id: &str, param_name: &str, value: f32) -> bool {
+        let Some((slot, guid)) = self.active_block_slot(block_id) else {
+            return false;
+        };
+
+        // 1. NAM trims — mutate the live instance directly via downcast.
+        let nam_applied = self
+            .daw
+            .with_plugin_instance(&guid, |inst| {
+                let Some(any) = inst.as_any_mut() else {
+                    return None;
+                };
+                if let Some(nam) = any.downcast_mut::<NamProcessor>() {
+                    match param_name {
+                        "input_trim" => {
+                            nam.input_gain_db = value;
+                            return Some(true);
+                        }
+                        "output_trim" => {
+                            nam.output_gain_db = value;
+                            return Some(true);
+                        }
+                        _ => return Some(false),
+                    }
+                }
+                None
+            })
+            .flatten();
+        match nam_applied {
+            // NAM trim applied.
+            Some(true) => return true,
+            // NAM block, but the name isn't a trim — no other NAM params exist.
+            Some(false) => return false,
+            // Not a NAM block — fall through to the hosted-plugin path.
+            None => {}
+        }
+
+        // 2. Hosted plugin — resolve param name → slot index, then FxParams::set.
+        let param_slot = self.daw.with_plugin_instance(&guid, |inst| {
+            inst.params()
+                .into_iter()
+                .position(|p| p.name == param_name)
+        });
+        let Some(Some(param_idx)) = param_slot else {
+            return false;
+        };
+        let fx_ctx = FxChainContext::track(self.track_guid.clone());
+        <Standalone as FxParams>::set(
+            &self.daw,
+            fx_ctx,
+            (slot + 1) as u32,
+            param_idx as u32,
+            value as f64,
+        )
+        .is_ok()
+    }
+}
+
+/// Test accessor for [`default_block_id`] (cross-module test in `api::rig`).
+#[doc(hidden)]
+pub fn default_block_id_for_test(path: &str) -> String {
+    default_block_id(path)
+}
+
+/// Derive a stable block id from a file path's stem (matches the api layer's
+/// `default_id`). Empty/unknown stems fall back to `"block"`.
+fn default_block_id(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("block")
+        .to_string()
 }
 
 /// Decode a standard-base64 plugin state chunk.

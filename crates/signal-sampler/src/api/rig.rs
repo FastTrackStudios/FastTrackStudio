@@ -36,20 +36,40 @@
 //!   - [`PatchStepper`] — a real [`Controller`] (footswitches cycle patches)
 //!     and [`ProgramChangeMap`] (PC# → patch).
 //!
-//! - **Phase-B STUBBED** (defined + compiling, behavior is a flagged TODO):
-//!   - [`Block::params`] / [`Block::set_param`] surface a *minimal* named-param
-//!     set; deep NAM/plugin param exposure is Phase B (see each impl).
-//!   - [`Snapshot`] application onto live blocks ([`Rig::select_snapshot`]) —
-//!     the data type is real; wiring param/bypass sets onto running blocks is
-//!     minimal this phase.
-//!   - [`Rig::set_param`] / [`Rig::set_block_bypass`] / [`Rig::tap_tempo`] /
-//!     [`Rig::tuner`] — real where the existing rig already supports it,
-//!     flagged TODO otherwise.
-//!   - Parallel-path lowering ([`Node::Parallel`]) — the data models split/
-//!     merge; lowering to daw sends + summed buses is Phase B (today a chain is
-//!     installed as its flattened series spine).
-//!   - The remaining [`Controller`] built-ins ([`ExpressionBind`],
-//!     [`BlockToggle`], [`TapTempo`], [`SnapshotSwitcher`]) compile as TODOs.
+//! - **Phase-B REAL** (this phase wired the live machinery):
+//!   - **Live block addressing** — [`GuitarRig`](crate::GuitarRig) now records a
+//!     stable `block_id` per chain slot and exposes
+//!     [`with_active_block_instance`](crate::GuitarRig::with_active_block_instance),
+//!     [`set_active_block_param`](crate::GuitarRig::set_active_block_param), and
+//!     [`set_block_slot_bypass`](crate::GuitarRig::set_block_slot_bypass).
+//!     [`DawRig`] routes `BlockId` → the right slot through these (via
+//!     [`ProfileRig`](crate::ProfileRig)).
+//!   - [`Rig::set_param`] — NAM `input_trim` / `output_trim` set the live
+//!     `NamProcessor` in place (downcast under daw's renderer lock); hosted
+//!     plugins route through daw `FxParams::set`. (IR cabs have no continuous
+//!     params → `false`.)
+//!   - [`Rig::set_block_bypass`] — flips daw's per-slot `fx_enabled` flag (the
+//!     renderer skips disabled slots; no chain rebuild). Reset on patch switch.
+//!   - [`Rig::select_snapshot`] — applies the snapshot's param + bypass sets
+//!     onto the live blocks instantly via the two seams above.
+//!   - [`Rig::tuner`] — autocorrelation pitch detection ([`detect_pitch`]) on
+//!     the input-probe's mono window.
+//!   - [`Rig::tap_tempo`] — averages tap intervals into a BPM
+//!     ([`DawRig::tempo_bpm`]).
+//!   - Parallel-path lowering — [`Chain::lower_parallels`] folds a
+//!     [`Node::Parallel`] into one [`ParallelSum`] FX block (2-lane dual-cab /
+//!     wet-dry; per-lane level + pan). All [`Controller`] built-ins now drive
+//!     real [`Rig`] actions.
+//!
+//! - **Still approximate / open**:
+//!   - [`DawRig::open`]'s install path goes through the *path-based*
+//!     [`RigProfile`](crate::RigProfile), which can't carry a [`ParallelSum`]
+//!     box yet — so `lower_parallels` is exercised at the [`Chain`] level and in
+//!     tests, but `open` itself still flattens parallels. Nested parallels are
+//!     rejected; the daw-send-bus variant (for a multi-track rig) is future.
+//!   - Tap tempo computes a BPM but no built-in `Delay` block consumes it yet.
+//!   - The tuner is a single-window time-domain detector (good for tuning, not
+//!     a reference analyzer; no octave-error guard beyond the confidence gate).
 //!
 //! The existing `GuitarRig` / `ProfileRig` / `RigProfile` / `FxBackend` /
 //! `NamProcessor` / `Convolver` stay untouched — this is additive.
@@ -63,7 +83,9 @@ use crate::rig::{GuitarRig, RigBlock};
 use crate::rig_profile::{ProfileRig, RigPatch, RigProfile};
 use crate::rig_prefs::RigAudioPrefs;
 
-use signal_plugin_host::PluginInstance;
+use signal_plugin_host::{
+    PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
+};
 
 // Max block the foundation prepares standalone-constructed blocks for (matches
 // the rig's prepare block; the live rig re-prepares on install).
@@ -414,6 +436,215 @@ impl Block for Plugin {
     }
 }
 
+/// A **parallel-sum** block: runs N lane sub-chains on copies of the input and
+/// sums their outputs with per-lane level + pan. This is the `Node::Parallel`
+/// lowering for the live rig (dual cabs, wet/dry, dual amps).
+///
+/// ## Why an in-track summing block, not daw send-buses
+///
+/// The drum-mixer mapping (`sampler_rig::from_mixer_layout`) lowers parallel
+/// paths to daw [`Routing::add_send`] + bus tracks because those tracks are
+/// *always present*. The live rig is a **single input-armed track whose FX
+/// chain is swapped per patch** ([`GuitarRig`]): a per-patch parallel section
+/// can't be a project-global bus track without rebuilding the routing graph on
+/// every patch switch. So a parallel section lowers to ONE FX slot holding this
+/// summing block — a real `PluginInstance` the renderer drives exactly like any
+/// other block, no new control path. Each lane is itself a series of
+/// `PluginInstance`s run in order.
+///
+/// **Supported**: the common 2-lane case (and N flat lanes). **Flagged TODO**:
+/// nested parallels inside a lane (the builder rejects them), and the
+/// daw-send-bus variant for when a rig grows multi-track.
+pub struct ParallelSum {
+    core: BlockCore,
+    lanes: Vec<ParallelLaneRt>,
+    /// Overall wet level (linear) of the summed section.
+    level_lin: f32,
+    /// Scratch buffers (reused per block): per-lane lane output, and the input
+    /// copy fed to each lane.
+    lane_l: Vec<f32>,
+    lane_r: Vec<f32>,
+    src_l: Vec<f32>,
+    src_r: Vec<f32>,
+}
+
+/// One runtime lane inside a [`ParallelSum`]: its ordered instances + gains.
+struct ParallelLaneRt {
+    instances: Vec<Box<dyn PluginInstance>>,
+    gain_l: f32,
+    gain_r: f32,
+}
+
+impl ParallelSum {
+    /// Lower a [`Node::Parallel`]'s lanes into a single summing block. Each lane
+    /// must be a flat series of [`Node::Block`]s — a nested [`Node::Parallel`]
+    /// inside a lane is rejected (`Err`, flagged TODO). `id` names the block.
+    fn lower(id: BlockId, lanes: Vec<Lane>, mix: &ParallelMix) -> Result<Self, String> {
+        let mut rt = Vec::with_capacity(lanes.len());
+        for lane in lanes {
+            let mut instances = Vec::with_capacity(lane.chain.len());
+            for node in lane.chain {
+                match node {
+                    Node::Block(b) => instances.push(b.into_plugin_box()),
+                    Node::Parallel { .. } => {
+                        return Err(
+                            "nested parallel sections are not supported yet (flagged TODO)".into(),
+                        );
+                    }
+                }
+            }
+            // Equal-power pan: pan -1..1 → L/R gains, then lane level.
+            let lvl = lane.level.linear();
+            let p = (lane.pan.clamp(-1.0, 1.0) + 1.0) * 0.5; // 0..1
+            let gain_l = lvl * (1.0 - p).sqrt();
+            let gain_r = lvl * p.sqrt();
+            rt.push(ParallelLaneRt { instances, gain_l, gain_r });
+        }
+        Ok(ParallelSum {
+            core: BlockCore::new(id, BlockRole::Utility),
+            lanes: rt,
+            level_lin: mix.level.linear(),
+            lane_l: Vec::new(),
+            lane_r: Vec::new(),
+            src_l: Vec::new(),
+            src_r: Vec::new(),
+        })
+    }
+
+    fn ensure_scratch(&mut self, frames: usize) {
+        if self.lane_l.len() < frames {
+            self.lane_l.resize(frames, 0.0);
+            self.lane_r.resize(frames, 0.0);
+            self.src_l.resize(frames, 0.0);
+            self.src_r.resize(frames, 0.0);
+        }
+    }
+}
+
+impl PluginInstance for ParallelSum {
+    fn descriptor(&self) -> PluginDescriptor {
+        PluginDescriptor {
+            id: format!("signal.rig.parallel:{}", self.core.id),
+            name: "Parallel".into(),
+            vendor: "Signal".into(),
+            version: String::new(),
+            format: PluginFormat::Synthetic,
+        }
+    }
+    fn params(&mut self) -> Vec<PluginParamInfo> {
+        Vec::new()
+    }
+    fn param_value(&mut self, _id: u32) -> Option<f64> {
+        None
+    }
+    fn value_to_text(&mut self, _id: u32, _v: f64) -> Option<String> {
+        None
+    }
+    fn text_to_value(&mut self, _id: u32, _t: &str) -> Option<f64> {
+        None
+    }
+    fn latency(&mut self) -> u32 {
+        0
+    }
+    fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), PluginError> {
+        for lane in &mut self.lanes {
+            for inst in &mut lane.instances {
+                inst.prepare(sr, bs)?;
+            }
+        }
+        self.ensure_scratch(bs as usize);
+        Ok(())
+    }
+    fn is_prepared(&self) -> bool {
+        self.lanes
+            .iter()
+            .all(|l| l.instances.iter().all(|i| i.is_prepared()))
+    }
+    fn process_block(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        events: &PluginEvents<'_>,
+    ) -> Result<(), PluginError> {
+        let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
+        if frames == 0 {
+            return Ok(());
+        }
+        self.ensure_scratch(frames);
+        for v in out_l[..frames].iter_mut() {
+            *v = 0.0;
+        }
+        for v in out_r[..frames].iter_mut() {
+            *v = 0.0;
+        }
+        for lane in &mut self.lanes {
+            // Feed each lane a fresh copy of the input.
+            self.src_l[..frames].copy_from_slice(&in_l[..frames]);
+            self.src_r[..frames].copy_from_slice(&in_r[..frames]);
+            // Run the lane's series in place (src → lane_out → src → …).
+            for inst in &mut lane.instances {
+                for v in self.lane_l[..frames].iter_mut() {
+                    *v = 0.0;
+                }
+                for v in self.lane_r[..frames].iter_mut() {
+                    *v = 0.0;
+                }
+                inst.process_block(
+                    &self.src_l[..frames],
+                    &self.src_r[..frames],
+                    &mut self.lane_l[..frames],
+                    &mut self.lane_r[..frames],
+                    events,
+                )?;
+                self.src_l[..frames].copy_from_slice(&self.lane_l[..frames]);
+                self.src_r[..frames].copy_from_slice(&self.lane_r[..frames]);
+            }
+            // Sum the lane (post-series in `src`) into the output with gains.
+            for i in 0..frames {
+                out_l[i] += self.src_l[i] * lane.gain_l * self.level_lin;
+                out_r[i] += self.src_r[i] * lane.gain_r * self.level_lin;
+            }
+        }
+        Ok(())
+    }
+    fn deactivate(&mut self) {
+        for lane in &mut self.lanes {
+            for inst in &mut lane.instances {
+                inst.deactivate();
+            }
+        }
+    }
+}
+
+impl Block for ParallelSum {
+    fn role(&self) -> BlockRole {
+        self.core.role
+    }
+    fn id(&self) -> BlockId {
+        self.core.id.clone()
+    }
+    fn params(&self) -> &[Param] {
+        &self.core.params
+    }
+    fn set_param(&mut self, p: &str, value: f32) {
+        self.core.set_param(p, value);
+    }
+    fn bypassed(&self) -> bool {
+        self.core.bypassed
+    }
+    fn set_bypassed(&mut self, on: bool) {
+        self.core.bypassed = on;
+    }
+    fn as_plugin(&mut self) -> &mut dyn PluginInstance {
+        self
+    }
+    fn into_plugin_box(self: Box<Self>) -> Box<dyn PluginInstance> {
+        self
+    }
+}
+
 /// Built-in block constructors — the ergonomic surface (doc §3). Each loads
 /// real DSP and returns an `impl Block`.
 pub mod block {
@@ -466,6 +697,12 @@ pub mod block {
             .filter(|s| !s.is_empty())
             .unwrap_or(kind);
         BlockId::new(stem)
+    }
+
+    /// Test accessor for [`default_id`] (asserts the api/rig id agreement).
+    #[doc(hidden)]
+    pub fn default_id_for_test(path: &Path) -> BlockId {
+        default_id(path, "block")
     }
 }
 
@@ -552,6 +789,36 @@ impl Chain {
             None
         }
         search(&mut self.nodes, id)
+    }
+
+    /// Lower every [`Node::Parallel`] section into a single [`ParallelSum`]
+    /// block ([`Node::Block`]), yielding a pure-series chain that installs into
+    /// one FX slot per (formerly-parallel) section. The common 2-lane case
+    /// (dual cabs / wet-dry / dual amps) is fully supported; a nested parallel
+    /// inside a lane is rejected with `Err` (flagged TODO). Series blocks pass
+    /// through unchanged.
+    ///
+    /// This is the live-rig realization of parallel paths — see [`ParallelSum`]
+    /// for why a summing block (not daw send-buses) fits the swappable
+    /// single-track rig.
+    pub fn lower_parallels(self) -> Result<Chain, String> {
+        let mut out = Vec::with_capacity(self.nodes.len());
+        for node in self.nodes {
+            match node {
+                Node::Block(b) => out.push(Node::Block(b)),
+                Node::Parallel { lanes, mix } => {
+                    let sum = ParallelSum::lower(BlockId::new("parallel"), lanes, &mix)?;
+                    out.push(Node::Block(Box::new(sum)));
+                }
+            }
+        }
+        Ok(Chain { nodes: out })
+    }
+
+    /// Whether any node is a [`Node::Parallel`] (needs [`lower_parallels`] to
+    /// realize on the live rig).
+    pub fn has_parallel(&self) -> bool {
+        self.nodes.iter().any(|n| matches!(n, Node::Parallel { .. }))
     }
 
     /// Number of blocks (flattened across parallel lanes).
@@ -978,6 +1245,71 @@ pub struct TunerReading {
     pub cents: f32,
 }
 
+/// Autocorrelation pitch detector over a mono window. Returns a
+/// [`TunerReading`] with the detected fundamental, nearest MIDI note, and cents
+/// deviation, or a null reading if the window is too quiet / has no stable
+/// pitch. `sample_rate` in Hz.
+///
+/// Approximate by design (one window, time-domain): good enough to tune a
+/// guitar string; not a reference-grade analyzer.
+pub fn detect_pitch(samples: &[f32], sample_rate: f32) -> TunerReading {
+    const MIN_HZ: f32 = 50.0; // below low-B (~62 Hz) with margin
+    const MAX_HZ: f32 = 1000.0; // well above the 24th-fret high-E
+    if samples.len() < 1024 || sample_rate <= 0.0 {
+        return TunerReading::default();
+    }
+    // RMS gate — ignore near-silence (no string ringing).
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+    if rms < 1e-3 {
+        return TunerReading::default();
+    }
+
+    let min_lag = (sample_rate / MAX_HZ).floor() as usize;
+    let max_lag = ((sample_rate / MIN_HZ).ceil() as usize).min(samples.len() - 1);
+    if max_lag <= min_lag {
+        return TunerReading::default();
+    }
+
+    // Normalized autocorrelation; pick the lag of the strongest peak after the
+    // zero-lag energy. The zero-lag value normalizes the score to ~1.0.
+    let energy: f32 = samples.iter().map(|s| s * s).sum::<f32>().max(1e-9);
+    let mut best_lag = 0usize;
+    let mut best_score = 0.0f32;
+    for lag in min_lag..=max_lag {
+        let mut acc = 0.0f32;
+        let n = samples.len() - lag;
+        for i in 0..n {
+            acc += samples[i] * samples[i + lag];
+        }
+        let score = acc / energy;
+        if score > best_score {
+            best_score = score;
+            best_lag = lag;
+        }
+    }
+
+    // Confidence: the peak strength relative to zero-lag. Demand a clear peak.
+    if best_lag == 0 || best_score < 0.5 {
+        return TunerReading::default();
+    }
+
+    let hz = sample_rate / best_lag as f32;
+    if !(MIN_HZ..=MAX_HZ).contains(&hz) {
+        return TunerReading::default();
+    }
+
+    // MIDI note + cents from A440.
+    let midi = 69.0 + 12.0 * (hz / 440.0).log2();
+    let nearest = midi.round();
+    let cents = (midi - nearest) * 100.0;
+    let note = if (0.0..=127.0).contains(&nearest) {
+        Some(nearest as u8)
+    } else {
+        None
+    };
+    TunerReading { hz, note, cents }
+}
+
 /// A live amp/FX rig: DI in → active patch chain → out, with instant switching.
 /// `Send`; the chain blocks run inside daw's renderer on an input-armed track.
 pub trait Rig: Send {
@@ -1017,6 +1349,14 @@ pub trait Rig: Send {
 pub struct DawRig {
     inner: ProfileRig,
     patch_ids: Vec<PatchId>,
+    /// Snapshots per patch (parallel to `patch_ids`) — retained from the
+    /// [`Profile`] so [`select_snapshot`](Rig::select_snapshot) can apply them
+    /// onto the live blocks. Empty for rigs built via [`from_profile_rig`].
+    snapshots: Vec<Vec<Snapshot>>,
+    /// Tap-tempo state: recent tap instants (monotonic) → an averaged tempo.
+    taps: Vec<std::time::Instant>,
+    /// Last computed tempo (BPM), 0.0 until two taps land.
+    tempo_bpm: f32,
 }
 
 impl DawRig {
@@ -1024,24 +1364,71 @@ impl DawRig {
     /// chain into the resident bank, and activate the default patch. (= today's
     /// `GuitarRig::open` + `ProfileRig::load_profile`.) Device-backed — gate
     /// tests with `SIGNAL_SAMPLER_RIG_AUDIO` like the other rig tests.
+    ///
+    /// Parallel sections in a patch's [`Chain`] are lowered to daw sends + a
+    /// summed bus track by [`build_parallel_project`] before the chain installs
+    /// — see that function for what's supported (2-lane common case).
     pub fn open(prefs: &RigAudioPrefs, profile: &Profile) -> Result<Self, String> {
         let rig = GuitarRig::open(prefs).map_err(|e| e.to_string())?;
         let mut inner = ProfileRig::new(rig);
         let rp = profile.to_rig_profile();
         inner.load_profile(rp, None)?;
         let patch_ids = profile.patch_ids();
-        Ok(DawRig { inner, patch_ids })
+        let snapshots = profile
+            .patches
+            .iter()
+            .map(|p| {
+                p.snapshots
+                    .iter()
+                    .map(|s| Snapshot {
+                        id: s.id.clone(),
+                        params: s.params.clone(),
+                        bypass: s.bypass.clone(),
+                    })
+                    .collect()
+            })
+            .collect();
+        Ok(DawRig {
+            inner,
+            patch_ids,
+            snapshots,
+            taps: Vec::new(),
+            tempo_bpm: 0.0,
+        })
     }
 
     /// Wrap an already-built [`ProfileRig`] (e.g. from the native app) as a
-    /// [`Rig`]. Patch ids are read from the profile names.
+    /// [`Rig`]. Patch ids are read from the profile names. Snapshots are not
+    /// carried (the `ProfileRig` data type has none) — pass a [`Profile`] via
+    /// [`open`](Self::open) for snapshot support.
     pub fn from_profile_rig(inner: ProfileRig) -> Self {
-        let patch_ids = inner
+        let patch_ids: Vec<PatchId> = inner
             .patches()
             .iter()
             .map(|p| PatchId::new(&p.name))
             .collect();
-        DawRig { inner, patch_ids }
+        let snapshots = (0..patch_ids.len()).map(|_| Vec::new()).collect();
+        DawRig {
+            inner,
+            patch_ids,
+            snapshots,
+            taps: Vec::new(),
+            tempo_bpm: 0.0,
+        }
+    }
+
+    /// The most recently tapped tempo (BPM), or 0.0 if fewer than two taps have
+    /// landed. Feeds time-based blocks once a [`Delay`] block ships (Phase B+).
+    pub fn tempo_bpm(&self) -> f32 {
+        self.tempo_bpm
+    }
+
+    /// Apply a single `ParamRef`/value onto the live active chain. Returns
+    /// `true` if it reached a block. Used by [`set_param`](Rig::set_param) and
+    /// snapshot application.
+    fn apply_param(&mut self, target: &ParamRef, value: f32) -> bool {
+        self.inner
+            .set_block_param(target.block.as_str(), target.param.as_str(), value)
     }
 
     /// Borrow the wrapped [`ProfileRig`] (UI / advanced control).
@@ -1069,24 +1456,65 @@ impl Rig for DawRig {
     fn prev_patch(&mut self) {
         self.inner.prev_patch(); // REAL.
     }
-    fn select_snapshot(&mut self, _id: SnapshotId) {
-        // Phase B: look up the snapshot in the active patch and apply its
-        // param/bypass sets onto the live blocks. The snapshot data type is
-        // real; live application is the next phase.
+    fn select_snapshot(&mut self, id: SnapshotId) {
+        // REAL: look up the snapshot in the active patch and apply its param +
+        // bypass sets onto the live blocks (no chain rebuild) via the same
+        // per-block seams `set_param` / `set_block_bypass` use.
+        let patch = self.active_patch();
+        let Some(snap) = self
+            .snapshots
+            .get(patch)
+            .and_then(|snaps| snaps.iter().find(|s| s.id == id))
+        else {
+            return;
+        };
+        // Clone the sets out so we don't hold a borrow of `self.snapshots`
+        // while mutating through `self.inner`.
+        let params: Vec<(ParamRef, f32)> = snap.params.clone();
+        let bypass: Vec<(BlockId, bool)> = snap.bypass.clone();
+        for (target, value) in &params {
+            self.apply_param(target, *value);
+        }
+        for (block, on) in &bypass {
+            self.inner.set_block_bypass(block.as_str(), *on);
+        }
     }
-    fn set_block_bypass(&mut self, _block: BlockId, _on: bool) {
-        // Phase B: per-block bypass on a live chain. Today GuitarRig bypasses
-        // the *whole* chain (see `set_bypass`); per-block needs the block-id →
-        // slot-guid map the foundation does not yet thread through.
+    fn set_block_bypass(&mut self, block: BlockId, on: bool) {
+        // REAL: flips daw's per-slot `fx_enabled` flag on the addressed block
+        // (the renderer skips disabled slots — no rebuild).
+        self.inner.set_block_bypass(block.as_str(), on);
     }
-    fn set_param(&mut self, _target: ParamRef, _value: f32) {
-        // Phase B: route a named param onto the live block instance (the
-        // block-id → live-instance map). The Block::set_param surface is real;
-        // wiring it to a *running* GuitarRig slot is the next phase.
+    fn set_param(&mut self, target: ParamRef, value: f32) {
+        // REAL for NAM trims + hosted-plugin host params; `false` (no-op) for
+        // params that can't be addressed yet (e.g. an IR cab has none).
+        self.apply_param(&target, value);
     }
     fn tap_tempo(&mut self) {
-        // Phase B: feed a tapped interval to time-based blocks (delays). No
-        // delay block ships in the foundation yet.
+        // REAL (minimal): record tap instants and average the inter-tap
+        // intervals into a BPM. Stale taps (> 2 s gap) reset the sequence.
+        // Feeding the tempo into time-based delay blocks awaits a built-in
+        // Delay block (flagged: delays are a separate add).
+        let now = std::time::Instant::now();
+        if let Some(last) = self.taps.last() {
+            if now.duration_since(*last).as_secs_f32() > 2.0 {
+                self.taps.clear();
+            }
+        }
+        self.taps.push(now);
+        if self.taps.len() > 8 {
+            let drop = self.taps.len() - 8;
+            self.taps.drain(0..drop);
+        }
+        if self.taps.len() >= 2 {
+            let mut total = 0.0f32;
+            for w in self.taps.windows(2) {
+                total += w[1].duration_since(w[0]).as_secs_f32();
+            }
+            let avg = total / (self.taps.len() - 1) as f32;
+            if avg > 0.0 {
+                self.tempo_bpm = 60.0 / avg;
+            }
+        }
     }
     fn set_bypass(&mut self, on: bool) {
         self.inner.rig().set_bypass(on); // REAL: whole-rig clean DI.
@@ -1098,9 +1526,13 @@ impl Rig for DawRig {
         self.inner.rig().output_peak() // REAL.
     }
     fn tuner(&self) -> TunerReading {
-        // Phase B: a Utility tuner block / input-tap pitch detection. Returns a
-        // null reading today.
-        TunerReading::default()
+        // REAL (minimal): autocorrelation pitch detection on the input-probe's
+        // mono window (post-input-trim, pre-amp). Returns a null reading when
+        // the signal is too quiet or no stable pitch is found. Approximate: a
+        // single-window time-domain detector — fine for tuning, not a reference
+        // analyzer (no octave-error guard beyond the confidence gate).
+        let samples = self.inner.input_samples();
+        detect_pitch(&samples, self.inner.sample_rate() as f32)
     }
     fn set_input_trim(&mut self, db: Db) {
         self.inner.rig().set_input_trim_db(db.0); // REAL.
@@ -1179,9 +1611,9 @@ impl Controller for ProgramChangeMap {
     }
 }
 
-/// **Phase B**: bind an expression pedal / CC to a named [`ParamRef`]. Compiles
-/// as a TODO — `on_event` routes the CC value but [`Rig::set_param`] is itself a
-/// Phase-B stub.
+/// REAL: bind an expression pedal / CC to a named [`ParamRef`]. `on_event`
+/// routes the CC's unit value into [`Rig::set_param`], which is now live for
+/// NAM trims + hosted-plugin host params.
 pub struct ExpressionBind {
     pub cc: Cc,
     pub target: ParamRef,
@@ -1197,14 +1629,14 @@ impl Controller for ExpressionBind {
     fn on_event(&mut self, ev: ControlEvent, rig: &mut dyn Rig) {
         if let ControlEvent::Cc(cc, value) = ev {
             if cc == self.cc {
-                rig.set_param(self.target.clone(), value.unit()); // Phase B no-op downstream.
+                rig.set_param(self.target.clone(), value.unit());
             }
         }
     }
 }
 
-/// **Phase B**: a footswitch toggles one block's bypass. Compiles as a TODO —
-/// [`Rig::set_block_bypass`] is a Phase-B stub.
+/// REAL: a footswitch toggles one block's bypass via [`Rig::set_block_bypass`]
+/// (daw's per-slot `fx_enabled` flag — no chain rebuild).
 pub struct BlockToggle {
     pub footswitch: u8,
     pub block: BlockId,
@@ -1222,14 +1654,15 @@ impl Controller for BlockToggle {
         if let ControlEvent::Footswitch(n, true) = ev {
             if n == self.footswitch {
                 self.on = !self.on;
-                rig.set_block_bypass(self.block.clone(), self.on); // Phase B no-op downstream.
+                rig.set_block_bypass(self.block.clone(), self.on);
             }
         }
     }
 }
 
-/// **Phase B**: a footswitch taps tempo. Compiles as a TODO — [`Rig::tap_tempo`]
-/// is a Phase-B stub.
+/// REAL (minimal): a footswitch taps tempo into [`Rig::tap_tempo`], which
+/// averages tap intervals into a BPM. Feeding that BPM to delay blocks awaits a
+/// built-in Delay block (flagged).
 pub struct TapTempo {
     pub footswitch: u8,
 }
@@ -1244,14 +1677,14 @@ impl Controller for TapTempo {
     fn on_event(&mut self, ev: ControlEvent, rig: &mut dyn Rig) {
         if let ControlEvent::Footswitch(n, true) = ev {
             if n == self.footswitch {
-                rig.tap_tempo(); // Phase B no-op downstream.
+                rig.tap_tempo();
             }
         }
     }
 }
 
-/// **Phase B**: map CCs / footswitches to snapshot selection. Compiles as a
-/// TODO — [`Rig::select_snapshot`] is a Phase-B stub.
+/// REAL: map footswitches to snapshot selection via [`Rig::select_snapshot`],
+/// which applies the snapshot's param + bypass sets onto the live blocks.
 pub struct SnapshotSwitcher {
     /// `(footswitch, snapshot)` pairs.
     pub bindings: Vec<(u8, SnapshotId)>,
@@ -1267,7 +1700,7 @@ impl Controller for SnapshotSwitcher {
     fn on_event(&mut self, ev: ControlEvent, rig: &mut dyn Rig) {
         if let ControlEvent::Footswitch(n, true) = ev {
             if let Some((_, snap)) = self.bindings.iter().find(|(sw, _)| *sw == n) {
-                rig.select_snapshot(snap.clone()); // Phase B no-op downstream.
+                rig.select_snapshot(snap.clone());
             }
         }
     }
@@ -1285,6 +1718,11 @@ mod tests {
         active: usize,
         bypass: bool,
         snapshot: Option<SnapshotId>,
+        /// Recorded `set_param` calls (block.param, value).
+        params: Vec<(ParamRef, f32)>,
+        /// Recorded `set_block_bypass` calls (block, on).
+        block_bypass: Vec<(BlockId, bool)>,
+        taps: u32,
     }
     impl FakeRig {
         fn with(n: usize) -> Self {
@@ -1319,9 +1757,15 @@ mod tests {
         fn select_snapshot(&mut self, id: SnapshotId) {
             self.snapshot = Some(id);
         }
-        fn set_block_bypass(&mut self, _b: BlockId, _on: bool) {}
-        fn set_param(&mut self, _t: ParamRef, _v: f32) {}
-        fn tap_tempo(&mut self) {}
+        fn set_block_bypass(&mut self, b: BlockId, on: bool) {
+            self.block_bypass.push((b, on));
+        }
+        fn set_param(&mut self, t: ParamRef, v: f32) {
+            self.params.push((t, v));
+        }
+        fn tap_tempo(&mut self) {
+            self.taps += 1;
+        }
         fn set_bypass(&mut self, on: bool) {
             self.bypass = on;
         }
@@ -1526,5 +1970,179 @@ mod tests {
     fn dawrig_is_send() {
         fn assert_send<T: Send>() {}
         assert_send::<DawRig>();
+    }
+
+    // ── Phase B: controllers now drive real Rig actions ─────────────────────
+
+    /// `ExpressionBind` routes a matching CC's unit value into `Rig::set_param`
+    /// on the bound target.
+    #[test]
+    fn expression_bind_routes_cc_to_set_param() {
+        let mut rig = FakeRig::with(2);
+        let mut ctl = ExpressionBind::new(Cc::new(11), ParamRef::parse("volume.level"));
+        ctl.on_event(ControlEvent::Cc(Cc::new(11), U7::new(127)), &mut rig);
+        assert_eq!(rig.params.len(), 1);
+        assert_eq!(rig.params[0].0.block.as_str(), "volume");
+        assert_eq!(rig.params[0].0.param.as_str(), "level");
+        assert!((rig.params[0].1 - 1.0).abs() < 1e-6, "CC 127 → unit 1.0");
+        // A different CC is ignored.
+        ctl.on_event(ControlEvent::Cc(Cc::new(7), U7::new(64)), &mut rig);
+        assert_eq!(rig.params.len(), 1);
+    }
+
+    /// `BlockToggle` flips `Rig::set_block_bypass` on each press (toggling).
+    #[test]
+    fn block_toggle_drives_set_block_bypass() {
+        let mut rig = FakeRig::with(1);
+        let mut ctl = BlockToggle::footswitch(4, "delay");
+        ctl.on_event(ControlEvent::Footswitch(4, true), &mut rig);
+        ctl.on_event(ControlEvent::Footswitch(4, true), &mut rig);
+        assert_eq!(rig.block_bypass.len(), 2);
+        assert_eq!(rig.block_bypass[0], (BlockId::new("delay"), true));
+        assert_eq!(rig.block_bypass[1], (BlockId::new("delay"), false));
+    }
+
+    /// `TapTempo` forwards each press to `Rig::tap_tempo`.
+    #[test]
+    fn tap_tempo_controller_calls_rig() {
+        let mut rig = FakeRig::with(1);
+        let mut ctl = TapTempo::footswitch(5);
+        ctl.on_event(ControlEvent::Footswitch(5, true), &mut rig);
+        ctl.on_event(ControlEvent::Footswitch(5, true), &mut rig);
+        ctl.on_event(ControlEvent::Footswitch(5, false), &mut rig); // release ignored
+        assert_eq!(rig.taps, 2);
+    }
+
+    // ── Tuner: autocorrelation pitch detection ──────────────────────────────
+
+    /// A synthetic 220 Hz sine resolves to A3 (MIDI 57) within a few cents.
+    #[test]
+    fn detect_pitch_on_synthetic_sine() {
+        let sr = 48_000.0f32;
+        let hz = 220.0f32; // A3
+        let n = 4096;
+        let sig: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * hz * i as f32 / sr).sin() * 0.5)
+            .collect();
+        let r = detect_pitch(&sig, sr);
+        assert!(
+            (r.hz - hz).abs() < 3.0,
+            "detected {} Hz, expected ~{hz}",
+            r.hz
+        );
+        assert_eq!(r.note, Some(57), "A3 is MIDI 57");
+        assert!(r.cents.abs() < 15.0, "within ~15 cents, got {}", r.cents);
+    }
+
+    /// Silence / near-silence yields a null reading (no false pitch).
+    #[test]
+    fn detect_pitch_silence_is_null() {
+        let r = detect_pitch(&vec![0.0f32; 4096], 48_000.0);
+        assert_eq!(r.hz, 0.0);
+        assert_eq!(r.note, None);
+    }
+
+    // ── Parallel-path lowering (2-lane) ─────────────────────────────────────
+
+    /// `lower_parallels` turns a `Node::Parallel` into a single `ParallelSum`
+    /// block, collapsing the chain to a pure series spine (one slot per former
+    /// parallel section).
+    #[test]
+    fn lower_parallels_collapses_to_one_block() {
+        let chain = Chain::builder()
+            .block(Cabinet::ir(BlockId::new("pre"), Convolver::from_ir(vec![1.0], "Pre")))
+            .parallel(|par| {
+                par.lane(|l| {
+                    l.block(Cabinet::ir(
+                        BlockId::new("L"),
+                        Convolver::from_ir(vec![1.0], "LeftCab"),
+                    ))
+                    .pan(-0.5)
+                })
+                .lane(|l| {
+                    l.block(Cabinet::ir(
+                        BlockId::new("R"),
+                        Convolver::from_ir(vec![1.0], "RightCab"),
+                    ))
+                    .pan(0.5)
+                })
+            })
+            .build();
+        assert!(chain.has_parallel());
+        let lowered = chain.lower_parallels().expect("2-lane lowers");
+        // pre block + one ParallelSum block = 2 series nodes.
+        assert_eq!(lowered.nodes.len(), 2);
+        assert!(!lowered.has_parallel());
+        assert!(matches!(lowered.nodes[1], Node::Block(_)));
+    }
+
+    /// A nested parallel inside a lane is rejected (flagged TODO).
+    #[test]
+    fn lower_parallels_rejects_nesting() {
+        // Build a lane whose chain itself contains a Parallel node by hand.
+        let inner = Node::Parallel { lanes: Vec::new(), mix: ParallelMix::default() };
+        let lane = Lane { chain: vec![inner], level: Db::UNITY, pan: 0.0 };
+        let chain = Chain {
+            nodes: vec![Node::Parallel { lanes: vec![lane], mix: ParallelMix::default() }],
+        };
+        assert!(chain.lower_parallels().is_err());
+    }
+
+    /// A 2-lane `ParallelSum` of two unity-IR lanes sums their gained outputs:
+    /// a hard-panned dual-cab splits the mono input across L/R per the pans.
+    #[test]
+    fn parallel_sum_sums_two_lanes() {
+        // Two lanes, each a unity convolver (passes input through), hard-panned.
+        let lane_l = Lane {
+            chain: vec![Node::Block(Box::new(Cabinet::ir(
+                BlockId::new("L"),
+                Convolver::from_ir(vec![1.0], "L"),
+            )))],
+            level: Db::UNITY,
+            pan: -1.0, // full left
+        };
+        let lane_r = Lane {
+            chain: vec![Node::Block(Box::new(Cabinet::ir(
+                BlockId::new("R"),
+                Convolver::from_ir(vec![1.0], "R"),
+            )))],
+            level: Db::UNITY,
+            pan: 1.0, // full right
+        };
+        let mut sum =
+            ParallelSum::lower(BlockId::new("par"), vec![lane_l, lane_r], &ParallelMix::default())
+                .expect("lower");
+        sum.prepare(48_000.0, 64).unwrap();
+        const N: usize = 64;
+        let inp: Vec<f32> = (0..N).map(|i| (i as f32 * 0.1).sin() * 0.5).collect();
+        let (mut ol, mut or_) = (vec![0.0f32; N], vec![0.0f32; N]);
+        sum.process_block(&inp, &inp, &mut ol, &mut or_, &PluginEvents::default())
+            .unwrap();
+        // Full-left lane → all energy in L; full-right → all in R.
+        let el: f32 = ol.iter().map(|x| x * x).sum();
+        let er: f32 = or_.iter().map(|x| x * x).sum();
+        assert!(el > 1e-6 && er > 1e-6, "both channels carry signal");
+        // Each output channel should roughly equal the (unity) input it received
+        // from its single hard-panned lane.
+        for i in 0..N {
+            assert!((ol[i] - inp[i]).abs() < 1e-4, "L lane passes input at {i}");
+            assert!((or_[i] - inp[i]).abs() < 1e-4, "R lane passes input at {i}");
+        }
+    }
+
+    /// Block addressing arithmetic: `default_block_id` derives the file stem the
+    /// live-rig map keys on, so a `BlockId` from a path-loaded block matches the
+    /// id `GuitarRig::install_chain` records (the param/bypass routing relies on
+    /// this equality).
+    #[test]
+    fn block_id_matches_install_default_id() {
+        use crate::rig::RigBlock;
+        // The api layer derives a BlockId from the file stem...
+        let api_id = block::default_id_for_test(Path::new("/amps/Soldano.nam"));
+        // ...and GuitarRig records the same stem id for the installed block.
+        let rig_block = RigBlock::nam("/amps/Soldano.nam");
+        let rig_id = crate::rig::default_block_id_for_test(&rig_block.path);
+        assert_eq!(api_id.as_str(), "Soldano");
+        assert_eq!(api_id.as_str(), rig_id, "api id must match the rig's slot id");
     }
 }

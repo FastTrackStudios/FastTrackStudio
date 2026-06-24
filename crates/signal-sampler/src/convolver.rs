@@ -226,6 +226,10 @@ impl PluginInstance for Convolver {
     fn deactivate(&mut self) {
         self.prepared = false;
     }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
 }
 
 #[cfg(test)]
