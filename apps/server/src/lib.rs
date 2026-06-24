@@ -21,6 +21,7 @@ pub mod attachments;
 pub mod capability;
 pub mod connections;
 pub mod forge_sync;
+pub mod link_sync;
 pub mod presence;
 pub mod server_mgmt;
 pub mod snapshot;
@@ -861,6 +862,13 @@ pub(crate) async fn build_org_state(
                 );
         // Typed-link store (user-asserted verse/note/wiki links).
         let links = links::Store::open(org_root.path().join("links.jsonl"));
+        // Keep `note → verse` links live as notes are saved: a background
+        // task syncs each changed note's `[[wikilinks]]` into the store.
+        crate::link_sync::spawn(
+            links.clone(),
+            vault_root.clone(),
+            vault_sync_state.channel("default").await.subscribe(),
+        );
         // Resource Library reader (transcript sidecars under resources/).
         let resources = resources::ResourcesBackend::new(org_root.resources_dir());
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —

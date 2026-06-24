@@ -10,6 +10,8 @@
 //! strongly-established connections (the quality-filtered, publishable
 //! view).
 
+use std::collections::HashSet;
+
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use view_knowledge_graph::{
@@ -17,6 +19,31 @@ use view_knowledge_graph::{
 };
 
 use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
+
+/// The focal node plus its 1-hop neighbourhood — every edge touching
+/// `focal` and the nodes on either end. Empty edge set ⇒ just the node.
+fn focal_subgraph(g: &WikiGraph, focal: &str) -> WikiGraph {
+    let mut keep: HashSet<&str> = HashSet::from([focal]);
+    let mut edges = Vec::new();
+    for e in &g.edges {
+        if e.source == focal || e.target == focal {
+            keep.insert(e.source.as_str());
+            keep.insert(e.target.as_str());
+            edges.push(e.clone());
+        }
+    }
+    let nodes = g
+        .nodes
+        .iter()
+        .filter(|n| keep.contains(n.id.as_str()))
+        .cloned()
+        .collect();
+    WikiGraph {
+        nodes,
+        edges,
+        communities: Vec::new(),
+    }
+}
 
 #[component]
 pub fn ConnectionsView() -> Element {
@@ -27,6 +54,8 @@ pub fn ConnectionsView() -> Element {
     let mut filters = use_signal(GraphFilterState::default);
     let mut node_scale = use_signal(|| 1.0_f32);
     let mut spacing = use_signal(|| 1.5_f32);
+    // Focal node: when set, the graph shows just it + its neighbours.
+    let mut focal = use_signal(|| None::<String>);
 
     // Fetch all links + build the graph once per (org) change.
     let graph = use_resource(move || async move {
@@ -47,24 +76,46 @@ pub fn ConnectionsView() -> Element {
             Some(Ok(g)) if g.nodes.is_empty() => render_empty(),
             Some(Ok(g)) => {
                 let f = filters.read().clone();
-                let filtered = apply_filters(&g.nodes, &g.edges, &f);
+                // Focus first (subgraph), then quality-filter what's shown.
+                let focal_id = focal();
+                let base = match &focal_id {
+                    Some(id) => focal_subgraph(g, id),
+                    None => g.clone(),
+                };
+                let filtered = apply_filters(&base.nodes, &base.edges, &f);
                 let shown = WikiGraph {
                     nodes: filtered.nodes,
                     edges: filtered.edges,
                     communities: g.communities.clone(),
                 };
-                // Unfiltered nodes/edges feed the panel's counts.
-                let all_nodes = g.nodes.clone();
-                let all_edges = g.edges.clone();
+                // Panel counts reflect the in-scope (focused) graph.
+                let all_nodes = base.nodes.clone();
+                let all_edges = base.edges.clone();
                 let scale = node_scale();
                 let space = spacing();
+                let focus_label = focal_id
+                    .as_deref()
+                    .map(|t| t.split_once(':').map_or(t, |(_, id)| id).to_string());
+                let neighbour_count = shown.nodes.len().saturating_sub(1);
                 rsx! {
                     div { class: "relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border/70 bg-card/30",
                         KnowledgeGraphView {
                             graph: shown,
                             node_scale: scale,
                             spacing: space,
-                            on_node_click: move |_id: String| {},
+                            on_node_click: move |id: String| focal.set(Some(id)),
+                        }
+                        if let Some(label) = focus_label {
+                            div { class: "absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-primary/40 bg-background/95 px-2.5 py-1.5 text-xs shadow-sm backdrop-blur",
+                                span { class: "font-medium text-foreground", "{label}" }
+                                span { class: "text-muted-foreground", "· {neighbour_count} connections" }
+                                button {
+                                    r#type: "button",
+                                    class: "rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground",
+                                    onclick: move |_| focal.set(None),
+                                    "Show all"
+                                }
+                            }
                         }
                         div { class: "absolute right-3 top-3",
                             GraphFilters {
@@ -104,7 +155,7 @@ pub fn ConnectionsView() -> Element {
                 Heading { level: HeadingLevel::H1, class: "tracking-tight", "Connections" }
                 Text {
                     variant: TextVariant::Muted,
-                    "The typed-link web — verses, songs, sermons and topics as nodes; allusions, citations and cross-references as edges. Use the filters to keep only the strong links."
+                    "The typed-link web — verses, songs, sermons and topics as nodes; allusions, citations and cross-references as edges. Click a node to focus on its neighbourhood; use the filters to keep only the strong links."
                 }
             }
             {body}

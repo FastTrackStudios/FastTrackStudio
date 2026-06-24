@@ -148,8 +148,10 @@ These populate the link/tag graph with authoritative data (the resource-library 
      Nav tab "Connections" (Waypoints icon). Server already serves `LinksService`
      (apps/server lib.rs). Compiles native + wasm. Renders the 136 seeded song/sermon/verse
      links as the force-directed web.
-   - ⬜ **Remaining:** focal-node subgraph (click a verse → pull its bundled
-     cross-refs/topics/entities); deep-link node clicks to `/scripture`.
+   - ✅ **Focal-node subgraph (2026-06-20).** Clicking a node on `/connections` focuses the
+     graph to it + its 1-hop neighbourhood (`focal_subgraph`), with a "Show all" chip; the
+     quality filters still apply on top. (Verse→`/scripture` deep-link still pending — the
+     reader has no verse route param.)
 5. 🟡 **Publishing (export done 2026-06-18).** `links` `examples/publish_graph.rs`: exports
    the publishable subset (`graph(include_private=false)` → drops Private links) to
    `<org>/published/links.jsonl`, redacting private-`note:` endpoints (id → `private`) so a
@@ -164,9 +166,12 @@ These populate the link/tag graph with authoritative data (the resource-library 
 6. 🟡 **Authoring (2026-06-17/18).** Two paths landed: (a) the `/watch` view creates typed
    links live ("add note/clip at current time" + optional verse/topic target); (b) the
    `sync_vault_links` example turns `[[wikilinks]]` in note prose into `note→verse`/`note→video`
-   links automatically (the private-journal layer, `Visibility::Private`). ⬜ Remaining: a
-   general in-app "link this to that" picker (relation + confidence) from any verse/note, and
-   running the wikilink sync server-side on save.
+   links; and (c) **server-side on save (2026-06-20)** — `apps/server/src/link_sync.rs` spawns
+   a task subscribed to the vault `VaultEvent` broadcast that re-syncs each saved note's
+   `[[verse]]` wikilinks into `note→verse` links (verse case; replaces only `vault-link-sync`
+   provenance, `Visibility::Private`). So the graph stays live without running the example.
+   ⬜ Remaining: a general in-app "link this to that" picker (relation + confidence); extend the
+   server sync to video-clip refs.
 
 ## Open design questions (need the user)
 

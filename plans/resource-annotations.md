@@ -252,7 +252,8 @@ so the data is there.
 `note → video:<slug>#t:…` (`cites`). So `[[…]]` references in prose become real edges in
 `/connections` + the watch view — without touching the editor. Private (notes are the private
 layer). Idempotent (`source_ref: vault-link-sync`). **124 note→verse links** synced from the
-study notes (260 links total now). ⬜ Could run server-side on note save.
+study notes (260 links total now). ✅ Now also runs **server-side on save**
+(`apps/server/src/link_sync.rs`, verse case) — see knowledge-primitives.md §6.
 
 ### Remaining (authoring polish)
 - **oembed title** on save (needs a server fetch or CORS-friendly path).
