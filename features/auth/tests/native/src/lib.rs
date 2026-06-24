@@ -313,14 +313,14 @@ async fn vox_session_surface_round_trips_over_local_server() {
         .await
         .expect("refreshed token validates");
     assert!(matches!(
-        client.current_session(signed_up.token.clone()).await,
-        Err(vox::VoxError::User(AuthFlowError::SessionExpired))
+        &client.current_session(signed_up.token.clone()).await,
+        Err(vox::VoxError::User(b)) if matches!(**b, AuthFlowError::SessionExpired)
     ));
 
     // refresh with garbage fails like current_session and issues nothing.
     assert!(matches!(
-        client.refresh_session("not-a-token".into()).await,
-        Err(vox::VoxError::User(AuthFlowError::InvalidCredentials))
+        &client.refresh_session("not-a-token".into()).await,
+        Err(vox::VoxError::User(b)) if matches!(**b, AuthFlowError::InvalidCredentials)
     ));
 
     // logout, then the rotated token is dead too.
@@ -329,8 +329,8 @@ async fn vox_session_surface_round_trips_over_local_server() {
         .await
         .expect("sign out");
     assert!(matches!(
-        client.whoami(refreshed.token).await,
-        Err(vox::VoxError::User(AuthFlowError::SessionExpired))
+        &client.whoami(refreshed.token).await,
+        Err(vox::VoxError::User(b)) if matches!(**b, AuthFlowError::SessionExpired)
     ));
 
     // login again over the same surface.

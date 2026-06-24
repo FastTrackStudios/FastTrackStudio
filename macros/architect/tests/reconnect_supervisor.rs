@@ -24,6 +24,28 @@ use std::time::Duration;
 use architect::{ConnectionState, LayerRouter, LocalServer, Scope};
 use dioxus::prelude::*;
 
+/// A minimal `FromVoxLane` client that carries only the connection's
+/// `Caller` — the vox 0.10 replacement for the removed `NoopClient`. The
+/// supervised connection anchors on this lane (no service calls) and
+/// watches `caller.closed()` for the death-watch.
+#[derive(Clone)]
+struct AnchorClient {
+    caller: vox_core::Caller,
+    #[allow(dead_code)]
+    connection: Option<vox_core::ConnectionHandle>,
+}
+
+impl vox_core::FromVoxLane for AnchorClient {
+    const SERVICE_NAME: &'static str = "Noop";
+
+    fn from_vox_lane(
+        caller: vox_core::Caller,
+        connection: Option<vox_core::ConnectionHandle>,
+    ) -> Self {
+        Self { caller, connection }
+    }
+}
+
 /// The "current server" — `None` while the server is down. The connect
 /// closure reads it on every attempt, exactly like a URL that points at
 /// a restarted process.
@@ -53,7 +75,7 @@ fn app() -> Element {
                 let Some(server) = server else {
                     return Err("server down".to_string());
                 };
-                let root: vox_core::NoopClient = server
+                let root: AnchorClient = server
                     .establish()
                     .await
                     .map_err(|e| format!("establish: {e:?}"))?;
@@ -105,7 +127,7 @@ async fn pump_until(
 fn fresh_server() -> (LocalServer, Arc<Scope>) {
     let scope = Scope::new();
     // An empty router is enough: the supervised connection anchors on the
-    // root `NoopClient` handshake, no service calls involved.
+    // root `AnchorClient` handshake, no service calls involved.
     let server = LocalServer::serve(LayerRouter::new(), scope.clone());
     (server, scope)
 }

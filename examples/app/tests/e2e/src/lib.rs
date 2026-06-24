@@ -17,7 +17,7 @@ use example::architect::{Page, Sort, SortOrder};
 use example::backend_memory::ExampleRepoMemory;
 use example::{ExampleCreate, ExampleRepoClient, ExampleServiceClient, ExampleUpdate};
 use tokio::sync::oneshot;
-use vox_core::{TransportMode, initiator_on};
+use vox_core::initiator_on;
 use vox_websocket::WsLink;
 
 /// Spawn the real router on an OS-assigned port. Returns the `/vox` URL
@@ -39,7 +39,7 @@ async fn spawn() -> (String, oneshot::Sender<()>) {
 
 async fn repo_client(ws_url: &str) -> ExampleRepoClient {
     let link = WsLink::connect(ws_url).await.expect("WsLink::connect");
-    initiator_on(link, TransportMode::Bare)
+    initiator_on(link)
         .establish::<ExampleRepoClient>()
         .await
         .expect("ExampleRepo handshake")
@@ -47,7 +47,7 @@ async fn repo_client(ws_url: &str) -> ExampleRepoClient {
 
 async fn service_client(ws_url: &str) -> ExampleServiceClient {
     let link = WsLink::connect(ws_url).await.expect("WsLink::connect");
-    initiator_on(link, TransportMode::Bare)
+    initiator_on(link)
         .establish::<ExampleServiceClient>()
         .await
         .expect("ExampleService handshake")
@@ -445,7 +445,7 @@ async fn reqwest_health(url: &str) -> String {
 
 async fn sync_client(ws_url: &str) -> crdt::sync::DocSyncClient {
     let link = WsLink::connect(ws_url).await.expect("WsLink::connect");
-    initiator_on(link, TransportMode::Bare)
+    initiator_on(link)
         .establish::<crdt::sync::DocSyncClient>()
         .await
         .expect("DocSync handshake")
@@ -453,7 +453,7 @@ async fn sync_client(ws_url: &str) -> crdt::sync::DocSyncClient {
 
 async fn presence_client(ws_url: &str) -> crdt::sync::DocPresenceClient {
     let link = WsLink::connect(ws_url).await.expect("WsLink::connect");
-    initiator_on(link, TransportMode::Bare)
+    initiator_on(link)
         .establish::<crdt::sync::DocPresenceClient>()
         .await
         .expect("DocPresence handshake")

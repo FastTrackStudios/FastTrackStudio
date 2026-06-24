@@ -4,7 +4,7 @@
 //! into the crate so a server's `main.rs` only writes the *interesting*
 //! part — the per-service dispatcher match. Everything else (the Link
 //! implementation, the io loop, the closed-channel notification, the
-//! `acceptor_on(...).establish::<NoopClient>()` dance) lives here.
+//! `acceptor_on(...).establish_connection()` dance) lives here.
 //!
 //! ## Usage
 //!
@@ -14,14 +14,14 @@
 //! async fn vox_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
 //!     ws.on_upgrade(move |socket| async move {
 //!         let db = state.db.clone();
-//!         let factory = vox::acceptor_fn(move |req, connection| {
+//!         let factory = vox::lane_acceptor_fn(move |req, connection| {
 //!             match req.service() {
 //!                 "ExampleRepo" => {
 //!                     connection.handle_with(ExampleRepoDispatcher::new(
 //!                         ExampleRepoStorage::new(db.clone())));
 //!                     Ok(())
 //!                 }
-//!                 _ => Err(vec![]),
+//!                 _ => Err(vox::LaneRejection::new(vox::LaneRejectReason::UnknownService)),
 //!             }
 //!         });
 //!         axum_ws::serve(socket, factory).await;
@@ -46,32 +46,32 @@ use moire::sync::{mpsc, oneshot};
 use moire::task;
 use tracing::warn;
 
-// Re-export so the user's match arms can write `architect::axum_ws::acceptor_fn`
+// Re-export so the user's match arms can write `architect::axum_ws::lane_acceptor_fn`
 // if they prefer, instead of importing vox at the top level.
-pub use vox_core::{acceptor_fn, acceptor_on};
+pub use vox_core::{acceptor_on, lane_acceptor_fn};
 
-/// Drive a single vox session on an upgraded axum WebSocket.
+/// Drive a single vox connection on an upgraded axum WebSocket.
 ///
 /// Spawns the IO loop, completes the vox handshake, then blocks until
 /// the peer disconnects (the closed channel fires from `Drop` on the
 /// io task's notifier).
 pub async fn serve<A>(socket: WebSocket, acceptor: A)
 where
-    A: vox_core::ConnectionAcceptor,
+    A: vox_core::LaneAcceptor,
 {
     let (closed_tx, closed_rx) = oneshot::channel("vox.session.closed");
-    let root = match acceptor_on(AxumWsLink::new(socket, closed_tx))
-        .on_connection(acceptor)
-        .establish::<vox_core::NoopClient>()
+    let connection = match acceptor_on(AxumWsLink::new(socket, closed_tx))
+        .on_lane(acceptor)
+        .establish_connection()
         .await
     {
-        Ok(r) => r,
+        Ok(c) => c,
         Err(e) => {
             warn!(error = %e, "vox WebSocket session failed");
             return;
         }
     };
-    let _root = root;
+    let _connection = connection;
     let _ = closed_rx.await;
 }
 

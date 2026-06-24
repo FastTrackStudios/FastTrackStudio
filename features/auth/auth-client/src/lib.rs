@@ -283,11 +283,7 @@ impl vox::ClientMiddleware for TokenStoreMiddleware {
             .map(|session| session.token);
         Box::pin(async move {
             if let Some(token) = token {
-                request.push_string_metadata(
-                    AUTHORIZATION_METADATA_KEY,
-                    format!("Bearer {token}"),
-                    vox::MetadataFlags::SENSITIVE | vox::MetadataFlags::NO_PROPAGATE,
-                );
+                request.push_string_metadata(AUTHORIZATION_METADATA_KEY, format!("Bearer {token}"));
             }
         })
     }

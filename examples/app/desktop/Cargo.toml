@@ -20,8 +20,7 @@ example-memory = { path = "../features/example/example-memory" }
 architect = { path = "../../../macros/architect", default-features = false, features = ["local"] }
 
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
-# v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server.
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
+vox-core = "0.10.0-rc.1"
+vox-websocket = "0.10.0-rc.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

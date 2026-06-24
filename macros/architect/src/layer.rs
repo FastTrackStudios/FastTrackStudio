@@ -96,8 +96,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use vox::{
-    DriverReplySink, Handler, MethodId, RequestCall, RetryPolicy, SchemaRecvTracker, SelfRef,
-    ServiceDescriptor,
+    DriverReplySink, Handler, MethodId, RequestCall, SchemaRecvTracker, SelfRef, ServiceDescriptor,
 };
 
 // ── Erased handler ────────────────────────────────────────────────────────
@@ -115,7 +114,6 @@ pub trait DynHandler: Send + Sync + 'static {
         schemas: Arc<SchemaRecvTracker>,
     ) -> Pin<Box<dyn core::future::Future<Output = ()> + Send + '_>>;
 
-    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy;
     fn args_have_channels(&self, method_id: MethodId) -> bool;
     fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape>;
     fn as_any(&self) -> &dyn Any;
@@ -133,9 +131,6 @@ where
         schemas: Arc<SchemaRecvTracker>,
     ) -> Pin<Box<dyn core::future::Future<Output = ()> + Send + '_>> {
         Box::pin(Handler::handle(self, call, reply, schemas))
-    }
-    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy {
-        Handler::retry_policy(self, method_id)
     }
     fn args_have_channels(&self, method_id: MethodId) -> bool {
         Handler::args_have_channels(self, method_id)
@@ -157,7 +152,6 @@ pub trait DynHandler: 'static {
         schemas: Arc<SchemaRecvTracker>,
     ) -> Pin<Box<dyn core::future::Future<Output = ()> + '_>>;
 
-    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy;
     fn args_have_channels(&self, method_id: MethodId) -> bool;
     fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape>;
     fn as_any(&self) -> &dyn Any;
@@ -175,9 +169,6 @@ where
         schemas: Arc<SchemaRecvTracker>,
     ) -> Pin<Box<dyn core::future::Future<Output = ()> + '_>> {
         Box::pin(Handler::handle(self, call, reply, schemas))
-    }
-    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy {
-        Handler::retry_policy(self, method_id)
     }
     fn args_have_channels(&self, method_id: MethodId) -> bool {
         Handler::args_have_channels(self, method_id)
@@ -691,13 +682,6 @@ impl LayerSink for LayerRouter {
 }
 
 impl Handler<DriverReplySink> for LayerRouter {
-    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy {
-        self.method_map
-            .get(&method_id)
-            .map(|&idx| self.handlers[idx].retry_policy(method_id))
-            .unwrap_or(RetryPolicy::VOLATILE)
-    }
-
     fn args_have_channels(&self, method_id: MethodId) -> bool {
         self.method_map
             .get(&method_id)

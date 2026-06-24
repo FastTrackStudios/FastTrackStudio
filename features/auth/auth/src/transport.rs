@@ -904,7 +904,6 @@ pub mod vox {
                 request.push_string_metadata(
                     AUTHORIZATION_METADATA_KEY,
                     format!("Bearer {}", self.token),
-                    ::vox::MetadataFlags::SENSITIVE | ::vox::MetadataFlags::NO_PROPAGATE,
                 );
             })
         }
@@ -923,18 +922,11 @@ pub mod vox {
     }
 
     // r[impl auth.transport.vox-schema]
-    pub fn authorization_token_from_metadata(
-        metadata: &[::vox::MetadataEntry<'_>],
-    ) -> Option<String> {
+    pub fn authorization_token_from_metadata(metadata: &::vox::Metadata) -> Option<String> {
+        use ::vox::MetadataExt;
         metadata
-            .iter()
-            .find(|entry| entry.key == AUTHORIZATION_METADATA_KEY)
-            .and_then(|entry| match &entry.value {
-                ::vox::MetadataValue::String(value) => {
-                    bearer_tokens::parse_authorization_header(Some(value)).ok()
-                }
-                _ => None,
-            })
+            .meta_str(AUTHORIZATION_METADATA_KEY)
+            .and_then(|value| bearer_tokens::parse_authorization_header(Some(value)).ok())
     }
 }
 
@@ -1681,11 +1673,9 @@ mod tests {
     #[cfg(feature = "vox")]
     #[test]
     fn vox_extracts_bearer_metadata() {
-        let metadata = [::vox::MetadataEntry {
-            key: "authorization".into(),
-            value: ::vox::MetadataValue::String("Bearer session-token".into()),
-            flags: ::vox::MetadataFlags::SENSITIVE | ::vox::MetadataFlags::NO_PROPAGATE,
-        }];
+        let metadata = ::vox::metadata()
+            .str("authorization", "Bearer session-token")
+            .build();
 
         let token = super::vox::authorization_token_from_metadata(&metadata);
 
@@ -1695,11 +1685,7 @@ mod tests {
     #[cfg(feature = "vox")]
     #[test]
     fn vox_ignores_non_bearer_metadata() {
-        let metadata = [::vox::MetadataEntry {
-            key: "authorization".into(),
-            value: ::vox::MetadataValue::String("Basic no".into()),
-            flags: ::vox::MetadataFlags::SENSITIVE,
-        }];
+        let metadata = ::vox::metadata().str("authorization", "Basic no").build();
 
         let token = super::vox::authorization_token_from_metadata(&metadata);
 

@@ -21,7 +21,7 @@ use facet_pretty::FacetPretty;
 use figue as args;
 use owo_colors::OwoColorize;
 use uuid::Uuid;
-use vox_core::{TransportMode, initiator_on};
+use vox_core::initiator_on;
 use vox_websocket::WsLink;
 
 #[derive(Facet, Debug)]
@@ -131,7 +131,7 @@ async fn connect(url: Option<String>) -> eyre::Result<ExampleRepoClient> {
     let link = WsLink::connect(&url)
         .await
         .map_err(|e| eyre::eyre!("WsLink::connect({url}): {e:?}"))?;
-    initiator_on(link, TransportMode::Bare)
+    initiator_on(link)
         .establish::<ExampleRepoClient>()
         .await
         .map_err(|e| eyre::eyre!("vox handshake: {e:?}"))

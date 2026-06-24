@@ -8,7 +8,7 @@
 //! WebSocket) or a backend running in the same process is chosen at the
 //! edge. The remote side is `axum_ws::serve`; this is its in-process
 //! twin — same acceptor dance ([`vox_core::acceptor_on`] +
-//! [`vox_core::acceptor_fn`] + `establish::<NoopClient>()`), but over
+//! [`vox_core::lane_acceptor_fn`] + `establish_connection()`), but over
 //! [`vox_core::memory_link_pair`] instead of a network socket.
 //!
 //! Native only: vox's `MemoryLink` isn't compiled for wasm, so browser
@@ -48,26 +48,26 @@ impl LocalServer {
     /// `<T>Client` you'd get over a WebSocket, no network involved.
     pub async fn establish<C>(&self) -> eyre::Result<C>
     where
-        C: vox_core::FromVoxSession,
+        C: vox_core::FromVoxLane,
     {
         let (client_link, server_link) = vox_core::memory_link_pair(16);
         let router = self.router.clone();
 
         // Server side: accept on one end and serve the router for any
-        // requested service (it dispatches by method id). Hold the root
-        // session alive until the task is aborted on scope close.
+        // requested lane (it dispatches by method id). Hold the
+        // connection alive until the task is aborted on scope close.
         let task = tokio::task::spawn(async move {
-            let acceptor = vox_core::acceptor_fn(move |_req, connection| {
+            let acceptor = vox_core::lane_acceptor_fn(move |_req, connection| {
                 connection.handle_with(router.clone());
                 Ok(())
             });
             match vox_core::acceptor_on(server_link)
-                .on_connection(acceptor)
-                .establish::<vox_core::NoopClient>()
+                .on_lane(acceptor)
+                .establish_connection()
                 .await
             {
-                Ok(root) => {
-                    let _root = root;
+                Ok(connection) => {
+                    let _connection = connection;
                     std::future::pending::<()>().await;
                 }
                 Err(e) => tracing::warn!(error = %e, "local vox acceptor failed"),
@@ -78,7 +78,7 @@ impl LocalServer {
         });
 
         // Client side: establish over the other end.
-        vox_core::initiator_on(client_link, vox_core::TransportMode::Bare)
+        vox_core::initiator_on(client_link)
             .establish::<C>()
             .await
             .map_err(|e| eyre::eyre!("local establish: {e:?}"))

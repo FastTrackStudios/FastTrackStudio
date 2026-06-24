@@ -422,9 +422,9 @@ impl<E> ClientError<E> {
 impl<E: std::fmt::Display> From<vox::VoxError<E>> for ClientError<E> {
     fn from(e: vox::VoxError<E>) -> Self {
         match e {
-            vox::VoxError::User(e) => Self::App(e),
+            vox::VoxError::User(e) => Self::App(*e),
             other => Self::Transport {
-                retryable: other.is_retryable(),
+                retryable: other.is_connection_interruption(),
                 detail: other.to_string(),
             },
         }

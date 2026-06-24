@@ -42,7 +42,7 @@ pub mod backend_crdt {
     pub use example_crdt::ExampleRepoLoro;
 }
 
-/// axum WebSocket adapter — `AxumWsLink`, `serve`, `acceptor_fn`,
+/// axum WebSocket adapter — `AxumWsLink`, `serve`, `lane_acceptor_fn`,
 /// `acceptor_on`. Re-exported from `architect::axum_ws` so consumers
 /// only ever need to import from `example::*`.
 #[cfg(feature = "server-axum")]

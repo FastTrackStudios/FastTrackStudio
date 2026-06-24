@@ -14,7 +14,7 @@
 
 use architect::{Duration, Schedule};
 use example::ExampleRepoClient;
-use vox_core::{Caller, TransportMode, initiator_on};
+use vox_core::{Caller, initiator_on};
 use vox_websocket::WsLink;
 
 /// Default vox endpoint for the remote transport.
@@ -54,7 +54,7 @@ pub async fn connect(transport: &Transport) -> Result<Caller, String> {
 /// platform-portable — `tokio::time` on desktop, browser timers on web.
 async fn establish_ws<C>(url: &str) -> Result<C, String>
 where
-    C: vox_core::FromVoxSession,
+    C: vox_core::FromVoxLane,
 {
     architect::schedule::retry(
         || establish_ws_once::<C>(url),
@@ -69,12 +69,12 @@ where
 /// One connect attempt.
 async fn establish_ws_once<C>(url: &str) -> Result<C, String>
 where
-    C: vox_core::FromVoxSession,
+    C: vox_core::FromVoxLane,
 {
     let link = WsLink::connect(url)
         .await
         .map_err(|e| format!("connect {url}: {e:?}"))?;
-    initiator_on(link, TransportMode::Bare)
+    initiator_on(link)
         .establish::<C>()
         .await
         .map_err(|e| format!("vox handshake: {e:?}"))

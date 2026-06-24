@@ -187,7 +187,7 @@ where
     ws.on_upgrade(move |socket| async move {
         let (repo, collab) = (*state).clone();
         let router = evented_router(repo, &collab);
-        let factory = axum_ws::acceptor_fn(move |_req, connection| {
+        let factory = axum_ws::lane_acceptor_fn(move |_req, connection| {
             connection.handle_with(router.clone());
             Ok(())
         });

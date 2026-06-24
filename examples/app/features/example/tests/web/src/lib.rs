@@ -18,7 +18,7 @@ use example::{
     architect::{Page, Sort, SortOrder},
 };
 use uuid::Uuid;
-use vox_core::{TransportMode, initiator_on};
+use vox_core::initiator_on;
 use vox_websocket::WsLink;
 use wasm_bindgen_test::*;
 
@@ -30,7 +30,7 @@ async fn connect() -> ExampleRepoClient {
     let link = WsLink::connect(SERVER_URL)
         .await
         .expect("WsLink::connect — is example-server running on :4040?");
-    initiator_on(link, TransportMode::Bare)
+    initiator_on(link)
         .establish::<ExampleRepoClient>()
         .await
         .expect("vox handshake failed")
@@ -40,7 +40,7 @@ async fn connect_service() -> ExampleServiceClient {
     let link = WsLink::connect(SERVER_URL)
         .await
         .expect("WsLink::connect — is example-server running on :4040?");
-    initiator_on(link, TransportMode::Bare)
+    initiator_on(link)
         .establish::<ExampleServiceClient>()
         .await
         .expect("vox handshake failed")

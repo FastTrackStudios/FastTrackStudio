@@ -143,7 +143,7 @@ async fn vox_ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>
             example_service_service_descriptor(),
             ExampleServiceDispatcher::new(CustomExampleService::new(repo)),
         );
-        let factory = axum_ws::acceptor_fn(move |_req, connection| {
+        let factory = axum_ws::lane_acceptor_fn(move |_req, connection| {
             connection.handle_with(router.clone());
             Ok(())
         });

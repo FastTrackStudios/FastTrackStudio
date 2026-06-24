@@ -102,8 +102,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 uuid = { version = "1", features = ["v4"] }
 
 # Serialization: vox uses facet for wire encoding.
-facet = { version = "0.46", features = ["reflect", "chrono", "uuid"] }
-facet-pretty = "0.46"
+facet = { version = "0.50.0-rc.1", features = ["reflect", "chrono", "uuid"] }
+facet-pretty = "0.50.0-rc.1"
 
 # Test-data + db-seed generation. Architect emits #[derive(Dummy)] on
 # every Create/Update/List/Model struct when the `fake` feature is on,
@@ -114,7 +114,7 @@ fake = { version = "4", features = ["derive", "uuid", "chrono"] }
 # CLI argument + config parser. Same shape across xtask, examples/app/cli,
 # and any future user-facing binary so flags / env / config files all
 # work consistently.
-figue = "4"
+figue = "5.0.0-rc.1"
 owo-colors = "4"
 heck = "0.5"
 
@@ -133,10 +133,10 @@ heck = "0.5"
 # describes them as `String` in the schema so plan-based/wasm decode
 # agrees. The client crates (examples/app/{ui,desktop,tests/web}) pin the
 # SAME rev so server + clients share one coherent wire schema.
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
-vox-types = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
+vox-core = "0.10.0-rc.1"
+vox-types = "0.10.0-rc.1"
+vox-websocket = "0.10.0-rc.1"
 
 # Loro — CRDT engine. Local-first state lives inside a LoroDoc;
 # SeaORM stores the doc's snapshot + update log as opaque bytes.

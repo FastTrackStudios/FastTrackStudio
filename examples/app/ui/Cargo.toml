@@ -22,11 +22,9 @@ example-ui = { path = "../features/example/example-ui" }
 # replica + its sync driver) and `use_presence_channel` (who's here).
 crdt = { path = "../../../libs/crdt", features = ["dioxus"] }
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
-# v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server so
-# the wire schema agrees.
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
+vox-core = "0.10.0-rc.1"
+vox-websocket = "0.10.0-rc.1"
 uuid = { version = "1", features = ["v4", "js"] }
 # architect's `schedule` policies wrap the (flaky) remote connect in
 # exponential backoff — see `client.rs`. Cross-target: `schedule`'s clock

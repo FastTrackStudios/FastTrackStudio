@@ -25,9 +25,8 @@ crate-type = ["cdylib", "rlib"]
 example = { path = "../../example", features = ["vox"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server.
-vox-core = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-core = "0.10.0-rc.1"
+vox-websocket = "0.10.0-rc.1"
 wasm-bindgen = "=0.2.118"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"
