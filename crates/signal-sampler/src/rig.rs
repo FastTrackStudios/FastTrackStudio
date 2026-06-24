@@ -1,14 +1,15 @@
 //! Live guitar-rig audio path — the standalone amp-modeler rig, a thin wrapper
-//! over daw's [`LiveRig`].
+//! over a live-capable daw [`AudioEngine`].
 //!
 //! The rig is **one input-armed track in a tiny daw project** whose FX chain is
 //! the active patch's chain ([NAM amp, cab IR, optional hosted CLAP/VST3]),
 //! routed to master. All of that plumbing — seeding the project, arming the
 //! input channel, reserving FX slots, opening the engine + live input stream,
-//! metering, transport — lives in daw's [`LiveRig`] now; [`GuitarRig`] just
-//! owns one and builds chains for it. There is no signal-owned cpal stream,
-//! ring buffer, project/track/slot wiring, `Identity`/`InputProbe`, or
-//! resident-bank any more — that work lives in daw's engine.
+//! metering, transport — lives on daw's [`AudioEngine`] now (opened via
+//! [`AudioEngine::open_live`]); [`GuitarRig`] just owns one and builds chains
+//! for it. There is no signal-owned cpal stream, ring buffer,
+//! project/track/slot wiring, `Identity`/`InputProbe`, or resident-bank any
+//! more — that work lives in daw's engine.
 //!
 //! ## Instant, GigPerformer-style patch switching
 //!
@@ -16,20 +17,20 @@
 //! (native) implement it directly; hosted plugins go through daw's own loader.
 //! A "chain" install pre-builds + prepares its boxes and stores them
 //! control-side. [`set_active`](GuitarRig::set_active) hands the active chain's
-//! boxes to [`LiveRig::set_chain`], which swaps them into the reserved slot
+//! boxes to [`AudioEngine::set_chain`], which swaps them into the reserved slot
 //! guids under the renderer's per-block lock (glitch-free) and returns the
 //! displaced boxes — dropped here, off the audio thread.
 //!
 //! ## Metering
 //!
-//! [`LiveRig`] exposes the track's post-fader peak (output) and a built-in
-//! input-probe peak (pre-FX input); [`GuitarRig`] delegates both.
+//! The live [`AudioEngine`] exposes the track's post-fader peak (output) and a
+//! built-in input-probe peak (pre-FX input); [`GuitarRig`] delegates both.
 
 use std::path::Path;
 
 use facet::Facet;
 
-use daw::live::LiveRig;
+use daw::standalone::audio_engine::AudioEngine;
 use daw::standalone::metering::linear_to_db;
 use signal_plugin_host::PluginInstance;
 
@@ -43,9 +44,9 @@ use crate::rig_prefs::RigAudioPrefs;
 /// against larger backend buffers without per-block re-preparation.
 const MAX_BLOCK: usize = FX_PREPARE_BLOCK as usize;
 
-/// Number of chain FX slots reserved on the rig track via [`LiveRig`]. Chains
-/// longer than this are rejected at install time. (LiveRig reserves one extra
-/// hidden slot for its input probe.)
+/// Number of chain FX slots reserved on the rig track via
+/// [`AudioEngine::open_live`]. Chains longer than this are rejected at install
+/// time. (The engine reserves one extra hidden slot for its input probe.)
 const MAX_CHAIN_SLOTS: usize = 8;
 
 /// Identifies a chain resident control-side. Assigned on install; opaque
@@ -206,7 +207,7 @@ fn build_block(
 
 /// A resident chain: its pre-built + prepared boxes (one per chain slot, in
 /// order) plus its control-side [`SlotInfo`]. Switching to it hands these boxes
-/// to [`LiveRig::set_chain`].
+/// to [`AudioEngine::set_chain`].
 struct ResidentChain {
     #[allow(dead_code)]
     info: SlotInfo,
@@ -219,8 +220,8 @@ struct ResidentChain {
 /// ([`set_active`](GuitarRig::set_active) / bypass / trims) can stay `&self`
 /// (the original API), while installs (`&mut self`) lock it briefly. The
 /// resident chains live here because both install (write) and activate (swap)
-/// touch them; the actual box-swap goes through [`LiveRig::set_chain`], which
-/// is itself `&self`.
+/// touch them; the actual box-swap goes through [`AudioEngine::set_chain`],
+/// which is itself `&self`.
 struct SwapState {
     /// Resident chains keyed by [`ModelId`].
     chains: std::collections::HashMap<ModelId, ResidentChain>,
@@ -233,11 +234,12 @@ struct SwapState {
 }
 
 /// A live guitar rig: a single input-armed daw track whose FX chain is the
-/// active patch, running on daw's [`LiveRig`].
+/// active patch, running on a live-capable daw [`AudioEngine`].
 pub struct GuitarRig {
     /// The live-monitor engine (owns the daw project/track/slots, cpal output +
-    /// live-input streams, meters; drop = stop).
-    live: LiveRig,
+    /// live-input streams, meters; drop = stop). Opened via
+    /// [`AudioEngine::open_live`].
+    live: AudioEngine,
     pub sample_rate: u32,
     /// Mutable swap state (resident chains + active selection + trims/bypass).
     swap: std::sync::Mutex<SwapState>,
@@ -269,9 +271,10 @@ impl GuitarRig {
         })
     }
 
-    /// Open the rig from [`RigAudioPrefs`]. Stands up a daw [`LiveRig`] — one
-    /// input-armed track monitoring `prefs.input_channel`, with reserved FX
-    /// slots, the engine + live input running, transport rolling.
+    /// Open the rig from [`RigAudioPrefs`]. Stands up a live-capable daw
+    /// [`AudioEngine`] via [`AudioEngine::open_live`] — one input-armed track
+    /// monitoring `prefs.input_channel`, with reserved FX slots, the engine +
+    /// live input running, transport rolling.
     pub fn open(prefs: &RigAudioPrefs) -> eyre::Result<Self> {
         // Low latency under JACK/PipeWire: ask PipeWire for the quantum before
         // the JACK client connects (the client can't set the buffer there).
@@ -286,14 +289,14 @@ impl GuitarRig {
             }
         }
 
-        let live = LiveRig::open(&prefs.into(), prefs.input_channel as u32, MAX_CHAIN_SLOTS)
+        let live = AudioEngine::open_live(&prefs.into(), prefs.input_channel as u32, MAX_CHAIN_SLOTS)
             .map_err(|e| eyre::eyre!("rig: {e}"))?;
         let sample_rate = live.sample_rate();
 
         tracing::info!(
             input_channel = prefs.input_channel,
             sample_rate,
-            "signal-sampler: guitar rig started on daw LiveRig"
+            "signal-sampler: guitar rig started on daw live AudioEngine"
         );
         eprintln!(
             "Guitar rig (daw engine): in ch{} → FX chain → master @ {} Hz",
@@ -419,7 +422,7 @@ impl GuitarRig {
     }
 
     /// Select the active chain — hands the chain's pre-prepared boxes to
-    /// [`LiveRig::set_chain`], which swaps them into the reserved slot guids
+    /// [`AudioEngine::set_chain`], which swaps them into the reserved slot guids
     /// under the renderer's per-block lock (glitch-free). `None` = clean DI
     /// passthrough (chain slots → identity). Boxes displaced from the previously
     /// active chain are reclaimed so it can be re-armed; any others are dropped

@@ -69,7 +69,7 @@ impl RigAudioPrefs {
 /// The rig is always duplex (live monitoring needs the input), so `want_input`
 /// is forced on. The per-track input *channel* lives on [`RigAudioPrefs`] but
 /// not on [`AudioIoPrefs`] (which is engine-global) — it's passed to
-/// [`LiveRig::open`](daw::live::LiveRig::open) separately.
+/// `AudioEngine::open_live` separately.
 impl From<&RigAudioPrefs> for daw_audio_io::AudioIoPrefs {
     fn from(p: &RigAudioPrefs) -> Self {
         daw_audio_io::AudioIoPrefs {
