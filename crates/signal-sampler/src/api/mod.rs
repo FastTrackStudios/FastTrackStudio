@@ -22,6 +22,7 @@
 //! The existing `SampleEngine` / `SamplerBank` / `SamplerInstrument` /
 //! `SamplerRig` / mixer stay untouched — this is additive.
 
+pub mod adapt;
 pub mod engine;
 pub mod model;
 pub mod prim;
@@ -49,6 +50,8 @@ pub use traits::{
 };
 
 pub use engine::EngineInstrument;
+
+pub use adapt::{pre_delay_curve, CacheLoader, CacheZoneLayers};
 
 pub use rig::{
     Amp, Block, BlockId, BlockRole, BlockToggle, Cabinet, CabDsp, Chain, ChainBuilder, ControlEvent,
