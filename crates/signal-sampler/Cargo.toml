@@ -6,6 +6,14 @@ authors.workspace = true
 license.workspace = true
 description = "Sample library playback engine for Signal — loads and plays orchestral, drum, and instrument libraries"
 
+[features]
+# Route audio through JACK instead of raw ALSA. On a PipeWire system this is
+# pipewire-jack, which lets the live guitar rig connect via PipeWire (and avoids
+# the "device busy" failure when PipeWire holds an interface exclusively).
+# Requires libjack at build/link time (e.g. `pipewire.jack` on NixOS). Run under
+# `pw-jack` if the JACK server isn't auto-detected.
+jack = ["cpal/jack", "daw-audio-io/jack"]
+
 [dependencies]
 # Spec loading
 facet       = { workspace = true }
@@ -26,8 +34,21 @@ neural-amp-modeler = { workspace = true }
 
 # Audio I/O
 cpal        = { workspace = true }
+# Reusable audio I/O from daw — device enumeration + AudioIoPrefs used to drive
+# daw's audio engine (which the live guitar rig now runs ON, see `rig.rs`).
+daw-audio-io = { workspace = true }
+# daw facade — the live guitar rig builds a tiny daw project (one input-armed
+# track) and drives daw's `AudioEngine` instead of its own cpal streams. The
+# `PluginInstance` trait (which NAM / cab-IR / hosted blocks implement) is also
+# re-exported through `signal-plugin-host`. `standalone-audio` pulls in the
+# project audio engine; `clap-host` matches signal-plugin-host so the shared
+# CLAP backend links once.
+daw         = { workspace = true, features = ["standalone-audio", "clap-host"] }
 crossbeam-channel = { workspace = true }
 arc-swap    = "1.7"
+# Decode persisted plugin state chunks (`state_b64`) when a rig "plugin" block
+# restores a hosted CLAP/VST3 plugin's saved parameters.
+base64      = "0.22"
 hound       = "3.5"
 # FLAC decode for .signalpack samples. Primary path is symphonia (faster on
 # 24-bit); claxon is kept as a correctness fallback. See `load_flac_bytes`:
@@ -51,3 +72,5 @@ walkdir     = "2"
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
+# TUI for the live guitar-rig example (input/output meters + patch switching).
+ratatui = "0.29"

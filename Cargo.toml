@@ -90,6 +90,10 @@ daw-cli = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "fea
 daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
+# Reusable audio I/O (device enumeration + JACK host + live DuplexMonitor). Not
+# exposed via the `daw` facade, so consumed directly from the patched-local daw
+# checkout. The guitar rig (signal-sampler) runs on its DuplexMonitor.
+daw-audio-io = { path = "../daw/features/audio/daw-audio-io", features = ["monitor"] }
 
 # ── Shared infrastructure ────────────────────────────────────────────
 # audio-controls was removed on feat/ui-showcase (folded into daw-ui); it

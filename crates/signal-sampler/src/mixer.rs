@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use signal_plugin_host::HostedPlugin;
 
+use crate::convolver::Convolver;
 use crate::nam::NamProcessor;
 
 /// Per-block peak-meter decay (peak-hold). Applied once per audio block so the
@@ -44,6 +45,9 @@ pub enum FxBackend {
     /// Built-in Neural Amp Modeler — works for any block role that wants
     /// neural-net amp/pedal modeling (Amp, Drive, Cabinet, …).
     Nam(NamProcessor),
+    /// Built-in cabinet impulse-response convolution (a `BlockKind::Native`
+    /// realization of a Cabinet block). Mono FIR; see [`crate::convolver`].
+    CabIr(Convolver),
 }
 
 impl std::fmt::Debug for FxBackend {
@@ -51,6 +55,7 @@ impl std::fmt::Debug for FxBackend {
         match self {
             Self::Hosted(h) => f.debug_tuple("Hosted").field(h).finish(),
             Self::Nam(n) => f.debug_tuple("Nam").field(n).finish(),
+            Self::CabIr(c) => f.debug_tuple("CabIr").field(c).finish(),
         }
     }
 }
@@ -61,14 +66,16 @@ impl FxBackend {
         match self {
             Self::Hosted(_) => "plugin",
             Self::Nam(_) => "nam",
+            Self::CabIr(_) => "cabir",
         }
     }
 
-    /// Cached display name (plugin descriptor or NAM filename).
+    /// Cached display name (plugin descriptor, NAM filename, or IR filename).
     pub fn display_name(&self) -> &str {
         match self {
             Self::Hosted(h) => &h.descriptor().name,
             Self::Nam(n) => &n.display_name,
+            Self::CabIr(c) => &c.display_name,
         }
     }
 
@@ -80,6 +87,7 @@ impl FxBackend {
                 let _ = h.process_interleaved(inout, &[], &[]);
             }
             Self::Nam(n) => n.process_interleaved(inout),
+            Self::CabIr(c) => c.process_interleaved(inout),
         }
     }
 

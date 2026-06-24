@@ -26,7 +26,9 @@ use signal_ui::components::Piano;
 
 mod mixer_view;
 mod plugin_picker;
+mod rig_view;
 use mixer_view::MixerPanel;
+use rig_view::{RigHandle, RigPanel};
 
 /// Single instrument slot — whatever we load plays under this id, and the
 /// piano / MIDI route note events to it.
@@ -77,6 +79,9 @@ fn App() -> Element {
         player
     });
     use_context_provider(|| LibraryRoot(library_root()));
+    // Guitar rig is created lazily (Start button in the Rig panel) so we don't
+    // grab the audio input device / a second output stream at app launch.
+    use_context_provider(RigHandle::default);
     use_context_provider(|| {
         let midi = MidiInput::open_all();
         match &midi {
@@ -110,6 +115,7 @@ fn PlayerPanel() -> Element {
     // layout; `show_mixer` toggles the stage between the mixer and the splash.
     let mut reload = use_signal(|| 0u64);
     let mut show_mixer = use_signal(|| true);
+    let mut show_rig = use_signal(|| false);
     // Background-load result slot: the worker thread deposits `(name, result)`
     // here; the poll future below picks it up and updates the UI. Keeps the
     // heavy load_preset (spec parse + engine build) OFF the dx event loop.
@@ -220,15 +226,26 @@ fn PlayerPanel() -> Element {
                 strong { style: "color:#e8813a;", "Signal Native — Player" }
                 span { "{status}" }
                 button {
-                    style: if show_mixer() {
+                    style: if show_mixer() && !show_rig() {
                         "margin-left:auto; padding:4px 12px; background:#e8813a; color:#111; \
                          border:none; border-radius:4px; cursor:pointer; font-weight:600;"
                     } else {
                         "margin-left:auto; padding:4px 12px; background:#2a2a2e; color:#ddd; \
                          border:1px solid #3a3a3c; border-radius:4px; cursor:pointer;"
                     },
-                    onclick: move |_| { let v = !show_mixer(); show_mixer.set(v); },
+                    onclick: move |_| { show_rig.set(false); let v = !show_mixer(); show_mixer.set(v); },
                     "Mixer"
+                }
+                button {
+                    style: if show_rig() {
+                        "padding:4px 12px; background:#e8813a; color:#111; \
+                         border:none; border-radius:4px; cursor:pointer; font-weight:600;"
+                    } else {
+                        "padding:4px 12px; background:#2a2a2e; color:#ddd; \
+                         border:1px solid #3a3a3c; border-radius:4px; cursor:pointer;"
+                    },
+                    onclick: move |_| show_rig.set(!show_rig()),
+                    "Guitar Rig"
                 }
                 span { style: "margin-left:12px; color:#777;", "voices: {voices} · pending: {pending}" }
             }
@@ -329,7 +346,11 @@ fn PlayerPanel() -> Element {
 
                 // Stage: loaded instrument + piano
                 div { style: "display:flex; flex:1; flex-direction:column; min-width:0;",
-                    if show_mixer() {
+                    if show_rig() {
+                        div { style: "flex:1; min-height:0;",
+                            RigPanel {}
+                        }
+                    } else if show_mixer() {
                         div { style: "flex:1; min-height:0;",
                             MixerPanel { reload: reload() }
                         }

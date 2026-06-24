@@ -1,0 +1,55 @@
+// A live guitar-rig profile for the standalone Signal rig.
+//
+// Each patch is a named tone whose chain is an ordered list of blocks:
+//   kind nam     → a Neural Amp Modeler model (.nam)  — amp or drive/pedal
+//   kind cab_ir  → a cabinet impulse response (.wav)
+//   kind plugin  → any third-party CLAP / VST3 plugin (format auto-detected);
+//                  optional `state_b64 "..."` restores saved plugin parameters
+// Switching patches at runtime is instant + click-free (every chain is
+// pre-loaded into the bank). Example plugin block:
+//   { kind plugin, path /usr/lib/clap/ValhallaSupermassive.clap }
+//
+// Paths are relative to THIS file's directory (or absolute). Edit them to point
+// at your own models/IRs, then run:
+//
+//   cargo run -p signal-sampler --example worship_rig -- crates/signal-sampler/examples/worship.styx
+
+name Worship
+default_patch 0
+patches (
+    {
+        name Clean
+        chain (
+            { kind nam, path amps/clean_twin.nam }
+            { kind cab_ir, path cabs/twin_jensen.wav }
+        )
+        input_trim_db 0.0
+        output_trim_db 0.0
+    }
+    {
+        name Crunch
+        chain (
+            { kind nam, path amps/crunch_ac30.nam }
+            { kind cab_ir, path cabs/greenback.wav }
+        )
+        output_trim_db -1.0
+    }
+    {
+        name Lead
+        // drive pedal → amp → cab
+        chain (
+            { kind nam, path amps/ts808.nam }
+            { kind nam, path amps/lead_boost.nam }
+            { kind cab_ir, path cabs/v30.wav }
+        )
+        input_trim_db 3.0
+        output_trim_db -2.0
+    }
+    {
+        name Ambient
+        chain (
+            { kind nam, path amps/ambient_clean.nam }
+            { kind cab_ir, path cabs/twin_jensen.wav }
+        )
+    }
+)

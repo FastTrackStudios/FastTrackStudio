@@ -2602,6 +2602,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-audio-io"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "facet 0.50.0-rc.1",
+ "rtrb",
+ "tracing",
+]
+
+[[package]]
 name = "daw-audio-sync"
 version = "0.1.0"
 dependencies = [
@@ -2729,11 +2739,13 @@ dependencies = [
  "clack-extensions",
  "clack-host",
  "cpal",
+ "daw-audio-io",
  "daw-proto",
  "gloo-timers",
  "libloading 0.8.9",
  "memmap2",
  "moire",
+ "rtrb",
  "symphonia",
  "thiserror 2.0.18",
  "tokio",
@@ -10229,6 +10241,8 @@ dependencies = [
  "claxon",
  "cpal",
  "crossbeam-channel",
+ "daw",
+ "daw-audio-io",
  "eyre",
  "facet 0.50.0-rc.1",
  "facet-styx",
@@ -10239,7 +10253,6 @@ dependencies = [
  "neural-amp-modeler",
  "ratatui",
  "rayon",
- "rtrb",
  "signal-plugin-host",
  "signal-proto",
  "symphonia",

@@ -46,6 +46,7 @@
 
 pub mod bank;
 pub mod block;
+pub mod convolver;
 pub mod engine;
 pub mod engine_spec;
 pub mod midi;
@@ -56,6 +57,10 @@ pub mod pack_rewrite;
 pub mod player;
 pub mod preset_spec;
 pub mod retag;
+pub mod rig;
+pub mod rig_manager;
+pub mod rig_prefs;
+pub mod rig_profile;
 pub mod runtime;
 pub mod sample_map;
 pub mod spec;
@@ -72,6 +77,11 @@ pub use mixer::{
 pub use module_spec::{ModulePort, ModuleSpec};
 pub use nam::NamProcessor;
 pub use player::{AudioStatsSnapshot, SamplerPlayer};
+pub use convolver::Convolver;
+pub use rig::{DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
+pub use rig_manager::RigManager;
+pub use rig_prefs::RigAudioPrefs;
+pub use rig_profile::{ProfileRig, RigPatch, RigProfile};
 pub use preset_spec::{
     MacroDef, MacroTarget, MasterFxSlot, NoteRoute, PresetEngineRef, PresetModuleRef, PresetSpec,
     RoutingRule,

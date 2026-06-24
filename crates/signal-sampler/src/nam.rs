@@ -39,6 +39,9 @@ pub struct NamProcessor {
     pub output_gain_db: f32,
     /// Sample rate the model was prepared at.
     pub sample_rate: f64,
+    /// Activation flag for the [`PluginInstance`] adapter. `load` leaves the
+    /// model reset-and-ready, so it starts `true`; `deactivate` clears it.
+    prepared: bool,
 }
 
 impl NamProcessor {
@@ -67,7 +70,22 @@ impl NamProcessor {
             input_gain_db: 0.0,
             output_gain_db: 0.0,
             sample_rate,
+            prepared: true,
         })
+    }
+
+    /// Sample rate the model was trained at, if the `.nam` file declares it
+    /// (modern format, v0.5+). Guitar models are usually 48 kHz; running the
+    /// model at a different host rate shifts its voicing/pitch, so the rig
+    /// uses this to warn (and, later, to resample).
+    pub fn expected_sample_rate(&self) -> Option<f64> {
+        self.model.expected_sample_rate()
+    }
+
+    /// Model loudness in dB (modern format), if present. Used to level-match
+    /// models across a swap so "Clean" and "Lead" don't jump in volume.
+    pub fn loudness(&self) -> Option<f64> {
+        self.model.loudness()
     }
 
     /// Re-prepare the model at a new sample rate / block size. Resets
@@ -123,5 +141,165 @@ impl std::fmt::Debug for NamProcessor {
             .field("input_gain_db", &self.input_gain_db)
             .field("output_gain_db", &self.output_gain_db)
             .finish()
+    }
+}
+
+// ── daw `PluginInstance` adapter ────────────────────────────────────────────
+//
+// Lets a `NamProcessor` be inserted into daw's per-track FX chain via
+// `Standalone::insert_plugin_instance`, so the live guitar rig runs ON daw's
+// audio engine instead of signal's own cpal streams (see `crate::rig`). NAM is
+// mono in / mono out; `process_block` sums L+R to the mono path the model wants
+// and broadcasts the result back to both output channels — the same conversion
+// `process_interleaved` does, just on planar buffers.
+
+use signal_plugin_host::{
+    PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
+};
+
+impl PluginInstance for NamProcessor {
+    fn descriptor(&self) -> PluginDescriptor {
+        PluginDescriptor {
+            id: format!("signal.nam:{}", self.model_path),
+            name: self.display_name.clone(),
+            vendor: "Signal (NAM)".to_string(),
+            version: String::new(),
+            format: PluginFormat::Synthetic,
+        }
+    }
+
+    fn params(&mut self) -> Vec<PluginParamInfo> {
+        // Input/output trims are driven directly via `input_gain_db` /
+        // `output_gain_db` (the rig sets patch-level trims), not as host params.
+        Vec::new()
+    }
+
+    fn param_value(&mut self, _id: u32) -> Option<f64> {
+        None
+    }
+
+    fn value_to_text(&mut self, _id: u32, _value: f64) -> Option<String> {
+        None
+    }
+
+    fn text_to_value(&mut self, _id: u32, _text: &str) -> Option<f64> {
+        None
+    }
+
+    fn latency(&mut self) -> u32 {
+        0
+    }
+
+    fn prepare(&mut self, sample_rate: f64, block_size: u32) -> Result<(), PluginError> {
+        self.reset(sample_rate, block_size as usize);
+        self.prepared = true;
+        Ok(())
+    }
+
+    fn is_prepared(&self) -> bool {
+        self.prepared
+    }
+
+    fn process_block(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        _events: &PluginEvents<'_>,
+    ) -> Result<(), PluginError> {
+        let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
+        if frames == 0 {
+            return Ok(());
+        }
+        if frames > self.in_mono.len() {
+            self.in_mono.resize(frames, 0.0);
+            self.out_mono.resize(frames, 0.0);
+        }
+        let gin = db_to_lin(self.input_gain_db) as f64;
+        let gout = db_to_lin(self.output_gain_db) as f64;
+        // Sum L+R to mono (× input gain). Halve so a centered signal lands at
+        // unity instead of doubling — matches `process_interleaved`.
+        for i in 0..frames {
+            let l = in_l[i] as f64;
+            let r = in_r[i] as f64;
+            self.in_mono[i] = ((l + r) * 0.5) * gin;
+        }
+        self.model
+            .process(&self.in_mono[..frames], &mut self.out_mono[..frames]);
+        for i in 0..frames {
+            let y = (self.out_mono[i] * gout) as f32;
+            out_l[i] = y;
+            out_r[i] = y;
+        }
+        Ok(())
+    }
+
+    fn deactivate(&mut self) {
+        self.prepared = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use signal_plugin_host::{PluginEvents, PluginInstance};
+
+    fn fixture(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/assets")
+            .join(name)
+    }
+
+    /// A known input through the `PluginInstance::process_block` planar path is
+    /// non-silent and equals the interleaved path frame-for-frame — the two
+    /// process routes agree (so the rig hears the same tone on daw's engine).
+    #[test]
+    fn process_block_matches_process_interleaved() {
+        let sr = 48_000.0;
+        let Ok(mut a) = NamProcessor::load(fixture("amp_a.nam"), sr, 256) else {
+            eprintln!("skip: amp_a.nam fixture failed to load");
+            return;
+        };
+        let mut b = NamProcessor::load(fixture("amp_a.nam"), sr, 256).expect("load b");
+        assert!(a.is_prepared() && b.is_prepared());
+
+        const N: usize = 256;
+        let sig: Vec<f32> = (0..N).map(|i| (i as f32 * 0.05).sin() * 0.3).collect();
+
+        // Planar path.
+        let (mut ol, mut or_) = (vec![0.0f32; N], vec![0.0f32; N]);
+        a.process_block(&sig, &sig, &mut ol, &mut or_, &PluginEvents::default())
+            .unwrap();
+
+        // Interleaved path (broadcast the same mono into both channels).
+        let mut inter: Vec<f32> = sig.iter().flat_map(|&s| [s, s]).collect();
+        b.process_interleaved(&mut inter);
+
+        let energy: f64 = ol.iter().map(|x| (*x as f64).powi(2)).sum();
+        assert!(energy > 1e-9, "NAM output should be non-silent");
+        for i in 0..N {
+            assert!((ol[i] - or_[i]).abs() < 1e-9, "L/R must match (mono broadcast)");
+            assert!(
+                (ol[i] - inter[2 * i]).abs() < 1e-5,
+                "planar vs interleaved diverge at {i}: {} != {}",
+                ol[i],
+                inter[2 * i]
+            );
+        }
+    }
+
+    /// `deactivate` clears the prepared flag; `prepare` restores it.
+    #[test]
+    fn prepare_deactivate_toggles_prepared() {
+        let Ok(mut a) = NamProcessor::load(fixture("amp_a.nam"), 48_000.0, 64) else {
+            eprintln!("skip: amp_a.nam fixture failed to load");
+            return;
+        };
+        assert!(a.is_prepared());
+        a.deactivate();
+        assert!(!a.is_prepared());
+        a.prepare(48_000.0, 128).unwrap();
+        assert!(a.is_prepared());
     }
 }
