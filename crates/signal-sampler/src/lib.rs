@@ -49,6 +49,7 @@ pub mod block;
 pub mod convolver;
 pub mod engine;
 pub mod engine_spec;
+pub mod instrument;
 pub mod midi;
 pub mod mixer;
 pub mod module_spec;
@@ -69,6 +70,7 @@ pub use bank::{PreloadProfile, SamplerBank};
 pub use block::{BlockParams, BlockSpec, SamplerBlock};
 pub use engine::SampleEngine;
 pub use engine::cache::SignalPcmPack;
+pub use instrument::SamplerInstrument;
 pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
 pub use mixer::{
     Bus, BusStrip, ChannelStrip, DirectChannel, DrumMixer, EngineStrip, FxBackend, FxSlotStrip,
