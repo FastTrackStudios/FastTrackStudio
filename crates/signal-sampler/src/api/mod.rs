@@ -25,6 +25,7 @@
 pub mod engine;
 pub mod model;
 pub mod prim;
+pub mod rig;
 pub mod script;
 pub mod traits;
 
@@ -48,6 +49,13 @@ pub use traits::{
 };
 
 pub use engine::EngineInstrument;
+
+pub use rig::{
+    Amp, Block, BlockId, BlockRole, BlockToggle, Cabinet, CabDsp, Chain, ChainBuilder, ControlEvent,
+    Controller, DawRig, ExpressionBind, Lane, Node, ParallelMix, Param as RigParam, ParamRef,
+    Patch, PatchBuilder, PatchId, PatchStepper, Plugin, Profile, ProfileBuilder, ProfileId,
+    ProgramChangeMap, Rig, Snapshot, SnapshotId, SnapshotSwitcher, TapTempo, TunerReading, block,
+};
 
 pub use script::{
     Action, CcArticulation, Humanize, KeyswitchRouter, MidiMessage, Performance, PerformanceScript,
