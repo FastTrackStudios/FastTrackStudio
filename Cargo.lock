@@ -78,18 +78,6 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.1.1"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "accesskit",
- "accesskit_macos",
- "accesskit_windows",
- "android-activity",
- "raw-window-handle 0.6.2",
-]
-
-[[package]]
-name = "accesskit_xplat"
-version = "0.1.1"
 source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
@@ -367,8 +355,8 @@ dependencies = [
  "rustc-hash 2.1.2",
  "vello",
  "wasm-bindgen-futures",
- "wgpu 29.0.3",
- "wgpu_context 0.6.0",
+ "wgpu",
+ "wgpu_context",
 ]
 
 [[package]]
@@ -403,8 +391,8 @@ dependencies = [
  "vello_common",
  "vello_hybrid",
  "wasm-bindgen-futures",
- "wgpu 29.0.3",
- "wgpu_context 0.6.0",
+ "wgpu",
+ "wgpu_context",
 ]
 
 [[package]]
@@ -765,12 +753,6 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "atomic_float"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62af46d040ba9df09edc6528dae9d8e49f5f3e82f55b7d2ec31a733c38dbc49d"
-
-[[package]]
-name = "atomic_float"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "628d228f918ac3b82fe590352cc719d30664a0c13ca3a60266fe02c7132d480a"
@@ -921,27 +903,12 @@ dependencies = [
 
 [[package]]
 name = "bit-set"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
-dependencies = [
- "bit-vec 0.8.0",
-]
-
-[[package]]
-name = "bit-set"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34ddef2995421ab6a5c779542c81ee77c115206f4ad9d5a8e05f4ff49716a3dd"
 dependencies = [
- "bit-vec 0.9.1",
+ "bit-vec",
 ]
-
-[[package]]
-name = "bit-vec"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bit-vec"
@@ -1005,49 +972,6 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "accesskit",
- "anyrender",
- "app_units",
- "atomic_refcell",
- "bitflags 2.11.1",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "color",
- "cssparser 0.37.0",
- "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "euclid",
- "html-escape",
- "image",
- "keyboard-types 0.7.0",
- "kurbo",
- "linebender_resource_handle",
- "markup5ever 0.39.0",
- "objc2 0.6.4",
- "parley",
- "percent-encoding",
- "rayon",
- "selectors 0.38.0",
- "skrifa",
- "slab",
- "smallvec 1.15.1",
- "stylo",
- "stylo_dom",
- "stylo_static_prefs",
- "stylo_taffy 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "stylo_traits",
- "taffy",
- "thread_local",
- "url",
- "usvg",
- "web-time",
- "wuff",
-]
-
-[[package]]
-name = "blitz-dom"
-version = "0.3.0-alpha.4"
 source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
@@ -1055,7 +979,7 @@ dependencies = [
  "app_units",
  "atomic_refcell",
  "bitflags 2.11.1",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "blitz-traits",
  "color",
  "cssparser 0.37.0",
  "cursor-icon",
@@ -1078,7 +1002,7 @@ dependencies = [
  "stylo",
  "stylo_dom",
  "stylo_static_prefs",
- "stylo_taffy 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "stylo_taffy",
  "stylo_traits",
  "taffy",
  "thread_local",
@@ -1091,21 +1015,10 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "html5ever 0.39.0",
- "xml5ever",
-]
-
-[[package]]
-name = "blitz-html"
-version = "0.3.0-alpha.4"
 source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "blitz-dom",
+ "blitz-traits",
  "html5ever 0.39.0",
  "xml5ever",
 ]
@@ -1113,21 +1026,9 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "data-url",
- "reqwest",
- "tokio",
- "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "blitz-net"
-version = "0.3.0-alpha.4"
 source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "blitz-traits",
  "data-url",
  "reqwest",
  "tokio",
@@ -1137,31 +1038,12 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "anyrender",
- "anyrender_svg",
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "color",
- "euclid",
- "kurbo",
- "parley",
- "peniko",
- "stylo",
- "taffy",
- "usvg",
-]
-
-[[package]]
-name = "blitz-paint"
-version = "0.3.0-alpha.4"
 source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "anyrender",
  "anyrender_svg",
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "blitz-dom",
+ "blitz-traits",
  "color",
  "euclid",
  "kurbo",
@@ -1175,38 +1057,16 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "accesskit",
- "accesskit_xplat 0.1.1 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "android-activity",
- "anyrender",
- "arboard",
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-paint 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "futures-util",
- "keyboard-types 0.7.0",
- "rfd",
- "wasm-bindgen",
- "web-sys",
- "web-time",
- "winit",
-]
-
-[[package]]
-name = "blitz-shell"
-version = "0.3.0-alpha.4"
 source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
- "accesskit_xplat 0.1.1 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "accesskit_xplat",
  "android-activity",
  "anyrender",
  "arboard",
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-paint 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
  "futures-util",
  "keyboard-types 0.7.0",
  "rfd",
@@ -1214,21 +1074,6 @@ dependencies = [
  "web-sys",
  "web-time",
  "winit",
-]
-
-[[package]]
-name = "blitz-traits"
-version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "bitflags 2.11.1",
- "bytes",
- "cursor-icon",
- "http",
- "keyboard-types 0.7.0",
- "serde",
- "smol_str",
- "url",
 ]
 
 [[package]]
@@ -1499,25 +1344,26 @@ dependencies = [
 
 [[package]]
 name = "cargo-platform"
-version = "0.1.9"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e35af189006b9c0f00a064685c727031e3ed2d8020f7ba284d78cc2671bd36ea"
+checksum = "dd0061da739915fae12ea00e16397555ed4371a6bb285431aab930f61b0aa4ba"
 dependencies = [
  "serde",
+ "serde_core",
 ]
 
 [[package]]
 name = "cargo_metadata"
-version = "0.18.1"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
+checksum = "ef987d17b0a113becdd19d3d0022d04d7ef41f9efe4f3fb63ac44ba61df3ade9"
 dependencies = [
  "camino",
  "cargo-platform",
  "semver",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1617,7 +1463,7 @@ version = "0.1.0"
 source = "git+https://github.com/prokopyl/clack#f874e858ad576c601367b3038af5088a4e671744"
 dependencies = [
  "bitflags 2.11.1",
- "clap-sys 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap-sys",
 ]
 
 [[package]]
@@ -1628,7 +1474,7 @@ dependencies = [
  "bitflags 2.11.1",
  "clack-common",
  "clack-host",
- "clap-sys 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap-sys",
 ]
 
 [[package]]
@@ -1637,7 +1483,7 @@ version = "0.1.0"
 source = "git+https://github.com/prokopyl/clack#f874e858ad576c601367b3038af5088a4e671744"
 dependencies = [
  "clack-common",
- "clap-sys 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap-sys",
  "libloading 0.8.9",
  "objc2-foundation 0.3.2",
 ]
@@ -1657,11 +1503,6 @@ name = "clap-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a76abbdb2907f6fd97fb6bc0b7be96b77d328f2dd9669d1075cc03369ed22154"
-
-[[package]]
-name = "clap-sys"
-version = "0.5.0"
-source = "git+https://github.com/micahrj/clap-sys.git?rev=25d7f53fdb6363ad63fbd80049cb7a42a97ac156#25d7f53fdb6363ad63fbd80049cb7a42a97ac156"
 
 [[package]]
 name = "clap_builder"
@@ -1771,17 +1612,6 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-graphics-types 0.2.0",
  "objc",
-]
-
-[[package]]
-name = "codespan-reporting"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe6d2e5af09e8c8ad56c969f2157a3d4238cebc7c55f0a517728c38f7b200f81"
-dependencies = [
- "serde",
- "termcolor",
- "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -2616,7 +2446,7 @@ name = "daw-audio-sync"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "reaper-low 0.1.0 (git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "reaper-medium",
  "serde",
  "socket2 0.5.10",
@@ -2669,7 +2499,7 @@ dependencies = [
  "daw-reaper",
  "eyre",
  "reaper-high",
- "reaper-low 0.1.0 (git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "reaper-medium",
  "tokio",
  "tracing",
@@ -2719,7 +2549,7 @@ dependencies = [
  "libloading 0.8.9",
  "moire",
  "reaper-high",
- "reaper-low 0.1.0 (git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "reaper-medium",
  "swell-ui",
  "tokio",
@@ -2820,11 +2650,6 @@ name = "debug_timer"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
-
-[[package]]
-name = "debug_timer"
-version = "0.1.3"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
 
 [[package]]
 name = "debug_timer"
@@ -3260,18 +3085,18 @@ dependencies = [
 [[package]]
 name = "dioxus-native"
 version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "android-activity",
  "anyrender",
  "anyrender_vello_cpu",
  "anyrender_vello_hybrid",
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-html 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-net 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-paint 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-shell 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
+ "blitz-dom",
+ "blitz-html",
+ "blitz-net",
+ "blitz-paint",
+ "blitz-shell",
+ "blitz-traits",
  "cfg-if",
  "dioxus-asset-resolver",
  "dioxus-cli-config",
@@ -3282,7 +3107,7 @@ dependencies = [
  "dioxus-history",
  "dioxus-hooks",
  "dioxus-html",
- "dioxus-native-dom 0.7.0 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
+ "dioxus-native-dom",
  "dioxus-signals",
  "dioxus-stores",
  "futures-util",
@@ -3291,60 +3116,8 @@ dependencies = [
  "rustc-hash 2.1.2",
  "tokio",
  "webbrowser",
- "wgpu_context 0.6.0",
+ "wgpu_context",
  "winit",
-]
-
-[[package]]
-name = "dioxus-native"
-version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
-dependencies = [
- "android-activity",
- "anyrender",
- "anyrender_vello_cpu",
- "anyrender_vello_hybrid",
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-html 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-net 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-paint 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-shell 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "cfg-if",
- "dioxus-asset-resolver",
- "dioxus-cli-config",
- "dioxus-core",
- "dioxus-core-macro",
- "dioxus-devtools",
- "dioxus-document",
- "dioxus-history",
- "dioxus-hooks",
- "dioxus-html",
- "dioxus-native-dom 0.7.0 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "dioxus-signals",
- "dioxus-stores",
- "futures-util",
- "keyboard-types 0.7.0",
- "manganis",
- "rustc-hash 2.1.2",
- "tokio",
- "webbrowser",
- "wgpu_context 0.6.0",
- "winit",
-]
-
-[[package]]
-name = "dioxus-native-dom"
-version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "dioxus-core",
- "dioxus-html",
- "futures-util",
- "keyboard-types 0.7.0",
- "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -3352,8 +3125,8 @@ name = "dioxus-native-dom"
 version = "0.7.0"
 source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "blitz-dom",
+ "blitz-traits",
  "dioxus-core",
  "dioxus-html",
  "futures-util",
@@ -4493,7 +4266,7 @@ name = "fts-plugin-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "atomic_float 1.1.0",
+ "atomic_float",
  "nice-plug",
  "thiserror 2.0.18",
  "tracing",
@@ -4503,13 +4276,13 @@ dependencies = [
 name = "fts-signal-controller"
 version = "0.1.0"
 dependencies = [
- "atomic_float 1.1.0",
+ "atomic_float",
  "crossbeam-channel",
  "daw",
  "daw-extension-runtime",
  "eyre",
  "fts-plugin-core",
- "nih_plug",
+ "nice-plug",
  "serde",
  "serde_json",
  "signal-proto",
@@ -5025,18 +4798,6 @@ dependencies = [
 
 [[package]]
 name = "glow"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e5ea60d70410161c8bf5da3fdfeaa1c72ed2c15f8bbb9d19fe3a4fad085f08"
-dependencies = [
- "js-sys",
- "slotmap",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "glow"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5"
@@ -5069,9 +4830,9 @@ dependencies = [
 
 [[package]]
 name = "goblin"
-version = "0.6.1"
+version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d6b4de4a8eb6c46a8c77e1d3be942cb9a8bf073c22374578e5ba4b08ed0ff68"
+checksum = "17582616a7718cca54cec18e534a76c7c4aec11a8b9a85695712f262fd15a4c8"
 dependencies = [
  "log",
  "plain",
@@ -6643,21 +6404,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metal"
-version = "0.33.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7047791b5bc903b8cd963014b355f71dc9864a9a0b727057676c1dcae5cbc15"
-dependencies = [
- "bitflags 2.11.1",
- "block",
- "core-graphics-types 0.2.0",
- "foreign-types 0.5.0",
- "log",
- "objc",
- "paste",
-]
-
-[[package]]
 name = "midi-consts"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6847,42 +6593,16 @@ checksum = "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126"
 
 [[package]]
 name = "naga"
-version = "28.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "618f667225063219ddfc61251087db8a9aec3c3f0950c916b614e403486f1135"
-dependencies = [
- "arrayvec",
- "bit-set 0.8.0",
- "bitflags 2.11.1",
- "cfg-if",
- "cfg_aliases",
- "codespan-reporting 0.12.0",
- "half",
- "hashbrown 0.16.1",
- "hexf-parse",
- "indexmap",
- "libm",
- "log",
- "num-traits",
- "once_cell",
- "rustc-hash 1.1.0",
- "spirv 0.3.0+sdk-1.3.268.0",
- "thiserror 2.0.18",
- "unicode-ident",
-]
-
-[[package]]
-name = "naga"
 version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0dd91265cc2454558f659b3b4b9640f0ddb8cc6521277f166b8a8c181c898079"
 dependencies = [
  "arrayvec",
- "bit-set 0.9.1",
+ "bit-set",
  "bitflags 2.11.1",
  "cfg-if",
  "cfg_aliases",
- "codespan-reporting 0.13.1",
+ "codespan-reporting",
  "half",
  "hashbrown 0.16.1",
  "hexf-parse",
@@ -6892,7 +6612,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "rustc-hash 1.1.0",
- "spirv 0.4.0+sdk-1.4.341.0",
+ "spirv",
  "thiserror 2.0.18",
  "unicode-ident",
 ]
@@ -6990,10 +6710,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "anymap3",
- "atomic_float 1.1.0",
+ "atomic_float",
  "atomic_refcell",
  "backtrace",
- "clap-sys 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap-sys",
  "core-foundation 0.9.4",
  "crossbeam",
  "libc",
@@ -7014,7 +6734,7 @@ dependencies = [
 name = "nice-plug-core"
 version = "0.1.2"
 dependencies = [
- "atomic_float 1.1.0",
+ "atomic_float",
  "atomic_refcell",
  "bitflags 2.11.1",
  "crossbeam-utils",
@@ -7043,13 +6763,13 @@ dependencies = [
  "anyrender",
  "anyrender_vello",
  "baseview",
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-paint 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
  "crossbeam",
  "cursor-icon",
  "dioxus-devtools",
- "dioxus-native 0.7.0 (git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a)",
+ "dioxus-native",
  "futures-util",
  "keyboard-types 0.6.2",
  "libc",
@@ -7060,100 +6780,21 @@ dependencies = [
  "serde",
  "smol_str",
  "vello",
- "wgpu 29.0.3",
- "wgpu_context 0.6.0",
+ "wgpu",
+ "wgpu_context",
  "x11-dl",
 ]
 
 [[package]]
-name = "nih_log"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0cdb52ef79af48ae110401c883bdb9c15e0306a99ab6ecf18bc52068b668e54"
-dependencies = [
- "atty",
- "log",
- "once_cell",
- "termcolor",
- "time",
- "windows 0.44.0",
-]
-
-[[package]]
-name = "nih_plug"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "anymap3",
- "atomic_float 0.1.0",
- "atomic_refcell",
- "backtrace",
- "bitflags 1.3.2",
- "cfg-if",
- "clap-sys 0.5.0 (git+https://github.com/micahrj/clap-sys.git?rev=25d7f53fdb6363ad63fbd80049cb7a42a97ac156)",
- "core-foundation 0.9.4",
- "crossbeam",
- "libc",
- "log",
- "midi-consts",
- "nih_log",
- "nih_plug_derive",
- "objc",
- "parking_lot",
- "raw-window-handle 0.5.2",
- "serde",
- "serde_json",
- "vst3-sys",
- "widestring",
- "windows 0.44.0",
-]
-
-[[package]]
-name = "nih_plug_derive"
+name = "nice-plug-xtask"
 version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "nih_plug_dioxus"
-version = "0.0.0"
-dependencies = [
- "anyrender_vello",
- "baseview",
- "blitz-dom 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-paint 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "blitz-traits 0.3.0-alpha.4 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "crossbeam",
- "dioxus-devtools",
- "dioxus-native 0.7.0 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
- "futures-util",
- "keyboard-types 0.6.2",
- "libc",
- "nih_plug",
- "parking_lot",
- "pollster",
- "raw-window-handle 0.6.2",
- "serde",
- "smol_str",
- "vello",
- "wgpu 29.0.3",
- "wgpu_context 0.4.0",
-]
-
-[[package]]
-name = "nih_plug_xtask"
-version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/nih-plug.git?branch=reaper-embed-ui#f7484b1f38ff4246a2cec91ff23b07429b5ab51f"
 dependencies = [
  "anyhow",
  "cargo_metadata",
  "goblin",
  "reflink",
  "serde",
- "toml 0.7.8",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]
@@ -8424,7 +8065,7 @@ dependencies = [
  "raw-window-handle 0.6.2",
  "thiserror 2.0.18",
  "ultraviolet",
- "wgpu 29.0.3",
+ "wgpu",
 ]
 
 [[package]]
@@ -9091,7 +8732,7 @@ dependencies = [
  "helgoboss-midi",
  "once_cell",
  "pathdiff",
- "reaper-low 0.1.0 (git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "reaper-medium",
  "ref-cast",
  "regex",
@@ -9130,25 +8771,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "reaper-low"
-version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
-dependencies = [
- "c_str_macro",
- "cc",
- "derive_more 0.99.20",
- "downcast-rs",
- "fragile",
- "libc",
- "tracing",
- "vst",
- "winapi",
-]
-
-[[package]]
 name = "reaper-macros"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
 dependencies = [
  "darling 0.10.2",
  "quote",
@@ -9166,7 +8791,7 @@ dependencies = [
  "helgoboss-midi",
  "libc",
  "reaper-common-types",
- "reaper-low 0.1.0 (git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "ref-cast",
  "tracing",
  "vst",
@@ -9632,18 +9257,18 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scroll"
-version = "0.11.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04c565b551bafbef4157586fa379538366e4385d42082f255bfd96e4fe8519da"
+checksum = "c1257cd4248b4132760d6524d6dda4e053bc648c9070b960929bf50cfb1e7add"
 dependencies = [
  "scroll_derive",
 ]
 
 [[package]]
 name = "scroll_derive"
-version = "0.11.1"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1db149f81d46d2deba7cd3c50772474707729550221e69588478ebf9ada425ae"
+checksum = "ed76efe62313ab6610570951494bdaa81568026e0318eaa55f167de70eeea67d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9921,6 +9546,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10090,7 +9724,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "eyre",
- "nih_plug_dioxus",
+ "nice-plug-dioxus",
  "signal",
  "signal-audio",
  "signal-sampler",
@@ -10109,7 +9743,7 @@ dependencies = [
  "eyre",
  "fragile",
  "macromod",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "reaper-macros",
  "serde_json",
  "signal",
@@ -10199,7 +9833,7 @@ dependencies = [
 name = "signal-native"
 version = "0.1.0"
 dependencies = [
- "dioxus-native 0.7.0 (git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4)",
+ "dioxus-native",
  "eyre",
  "futures-timer",
  "signal-audio",
@@ -10312,7 +9946,7 @@ dependencies = [
  "dock-proto",
  "fts-ui",
  "lumen-blocks",
- "nih_plug_dioxus",
+ "nice-plug-dioxus",
  "signal",
  "signal-audio",
  "signal-browser",
@@ -10551,15 +10185,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
-]
-
-[[package]]
-name = "spirv"
-version = "0.3.0+sdk-1.3.268.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eda41003dc44290527a59b13432d4a0379379fa074b70174882adfbdfd917844"
-dependencies = [
- "bitflags 2.11.1",
 ]
 
 [[package]]
@@ -11052,16 +10677,6 @@ checksum = "850ac3401667d004d4a13f9c93dc6d9fe67044c9bfdaf5f1519ff136ed68fbab"
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=0e0027ab6eba536cfa03445baac48efed31609e4#0e0027ab6eba536cfa03445baac48efed31609e4"
-dependencies = [
- "stylo",
- "stylo_atoms",
- "taffy",
-]
-
-[[package]]
-name = "stylo_taffy"
-version = "0.3.0-alpha.4"
 source = "git+https://github.com/DioxusLabs/blitz.git?rev=9ebd23a#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "stylo",
@@ -11223,7 +10838,7 @@ dependencies = [
  "palette",
  "raw-window-handle 0.4.3",
  "reaper-common-types",
- "reaper-low 0.1.0 (git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "reaper-medium",
  "rxrust",
  "scopeguard",
@@ -11808,26 +11423,29 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd79e69d3b627db300ff956027cc6c3798cef26d22526befdfcd12feeb6d2257"
-dependencies = [
- "serde",
- "serde_spanned",
- "toml_datetime 0.6.3",
- "toml_edit 0.19.15",
-]
-
-[[package]]
-name = "toml"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "185d8ab0dfbb35cf1399a6344d8484209c088f75f8f68230da55d48d95d43e3d"
 dependencies = [
  "serde",
- "serde_spanned",
+ "serde_spanned 0.6.9",
  "toml_datetime 0.6.3",
  "toml_edit 0.20.2",
+]
+
+[[package]]
+name = "toml"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81f3d15e84cbcd896376e6730314d59fb5a87f31e4b038454184435cd57defee"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned 1.1.1",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 1.0.3",
 ]
 
 [[package]]
@@ -11855,8 +11473,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap",
- "serde",
- "serde_spanned",
  "toml_datetime 0.6.3",
  "winnow 0.5.40",
 ]
@@ -11869,7 +11485,7 @@ checksum = "396e4d48bbb2b7554c944bde63101b5ae446cff6ec4a24227428f15eb72ef338"
 dependencies = [
  "indexmap",
  "serde",
- "serde_spanned",
+ "serde_spanned 0.6.9",
  "toml_datetime 0.6.3",
  "winnow 0.5.40",
 ]
@@ -11894,6 +11510,12 @@ checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow 1.0.3",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "tower"
@@ -12357,7 +11979,7 @@ dependencies = [
  "thiserror 2.0.18",
  "vello_encoding",
  "vello_shaders",
- "wgpu 29.0.3",
+ "wgpu",
 ]
 
 [[package]]
@@ -12415,7 +12037,7 @@ dependencies = [
  "thiserror 2.0.18",
  "vello_common",
  "vello_sparse_shaders",
- "wgpu 29.0.3",
+ "wgpu",
 ]
 
 [[package]]
@@ -12426,7 +12048,7 @@ checksum = "9dd38937516fa4b47423d9255bb5e4a65e839ec9d57c38c4af6189ce56bf46b7"
 dependencies = [
  "bytemuck",
  "log",
- "naga 29.0.3",
+ "naga",
  "thiserror 2.0.18",
  "vello_encoding",
 ]
@@ -13169,36 +12791,6 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
 name = "wgpu"
-version = "28.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9cb534d5ffd109c7d1135f34cdae29e60eab94855a625dcfe1705f8bc7ad79f"
-dependencies = [
- "arrayvec",
- "bitflags 2.11.1",
- "bytemuck",
- "cfg-if",
- "cfg_aliases",
- "document-features",
- "hashbrown 0.16.1",
- "js-sys",
- "log",
- "naga 28.0.0",
- "parking_lot",
- "portable-atomic",
- "profiling",
- "raw-window-handle 0.6.2",
- "smallvec 1.15.1",
- "static_assertions",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu-core 28.0.1",
- "wgpu-hal 28.0.1",
- "wgpu-types 28.0.0",
-]
-
-[[package]]
-name = "wgpu"
 version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb3feacc458f7bee8bc1737149b42b6c731aa461039a4264a67bb6681646b250"
@@ -13212,7 +12804,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "js-sys",
  "log",
- "naga 29.0.3",
+ "naga",
  "parking_lot",
  "portable-atomic",
  "profiling",
@@ -13222,41 +12814,9 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu-core 29.0.3",
- "wgpu-hal 29.0.3",
- "wgpu-types 29.0.3",
-]
-
-[[package]]
-name = "wgpu-core"
-version = "28.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d23f4642f53f666adcfd2d3218ab174d1e6681101aef18696b90cbe64d1c10f9"
-dependencies = [
- "arrayvec",
- "bit-set 0.8.0",
- "bit-vec 0.8.0",
- "bitflags 2.11.1",
- "bytemuck",
- "cfg_aliases",
- "document-features",
- "hashbrown 0.16.1",
- "indexmap",
- "log",
- "naga 28.0.0",
- "once_cell",
- "parking_lot",
- "portable-atomic",
- "profiling",
- "raw-window-handle 0.6.2",
- "rustc-hash 1.1.0",
- "smallvec 1.15.1",
- "thiserror 2.0.18",
- "wgpu-core-deps-apple 28.0.0",
- "wgpu-core-deps-emscripten 28.0.0",
- "wgpu-core-deps-windows-linux-android 28.0.0",
- "wgpu-hal 28.0.1",
- "wgpu-types 28.0.0",
+ "wgpu-core",
+ "wgpu-hal",
+ "wgpu-types",
 ]
 
 [[package]]
@@ -13266,8 +12826,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02da3ad1b568337f25513b317870960ef87073ea0945502e44b864b67a8c77b7"
 dependencies = [
  "arrayvec",
- "bit-set 0.9.1",
- "bit-vec 0.9.1",
+ "bit-set",
+ "bit-vec",
  "bitflags 2.11.1",
  "bytemuck",
  "cfg_aliases",
@@ -13275,7 +12835,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "indexmap",
  "log",
- "naga 29.0.3",
+ "naga",
  "once_cell",
  "parking_lot",
  "portable-atomic",
@@ -13284,22 +12844,13 @@ dependencies = [
  "rustc-hash 1.1.0",
  "smallvec 1.15.1",
  "thiserror 2.0.18",
- "wgpu-core-deps-apple 29.0.3",
- "wgpu-core-deps-emscripten 29.0.3",
+ "wgpu-core-deps-apple",
+ "wgpu-core-deps-emscripten",
  "wgpu-core-deps-wasm",
- "wgpu-core-deps-windows-linux-android 29.0.3",
- "wgpu-hal 29.0.3",
+ "wgpu-core-deps-windows-linux-android",
+ "wgpu-hal",
  "wgpu-naga-bridge",
- "wgpu-types 29.0.3",
-]
-
-[[package]]
-name = "wgpu-core-deps-apple"
-version = "28.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87b7b696b918f337c486bf93142454080a32a37832ba8a31e4f48221890047da"
-dependencies = [
- "wgpu-hal 28.0.1",
+ "wgpu-types",
 ]
 
 [[package]]
@@ -13308,16 +12859,7 @@ version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62e51b5447e144b3dbba4feb01f80f4fa21696fa0cd99afb2c3df1affd6fdb28"
 dependencies = [
- "wgpu-hal 29.0.3",
-]
-
-[[package]]
-name = "wgpu-core-deps-emscripten"
-version = "28.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34b251c331f84feac147de3c4aa3aa45112622a95dd7ee1b74384fa0458dbd79"
-dependencies = [
- "wgpu-hal 28.0.1",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -13326,7 +12868,7 @@ version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3487cd6293a963bc5c0c0396f6a2192043c50003c07f4efdccbad3d90ec9d819"
 dependencies = [
- "wgpu-hal 29.0.3",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -13335,16 +12877,7 @@ version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2f2fb042f36920771deb0b966543c5751b18f3d327760ffc90f74e20b2dcd4"
 dependencies = [
- "wgpu-hal 29.0.3",
-]
-
-[[package]]
-name = "wgpu-core-deps-windows-linux-android"
-version = "28.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68ca976e72b2c9964eb243e281f6ce7f14a514e409920920dcda12ae40febaae"
-dependencies = [
- "wgpu-hal 28.0.1",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -13353,55 +12886,7 @@ version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bfb01076d0aa08b0ba9bd741e178b5cc440f5abe99d9581323a4c8b5d1a1916"
 dependencies = [
- "wgpu-hal 29.0.3",
-]
-
-[[package]]
-name = "wgpu-hal"
-version = "28.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44d6cb474beb218824dcc9e1ce679d973f719262789bfb27407da560cac20eeb"
-dependencies = [
- "android_system_properties",
- "arrayvec",
- "ash",
- "bit-set 0.8.0",
- "bitflags 2.11.1",
- "block",
- "bytemuck",
- "cfg-if",
- "cfg_aliases",
- "core-graphics-types 0.2.0",
- "glow 0.16.0",
- "glutin_wgl_sys",
- "gpu-allocator",
- "gpu-descriptor",
- "hashbrown 0.16.1",
- "js-sys",
- "khronos-egl",
- "libc",
- "libloading 0.8.9",
- "log",
- "metal",
- "naga 28.0.0",
- "ndk-sys",
- "objc",
- "once_cell",
- "ordered-float 5.0.0",
- "parking_lot",
- "portable-atomic",
- "portable-atomic-util",
- "profiling",
- "range-alloc",
- "raw-window-handle 0.6.2",
- "renderdoc-sys",
- "smallvec 1.15.1",
- "thiserror 2.0.18",
- "wasm-bindgen",
- "web-sys",
- "wgpu-types 28.0.0",
- "windows 0.62.2",
- "windows-core 0.62.2",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -13413,13 +12898,13 @@ dependencies = [
  "android_system_properties",
  "arrayvec",
  "ash",
- "bit-set 0.9.1",
+ "bit-set",
  "bitflags 2.11.1",
  "block2 0.6.2",
  "bytemuck",
  "cfg-if",
  "cfg_aliases",
- "glow 0.17.0",
+ "glow",
  "glutin_wgl_sys",
  "gpu-allocator",
  "gpu-descriptor",
@@ -13429,7 +12914,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "log",
- "naga 29.0.3",
+ "naga",
  "ndk-sys",
  "objc2 0.6.4",
  "objc2-core-foundation",
@@ -13452,7 +12937,7 @@ dependencies = [
  "wayland-sys",
  "web-sys",
  "wgpu-naga-bridge",
- "wgpu-types 29.0.3",
+ "wgpu-types",
  "windows 0.62.2",
  "windows-core 0.62.2",
  "windows-result 0.4.1",
@@ -13464,21 +12949,8 @@ version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59c654c483f058800972c3645e95388a7eca31bf9fe1933bc20e036588a0be02"
 dependencies = [
- "naga 29.0.3",
- "wgpu-types 29.0.3",
-]
-
-[[package]]
-name = "wgpu-types"
-version = "28.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e18308757e594ed2cd27dddbb16a139c42a683819d32a2e0b1b0167552f5840c"
-dependencies = [
- "bitflags 2.11.1",
- "bytemuck",
- "js-sys",
- "log",
- "web-sys",
+ "naga",
+ "wgpu-types",
 ]
 
 [[package]]
@@ -13497,22 +12969,12 @@ dependencies = [
 
 [[package]]
 name = "wgpu_context"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51d6ffedd8185fb255c6adf946591cb3378544d50e4bc1756aee18297e313ba6"
-dependencies = [
- "futures-intrusive",
- "wgpu 28.0.0",
-]
-
-[[package]]
-name = "wgpu_context"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1352548a4576b7998474fa6fbc54232df5f9ccd90cdea079418c3577e26e220"
 dependencies = [
  "futures-intrusive",
- "wgpu 29.0.3",
+ "wgpu",
 ]
 
 [[package]]
@@ -14662,7 +14124,7 @@ version = "0.1.0"
 dependencies = [
  "daw",
  "fts-devtools",
- "nih_plug_xtask",
+ "nice-plug-xtask",
 ]
 
 [[package]]

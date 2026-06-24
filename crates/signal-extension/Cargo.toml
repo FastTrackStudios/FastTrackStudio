@@ -15,8 +15,11 @@ daw-extension-runtime.workspace = true
 macromod.workspace = true
 signal.workspace = true
 fragile = "2"
-reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+# Codeberg reaper-rs — must match daw's source (codeberg, same branch) so the
+# graph has ONE reaper_low instance. (Was starcommand.live → two copies → type
+# mismatch in `daw[reaper]` + this crate's reaper_low.)
+reaper-low = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 tokio = { workspace = true, features = ["time", "net", "rt"] }
 eyre.workspace = true
 serde_json.workspace = true

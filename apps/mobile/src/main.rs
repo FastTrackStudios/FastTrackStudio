@@ -4,7 +4,7 @@
 //! ProcessingChain is injected via Dioxus context so all components
 //! can read meters and update parameters without prop-drilling.
 //!
-//! Rendering: Dioxus mobile (WKWebView on iOS). NOT nih_plug_dioxus/Blitz —
+//! Rendering: Dioxus mobile (WKWebView on iOS). NOT nice_plug_dioxus/Blitz —
 //! mobile uses the WebView renderer, so all layout is CSS-based.
 
 use signal_audio::{LiveAudioEngine, ProcessingChain};

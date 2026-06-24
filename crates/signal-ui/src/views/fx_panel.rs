@@ -1,6 +1,6 @@
 //! FX panel — embedded EQ and Compressor GUI.
 
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 use audio_gui::meters::GrMeter;
 use audio_gui::viz::{EqBand, EqBandShape, EqGraph};

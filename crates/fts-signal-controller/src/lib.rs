@@ -15,4 +15,4 @@ pub mod scene_timer;
 
 use fts_plugin_core::prelude::*;
 
-nih_export_clap!(plugin::FtsSignalController);
+nice_export_clap!(plugin::FtsSignalController);

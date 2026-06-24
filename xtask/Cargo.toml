@@ -6,7 +6,8 @@ publish = false
 
 [dependencies]
 fts-devtools = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-nih_plug_xtask = { git = "https://git.starcommand.live/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+# CLAP/VST3 bundler — the nice-plug fork's xtask (fts-plug). Replaces nih_plug_xtask.
+nice-plug-xtask = { path = "../../FTS-Plugins/forks/fts-plug/crates/nice-plug-xtask" }
 # `reaper-test` folded into the daw facade behind `test-harness`; the runner
 # lives at `daw::test::runner`.
 daw = { workspace = true, features = ["test-harness"] }

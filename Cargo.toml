@@ -115,12 +115,15 @@ dock-proto = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", br
 utils = { git = "https://codeberg.org/FastTrackStudios/FastTrackStudio.git", branch = "main" }
 
 # ── Plugin framework ───────────────────────────────────────────────────
-nih_plug = { git = "https://codeberg.org/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+# Migrated off nih-plug onto fts-plug = the `nice-plug` fork (matches what the
+# FTS-Audiocore plugin crates — fts-plugin-core / audio-gui — link against).
+nice-plug = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug" }
 # Blitz-based Dioxus renderer — used by ALL GUI contexts (desktop standalone,
 # REAPER embedded, VST3/CLAP plugin). Guarantees the same rendering pipeline
 # everywhere. Use open_standalone_with_state() in signal-desktop and
-# create_dioxus_editor_with_state() in fts-signal-plugin.
-nih_plug_dioxus = { git = "https://codeberg.org/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+# create_dioxus_editor_with_state() in fts-signal-plugin. Brings its own blitz
+# (DioxusLabs/blitz @ 9ebd23a) + anyrender/stylo stack transitively.
+nice-plug-dioxus = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug-dioxus" }
 fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core", default-features = false }
 audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
 atomic_float = "1"
@@ -203,30 +206,12 @@ fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
 audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
 fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }
 
-# ── nih-plug unification ────────────────────────────────────────────────
-# NOTE: the local-path patch (`nih_plug = { path = "../forks/nih-plug" }`) was
-# removed. That checkout sits on `master`, which lacks `nih_plug_dioxus` and the
-# reaper-embed-ui API additions (`rescan_param_info`, `set_normalized_value`,
-# the `reaper-embed-ui` `ParamPtr`), so it diverged from the `nih_plug` that
-# `nih_plug_dioxus` (reaper-embed-ui) links against — producing two nih_plug
-# versions in the graph. Both now resolve from the `reaper-embed-ui` branch.
-#
-# The FTS-Audiocore plugin crates (fts-plugin-core, audio-gui — path deps) pull
-# nih-plug from the github.com mirror via their own workspace, while signal uses
-# the starcommand.live origin. Same commit, different URL = two sources. Redirect
-# the github mirror onto the starcommand origin so the whole graph shares one
-# nih_plug / nih_plug_dioxus.
-# Local editable checkout of the reaper-embed-ui branch while porting
-# nih_plug_dioxus to current DioxusLabs/blitz. Both the starcommand origin and
-# the github mirror (pulled by FTS-Audiocore plugin crates) redirect here, so
-# the whole graph shares one editable nih_plug / nih_plug_dioxus.
-[patch."https://codeberg.org/FastTrackStudios/nih-plug.git"]
-nih_plug = { path = "../forks/nih-plug-port" }
-nih_plug_dioxus = { path = "../forks/nih-plug-port/nih_plug_dioxus" }
-
-[patch."https://github.com/FastTrackStudios/nih-plug.git"]
-nih_plug = { path = "../forks/nih-plug-port" }
-nih_plug_dioxus = { path = "../forks/nih-plug-port/nih_plug_dioxus" }
+# ── nih-plug → nice-plug migration ──────────────────────────────────────
+# The nih-plug `[patch]` blocks were removed: signal now depends on the
+# `nice-plug` fork (fts-plug) via path deps (see [workspace.dependencies]),
+# matching the FTS-Audiocore plugin crates. The FTS-Audiocore plugin crates
+# (fts-plugin-core, audio-gui — path deps) link `nice-plug` from the same
+# local checkout, so the whole graph shares one plugin framework + one blitz.
 
 # NOTE: the bearcove/vox → Codys-Wright-fork [patch] block was removed.
 # It was forcing daw's clean upstream-bearcove vox deps onto the old fork,
@@ -249,18 +234,16 @@ moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7
 moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
-# Blitz crates — upstream DioxusLabs/blitz, pinned to one rev so nih_plug_dioxus,
-# fts-ui, and signal all share a single blitz/dioxus-native. Bump in lockstep
-# with nih_plug_dioxus (it tracks this rev's API).
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
-dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
-blitz-net = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
-blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
-stylo_taffy = { git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4" }
+# Blitz / dioxus-native + the whole renderer stack now come transitively from
+# `nice-plug-dioxus`, which declares DioxusLabs/blitz @ 9ebd23a directly as a git
+# dep. blitz @ 9ebd23a pins its own (current) crates.io versions of the renderer
+# crates — anyrender 0.10 / anyrender_vello 0.10 / vello 0.9 / wgpu 29 / stylo 0.17
+# / selectors 0.38 — so the whole graph resolves to a SINGLE blitz + a single
+# renderer stack with no patches needed here (the SAME renderer pipeline
+# everywhere, per CLAUDE.md's GUI rules). The old FastTrackStudios anyrender/stylo
+# fork patches are intentionally NOT carried over: those forks ship anyrender 0.6 /
+# stylo 0.10, which don't satisfy blitz @ 9ebd23a's 0.10/0.17 requirements (the
+# patches resolved to "unused" and would only add noise).
 # moire: unify crates.io moire with the FTS fork (includes NixOS frame-pointer fix)
 # All crates must be listed to prevent duplicate moire-runtime #[ctor] crash.
 moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }

@@ -15,7 +15,7 @@ path = "src/main.rs"
 # works without extra flags (dx 0.7.x doesn't read `features` from Dioxus.toml).
 #
 # Production / nix builds pass `--no-default-features` to use the
-# `nih_plug_dioxus` Blitz/wgpu renderer — the same pipeline as fts-signal-plugin.
+# `nice_plug_dioxus` Blitz/wgpu renderer — the same pipeline as fts-signal-plugin.
 default = ["dev"]
 dev = ["dioxus/desktop"]
 
@@ -27,7 +27,7 @@ signal-ui = { workspace = true, default-features = false, features = ["desktop"]
 # Blitz renderer — same pipeline as fts-signal-plugin (VST3/CLAP).
 # Do NOT enable dioxus/desktop here; that pulls in WebKit/WRY which conflicts.
 # Use --features dev for dx serve hot-reload workflow instead.
-nih_plug_dioxus.workspace = true
+nice-plug-dioxus.workspace = true
 # dioxus is needed for component macros (rsx!, #[component], Element) and,
 # when --features dev is active, for the WebKit/WRY desktop renderer.
 dioxus.workspace = true

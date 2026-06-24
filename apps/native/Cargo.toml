@@ -12,10 +12,10 @@ path = "src/main.rs"
 [dependencies]
 # Dioxus-native (Blitz/Vello/wgpu) renderer, pulled from the blitz repo and
 # renamed to `dioxus` so app code uses `use dioxus::prelude::*`. Pinned to the
-# SAME blitz rev as signal's [patch] table, so the whole graph shares one
-# blitz / dioxus-core (also used by nih_plug_dioxus + signal-ui).
+# SAME blitz rev (9ebd23a) that `nice-plug-dioxus` declares, so the whole graph
+# shares one blitz / dioxus-core (also used by nice_plug_dioxus + signal-ui).
 # Run with `dx serve --platform native` (hot-reload) or `cargo run`.
-dioxus = { package = "dioxus-native", git = "https://github.com/DioxusLabs/blitz.git", rev = "0e0027ab6eba536cfa03445baac48efed31609e4", features = ["prelude", "system-fonts"] }
+dioxus = { package = "dioxus-native", git = "https://github.com/DioxusLabs/blitz.git", rev = "9ebd23a", features = ["prelude", "system-fonts"] }
 # Shared UI components (Piano, …). Built against crates.io dioxus 0.7.x; unifies
 # with dioxus-native on dioxus-core at link time.
 signal-ui = { workspace = true, default-features = false, features = ["desktop"] }

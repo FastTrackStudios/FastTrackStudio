@@ -6,7 +6,7 @@
 //! — enables `dx serve` hot-reload for rapid RSX/Tailwind prototyping.
 //! `dev` is the default feature so plain `dx serve` works without flags.
 //!
-//! **Production** (`--no-default-features`): `nih_plug_dioxus::open_standalone_with_state`
+//! **Production** (`--no-default-features`): `nice_plug_dioxus::open_standalone_with_state`
 //! (Blitz/Vello/wgpu renderer) — same pipeline as `fts-signal-plugin`
 //! (VST3/CLAP). UI components are guaranteed to render identically in both
 //! standalone and plugin contexts. Nix release builds pass `--no-default-features`
@@ -78,7 +78,7 @@ struct AppState {
 
 #[cfg(not(feature = "dev"))]
 fn main() {
-    use nih_plug_dioxus::SharedState;
+    use nice_plug_dioxus::SharedState;
     use std::sync::Arc;
 
     tracing_subscriber::fmt()
@@ -113,7 +113,7 @@ fn main() {
     let shared = SharedState::new(Arc::new(app_state));
 
     // Blocks until the window is closed.
-    nih_plug_dioxus::open_standalone_with_state(App, 1400, 900, Some(shared));
+    nice_plug_dioxus::open_standalone_with_state(App, 1400, 900, Some(shared));
 }
 
 // ── Production root component ─────────────────────────────────────────────────
@@ -128,7 +128,7 @@ fn main() {
 #[cfg(not(feature = "dev"))]
 #[component]
 fn App() -> Element {
-    use nih_plug_dioxus::SharedState;
+    use nice_plug_dioxus::SharedState;
 
     let shared = use_context::<SharedState>();
     let state = shared

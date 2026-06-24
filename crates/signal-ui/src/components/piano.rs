@@ -34,7 +34,7 @@
 //! MIDI middle C = note 60.
 
 // Vello / audio-gui imports — only compiled for native targets.
-// On wasm32 neither `nih_plug_dioxus` nor `audio-gui` is available
+// On wasm32 neither `nice_plug_dioxus` nor `audio-gui` is available
 // (they depend on `baseview`, which is native-only).
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
@@ -45,9 +45,9 @@ use std::rc::Rc;
 use audio_gui::viz::{CanvasPainter, VelloCanvas};
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
-use nih_plug_dioxus::prelude::vello::kurbo::{Affine, Rect, RoundedRect};
+use nice_plug_dioxus::prelude::vello::kurbo::{Affine, Rect, RoundedRect};
 #[cfg(not(target_arch = "wasm32"))]
-use nih_plug_dioxus::prelude::vello::peniko::{Color, Fill, Gradient};
+use nice_plug_dioxus::prelude::vello::peniko::{Color, Fill, Gradient};
 
 // ── Geometry constants (SVG user units; scaled to container via viewBox) ──────
 
@@ -200,7 +200,7 @@ impl WaterfallPainter {
 impl CanvasPainter for WaterfallPainter {
     fn paint(
         &self,
-        scene: &mut nih_plug_dioxus::prelude::vello::Scene,
+        scene: &mut nice_plug_dioxus::prelude::vello::Scene,
         transform: Affine,
         width: f64,
         height: f64,

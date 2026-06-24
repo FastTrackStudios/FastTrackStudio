@@ -9,8 +9,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("install") => install()?,
         Some("uninstall") => uninstall()?,
         Some("status") => fts_devtools::status(),
-        // Delegate bundle (and any other nih_plug_xtask commands) to the bundler
-        Some("bundle") => nih_plug_xtask::main()?,
+        // Delegate bundle (and any other nice_plug_xtask commands) to the bundler
+        Some("bundle") => nice_plug_xtask::main()?,
         Some("reaper-test") => {
             let filter = args.get(1).cloned();
             let keep_open = args.iter().any(|a| a == "--keep-open");
@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!(
                 "  uninstall     Remove signal-extension and fts-signal-controller from REAPER"
             );
-            eprintln!("  bundle        Bundle CLAP plugins (delegates to nih_plug_xtask)");
+            eprintln!("  bundle        Bundle CLAP plugins (delegates to nice_plug_xtask)");
             eprintln!("  status        Show installed extensions and plugins");
             eprintln!("  reaper-test   Run REAPER integration tests [filter] [--keep-open]");
             std::process::exit(1);
