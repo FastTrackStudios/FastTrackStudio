@@ -44,6 +44,7 @@
 //! # Ok::<(), eyre::Error>(())
 //! ```
 
+pub mod api;
 pub mod bank;
 pub mod block;
 pub mod convolver;
