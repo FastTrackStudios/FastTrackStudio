@@ -206,34 +206,23 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                     info!("Client connected via Unix socket");
                     let acceptor = acceptor.clone();
                     moire::task::spawn(async move {
+                        use vox::MetadataExt as _;
                         let link = vox_stream::StreamLink::unix(stream);
-                        let handshake = vox::HandshakeResult {
-                            role: vox::SessionRole::Acceptor,
-                            our_settings: vox::ConnectionSettings {
-                                parity: vox::Parity::Even,
-                                max_concurrent_requests: 64,
-
-                                initial_channel_credit: 16,
-                            },
-                            peer_settings: vox::ConnectionSettings {
-                                parity: vox::Parity::Odd,
-                                max_concurrent_requests: 64,
-
-                                initial_channel_credit: 16,
-                            },
-                            peer_supports_retry: true,
-                            session_resume_key: None,
-                            peer_resume_key: None,
-                            our_schema: vec![],
-                            peer_schema: vec![],
-                            peer_metadata: vec![],
-                        };
-                        match vox::acceptor_conduit(vox::BareConduit::new(link), handshake)
-                            .on_connection(acceptor)
-                            .establish::<vox::NoopClient>()
+                        // vox 0.10 lane model: hand every inbound lane to the
+                        // shared LayerRouter (dispatches by method id).
+                        let router = acceptor.router();
+                        let lane_acceptor = vox::lane_acceptor_fn(move |req, connection| {
+                            let role = req.metadata().meta_str("role").unwrap_or("unknown");
+                            info!("Accepting lane: role={}", role);
+                            connection.handle_with(router.clone());
+                            Ok(())
+                        });
+                        match vox::acceptor_on(link)
+                            .on_lane(lane_acceptor)
+                            .establish_connection()
                             .await
                         {
-                            Ok(_root) => {
+                            Ok(_connection) => {
                                 debug!("Unix socket session established");
                                 std::future::pending::<()>().await;
                             }

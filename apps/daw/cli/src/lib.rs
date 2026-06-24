@@ -4,7 +4,6 @@
 //! formatting helpers, and command implementations for querying a running
 //! REAPER instance via the vox RPC protocol.
 
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -15,22 +14,34 @@ use daw::rpc::Daw;
 use daw::service::FxType;
 use eyre::{Result, bail};
 use serde_json::json;
-use vox::{
-    Caller, ConnectionSettings, Driver, MetadataEntry, MetadataFlags, MetadataValue, Parity,
-    SessionHandle,
-};
+use vox::{Caller, ConnectionHandle};
 
 pub mod cli_values;
 pub mod ops;
 pub mod sync;
 
-/// A DAW connection that keeps the vox session alive.
+/// Minimal `FromVoxLane` client that captures the DAW service lane's
+/// `Caller` (vox 0.10 replacement for the removed `NoopClient`).
+#[derive(Clone)]
+struct DawLaneClient {
+    caller: Caller,
+}
+
+impl vox::FromVoxLane for DawLaneClient {
+    const SERVICE_NAME: &'static str = "daw-cli";
+
+    fn from_vox_lane(caller: Caller, _connection: Option<ConnectionHandle>) -> Self {
+        Self { caller }
+    }
+}
+
+/// A DAW connection that keeps the vox connection alive.
 ///
-/// The `SessionHandle` must be kept alive for the duration of use —
-/// dropping it closes the underlying vox session and all RPC calls will fail.
+/// The `ConnectionHandle` must be kept alive for the duration of use —
+/// dropping it closes the underlying vox connection and all RPC calls will fail.
 pub struct DawConnection {
     pub daw: Daw,
-    _session: SessionHandle,
+    _connection: ConnectionHandle,
 }
 
 impl std::ops::Deref for DawConnection {
@@ -653,77 +664,23 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
     .map_err(|e| eyre::eyre!("Failed to connect to {}: {}", path.display(), e))?;
 
     let link = vox_stream::StreamLink::unix(stream);
-    let handshake = vox::HandshakeResult {
-        role: vox::SessionRole::Initiator,
-        our_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Odd,
-            max_concurrent_requests: 64,
 
-            initial_channel_credit: 16,
-        },
-        peer_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Even,
-            max_concurrent_requests: 64,
-
-            initial_channel_credit: 16,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-        peer_metadata: vec![],
-    };
-    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
-        .establish::<vox::NoopClient>()
+    // vox 0.10 lane model: establish the connection, then open the DAW
+    // service lane (carries `vox-service: daw-cli` automatically) which
+    // yields a ready-to-use `Caller`.
+    let connection = vox::initiator_on(link)
+        .establish_connection()
         .await
-        .map_err(|e| eyre::eyre!("Failed to establish vox session: {:?}", e))?;
-    let session = root
-        .session
-        .clone()
-        .ok_or_else(|| eyre::eyre!("root session missing handle"))?;
-
-    let caller = open_daw_connection(&session).await?;
+        .map_err(|e| eyre::eyre!("Failed to establish vox connection: {:?}", e))?;
+    let client = connection
+        .open_lane::<DawLaneClient>()
+        .await
+        .map_err(|e| eyre::eyre!("Failed to open DAW lane: {:?}", e))?;
 
     Ok(DawConnection {
-        daw: Daw::new(caller),
-        _session: session,
+        daw: Daw::new(client.caller),
+        _connection: connection,
     })
-}
-
-/// Open a DAW virtual connection on an established vox session.
-///
-/// Sends metadata identifying this as a DAW client, then creates a Driver
-/// on the virtual connection and returns an `Caller` for RPC.
-async fn open_daw_connection(session: &SessionHandle) -> Result<Caller> {
-    let conn = session
-        .open_connection(
-            ConnectionSettings {
-                parity: Parity::Odd,
-                max_concurrent_requests: 64,
-
-                initial_channel_credit: 16,
-            },
-            vec![
-                MetadataEntry {
-                    key: Cow::Borrowed("vox-service"),
-                    value: MetadataValue::String(Cow::Borrowed("daw-cli")),
-                    flags: MetadataFlags::NONE,
-                },
-                MetadataEntry {
-                    key: Cow::Borrowed("role"),
-                    value: MetadataValue::String(Cow::Borrowed("daw-client")),
-                    flags: MetadataFlags::NONE,
-                },
-            ],
-        )
-        .await
-        .map_err(|e| eyre::eyre!("open_connection failed: {e:?}"))?;
-
-    let mut driver = Driver::new(conn, ());
-    let caller = Caller::new(driver.caller());
-    moire::task::spawn(async move { driver.run().await });
-    Ok(caller)
 }
 
 // ============================================================================

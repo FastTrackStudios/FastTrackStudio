@@ -24,10 +24,8 @@ fn service_descriptor_json(service: &'static vox::ServiceDescriptor) -> Value {
             "doc": method.doc,
             "args_shape": shape_name(method.args_shape),
             "return_shape": shape_name(method.return_shape),
-            "retry": {
-                "persist": method.retry.persist,
-                "idempotent": method.retry.idem,
-            },
+            // Note: vox 0.10 removed per-method retry metadata (retry is no
+            // longer a vox concept), so there is no `retry` block to emit.
             "args": method.args.iter().map(|arg| json!({
                 "name": arg.name,
                 "shape": shape_name(arg.shape),

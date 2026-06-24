@@ -23,6 +23,7 @@ members = [
     "features/backends/reaper/daw-bridge",
     "features/backends/reaper/daw-perf-test",
     "features/audio/fts-audio-proto",
+    "features/audio/daw-audio-io",
     "crates/fts-devtools",
     "features/backends/reaper/daw-extension-runtime",
     "crates/daw-module",
@@ -70,9 +71,9 @@ fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", rev = "d9f0
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
-# Facet reflection — align the stack to the current 0.46 line.
-facet = { version = "0.46" }
-facet-json = { version = "0.46" }
+# Facet reflection — align the stack to the current 0.50 line.
+facet = { version = "0.50.0-rc.1" }
+facet-json = { version = "0.50.0-rc.1" }
 
 # architect framework — defines #[architect::rpc] for sync-trait → vox
 # bridge generation plus the Entity derive for CRUD-shaped data.
@@ -80,10 +81,10 @@ facet-json = { version = "0.46" }
 # (a local path dep escapes the repo and breaks downstream `cargo metadata`).
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
-# VOX service framework (pinned to FastTrackStudios fork)
-vox = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a", default-features = false, features = ["runtime"] }
-vox-types = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
-vox-stream = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+# VOX service framework — consumed from crates.io (upstream facet/vox monorepo).
+vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
+vox-types = { version = "0.10.0-rc.1" }
+vox-stream = { version = "0.10.0-rc.1" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -145,8 +146,8 @@ futures = "0.3"
 # Hardware MIDI I/O (control surfaces — ALSA on Linux, CoreMIDI on macOS)
 midir = "0.10"
 # Styx config parsing into Facet types (surface zone definitions).
-# 3.0 pairs with facet 0.46 (same pairing as the fts `input` repo).
-facet-styx = "3.0"
+# 5.0 pairs with facet 0.50 (same pairing as the fts `input` repo).
+facet-styx = "5.0.0-rc.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -189,10 +190,12 @@ fragile = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # ── Local development overrides ──────────────────────────────────────
-# Uncomment to use local checkouts instead of GitHub.
+# Path-patch the already-migrated sibling repos (facet 0.50 / vox 0.10).
+[patch."https://codeberg.org/FastTrackStudios/architect.git"]
+architect = { path = "/run/media/Development/architect/macros/architect" }
 
-# [patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
-# actions-proto = { path = "../input_actions/crates/actions-proto" }
+[patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "/run/media/Development/FastTrackStudio/input_actions/crates/actions-proto" }
 
 # [patch."https://codeberg.org/FastTrackStudios/keyflow.git"]
 # keyflow = { path = "../keyflow/crates/keyflow" }
@@ -212,9 +215,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # [patch."https://codeberg.org/FastTrackStudios/monarchy.git"]
 # monarchy = { path = "../monarchy/crates/monarchy" }
-
-# (no vox patch needed — daw, architect, and input_actions all pin the same
-# Codeberg vox fork @ f31f1040 = vox 0.8.2, so the graph shares one vox.)
 
 # reaper-rs source unification: daw pins reaper-low/medium to Codeberg, but
 # swell-ui (from Codeberg reaper-lib) still pulls them from the legacy

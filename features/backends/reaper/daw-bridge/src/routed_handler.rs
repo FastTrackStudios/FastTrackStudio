@@ -7,21 +7,18 @@
 //! fully populated `LayerRouter` and pass it to [`DawConnectionAcceptor::new`].
 
 use std::sync::Arc;
-use tracing::info;
-use vox::{ConnectionAcceptor, ConnectionRequest, MetadataValue, PendingConnection};
 
 use architect::LayerRouter;
 
 // ============================================================================
-// DawConnectionAcceptor — virtual-connection-based service routing
+// DawConnectionAcceptor — lane-based service routing (vox 0.10)
 // ============================================================================
 
-/// Accepts inbound virtual connections and spawns a `Driver` with the
-/// [`architect::LayerRouter`] for each one.
+/// Holds the [`architect::LayerRouter`] handed to every inbound lane.
 ///
-/// Clients open virtual connections with metadata identifying themselves.
-/// All connections currently get the full DAW service set. Future:
-/// metadata-driven sub-bundles for role-restricted views.
+/// Clients open lanes with metadata identifying themselves. All lanes
+/// currently get the full DAW service set (the router dispatches by method
+/// id). Future: metadata-driven sub-bundles for role-restricted views.
 #[derive(Clone)]
 pub struct DawConnectionAcceptor {
     handler: Arc<LayerRouter>,
@@ -33,26 +30,9 @@ impl DawConnectionAcceptor {
             handler: Arc::new(handler),
         }
     }
-}
 
-impl ConnectionAcceptor for DawConnectionAcceptor {
-    fn accept(
-        &self,
-        request: &ConnectionRequest,
-        connection: PendingConnection,
-    ) -> Result<(), vox::Metadata<'static>> {
-        let role = request
-            .metadata()
-            .iter()
-            .find(|e| e.key == "role")
-            .and_then(|e| match &e.value {
-                MetadataValue::String(s) => Some(s.as_ref()),
-                _ => None,
-            })
-            .unwrap_or("unknown");
-
-        info!("Accepting virtual connection: role={}", role);
-        connection.handle_with(self.handler.as_ref().clone());
-        Ok(())
+    /// Clone the shared `LayerRouter` for handing to a vox lane.
+    pub fn router(&self) -> LayerRouter {
+        self.handler.as_ref().clone()
     }
 }

@@ -17,11 +17,11 @@ use std::sync::Arc;
 use architect::LayerRouter;
 use tokio::net::UnixListener;
 use tracing::{debug, info, warn};
-use vox::{ConnectionAcceptor, ConnectionRequest, MetadataValue, PendingConnection};
+use vox::MetadataExt as _;
 
-/// Vox `ConnectionAcceptor` that hands every inbound virtual connection
-/// to a single shared `LayerRouter`. The router contains the mounted
-/// dispatchers for every service exposed by the extension.
+/// Vox lane acceptor that hands every inbound lane to a single shared
+/// `LayerRouter`. The router contains the mounted dispatchers for every
+/// service exposed by the extension.
 #[derive(Clone)]
 pub struct ExtensionConnectionAcceptor {
     handler: Arc<LayerRouter>,
@@ -32,27 +32,6 @@ impl ExtensionConnectionAcceptor {
         Self {
             handler: Arc::new(handler),
         }
-    }
-}
-
-impl ConnectionAcceptor for ExtensionConnectionAcceptor {
-    fn accept(
-        &self,
-        request: &ConnectionRequest,
-        connection: PendingConnection,
-    ) -> Result<(), vox::Metadata<'static>> {
-        let role = request
-            .metadata()
-            .iter()
-            .find(|e| e.key == "role")
-            .and_then(|e| match &e.value {
-                MetadataValue::String(s) => Some(s.as_ref()),
-                _ => None,
-            })
-            .unwrap_or("unknown");
-        info!(role = role, "Accepting virtual connection");
-        connection.handle_with(self.handler.as_ref().clone());
-        Ok(())
     }
 }
 
@@ -106,31 +85,21 @@ pub fn publish_extension_socket(router: LayerRouter) {
                     let acceptor = acceptor.clone();
                     moire::task::spawn(async move {
                         let link = vox_stream::StreamLink::unix(stream);
-                        let handshake = vox::HandshakeResult {
-                            role: vox::SessionRole::Acceptor,
-                            our_settings: vox::ConnectionSettings {
-                                parity: vox::Parity::Even,
-                                max_concurrent_requests: 64,
-                                initial_channel_credit: 16,
-                            },
-                            peer_settings: vox::ConnectionSettings {
-                                parity: vox::Parity::Odd,
-                                max_concurrent_requests: 64,
-                                initial_channel_credit: 16,
-                            },
-                            peer_supports_retry: true,
-                            session_resume_key: None,
-                            peer_resume_key: None,
-                            our_schema: vec![],
-                            peer_schema: vec![],
-                            peer_metadata: vec![],
-                        };
-                        match vox::acceptor_conduit(vox::BareConduit::new(link), handshake)
-                            .on_connection(acceptor)
-                            .establish::<vox::NoopClient>()
+                        // vox 0.10 lane model: hand every inbound lane to the
+                        // shared LayerRouter (it dispatches by method id).
+                        let router = acceptor.handler.as_ref().clone();
+                        let lane_acceptor = vox::lane_acceptor_fn(move |req, connection| {
+                            let role = req.metadata().meta_str("role").unwrap_or("unknown");
+                            info!(role = role, "Accepting lane");
+                            connection.handle_with(router.clone());
+                            Ok(())
+                        });
+                        match vox::acceptor_on(link)
+                            .on_lane(lane_acceptor)
+                            .establish_connection()
                             .await
                         {
-                            Ok(_root) => {
+                            Ok(_connection) => {
                                 debug!("Unix socket session established");
                                 std::future::pending::<()>().await;
                             }

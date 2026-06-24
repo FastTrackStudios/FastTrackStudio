@@ -69,58 +69,37 @@ async fn connect_to_daw_bridge() -> eyre::Result<Daw> {
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await?;
     let link = vox_stream::StreamLink::unix(stream);
-    let handshake = vox::HandshakeResult {
-        role: vox::SessionRole::Initiator,
-        our_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Odd,
-            max_concurrent_requests: 64,
 
-            initial_channel_credit: 16,
-        },
-        peer_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Even,
-            max_concurrent_requests: 64,
-
-            initial_channel_credit: 16,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-        peer_metadata: vec![],
-    };
-    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
-        .establish::<vox::NoopClient>()
+    // vox 0.10 lane model: establish the connection, then open the DAW
+    // service lane (carries `vox-service: perf-test` automatically),
+    // yielding a ready-to-use `Caller`.
+    let connection = vox::initiator_on(link)
+        .establish_connection()
         .await
-        .map_err(|e| eyre::eyre!("Failed to establish vox session: {:?}", e))?;
-    let session = root
-        .session
-        .clone()
-        .ok_or_else(|| eyre::eyre!("perf-test root session missing handle"))?;
-
-    let conn = session
-        .open_connection(
-            vox::ConnectionSettings {
-                parity: vox::Parity::Odd,
-                max_concurrent_requests: 64,
-
-                initial_channel_credit: 16,
-            },
-            vec![vox::MetadataEntry {
-                key: std::borrow::Cow::Borrowed("role"),
-                value: vox::MetadataValue::String(std::borrow::Cow::Borrowed("perf-test")),
-                flags: vox::MetadataFlags::NONE,
-            }],
-        )
+        .map_err(|e| eyre::eyre!("Failed to establish vox connection: {:?}", e))?;
+    let client = connection
+        .open_lane::<PerfLaneClient>()
         .await
-        .map_err(|e| eyre::eyre!("open_connection failed: {e:?}"))?;
+        .map_err(|e| eyre::eyre!("Failed to open DAW lane: {:?}", e))?;
+    // The lane's Caller + its spawned driver keep the session alive.
+    drop(connection);
 
-    let mut driver = vox::Driver::new(conn, ());
-    let caller = vox::Caller::new(driver.caller());
-    moire::task::spawn(async move { driver.run().await });
+    Ok(Daw::new(client.caller))
+}
 
-    Ok(Daw::new(caller))
+/// Minimal `FromVoxLane` client capturing the lane's `Caller`
+/// (vox 0.10 replacement for the removed `NoopClient`).
+#[derive(Clone)]
+struct PerfLaneClient {
+    caller: vox::Caller,
+}
+
+impl vox::FromVoxLane for PerfLaneClient {
+    const SERVICE_NAME: &'static str = "perf-test";
+
+    fn from_vox_lane(caller: vox::Caller, _connection: Option<vox::ConnectionHandle>) -> Self {
+        Self { caller }
+    }
 }
 
 // ============================================================================
