@@ -77,7 +77,7 @@ facet-json = { version = "0.50.0-rc.1" }
 
 # architect framework — defines #[architect::rpc] for sync-trait → vox
 # bridge generation plus the Entity derive for CRUD-shaped data.
-# Consumed from git.starcommand.live so daw is usable as a git dependency
+# Consumed from codeberg.org so daw is usable as a git dependency
 # (a local path dep escapes the repo and breaks downstream `cargo metadata`).
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
@@ -218,11 +218,11 @@ actions-proto = { path = "/run/media/Development/FastTrackStudio/input_actions/c
 
 # reaper-rs source unification: daw pins reaper-low/medium to Codeberg, but
 # swell-ui (from Codeberg reaper-lib) still pulls them from the legacy
-# git.starcommand.live URL at the same rev. Cargo treats the two URLs as
+# codeberg.org URL at the same rev. Cargo treats the two URLs as
 # distinct sources → duplicate reaper_low → `RECT`/type mismatches across the
 # boundary. Redirect the starcommand.live reaper-rs URL to Codeberg so the
 # whole graph shares one reaper-rs. (Drop once reaper-lib repoints upstream.)
-[patch."https://git.starcommand.live/FastTrackStudios/reaper-rs.git"]
+[patch."https://codeberg.org/FastTrackStudios/reaper-rs.git"]
 reaper-low = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-medium = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
