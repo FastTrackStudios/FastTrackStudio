@@ -40,15 +40,12 @@ fn main() -> eyre::Result<()> {
         format!("{dev}  ch{}  @ {} Hz", p.input_channel + 1, prig.rig().sample_rate)
     };
 
-    // Wire the guitar DI → rig input via PipeWire. cpal-jack auto-connects the
-    // input to whatever the default source is (on a custom graph that's the
-    // wrong node), so we drop those and connect the configured interface's DI
-    // channel directly. Best-effort; prints what it did before the TUI starts.
-    for line in autoconnect_input(
-        &prig.rig().prefs().input_device,
-        &mgr.audio.input_device,
-        mgr.audio.input_channel,
-    ) {
+    // Wire the interface DI channel → rig input, and rig output → the
+    // interface's first stereo pair, over PipeWire. The rig's JACK client ports
+    // are discovered from the graph (cpal names them `cpal_client_in/out`); the
+    // application shows as FTS-Signal via PIPEWIRE_PROPS (set in `just rig`).
+    // Best-effort; prints what it did.
+    for line in autoconnect_io(&mgr.audio.input_device, mgr.audio.input_channel) {
         eprintln!("{line}");
     }
 
@@ -96,64 +93,94 @@ fn pw_link(args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
-/// Connect the interface's DI channel to the rig input port, after dropping any
-/// sources cpal-jack auto-connected to it. `rig_in_node` is the rig's JACK input
-/// client (e.g. `cpal_client_in-1115`), `input_match` is the interface name
-/// substring (e.g. "Yamaha TF"), `channel` is 0-based (4th input = 3).
-fn autoconnect_input(rig_in_node: &str, input_match: &str, channel: usize) -> Vec<String> {
-    let mut log = Vec::new();
-    if rig_in_node.is_empty() || input_match.is_empty() {
-        return log; // default device / no jack node — nothing to wire
-    }
-    let dst = format!("{rig_in_node}:in_{channel}");
-
-    // 1. Drop whatever is currently feeding the DI port (pw-link -l lists each
-    //    port followed by its `|<- source` connections).
-    let listing = pw_link(&["-l"]);
-    let mut in_block = false;
-    let mut existing = Vec::new();
-    for line in listing.lines() {
-        if !line.starts_with(char::is_whitespace) {
-            in_block = line.trim() == dst;
-        } else if in_block {
-            if let Some(src) = line.trim().strip_prefix("|<- ") {
-                existing.push(src.trim().to_string());
-            }
-        }
-    }
-    for src in &existing {
-        let _ = Command::new("pw-link").args(["-d", src, &dst]).status();
-        log.push(format!("  unlinked {src} -> {dst}"));
-    }
-
-    // 2. Find the interface's capture source node and connect its DI channel.
-    let needle = input_match.to_lowercase().replace(' ', "_");
-    let outs = pw_link(&["-o"]);
-    let src_node = outs.lines().find_map(|l| {
+/// Find a node in `listing` (`pw-link -i`/`-o` output) whose name contains all
+/// `needles` (lower-case). Returns the node name (text before `:`).
+fn find_node(listing: &str, needles: &[&str]) -> Option<String> {
+    listing.lines().find_map(|l| {
         let low = l.to_lowercase();
-        if low.contains(&needle) && low.contains("capture") && low.contains("alsa_input") {
+        if needles.iter().all(|n| low.contains(*n)) {
             l.split(':').next().map(str::to_string)
         } else {
             None
         }
-    });
-    match src_node {
-        Some(node) => {
-            let src = format!("{node}:capture_{}", channel + 1);
-            let ok = Command::new("pw-link")
-                .arg(&src)
-                .arg(&dst)
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            log.push(format!(
-                "  {} {src} -> {dst}",
-                if ok { "linked" } else { "could not link (already linked?)" }
-            ));
+    })
+}
+
+/// The rig's JACK input / output client node names. cpal names them
+/// `cpal_client_in` / `cpal_client_out`; discover them from the live graph.
+fn rig_io_nodes() -> (Option<String>, Option<String>) {
+    (
+        find_node(&pw_link(&["-i"]), &["cpal", "in_"]),
+        find_node(&pw_link(&["-o"]), &["cpal", "out_"]),
+    )
+}
+
+/// Link `src -> dst`. When `exclusive`, first drop any *other* sources already
+/// feeding `dst` — used for the rig input so only the guitar reaches it. NOT
+/// used for the interface playback ports, which also carry everyday audio.
+fn relink(src: &str, dst: &str, exclusive: bool, log: &mut Vec<String>) {
+    if exclusive {
+        let listing = pw_link(&["-l"]);
+        let mut in_block = false;
+        for line in listing.lines() {
+            if !line.starts_with(char::is_whitespace) {
+                in_block = line.trim() == dst;
+            } else if in_block {
+                if let Some(s) = line.trim().strip_prefix("|<- ").map(str::trim) {
+                    if s != src {
+                        let _ = Command::new("pw-link").args(["-d", s, dst]).status();
+                    }
+                }
+            }
         }
-        None => log.push(format!(
-            "  no capture source matching {input_match:?} — connect the guitar to {dst} in qpwgraph"
-        )),
+    }
+    let ok = Command::new("pw-link")
+        .arg(src)
+        .arg(dst)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    log.push(format!(
+        "  {} {src} -> {dst}",
+        if ok { "linked" } else { "could not link (already linked?)" }
+    ));
+}
+
+/// Connect the interface DI channel → rig input, and rig output → the
+/// interface's first stereo pair. `input_match` is the interface name substring
+/// (e.g. "Yamaha TF"); `channel` is 0-based (4th input = 3).
+fn autoconnect_io(input_match: &str, channel: usize) -> Vec<String> {
+    let mut log = Vec::new();
+    if input_match.is_empty() {
+        return log; // default device — let pipewire's own auto-connect handle it
+    }
+    let needle = input_match.to_lowercase().replace(' ', "_");
+    let (in_node, out_node) = rig_io_nodes();
+
+    // Input: interface capture_{ch+1} → rig in_{ch} (exclusive: only the guitar).
+    let cap = find_node(&pw_link(&["-o"]), &[&needle, "capture", "alsa_input"]);
+    match (cap, &in_node) {
+        (Some(c), Some(ri)) => relink(
+            &format!("{c}:capture_{}", channel + 1),
+            &format!("{ri}:in_{channel}"),
+            true,
+            &mut log,
+        ),
+        (None, _) => log.push(format!("  no capture source matching {input_match:?}")),
+        (_, None) => log.push("  rig input client not found (is the engine up?)".into()),
+    }
+
+    // Output: rig out_0/out_1 → interface playback_1/2 (additive: leave any
+    // everyday-audio links to those ports in place).
+    let play = find_node(&pw_link(&["-i"]), &[&needle, "playback", "alsa_output"]);
+    match (play, &out_node) {
+        (Some(p), Some(ro)) => {
+            for (o, pb) in [(0usize, 1usize), (1, 2)] {
+                relink(&format!("{ro}:out_{o}"), &format!("{p}:playback_{pb}"), false, &mut log);
+            }
+        }
+        (None, _) => log.push(format!("  no playback sink matching {input_match:?}")),
+        (_, None) => log.push("  rig output client not found".into()),
     }
     log
 }
