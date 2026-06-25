@@ -7,7 +7,7 @@ authors.workspace = true
 description = "Live audio processing engine for Signal with cpal I/O"
 
 [dependencies]
-cpal = "0.17"
+cpal = "0.18"
 midir.workspace = true
 crossbeam-channel.workspace = true
 tracing.workspace = true

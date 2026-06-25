@@ -68,7 +68,7 @@ fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
 # block (Amp / Drive / Cabinet) can opt into a NAM kind by loading a
 # `.nam` model file at runtime.
 neural-amp-modeler = { path = "../neural-amp-modeler-rs" }
-cpal = "0.17"
+cpal = "0.18"
 
 # ── Facet reflection ─────────────────────────────────────────────────
 # Upstream facet/facet-styx from crates.io (migrated off the FTS codeberg fork).
@@ -128,7 +128,7 @@ fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core", de
 audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
 atomic_float = "1"
 crossbeam-channel = "0.5"
-midir = "0.10"
+midir = "0.11"
 
 # ── UI ────────────────────────────────────────────────────────────────
 dioxus = "=0.7.9"

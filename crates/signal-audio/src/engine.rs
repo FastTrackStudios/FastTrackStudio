@@ -89,7 +89,7 @@ impl LiveAudioEngine {
                 let chain = chain.clone();
                 device
                     .build_output_stream(
-                        &config.into(),
+                        config.into(),
                         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                             let frame_count = data.len() / channels;
                             let mut left = vec![0.0f64; frame_count];
