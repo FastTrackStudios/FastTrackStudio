@@ -341,6 +341,24 @@ impl SamplerBlock {
         self.engine.pin_articulation(artic);
     }
 
+    /// Switch this block's engine to a microphone position (e.g. `"Mix"`).
+    /// See [`SampleEngine::set_mic`].
+    pub fn set_mic(&mut self, mic_id: impl Into<String>) {
+        self.engine.set_mic(mic_id);
+    }
+
+    /// Restrict zoned playback to a single mic. See
+    /// [`SampleEngine::set_solo_mic`].
+    pub fn set_solo_mic(&mut self, mic_id: Option<String>) {
+        self.engine.set_solo_mic(mic_id);
+    }
+
+    /// Warm the samples a note would trigger under the current pin + solo mic.
+    /// See [`SampleEngine::warm_note`].
+    pub fn warm_note(&self, note: u8) -> crate::engine::cache::PreloadStats {
+        self.engine.warm_note(note)
+    }
+
     /// Set an engine-wide choke group + the articulations that trigger it.
     /// See [`SampleEngine::set_choke_group`].
     pub fn set_choke_group(&mut self, group: Option<&str>, choke_on: &[String]) {

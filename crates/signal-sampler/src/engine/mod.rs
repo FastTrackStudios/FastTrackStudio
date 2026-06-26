@@ -136,6 +136,12 @@ pub struct SampleEngine {
     articulation: String,
     /// Active microphone position ID (e.g. `"Mix"`, `"Main"`).
     mic: String,
+    /// Opt-in single-mic filter for multi-mic zone sets that declare no
+    /// `mics` block (so mic_index folds everything to bus 0). When `Some`,
+    /// only zones whose `mic` matches fire — otherwise every mic in the set
+    /// sounds at once (Main + Mix doubling). `None` keeps the default
+    /// play-all-mics behaviour used by multi-mic mixing + drum kits.
+    solo_mic: Option<String>,
 
     /// True when the source pack is a percussion / drum-kit library
     /// (`category` ~ "drum-kit", or a percussion `instrument`). Percussion
@@ -325,6 +331,7 @@ impl SampleEngine {
             section,
             articulation,
             mic,
+            solo_mic: None,
             percussion,
             single_attack_key,
             pinned_articulation: None,
@@ -506,6 +513,64 @@ impl SampleEngine {
     /// Switch to a different microphone position.
     pub fn set_mic(&mut self, mic_id: impl Into<String>) {
         self.mic = mic_id.into();
+    }
+
+    /// Restrict zoned playback to a single mic. `Some("Mix")` makes only zones
+    /// tagged with that mic fire — the fix for multi-mic libraries (like CSS)
+    /// that ship every mic in one zone set but declare no `mics` block, so
+    /// without this every mic folds to bus 0 and sounds at once. `None` (the
+    /// default) keeps the play-all-mics behaviour for multi-mic mixing.
+    pub fn set_solo_mic(&mut self, mic_id: Option<String>) {
+        self.solo_mic = mic_id.filter(|m| !m.is_empty());
+    }
+
+    /// Warm (decode into cache, on the caller's thread) every attack zone a
+    /// note-on at `note` could trigger under the CURRENT articulation pin +
+    /// solo mic — across all dynamic layers and round-robins — so the first
+    /// hit at any velocity is never silent. Selection mirrors the live trigger
+    /// path (unlike [`warm_note_samples`](Self::warm_note_samples), which uses
+    /// the pin/mic-agnostic `resolve_zone` and can warm the wrong articulation).
+    /// Returns how many samples were decoded; a no-op for non-zoned patches.
+    pub fn warm_note(&self, note: u8) -> crate::engine::cache::PreloadStats {
+        use crate::engine::cache::PreloadStats;
+        if !self.patch.is_zoned() {
+            return PreloadStats::default();
+        }
+        let pin = self
+            .trigger_articulation
+            .as_ref()
+            .or(self.pinned_articulation.as_ref());
+        let mut stats = PreloadStats::default();
+        for (i, z) in self.patch.spec.zones.iter().enumerate() {
+            if !zone_trigger_matches(z, ZoneTrigger::Attack) {
+                continue;
+            }
+            if note < z.key_min || note > z.key_max {
+                continue;
+            }
+            if let Some(p) = pin {
+                if !z.articulation.eq_ignore_ascii_case(p) {
+                    continue;
+                }
+            }
+            if let Some(solo) = &self.solo_mic {
+                if !z.mic.eq_ignore_ascii_case(solo) {
+                    continue;
+                }
+            }
+            let path = &self.patch.zone_paths[i];
+            if self.cache.get_loaded(path).is_some() {
+                continue;
+            }
+            match self.cache.get(path) {
+                Ok(data) => {
+                    stats.loaded += 1;
+                    stats.bytes += data.decoded_bytes();
+                }
+                Err(_) => stats.failed += 1,
+            }
+        }
+        stats
     }
 
     /// Returns the currently active articulation ID.
@@ -850,12 +915,19 @@ impl SampleEngine {
 
     fn trigger_zoned_groups(
         &mut self,
-        by_mic: std::collections::BTreeMap<String, Vec<usize>>,
+        mut by_mic: std::collections::BTreeMap<String, Vec<usize>>,
         event_note: Option<u8>,
         velocity: u8,
         trigger: ZoneTrigger,
         record_empty_miss: bool,
     ) {
+        // Single-mic solo: keep only the requested mic's bucket so multi-mic
+        // zone sets (CSS ships Main + Mix in one set, no `mics` block) don't
+        // fold every mic to bus 0 and double. Centralised here so it applies to
+        // every trigger path (attack / release / CC / aftertouch / event).
+        if let Some(solo) = &self.solo_mic {
+            by_mic.retain(|mic, _| mic.eq_ignore_ascii_case(solo));
+        }
         if by_mic.is_empty() {
             if record_empty_miss {
                 self.sample_misses

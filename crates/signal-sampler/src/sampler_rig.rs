@@ -581,6 +581,45 @@ impl SamplerRig {
         }
     }
 
+    /// Pin an instrument to a single articulation (e.g. `"Leg"` legato);
+    /// `None` clears the pin. Without a pin, a multi-articulation zone set fires
+    /// every articulation matching the note — pin one to play just sustains.
+    pub fn pin_articulation(&self, id: &str, artic: Option<String>) {
+        match self.bank().lock() {
+            Ok(mut bank) => bank.pin_articulation(id, artic),
+            Err(_) => tracing::warn!("signal-sampler: bank lock poisoned; pin skipped"),
+        }
+    }
+
+    /// Switch an instrument's active microphone position (e.g. `"Mix"`).
+    pub fn set_mic(&self, id: &str, mic_id: impl Into<String>) {
+        match self.bank().lock() {
+            Ok(mut bank) => bank.set_mic(id, mic_id),
+            Err(_) => tracing::warn!("signal-sampler: bank lock poisoned; set_mic skipped"),
+        }
+    }
+
+    /// Restrict an instrument's zoned playback to a single mic; `None` plays
+    /// all. Needed for multi-mic libraries (CSS ships Main + Mix in one zone
+    /// set with no `mics` block, so all mics otherwise sound at once).
+    pub fn set_solo_mic(&self, id: &str, mic_id: Option<String>) {
+        match self.bank().lock() {
+            Ok(mut bank) => bank.set_solo_mic(id, mic_id),
+            Err(_) => tracing::warn!("signal-sampler: bank lock poisoned; set_solo_mic skipped"),
+        }
+    }
+
+    /// Warm (decode into cache) the samples `note` would trigger for `id` under
+    /// its current articulation pin + solo mic, so the first hit isn't silent.
+    /// Background-warm a playable range at startup, like the guitar rig prewarms
+    /// its NAM models. Returns how many samples were decoded.
+    pub fn warm_note(&self, id: &str, note: u8) -> PreloadStats {
+        match self.bank().lock() {
+            Ok(bank) => bank.warm_note(id, note),
+            Err(_) => PreloadStats::default(),
+        }
+    }
+
     pub fn preload_instrument(&self, id: &str) -> eyre::Result<PreloadStats> {
         self.bank()
             .lock()
@@ -701,6 +740,36 @@ impl SamplerRig {
             (Some(d), Some(t)) => Some((d, t.clone())),
             _ => None,
         }
+    }
+
+    // ── Hardware MIDI input (daw-owned primitive) ─────────────────────────────
+
+    /// List available hardware MIDI input port names — for a device picker.
+    /// All device enumeration lives in daw's `daw-midi-io`; signal only forwards.
+    pub fn midi_input_ports() -> Vec<String> {
+        daw_midi_io::input_ports()
+    }
+
+    /// Open a hardware MIDI keyboard and forward its events into this rig's bank
+    /// track (live mode only). `selection` chooses one named device, **all**
+    /// devices merged, or a REAPER-style **virtual** port.
+    ///
+    /// The returned [`daw_midi_io::MidiInput`] owns the open connection(s) —
+    /// hold it for as long as you want MIDI, drop it to stop. All MIDI primitive
+    /// logic (enumeration, selection, byte parsing) lives in daw; signal just
+    /// wires the daw source to daw's live-MIDI ring with full fidelity
+    /// (channel / velocity / pitch-bend preserved via `push_live_midi`).
+    pub fn attach_midi(
+        &self,
+        selection: daw_midi_io::MidiSelection,
+    ) -> eyre::Result<daw_midi_io::MidiInput> {
+        let (daw, track) = match (self.inner.daw.as_ref(), self.inner.bank_track.as_ref()) {
+            (Some(d), Some(t)) => (d.clone(), t.clone()),
+            _ => eyre::bail!("attach_midi requires a live rig with a bank track (not offline)"),
+        };
+        daw_midi_io::MidiInput::open(selection, move |msg| {
+            daw.push_live_midi(&track, msg);
+        })
     }
 
     // ── Drum mixer (bank-backed; SamplerPlayer-equivalent) ────────────────────

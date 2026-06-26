@@ -455,6 +455,55 @@ impl SamplerBank {
         }
     }
 
+    /// Reach an instrument's [`SamplerBlock`](crate::block::SamplerBlock) for a
+    /// live config tweak (articulation / mic), resolving both the direct-slot
+    /// and the `preset:engine` cases. No-op if `id` isn't loaded.
+    fn with_block(&mut self, id: &str, f: impl FnOnce(&mut crate::block::SamplerBlock)) {
+        if let Some(slot) = self.instruments.get_mut(id) {
+            f(&mut slot.engine.block);
+            return;
+        }
+        if let Some((prefix, engine_id)) = self.instrument_to_preset.get(id).cloned() {
+            if let Some(preset) = self.presets.get_mut(&prefix) {
+                if let Some(&idx) = preset.engine_id_to_idx.get(&engine_id) {
+                    f(&mut preset.engines[idx].block);
+                }
+            }
+        }
+    }
+
+    /// Pin an instrument to a single articulation (e.g. `"Leg"`); `None` clears.
+    pub fn pin_articulation(&mut self, id: &str, artic: Option<String>) {
+        self.with_block(id, |b| b.pin_articulation(artic));
+    }
+
+    /// Switch an instrument's active microphone position (e.g. `"Mix"`).
+    pub fn set_mic(&mut self, id: &str, mic_id: impl Into<String>) {
+        let mic = mic_id.into();
+        self.with_block(id, |b| b.set_mic(mic));
+    }
+
+    /// Restrict an instrument's zoned playback to a single mic; `None` plays all.
+    pub fn set_solo_mic(&mut self, id: &str, mic_id: Option<String>) {
+        self.with_block(id, |b| b.set_solo_mic(mic_id));
+    }
+
+    /// Warm the samples `note` would trigger for `id` under its current pin +
+    /// solo mic (read-only on the cache; safe to call off-thread).
+    pub fn warm_note(&self, id: &str, note: u8) -> PreloadStats {
+        if let Some(slot) = self.instruments.get(id) {
+            return slot.engine.block.warm_note(note);
+        }
+        if let Some((prefix, engine_id)) = self.instrument_to_preset.get(id) {
+            if let Some(preset) = self.presets.get(prefix) {
+                if let Some(&idx) = preset.engine_id_to_idx.get(engine_id) {
+                    return preset.engines[idx].block.warm_note(note);
+                }
+            }
+        }
+        PreloadStats::default()
+    }
+
     /// Mute a Module inside a loaded preset. Returns true if found.
     pub fn set_module_muted(&mut self, preset_prefix: &str, module_id: &str, muted: bool) -> bool {
         self.presets

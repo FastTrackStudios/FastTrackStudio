@@ -2574,6 +2574,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-midi-io"
+version = "0.1.0"
+dependencies = [
+ "daw-proto",
+ "eyre",
+ "midir",
+ "tracing",
+]
+
+[[package]]
 name = "daw-module"
 version = "0.1.0"
 dependencies = [
@@ -10027,6 +10037,7 @@ dependencies = [
  "crossbeam-channel",
  "daw",
  "daw-audio-io",
+ "daw-midi-io",
  "eyre",
  "facet 0.50.0-rc.1",
  "facet-styx",
