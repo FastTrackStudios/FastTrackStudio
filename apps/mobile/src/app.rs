@@ -11,7 +11,7 @@
 
 use dioxus::prelude::*;
 
-use signal_audio::ProcessingChain;
+use signal_ui::ProcessingChain;
 
 use crate::channel::{ChannelKind, ChannelState};
 use crate::mixer::MixerView;

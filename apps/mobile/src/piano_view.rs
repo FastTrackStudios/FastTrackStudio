@@ -1,10 +1,10 @@
 //! Piano view — full-range keyboard with falling-note waterfall.
 //!
-//! Plays notes via `signal_audio::ProcessingChain` (test tone for now;
+//! Plays notes via `signal_ui::ProcessingChain` (test tone for now;
 //! will route through the sampler engine in a later phase).
 
 use dioxus::prelude::*;
-use signal_audio::ProcessingChain;
+use signal_ui::ProcessingChain;
 use signal_ui::components::piano::{Piano, WaterfallNote, WaterfallState};
 
 use crate::styles as s;

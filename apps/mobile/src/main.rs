@@ -7,7 +7,7 @@
 //! Rendering: Dioxus mobile (WKWebView on iOS). NOT nice_plug_dioxus/Blitz —
 //! mobile uses the WebView renderer, so all layout is CSS-based.
 
-use signal_audio::{LiveAudioEngine, ProcessingChain};
+use signal_ui::ProcessingChain;
 
 mod app;
 mod channel;
@@ -17,11 +17,9 @@ mod scene_bar;
 mod styles;
 
 fn main() {
-    // Start audio engine before handing control to the WebView event loop.
-    // 48 kHz, stereo — matches typical iOS audio session sample rate.
+    // UI meter state shared via context. Audio I/O lives in daw; the mobile
+    // shell currently renders UI only (no standalone audio engine).
     let chain = ProcessingChain::new(48000.0);
-    // Keep the engine alive for the app's lifetime.
-    let _engine = LiveAudioEngine::new(chain.clone());
 
     dioxus::LaunchBuilder::mobile()
         .with_context(chain)

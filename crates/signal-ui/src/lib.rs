@@ -45,11 +45,13 @@ pub mod components;
 pub mod hooks;
 pub mod infer_adapter;
 pub mod panel_registration;
+pub mod processing_chain;
 pub mod shell;
 pub mod views;
 
 // Convenience re-exports
 pub use hooks::use_signal_service;
 pub use panel_registration::register_panels;
+pub use processing_chain::ProcessingChain;
 pub use shell::SignalRoot;
 pub use views::SignalSlider;

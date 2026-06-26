@@ -8,7 +8,6 @@ members = [
     "crates/macromod",
     "crates/nam-manager",
     "crates/signal",
-    "crates/signal-audio",
     "crates/signal-browser",
     "crates/signal-controller",
     "crates/signal-daw-bridge",
@@ -54,7 +53,6 @@ signal-browser = { path = "crates/signal-browser" }
 
 # ── Local utility crates ─────────────────────────────────────────────
 macromod            = { path = "crates/macromod" }
-signal-audio        = { path = "crates/signal-audio" }
 signal-plugin-host  = { path = "crates/signal-plugin-host", default-features = false }
 signal-sampler      = { path = "crates/signal-sampler" }
 
@@ -268,7 +266,7 @@ unused = "allow"
 
 # ── Dev profile: release-like runtime for `dx serve` (no --release needed) ──
 # `dx serve` builds the dev profile. Optimize all dependencies — including the
-# audio DSP crates (signal-sampler/signal-audio/daw) and wgpu/blitz/vello — to
+# audio DSP crates (signal-sampler/daw) and wgpu/blitz/vello — to
 # release opt-level so the player shows real performance by default, while the
 # thin app/UI crates stay at light opt for fast hot-reload rebuilds.
 # For exact release numbers, run `dx serve --release`.

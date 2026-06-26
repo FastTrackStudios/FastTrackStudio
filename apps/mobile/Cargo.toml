@@ -11,7 +11,6 @@ path = "src/main.rs"
 
 [dependencies]
 signal.workspace = true
-signal-audio.workspace = true
 signal-ui = { workspace = true, default-features = false, features = ["web"] }
 # Mobile renderer — WebView (WKWebView on iOS, WebView on Android).
 # This is intentionally NOT nice-plug-dioxus; mobile doesn't use Blitz/wgpu.

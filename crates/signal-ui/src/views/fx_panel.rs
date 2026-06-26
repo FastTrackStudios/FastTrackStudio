@@ -4,7 +4,7 @@ use nice_plug_dioxus::prelude::*;
 
 use audio_gui::meters::GrMeter;
 use audio_gui::viz::{EqBand, EqBandShape, EqGraph};
-use signal_audio::ProcessingChain;
+use crate::ProcessingChain;
 
 // ── Top-level FX view ──────────────────────────────────────────────────────────
 

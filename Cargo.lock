@@ -2577,6 +2577,7 @@ dependencies = [
 name = "daw-midi-io"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel",
  "daw-proto",
  "eyre",
  "midir",
@@ -9813,16 +9814,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal-audio"
-version = "0.1.0"
-dependencies = [
- "cpal",
- "crossbeam-channel",
- "midir",
- "tracing",
-]
-
-[[package]]
 name = "signal-browser"
 version = "0.1.0"
 dependencies = [
@@ -9880,13 +9871,13 @@ dependencies = [
 name = "signal-desktop"
 version = "0.1.0"
 dependencies = [
+ "daw-midi-io",
  "dioxus",
  "dock-dioxus",
  "dock-proto",
  "eyre",
  "nice-plug-dioxus",
  "signal",
- "signal-audio",
  "signal-sampler",
  "signal-ui",
  "tokio",
@@ -9982,7 +9973,6 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "signal",
- "signal-audio",
  "signal-ui",
  "tokio",
  "tracing",
@@ -9993,10 +9983,10 @@ dependencies = [
 name = "signal-native"
 version = "0.1.0"
 dependencies = [
+ "daw-midi-io",
  "dioxus-native",
  "eyre",
  "futures-timer",
- "signal-audio",
  "signal-plugin-host",
  "signal-sampler",
  "signal-ui",
@@ -10103,6 +10093,7 @@ version = "0.1.0"
 dependencies = [
  "audio-controls",
  "audio-gui",
+ "daw-midi-io",
  "dioxus",
  "dock-dioxus",
  "dock-proto",
@@ -10110,7 +10101,6 @@ dependencies = [
  "lumen-blocks",
  "nice-plug-dioxus",
  "signal",
- "signal-audio",
  "signal-browser",
  "signal-controller",
  "signal-daw-bridge",

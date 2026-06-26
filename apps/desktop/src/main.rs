@@ -15,9 +15,9 @@
 use dioxus::prelude::*;
 
 use signal::{Signal, connect_db_seeded};
-use signal_audio::MidiInput;
+use daw_midi_io::MidiStream;
 #[cfg(not(feature = "dev"))]
-use signal_audio::ProcessingChain;
+use signal_ui::ProcessingChain;
 #[cfg(not(feature = "dev"))]
 use signal_sampler::SamplerRig;
 use signal_ui::SignalRoot;
@@ -97,9 +97,8 @@ fn main() {
         .block_on(connect_db_seeded(&db_path()))
         .expect("Failed to initialise Signal database");
 
-    // Create the live audio processing chain and start the engine.
+    // Create the live audio processing chain (UI meter state).
     let chain = ProcessingChain::new(48000.0);
-    let _engine = signal_audio::LiveAudioEngine::disabled();
 
     // Create the sampler rig. It runs the SamplerBank on daw's AudioEngine; keep
     // the processing-chain engine disabled until both paths share one mixer.
@@ -209,7 +208,7 @@ fn DevApp() -> Element {
         Some(Ok(ctrl)) => {
             // Open MIDI on first successful load (once per app lifetime).
             use_context_provider(|| {
-                let midi = MidiInput::open_all();
+                let midi = MidiStream::open_all();
                 if midi.is_some() {
                     tracing::info!("MIDI: input active");
                 } else {

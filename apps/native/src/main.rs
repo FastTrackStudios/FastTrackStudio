@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use signal_audio::MidiInput;
+use daw_midi_io::MidiStream;
 use signal_sampler::{PreloadProfile, SamplerRig};
 use signal_ui::components::Piano;
 
@@ -83,12 +83,12 @@ fn App() -> Element {
     // grab the audio input device / a second output stream at app launch.
     use_context_provider(RigHandle::default);
     use_context_provider(|| {
-        let midi = MidiInput::open_all();
+        let midi = MidiStream::open_all();
         match &midi {
             Some(_) => tracing::info!("MIDI: input active"),
             None => tracing::info!("MIDI: no input ports found"),
         }
-        midi // Option<MidiInput>
+        midi // Option<MidiStream>
     });
 
     rsx! {
@@ -100,7 +100,7 @@ fn App() -> Element {
 #[component]
 fn PlayerPanel() -> Element {
     let sampler = use_context::<SamplerRig>();
-    let midi_opt = use_context::<Option<MidiInput>>();
+    let midi_opt = use_context::<Option<MidiStream>>();
     let root = use_context::<LibraryRoot>().0;
 
     let mut current = use_signal(|| root.clone());

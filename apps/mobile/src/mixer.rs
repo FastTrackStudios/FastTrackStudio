@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 
-use signal_audio::ProcessingChain;
+use signal_ui::ProcessingChain;
 
 use crate::channel::{ChannelKind, ChannelState, ChannelStrip};
 use crate::styles as s;

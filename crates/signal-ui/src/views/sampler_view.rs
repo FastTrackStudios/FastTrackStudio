@@ -17,7 +17,7 @@
 
 use dioxus::prelude::*;
 
-use signal_audio::MidiInput;
+use daw_midi_io::MidiStream;
 
 use crate::components::piano::{Piano, WaterfallNote, WaterfallState};
 
@@ -169,7 +169,7 @@ pub fn SamplerView() -> Element {
     // and mirrors hardware note-on/off events onto the piano.
     // use_context::<Option<MidiInput>>() — provided by the desktop app.
     // Returns None if no MIDI hardware is available or not running in desktop mode.
-    let midi_opt: Option<MidiInput> = use_context::<Option<MidiInput>>();
+    let midi_opt: Option<MidiStream> = use_context::<Option<MidiStream>>();
     // Clone for the coroutine so `midi_opt` stays available for the indicator dot.
     let midi_for_future = midi_opt.clone();
     use_future(move || {
@@ -315,7 +315,7 @@ pub fn SamplerView() -> Element {
                     }
                     // MIDI indicator dot
                     {
-                        let has_midi = midi_opt.is_some(); // Option<MidiInput>
+                        let has_midi = midi_opt.is_some(); // Option<MidiStream>
                         rsx! {
                             div {
                                 title: if has_midi { "MIDI connected" } else { "No MIDI input" },
