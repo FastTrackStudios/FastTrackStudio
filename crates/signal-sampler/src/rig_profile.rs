@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 
 use facet::Facet;
 
-use crate::SamplerError;
 use crate::rig::{GuitarRig, ModelId, RigBlock};
+use crate::SamplerError;
 
 /// One patch in a rig profile: a named tone = an ordered FX chain + patch trims.
 #[derive(Debug, Clone, Facet)]
@@ -93,7 +93,11 @@ pub struct RigProfile {
 
 impl RigProfile {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), patches: Vec::new(), default_patch: 0 }
+        Self {
+            name: name.into(),
+            patches: Vec::new(),
+            default_patch: 0,
+        }
     }
 
     #[must_use]
@@ -166,7 +170,11 @@ impl RigProfile {
                 output_trim_db: 0.0,
             });
         }
-        Ok(Self { name: profile.name.clone(), patches, default_patch })
+        Ok(Self {
+            name: profile.name.clone(),
+            patches,
+            default_patch,
+        })
     }
 }
 
@@ -308,7 +316,9 @@ impl ProfileRig {
                 .iter()
                 .map(|b| {
                     let mut rb = b.clone();
-                    rb.path = resolve_path(&b.path, base_dir).to_string_lossy().to_string();
+                    rb.path = resolve_path(&b.path, base_dir)
+                        .to_string_lossy()
+                        .to_string();
                     rb
                 })
                 .collect();
@@ -341,7 +351,11 @@ impl ProfileRig {
         }
 
         let want = profile.default_patch;
-        let start = if self.patch_ids.get(want).copied().unwrap_or(MODEL_UNAVAILABLE)
+        let start = if self
+            .patch_ids
+            .get(want)
+            .copied()
+            .unwrap_or(MODEL_UNAVAILABLE)
             != MODEL_UNAVAILABLE
         {
             want
@@ -363,9 +377,15 @@ impl ProfileRig {
     /// Activate the patch at `index`. Returns false if out of range or its
     /// chain failed to build. Applies patch trims + (optional) level-match.
     pub fn activate(&mut self, index: usize) -> bool {
-        let Some(profile) = &self.profile else { return false };
-        let Some(patch) = profile.patches.get(index) else { return false };
-        let Some(&id) = self.patch_ids.get(index) else { return false };
+        let Some(profile) = &self.profile else {
+            return false;
+        };
+        let Some(patch) = profile.patches.get(index) else {
+            return false;
+        };
+        let Some(&id) = self.patch_ids.get(index) else {
+            return false;
+        };
         if id == MODEL_UNAVAILABLE {
             return false;
         }
@@ -386,7 +406,9 @@ impl ProfileRig {
     /// Activate a patch by name (case-insensitive).
     pub fn activate_named(&mut self, name: &str) -> bool {
         let Some(idx) = self.profile.as_ref().and_then(|p| {
-            p.patches.iter().position(|q| q.name.eq_ignore_ascii_case(name))
+            p.patches
+                .iter()
+                .position(|q| q.name.eq_ignore_ascii_case(name))
         }) else {
             return false;
         };
@@ -424,7 +446,10 @@ impl ProfileRig {
     }
 
     pub fn patches(&self) -> &[RigPatch] {
-        self.profile.as_ref().map(|p| p.patches.as_slice()).unwrap_or(&[])
+        self.profile
+            .as_ref()
+            .map(|p| p.patches.as_slice())
+            .unwrap_or(&[])
     }
 
     pub fn is_patch_available(&self, index: usize) -> bool {
@@ -580,7 +605,11 @@ mod tests {
             fn resolve_patch(&self, _p: &Patch) -> Result<Vec<ResolvedRigBlock>, String> {
                 Ok(vec![
                     ResolvedRigBlock::nam("amp.nam"),
-                    ResolvedRigBlock::plugin("Clap", "/plugins/Reverb.clap", Some("c3RhdGU=".into())),
+                    ResolvedRigBlock::plugin(
+                        "Clap",
+                        "/plugins/Reverb.clap",
+                        Some("c3RhdGU=".into()),
+                    ),
                 ])
             }
         }
@@ -637,9 +666,9 @@ mod tests {
 
     #[test]
     fn from_proto_maps_patches_to_chains() {
+        use signal_proto::profile::PatchId;
         use signal_proto::profile::{Patch, Profile};
         use signal_proto::rig::{RigId, RigSceneId};
-        use signal_proto::profile::PatchId;
 
         let clean = Patch::from_rig_scene(PatchId::new(), "Clean", RigId::new(), RigSceneId::new());
         let lead_id = PatchId::new();

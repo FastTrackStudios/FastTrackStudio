@@ -80,8 +80,8 @@ use super::prim::{Cc, Db, Interned, U7};
 use crate::convolver::Convolver;
 use crate::nam::NamProcessor;
 use crate::rig::{GuitarRig, RigBlock};
-use crate::rig_profile::{ProfileRig, RigPatch, RigProfile};
 use crate::rig_prefs::RigAudioPrefs;
+use crate::rig_profile::{ProfileRig, RigPatch, RigProfile};
 
 use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
@@ -154,7 +154,10 @@ pub struct ParamRef {
 
 impl ParamRef {
     pub fn new(block: impl Into<BlockId>, param: impl AsRef<str>) -> Self {
-        ParamRef { block: block.into(), param: Interned::new(param) }
+        ParamRef {
+            block: block.into(),
+            param: Interned::new(param),
+        }
     }
 
     /// Parse `"amp.gain"` → `ParamRef { block: "amp", param: "gain" }`. A
@@ -162,7 +165,10 @@ impl ParamRef {
     pub fn parse(spec: &str) -> Self {
         match spec.split_once('.') {
             Some((b, p)) => ParamRef::new(b, p),
-            None => ParamRef { block: BlockId::new(""), param: Interned::new(spec) },
+            None => ParamRef {
+                block: BlockId::new(""),
+                param: Interned::new(spec),
+            },
         }
     }
 }
@@ -199,7 +205,10 @@ pub struct Param {
 
 impl Param {
     pub fn new(name: impl AsRef<str>, value: f32) -> Self {
-        Param { name: Interned::new(name), value }
+        Param {
+            name: Interned::new(name),
+            value,
+        }
     }
 }
 
@@ -234,7 +243,12 @@ struct BlockCore {
 
 impl BlockCore {
     fn new(id: BlockId, role: BlockRole) -> Self {
-        BlockCore { id, role, bypassed: false, params: Vec::new() }
+        BlockCore {
+            id,
+            role,
+            bypassed: false,
+            params: Vec::new(),
+        }
     }
     fn set_param(&mut self, p: &str, value: f32) {
         if let Some(param) = self.params.iter_mut().find(|q| q.name.as_str() == p) {
@@ -258,8 +272,10 @@ pub struct Amp {
 impl Amp {
     fn build(id: BlockId, role: BlockRole, nam: NamProcessor) -> Self {
         let mut core = BlockCore::new(id, role);
-        core.params.push(Param::new("input_trim", nam.input_gain_db));
-        core.params.push(Param::new("output_trim", nam.output_gain_db));
+        core.params
+            .push(Param::new("input_trim", nam.input_gain_db));
+        core.params
+            .push(Param::new("output_trim", nam.output_gain_db));
         Amp { core, nam }
     }
 
@@ -341,10 +357,16 @@ pub struct Cabinet {
 
 impl Cabinet {
     fn ir(id: BlockId, conv: Convolver) -> Self {
-        Cabinet { core: BlockCore::new(id, BlockRole::Cabinet), dsp: CabDsp::Ir(conv) }
+        Cabinet {
+            core: BlockCore::new(id, BlockRole::Cabinet),
+            dsp: CabDsp::Ir(conv),
+        }
     }
     fn neural(id: BlockId, nam: NamProcessor) -> Self {
-        Cabinet { core: BlockCore::new(id, BlockRole::Cabinet), dsp: CabDsp::Neural(nam) }
+        Cabinet {
+            core: BlockCore::new(id, BlockRole::Cabinet),
+            dsp: CabDsp::Neural(nam),
+        }
     }
 
     pub fn display_name(&self) -> &str {
@@ -399,7 +421,10 @@ pub struct Plugin {
 
 impl Plugin {
     fn build(id: BlockId, role: BlockRole, inner: Box<dyn PluginInstance>) -> Self {
-        Plugin { core: BlockCore::new(id, role), inner }
+        Plugin {
+            core: BlockCore::new(id, role),
+            inner,
+        }
     }
 
     pub fn display_name(&self) -> String {
@@ -498,7 +523,11 @@ impl ParallelSum {
             let p = (lane.pan.clamp(-1.0, 1.0) + 1.0) * 0.5; // 0..1
             let gain_l = lvl * (1.0 - p).sqrt();
             let gain_r = lvl * p.sqrt();
-            rt.push(ParallelLaneRt { instances, gain_l, gain_r });
+            rt.push(ParallelLaneRt {
+                instances,
+                gain_l,
+                gain_r,
+            });
         }
         Ok(ParallelSum {
             core: BlockCore::new(id, BlockRole::Utility),
@@ -736,7 +765,10 @@ pub enum Node {
     Block(Box<dyn Block>),
     /// Split → lanes → sum. **Phase B**: lowers to daw sends + buses; today the
     /// foundation flattens lanes into the series spine when realizing.
-    Parallel { lanes: Vec<Lane>, mix: ParallelMix },
+    Parallel {
+        lanes: Vec<Lane>,
+        mix: ParallelMix,
+    },
 }
 
 /// The signal graph of a patch — a series spine with optional parallel sections.
@@ -818,7 +850,9 @@ impl Chain {
     /// Whether any node is a [`Node::Parallel`] (needs [`lower_parallels`] to
     /// realize on the live rig).
     pub fn has_parallel(&self) -> bool {
-        self.nodes.iter().any(|n| matches!(n, Node::Parallel { .. }))
+        self.nodes
+            .iter()
+            .any(|n| matches!(n, Node::Parallel { .. }))
     }
 
     /// Number of blocks (flattened across parallel lanes).
@@ -828,9 +862,7 @@ impl Chain {
                 .iter()
                 .map(|n| match n {
                     Node::Block(_) => 1,
-                    Node::Parallel { lanes, .. } => {
-                        lanes.iter().map(|l| count(&l.chain)).sum()
-                    }
+                    Node::Parallel { lanes, .. } => lanes.iter().map(|l| count(&l.chain)).sum(),
                 })
                 .sum()
         }
@@ -861,8 +893,14 @@ impl ChainBuilder {
     /// Append a parallel section built by `f`.
     #[must_use]
     pub fn parallel(mut self, f: impl FnOnce(ParallelBuilder) -> ParallelBuilder) -> Self {
-        let pb = f(ParallelBuilder { lanes: Vec::new(), mix: ParallelMix::default() });
-        self.nodes.push(Node::Parallel { lanes: pb.lanes, mix: pb.mix });
+        let pb = f(ParallelBuilder {
+            lanes: Vec::new(),
+            mix: ParallelMix::default(),
+        });
+        self.nodes.push(Node::Parallel {
+            lanes: pb.lanes,
+            mix: pb.mix,
+        });
         self
     }
 
@@ -880,8 +918,16 @@ pub struct ParallelBuilder {
 impl ParallelBuilder {
     #[must_use]
     pub fn lane(mut self, f: impl FnOnce(LaneBuilder) -> LaneBuilder) -> Self {
-        let lb = f(LaneBuilder { chain: Vec::new(), level: Db::UNITY, pan: 0.0 });
-        self.lanes.push(Lane { chain: lb.chain, level: lb.level, pan: lb.pan });
+        let lb = f(LaneBuilder {
+            chain: Vec::new(),
+            level: Db::UNITY,
+            pan: 0.0,
+        });
+        self.lanes.push(Lane {
+            chain: lb.chain,
+            level: lb.level,
+            pan: lb.pan,
+        });
         self
     }
     #[must_use]
@@ -929,7 +975,11 @@ pub struct Snapshot {
 
 impl Snapshot {
     pub fn new(id: impl Into<SnapshotId>) -> Self {
-        Snapshot { id: id.into(), params: Vec::new(), bypass: Vec::new() }
+        Snapshot {
+            id: id.into(),
+            params: Vec::new(),
+            bypass: Vec::new(),
+        }
     }
 
     /// Set `"block.param"` to `value` in this snapshot.
@@ -1186,7 +1236,11 @@ impl ProfileBuilder {
         if let Some(e) = self.error {
             return Err(e);
         }
-        Ok(Profile { id: self.id, patches: self.patches, default: self.default })
+        Ok(Profile {
+            id: self.id,
+            patches: self.patches,
+            default: self.default,
+        })
     }
 }
 
@@ -1645,7 +1699,11 @@ pub struct BlockToggle {
 
 impl BlockToggle {
     pub fn footswitch(sw: u8, block: impl Into<BlockId>) -> Self {
-        BlockToggle { footswitch: sw, block: block.into(), on: false }
+        BlockToggle {
+            footswitch: sw,
+            block: block.into(),
+            on: false,
+        }
     }
 }
 
@@ -1868,15 +1926,12 @@ mod tests {
         let profile = Profile {
             id: ProfileId::new("Metal"),
             default: 1,
-            patches: vec![
-                Patch::new("Clean", Chain { nodes: Vec::new() }),
-                {
-                    let mut p = Patch::new("Lead", Chain { nodes: Vec::new() });
-                    p.input_trim = Db(2.0);
-                    p.output_trim = Db(-1.0);
-                    p
-                },
-            ],
+            patches: vec![Patch::new("Clean", Chain { nodes: Vec::new() }), {
+                let mut p = Patch::new("Lead", Chain { nodes: Vec::new() });
+                p.input_trim = Db(2.0);
+                p.output_trim = Db(-1.0);
+                p
+            }],
         };
         let rp = profile.to_rig_profile();
         assert_eq!(rp.name, "Metal");
@@ -1948,8 +2003,7 @@ mod tests {
     /// missing files, so chains may be empty, but shape + names hold).
     #[test]
     fn from_styx_reuses_existing_parser() {
-        let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/worship.styx");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/worship.styx");
         // from_styx loads block DSP; the example's model paths don't exist in
         // CI, so fall back to the infallible adapter to assert the shape.
         let rp = RigProfile::from_styx_file(&path).expect("parse worship.styx");
@@ -2050,7 +2104,10 @@ mod tests {
     #[test]
     fn lower_parallels_collapses_to_one_block() {
         let chain = Chain::builder()
-            .block(Cabinet::ir(BlockId::new("pre"), Convolver::from_ir(vec![1.0], "Pre")))
+            .block(Cabinet::ir(
+                BlockId::new("pre"),
+                Convolver::from_ir(vec![1.0], "Pre"),
+            ))
             .parallel(|par| {
                 par.lane(|l| {
                     l.block(Cabinet::ir(
@@ -2080,10 +2137,20 @@ mod tests {
     #[test]
     fn lower_parallels_rejects_nesting() {
         // Build a lane whose chain itself contains a Parallel node by hand.
-        let inner = Node::Parallel { lanes: Vec::new(), mix: ParallelMix::default() };
-        let lane = Lane { chain: vec![inner], level: Db::UNITY, pan: 0.0 };
+        let inner = Node::Parallel {
+            lanes: Vec::new(),
+            mix: ParallelMix::default(),
+        };
+        let lane = Lane {
+            chain: vec![inner],
+            level: Db::UNITY,
+            pan: 0.0,
+        };
         let chain = Chain {
-            nodes: vec![Node::Parallel { lanes: vec![lane], mix: ParallelMix::default() }],
+            nodes: vec![Node::Parallel {
+                lanes: vec![lane],
+                mix: ParallelMix::default(),
+            }],
         };
         assert!(chain.lower_parallels().is_err());
     }
@@ -2109,9 +2176,12 @@ mod tests {
             level: Db::UNITY,
             pan: 1.0, // full right
         };
-        let mut sum =
-            ParallelSum::lower(BlockId::new("par"), vec![lane_l, lane_r], &ParallelMix::default())
-                .expect("lower");
+        let mut sum = ParallelSum::lower(
+            BlockId::new("par"),
+            vec![lane_l, lane_r],
+            &ParallelMix::default(),
+        )
+        .expect("lower");
         sum.prepare(48_000.0, 64).unwrap();
         const N: usize = 64;
         let inp: Vec<f32> = (0..N).map(|i| (i as f32 * 0.1).sin() * 0.5).collect();
@@ -2143,6 +2213,10 @@ mod tests {
         let rig_block = RigBlock::nam("/amps/Soldano.nam");
         let rig_id = crate::rig::default_block_id_for_test(&rig_block.path);
         assert_eq!(api_id.as_str(), "Soldano");
-        assert_eq!(api_id.as_str(), rig_id, "api id must match the rig's slot id");
+        assert_eq!(
+            api_id.as_str(),
+            rig_id,
+            "api id must match the rig's slot id"
+        );
     }
 }

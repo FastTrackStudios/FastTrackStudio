@@ -11,7 +11,7 @@
 //! the deep impls are Phase-B TODOs.
 
 use super::model::SampleSlice;
-use super::prim::{ArticulationId, Cc, Frames, MicId, Note, U14, U7, Velocity};
+use super::prim::{ArticulationId, Cc, Frames, MicId, Note, Velocity, U14, U7};
 
 // ── Render buffers — mics are first-class ────────────────────────────────
 
@@ -303,15 +303,30 @@ mod tests {
         let mut b_l = [0.5f32, 0.5];
         let mut b_r = [0.5f32, 0.5];
         let mut mics = [
-            (MicId::new("A"), StereoBuf { l: &mut a_l, r: &mut a_r }),
-            (MicId::new("B"), StereoBuf { l: &mut b_l, r: &mut b_r }),
+            (
+                MicId::new("A"),
+                StereoBuf {
+                    l: &mut a_l,
+                    r: &mut a_r,
+                },
+            ),
+            (
+                MicId::new("B"),
+                StereoBuf {
+                    l: &mut b_l,
+                    r: &mut b_r,
+                },
+            ),
         ];
         let block = MicBlock::new(2, &mut mics);
 
         let mut m_l = [0.0f32, 0.0];
         let mut m_r = [0.0f32, 0.0];
         let mut graph = BusGraph {
-            master: StereoBuf { l: &mut m_l, r: &mut m_r },
+            master: StereoBuf {
+                l: &mut m_l,
+                r: &mut m_r,
+            },
         };
         SumMixer.route(&block, &mut graph);
         assert_eq!(m_l, [1.5, 1.5]);
@@ -325,7 +340,10 @@ mod tests {
         fx.prepare(48_000.0, 512);
         let mut l = [1.0f32];
         let mut r = [1.0f32];
-        fx.process(&mut StereoBuf { l: &mut l, r: &mut r });
+        fx.process(&mut StereoBuf {
+            l: &mut l,
+            r: &mut r,
+        });
         assert_eq!(l, [1.0]);
 
         let mut m = ConstModulator(0.7);

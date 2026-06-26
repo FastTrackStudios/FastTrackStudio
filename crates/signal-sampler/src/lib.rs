@@ -63,40 +63,40 @@ pub mod rig_manager;
 pub mod rig_prefs;
 pub mod rig_profile;
 pub mod runtime;
-pub mod sampler_rig;
-pub mod stats;
 pub mod sample_map;
+pub mod sampler_rig;
 pub mod spec;
+pub mod stats;
 
 pub use bank::{PreloadProfile, SamplerBank};
 pub use block::{BlockParams, BlockSpec, SamplerBlock};
-pub use engine::SampleEngine;
+pub use convolver::Convolver;
 pub use engine::cache::SignalPcmPack;
-pub use instrument::SamplerInstrument;
+pub use engine::SampleEngine;
 pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
+pub use instrument::SamplerInstrument;
 pub use mixer::{
     Bus, BusStrip, ChannelStrip, DirectChannel, DrumMixer, EngineStrip, FxBackend, FxSlotStrip,
     MixerLayout, MixerMeters, Send as MixerSend, SendStrip,
 };
 pub use module_spec::{ModulePort, ModuleSpec};
 pub use nam::NamProcessor;
-pub use stats::AudioStatsSnapshot;
-pub use convolver::Convolver;
-pub use rig::{DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
-pub use sampler_rig::{BusTrack, InstrumentTrack, SamplerRig};
-pub use rig_manager::RigManager;
-pub use rig_prefs::RigAudioPrefs;
-pub use rig_profile::{ProfileRig, RigPatch, RigProfile};
 pub use preset_spec::{
     MacroDef, MacroTarget, MasterFxSlot, NoteRoute, PresetEngineRef, PresetModuleRef, PresetSpec,
     RoutingRule,
 };
+pub use rig::{DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
+pub use rig_manager::RigManager;
+pub use rig_prefs::RigAudioPrefs;
+pub use rig_profile::{ProfileRig, RigPatch, RigProfile};
 pub use runtime::{
     BufferRef, EngineInstance, LayerRuntime, ModuleInstance, PortRuntime, PresetRuntime,
     ResolvedEdge,
 };
 pub use sample_map::{SampleKey, SampleMap};
+pub use sampler_rig::{BusTrack, InstrumentTrack, SamplerRig};
 pub use spec::LibrarySpec;
+pub use stats::AudioStatsSnapshot;
 
 use std::path::Path;
 
@@ -143,7 +143,7 @@ pub mod pack {
     }
 }
 
-pub use pack::{PackHeader, read_pack_header};
+pub use pack::{read_pack_header, PackHeader};
 
 /// Identifier for a loaded instrument within the bank.
 pub type InstrumentId = String;

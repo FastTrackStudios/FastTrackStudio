@@ -12,8 +12,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::block::{BlockSpec, ParamOverride, SamplerBlock};
 use crate::engine::cache::{EvictStats, PreloadStats, SampleCache};
@@ -105,7 +105,11 @@ struct PendingPreload {
 
 fn resolve_relative(path_str: &str, base_dir: &Path) -> PathBuf {
     let p = PathBuf::from(path_str);
-    if p.is_absolute() { p } else { base_dir.join(p) }
+    if p.is_absolute() {
+        p
+    } else {
+        base_dir.join(p)
+    }
 }
 
 /// Map an instrument tag to a drum-kit preload priority. Lower values are

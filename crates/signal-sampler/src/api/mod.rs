@@ -33,8 +33,8 @@ pub mod traits;
 // ── Curated re-exports ───────────────────────────────────────────────────
 
 pub use prim::{
-    Axis, Cc, Cents, Db, Frames, Interned, Interval, MidiCh, Note, Seconds, U14, U7, Velocity,
-    ArticulationId, GroupId, InstrumentId, MicId, ZoneId,
+    ArticulationId, Axis, Cc, Cents, Db, Frames, GroupId, InstrumentId, Interned, Interval, MicId,
+    MidiCh, Note, Seconds, Velocity, ZoneId, U14, U7,
 };
 
 pub use model::{
@@ -54,10 +54,11 @@ pub use engine::EngineInstrument;
 pub use adapt::{pre_delay_curve, CacheLoader, CacheZoneLayers};
 
 pub use rig::{
-    Amp, Block, BlockId, BlockRole, BlockToggle, Cabinet, CabDsp, Chain, ChainBuilder, ControlEvent,
-    Controller, DawRig, ExpressionBind, Lane, Node, ParallelMix, Param as RigParam, ParamRef,
-    Patch, PatchBuilder, PatchId, PatchStepper, Plugin, Profile, ProfileBuilder, ProfileId,
-    ProgramChangeMap, Rig, Snapshot, SnapshotId, SnapshotSwitcher, TapTempo, TunerReading, block,
+    block, Amp, Block, BlockId, BlockRole, BlockToggle, CabDsp, Cabinet, Chain, ChainBuilder,
+    ControlEvent, Controller, DawRig, ExpressionBind, Lane, Node, ParallelMix, Param as RigParam,
+    ParamRef, Patch, PatchBuilder, PatchId, PatchStepper, Plugin, Profile, ProfileBuilder,
+    ProfileId, ProgramChangeMap, Rig, Snapshot, SnapshotId, SnapshotSwitcher, TapTempo,
+    TunerReading,
 };
 
 pub use script::{

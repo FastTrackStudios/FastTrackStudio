@@ -283,7 +283,10 @@ mod tests {
         let energy: f64 = ol.iter().map(|x| (*x as f64).powi(2)).sum();
         assert!(energy > 1e-9, "NAM output should be non-silent");
         for i in 0..N {
-            assert!((ol[i] - or_[i]).abs() < 1e-9, "L/R must match (mono broadcast)");
+            assert!(
+                (ol[i] - or_[i]).abs() < 1e-9,
+                "L/R must match (mono broadcast)"
+            );
             assert!(
                 (ol[i] - inter[2 * i]).abs() < 1e-5,
                 "planar vs interleaved diverge at {i}: {} != {}",

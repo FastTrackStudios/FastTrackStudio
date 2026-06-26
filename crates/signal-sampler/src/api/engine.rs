@@ -22,7 +22,7 @@
 
 use crate::engine::SampleEngine;
 
-use super::prim::{ArticulationId, Cc, Frames, MicId, Note, U14, U7, Velocity};
+use super::prim::{ArticulationId, Cc, Frames, MicId, Note, Velocity, U14, U7};
 use super::traits::{Instrument, MicBlock};
 
 /// [`SampleEngine`] presented as an [`Instrument`].
@@ -53,11 +53,7 @@ impl EngineInstrument {
             .map(|a| ArticulationId::new(&a.id))
             .collect::<Vec<_>>();
         let active = ArticulationId::new(engine.articulation());
-        let mic_ids = engine
-            .mic_ids()
-            .iter()
-            .map(MicId::new)
-            .collect::<Vec<_>>();
+        let mic_ids = engine.mic_ids().iter().map(MicId::new).collect::<Vec<_>>();
         Self {
             engine,
             articulation_ids,
@@ -253,8 +249,7 @@ zones (
     /// audio via the existing `SampleEngine`.
     #[test]
     fn note_on_then_render_produces_audio() {
-        let dir =
-            std::env::temp_dir().join(format!("signal-api-engine-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("signal-api-engine-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("mkdir");
 
         let mut inst = EngineInstrument::new(minimal_engine(&dir));
@@ -273,7 +268,10 @@ zones (
             {
                 let mut mics = [(
                     MicId::new(""),
-                    StereoBuf { l: &mut l, r: &mut r },
+                    StereoBuf {
+                        l: &mut l,
+                        r: &mut r,
+                    },
                 )];
                 let mut block = MicBlock::new(frames, &mut mics);
                 inst.render(&mut block);
@@ -284,7 +282,10 @@ zones (
             }
         }
         let rms = (energy / count.max(1) as f64).sqrt();
-        assert!(rms > 1e-4, "rendered output should be non-silent, rms={rms}");
+        assert!(
+            rms > 1e-4,
+            "rendered output should be non-silent, rms={rms}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

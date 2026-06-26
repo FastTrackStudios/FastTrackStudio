@@ -737,7 +737,11 @@ fn parse_extended80(b: &[u8]) -> f64 {
     }
     let unbiased = exp as i32 - 16383;
     let f = (mant as f64) * 2f64.powi(unbiased - 63);
-    if sign { -f } else { f }
+    if sign {
+        -f
+    } else {
+        f
+    }
 }
 
 fn load_wav(path: &Path) -> Result<SampleData, SamplerError> {

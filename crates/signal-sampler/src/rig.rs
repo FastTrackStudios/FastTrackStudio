@@ -36,18 +36,26 @@
 //! (post-input-trim, pre-amp) into a shared atomic.
 
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 
 use facet::Facet;
 
 use daw::service::{
     FxChainContext, FxChains, FxParams, ProjectContext, ProjectInfo, RecordInput, TrackRef, Tracks,
 };
-use daw::standalone::Standalone;
-use daw::standalone::audio_engine::AudioEngine;
-use daw::standalone::metering::{Meters, linear_to_db};
+// The rig's realtime engine. On Linux with the `pipewire` feature it's the
+// native duplex `pw_filter` engine (one callback, no ring, low latency); the
+// cpal `AudioEngine` is the fallback. Both share `with_project_prefs` +
+// `sample_rate`, so the open path below is engine-agnostic.
+#[cfg(not(all(feature = "pipewire", target_os = "linux")))]
+use daw::standalone::audio_engine::AudioEngine as RigEngine;
+#[cfg(all(feature = "pipewire", target_os = "linux"))]
+use daw::standalone::audio_engine::DuplexAudioEngine as RigEngine;
+use daw::standalone::metering::{linear_to_db, Meters};
 use daw::standalone::transport_engine::{PlayStateRepr, TransportShared};
+use daw::standalone::Standalone;
+use daw_audio_io::duplex::EngineStats;
 use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
 };
@@ -74,7 +82,11 @@ const MAX_CHAIN_SLOTS: usize = 8;
 pub type ModelId = u32;
 
 fn db_to_lin(db: f32) -> f32 {
-    if db == 0.0 { 1.0 } else { 10f32.powf(db / 20.0) }
+    if db == 0.0 {
+        1.0
+    } else {
+        10f32.powf(db / 20.0)
+    }
 }
 
 /// One block in a patch's FX chain — a backend kind plus a file path.
@@ -120,7 +132,10 @@ impl RigBlock {
 
     /// A hosted plugin block that restores a saved state chunk.
     pub fn plugin_with_state(path: impl Into<String>, state_b64: Option<String>) -> Self {
-        Self { state_b64, ..Self::bare("plugin", path) }
+        Self {
+            state_b64,
+            ..Self::bare("plugin", path)
+        }
     }
 
     fn bare(kind: &str, path: impl Into<String>) -> Self {
@@ -145,7 +160,10 @@ impl RigBlock {
     }
 
     pub fn is_plugin(&self) -> bool {
-        matches!(self.kind.to_ascii_lowercase().as_str(), "plugin" | "clap" | "vst3")
+        matches!(
+            self.kind.to_ascii_lowercase().as_str(),
+            "plugin" | "clap" | "vst3"
+        )
     }
 }
 
@@ -230,7 +248,11 @@ struct InputProbe {
 
 impl InputProbe {
     fn new(shared: Arc<InputMeterShared>) -> Self {
-        Self { shared, prepared: true, mono: Vec::with_capacity(MAX_BLOCK) }
+        Self {
+            shared,
+            prepared: true,
+            mono: Vec::with_capacity(MAX_BLOCK),
+        }
     }
 }
 
@@ -448,8 +470,11 @@ struct SwapState {
 /// active patch, running on daw's realtime [`AudioEngine`].
 pub struct GuitarRig {
     daw: Standalone,
-    // The engine owns the cpal output + live-input streams; drop = stop.
-    _engine: AudioEngine,
+    // The realtime engine (duplex pw_filter or cpal); drop = stop audio.
+    _engine: RigEngine,
+    /// Live realtime metrics (render time / block size) from the duplex engine,
+    /// driving the rig's DSP-load meter. `None` under the cpal fallback.
+    engine_stats: Option<Arc<EngineStats>>,
     #[allow(dead_code)]
     shared: Arc<TransportShared>,
     meters: Arc<Meters>,
@@ -526,8 +551,9 @@ impl GuitarRig {
         });
         daw.set_current_project(&project_guid);
 
-        let track_guid = <Standalone as Tracks>::add(&daw, ProjectContext::Current, RIG_TRACK_NAME, None)
-            .map_err(|e| eyre::eyre!("rig: add track failed: {e}"))?;
+        let track_guid =
+            <Standalone as Tracks>::add(&daw, ProjectContext::Current, RIG_TRACK_NAME, None)
+                .map_err(|e| eyre::eyre!("rig: add track failed: {e}"))?;
 
         // 2. Arm the track to monitor the hardware input channel — this is what
         //    makes daw's engine open a live input stream and feed the bus.
@@ -535,7 +561,9 @@ impl GuitarRig {
             &daw,
             ProjectContext::Current,
             TrackRef::guid(track_guid.as_str()),
-            RecordInput::Audio { channel: prefs.input_channel as u32 },
+            RecordInput::Audio {
+                channel: prefs.input_channel as u32,
+            },
         )
         .map_err(|e| eyre::eyre!("rig: set record input failed: {e}"))?;
 
@@ -558,7 +586,7 @@ impl GuitarRig {
         //    stream even before a track is read as armed.
         let req_rate = prefs.sample_rate_opt().unwrap_or(48_000);
         let shared = Arc::new(TransportShared::new(req_rate, 120.0));
-        let engine = AudioEngine::with_project_prefs(
+        let engine = RigEngine::with_project_prefs(
             daw.clone(),
             project_guid.clone(),
             shared.clone(),
@@ -566,6 +594,11 @@ impl GuitarRig {
         )
         .map_err(|e| eyre::eyre!("rig: audio engine failed: {e}"))?;
         let sample_rate = engine.sample_rate();
+        // Duplex engine surfaces live render-time metrics; cpal fallback doesn't.
+        #[cfg(all(feature = "pipewire", target_os = "linux"))]
+        let engine_stats = Some(engine.stats());
+        #[cfg(not(all(feature = "pipewire", target_os = "linux")))]
+        let engine_stats: Option<Arc<EngineStats>> = None;
 
         // Per-track meter bank (one cell, post-fader output peak). Install AFTER
         // the engine opens so it's sized for the device; the renderer reads
@@ -590,15 +623,16 @@ impl GuitarRig {
         //    through the chain to master) every block.
         shared.set_play_state(PlayStateRepr::Playing);
 
+        // Tracing only — never println/eprintln here: the live-rig TUI owns the
+        // terminal, and a stray write to stdout/stderr corrupts the render. A
+        // re-open (device/latency change) calls this while the TUI is up.
         tracing::info!(
             input_channel = prefs.input_channel,
             sample_rate,
             project = %project_guid,
-            "signal-sampler: guitar rig started on daw engine"
-        );
-        eprintln!(
-            "Guitar rig (daw engine): in ch{} → FX chain → master @ {} Hz",
-            prefs.input_channel, sample_rate,
+            "signal-sampler: guitar rig started on daw engine (in ch{} → FX chain → master @ {} Hz)",
+            prefs.input_channel,
+            sample_rate,
         );
 
         let effective = RigAudioPrefs {
@@ -612,6 +646,7 @@ impl GuitarRig {
         Ok(Self {
             daw,
             _engine: engine,
+            engine_stats,
             shared,
             meters,
             project_guid,
@@ -724,11 +759,14 @@ impl GuitarRig {
             primary_expected_sr,
         };
         self.slots.push(info.clone());
-        self.swap
-            .lock()
-            .unwrap()
-            .chains
-            .insert(id, ResidentChain { info, boxes, block_ids: ids });
+        self.swap.lock().unwrap().chains.insert(
+            id,
+            ResidentChain {
+                info,
+                boxes,
+                block_ids: ids,
+            },
+        );
         Ok(id)
     }
 
@@ -765,7 +803,8 @@ impl GuitarRig {
         // must not leak across a patch switch.)
         let fx_ctx = FxChainContext::track(self.track_guid.clone());
         for slot in 1..self.slot_guids.len() {
-            let _ = <Standalone as FxChains>::set_enabled(&self.daw, fx_ctx.clone(), slot as u32, true);
+            let _ =
+                <Standalone as FxChains>::set_enabled(&self.daw, fx_ctx.clone(), slot as u32, true);
         }
 
         // 1. Reclaim the previously-active chain's boxes back into the resident
@@ -799,7 +838,10 @@ impl GuitarRig {
             }
             None => {
                 for guid in chain_guids {
-                    drop(self.daw.insert_plugin_instance(guid.clone(), Self::fresh_identity(sr)));
+                    drop(
+                        self.daw
+                            .insert_plugin_instance(guid.clone(), Self::fresh_identity(sr)),
+                    );
                 }
                 // When bypassed, remember the requested (known) id so toggling
                 // bypass off re-arms it; otherwise we're cleanly passthrough.
@@ -909,10 +951,14 @@ impl GuitarRig {
             .unwrap_or(0.0)
     }
 
-    /// Input-stream overruns. daw's engine counts these internally; not yet
-    /// surfaced through a public API, so reported as 0.
+    /// Realtime xruns. The duplex engine has no input ring (input and output are
+    /// the same callback), so ring under/overruns don't exist; graph-deadline
+    /// xruns aren't surfaced yet, so this reads 0.
     pub fn underruns(&self) -> u64 {
-        0
+        self.engine_stats
+            .as_ref()
+            .map(|s| s.xruns.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(0)
     }
 
     pub fn overruns(&self) -> u64 {
@@ -923,24 +969,45 @@ impl GuitarRig {
         self.slots.len() as u64
     }
 
-    /// DSP load metrics are owned by daw's engine and not surfaced yet.
+    /// Last block's render time in microseconds (the DSP-load numerator),
+    /// measured by the duplex engine's realtime callback.
     pub fn render_us(&self) -> u32 {
-        0
+        self.engine_stats
+            .as_ref()
+            .map(|s| (s.render_ns.load(std::sync::atomic::Ordering::Relaxed) / 1000) as u32)
+            .unwrap_or(0)
     }
 
     pub fn peak_render_us(&self) -> u32 {
-        0
+        self.engine_stats
+            .as_ref()
+            .map(|s| (s.peak_render_ns.load(std::sync::atomic::Ordering::Relaxed) / 1000) as u32)
+            .unwrap_or(0)
     }
 
-    pub fn reset_render_peak(&self) {}
+    pub fn reset_render_peak(&self) {
+        if let Some(s) = &self.engine_stats {
+            s.reset_peak();
+        }
+    }
 
-    /// Frames in the last block — the running buffer/quantum, from prefs.
+    /// Frames in the last block (the running buffer/quantum) — from the engine's
+    /// live metrics, falling back to the configured buffer before the first block.
     pub fn block_frames(&self) -> u32 {
-        self.prefs.buffer_size
+        let live = self
+            .engine_stats
+            .as_ref()
+            .map(|s| s.block_frames.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(0);
+        if live > 0 {
+            live
+        } else {
+            self.prefs.buffer_size
+        }
     }
 
-    /// Bridge latency between input and output. daw's engine bridges via its own
-    /// ring; not surfaced as a frame count yet.
+    /// Input→output bridge latency. The duplex engine processes input and output
+    /// in one callback (no ring), so this is genuinely 0.
     pub fn ring_frames(&self) -> u32 {
         0
     }
@@ -1059,9 +1126,7 @@ impl GuitarRig {
 
         // 2. Hosted plugin — resolve param name → slot index, then FxParams::set.
         let param_slot = self.daw.with_plugin_instance(&guid, |inst| {
-            inst.params()
-                .into_iter()
-                .position(|p| p.name == param_name)
+            inst.params().into_iter().position(|p| p.name == param_name)
         });
         let Some(Some(param_idx)) = param_slot else {
             return false;
@@ -1151,11 +1216,12 @@ mod tests {
     /// Building a NAM block produces a prepared, non-silent `PluginInstance`.
     #[test]
     fn build_block_nam_produces_audio() {
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/assets/amp_a.nam");
-        let Ok((mut boxed, name, _loud, _sr)) =
-            build_block(&RigBlock::nam(fixture.to_string_lossy().to_string()), 48_000)
-        else {
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/assets/amp_a.nam");
+        let Ok((mut boxed, name, _loud, _sr)) = build_block(
+            &RigBlock::nam(fixture.to_string_lossy().to_string()),
+            48_000,
+        ) else {
             eprintln!("skip: amp_a.nam fixture failed to load");
             return;
         };
@@ -1193,7 +1259,10 @@ mod tests {
         probe
             .process_block(&il, &ir, &mut ol, &mut or_, &PluginEvents::default())
             .unwrap();
-        assert!((shared.load() - 0.8).abs() < 1e-6, "probe records the block peak");
+        assert!(
+            (shared.load() - 0.8).abs() < 1e-6,
+            "probe records the block peak"
+        );
         assert_eq!(ol, il, "probe passes input through unchanged");
     }
 

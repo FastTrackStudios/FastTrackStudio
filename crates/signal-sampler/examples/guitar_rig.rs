@@ -22,7 +22,9 @@ use std::io::BufRead;
 use signal_sampler::{GuitarRig, ProfileRig, RigManager};
 
 fn arg(args: &[String], flag: &str) -> Option<String> {
-    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1).cloned())
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn main() -> eyre::Result<()> {
@@ -39,11 +41,17 @@ fn main() -> eyre::Result<()> {
     if args.iter().any(|a| a == "--list") {
         println!("INPUT devices (channel index is 0-based):");
         for d in GuitarRig::input_devices() {
-            println!("  [{:>2} ch @ {} Hz]  {}", d.channels, d.default_sample_rate, d.name);
+            println!(
+                "  [{:>2} ch @ {} Hz]  {}",
+                d.channels, d.default_sample_rate, d.name
+            );
         }
         println!("\nOUTPUT devices:");
         for d in GuitarRig::output_devices() {
-            println!("  [{:>2} ch @ {} Hz]  {}", d.channels, d.default_sample_rate, d.name);
+            println!(
+                "  [{:>2} ch @ {} Hz]  {}",
+                d.channels, d.default_sample_rate, d.name
+            );
         }
         return Ok(());
     }
@@ -87,10 +95,22 @@ fn main() -> eyre::Result<()> {
     println!(
         "Opening rig '{}'  (input='{}' ch{}, output='{}', profile='{}')",
         mgr.name,
-        if mgr.audio.input_device.is_empty() { "default" } else { &mgr.audio.input_device },
+        if mgr.audio.input_device.is_empty() {
+            "default"
+        } else {
+            &mgr.audio.input_device
+        },
         mgr.audio.input_channel,
-        if mgr.audio.output_device.is_empty() { "default" } else { &mgr.audio.output_device },
-        if mgr.profile_path.is_empty() { "(none)" } else { &mgr.profile_path },
+        if mgr.audio.output_device.is_empty() {
+            "default"
+        } else {
+            &mgr.audio.output_device
+        },
+        if mgr.profile_path.is_empty() {
+            "(none)"
+        } else {
+            &mgr.profile_path
+        },
     );
 
     let mut prig = mgr.open()?;
@@ -155,10 +175,21 @@ fn announce(prig: &ProfileRig, ok: bool) {
 }
 
 fn print_status(prig: &ProfileRig) {
-    println!("profile: {}", prig.profile_name().unwrap_or("(none loaded)"));
+    println!(
+        "profile: {}",
+        prig.profile_name().unwrap_or("(none loaded)")
+    );
     for (i, p) in prig.patches().iter().enumerate() {
-        let mark = if Some(i) == prig.active_index() { "▶" } else { " " };
-        let avail = if prig.is_patch_available(i) { "" } else { "  (model missing)" };
+        let mark = if Some(i) == prig.active_index() {
+            "▶"
+        } else {
+            " "
+        };
+        let avail = if prig.is_patch_available(i) {
+            ""
+        } else {
+            "  (model missing)"
+        };
         println!("  {mark} [{}] {}{avail}", i + 1, p.name);
     }
     let rig = prig.rig();
@@ -188,5 +219,9 @@ fn print_help() {
 }
 
 fn lin_to_db(lin: f32) -> f32 {
-    if lin <= 1e-9 { -120.0 } else { 20.0 * lin.log10() }
+    if lin <= 1e-9 {
+        -120.0
+    } else {
+        20.0 * lin.log10()
+    }
 }

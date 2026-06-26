@@ -19,10 +19,10 @@ use std::path::{Path, PathBuf};
 
 use facet::Facet;
 
-use crate::SamplerError;
 use crate::rig::GuitarRig;
-use crate::rig_prefs::{RigAudioPrefs, signal_config_dir};
+use crate::rig_prefs::{signal_config_dir, RigAudioPrefs};
 use crate::rig_profile::ProfileRig;
+use crate::SamplerError;
 
 /// Saved settings for a specific rig.
 #[derive(Clone, Debug, Facet)]
@@ -60,7 +60,13 @@ impl Default for RigManager {
 fn slugify(name: &str) -> String {
     let mut s: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     while s.contains("--") {
         s = s.replace("--", "-");
@@ -88,7 +94,10 @@ impl RigManager {
     pub fn load(name: &str) -> Self {
         match Self::load_from(&Self::path_for(name)) {
             Ok(m) => m,
-            Err(_) => Self { name: name.to_string(), ..Self::default() },
+            Err(_) => Self {
+                name: name.to_string(),
+                ..Self::default()
+            },
         }
     }
 
@@ -136,7 +145,12 @@ impl RigManager {
         if p.is_absolute() {
             Some(p)
         } else {
-            Some(self.config_path().parent().unwrap_or(Path::new(".")).join(p))
+            Some(
+                self.config_path()
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .join(p),
+            )
         }
     }
 

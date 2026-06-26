@@ -52,20 +52,20 @@ use daw::service::{
     FxChainContext, FxChains, ProjectContext, ProjectInfo, RouteRef, Routing, SendMode, TrackRef,
     Tracks,
 };
-use daw::standalone::Standalone;
 use daw::standalone::audio_engine::AudioEngine;
-use daw::standalone::metering::{Meters, linear_to_db};
+use daw::standalone::metering::{linear_to_db, Meters};
 use daw::standalone::transport_engine::{PlayStateRepr, TransportShared};
+use daw::standalone::Standalone;
 use daw_audio_io::AudioIoPrefs;
 use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
 };
 
 use crate::bank::{PreloadProfile, SamplerBank};
-use crate::engine::SampleEngine;
 use crate::engine::cache::{EvictStats, PreloadStats};
+use crate::engine::SampleEngine;
 use crate::instrument::SamplerInstrument;
-use crate::mixer::{FX_PREPARE_BLOCK, MixerLayout};
+use crate::mixer::{MixerLayout, FX_PREPARE_BLOCK};
 use crate::stats::AudioStatsSnapshot;
 
 /// Stable identifier for a loaded instrument within the rig (e.g. a piece id
@@ -135,7 +135,12 @@ impl BankStats {
 
 impl BankInstrument {
     fn new(bank: Arc<Mutex<SamplerBank>>, stats: Arc<BankStats>) -> Self {
-        Self { bank, stats, scratch: Vec::new(), prepared: false }
+        Self {
+            bank,
+            stats,
+            scratch: Vec::new(),
+            prepared: false,
+        }
     }
 }
 
@@ -227,21 +232,29 @@ impl PluginInstance for BankInstrument {
 fn apply_midi(bank: &mut SamplerBank, message: &daw::service::MidiMessage) {
     use daw::service::MidiMessage;
     match *message {
-        MidiMessage::NoteOn { channel, note, velocity } => {
-            bank.midi_message(channel, 0x90, note, velocity)
-        }
-        MidiMessage::NoteOff { channel, note, velocity } => {
-            bank.midi_message(channel, 0x80, note, velocity)
-        }
-        MidiMessage::ControlChange { channel, controller, value } => {
-            bank.midi_message(channel, 0xB0, controller, value)
-        }
+        MidiMessage::NoteOn {
+            channel,
+            note,
+            velocity,
+        } => bank.midi_message(channel, 0x90, note, velocity),
+        MidiMessage::NoteOff {
+            channel,
+            note,
+            velocity,
+        } => bank.midi_message(channel, 0x80, note, velocity),
+        MidiMessage::ControlChange {
+            channel,
+            controller,
+            value,
+        } => bank.midi_message(channel, 0xB0, controller, value),
         MidiMessage::ChannelPressure { channel, pressure } => {
             bank.midi_message(channel, 0xD0, pressure, 0)
         }
-        MidiMessage::PolyPressure { channel, note, pressure } => {
-            bank.midi_message(channel, 0xA0, note, pressure)
-        }
+        MidiMessage::PolyPressure {
+            channel,
+            note,
+            pressure,
+        } => bank.midi_message(channel, 0xA0, note, pressure),
         _ => {}
     }
 }
@@ -324,7 +337,11 @@ impl SamplerRig {
     /// Open the system default output device (replaces the retired
     /// `SamplerPlayer::new`).
     pub fn new() -> eyre::Result<Self> {
-        Self::open(&AudioIoPrefs { sample_rate: 0, buffer_size: 256, ..Default::default() })
+        Self::open(&AudioIoPrefs {
+            sample_rate: 0,
+            buffer_size: 256,
+            ..Default::default()
+        })
     }
 
     /// Open a specific output device by substring + optional rate / buffer /
@@ -361,7 +378,11 @@ impl SamplerRig {
         #[cfg(feature = "jack")]
         {
             if prefs.buffer_size != 0 && std::env::var_os("PIPEWIRE_LATENCY").is_none() {
-                let rate = if prefs.sample_rate != 0 { prefs.sample_rate } else { 48_000 };
+                let rate = if prefs.sample_rate != 0 {
+                    prefs.sample_rate
+                } else {
+                    48_000
+                };
                 let buf = prefs.buffer_size;
                 unsafe { std::env::set_var("PIPEWIRE_LATENCY", format!("{buf}/{rate}")) };
                 tracing::info!(quantum = %format!("{buf}/{rate}"), "sampler rig: requesting PipeWire low-latency quantum");
@@ -391,7 +412,11 @@ impl SamplerRig {
         // Output-only engine (a sampler generates, never records).
         let mut io = prefs.clone();
         io.want_input = false;
-        let req_rate = if prefs.sample_rate != 0 { prefs.sample_rate } else { 48_000 };
+        let req_rate = if prefs.sample_rate != 0 {
+            prefs.sample_rate
+        } else {
+            48_000
+        };
         let shared = Arc::new(TransportShared::new(req_rate, 120.0));
         let engine =
             AudioEngine::with_project_prefs(daw.clone(), project_guid.clone(), shared.clone(), &io)
@@ -567,7 +592,9 @@ impl SamplerRig {
         match self.bank().lock() {
             Ok(mut bank) => bank.set_preload_profile(profile),
             Err(_) => {
-                tracing::warn!("signal-sampler: sampler bank lock poisoned; preload profile skipped")
+                tracing::warn!(
+                    "signal-sampler: sampler bank lock poisoned; preload profile skipped"
+                )
             }
         }
     }
@@ -754,10 +781,9 @@ impl SamplerRig {
             Some(p) => p,
             None => return Ok(None),
         };
-        let mut bank = self
-            .bank()
-            .lock()
-            .map_err(|_| signal_plugin_host::PluginError::LoadFailed("bank mutex poisoned".into()))?;
+        let mut bank = self.bank().lock().map_err(|_| {
+            signal_plugin_host::PluginError::LoadFailed("bank mutex poisoned".into())
+        })?;
         let slot = bank.install_mixer_plugin(id, target, plugin)?;
         Ok(Some(slot))
     }
@@ -771,10 +797,9 @@ impl SamplerRig {
             Some(p) => p,
             None => return Ok(None),
         };
-        let mut bank = self
-            .bank()
-            .lock()
-            .map_err(|_| signal_plugin_host::PluginError::LoadFailed("bank mutex poisoned".into()))?;
+        let mut bank = self.bank().lock().map_err(|_| {
+            signal_plugin_host::PluginError::LoadFailed("bank mutex poisoned".into())
+        })?;
         let slot = bank.install_preset_master_plugin(id, plugin)?;
         Ok(Some(slot))
     }
@@ -822,7 +847,10 @@ impl SamplerRig {
         target: crate::mixer::FxTarget,
         slot_idx: usize,
     ) -> Option<Vec<signal_plugin_host::PluginParamInfo>> {
-        self.bank().lock().ok()?.mixer_slot_params(id, target, slot_idx)
+        self.bank()
+            .lock()
+            .ok()?
+            .mixer_slot_params(id, target, slot_idx)
     }
 
     pub fn load_mixer_nam(
@@ -832,7 +860,10 @@ impl SamplerRig {
         path: impl AsRef<std::path::Path>,
     ) -> Result<usize, String> {
         let path = path.as_ref().to_path_buf();
-        let mut bank = self.bank().lock().map_err(|_| String::from("bank mutex poisoned"))?;
+        let mut bank = self
+            .bank()
+            .lock()
+            .map_err(|_| String::from("bank mutex poisoned"))?;
         bank.install_mixer_nam(id, target, &path)
     }
 
@@ -842,7 +873,10 @@ impl SamplerRig {
         path: impl AsRef<std::path::Path>,
     ) -> Result<usize, String> {
         let path = path.as_ref().to_path_buf();
-        let mut bank = self.bank().lock().map_err(|_| String::from("bank mutex poisoned"))?;
+        let mut bank = self
+            .bank()
+            .lock()
+            .map_err(|_| String::from("bank mutex poisoned"))?;
         bank.install_preset_master_nam(id, &path)
     }
 
@@ -863,19 +897,31 @@ impl SamplerRig {
 
     /// `(loaded, total)` background-preload progress for an instrument.
     pub fn preload_progress(&self, id: &str) -> (usize, usize) {
-        self.bank().try_lock().map(|bank| bank.preload_progress(id)).unwrap_or((0, 0))
+        self.bank()
+            .try_lock()
+            .map(|bank| bank.preload_progress(id))
+            .unwrap_or((0, 0))
     }
 
     pub fn active_voices(&self, id: &str) -> usize {
-        self.bank().try_lock().map(|bank| bank.active_voices(id)).unwrap_or(0)
+        self.bank()
+            .try_lock()
+            .map(|bank| bank.active_voices(id))
+            .unwrap_or(0)
     }
 
     pub fn stolen_voices(&self, id: &str) -> usize {
-        self.bank().try_lock().map(|bank| bank.stolen_voices(id)).unwrap_or(0)
+        self.bank()
+            .try_lock()
+            .map(|bank| bank.stolen_voices(id))
+            .unwrap_or(0)
     }
 
     pub fn evict_cache_over_budget(&self) -> EvictStats {
-        self.bank().try_lock().map(|bank| bank.evict_cache_over_budget()).unwrap_or_default()
+        self.bank()
+            .try_lock()
+            .map(|bank| bank.evict_cache_over_budget())
+            .unwrap_or_default()
     }
 
     pub fn reset_audio_stats(&self) {
@@ -916,7 +962,9 @@ impl SamplerRig {
     /// cleared before rendering. Only available on an offline rig.
     pub fn render_offline(&self, output: &mut [f32]) -> eyre::Result<()> {
         if !self.is_offline() {
-            return Err(eyre::eyre!("render_offline is only available on SamplerRig::new_offline"));
+            return Err(eyre::eyre!(
+                "render_offline is only available on SamplerRig::new_offline"
+            ));
         }
         let mut bank = self
             .bank()
@@ -997,10 +1045,19 @@ impl SamplerRig {
             .ok_or_else(|| eyre::eyre!("sampler rig: fx slot for {id:?} vanished after add"))?;
 
         let mut inst = SamplerInstrument::new(engine);
-        let _ = daw::plugin::PluginInstance::prepare(&mut inst, self.inner.sample_rate as f64, PREPARE_BLOCK);
+        let _ = daw::plugin::PluginInstance::prepare(
+            &mut inst,
+            self.inner.sample_rate as f64,
+            PREPARE_BLOCK,
+        );
         daw.insert_plugin_instance(fx_guid.clone(), Box::new(inst));
 
-        let track = InstrumentTrack { track_guid, fx_guid, meter_index, piece };
+        let track = InstrumentTrack {
+            track_guid,
+            fx_guid,
+            meter_index,
+            piece,
+        };
         tables.instruments.insert(id.clone(), track.clone());
         tables.order.push(id);
         drop(tables);
@@ -1013,7 +1070,11 @@ impl SamplerRig {
     /// The engine must already be at this rig's [`sample_rate`](Self::sample_rate).
     pub fn add_instrument(&self, id: InstrumentId, engine: SampleEngine) -> eyre::Result<()> {
         {
-            let tables = self.inner.tracks.lock().map_err(|_| eyre::eyre!("track table poisoned"))?;
+            let tables = self
+                .inner
+                .tracks
+                .lock()
+                .map_err(|_| eyre::eyre!("track table poisoned"))?;
             if tables.instruments.contains_key(&id) {
                 return Err(eyre::eyre!("sampler rig: instrument {id:?} already added"));
             }
@@ -1029,12 +1090,20 @@ impl SamplerRig {
             .daw
             .as_ref()
             .ok_or_else(|| eyre::eyre!("bus tracks require a live rig"))?;
-        let mut tables = self.inner.tracks.lock().map_err(|_| eyre::eyre!("track table poisoned"))?;
+        let mut tables = self
+            .inner
+            .tracks
+            .lock()
+            .map_err(|_| eyre::eyre!("track table poisoned"))?;
         let meter_index = 1 + Self::track_count(&tables);
         let name = format!("{bus_id} (bus)");
         let track_guid = <Standalone as Tracks>::add(daw, ProjectContext::Current, &name, None)
             .map_err(|e| eyre::eyre!("sampler rig: add bus track {bus_id:?} failed: {e}"))?;
-        let bus = BusTrack { id: bus_id.to_string(), track_guid, meter_index };
+        let bus = BusTrack {
+            id: bus_id.to_string(),
+            track_guid,
+            meter_index,
+        };
         tables.buses.insert(bus_id.to_string(), bus.clone());
         drop(tables);
         let tables = self.inner.tracks.lock().expect("track table poisoned");
@@ -1043,7 +1112,11 @@ impl SamplerRig {
     }
 
     fn route_to_bus(&self, source_track: &str, bus_track: &str) -> eyre::Result<()> {
-        let daw = self.inner.daw.as_ref().ok_or_else(|| eyre::eyre!("routing requires a live rig"))?;
+        let daw = self
+            .inner
+            .daw
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("routing requires a live rig"))?;
         let ctx = ProjectContext::Current;
         let idx = <Standalone as Routing>::add_send(
             daw,
@@ -1177,7 +1250,11 @@ impl SamplerRig {
 
     /// Number of per-track instruments (per-track API).
     pub fn instrument_count(&self) -> usize {
-        self.inner.tracks.lock().map(|t| t.instruments.len()).unwrap_or(0)
+        self.inner
+            .tracks
+            .lock()
+            .map(|t| t.instruments.len())
+            .unwrap_or(0)
     }
 
     /// The per-track routing entry for an instrument id (per-track API).
@@ -1187,11 +1264,19 @@ impl SamplerRig {
 
     /// Per-track bus tracks, keyed by bus id (per-track API).
     pub fn buses(&self) -> HashMap<String, BusTrack> {
-        self.inner.tracks.lock().map(|t| t.buses.clone()).unwrap_or_default()
+        self.inner
+            .tracks
+            .lock()
+            .map(|t| t.buses.clone())
+            .unwrap_or_default()
     }
 
     fn meters(&self) -> Arc<Meters> {
-        self.inner.meters.lock().map(|m| m.clone()).unwrap_or_else(|_| Meters::new(0))
+        self.inner
+            .meters
+            .lock()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| Meters::new(0))
     }
 
     /// Per-track output peak (linear) for a per-track instrument `id`.
@@ -1284,7 +1369,10 @@ mod tests {
         rig.note_on("missing", 60, 100);
         let mut block = vec![1.0f32; 128 * 2];
         rig.render_offline(&mut block).expect("offline render");
-        assert!(block.iter().all(|s| *s == 0.0), "missing instrument → silence");
+        assert!(
+            block.iter().all(|s| *s == 0.0),
+            "missing instrument → silence"
+        );
     }
 
     #[test]
@@ -1344,7 +1432,10 @@ zones (
             }
         }
         assert!(energy > 1e-6, "loaded zone instrument should produce audio");
-        assert!(rig.active_voices("piano") > 0, "note-on should allocate a voice");
+        assert!(
+            rig.active_voices("piano") > 0,
+            "note-on should allocate a voice"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1406,10 +1497,15 @@ zones (
         let spec_path = dir.join("lib.styx");
         std::fs::write(&spec_path, styx).expect("write styx");
 
-        let prefs = AudioIoPrefs { sample_rate: 48_000, buffer_size: 256, ..Default::default() };
+        let prefs = AudioIoPrefs {
+            sample_rate: 48_000,
+            buffer_size: 256,
+            ..Default::default()
+        };
         let rig = SamplerRig::open(&prefs).expect("open rig");
         assert!(!rig.is_offline());
-        rig.load_instrument("piano", &spec_path, Some(&dir), "", "").expect("load");
+        rig.load_instrument("piano", &spec_path, Some(&dir), "", "")
+            .expect("load");
         rig.preload_instrument("piano").expect("preload");
         rig.note_on("piano", 60, 110);
         // Let the renderer run a few blocks, then check stats moved.
@@ -1427,9 +1523,14 @@ zones (
         let dir = std::env::temp_dir().join(format!("signal-sampler-rig-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("mkdir");
 
-        let prefs = AudioIoPrefs { sample_rate: 48_000, buffer_size: 256, ..Default::default() };
+        let prefs = AudioIoPrefs {
+            sample_rate: 48_000,
+            buffer_size: 256,
+            ..Default::default()
+        };
         let rig = SamplerRig::open(&prefs).expect("open rig");
-        rig.add_instrument("piano".into(), minimal_engine(&dir)).expect("add instrument");
+        rig.add_instrument("piano".into(), minimal_engine(&dir))
+            .expect("add instrument");
         assert_eq!(rig.instrument_count(), 1);
         assert!(rig.instrument("piano").is_some());
         rig.track_note_on("piano", 60, 100);
@@ -1446,7 +1547,11 @@ zones (
         std::fs::create_dir_all(&dir).expect("mkdir");
 
         let layout = kit_layout();
-        let prefs = AudioIoPrefs { sample_rate: 48_000, buffer_size: 256, ..Default::default() };
+        let prefs = AudioIoPrefs {
+            sample_rate: 48_000,
+            buffer_size: 256,
+            ..Default::default()
+        };
 
         let mut engines: HashMap<(usize, String), SampleEngine> = HashMap::new();
         for eng in &layout.engines {
@@ -1454,7 +1559,10 @@ zones (
                 engines.insert((eng.engine_idx, ch.mic_label.clone()), minimal_engine(&dir));
             }
             for snd in &eng.sends {
-                engines.insert((eng.engine_idx, snd.mic_label.clone()), minimal_engine(&dir));
+                engines.insert(
+                    (eng.engine_idx, snd.mic_label.clone()),
+                    minimal_engine(&dir),
+                );
             }
         }
 
@@ -1473,7 +1581,9 @@ zones (
                     TrackRef::guid(&t.track_guid),
                 );
                 assert!(
-                    sends.iter().any(|s| s.dest_track_guid.as_deref() == Some(bus_guid.as_str())),
+                    sends
+                        .iter()
+                        .any(|s| s.dest_track_guid.as_deref() == Some(bus_guid.as_str())),
                     "overhead mic {id} must send to the Overhead bus"
                 );
                 assert!(

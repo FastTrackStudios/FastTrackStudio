@@ -41,16 +41,13 @@ impl Convolver {
     /// and truncates to [`MAX_TAPS`].
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
-        let mut reader = hound::WavReader::open(path)
-            .map_err(|e| format!("open IR {}: {e}", path.display()))?;
+        let mut reader =
+            hound::WavReader::open(path).map_err(|e| format!("open IR {}: {e}", path.display()))?;
         let spec = reader.spec();
         let ch = spec.channels.max(1) as usize;
 
         let interleaved: Vec<f32> = match spec.sample_format {
-            hound::SampleFormat::Float => reader
-                .samples::<f32>()
-                .filter_map(Result::ok)
-                .collect(),
+            hound::SampleFormat::Float => reader.samples::<f32>().filter_map(Result::ok).collect(),
             hound::SampleFormat::Int => {
                 let scale = 1.0 / ((1i64 << (spec.bits_per_sample.max(1) - 1)) as f32);
                 reader
@@ -118,7 +115,11 @@ impl Convolver {
         let taps = self.ir.len();
         self.hist[self.write] = x;
         let mut pos = self.write; // newest sample
-        self.write = if self.write + 1 == taps { 0 } else { self.write + 1 };
+        self.write = if self.write + 1 == taps {
+            0
+        } else {
+            self.write + 1
+        };
 
         let mut acc = 0.0f32;
         for k in 0..taps {
@@ -250,7 +251,11 @@ mod tests {
             out.push(frame[0]);
         }
         for (k, &expected) in ir.iter().enumerate() {
-            assert!((out[k] - expected).abs() < 1e-6, "tap {k}: {} != {expected}", out[k]);
+            assert!(
+                (out[k] - expected).abs() < 1e-6,
+                "tap {k}: {} != {expected}",
+                out[k]
+            );
         }
     }
 
@@ -276,12 +281,20 @@ mod tests {
             let x = if n == 0 { 1.0 } else { 0.0 };
             let (il, ir_in) = ([x], [x]);
             let (mut ol, mut or_) = ([0.0f32], [0.0f32]);
-            c.process_block(&il, &ir_in, &mut ol, &mut or_, &ev).unwrap();
-            assert!((ol[0] - or_[0]).abs() < 1e-9, "L and R must match (mono broadcast)");
+            c.process_block(&il, &ir_in, &mut ol, &mut or_, &ev)
+                .unwrap();
+            assert!(
+                (ol[0] - or_[0]).abs() < 1e-9,
+                "L and R must match (mono broadcast)"
+            );
             out.push(ol[0]);
         }
         for (k, &expected) in ir.iter().enumerate() {
-            assert!((out[k] - expected).abs() < 1e-6, "tap {k}: {} != {expected}", out[k]);
+            assert!(
+                (out[k] - expected).abs() < 1e-6,
+                "tap {k}: {} != {expected}",
+                out[k]
+            );
         }
         assert!(c.is_prepared());
     }

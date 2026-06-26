@@ -513,7 +513,14 @@ fn articulation_from_spec(
         _ => Polyphony::Unlimited,
     };
 
-    let zones = build_zones(spec, mics, dyn_layers_list, dyn_labels, a.rr.max(1) as u32, bind);
+    let zones = build_zones(
+        spec,
+        mics,
+        dyn_layers_list,
+        dyn_labels,
+        a.rr.max(1) as u32,
+        bind,
+    );
 
     let group = Group {
         id: GroupId::new(&a.id),
@@ -733,18 +740,43 @@ zones (
         let mode = LegatoModeSpec {
             enabled_cc58_range: None,
             zones: vec![
-                LegatoZoneSpec { vel_range: [0, 42], label: "slow".into(), delay_ms: 120 },
-                LegatoZoneSpec { vel_range: [43, 85], label: "med".into(), delay_ms: 70 },
-                LegatoZoneSpec { vel_range: [86, 127], label: "fast".into(), delay_ms: 20 },
+                LegatoZoneSpec {
+                    vel_range: [0, 42],
+                    label: "slow".into(),
+                    delay_ms: 120,
+                },
+                LegatoZoneSpec {
+                    vel_range: [43, 85],
+                    label: "med".into(),
+                    delay_ms: 70,
+                },
+                LegatoZoneSpec {
+                    vel_range: [86, 127],
+                    label: "fast".into(),
+                    delay_ms: 20,
+                },
             ],
         };
         let curve = pre_delay_curve(&mode);
         // Soft (vel 10) clamps to the slowest zone's ~120ms; hard (vel 120) to ~20ms.
         let soft = curve.at(Velocity::new(10), super::super::prim::Interval(0));
         let hard = curve.at(Velocity::new(120), super::super::prim::Interval(0));
-        assert!(soft.as_ms() > hard.as_ms(), "soft={} hard={}", soft.as_ms(), hard.as_ms());
-        assert!((soft.as_ms() - 120.0).abs() < 1.0, "soft was {}", soft.as_ms());
-        assert!((hard.as_ms() - 20.0).abs() < 1.0, "hard was {}", hard.as_ms());
+        assert!(
+            soft.as_ms() > hard.as_ms(),
+            "soft={} hard={}",
+            soft.as_ms(),
+            hard.as_ms()
+        );
+        assert!(
+            (soft.as_ms() - 120.0).abs() < 1.0,
+            "soft was {}",
+            soft.as_ms()
+        );
+        assert!(
+            (hard.as_ms() - 20.0).abs() < 1.0,
+            "hard was {}",
+            hard.as_ms()
+        );
         // A mid velocity interpolates strictly between the extremes.
         let mid = curve.at(Velocity::new(64), super::super::prim::Interval(0));
         assert!(mid.as_ms() < soft.as_ms() && mid.as_ms() > hard.as_ms());
@@ -759,8 +791,16 @@ zones (
             expressive: Some(LegatoModeSpec {
                 enabled_cc58_range: None,
                 zones: vec![
-                    LegatoZoneSpec { vel_range: [0, 60], label: "slow".into(), delay_ms: 100 },
-                    LegatoZoneSpec { vel_range: [61, 127], label: "fast".into(), delay_ms: 30 },
+                    LegatoZoneSpec {
+                        vel_range: [0, 60],
+                        label: "slow".into(),
+                        delay_ms: 100,
+                    },
+                    LegatoZoneSpec {
+                        vel_range: [61, 127],
+                        label: "fast".into(),
+                        delay_ms: 30,
+                    },
                 ],
             }),
             low_latency: None,
@@ -769,8 +809,12 @@ zones (
         });
         let leg = legato_from_spec(&spec).expect("legato built");
         assert!(matches!(leg.mode, LegatoMode::Mono));
-        let soft = leg.pre_delay.at(Velocity::new(5), super::super::prim::Interval(0));
-        let hard = leg.pre_delay.at(Velocity::new(127), super::super::prim::Interval(0));
+        let soft = leg
+            .pre_delay
+            .at(Velocity::new(5), super::super::prim::Interval(0));
+        let hard = leg
+            .pre_delay
+            .at(Velocity::new(127), super::super::prim::Interval(0));
         assert!(soft.as_ms() > hard.as_ms());
     }
 
@@ -883,8 +927,8 @@ zones ()
     /// model, and the engine renders audio.
     #[test]
     fn from_patch_builds_engine_and_model() {
-        use super::super::traits::{MicBlock, StereoBuf};
         use super::super::traits::Instrument;
+        use super::super::traits::{MicBlock, StereoBuf};
 
         let dir = std::env::temp_dir().join(format!("signal-adapt-br-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("mkdir");
@@ -908,7 +952,13 @@ zones ()
                 *v = 0.0;
             }
             {
-                let mut mics = [(MicId::new(""), StereoBuf { l: &mut l, r: &mut r })];
+                let mut mics = [(
+                    MicId::new(""),
+                    StereoBuf {
+                        l: &mut l,
+                        r: &mut r,
+                    },
+                )];
                 let mut block = MicBlock::new(frames, &mut mics);
                 inst.render(&mut block);
             }
@@ -917,7 +967,10 @@ zones ()
             }
         }
         let rms = (energy / (frames * 2 * 8) as f64).sqrt();
-        assert!(rms > 1e-4, "engine should render non-silent audio, rms={rms}");
+        assert!(
+            rms > 1e-4,
+            "engine should render non-silent audio, rms={rms}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

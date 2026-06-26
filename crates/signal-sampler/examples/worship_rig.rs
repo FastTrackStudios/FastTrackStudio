@@ -128,8 +128,16 @@ fn print_status(prig: &ProfileRig) {
         prig.profile_name().unwrap_or("(none loaded)")
     );
     for (i, p) in prig.patches().iter().enumerate() {
-        let mark = if Some(i) == prig.active_index() { "▶" } else { " " };
-        let avail = if prig.is_patch_available(i) { "" } else { "  (model missing)" };
+        let mark = if Some(i) == prig.active_index() {
+            "▶"
+        } else {
+            " "
+        };
+        let avail = if prig.is_patch_available(i) {
+            ""
+        } else {
+            "  (model missing)"
+        };
         println!("  {mark} [{}] {}{avail}", i + 1, p.name);
     }
     let rig = prig.rig();
@@ -150,5 +158,9 @@ fn print_help() {
 }
 
 fn lin_to_db(lin: f32) -> f32 {
-    if lin <= 1e-9 { -120.0 } else { 20.0 * lin.log10() }
+    if lin <= 1e-9 {
+        -120.0
+    } else {
+        20.0 * lin.log10()
+    }
 }

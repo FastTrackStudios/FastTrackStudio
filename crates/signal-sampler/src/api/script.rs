@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 
 use super::model::Legato;
-use super::prim::{ArticulationId, Cc, Note, Seconds, U7, Velocity};
+use super::prim::{ArticulationId, Cc, Note, Seconds, Velocity, U7};
 
 /// A raw MIDI message entering the pipeline.
 #[derive(Clone, Copy, Debug)]
@@ -368,7 +368,10 @@ mod tests {
         // A keyswitch press selects the articulation, emits no Play.
         let mut perf = Performance::new(&artics);
         router.on_message(
-            MidiMessage::NoteOn { note: Note(25), vel: Velocity::new(1) },
+            MidiMessage::NoteOn {
+                note: Note(25),
+                vel: Velocity::new(1),
+            },
             &mut perf,
         );
         assert_eq!(perf.active_articulation(), 1);
@@ -377,12 +380,18 @@ mod tests {
         // A normal note passes through as Play.
         let mut perf = Performance::new(&artics);
         router.on_message(
-            MidiMessage::NoteOn { note: Note(60), vel: Velocity::new(100) },
+            MidiMessage::NoteOn {
+                note: Note(60),
+                vel: Velocity::new(100),
+            },
             &mut perf,
         );
         assert_eq!(
             perf.actions(),
-            &[Action::Play { note: Note(60), vel: Velocity::new(100) }]
+            &[Action::Play {
+                note: Note(60),
+                vel: Velocity::new(100)
+            }]
         );
         assert_eq!(perf.held(), &[Note(60)]);
     }
@@ -400,7 +409,10 @@ mod tests {
 
         let mut perf = Performance::new(&artics);
         pipe.on_message(
-            MidiMessage::NoteOn { note: Note(60), vel: Velocity::new(64) },
+            MidiMessage::NoteOn {
+                note: Note(60),
+                vel: Velocity::new(64),
+            },
             &mut perf,
         );
         let actions = perf.actions();
@@ -412,7 +424,13 @@ mod tests {
         } else {
             panic!("expected first action to be a Play from VelocityCurve");
         }
-        assert_eq!(actions[1], Action::Play { note: Note(60), vel: Velocity::new(64) });
+        assert_eq!(
+            actions[1],
+            Action::Play {
+                note: Note(60),
+                vel: Velocity::new(64)
+            }
+        );
     }
 
     #[test]
@@ -420,11 +438,23 @@ mod tests {
         let artics = artics();
         let mut perf = Performance::new(&artics);
         let mut ped = SustainPedal::new(Cc::SUSTAIN);
-        ped.on_message(MidiMessage::Cc { cc: Cc::SUSTAIN, value: U7::new(127) }, &mut perf);
+        ped.on_message(
+            MidiMessage::Cc {
+                cc: Cc::SUSTAIN,
+                value: U7::new(127),
+            },
+            &mut perf,
+        );
         assert!(perf.actions().is_empty());
 
         let mut rr = RoundRobinReset::on_silence(Seconds::from_ms(500.0));
-        rr.on_message(MidiMessage::NoteOn { note: Note(60), vel: Velocity::new(64) }, &mut perf);
+        rr.on_message(
+            MidiMessage::NoteOn {
+                note: Note(60),
+                vel: Velocity::new(64),
+            },
+            &mut perf,
+        );
         assert!(perf.actions().is_empty());
     }
 }

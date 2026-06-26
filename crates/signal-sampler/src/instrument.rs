@@ -70,9 +70,7 @@ impl SamplerInstrument {
                 // routes vel-0 to `note_off`, so just forward.
                 self.engine.note_on(note, velocity);
             }
-            MidiMessage::NoteOff {
-                note, velocity, ..
-            } => {
+            MidiMessage::NoteOff { note, velocity, .. } => {
                 self.engine.note_off_with_velocity(note, velocity);
             }
             MidiMessage::ControlChange {
@@ -291,7 +289,10 @@ zones (
             }
         }
         let rms = (energy / count.max(1) as f64).sqrt();
-        assert!(rms > 1e-4, "rendered output should be non-silent, rms={rms}");
+        assert!(
+            rms > 1e-4,
+            "rendered output should be non-silent, rms={rms}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

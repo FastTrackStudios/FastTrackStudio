@@ -410,7 +410,10 @@ mod tests {
     #[test]
     fn velcurve_breakpoint_interpolation() {
         // CSS pre-delay: soft (vel 20) → 120ms, hard (vel 110) → 20ms.
-        let c = VelCurve::breakpoints([(Velocity::new(20), ms(120.0)), (Velocity::new(110), ms(20.0))]);
+        let c = VelCurve::breakpoints([
+            (Velocity::new(20), ms(120.0)),
+            (Velocity::new(110), ms(20.0)),
+        ]);
         // Endpoints clamp.
         assert_eq!(c.at(Velocity::new(10), Interval(0)), ms(120.0));
         assert_eq!(c.at(Velocity::new(127), Interval(0)), ms(20.0));
@@ -421,7 +424,10 @@ mod tests {
 
     #[test]
     fn velcurve_unsorted_input_sorts() {
-        let c = VelCurve::breakpoints([(Velocity::new(110), ms(20.0)), (Velocity::new(20), ms(120.0))]);
+        let c = VelCurve::breakpoints([
+            (Velocity::new(110), ms(20.0)),
+            (Velocity::new(20), ms(120.0)),
+        ]);
         assert_eq!(c.at(Velocity::new(10), Interval(0)), ms(120.0));
         assert_eq!(c.at(Velocity::new(127), Interval(0)), ms(20.0));
     }
@@ -435,7 +441,8 @@ mod tests {
     #[test]
     fn velcurve_interval_scale_widens() {
         // Wider leaps glide longer: base 100ms scaled by 1 + semis*0.1.
-        let c = VelCurve::constant(ms(100.0)).scaled_by_interval(|i| 1.0 + i.abs_semitones() as f32 * 0.1);
+        let c = VelCurve::constant(ms(100.0))
+            .scaled_by_interval(|i| 1.0 + i.abs_semitones() as f32 * 0.1);
         let step = c.at(Velocity::new(64), Interval(1)); // 1.1x → 110ms
         let leap = c.at(Velocity::new(64), Interval(12)); // 2.2x → 220ms
         assert!(leap.as_ms() > step.as_ms());
