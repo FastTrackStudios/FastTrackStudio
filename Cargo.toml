@@ -24,6 +24,7 @@ members = [
     "features/backends/reaper/daw-perf-test",
     "features/audio/fts-audio-proto",
     "features/audio/daw-audio-io",
+    "features/audio/daw-midi-io",
     "crates/fts-devtools",
     "features/backends/reaper/daw-extension-runtime",
     "crates/daw-module",
@@ -143,8 +144,10 @@ dioxus = "0.7.2"
 tokio = { version = "1.48", features = ["full"] }
 futures = "0.3"
 
-# Hardware MIDI I/O (control surfaces — ALSA on Linux, CoreMIDI on macOS)
-midir = "0.10"
+# Hardware MIDI I/O (control surfaces + daw-midi-io — ALSA on Linux, CoreMIDI
+# on macOS). 0.11 to share one alsa-sys with the rest of the FTS stack (signal
+# is on midir 0.11); the MidiInput/MidiOutput API daw-csi uses is unchanged.
+midir = "0.11"
 # Styx config parsing into Facet types (surface zone definitions).
 # 5.0 pairs with facet 0.50 (same pairing as the fts `input` repo).
 facet-styx = "5.0.0-rc.1"
