@@ -517,6 +517,25 @@ impl SamplerRig {
             .load_instrument(id, spec_path, samples_root, section, mic)
     }
 
+    /// Load an instrument whose samples come from `zones_path` and whose engine
+    /// config (articulations / keyswitch / CC58 / legato / dynamics) comes from
+    /// a separate descriptive spec — required for articulation + keyswitch
+    /// switching on Cinematic Studio libraries (zone specs carry no config).
+    pub fn load_instrument_with_config(
+        &self,
+        id: impl Into<InstrumentId>,
+        config_path: &Path,
+        zones_path: &Path,
+        samples_root: &Path,
+        section: impl Into<String>,
+        mic: impl Into<String>,
+    ) -> eyre::Result<()> {
+        self.bank()
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?
+            .load_instrument_with_config(id, config_path, zones_path, samples_root, section, mic)
+    }
+
     /// Load a `.signalpack`.
     pub fn load_pack(&self, id: impl Into<InstrumentId>, pack_path: &Path) -> eyre::Result<()> {
         self.bank()
@@ -589,6 +608,23 @@ impl SamplerRig {
             Ok(mut bank) => bank.pin_articulation(id, artic),
             Err(_) => tracing::warn!("signal-sampler: bank lock poisoned; pin skipped"),
         }
+    }
+
+    /// Select an instrument's live articulation (the keyswitch / CC58
+    /// equivalent) — only zones of this articulation fire. Unlike
+    /// [`pin_articulation`](Self::pin_articulation) this is the normal melodic
+    /// selection (key range still applies); pinning is for percussion / routing.
+    pub fn set_articulation(&self, id: &str, artic: impl Into<String>) {
+        match self.bank().lock() {
+            Ok(mut bank) => bank.set_articulation(id, artic),
+            Err(_) => tracing::warn!("signal-sampler: bank lock poisoned; set_articulation skipped"),
+        }
+    }
+
+    /// An instrument's current live articulation — reflects keyswitch / CC58
+    /// changes coming from the keyboard, so a UI can display what's selected.
+    pub fn articulation(&self, id: &str) -> Option<String> {
+        self.bank().lock().ok().and_then(|b| b.articulation(id))
     }
 
     /// Switch an instrument's active microphone position (e.g. `"Mix"`).

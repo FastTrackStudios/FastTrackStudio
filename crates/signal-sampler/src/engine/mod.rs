@@ -142,6 +142,10 @@ pub struct SampleEngine {
     /// sounds at once (Main + Mix doubling). `None` keeps the default
     /// play-all-mics behaviour used by multi-mic mixing + drum kits.
     solo_mic: Option<String>,
+    /// MIDI note → index into `keyswitch.notes`: which incoming notes are
+    /// velocity-sensitive keyswitches (selecting articulation / mode) rather
+    /// than sounding. Built from the spec at construction.
+    keyswitch_notes: HashMap<u8, usize>,
 
     /// True when the source pack is a percussion / drum-kit library
     /// (`category` ~ "drum-kit", or a percussion `instrument`). Percussion
@@ -322,6 +326,22 @@ impl SampleEngine {
             }
         };
 
+        // Resolve keyswitch note names → MIDI numbers once (C0 = 12).
+        let keyswitch_notes: HashMap<u8, usize> = patch
+            .spec
+            .keyswitch
+            .as_ref()
+            .map(|ks| {
+                ks.notes
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, kn)| {
+                        crate::midi::note_name_to_midi(&kn.note).ok().map(|n| (n, i))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Self {
             patch,
             cache,
@@ -332,6 +352,7 @@ impl SampleEngine {
             articulation,
             mic,
             solo_mic: None,
+            keyswitch_notes,
             percussion,
             single_attack_key,
             pinned_articulation: None,
@@ -536,10 +557,7 @@ impl SampleEngine {
         if !self.patch.is_zoned() {
             return PreloadStats::default();
         }
-        let pin = self
-            .trigger_articulation
-            .as_ref()
-            .or(self.pinned_articulation.as_ref());
+        let artic = self.effective_articulation();
         let mut stats = PreloadStats::default();
         for (i, z) in self.patch.spec.zones.iter().enumerate() {
             if !zone_trigger_matches(z, ZoneTrigger::Attack) {
@@ -548,8 +566,8 @@ impl SampleEngine {
             if note < z.key_min || note > z.key_max {
                 continue;
             }
-            if let Some(p) = pin {
-                if !z.articulation.eq_ignore_ascii_case(p) {
+            if let Some(p) = artic {
+                if !z.articulation.is_empty() && !z.articulation.eq_ignore_ascii_case(p) {
                     continue;
                 }
             }
@@ -650,6 +668,9 @@ impl SampleEngine {
         if velocity < zone.vel_min || velocity > zone.vel_max {
             return false;
         }
+        // An explicit pin (percussion kits / routed triggers) matches by
+        // articulation ONLY, ignoring the key — any routed note plays the pinned
+        // articulation's zone.
         if let Some(pin) = self
             .trigger_articulation
             .as_ref()
@@ -660,7 +681,33 @@ impl SampleEngine {
         if self.percussion && self.single_attack_key {
             return true;
         }
+        // Melodic libraries: only the currently-selected articulation fires
+        // (set by keyswitch / CC58 / `set_articulation`). Without this filter,
+        // every articulation in a multi-articulation zone set (e.g. CSS ships
+        // ~20 in one set) would sound at once. An empty selection = no filter
+        // (legacy behaviour for libraries that don't switch articulations).
+        if !self.articulation.is_empty()
+            && !zone.articulation.is_empty()
+            && !zone.articulation.eq_ignore_ascii_case(&self.articulation)
+        {
+            return false;
+        }
         note >= zone.key_min && note <= zone.key_max
+    }
+
+    /// The articulation that drives zone selection / warming: an explicit pin
+    /// wins (percussion / routed triggers), otherwise the live selection set by
+    /// keyswitch / CC58 / [`set_articulation`](Self::set_articulation). `None`
+    /// when nothing is selected (legacy "all articulations" behaviour).
+    fn effective_articulation(&self) -> Option<&str> {
+        self.trigger_articulation
+            .as_deref()
+            .or(self.pinned_articulation.as_deref())
+            .or(if self.articulation.is_empty() {
+                None
+            } else {
+                Some(self.articulation.as_str())
+            })
     }
 
     /// Toggle Con Sordino mode.
@@ -754,6 +801,12 @@ impl SampleEngine {
     pub fn note_on(&mut self, note: u8, velocity: u8) {
         if velocity == 0 {
             self.note_off(note);
+            return;
+        }
+
+        // Velocity-sensitive keyswitches (CSS-style): a keyswitch note selects
+        // an articulation / mode and does NOT sound.
+        if self.try_keyswitch(note, velocity) {
             return;
         }
 
@@ -1854,6 +1907,66 @@ impl SampleEngine {
     /// All other labels are treated as articulation IDs or display labels. If Con
     /// Sordino mode is active, the matched articulation is remapped to its sordino
     /// counterpart.
+    /// If `note` is a configured keyswitch, apply its velocity-mapped value and
+    /// return `true` (the note is consumed — keyswitches don't sound).
+    fn try_keyswitch(&mut self, note: u8, velocity: u8) -> bool {
+        let Some(&idx) = self.keyswitch_notes.get(&note) else {
+            return false;
+        };
+        let value = self
+            .patch
+            .spec
+            .keyswitch
+            .as_ref()
+            .and_then(|ks| ks.notes.get(idx))
+            .and_then(|kn| kn.value_for(velocity))
+            .map(|s| s.to_string());
+        if let Some(v) = value {
+            self.apply_keyswitch_value(&v);
+        }
+        true
+    }
+
+    /// Apply a keyswitch value: `+`-joined tokens, each either an `@mode` token
+    /// (`@legato-on`, `@legato-expressive`, `@sordino-off`, …) or a zone
+    /// articulation tag (`Spiccato`, `Leg`, …).
+    fn apply_keyswitch_value(&mut self, value: &str) {
+        for tok in value.split('+').map(str::trim).filter(|t| !t.is_empty()) {
+            match tok {
+                "@ignore" => {}
+                "@legato-on" => self.legato_enabled = true,
+                "@legato-off" => self.legato_enabled = false,
+                "@legato-low" => {
+                    self.legato_enabled = true;
+                    self.legato_expressive = false;
+                }
+                "@legato-expressive" => {
+                    self.legato_enabled = true;
+                    self.legato_expressive = true;
+                }
+                "@sordino-on" => self.set_con_sordino(true),
+                "@sordino-off" => self.set_con_sordino(false),
+                t if t.starts_with('@') => tracing::debug!("unknown keyswitch token {t:?}"),
+                tag => self.select_articulation_tag(tag),
+            }
+        }
+    }
+
+    /// Select an articulation by tag/id/label: prefer a matching declared
+    /// articulation, else use the tag verbatim (zone tags like `"Leg"` aren't
+    /// always declared as articulations). Honours Con Sordino remapping.
+    fn select_articulation_tag(&mut self, tag: &str) {
+        let id = self
+            .patch
+            .spec
+            .articulations
+            .iter()
+            .find(|a| a.id.eq_ignore_ascii_case(tag) || a.label.eq_ignore_ascii_case(tag))
+            .map(|a| a.id.clone())
+            .unwrap_or_else(|| tag.to_string());
+        self.articulation = self.remap_sordino(&id, self.con_sordino);
+    }
+
     fn apply_cc58(&mut self) {
         let Some(ks) = self.patch.spec.keyswitch.as_ref() else {
             return;
@@ -1884,11 +1997,13 @@ impl SampleEngine {
             "Sustain: Low Latency Legato" => {
                 self.legato_enabled = true;
                 self.legato_expressive = false;
+                self.select_articulation_tag("Leg");
                 return;
             }
             "Sustain: Expressive Legato" => {
                 self.legato_enabled = true;
                 self.legato_expressive = true;
+                self.select_articulation_tag("Leg");
                 return;
             }
             "Measured Tremolo" => {
@@ -2930,6 +3045,59 @@ mod tests {
             10,
             ZoneTrigger::Attack
         ));
+    }
+
+    #[test]
+    fn keyswitch_note_selects_articulation_velocity_sensitive() {
+        // Melodic patch (no drum category) with two-articulation zones + a
+        // velocity-sensitive keyswitch note (CSS-style).
+        let mut eng = engine_from_styx(
+            "name \"s\"\n\
+             keyswitch {\n\
+               notes (\n\
+                 {\n\
+                   note \"C0\"\n\
+                   label \"Sustain\"\n\
+                   vel_map { 0-127 \"Leg\" }\n\
+                 }\n\
+                 {\n\
+                   note \"C#0\"\n\
+                   label \"Shorts\"\n\
+                   vel_map {\n\
+                     0-64 \"Spiccato\"\n\
+                     65-127 \"Staccato\"\n\
+                   }\n\
+                 }\n\
+               )\n\
+             }\n\
+             zones (\n\
+               {file \"leg.wav\", key_min 60, key_max 60, root_key 60, vel_min 0, vel_max 127, articulation \"Leg\"}\n\
+               {file \"spic.wav\", key_min 60, key_max 60, root_key 60, vel_min 0, vel_max 127, articulation \"Spiccato\"}\n\
+               {file \"stac.wav\", key_min 60, key_max 60, root_key 60, vel_min 0, vel_max 127, articulation \"Staccato\"}\n\
+             )\n",
+        );
+        let leg = eng.patch().spec.zones[0].clone();
+        let spic = eng.patch().spec.zones[1].clone();
+        let stac = eng.patch().spec.zones[2].clone();
+
+        // A keyswitch note is consumed (returns true) and selects its artic.
+        assert!(eng.try_keyswitch(12, 100)); // C0 = MIDI 12 → Leg
+        assert_eq!(eng.articulation(), "Leg");
+        assert!(eng.zone_selected(&leg, 60, 100, ZoneTrigger::Attack));
+        assert!(!eng.zone_selected(&spic, 60, 100, ZoneTrigger::Attack));
+
+        // Velocity on C#0 picks the variant: soft = Spiccato, hard = Staccato.
+        assert!(eng.try_keyswitch(13, 30));
+        assert_eq!(eng.articulation(), "Spiccato");
+        assert!(eng.zone_selected(&spic, 60, 100, ZoneTrigger::Attack));
+        assert!(!eng.zone_selected(&stac, 60, 100, ZoneTrigger::Attack));
+
+        assert!(eng.try_keyswitch(13, 120));
+        assert_eq!(eng.articulation(), "Staccato");
+        assert!(eng.zone_selected(&stac, 60, 100, ZoneTrigger::Attack));
+
+        // A normal (non-keyswitch) note is NOT consumed — it should sound.
+        assert!(!eng.try_keyswitch(60, 100));
     }
 
     #[test]

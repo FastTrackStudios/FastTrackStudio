@@ -341,6 +341,17 @@ impl SamplerBlock {
         self.engine.pin_articulation(artic);
     }
 
+    /// Select this block's live articulation (keyswitch / CC58 equivalent).
+    /// See [`SampleEngine::set_articulation`].
+    pub fn set_articulation(&mut self, artic: impl Into<String>) {
+        self.engine.set_articulation(artic);
+    }
+
+    /// The block's current live articulation (reflects keyswitch / CC58).
+    pub fn articulation(&self) -> &str {
+        self.engine.articulation()
+    }
+
     /// Switch this block's engine to a microphone position (e.g. `"Mix"`).
     /// See [`SampleEngine::set_mic`].
     pub fn set_mic(&mut self, mic_id: impl Into<String>) {

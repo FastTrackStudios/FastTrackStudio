@@ -38,6 +38,12 @@ const INSTRUMENT_ID: &str = "strings_1v";
 const CSS_ROOT: &str =
     "/run/media/AudioHaven/Sampled/Orchestral/Cinematic Series/Cinematic Studio Strings";
 
+/// Default descriptive engine-config spec — articulations / keyswitch / CC58 /
+/// legato / dynamics. Loaded alongside the zones so articulation switching
+/// works. Lives in the sibling sample-collector repo.
+const CSS_CONFIG: &str =
+    "/run/media/Development/FastTrackStudio/sample-collector/specs/cinematic-strings.styx";
+
 /// Articulations to cycle with `[` / `]` — the playable subset of 1st Violins,
 /// most-covered first. `Leg` (legato) is the default sustaining articulation.
 const ARTICULATIONS: &[&str] = &[
@@ -110,9 +116,32 @@ fn main() -> eyre::Result<()> {
         Some(buffer),
         Some(cache_budget),
     )?;
-    rig.load_instrument(INSTRUMENT_ID, &spec_path, Some(&css_root), &section, MICS[mic_idx])?;
+    // Load the zones WITH the descriptive engine config so articulations,
+    // keyswitches and CC58 work. Falls back to zones-only if the config is
+    // missing (articulation switching then disabled).
+    let config_path = arg(&args, "--config")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(CSS_CONFIG));
+    if config_path.exists() {
+        rig.load_instrument_with_config(
+            INSTRUMENT_ID,
+            &config_path,
+            &spec_path,
+            &css_root,
+            &section,
+            MICS[mic_idx],
+        )?;
+    } else {
+        eprintln!(
+            "warning: config spec not found ({}) — articulations/keyswitches disabled",
+            config_path.display()
+        );
+        rig.load_instrument(INSTRUMENT_ID, &spec_path, Some(&css_root), &section, MICS[mic_idx])?;
+    }
     rig.set_solo_mic(INSTRUMENT_ID, Some(MICS[mic_idx].to_string()));
-    rig.pin_articulation(INSTRUMENT_ID, Some(ARTICULATIONS[artic_idx].to_string()));
+    // Live articulation (keyswitch / CC58 equivalent) — NOT a pin: the low-octave
+    // keyswitches change it live from the keyboard, the TUI `[`/`]` keys nudge it.
+    rig.set_articulation(INSTRUMENT_ID, ARTICULATIONS[artic_idx]);
 
     // Hardware MIDI in → daw live-MIDI ring → bank track. Held for the run.
     let _midi = rig
@@ -188,8 +217,19 @@ fn run(
         total: warm.total,
         cancel: warm.cancel.clone(),
     };
+    // Track the live articulation + mic so a change from ANY source — the TUI
+    // keys OR a keyswitch / CC58 from the keyboard — re-warms the new samples.
+    let mut last_artic = rig.articulation(INSTRUMENT_ID).unwrap_or_default();
+    let mut last_mic = MICS[*mic_idx].to_string();
     loop {
-        term.draw(|f| ui(f, rig, midi_ports, *artic_idx, *mic_idx, &warm))?;
+        let live_artic = rig.articulation(INSTRUMENT_ID).unwrap_or_default();
+        term.draw(|f| ui(f, rig, midi_ports, &live_artic, *mic_idx, &warm))?;
+
+        if live_artic != last_artic || MICS[*mic_idx] != last_mic {
+            last_artic = live_artic.clone();
+            last_mic = MICS[*mic_idx].to_string();
+            warm = rearm(rig, &warm);
+        }
 
         if event::poll(Duration::from_millis(33))? {
             if let Event::Key(k) = event::read()? {
@@ -201,25 +241,21 @@ fn run(
                     KeyCode::Char(' ') => rig.panic(INSTRUMENT_ID),
                     KeyCode::Char(']') => {
                         *artic_idx = (*artic_idx + 1) % ARTICULATIONS.len();
-                        rig.pin_articulation(INSTRUMENT_ID, Some(ARTICULATIONS[*artic_idx].into()));
-                        warm = rearm(rig, &warm);
+                        rig.set_articulation(INSTRUMENT_ID, ARTICULATIONS[*artic_idx]);
                     }
                     KeyCode::Char('[') => {
                         *artic_idx = (*artic_idx + ARTICULATIONS.len() - 1) % ARTICULATIONS.len();
-                        rig.pin_articulation(INSTRUMENT_ID, Some(ARTICULATIONS[*artic_idx].into()));
-                        warm = rearm(rig, &warm);
+                        rig.set_articulation(INSTRUMENT_ID, ARTICULATIONS[*artic_idx]);
                     }
                     KeyCode::Char('.') => {
                         *mic_idx = (*mic_idx + 1) % MICS.len();
                         rig.set_mic(INSTRUMENT_ID, MICS[*mic_idx]);
                         rig.set_solo_mic(INSTRUMENT_ID, Some(MICS[*mic_idx].into()));
-                        warm = rearm(rig, &warm);
                     }
                     KeyCode::Char(',') => {
                         *mic_idx = (*mic_idx + MICS.len() - 1) % MICS.len();
                         rig.set_mic(INSTRUMENT_ID, MICS[*mic_idx]);
                         rig.set_solo_mic(INSTRUMENT_ID, Some(MICS[*mic_idx].into()));
-                        warm = rearm(rig, &warm);
                     }
                     _ => {}
                 }
@@ -229,7 +265,8 @@ fn run(
     Ok(())
 }
 
-/// Cancel the running warm pass and start a fresh one for the new pin / mic.
+/// Cancel the running warm pass and start a fresh one for the new articulation
+/// / mic selection.
 fn rearm(rig: &SamplerRig, prev: &WarmJob) -> WarmJob {
     prev.cancel.store(true, Ordering::Relaxed);
     WarmJob::spawn(rig)
@@ -239,7 +276,7 @@ fn ui(
     f: &mut Frame,
     rig: &SamplerRig,
     midi_ports: &str,
-    artic_idx: usize,
+    live_artic: &str,
     mic_idx: usize,
     warm: &WarmJob,
 ) {
@@ -248,6 +285,7 @@ fn ui(
         Constraint::Length(3), // output meter
         Constraint::Length(3), // warm progress
         Constraint::Length(6), // status
+        Constraint::Length(4), // keyswitch hint
         Constraint::Min(0),    // help
     ])
     .split(f.area());
@@ -290,7 +328,7 @@ fn ui(
         Line::from(vec![
             Span::raw("articulation  "),
             Span::styled(
-                ARTICULATIONS[artic_idx],
+                if live_artic.is_empty() { "(all)" } else { live_artic },
                 Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
             ),
             Span::raw("    mic  "),
@@ -313,12 +351,26 @@ fn ui(
     .block(Block::bordered().title("status"));
     f.render_widget(status, rows[3]);
 
+    // CSS-style velocity keyswitches: play these low notes (below the G2 range)
+    // to switch articulation live — soft vs hard pick the variant.
+    let ks = Paragraph::new(vec![
+        Line::from(
+            "C0 Sustain (soft=low-latency, hard=expressive legato)   C#0 Shorts (vel: spicc→stacc→sfz)",
+        ),
+        Line::from(
+            "D0 Pizz (vel: pizz→bartók→col legno)   D#0 Trills   E0 Harm   F0 Trem   F#0 Marcato   A#0 NonVib",
+        ),
+    ])
+    .style(Style::default().fg(Color::Cyan))
+    .block(Block::bordered().title("keyswitches (or send CC58)"));
+    f.render_widget(ks, rows[4]);
+
     let help = Paragraph::new(Line::from(
         "[ ] articulation   , . mic   space panic   q quit",
     ))
     .style(Style::default().fg(Color::DarkGray))
     .block(Block::bordered());
-    f.render_widget(help, rows[4]);
+    f.render_widget(help, rows[5]);
 }
 
 fn meter_color(db: f64) -> Color {

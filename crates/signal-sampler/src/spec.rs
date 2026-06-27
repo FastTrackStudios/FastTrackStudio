@@ -619,6 +619,42 @@ pub struct KeyswitchSpec {
     /// Keys are range strings like `"0-5"`, `"6-10"`, etc.
     #[facet(default)]
     pub cc58_map: HashMap<String, String>,
+
+    /// Velocity-sensitive keyswitch NOTES (how CSS switches from a keyboard):
+    /// playing one of these low notes selects an articulation / mode instead of
+    /// sounding. Each note carries its own velocity → value map.
+    #[facet(default)]
+    pub notes: Vec<KeyswitchNote>,
+}
+
+/// One velocity-sensitive keyswitch note: playing `note` at a given velocity
+/// applies the mapped value — a zone articulation tag (e.g. `Spiccato`) or an
+/// `@`-prefixed mode token (`@legato-on`, `@sordino-off`, `@legato-expressive`).
+/// `+` joins several, e.g. `"Leg+@legato-expressive"` (select Leg AND set
+/// expressive legato).
+#[derive(Debug, Clone, Facet)]
+pub struct KeyswitchNote {
+    /// MIDI note name (e.g. `"C0"`, `"A#0"`) — convention C0 = MIDI 12.
+    pub note: String,
+    /// Human-readable group name for UI (e.g. `"Sustain"`, `"Shorts"`).
+    #[facet(default)]
+    pub label: String,
+    /// Velocity range (`"0-64"`) → value applied when struck in that range.
+    pub vel_map: HashMap<String, String>,
+}
+
+impl KeyswitchNote {
+    /// The value mapped to `velocity` on this keyswitch, if any.
+    pub fn value_for(&self, velocity: u8) -> Option<&str> {
+        for (range_str, value) in &self.vel_map {
+            if let Some((lo, hi)) = parse_range(range_str) {
+                if velocity >= lo && velocity <= hi {
+                    return Some(value);
+                }
+            }
+        }
+        None
+    }
 }
 
 impl KeyswitchSpec {

@@ -265,6 +265,35 @@ impl PlayerPatch {
         })
     }
 
+    /// Load a patch whose **samples** come from `zones_path` (a zone spec) but
+    /// whose **engine config** — sections / mics / dynamics / articulations /
+    /// legato engine / keyswitch + CC58 map — comes from a separate descriptive
+    /// spec at `config_path`.
+    ///
+    /// Cinematic Studio libraries ship this way: `zones.styx` (or a per-section
+    /// `_patches/<section>/library.styx`) carries only the sample paths, and its
+    /// own header says to load `cinematic-strings.styx` alongside it for the
+    /// engine config. Without the config, the runtime has no articulation
+    /// definitions or keyswitch/CC58 map, so articulation switching can't work.
+    pub fn load_merged(
+        config_path: &Path,
+        zones_path: &Path,
+        samples_root: &Path,
+    ) -> Result<Self, SamplerError> {
+        let mut patch = Self::load(zones_path, samples_root)?;
+        let cfg = LibrarySpec::from_file(config_path)?;
+        // Overlay the descriptive config; keep the zone spec's samples
+        // (zones / zone_paths / grooves / wavetables / map stay as loaded).
+        patch.spec.sections = cfg.sections;
+        patch.spec.mics = cfg.mics;
+        patch.spec.dynamics = cfg.dynamics;
+        patch.spec.articulations = cfg.articulations;
+        patch.spec.legato_engine = cfg.legato_engine;
+        patch.spec.short_note_timing = cfg.short_note_timing;
+        patch.spec.keyswitch = cfg.keyswitch;
+        Ok(patch)
+    }
+
     /// Build a patch from an already-parsed spec with an empty sample map.
     pub fn from_spec(spec: LibrarySpec) -> Self {
         Self {

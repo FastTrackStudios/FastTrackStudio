@@ -266,16 +266,53 @@ impl SamplerBank {
                 crate::PlayerPatch::from_spec(spec)
             }
         };
+        let name = spec_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("block")
+            .to_string();
+        self.install_patch(id, patch, name, section, mic);
+        Ok(())
+    }
+
+    /// Load an instrument whose samples come from `zones_path` but whose engine
+    /// config (articulations / keyswitch / CC58 / legato / dynamics) comes from
+    /// a separate descriptive spec — the way Cinematic Studio libraries ship.
+    /// Without this, the zone spec alone has no articulation metadata, so
+    /// articulation + keyswitch switching can't work. See
+    /// [`PlayerPatch::load_merged`](crate::PlayerPatch::load_merged).
+    pub fn load_instrument_with_config(
+        &mut self,
+        id: impl Into<InstrumentId>,
+        config_path: &Path,
+        zones_path: &Path,
+        samples_root: &Path,
+        section: impl Into<String>,
+        mic: impl Into<String>,
+    ) -> eyre::Result<()> {
+        let id = id.into();
+        let patch = crate::PlayerPatch::load_merged(config_path, zones_path, samples_root)?;
+        let name = zones_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("block")
+            .to_string();
+        self.install_patch(id, patch, name, section, mic);
+        Ok(())
+    }
+
+    /// Wrap a loaded [`PlayerPatch`](crate::PlayerPatch) into a bank instrument
+    /// slot under `id`.
+    fn install_patch(
+        &mut self,
+        id: InstrumentId,
+        patch: crate::PlayerPatch,
+        name: String,
+        section: impl Into<String>,
+        mic: impl Into<String>,
+    ) {
         let engine = crate::SampleEngine::new(patch, self.sample_rate, section, mic);
-        let block = SamplerBlock::from_engine(
-            spec_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("block")
-                .to_string(),
-            engine,
-            crate::block::BlockParams::default(),
-        );
+        let block = SamplerBlock::from_engine(name, engine, crate::block::BlockParams::default());
         let synth_spec = Self::synth_default_engine_spec(&block.name.clone());
         let instance = EngineInstance::new(synth_spec, block, self.block_frames);
         tracing::info!("signal-sampler: loaded instrument {id:?}");
@@ -287,7 +324,6 @@ impl SamplerBank {
                 preload_target: None,
             },
         );
-        Ok(())
     }
 
     pub fn load_pack(&mut self, id: impl Into<InstrumentId>, pack_path: &Path) -> eyre::Result<()> {
@@ -475,6 +511,27 @@ impl SamplerBank {
     /// Pin an instrument to a single articulation (e.g. `"Leg"`); `None` clears.
     pub fn pin_articulation(&mut self, id: &str, artic: Option<String>) {
         self.with_block(id, |b| b.pin_articulation(artic));
+    }
+
+    /// Select an instrument's live articulation (keyswitch / CC58 equivalent).
+    pub fn set_articulation(&mut self, id: &str, artic: impl Into<String>) {
+        let artic = artic.into();
+        self.with_block(id, |b| b.set_articulation(artic));
+    }
+
+    /// An instrument's current live articulation (reflects keyswitch / CC58).
+    pub fn articulation(&self, id: &str) -> Option<String> {
+        if let Some(slot) = self.instruments.get(id) {
+            return Some(slot.engine.block.articulation().to_string());
+        }
+        if let Some((prefix, engine_id)) = self.instrument_to_preset.get(id) {
+            if let Some(preset) = self.presets.get(prefix) {
+                if let Some(&idx) = preset.engine_id_to_idx.get(engine_id) {
+                    return Some(preset.engines[idx].block.articulation().to_string());
+                }
+            }
+        }
+        None
     }
 
     /// Switch an instrument's active microphone position (e.g. `"Mix"`).
