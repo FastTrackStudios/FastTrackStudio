@@ -20,21 +20,31 @@
 //! ([`RigBlock`] with no realization → `has_backend() == false`). DSP gets
 //! implemented block-type by block-type later; the routing is locked first.
 
+use facet::Facet;
 use signal_proto::block::BlockType;
 
 use crate::rig::RigBlock;
+use crate::SamplerError;
 
 /// A node in the composition tree: a leaf processor or a container.
-#[derive(Debug, Clone)]
+///
+/// Facet-derived, so a whole tree round-trips through styx — presets can be
+/// authored in code (traceable factories) **or** loaded from `.styx`.
+#[derive(Debug, Clone, Facet)]
+#[repr(C)]
 pub enum RigNode {
-    Block(RigBlock),
-    Container(Container),
+    /// A leaf processor. (Struct variant — round-trips cleanly through styx,
+    /// unlike a newtype tuple variant.)
+    Block { block: RigBlock },
+    /// A nested container subtree.
+    Container { container: Container },
 }
 
 /// Semantic role of a container — a label describing intent. The audio behaviour
 /// is set by [`Combine`], not by this; roles drive display + where shared-vs-
 /// per-child processing is understood to sit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[repr(C)]
 pub enum Role {
     /// The whole program (top of the tree).
     Preset,
@@ -58,7 +68,8 @@ impl Role {
 }
 
 /// How a container combines its children into its output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[repr(C)]
 pub enum Combine {
     /// Children chained in order: `child[0] → child[1] → … → out`.
     Serial,
@@ -77,7 +88,7 @@ impl Combine {
 
 /// A cross-tree audio send (the routing axis) — this container's output also
 /// flows to the node named `target` (e.g. a layer routing "To Rotary").
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Facet)]
 pub struct Send {
     /// Name of the destination node (resolved against the tree).
     pub target: String,
@@ -85,55 +96,70 @@ pub struct Send {
     pub label: String,
 }
 
+/// A container-level setting that isn't a block (a `(name, value)` pair) —
+/// e.g. a Layer's `voice_mode` / `unison` / `octave`, an Engine's menu options.
+#[derive(Debug, Clone, Facet)]
+pub struct Param {
+    pub name: String,
+    pub value: String,
+}
+
 /// A container node: a named folder of children with a combine rule, plus the
 /// routing-axis attachments (modulators + sends).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Facet)]
 pub struct Container {
     pub role: Role,
     pub name: String,
     pub combine: Combine,
     /// Input trim (dB) applied before this container's children. Modules use it
     /// as their input volume; Layers/Engines normally leave it at 0.
+    #[facet(default)]
     pub input_db: f32,
     /// Output volume (dB) — the "fader". A Layer's and an Engine's native volume;
     /// a Module's output trim. Paired with [`input_db`](Self::input_db).
+    #[facet(default)]
     pub output_db: f32,
     /// Audio children, in order.
+    #[facet(default)]
     pub children: Vec<RigNode>,
     /// Control-rate modulators attached here (drive params via routes, not audio).
+    #[facet(default)]
     pub modulators: Vec<RigBlock>,
     /// Cross-tree audio sends from this node's output.
+    #[facet(default)]
     pub sends: Vec<Send>,
     /// Container-level settings that aren't blocks — e.g. a Layer's `voice_mode`,
-    /// `unison`, `octave`, `level`; an Engine's menu options. `(name, value)`.
-    pub params: Vec<(String, String)>,
+    /// `unison`, `octave`; an Engine's menu options.
+    #[facet(default)]
+    pub params: Vec<Param>,
     /// Whether this whole subtree is bypassed.
+    #[facet(default)]
     pub bypassed: bool,
 }
 
 impl From<RigBlock> for RigNode {
     fn from(b: RigBlock) -> Self {
-        RigNode::Block(b)
+        RigNode::Block { block: b }
     }
 }
 
 impl From<Container> for RigNode {
     fn from(c: Container) -> Self {
-        RigNode::Container(c)
+        RigNode::Container { container: c }
     }
 }
 
 impl RigNode {
     pub fn name(&self) -> &str {
         match self {
-            RigNode::Block(b) => &b.name,
-            RigNode::Container(c) => &c.name,
+            RigNode::Block { block: b } => &b.name,
+            RigNode::Container { container: c } => &c.name,
         }
     }
 
     pub fn as_container(&self) -> Option<&Container> {
         match self {
-            RigNode::Container(c) => Some(c),
+            RigNode::Container { container: c } => Some(c),
             _ => None,
         }
     }
@@ -196,7 +222,7 @@ impl Container {
     #[must_use]
     pub fn block(mut self, block_type: BlockType, name: impl Into<String>) -> Self {
         self.children
-            .push(RigNode::Block(RigBlock::of_type(block_type).named(name)));
+            .push(RigNode::Block { block: RigBlock::of_type(block_type).named(name) });
         self
     }
 
@@ -221,8 +247,29 @@ impl Container {
     /// Set a container-level setting (e.g. `voice_mode`, `unison`, `octave`).
     #[must_use]
     pub fn param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.params.push((name.into(), value.into()));
+        self.params.push(Param {
+            name: name.into(),
+            value: value.into(),
+        });
         self
+    }
+
+    // ── styx (de)serialization ───────────────────────────────────────────
+
+    /// Parse a composition tree from a `.styx` string.
+    pub fn from_styx_str(text: &str) -> Result<Self, SamplerError> {
+        facet_styx::from_str(text).map_err(|e| SamplerError::SpecParse(e.to_string()))
+    }
+
+    /// Parse a composition tree from a `.styx` file.
+    pub fn from_styx_file(path: &std::path::Path) -> Result<Self, SamplerError> {
+        let text = std::fs::read_to_string(path)?;
+        Self::from_styx_str(&text)
+    }
+
+    /// Serialize this tree to a `.styx` string.
+    pub fn to_styx_string(&self) -> Result<String, SamplerError> {
+        facet_styx::to_string(self).map_err(|e| SamplerError::SpecParse(e.to_string()))
     }
 
     /// Set the output volume (dB) — the Layer/Engine fader, or a Module's output
@@ -253,8 +300,8 @@ impl Container {
     fn collect_blocks<'a>(&'a self, out: &mut Vec<&'a RigBlock>) {
         for child in &self.children {
             match child {
-                RigNode::Block(b) => out.push(b),
-                RigNode::Container(c) => c.collect_blocks(out),
+                RigNode::Block { block: b } => out.push(b),
+                RigNode::Container { container: c } => c.collect_blocks(out),
             }
         }
     }
@@ -263,7 +310,7 @@ impl Container {
     pub fn modulators_recursive(&self) -> Vec<&RigBlock> {
         let mut out: Vec<&RigBlock> = self.modulators.iter().collect();
         for child in &self.children {
-            if let RigNode::Container(c) = child {
+            if let RigNode::Container { container: c } = child {
                 out.extend(c.modulators_recursive());
             }
         }
@@ -276,7 +323,7 @@ impl Container {
             return Some(self);
         }
         for child in &self.children {
-            if let RigNode::Container(c) = child {
+            if let RigNode::Container { container: c } = child {
                 if let Some(found) = c.find(name) {
                     return Some(found);
                 }
@@ -297,7 +344,7 @@ impl Container {
             out.push(self);
         }
         for child in &self.children {
-            if let RigNode::Container(c) = child {
+            if let RigNode::Container { container: c } = child {
                 c.collect_role(role, out);
             }
         }
@@ -311,7 +358,7 @@ impl Container {
             .map(|s| (self.name.as_str(), s))
             .collect();
         for child in &self.children {
-            if let RigNode::Container(c) = child {
+            if let RigNode::Container { container: c } = child {
                 out.extend(c.sends_recursive());
             }
         }
@@ -356,7 +403,7 @@ impl Container {
             let ps: Vec<String> = self
                 .params
                 .iter()
-                .map(|(k, v)| format!("{k}={v}"))
+                .map(|p| format!("{}={}", p.name, p.value))
                 .collect();
             out.push_str(&format!("  {{{}}}", ps.join(", ")));
         }
@@ -372,8 +419,8 @@ impl Container {
         for (i, child) in self.children.iter().enumerate() {
             let is_last = i + 1 == n;
             match child {
-                RigNode::Container(c) => c.dump_into(out, &child_prefix, is_last, false),
-                RigNode::Block(b) => {
+                RigNode::Container { container: c } => c.dump_into(out, &child_prefix, is_last, false),
+                RigNode::Block { block: b } => {
                     let bb = if is_last { "└─ " } else { "├─ " };
                     out.push_str(&child_prefix);
                     out.push_str(bb);
@@ -442,6 +489,40 @@ mod tests {
         assert_eq!(m.input_db, 2.0);
         assert_eq!(m.output_db, -1.0);
         assert!(m.dump().contains("trim +2/-1dB"));
+    }
+
+    #[test]
+    fn tree_round_trips_through_styx() {
+        let tree = Container::preset("Demo")
+            .volume(-1.0)
+            .add(
+                Container::parallel("Voices")
+                    .add(
+                        Container::layer("A")
+                            .param("voice_mode", "Poly")
+                            .volume(-3.0)
+                            .add(Container::module("Osc").block(BlockType::Oscillator, "Osc")),
+                    )
+                    .add(Container::layer("B").block(BlockType::Sampler, "Smp")),
+            )
+            .add(
+                Container::module("Global")
+                    .input_db(1.0)
+                    .block(BlockType::Rotary, "Rotary"),
+            );
+
+        let styx = tree.to_styx_string().expect("serialize");
+        let back = Container::from_styx_str(&styx).expect("parse");
+
+        // Structure survives the round trip.
+        assert_eq!(back.name, "Demo");
+        assert_eq!(back.output_db, -1.0);
+        assert_eq!(back.of_role(Role::Layer).len(), 2);
+        assert_eq!(back.blocks().len(), 3);
+        let a = back.find("A").unwrap();
+        assert_eq!(a.output_db, -3.0);
+        assert_eq!(a.params[0].value, "Poly");
+        assert_eq!(back.find("Global").unwrap().input_db, 1.0);
     }
 
     #[test]

@@ -67,7 +67,7 @@ fn fx_chain() -> Vec<RigNode> {
         mod2().into(),
         delay().into(),
         amp_eq().into(),
-        RigNode::Block(crate::rig::RigBlock::of_type(BlockType::Compressor).named("Comp")),
+        RigNode::Block { block: crate::rig::RigBlock::of_type(BlockType::Compressor).named("Comp") },
         reverb().into(),
     ]
 }

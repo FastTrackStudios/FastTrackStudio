@@ -67,8 +67,8 @@ impl RenderNode {
 
     fn compile_node(node: &RigNode, sample_rate: u32) -> RenderNode {
         match node {
-            RigNode::Block(b) => RenderNode::Leaf(build_node_backend(b, sample_rate)),
-            RigNode::Container(c) => Self::compile(c, sample_rate),
+            RigNode::Block { block: b } => RenderNode::Leaf(build_node_backend(b, sample_rate)),
+            RigNode::Container { container: c } => Self::compile(c, sample_rate),
         }
     }
 
