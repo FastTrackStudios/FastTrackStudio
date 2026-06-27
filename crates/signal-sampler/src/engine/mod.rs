@@ -562,7 +562,11 @@ impl SampleEngine {
         if !self.patch.is_zoned() {
             return PreloadStats::default();
         }
-        let artic = self.effective_articulation();
+        let artic = self.effective_articulation().map(|s| s.to_string());
+        // Also warm the vibrato pair — CC2 can blend it in at any time, and the
+        // directional legato samples come in up/down pairs (warmed by ignoring
+        // direction below), so any combination is ready without a cold first hit.
+        let vib_pair = artic.as_deref().and_then(|a| self.find_vibrato_pair_id(a));
         let mut stats = PreloadStats::default();
         for (i, z) in self.patch.spec.zones.iter().enumerate() {
             if !zone_trigger_matches(z, ZoneTrigger::Attack) {
@@ -571,8 +575,13 @@ impl SampleEngine {
             if note < z.key_min || note > z.key_max {
                 continue;
             }
-            if let Some(p) = artic {
-                if !z.articulation.is_empty() && !z.articulation.eq_ignore_ascii_case(p) {
+            if let Some(p) = artic.as_deref() {
+                let matches_artic = z.articulation.is_empty()
+                    || z.articulation.eq_ignore_ascii_case(p)
+                    || vib_pair
+                        .as_deref()
+                        .is_some_and(|v| z.articulation.eq_ignore_ascii_case(v));
+                if !matches_artic {
                     continue;
                 }
             }
@@ -860,12 +869,15 @@ impl SampleEngine {
             // held, plays a delayed directional transition (the famous latency).
             // The first note of a phrase — or any non-legato articulation —
             // sounds immediately.
-            let is_legato = matches!(
-                self.patch
-                    .spec
-                    .articulation(&self.articulation)
-                    .map(|a| a.kind.clone()),
-                Some(ArticulationKind::Legato)
+            let kind = self
+                .patch
+                .spec
+                .articulation(&self.articulation)
+                .map(|a| a.kind.clone());
+            let is_legato = matches!(kind, Some(ArticulationKind::Legato));
+            let is_sustain = matches!(
+                kind,
+                Some(ArticulationKind::Sustain | ArticulationKind::Looped)
             );
             let other_held = self.held_notes.keys().any(|&n| n != note);
             self.held_notes.insert(note, velocity);
@@ -873,10 +885,13 @@ impl SampleEngine {
                 // Sets LegatoState::Pending with the velocity-mapped delay;
                 // render() fires fire_legato when it elapses.
                 self.initiate_legato(note, velocity);
+            } else if is_legato || is_sustain {
+                // First note of a phrase (or any sustain): play immediately with
+                // the full CC1 dynamic + CC2 vibrato blend. Default direction up.
+                self.play_direction = "up".to_string();
+                self.trigger_zoned_sustain(note);
             } else {
-                if is_legato {
-                    self.play_direction = "up".to_string();
-                }
+                // Shorts / other articulations: single-shot, velocity-driven.
                 self.trigger_zoned(note, velocity, ZoneTrigger::Attack, true);
             }
             return;
@@ -1031,6 +1046,180 @@ impl SampleEngine {
             }
         }
         self.trigger_zoned_groups(by_mic, None, velocity, trigger, false);
+    }
+
+    /// Trigger a zoned sustain/legato note with the full CSS expressive blend:
+    /// CC1 crossfades the two adjacent dynamic layers, CC2 crossfades the
+    /// non-vibrato and vibrato sample sets. Spawns up to four "corner" voices
+    /// (NV-lo/hi, Vib-lo/hi); `render()` re-levels them live by [`VoiceKind`]
+    /// as CC1/CC2 move (see [`update_sustain_gains`](Self::update_sustain_gains)).
+    /// `self.articulation` is the non-vibrato base; the vibrato pair is found
+    /// and blended in by CC2.
+    fn trigger_zoned_sustain(&mut self, note: u8) {
+        let direction = self.play_direction.clone();
+        let rr = self.zone_rr_counter;
+        self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
+
+        let vib = self.cc2_blend();
+        let nv_scale = 1.0 - vib;
+        let vb_scale = vib;
+
+        let nv_artic = self.articulation.clone();
+        let vib_artic = self.find_vibrato_pair_id(&nv_artic);
+
+        // Non-vibrato dynamic layers.
+        let (nv_lo, nv_hi, nv_blend) = self.layers_for_artic(&nv_artic);
+        self.spawn_zone_layer(
+            &nv_artic,
+            &direction,
+            &nv_lo,
+            note,
+            rr,
+            VoiceKind::SustainNVLo,
+            nv_scale * (1.0 - nv_blend),
+        );
+        if nv_hi != nv_lo {
+            self.spawn_zone_layer(
+                &nv_artic,
+                &direction,
+                &nv_hi,
+                note,
+                rr,
+                VoiceKind::SustainNVHi,
+                nv_scale * nv_blend,
+            );
+        }
+
+        // Vibrato dynamic layers (only if a vibrato pair exists).
+        if let Some(vib_id) = vib_artic {
+            let (vb_lo, vb_hi, vb_blend) = self.layers_for_artic(&vib_id);
+            self.spawn_zone_layer(
+                &vib_id,
+                &direction,
+                &vb_lo,
+                note,
+                rr,
+                VoiceKind::SustainVibLo,
+                vb_scale * (1.0 - vb_blend),
+            );
+            if vb_hi != vb_lo {
+                self.spawn_zone_layer(
+                    &vib_id,
+                    &direction,
+                    &vb_hi,
+                    note,
+                    rr,
+                    VoiceKind::SustainVibHi,
+                    vb_scale * vb_blend,
+                );
+            }
+        }
+    }
+
+    /// Find + spawn one crossfade-corner voice (articulation × direction ×
+    /// dynamic layer) for `note`, if a matching zone exists and is loaded.
+    fn spawn_zone_layer(
+        &mut self,
+        artic: &str,
+        direction: &str,
+        dynamic: &str,
+        note: u8,
+        rr: usize,
+        kind: VoiceKind,
+        gain_scale: f32,
+    ) {
+        if let Some(idx) = self.find_layer_zone(artic, direction, dynamic, note, rr) {
+            self.spawn_zone_voice(idx, note, kind, gain_scale);
+        }
+    }
+
+    /// Pick the zone index for (articulation, direction, dynamic layer, note),
+    /// honouring the solo mic, with simple round-robin over matches by `rr`.
+    fn find_layer_zone(
+        &self,
+        artic: &str,
+        direction: &str,
+        dynamic: &str,
+        note: u8,
+        rr: usize,
+    ) -> Option<usize> {
+        let mut matches: Vec<usize> = Vec::new();
+        for (i, z) in self.patch.spec.zones.iter().enumerate() {
+            if !zone_trigger_matches(z, ZoneTrigger::Attack) {
+                continue;
+            }
+            if note < z.key_min || note > z.key_max {
+                continue;
+            }
+            if !z.articulation.eq_ignore_ascii_case(artic) {
+                continue;
+            }
+            if !z.direction.is_empty() && !z.direction.eq_ignore_ascii_case(direction) {
+                continue;
+            }
+            if !dynamic.is_empty()
+                && !z.dynamic.is_empty()
+                && !z.dynamic.eq_ignore_ascii_case(dynamic)
+            {
+                continue;
+            }
+            if let Some(solo) = &self.solo_mic {
+                if !z.mic.eq_ignore_ascii_case(solo) {
+                    continue;
+                }
+            }
+            matches.push(i);
+        }
+        if matches.is_empty() {
+            return None;
+        }
+        Some(matches[rr % matches.len()])
+    }
+
+    /// Spawn a voice from zone `idx` for `note` with a layer `kind` and
+    /// crossfade `gain_scale` (multiplied into the zone's own gain). Returns
+    /// false if the sample isn't loaded yet.
+    fn spawn_zone_voice(&mut self, idx: usize, note: u8, kind: VoiceKind, gain_scale: f32) -> bool {
+        // Copy out the zone fields up front so no borrow of `self.patch`
+        // outlives the `&mut self` cache-miss bookkeeping below.
+        let z = &self.patch.spec.zones[idx];
+        let (root_key, tune_cents, gain_db, mic, pan) =
+            (z.root_key, z.tune_cents, z.gain_db, z.mic.clone(), z.pan);
+        let (sample_start, sample_end) = (z.sample_start, z.sample_end);
+        let playback_mode = z.playback_mode.clone();
+        let (loop_start, loop_end) = (z.loop_start, z.loop_end);
+        let alternating = zone_is_alternating_loop(z);
+        let path = self.patch.zone_paths[idx].clone();
+
+        let Some(data) = self.cache.get_loaded(&path) else {
+            self.cache_misses
+                .set(self.cache_misses.get().saturating_add(1));
+            self.record_cache_miss(&path);
+            return false;
+        };
+
+        let semitones = note as f64 - root_key as f64;
+        let total_cents = semitones * 100.0 + tune_cents as f64;
+        let rate = 2.0f64.powf(total_cents / 1200.0);
+        let gain = 10.0f32.powf(gain_db / 20.0) * gain_scale;
+        let mic_index = self.mic_index_for(&mic);
+
+        let mut voice = Voice::with_rate(data, note, kind, rate, gain, self.release_frames)
+            .with_mic_index(mic_index)
+            .with_pan(pan)
+            .with_sample_window(
+                sample_start as usize,
+                (sample_end > 0).then_some(sample_end as usize),
+            );
+        if playback_mode.eq_ignore_ascii_case("reverse") {
+            voice = voice.reversed();
+        } else if alternating {
+            voice = voice.with_alternating_loop(loop_start as usize, loop_end as usize);
+        } else {
+            voice = voice.with_forward_loop(loop_start as usize, loop_end as usize);
+        }
+        self.voices.spawn(voice);
+        true
     }
 
     fn trigger_zoned_groups(
@@ -1676,8 +1865,9 @@ impl SampleEngine {
         // (recorded transition + sustained body), selected by `play_direction`.
         // No separate background sustain — the Leg sample carries it.
         if self.patch.is_zoned() {
+            let _ = velocity;
             self.play_direction = direction.to_string();
-            self.trigger_zoned(to_note, velocity, ZoneTrigger::Attack, true);
+            self.trigger_zoned_sustain(to_note);
             return;
         }
 
@@ -1955,12 +2145,20 @@ impl SampleEngine {
         let is_sord = id_lower.contains("sord");
         let is_nv = id_lower.contains("nv") || id_lower.contains("nonvib");
 
+        // The vibrato pair lives in the same articulation family — Sustain
+        // (Vibsus↔Nonvib) or Legato (Leg↔NVLeg) — so legato gets CC2 vibrato too.
+        let want_kind = self
+            .patch
+            .spec
+            .articulation(artic_id)
+            .map(|a| a.kind.clone());
         self.patch
             .spec
             .articulations
             .iter()
             .filter(|a| a.id != artic_id)
-            .filter(|a| a.kind == ArticulationKind::Sustain)
+            .filter(|a| Some(&a.kind) == want_kind.as_ref())
+            .filter(|a| matches!(a.kind, ArticulationKind::Sustain | ArticulationKind::Legato))
             .filter(|a| {
                 let other = a.id.to_lowercase();
                 // Same family (sord vs non-sord)
@@ -2022,6 +2220,11 @@ impl SampleEngine {
                 }
                 "@sordino-on" => self.set_con_sordino(true),
                 "@sordino-off" => self.set_con_sordino(false),
+                // Force full non-vibrato (the CSS Non-Vib keyswitch): CC2 → 0.
+                "@novib" => {
+                    self.cc2 = 0;
+                    self.update_sustain_gains();
+                }
                 t if t.starts_with('@') => tracing::debug!("unknown keyswitch token {t:?}"),
                 tag => self.select_articulation_tag(tag),
             }
@@ -2073,13 +2276,13 @@ impl SampleEngine {
             "Sustain: Low Latency Legato" => {
                 self.legato_enabled = true;
                 self.legato_expressive = false;
-                self.select_articulation_tag("Leg");
+                self.select_articulation_tag("NVLeg");
                 return;
             }
             "Sustain: Expressive Legato" => {
                 self.legato_enabled = true;
                 self.legato_expressive = true;
-                self.select_articulation_tag("Leg");
+                self.select_articulation_tag("NVLeg");
                 return;
             }
             "Measured Tremolo" => {
@@ -3233,6 +3436,25 @@ mod tests {
         // The up-zone for the target is now selected; the down-zone is not.
         assert!(eng.zone_selected(&u62, 62, 100, ZoneTrigger::Attack));
         assert!(!eng.zone_selected(&d62, 62, 100, ZoneTrigger::Attack));
+    }
+
+    #[test]
+    fn legato_pairs_nonvib_and_vibrato_for_cc2() {
+        // CC2 vibrato crossfades a non-vib / vib pair. CSS has them for legato
+        // (Leg ↔ NVLeg) as well as sustains — the pair lookup must find both.
+        let eng = engine_from_styx(
+            "name \"s\"\n\
+             dynamics { vibrato_controller CC2 }\n\
+             articulations (\n\
+               {id NVLeg, label NVLeg, kind @Legato}\n\
+               {id Leg, label Leg, kind @Legato}\n\
+             )\n\
+             zones (\n\
+               {file \"a.wav\", key_min 60, key_max 60, root_key 60, vel_min 0, vel_max 127, articulation \"NVLeg\"}\n\
+             )\n",
+        );
+        assert_eq!(eng.find_vibrato_pair_id("NVLeg").as_deref(), Some("Leg"));
+        assert_eq!(eng.find_vibrato_pair_id("Leg").as_deref(), Some("NVLeg"));
     }
 
     #[test]

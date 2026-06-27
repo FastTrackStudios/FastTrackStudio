@@ -44,12 +44,11 @@ const CSS_ROOT: &str =
 const CSS_CONFIG: &str =
     "/run/media/Development/FastTrackStudio/sample-collector/specs/cinematic-strings.styx";
 
-/// Articulations to cycle with `[` / `]` — the playable subset of 1st Violins,
-/// most-covered first. `Leg` (legato) is the default sustaining articulation.
+/// Articulations to cycle with `[` / `]` — the playable subset of 1st Violins.
+/// `NVLeg` (non-vib legato) is the default base; CC2 blends in the vibrato pair
+/// (`Leg`) on top, so the legato/sustain entries are the non-vib bases.
 const ARTICULATIONS: &[&str] = &[
-    "Leg",
     "NVLeg",
-    "Vibsus",
     "Nonvib",
     "Marcato",
     "Spiccato",
@@ -142,6 +141,10 @@ fn main() -> eyre::Result<()> {
     // Live articulation (keyswitch / CC58 equivalent) — NOT a pin: the low-octave
     // keyswitches change it live from the keyboard, the TUI `[`/`]` keys nudge it.
     rig.set_articulation(INSTRUMENT_ID, ARTICULATIONS[artic_idx]);
+    // Sensible starting expression: CC1 ≈ mf dynamic, CC2 ≈ moderate vibrato.
+    // Drive these from your keyboard's mod wheel (CC1) + a CC2 control live.
+    rig.cc(INSTRUMENT_ID, 1, 90);
+    rig.cc(INSTRUMENT_ID, 2, 90);
 
     // Hardware MIDI in → daw live-MIDI ring → bank track. Held for the run.
     let _midi = rig
@@ -285,7 +288,7 @@ fn ui(
         Constraint::Length(3), // output meter
         Constraint::Length(3), // warm progress
         Constraint::Length(6), // status
-        Constraint::Length(4), // keyswitch hint
+        Constraint::Length(5), // keyswitch + expression hint
         Constraint::Min(0),    // help
     ])
     .split(f.area());
@@ -360,9 +363,12 @@ fn ui(
         Line::from(
             "D0 Pizz (vel: pizz→bartók→col legno)   D#0 Trills   E0 Harm   F0 Trem   F#0 Marcato   A#0 NonVib",
         ),
+        Line::from(
+            "CC1 = dynamics (swell)    CC2 = vibrato (NonVib↔Vib)    CC58 = articulation",
+        ),
     ])
     .style(Style::default().fg(Color::Cyan))
-    .block(Block::bordered().title("keyswitches (or send CC58)"));
+    .block(Block::bordered().title("keyswitches + expression"));
     f.render_widget(ks, rows[4]);
 
     let help = Paragraph::new(Line::from(
