@@ -593,11 +593,11 @@ mod tests {
             "Lead resolves to the Friedman BE Lead capture, got {:?}",
             lead.chain[0].nam
         );
-        // The appended Time-module effects are placeholders (empty path) and
-        // flagged for the global time-bypass.
+        // The appended Time-module effects are Native blocks (no NAM/IR/plugin
+        // yet) flagged for the global time-bypass.
         let time_fx: Vec<_> = lead.chain.iter().filter(|b| b.is_time_fx()).collect();
         assert_eq!(time_fx.len(), 2, "Lead has a 2-block Time module");
-        assert!(time_fx.iter().all(|b| b.is_placeholder()));
+        assert!(time_fx.iter().all(|b| b.is_native() && !b.has_backend()));
 
         // Funk has no Time module — it's the dry clean core.
         let funk = resolved.patches.iter().find(|p| p.name == "Funk").unwrap();

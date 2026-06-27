@@ -91,22 +91,48 @@ fn db_to_lin(db: f32) -> f32 {
     }
 }
 
+/// How a block's [`BlockType`] is **implemented** — the realization axis
+/// (orthogonal to the semantic `block_type`). Each block type can have several
+/// implementations; a [`RigBlock`] picks one by which asset it carries.
+///
+/// Mirrors `signal_proto::block_kind::BlockKind` and the runtime
+/// [`FxBackend`](crate::mixer::FxBackend).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Facet)]
+#[repr(C)]
+pub enum BlockImpl {
+    /// Signal's built-in DSP for this block type — our own "DSP plugin". The
+    /// default implementation. (Not yet written for most types; see
+    /// [`RigBlock::has_backend`].)
+    Native,
+    /// A Neural Amp Modeler `.nam` model — the special implementation for
+    /// nonlinear/amp-shaped blocks (Amp, Drive, even a neural Cabinet).
+    Nam,
+    /// A cabinet impulse response convolved by the built-in convolver.
+    Ir,
+    /// An external CLAP / VST3 plugin loaded for this block (e.g. a third-party
+    /// delay or reverb).
+    Plugin,
+}
+
 /// One block in a patch's FX chain, modeled on the two orthogonal axes from
 /// `DOMAIN.md`:
 ///
 /// - **`block_type`** — *what the block does* (proto [`BlockType`]: `Amp`,
 ///   `Cabinet`, `Drive`, `Reverb`, `Delay`, `Pitch`, …). This is the block's
 ///   identity in the module system.
-/// - **realization** — *how that type is realized*, expressed by which asset
-///   field is set: a NAM model ([`nam`](Self::nam)), a cabinet impulse response
-///   ([`ir`](Self::ir)), or a hosted CLAP/VST3 ([`plugin`](Self::plugin)). All
-///   three empty = a **placeholder** (kept in the chain for structure + bypass
-///   grouping, skipped at install).
+/// - **implementation** — *how that type is realized* ([`BlockImpl`]), chosen by
+///   which asset field is set: [`nam`](Self::nam) (a NAM model), [`ir`](Self::ir)
+///   (a cabinet impulse response), [`plugin`](Self::plugin) (a hosted CLAP/VST3).
+///   No asset ⇒ [`Native`](BlockImpl::Native) — Signal's built-in DSP for that
+///   type. Native DSP isn't written yet, so a Native block has no backend
+///   ([`has_backend`](Self::has_backend) = false) and is skipped at install
+///   while still occupying the chain (structure + bypass grouping).
 ///
 /// So an amp is just `{ block_type @Amp, nam "…/amp.nam" }` — the NAM model is
-/// the amp block's model option, not a special block "kind". The global
-/// time-bypass acts on every block whose type is in [`BlockCategory::Time`]
-/// (`Delay` / `Reverb` / `Freeze`).
+/// the amp block's implementation, not a special block "kind"; a `{ block_type
+/// @Delay, plugin "Echo.clap" }` is a Delay realized by an external plugin. The
+/// global time-bypass acts on every block whose type is in
+/// [`BlockCategory::Time`] (`Delay` / `Reverb` / `Freeze`).
 #[derive(Clone, Debug, Facet)]
 pub struct RigBlock {
     /// What the block is — its semantic type (Amp, Cabinet, Reverb, Delay, …).
@@ -237,9 +263,33 @@ impl RigBlock {
         }
     }
 
-    /// True for a placeholder block (no realization). Skipped at install.
-    pub fn is_placeholder(&self) -> bool {
-        self.nam.trim().is_empty() && self.ir.trim().is_empty() && self.plugin.trim().is_empty()
+    /// Which **implementation** (backend) realizes this block's type. Derived
+    /// from which asset is set; no asset ⇒ [`BlockImpl::Native`] (our built-in
+    /// DSP). See [`BlockImpl`].
+    pub fn implementation(&self) -> BlockImpl {
+        if !self.nam.trim().is_empty() {
+            BlockImpl::Nam
+        } else if !self.ir.trim().is_empty() {
+            BlockImpl::Ir
+        } else if !self.plugin.trim().is_empty() {
+            BlockImpl::Plugin
+        } else {
+            BlockImpl::Native
+        }
+    }
+
+    /// True when this block is realized by the built-in [`Native`](BlockImpl::Native)
+    /// DSP for its type (no NAM / IR / plugin asset chosen).
+    pub fn is_native(&self) -> bool {
+        self.implementation() == BlockImpl::Native
+    }
+
+    /// Whether the rig can build an audio backend for this block **today**. NAM,
+    /// IR and Plugin implementations are buildable; `Native` is not yet (the
+    /// built-in DSP for these block types — `daw-builtin-fx` — isn't written),
+    /// so Native blocks are skipped at install until that lands.
+    pub fn has_backend(&self) -> bool {
+        self.implementation() != BlockImpl::Native
     }
 
     /// Display label: explicit `name`, else the asset file stem, else the block
@@ -542,8 +592,10 @@ fn build_block(
         let dn = plugin.descriptor().name;
         Ok((plugin, format!("{dn} (plugin)"), None, None))
     } else {
+        // Native implementation: built-in DSP for this block type isn't written
+        // yet (no `daw-builtin-fx`). Callers filter these out before install.
         Err(format!(
-            "placeholder block (type {:?}) has no realization to build",
+            "no built-in DSP for a Native {:?} block yet — give it a NAM/IR/plugin",
             block.block_type
         ))
     }
@@ -1318,6 +1370,30 @@ mod tests {
         assert!(RigBlock::cab_ir("v30.wav").is_cab_ir());
         assert!(RigBlock::plugin("/x/Reverb.clap").is_plugin());
         assert!(!RigBlock::nam("a.nam").is_cab_ir());
+    }
+
+    #[test]
+    fn block_implementation_is_derived_from_the_asset() {
+        // type + implementation are independent: an Amp can be NAM…
+        let amp = RigBlock::nam("amp.nam");
+        assert_eq!(amp.block_type, BlockType::Amp);
+        assert_eq!(amp.implementation(), BlockImpl::Nam);
+        assert!(amp.has_backend());
+
+        // …a Cabinet can be an IR…
+        assert_eq!(RigBlock::cab_ir("v30.wav").implementation(), BlockImpl::Ir);
+
+        // …a Delay can be an external plugin…
+        let delay = RigBlock::effect(BlockType::Delay, "Echo").with_plugin("Echo.clap");
+        assert_eq!(delay.block_type, BlockType::Delay);
+        assert_eq!(delay.implementation(), BlockImpl::Plugin);
+
+        // …and a typed effect with no asset is Native (built-in DSP) — which has
+        // no backend yet, so it's skipped at install.
+        let native = RigBlock::effect(BlockType::Reverb, "Hall");
+        assert_eq!(native.implementation(), BlockImpl::Native);
+        assert!(native.is_native());
+        assert!(!native.has_backend());
     }
 
     #[test]

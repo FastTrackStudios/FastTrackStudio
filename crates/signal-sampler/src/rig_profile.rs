@@ -406,10 +406,11 @@ impl ProfileRig {
         let mut loaded = 0usize;
         let mut first_ok: Option<usize> = None;
         for (i, patch) in profile.patches.iter().enumerate() {
-            // Resolve every real block's path against the base dir; skip
-            // placeholder blocks (empty path — e.g. a not-yet-chosen Time-module
-            // effect) so they don't fail the install. They stay in the patch for
-            // display and become live once a plugin path replaces them.
+            // Resolve every buildable block's asset path against the base dir;
+            // skip blocks with no audio backend yet — i.e. `Native` blocks, whose
+            // built-in DSP isn't written (a not-yet-chosen Time-module effect).
+            // They stay in the patch for display + bypass grouping and become
+            // live once given a NAM/IR/plugin asset (or native DSP lands).
             let resolve = |p: &str| -> String {
                 if p.is_empty() {
                     String::new()
@@ -420,7 +421,7 @@ impl ProfileRig {
             let blocks: Vec<RigBlock> = patch
                 .chain
                 .iter()
-                .filter(|b| !b.is_placeholder())
+                .filter(|b| b.has_backend())
                 .map(|b| {
                     let mut rb = b.clone();
                     rb.nam = resolve(&b.nam);
@@ -514,7 +515,7 @@ impl ProfileRig {
     /// Push the current global time-bypass state onto the active patch: bypass
     /// every installed time/fx block (the Time module) of patch `index`. The
     /// installed chain skips placeholder blocks, so we zip the live block ids
-    /// against the patch's non-placeholder blocks to find which are time/fx.
+    /// against the patch's installed (has-backend) blocks to find which are time/fx.
     fn apply_fx_bypass(&self, index: usize) {
         let Some(profile) = &self.profile else {
             return;
@@ -523,7 +524,7 @@ impl ProfileRig {
             return;
         };
         let live_ids = self.rig.active_block_ids();
-        let real = patch.chain.iter().filter(|b| !b.is_placeholder());
+        let real = patch.chain.iter().filter(|b| b.has_backend());
         for (block, id) in real.zip(live_ids.iter()) {
             if block.is_time_fx() {
                 self.rig.set_block_slot_bypass(id, self.fx_bypass);

@@ -86,7 +86,7 @@ pub use preset_spec::{
     MacroDef, MacroTarget, MasterFxSlot, NoteRoute, PresetEngineRef, PresetModuleRef, PresetSpec,
     RoutingRule,
 };
-pub use rig::{DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
+pub use rig::{BlockImpl, DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
 pub use rig_library::{Library, RigPreset, RigScene, RigSection, RigSong};
 pub use rig_manager::RigManager;
 pub use rig_prefs::RigAudioPrefs;
@@ -96,7 +96,7 @@ pub use runtime::{
     ResolvedEdge,
 };
 pub use sample_map::{SampleKey, SampleMap};
-pub use sampler_rig::{BusTrack, InstrumentTrack, SamplerRig};
+pub use sampler_rig::{BusTrack, InstrumentTrack, MidiMonitor, SamplerRig};
 // Hardware MIDI input primitives live in daw (`daw-midi-io`); re-export the
 // selection + handle + message types so rig consumers (e.g. the strings TUI)
 // don't need a direct daw-midi-io dependency.
