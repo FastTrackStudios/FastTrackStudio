@@ -43,7 +43,7 @@ use crate::{PlayerPatch, VoiceConfig};
 use cache::{EvictStats, PreloadStats, SampleCache};
 use filter::BiquadFilter;
 use rr::RrCounters;
-use voice::{Voice, VoiceKind, VoicePool, VoiceStealPolicy};
+use voice::{DynLayer, Voice, VoiceKind, VoicePool, VoiceStealPolicy};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1129,71 +1129,74 @@ impl SampleEngine {
     }
 
     /// Trigger a zoned sustain/legato note with the full CSS expressive blend:
-    /// CC1 crossfades the two adjacent dynamic layers, CC2 crossfades the
-    /// non-vibrato and vibrato sample sets. Spawns up to four "corner" voices
-    /// (NV-lo/hi, Vib-lo/hi); `render()` re-levels them live by [`VoiceKind`]
-    /// as CC1/CC2 move (see [`update_sustain_gains`](Self::update_sustain_gains)).
-    /// `self.articulation` is the non-vibrato base; the vibrato pair is found
-    /// and blended in by CC2.
+    /// CC1 crossfades across ALL dynamic layers, CC2 crossfades the non-vibrato
+    /// and vibrato sample sets. Spawns one `SustainLayer` voice per dynamic
+    /// layer per vib side; `render()` re-levels them live as CC1/CC2 move (see
+    /// [`update_sustain_gains`](Self::update_sustain_gains)), so a held note
+    /// swells the full dynamic range. `self.articulation` is the non-vibrato
+    /// base; the vibrato pair is found and blended in by CC2.
     fn trigger_zoned_sustain(&mut self, note: u8) {
         let direction = self.play_direction.clone();
         let rr = self.zone_rr_counter;
         self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
 
-        // Equal-power crossfade in both dimensions (CSS-style): CC2 picks the
-        // non-vib vs vib balance, CC1 the dynamic-layer balance, perceived
-        // loudness held constant across each fade.
+        // CC2 picks the non-vib vs vib balance (equal-power).
         let (nv_scale, vb_scale) = Self::equal_power(self.cc2_blend());
-
         let nv_artic = self.articulation.clone();
         let vib_artic = self.find_vibrato_pair_id(&nv_artic);
 
-        // Non-vibrato dynamic layers.
-        let (nv_lo, nv_hi, nv_blend) = self.layers_for_artic(&nv_artic);
-        let (nv_lo_g, nv_hi_g) = Self::equal_power(nv_blend);
-        self.spawn_zone_layer(
-            &nv_artic,
-            &direction,
-            &nv_lo,
-            note,
-            rr,
-            VoiceKind::SustainNVLo,
-            nv_scale * nv_lo_g,
-        );
-        if nv_hi != nv_lo {
-            self.spawn_zone_layer(
-                &nv_artic,
-                &direction,
-                &nv_hi,
-                note,
-                rr,
-                VoiceKind::SustainNVHi,
-                nv_scale * nv_hi_g,
-            );
-        }
-
-        // Vibrato dynamic layers (only if a vibrato pair exists).
+        self.spawn_sustain_layers(&nv_artic, false, nv_scale, &direction, note, rr);
         if let Some(vib_id) = vib_artic {
-            let (vb_lo, vb_hi, vb_blend) = self.layers_for_artic(&vib_id);
-            let (vb_lo_g, vb_hi_g) = Self::equal_power(vb_blend);
-            self.spawn_zone_layer(
-                &vib_id,
-                &direction,
-                &vb_lo,
-                note,
-                rr,
-                VoiceKind::SustainVibLo,
-                vb_scale * vb_lo_g,
-            );
-            if vb_hi != vb_lo {
-                self.spawn_zone_layer(
-                    &vib_id,
-                    &direction,
-                    &vb_hi,
+            self.spawn_sustain_layers(&vib_id, true, vb_scale, &direction, note, rr);
+        }
+    }
+
+    /// Spawn EVERY dynamic layer of `artic` (one `SustainLayer` voice each),
+    /// gained by the current CC1 crossfade. Holding all layers — even the silent
+    /// ones — is what lets a held note swell the full dynamic range as CC1 moves
+    /// (`update_sustain_gains` re-levels them live), the way CSS does.
+    fn spawn_sustain_layers(
+        &mut self,
+        artic: &str,
+        vib: bool,
+        side_scale: f32,
+        direction: &str,
+        note: u8,
+        rr: usize,
+    ) {
+        let labels: Vec<String> = self
+            .cc1_layers_for(artic)
+            .iter()
+            .map(|l| l.label.clone())
+            .collect();
+        if labels.is_empty() {
+            // No declared CC1 layers — a single layer at full side scale.
+            let (lo, _, _) = self.layers_for_artic(artic);
+            if let Some(idx) = self.find_layer_zone(artic, direction, &lo, note, rr) {
+                self.spawn_zone_voice(
+                    idx,
                     note,
-                    rr,
-                    VoiceKind::SustainVibHi,
-                    vb_scale * vb_hi_g,
+                    VoiceKind::SustainLayer,
+                    side_scale,
+                    Some(DynLayer { vib, index: 0 }),
+                );
+            }
+            return;
+        }
+        let (lo_idx, hi_idx, blend) = Self::cc1_blend_idx(self.cc1_layers_for(artic), self.cc1);
+        let (lo_g, hi_g) = Self::equal_power(blend);
+        for (i, label) in labels.iter().enumerate() {
+            let gain = side_scale * layer_gain(i, lo_idx, hi_idx, lo_g, hi_g);
+            if let Some(idx) = self.find_layer_zone(artic, direction, label, note, rr) {
+                self.spawn_zone_voice(
+                    idx,
+                    note,
+                    VoiceKind::SustainLayer,
+                    gain,
+                    Some(DynLayer {
+                        vib,
+                        index: i as u8,
+                    }),
                 );
             }
         }
@@ -1263,7 +1266,7 @@ impl SampleEngine {
         let dynamic = if blend >= 0.5 { hi } else { lo };
         let rr = self.zone_rr_counter;
         if let Some(idx) = self.find_layer_zone(&leg_id, direction, &dynamic, to, rr) {
-            self.spawn_zone_voice(idx, to, VoiceKind::Legato, 1.0);
+            self.spawn_zone_voice(idx, to, VoiceKind::Legato, 1.0, None);
         }
     }
 
@@ -1284,26 +1287,10 @@ impl SampleEngine {
         let rr = self.zone_rr_counter;
         // Release samples are non-directional → pass "" (no direction filter).
         if let Some(idx) = self.find_layer_zone(&rel_id, "", &dynamic, note, rr) {
-            self.spawn_zone_voice(idx, note, VoiceKind::Release, 1.0);
+            self.spawn_zone_voice(idx, note, VoiceKind::Release, 1.0, None);
         }
     }
 
-    /// Find + spawn one crossfade-corner voice (articulation × direction ×
-    /// dynamic layer) for `note`, if a matching zone exists and is loaded.
-    fn spawn_zone_layer(
-        &mut self,
-        artic: &str,
-        direction: &str,
-        dynamic: &str,
-        note: u8,
-        rr: usize,
-        kind: VoiceKind,
-        gain_scale: f32,
-    ) {
-        if let Some(idx) = self.find_layer_zone(artic, direction, dynamic, note, rr) {
-            self.spawn_zone_voice(idx, note, kind, gain_scale);
-        }
-    }
 
     /// Pick the zone index for (articulation, direction, dynamic layer, note),
     /// honouring the solo mic, with simple round-robin over matches by `rr`.
@@ -1364,7 +1351,14 @@ impl SampleEngine {
     /// Spawn a voice from zone `idx` for `note` with a layer `kind` and
     /// crossfade `gain_scale` (multiplied into the zone's own gain). Returns
     /// false if the sample isn't loaded yet.
-    fn spawn_zone_voice(&mut self, idx: usize, note: u8, kind: VoiceKind, gain_scale: f32) -> bool {
+    fn spawn_zone_voice(
+        &mut self,
+        idx: usize,
+        note: u8,
+        kind: VoiceKind,
+        gain_scale: f32,
+        dyn_layer: Option<DynLayer>,
+    ) -> bool {
         // Copy out the zone fields up front so no borrow of `self.patch`
         // outlives the `&mut self` cache-miss bookkeeping below.
         let z = &self.patch.spec.zones[idx];
@@ -1397,6 +1391,7 @@ impl SampleEngine {
                 | VoiceKind::SustainVibHi
                 | VoiceKind::SustainLo
                 | VoiceKind::SustainHi
+                | VoiceKind::SustainLayer
         );
 
         // Attack envelope on the sustained body only (the legato transition and
@@ -1410,6 +1405,9 @@ impl SampleEngine {
                 sample_start as usize,
                 (sample_end > 0).then_some(sample_end as usize),
             );
+        if let Some(layer) = dyn_layer {
+            voice = voice.with_dyn_layer(layer);
+        }
         if playback_mode.eq_ignore_ascii_case("reverse") {
             voice = voice.reversed();
         } else if alternating {
@@ -2304,30 +2302,41 @@ impl SampleEngine {
 
     /// Recompute and ramp all 4 sustain voice gains when CC1 or CC2 changes.
     fn update_sustain_gains(&mut self) {
-        // Equal-power crossfade (CSS-style) in both dimensions — see
-        // trigger_zoned_sustain. CC2 → non-vib/vib balance, CC1 → dynamic layer.
+        // CC2 → non-vib/vib balance (equal-power).
         let (nv, vb) = Self::equal_power(self.cc2_blend());
         let ramp = self.cc1_ramp_frames;
+        let nv_artic = self.articulation.clone();
+        let vib_artic = self.find_vibrato_pair_id(&nv_artic);
 
-        // Use per-articulation layer sets so NV and Vib voices each use
-        // their own dynamics count (see trigger_sustain for full rationale).
-        let vib_artic = self.find_vibrato_pair_id(&self.articulation);
+        // Per-side CC1 crossfade across ALL dynamic layers: the active pair
+        // (lo,hi) get equal-power gains, every other layer is silent. Held
+        // SustainLayer voices are re-levelled by index → full-range swell.
+        let (nv_lo, nv_hi, nv_b) = Self::cc1_blend_idx(self.cc1_layers_for(&nv_artic), self.cc1);
+        let (nv_lo_g, nv_hi_g) = Self::equal_power(nv_b);
+        let (vb_lo, vb_hi, vb_lo_g, vb_hi_g) = match vib_artic.as_deref() {
+            Some(vib) => {
+                let (l, h, b) = Self::cc1_blend_idx(self.cc1_layers_for(vib), self.cc1);
+                let (lg, hg) = Self::equal_power(b);
+                (l, h, lg, hg)
+            }
+            None => (0, 0, 0.0, 0.0),
+        };
 
-        let (_, _, nv_blend) = self.layers_for_artic(&self.articulation);
-        let (_, _, vb_blend) = vib_artic
-            .as_deref()
-            .map(|id| self.layers_for_artic(id))
-            .unwrap_or((String::new(), String::new(), nv_blend));
-        let (nv_lo_g, nv_hi_g) = Self::equal_power(nv_blend);
-        let (vb_lo_g, vb_hi_g) = Self::equal_power(vb_blend);
+        for v in self.voices.voices_mut() {
+            if let Some(layer) = v.dyn_layer {
+                let i = layer.index as usize;
+                let g = if layer.vib {
+                    vb * layer_gain(i, vb_lo, vb_hi, vb_lo_g, vb_hi_g)
+                } else {
+                    nv * layer_gain(i, nv_lo, nv_hi, nv_lo_g, nv_hi_g)
+                };
+                v.ramp_gain(g, ramp);
+            }
+        }
 
-        self.voices.update_sustain_blend(
-            nv * nv_lo_g, // NVLo
-            nv * nv_hi_g, // NVHi
-            vb * vb_lo_g, // VibLo
-            vb * vb_hi_g, // VibHi
-            ramp,
-        );
+        // Legacy 2-layer kinds (non-zoned trigger_sustain path) — unchanged.
+        self.voices
+            .update_sustain_blend(nv * nv_lo_g, nv * nv_hi_g, vb * vb_lo_g, vb * vb_hi_g, ramp);
     }
 
     /// Equal-power crossfade gains for a blend in `[0,1]`: returns `(lo, hi)` =
@@ -2692,6 +2701,44 @@ impl SampleEngine {
         (top.label.clone(), top.label.clone(), 0.0)
     }
 
+    /// Like [`cc1_blend`](Self::cc1_blend) but returns the active layer
+    /// *indices* `(lo, hi, blend)` — for the N-layer zoned crossfade, where
+    /// every dynamic layer is voiced and gained by its index.
+    fn cc1_blend_idx(layers: &[Cc1Layer], cc1: u8) -> (usize, usize, f32) {
+        if layers.is_empty() {
+            return (0, 0, 0.0);
+        }
+        for i in 0..layers.len().saturating_sub(1) {
+            let xfade_start = layers[i + 1].cc_range[0];
+            let xfade_end = layers[i].cc_range[1];
+            if cc1 <= xfade_end {
+                if cc1 < xfade_start {
+                    return (i, i, 0.0);
+                }
+                let span = (xfade_end - xfade_start + 1).max(1) as f32;
+                return (i, i + 1, (cc1 - xfade_start) as f32 / span);
+            }
+        }
+        let top = layers.len() - 1;
+        (top, top, 0.0)
+    }
+
+    /// The CC1 layer slice for a given articulation (by its dynamics count).
+    fn cc1_layers_for(&self, artic_id: &str) -> &[Cc1Layer] {
+        let Some(artic) = self.patch.spec.articulation(artic_id) else {
+            return &[];
+        };
+        let d = &self.patch.spec.dynamics;
+        match artic.dynamics.len() {
+            2 => &d.cc1_layers_2,
+            3 => &d.cc1_layers_3,
+            4 => &d.cc1_layers_4,
+            5 => &d.cc1_layers_5,
+            6 => &d.cc1_layers_6,
+            _ => &[],
+        }
+    }
+
     /// Return the correct CC1 layer slice for the current articulation.
     fn active_cc1_layers(&self) -> &[Cc1Layer] {
         let Some(artic) = self.patch.spec.articulation(&self.articulation) else {
@@ -2873,6 +2920,19 @@ impl VoicePool {
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
+
+/// Gain for dynamic layer `index` in an N-layer CC1 crossfade: the active pair
+/// `(lo, hi)` carry the equal-power gains, every other layer is silent.
+#[inline]
+fn layer_gain(index: usize, lo: usize, hi: usize, lo_g: f32, hi_g: f32) -> f32 {
+    if index == lo {
+        lo_g
+    } else if index == hi {
+        hi_g
+    } else {
+        0.0
+    }
+}
 
 /// Convert milliseconds to audio frames at the given sample rate.
 #[inline]

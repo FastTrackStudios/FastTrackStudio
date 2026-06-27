@@ -43,6 +43,10 @@ pub enum VoiceKind {
     SustainLo,
     /// Primary sustain layer B (upper dynamic, for CC1 crossfade).
     SustainHi,
+    /// Zoned sustain dynamic layer (CSS N-layer CC1 crossfade). Carries its
+    /// vib side + dynamic-layer index in [`Voice::dyn_layer`]; the engine sets
+    /// each one's gain from CC1/CC2 so a held note swells the full range.
+    SustainLayer,
     /// Legato transition sample.
     Legato,
     /// Release trail (triggered on note-off).
@@ -104,6 +108,19 @@ pub struct Voice {
 
     /// Release fade duration in frames. Used when state transitions to Releasing.
     release_frames: usize,
+
+    /// For `SustainLayer` voices: which vib side + dynamic-layer index this is,
+    /// so the engine can set its CC1/CC2 crossfade gain. `None` otherwise.
+    pub dyn_layer: Option<DynLayer>,
+}
+
+/// Identifies a zoned sustain dynamic layer for CC1/CC2 crossfade gain control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DynLayer {
+    /// True = vibrato side, false = non-vibrato side (CC2 crossfade).
+    pub vib: bool,
+    /// Dynamic-layer index (0 = softest), for CC1 crossfade.
+    pub index: u8,
 }
 
 impl Voice {
@@ -143,6 +160,7 @@ impl Voice {
             mic_index: None,
             choke_group: None,
             release_frames,
+            dyn_layer: None,
         }
     }
 
@@ -180,6 +198,7 @@ impl Voice {
             mic_index: None,
             choke_group: None,
             release_frames,
+            dyn_layer: None,
         }
     }
 
@@ -204,6 +223,12 @@ impl Voice {
         let theta = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
         self.pan_l = theta.cos();
         self.pan_r = theta.sin();
+        self
+    }
+
+    /// Tag this voice as a zoned sustain dynamic layer (CC1/CC2 crossfade).
+    pub fn with_dyn_layer(mut self, layer: DynLayer) -> Self {
+        self.dyn_layer = Some(layer);
         self
     }
 
@@ -549,6 +574,7 @@ impl VoicePool {
                         | VoiceKind::SustainVibHi
                         | VoiceKind::SustainLo
                         | VoiceKind::SustainHi
+                        | VoiceKind::SustainLayer
                 )
             {
                 v.ramp_gain(0.0, fade_frames);
