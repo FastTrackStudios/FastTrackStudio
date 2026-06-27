@@ -648,14 +648,17 @@ fn run(
                         let b = !prig.rig().is_bypassed();
                         prig.rig().set_bypass(b);
                     }
-                    // Global time-bypass (kills the Time module on the active
-                    // patch — delay/reverb). "Funk switch".
-                    KeyCode::Char('t') => {
+                    // 0 = global time-bypass (kills the Time module on the active
+                    // patch — delay/reverb). The "Funk switch". (`t` alias.)
+                    KeyCode::Char('0') | KeyCode::Char('t') => {
                         let on = prig.toggle_fx_bypass();
                         status = Some(if on { "time bypass ON".into() } else { "time bypass off".into() });
                     }
-                    // F1–F8 are the footswitch stacks: press to engage the
-                    // stack's current patch, press again to rotate within it.
+                    // 1–8 (and F1–F8) are the footswitch stacks: press to engage
+                    // the stack's current patch, press again to rotate within it.
+                    KeyCode::Char(c) if ('1'..='8').contains(&c) => {
+                        prig.activate_stack(c as usize - '1' as usize);
+                    }
                     KeyCode::F(n) if (1..=12).contains(&n) => {
                         prig.activate_stack((n - 1) as usize);
                     }
@@ -801,7 +804,7 @@ fn ui(
             } else {
                 String::new()
             };
-            let label = format!(" F{}:{}{} ", i + 1, st.name, rot);
+            let label = format!(" {}:{}{} ", i + 1, st.name, rot);
             let style = if on {
                 Style::new()
                     .fg(Color::Black)
@@ -889,7 +892,7 @@ fn ui(
         Line::from(Span::styled(format!(" {s}"), Style::new().fg(Color::Green)))
     } else {
         Line::from(Span::styled(
-            " [l] browse  [F1-8] stack  [1-9] patch  ←/→ patch  [t] time-bypass  [b] bypass  [ / ] buffer  [s] settings  [q] quit",
+            " [l] browse  [1-8] stack (re-press rotates)  [0] time-bypass  ←/→ patch  [b] bypass  [ / ] buffer  [s] settings  [q] quit",
             Style::new().fg(Color::DarkGray),
         ))
     };
@@ -1007,7 +1010,7 @@ fn browser_detail(b: &Browser) -> Vec<Line<'static>> {
             ])];
             for (i, st) in p.stacks.iter().enumerate() {
                 lines.push(Line::from(vec![
-                    Span::styled(format!("F{}:{}  ", i + 1, st.name), Style::new().fg(Color::Rgb(232, 129, 58))),
+                    Span::styled(format!("{}:{}  ", i + 1, st.name), Style::new().fg(Color::Rgb(232, 129, 58))),
                     Span::raw(st.patches.join(" · ")),
                 ]));
             }
