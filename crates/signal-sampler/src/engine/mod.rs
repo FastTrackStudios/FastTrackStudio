@@ -208,6 +208,10 @@ pub struct SampleEngine {
     cc2: u8,
     /// Current CC58 value, selects articulation / legato mode.
     cc58: u8,
+    /// Master output volume [0.0, 1.0] from CC11 (CSS "Volume"). 1.0 = full.
+    cc11_volume: f32,
+    /// Portamento glide volume [0.0, 1.0] from CC5 (CSS "Portamento Volume").
+    cc5_porta_volume: f32,
     cc_values: [u8; 128],
     channel_aftertouch: u8,
     poly_aftertouch: [u8; 128],
@@ -394,6 +398,8 @@ impl SampleEngine {
             cc1: 64,
             cc2: 0,
             cc58: 0,
+            cc11_volume: 1.0,
+            cc5_porta_volume: 1.0,
             cc_values: [0; 128],
             channel_aftertouch: 0,
             poly_aftertouch: [0; 128],
@@ -1271,9 +1277,15 @@ impl SampleEngine {
         // Dynamic layer for the transition from CC1 (single dominant layer).
         let (lo, hi, blend) = self.layers_for_artic(&leg_id);
         let dynamic = if blend >= 0.5 { hi } else { lo };
+        // Portamento glides use CC5 "Portamento Volume"; normal transitions full.
+        let gain = if portamento {
+            self.cc5_porta_volume
+        } else {
+            1.0
+        };
         let rr = self.zone_rr_counter;
         if let Some(idx) = self.find_layer_zone(&leg_id, direction, &dynamic, to, rr) {
-            self.spawn_zone_voice(idx, to, VoiceKind::Legato, 1.0, None);
+            self.spawn_zone_voice(idx, to, VoiceKind::Legato, gain, None);
         }
     }
 
@@ -1699,6 +1711,10 @@ impl SampleEngine {
                     }
                 }
             }
+            // CSS "Volume" — master output level (separate from CC1 dynamics).
+            11 => self.cc11_volume = value as f32 / 127.0,
+            // CSS "Portamento Volume" — level of the portamento glide.
+            5 => self.cc5_porta_volume = value as f32 / 127.0,
             // All Sound Off (immediate) / All Notes Off (release held) — standard
             // MIDI panic CCs, so they work through the one MIDI dispatch path.
             120 => self.panic(),
@@ -1767,6 +1783,13 @@ impl SampleEngine {
 
         self.voices.render(output);
 
+        // CSS "Volume" (CC11) — master output level.
+        if self.cc11_volume != 1.0 {
+            for s in output.iter_mut() {
+                *s *= self.cc11_volume;
+            }
+        }
+
         // Apply Con Sordino placeholder filter to the entire output bus.
         if self.con_sordino {
             self.sord_filter.process(output);
@@ -1810,6 +1833,15 @@ impl SampleEngine {
         }
 
         self.voices.render_multi(outputs);
+
+        // CSS "Volume" (CC11) — master output level, all mic buses.
+        if self.cc11_volume != 1.0 {
+            for buf in outputs.iter_mut() {
+                for s in buf.iter_mut() {
+                    *s *= self.cc11_volume;
+                }
+            }
+        }
 
         // Con Sordino filter: apply only to mic 0 (sord is a section/bus
         // effect, not a per-mic effect). Multi-mic libraries rarely use

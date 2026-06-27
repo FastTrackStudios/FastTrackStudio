@@ -532,7 +532,7 @@ fn ui(
             "D0 Pizz (vel: pizz→bartók→col legno)   D#0 Trills   E0 Harm   F0 Trem   F#0 Marcato   A#0 NonVib",
         ),
         Line::from(
-            "CC1 = dynamics (swell)    CC2 = vibrato (NonVib↔Vib)    CC58 = articulation",
+            "CC1 dynamics  ·  CC2 vibrato  ·  CC11 volume  ·  CC5 portamento  ·  CC58 articulation",
         ),
     ])
     .style(Style::default().fg(Color::Cyan))

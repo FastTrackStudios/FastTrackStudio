@@ -117,6 +117,21 @@ fn main() -> eyre::Result<()> {
         rig.active_voices(ID)
     );
 
+    // CC11 master volume: same note, half volume → ~half peak.
+    rig.panic(ID);
+    rig.cc(ID, 1, 110);
+    rig.cc(ID, 11, 64); // ~half
+    rig.warm_note(ID, note2);
+    rig.note_on(ID, note2, 100);
+    let mut volb = vec![0.0f32; frames * 2];
+    rig.render_offline(&mut volb)?;
+    let vol_half = volb.iter().fold(0f32, |m, &s| m.max(s.abs()));
+    rig.cc(ID, 11, 127); // full
+    let mut volf = vec![0.0f32; frames * 2];
+    rig.render_offline(&mut volf)?;
+    let vol_full = volf.iter().fold(0f32, |m, &s| m.max(s.abs()));
+    println!("CC11 volume: half(64)={vol_half:.5}  full(127)={vol_full:.5}");
+
     if peak > 0.0 && peak2 > 0.0 {
         println!("\n✅ BOTH paths produce audio. If the live rig is still silent,");
         println!("   the issue is output-device routing (check the OUTPUT meter / qpwgraph).");
