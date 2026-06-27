@@ -248,6 +248,9 @@ pub struct SampleEngine {
     cc1_ramp_frames: usize,
     /// Default release duration (frames) for sustain voices.
     release_frames: usize,
+    /// Attack envelope (frames) ramped in on sustain onset. 0 = the sample's
+    /// natural attack (CSS attack parameter; user-adjustable).
+    attack_frames: usize,
 
     /// Round-robin counter for zone mode. Increments on every zoned note-on
     /// regardless of (note, velocity) so RR cycling within a matching zone set
@@ -405,6 +408,7 @@ impl SampleEngine {
             legato_fade_frames,
             cc1_ramp_frames,
             release_frames,
+            attack_frames: 0,
             zone_rr_counter: 0,
             zone_rr_random_state: 0x9e37_79b9_7f4a_7c15,
             zone_rr_last_slots: HashMap::with_capacity(128),
@@ -567,6 +571,23 @@ impl SampleEngine {
     /// default) keeps the play-all-mics behaviour for multi-mic mixing.
     pub fn set_solo_mic(&mut self, mic_id: Option<String>) {
         self.solo_mic = mic_id.filter(|m| !m.is_empty());
+    }
+
+    /// Attack envelope length in frames for sustained notes (CSS attack
+    /// parameter). 0 = the sample's natural attack.
+    pub fn set_attack_frames(&mut self, frames: usize) {
+        self.attack_frames = frames;
+    }
+
+    /// Release fade length in frames on note-off (CSS release parameter); the
+    /// recorded release sample plays underneath.
+    pub fn set_release_frames(&mut self, frames: usize) {
+        self.release_frames = frames;
+    }
+
+    /// Sample rate (frames/s) — for ms↔frame conversion by callers.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
     }
 
     /// Warm (decode into cache, on the caller's thread) every attack zone a
@@ -1011,7 +1032,9 @@ impl SampleEngine {
                 }
                 self.legato_note = None;
             }
-            self.trigger_zoned(note, release_velocity, ZoneTrigger::Release, false);
+            // Play the recorded release tail (CSS Vsusrel/NVrel) and fade the
+            // looping sustain underneath it.
+            self.spawn_release(note);
             self.voices
                 .note_off_with_release_frames(note, Some(release_frames));
             return;
@@ -1244,6 +1267,27 @@ impl SampleEngine {
         }
     }
 
+    /// Spawn the recorded RELEASE sample (e.g. `NVrel`/`Vsusrel`) for the
+    /// current sustain articulation when a note is released — CSS's release
+    /// tail. No-op if the articulation declares no `release_artic`.
+    fn spawn_release(&mut self, note: u8) {
+        let rel_id = self
+            .patch
+            .spec
+            .articulation(&self.articulation)
+            .and_then(|a| a.release_artic.clone());
+        let Some(rel_id) = rel_id else {
+            return;
+        };
+        let (lo, hi, blend) = self.layers_for_artic(&rel_id);
+        let dynamic = if blend >= 0.5 { hi } else { lo };
+        let rr = self.zone_rr_counter;
+        // Release samples are non-directional → pass "" (no direction filter).
+        if let Some(idx) = self.find_layer_zone(&rel_id, "", &dynamic, note, rr) {
+            self.spawn_zone_voice(idx, note, VoiceKind::Release, 1.0);
+        }
+    }
+
     /// Find + spawn one crossfade-corner voice (articulation × direction ×
     /// dynamic layer) for `note`, if a matching zone exists and is loaded.
     fn spawn_zone_layer(
@@ -1355,9 +1399,13 @@ impl SampleEngine {
                 | VoiceKind::SustainHi
         );
 
+        // Attack envelope on the sustained body only (the legato transition and
+        // shorts keep their natural recorded attack).
+        let attack = if is_sustain_layer { self.attack_frames } else { 0 };
         let mut voice = Voice::with_rate(data, note, kind, rate, gain, self.release_frames)
             .with_mic_index(mic_index)
             .with_pan(pan)
+            .with_attack(attack)
             .with_sample_window(
                 sample_start as usize,
                 (sample_end > 0).then_some(sample_end as usize),

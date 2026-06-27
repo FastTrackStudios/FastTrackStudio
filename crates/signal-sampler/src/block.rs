@@ -352,6 +352,19 @@ impl SamplerBlock {
         self.engine.articulation()
     }
 
+    /// Sustain attack envelope in milliseconds (CSS attack parameter).
+    pub fn set_attack_ms(&mut self, ms: u32) {
+        let sr = self.engine.sample_rate();
+        self.engine.set_attack_frames(crate::engine::ms_to_frames(ms, sr));
+    }
+
+    /// Sustain release fade in milliseconds (CSS release parameter).
+    pub fn set_release_ms(&mut self, ms: u32) {
+        let sr = self.engine.sample_rate();
+        self.engine
+            .set_release_frames(crate::engine::ms_to_frames(ms, sr));
+    }
+
     /// Switch this block's engine to a microphone position (e.g. `"Mix"`).
     /// See [`SampleEngine::set_mic`].
     pub fn set_mic(&mut self, mic_id: impl Into<String>) {

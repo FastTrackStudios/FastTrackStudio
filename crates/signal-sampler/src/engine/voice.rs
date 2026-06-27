@@ -207,6 +207,16 @@ impl Voice {
         self
     }
 
+    /// Start at silence and ramp up to the spawn gain over `frames` — the
+    /// attack envelope. `frames == 0` keeps the sample's natural attack.
+    pub fn with_attack(mut self, frames: usize) -> Self {
+        if frames > 0 {
+            self.gain = 0.0; // target_gain stays at the intended spawn gain
+            self.gain_ramp_frames = frames;
+        }
+        self
+    }
+
     pub fn with_sample_window(mut self, start_frame: usize, end_frame: Option<usize>) -> Self {
         let start = start_frame.min(self.data.num_frames);
         let end = end_frame

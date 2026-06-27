@@ -71,6 +71,11 @@ const MICS: &[&str] = &["Mix", "Main", "Room", "Spot1", "Spot2"];
 const WARM_LO: u8 = 40;
 const WARM_HI: u8 = 88;
 
+/// Default attack / release envelope (ms). Attack 0 keeps the sample's natural
+/// onset; a small value softens it. Release is the fade under the release tail.
+const DEFAULT_ATTACK_MS: u32 = 20;
+const DEFAULT_RELEASE_MS: u32 = 300;
+
 fn arg(args: &[String], flag: &str) -> Option<String> {
     args.iter()
         .position(|a| a == flag)
@@ -142,6 +147,9 @@ fn main() -> eyre::Result<()> {
     // Drive these from your keyboard's mod wheel (CC1) + a CC2 control live.
     rig.cc(INSTRUMENT_ID, 1, 90);
     rig.cc(INSTRUMENT_ID, 2, 90);
+    // Attack / release envelope (CSS-style), adjustable live with a/A and r/R.
+    rig.set_attack_ms(INSTRUMENT_ID, DEFAULT_ATTACK_MS);
+    rig.set_release_ms(INSTRUMENT_ID, DEFAULT_RELEASE_MS);
 
     // MIDI input device choices: All inputs (default) + each detected port + a
     // virtual port. Cycle them live in the TUI with `i`. Detected once at start;
@@ -295,6 +303,8 @@ fn run(
         cancel: warm.cancel.clone(),
     };
     let monitor = rig.midi_monitor();
+    let mut attack_ms = DEFAULT_ATTACK_MS;
+    let mut release_ms = DEFAULT_RELEASE_MS;
     // Track the live articulation + mic so a change from ANY source — the TUI
     // keys OR a keyswitch / CC58 from the keyboard — re-warms the new samples.
     let mut last_artic = rig.articulation(INSTRUMENT_ID).unwrap_or_default();
@@ -311,6 +321,8 @@ fn run(
                 &monitor,
                 &live_artic,
                 *mic_idx,
+                attack_ms,
+                release_ms,
                 &warm,
             )
         })?;
@@ -329,6 +341,23 @@ fn run(
                 match k.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Char(' ') => rig.panic(INSTRUMENT_ID),
+                    // Attack / release envelope (CSS params).
+                    KeyCode::Char('a') => {
+                        attack_ms = attack_ms.saturating_sub(5);
+                        rig.set_attack_ms(INSTRUMENT_ID, attack_ms);
+                    }
+                    KeyCode::Char('A') => {
+                        attack_ms = (attack_ms + 5).min(2000);
+                        rig.set_attack_ms(INSTRUMENT_ID, attack_ms);
+                    }
+                    KeyCode::Char('r') => {
+                        release_ms = release_ms.saturating_sub(25);
+                        rig.set_release_ms(INSTRUMENT_ID, release_ms);
+                    }
+                    KeyCode::Char('R') => {
+                        release_ms = (release_ms + 25).min(5000);
+                        rig.set_release_ms(INSTRUMENT_ID, release_ms);
+                    }
                     // Cycle the MIDI input device: drop the old connection, open
                     // the next. `I` goes backwards.
                     KeyCode::Char('i') | KeyCode::Char('I') => {
@@ -383,6 +412,8 @@ fn ui(
     monitor: &MidiMonitor,
     live_artic: &str,
     mic_idx: usize,
+    attack_ms: u32,
+    release_ms: u32,
     warm: &WarmJob,
 ) {
     let rows = Layout::vertical([
@@ -442,6 +473,7 @@ fn ui(
                 MICS[mic_idx],
                 Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             ),
+            Span::raw(format!("    attack {attack_ms}ms   release {release_ms}ms")),
         ]),
         Line::from(format!(
             "voices {voices}   sample rate {} Hz   engine midi {}",
@@ -508,7 +540,7 @@ fn ui(
     f.render_widget(ks, rows[5]);
 
     let help = Paragraph::new(Line::from(
-        "i MIDI device   [ ] articulation   , . mic   space panic   q quit",
+        "i MIDI   [ ] artic   , . mic   a/A attack   r/R release   space panic   q quit",
     ))
     .style(Style::default().fg(Color::DarkGray))
     .block(Block::bordered());

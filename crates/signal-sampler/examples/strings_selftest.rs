@@ -98,6 +98,25 @@ fn main() -> eyre::Result<()> {
         rig.active_voices(ID)
     );
 
+    // Attack + release: hold a note, then release it and confirm the recorded
+    // release tail (NVrel/Vsusrel) fires and rings on.
+    rig.panic(ID);
+    rig.set_attack_ms(ID, 40);
+    rig.set_release_ms(ID, 300);
+    rig.warm_note(ID, note2);
+    rig.note_on(ID, note2, 100);
+    let mut hold = vec![0.0f32; frames * 2];
+    rig.render_offline(&mut hold)?;
+    let held_voices = rig.active_voices(ID);
+    rig.note_off(ID, note2);
+    let mut rel = vec![0.0f32; frames * 2];
+    rig.render_offline(&mut rel)?;
+    let rel_peak = rel.iter().fold(0f32, |m, &s| m.max(s.abs()));
+    println!(
+        "attack/release: held voices={held_voices}, after note_off voices={} release peak={rel_peak:.5}",
+        rig.active_voices(ID)
+    );
+
     if peak > 0.0 && peak2 > 0.0 {
         println!("\n✅ BOTH paths produce audio. If the live rig is still silent,");
         println!("   the issue is output-device routing (check the OUTPUT meter / qpwgraph).");

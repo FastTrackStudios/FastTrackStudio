@@ -679,6 +679,22 @@ impl SamplerRig {
         self.bank().lock().ok().and_then(|b| b.articulation(id))
     }
 
+    /// Set an instrument's sustain attack envelope in ms (CSS attack
+    /// parameter). 0 = the sample's natural attack.
+    pub fn set_attack_ms(&self, id: &str, ms: u32) {
+        if let Ok(mut bank) = self.bank().lock() {
+            bank.set_attack_ms(id, ms);
+        }
+    }
+
+    /// Set an instrument's sustain release fade in ms (CSS release parameter);
+    /// the recorded release sample plays underneath on note-off.
+    pub fn set_release_ms(&self, id: &str, ms: u32) {
+        if let Ok(mut bank) = self.bank().lock() {
+            bank.set_release_ms(id, ms);
+        }
+    }
+
     /// Switch an instrument's active microphone position (e.g. `"Mix"`).
     pub fn set_mic(&self, id: &str, mic_id: impl Into<String>) {
         match self.bank().lock() {

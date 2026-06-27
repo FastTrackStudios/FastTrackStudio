@@ -553,6 +553,16 @@ impl SamplerBank {
         self.with_block(id, |b| b.set_solo_mic(mic_id));
     }
 
+    /// Sustain attack envelope (ms) for an instrument (CSS attack parameter).
+    pub fn set_attack_ms(&mut self, id: &str, ms: u32) {
+        self.with_block(id, |b| b.set_attack_ms(ms));
+    }
+
+    /// Sustain release fade (ms) for an instrument (CSS release parameter).
+    pub fn set_release_ms(&mut self, id: &str, ms: u32) {
+        self.with_block(id, |b| b.set_release_ms(ms));
+    }
+
     /// Warm the samples `note` would trigger for `id` under its current pin +
     /// solo mic (read-only on the cache; safe to call off-thread).
     pub fn warm_note(&self, id: &str, note: u8) -> PreloadStats {
