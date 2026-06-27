@@ -1221,6 +1221,29 @@ impl SampleEngine {
         (delay_ms, portamento)
     }
 
+    /// Spawn the directional legato TRANSITION sample into `to` (a one-shot
+    /// `Leg`/`NVLeg`/`Port` recording carrying the bow change). The sustained
+    /// body is started separately by the caller.
+    fn spawn_legato_transition(&mut self, to: u8, direction: &str, velocity: u8, portamento: bool) {
+        let _ = velocity;
+        let leg_id = if portamento {
+            self.find_port_artic_id()
+                .or_else(|| self.find_legato_artic_id(false))
+        } else {
+            self.find_legato_artic_id(false)
+        };
+        let Some(leg_id) = leg_id else {
+            return;
+        };
+        // Dynamic layer for the transition from CC1 (single dominant layer).
+        let (lo, hi, blend) = self.layers_for_artic(&leg_id);
+        let dynamic = if blend >= 0.5 { hi } else { lo };
+        let rr = self.zone_rr_counter;
+        if let Some(idx) = self.find_layer_zone(&leg_id, direction, &dynamic, to, rr) {
+            self.spawn_zone_voice(idx, to, VoiceKind::Legato, 1.0);
+        }
+    }
+
     /// Find + spawn one crossfade-corner voice (articulation × direction ×
     /// dynamic layer) for `note`, if a matching zone exists and is loaded.
     fn spawn_zone_layer(
@@ -1315,12 +1338,22 @@ impl SampleEngine {
             self.record_cache_miss(&path);
             return false;
         };
+        let num_frames = data.num_frames;
 
         let semitones = note as f64 - root_key as f64;
         let total_cents = semitones * 100.0 + tune_cents as f64;
         let rate = 2.0f64.powf(total_cents / 1200.0);
         let gain = 10.0f32.powf(gain_db / 20.0) * gain_scale;
         let mic_index = self.mic_index_for(&mic);
+        let is_sustain_layer = matches!(
+            kind,
+            VoiceKind::SustainNVLo
+                | VoiceKind::SustainNVHi
+                | VoiceKind::SustainVibLo
+                | VoiceKind::SustainVibHi
+                | VoiceKind::SustainLo
+                | VoiceKind::SustainHi
+        );
 
         let mut voice = Voice::with_rate(data, note, kind, rate, gain, self.release_frames)
             .with_mic_index(mic_index)
@@ -1333,8 +1366,15 @@ impl SampleEngine {
             voice = voice.reversed();
         } else if alternating {
             voice = voice.with_alternating_loop(loop_start as usize, loop_end as usize);
-        } else {
+        } else if loop_end > loop_start {
             voice = voice.with_forward_loop(loop_start as usize, loop_end as usize);
+        } else if is_sustain_layer && num_frames > 0 {
+            // CSS sustain samples ship no loop points but must hold indefinitely.
+            // Loop the steady region (past the attack, before the tail). Crude
+            // vs real loop markers, but lets a held note sustain forever.
+            let lo = num_frames / 4;
+            let hi = num_frames.saturating_sub(num_frames / 20).max(lo + 2);
+            voice = voice.with_forward_loop(lo, hi);
         }
         self.voices.spawn(voice);
         true
@@ -1979,12 +2019,13 @@ impl SampleEngine {
         // Fade out old sustain voice.
         self.voices.silence_note(from_note, self.legato_fade_frames);
 
-        // Zoned libraries (CSS): the directional legato zone IS the full note
-        // (recorded transition + sustained body), selected by `play_direction`.
-        // No separate background sustain — the Leg sample carries it.
+        // Zoned libraries (CSS): play the directional legato TRANSITION sample
+        // (the recorded bow change into the target) as a one-shot, then start
+        // the sustained body (Nonvib/Vibsus) which holds. The transition gives
+        // the slur; the sustain holds the note.
         if self.patch.is_zoned() {
-            let _ = velocity;
             self.play_direction = direction.to_string();
+            self.spawn_legato_transition(to_note, direction, velocity, portamento);
             self.legato_note = Some(to_note);
             self.trigger_zoned_sustain(to_note);
             return;
@@ -2406,13 +2447,13 @@ impl SampleEngine {
             "Sustain: Low Latency Legato" => {
                 self.legato_enabled = true;
                 self.legato_expressive = false;
-                self.select_articulation_tag("NVLeg");
+                self.select_articulation_tag("Nonvib");
                 return;
             }
             "Sustain: Expressive Legato" => {
                 self.legato_enabled = true;
                 self.legato_expressive = true;
-                self.select_articulation_tag("NVLeg");
+                self.select_articulation_tag("Nonvib");
                 return;
             }
             "Measured Tremolo" => {

@@ -38,7 +38,7 @@ fn main() -> eyre::Result<()> {
     let rig = SamplerRig::new_offline_with_cache_budget(48_000, Some(6 * 1024 * 1024 * 1024));
     rig.load_instrument_with_config(ID, &config, &spec, &css_root, "1st Violins", "Mix")?;
     rig.set_solo_mic(ID, Some("Mix".into()));
-    rig.set_articulation(ID, "NVLeg");
+    rig.set_articulation(ID, "Nonvib");
     rig.cc(ID, 1, 90);
     rig.cc(ID, 2, 90);
     println!("articulation: {:?}", rig.articulation(ID));

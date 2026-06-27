@@ -54,8 +54,8 @@ const CSS_CONFIG: &str =
 /// `NVLeg` (non-vib legato) is the default base; CC2 blends in the vibrato pair
 /// (`Leg`) on top, so the legato/sustain entries are the non-vib bases.
 const ARTICULATIONS: &[&str] = &[
-    "NVLeg",
     "Nonvib",
+    "Vibsus",
     "Marcato",
     "Spiccato",
     "Staccato",
