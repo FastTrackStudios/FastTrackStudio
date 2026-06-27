@@ -54,6 +54,7 @@ pub mod instrument;
 pub mod midi;
 pub mod mixer;
 pub mod module_spec;
+pub mod keys_rig;
 pub mod nam;
 pub mod native_osc;
 pub mod node_render;
@@ -93,6 +94,7 @@ pub use preset_spec::{
 };
 pub use rig::{BlockImpl, DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
 pub use rig_library::{Library, RigPreset, RigScene, RigSection, RigSong};
+pub use keys_rig::{KeysInstrument, KeysRig};
 pub use native_osc::{NativeOscillator, OscWave};
 pub use node_render::{build_node_backend, RenderNode};
 pub use preset_registry::{PresetRegistry, PresetSource, RegisteredPreset};

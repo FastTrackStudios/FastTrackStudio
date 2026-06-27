@@ -308,7 +308,8 @@ struct MidiMonitorInner {
 }
 
 impl MidiMonitor {
-    fn record(&self, msg: &daw_midi_io::MidiMessage) {
+    /// Record a message (tap from a MIDI input callback).
+    pub fn record(&self, msg: &daw_midi_io::MidiMessage) {
         if let Ok(mut g) = self.inner.lock() {
             g.count = g.count.saturating_add(1);
             if g.recent.len() >= MIDI_MONITOR_CAP {
