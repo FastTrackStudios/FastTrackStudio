@@ -69,7 +69,7 @@ fn main() -> eyre::Result<()> {
     rig.cc(ID, 1, 64);
     rig.warm_note(ID, note);
     rig.note_on(ID, note, 100);
-    for cc1 in [10u8, 64, 110, 30] {
+    for cc1 in [0u8, 16, 32, 48, 64, 80, 96, 112, 127] {
         rig.cc(ID, 1, cc1);
         let mut b = vec![0.0f32; frames * 2];
         rig.render_offline(&mut b)?;

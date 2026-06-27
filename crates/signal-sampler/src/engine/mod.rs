@@ -2701,22 +2701,29 @@ impl SampleEngine {
         (top.label.clone(), top.label.clone(), 0.0)
     }
 
-    /// Like [`cc1_blend`](Self::cc1_blend) but returns the active layer
-    /// *indices* `(lo, hi, blend)` — for the N-layer zoned crossfade, where
-    /// every dynamic layer is voiced and gained by its index.
+    /// Active layer pair `(lo, hi, blend)` for the N-layer zoned crossfade —
+    /// CONTINUOUS across the whole 0–127 range. Anchored on each layer's centre
+    /// (midpoint of its cc_range) and interpolated between adjacent centres, so
+    /// there are no flat "solo" plateaus in the middle (those made CC1 feel like
+    /// just 3 fixed dynamics). Below the softest / above the loudest centre the
+    /// extreme layer plays solo.
     fn cc1_blend_idx(layers: &[Cc1Layer], cc1: u8) -> (usize, usize, f32) {
         if layers.is_empty() {
             return (0, 0, 0.0);
         }
-        for i in 0..layers.len().saturating_sub(1) {
-            let xfade_start = layers[i + 1].cc_range[0];
-            let xfade_end = layers[i].cc_range[1];
-            if cc1 <= xfade_end {
-                if cc1 < xfade_start {
-                    return (i, i, 0.0);
-                }
-                let span = (xfade_end - xfade_start + 1).max(1) as f32;
-                return (i, i + 1, (cc1 - xfade_start) as f32 / span);
+        let center = |i: usize| -> f32 {
+            let r = layers[i].cc_range;
+            (r[0] as f32 + r[1] as f32) * 0.5
+        };
+        let c = cc1 as f32;
+        if c <= center(0) {
+            return (0, 0, 0.0);
+        }
+        for i in 0..layers.len() - 1 {
+            let (ci, cj) = (center(i), center(i + 1));
+            if c <= cj {
+                let blend = if cj > ci { (c - ci) / (cj - ci) } else { 0.0 };
+                return (i, i + 1, blend.clamp(0.0, 1.0));
             }
         }
         let top = layers.len() - 1;
