@@ -132,6 +132,36 @@ fn main() -> eyre::Result<()> {
     let vol_full = volf.iter().fold(0f32, |m, &s| m.max(s.abs()));
     println!("CC11 volume: half(64)={vol_half:.5}  full(127)={vol_full:.5}");
 
+    // Every articulation should produce audio at note 67 (a recorded key).
+    println!("\n-- articulation sweep (note 67, vel 100, CC1=100) --");
+    rig.cc(ID, 1, 100);
+    for art in [
+        "Nonvib",
+        "Vibsus",
+        "Spiccato",
+        "Staccato",
+        "Staccatissimo",
+        "Sfz",
+        "Pizzicato",
+        "Bartokpizz",
+        "Marcato",
+        "HTrills",
+        "WTrills",
+        "Harm",
+        "Tremolo",
+        "Clegno",
+    ] {
+        rig.panic(ID);
+        rig.set_articulation(ID, art);
+        rig.warm_note(ID, 67);
+        rig.note_on(ID, 67, 100);
+        let mut b = vec![0.0f32; frames * 2];
+        rig.render_offline(&mut b)?;
+        let p = b.iter().fold(0f32, |m, &s| m.max(s.abs()));
+        let mark = if p > 0.0 { "ok " } else { "SILENT" };
+        println!("  {mark} {art:<14} peak={p:.5}");
+    }
+
     if peak > 0.0 && peak2 > 0.0 {
         println!("\n✅ BOTH paths produce audio. If the live rig is still silent,");
         println!("   the issue is output-device routing (check the OUTPUT meter / qpwgraph).");

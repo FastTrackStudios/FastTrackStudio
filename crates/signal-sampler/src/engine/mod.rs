@@ -931,9 +931,15 @@ impl SampleEngine {
                 .articulation(&self.articulation)
                 .map(|a| a.kind.clone());
             let is_legato = matches!(kind, Some(ArticulationKind::Legato));
+            // Held + CC1-crossfaded: sustains, tremolo, harmonics, and trills.
             let is_sustain = matches!(
                 kind,
-                Some(ArticulationKind::Sustain | ArticulationKind::Looped)
+                Some(ArticulationKind::Sustain | ArticulationKind::Looped | ArticulationKind::Trill)
+            );
+            // One-shot, velocity-picked dynamic: spiccato/staccato/sfz/pizz/etc.
+            let is_short = matches!(
+                kind,
+                Some(ArticulationKind::Short | ArticulationKind::OneShot)
             );
             self.held_notes.insert(note, velocity);
 
@@ -956,12 +962,16 @@ impl SampleEngine {
                     Some(cur) => self.start_legato_transition(cur, note, velocity),
                 }
             } else if is_legato || is_sustain {
-                // Polyphonic sustain (legato OFF): each note independent, full
-                // CC1 dynamic + CC2 vibrato blend.
+                // Held: polyphonic sustain / trill (legato OFF for legato artics),
+                // full CC1 dynamic + CC2 vibrato blend, loops to hold.
                 self.play_direction = "up".to_string();
                 self.trigger_zoned_sustain(note);
+            } else if is_short {
+                // One-shot short: velocity picks the dynamic layer, nearest-key
+                // pitch-shift, plays to completion.
+                self.trigger_zoned_short(note, velocity);
             } else {
-                // Shorts / other articulations: single-shot, velocity-driven.
+                // Anything unusual: fall back to the generic zoned trigger.
                 self.trigger_zoned(note, velocity, ZoneTrigger::Attack, true);
             }
             return;
@@ -1159,6 +1169,20 @@ impl SampleEngine {
         self.spawn_sustain_layers(&nv_artic, false, nv_scale, &direction, note, rr);
         if let Some(vib_id) = vib_artic {
             self.spawn_sustain_layers(&vib_id, true, vb_scale, &direction, note, rr);
+        }
+    }
+
+    /// Trigger a one-shot short note (spiccato / staccato / sfz / pizz / …):
+    /// velocity picks the dynamic layer, nearest recorded key is pitch-shifted,
+    /// and it plays to completion (no CC1 crossfade, no loop).
+    fn trigger_zoned_short(&mut self, note: u8, velocity: u8) {
+        let rr = self.zone_rr_counter;
+        self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
+        let artic = self.articulation.clone();
+        let dynamic = self.short_note_dynamic(velocity);
+        let gain = velocity_gain(velocity);
+        if let Some(idx) = self.find_layer_zone(&artic, "", &dynamic, note, rr) {
+            self.spawn_zone_voice(idx, note, VoiceKind::Short, gain, None);
         }
     }
 
