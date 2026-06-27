@@ -146,6 +146,10 @@ pub struct SampleEngine {
     /// velocity-sensitive keyswitches (selecting articulation / mode) rather
     /// than sounding. Built from the spec at construction.
     keyswitch_notes: HashMap<u8, usize>,
+    /// Current legato transition direction (`"up"` / `"down"`) — selects the
+    /// directional legato zone (CSS records a separate sample per direction).
+    /// Defaults to `"up"`; updated per note from the interval played.
+    play_direction: String,
 
     /// True when the source pack is a percussion / drum-kit library
     /// (`category` ~ "drum-kit", or a percussion `instrument`). Percussion
@@ -353,6 +357,7 @@ impl SampleEngine {
             mic,
             solo_mic: None,
             keyswitch_notes,
+            play_direction: "up".to_string(),
             percussion,
             single_attack_key,
             pinned_articulation: None,
@@ -692,7 +697,47 @@ impl SampleEngine {
         {
             return false;
         }
+        // Directional zones (CSS legato records up- vs down-transitions
+        // separately): only the current play direction fires. Non-directional
+        // zones (shorts, sustains) carry an empty `direction` and are unaffected.
+        if !zone.direction.is_empty() && !zone.direction.eq_ignore_ascii_case(&self.play_direction) {
+            return false;
+        }
+        // CC1 dynamic layer: CSS sustains/legato record p/mf/ff at full velocity
+        // range and crossfade them by CC1 — without picking one layer they all
+        // stack. Velocity-driven (short) articulations keep their vel_min/max
+        // gating and are left alone here.
+        if !zone.dynamic.is_empty() {
+            if let Some(dyn_label) = self.current_zone_dynamic_cc1() {
+                if !zone.dynamic.eq_ignore_ascii_case(&dyn_label) {
+                    return false;
+                }
+            }
+        }
         note >= zone.key_min && note <= zone.key_max
+    }
+
+    /// The dominant CC1 dynamic-layer label for the current articulation, or
+    /// `None` for articulations that aren't CC1-controlled (shorts) or have no
+    /// declared dynamic layers. Used to pick a single zoned dynamic layer.
+    fn current_zone_dynamic_cc1(&self) -> Option<String> {
+        let kind = self
+            .patch
+            .spec
+            .articulation(&self.articulation)
+            .map(|a| a.kind.clone());
+        if matches!(
+            kind,
+            Some(ArticulationKind::Short | ArticulationKind::OneShot)
+        ) {
+            return None;
+        }
+        let layers = self.active_cc1_layers();
+        if layers.is_empty() {
+            return None;
+        }
+        let (lo, hi, blend) = Self::cc1_blend(layers, self.cc1);
+        Some(if blend >= 0.5 { hi } else { lo })
     }
 
     /// The articulation that drives zone selection / warming: an explicit pin
@@ -811,7 +856,29 @@ impl SampleEngine {
         }
 
         if self.patch.is_zoned() {
-            self.trigger_zoned(note, velocity, ZoneTrigger::Attack, true);
+            // CSS-style legato: a legato articulation, with another note already
+            // held, plays a delayed directional transition (the famous latency).
+            // The first note of a phrase — or any non-legato articulation —
+            // sounds immediately.
+            let is_legato = matches!(
+                self.patch
+                    .spec
+                    .articulation(&self.articulation)
+                    .map(|a| a.kind.clone()),
+                Some(ArticulationKind::Legato)
+            );
+            let other_held = self.held_notes.keys().any(|&n| n != note);
+            self.held_notes.insert(note, velocity);
+            if is_legato && self.legato_enabled && other_held {
+                // Sets LegatoState::Pending with the velocity-mapped delay;
+                // render() fires fire_legato when it elapses.
+                self.initiate_legato(note, velocity);
+            } else {
+                if is_legato {
+                    self.play_direction = "up".to_string();
+                }
+                self.trigger_zoned(note, velocity, ZoneTrigger::Attack, true);
+            }
             return;
         }
 
@@ -1599,11 +1666,20 @@ impl SampleEngine {
         };
     }
 
-    fn fire_legato(&mut self, from_note: u8, to_note: u8, _velocity: u8, portamento: bool) {
+    fn fire_legato(&mut self, from_note: u8, to_note: u8, velocity: u8, portamento: bool) {
         let direction = if to_note > from_note { "up" } else { "down" };
 
         // Fade out old sustain voice.
         self.voices.silence_note(from_note, self.legato_fade_frames);
+
+        // Zoned libraries (CSS): the directional legato zone IS the full note
+        // (recorded transition + sustained body), selected by `play_direction`.
+        // No separate background sustain — the Leg sample carries it.
+        if self.patch.is_zoned() {
+            self.play_direction = direction.to_string();
+            self.trigger_zoned(to_note, velocity, ZoneTrigger::Attack, true);
+            return;
+        }
 
         // For portamento, look for Port-type articulation; otherwise Leg/NVLeg.
         let leg_id = if portamento {
@@ -3098,6 +3174,65 @@ mod tests {
 
         // A normal (non-keyswitch) note is NOT consumed — it should sound.
         assert!(!eng.try_keyswitch(60, 100));
+    }
+
+    #[test]
+    fn zoned_legato_delays_then_fires_directional() {
+        // Legato articulation with directional zones (up/down) for two notes.
+        // Build with synthetic zone_paths so the patch reads as zoned (is_zoned
+        // checks resolved paths; the samples themselves never load in a test).
+        let spec = crate::LibrarySpec::from_styx(
+            "name \"s\"\n\
+             articulations (\n\
+               {id Leg, label Leg, kind @Legato}\n\
+             )\n\
+             zones (\n\
+               {file \"u60.wav\", key_min 60, key_max 60, root_key 60, vel_min 0, vel_max 127, articulation \"Leg\", direction \"up\"}\n\
+               {file \"d60.wav\", key_min 60, key_max 60, root_key 60, vel_min 0, vel_max 127, articulation \"Leg\", direction \"down\"}\n\
+               {file \"u62.wav\", key_min 62, key_max 62, root_key 62, vel_min 0, vel_max 127, articulation \"Leg\", direction \"up\"}\n\
+               {file \"d62.wav\", key_min 62, key_max 62, root_key 62, vel_min 0, vel_max 127, articulation \"Leg\", direction \"down\"}\n\
+             )\n",
+        )
+        .expect("parse styx");
+        let mut patch = crate::PlayerPatch::from_spec(spec);
+        patch.zone_paths = (0..patch.spec.zones.len())
+            .map(|i| std::path::PathBuf::from(format!("z{i}.wav")))
+            .collect();
+        let mut eng = SampleEngine::new(patch, 48_000, "", "");
+        eng.set_articulation("Leg");
+        assert!(eng.legato_enabled, "legato on by default");
+        assert_eq!(eng.articulation(), "Leg");
+        assert!(
+            matches!(
+                eng.patch().spec.articulation("Leg").map(|a| a.kind.clone()),
+                Some(ArticulationKind::Legato)
+            ),
+            "Leg parsed as @Legato"
+        );
+        let u62 = eng.patch().spec.zones[2].clone();
+        let d62 = eng.patch().spec.zones[3].clone();
+
+        // First note sounds immediately — no pending legato.
+        eng.note_on(60, 100);
+        assert!(matches!(eng.legato_state, LegatoState::Idle));
+
+        // Second note while the first is held → delayed (the CSS latency):
+        // pending, not yet fired.
+        eng.note_on(62, 100);
+        assert!(
+            matches!(eng.legato_state, LegatoState::Pending { .. }),
+            "overlapping legato note should delay (latency), not fire instantly"
+        );
+
+        // Render past the (default 100ms) delay → fires; direction up (62 > 60).
+        let frames = (eng.sample_rate as usize / 1000) * 200; // 200 ms
+        let mut out = vec![0.0f32; frames * 2];
+        eng.render(&mut out);
+        assert!(matches!(eng.legato_state, LegatoState::Idle), "legato fired");
+        assert_eq!(eng.play_direction, "up");
+        // The up-zone for the target is now selected; the down-zone is not.
+        assert!(eng.zone_selected(&u62, 62, 100, ZoneTrigger::Attack));
+        assert!(!eng.zone_selected(&d62, 62, 100, ZoneTrigger::Attack));
     }
 
     #[test]
