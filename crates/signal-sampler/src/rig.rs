@@ -114,6 +114,47 @@ pub enum BlockImpl {
     Plugin,
 }
 
+impl BlockImpl {
+    /// Whether this implementation is valid for `block_type`. The realization
+    /// axis is constrained by the semantic axis — not every backend fits every
+    /// block:
+    /// - **Nam** only fits amp-shaped (nonlinear) blocks: `Amp`, `Drive`,
+    ///   `Saturator`. A NAM model can't be a delay or a reverb.
+    /// - **Ir** only fits a `Cabinet` (impulse-response convolution).
+    /// - **Plugin** and **Native** fit any block type (an external plugin or our
+    ///   built-in DSP can implement anything).
+    pub fn supports(self, block_type: BlockType) -> bool {
+        match self {
+            BlockImpl::Native | BlockImpl::Plugin => true,
+            BlockImpl::Nam => matches!(
+                block_type,
+                BlockType::Amp | BlockType::Drive | BlockType::Saturator
+            ),
+            BlockImpl::Ir => block_type == BlockType::Cabinet,
+        }
+    }
+
+    /// The implementations valid for `block_type` (for UI pickers). `Native`
+    /// always leads (the default), then the type-specific specials, then
+    /// `Plugin`.
+    pub fn allowed_for(block_type: BlockType) -> Vec<BlockImpl> {
+        [BlockImpl::Native, BlockImpl::Nam, BlockImpl::Ir, BlockImpl::Plugin]
+            .into_iter()
+            .filter(|i| i.supports(block_type))
+            .collect()
+    }
+
+    /// Short identifier for logs / UI.
+    pub const fn tag(self) -> &'static str {
+        match self {
+            BlockImpl::Native => "native",
+            BlockImpl::Nam => "nam",
+            BlockImpl::Ir => "ir",
+            BlockImpl::Plugin => "plugin",
+        }
+    }
+}
+
 /// One block in a patch's FX chain, modeled on the two orthogonal axes from
 /// `DOMAIN.md`:
 ///
@@ -290,6 +331,25 @@ impl RigBlock {
     /// so Native blocks are skipped at install until that lands.
     pub fn has_backend(&self) -> bool {
         self.implementation() != BlockImpl::Native
+    }
+
+    /// Check the block's implementation is valid for its type (e.g. a NAM model
+    /// can't realize a `Delay`). Returns a human-readable error otherwise.
+    pub fn validate(&self) -> Result<(), String> {
+        let imp = self.implementation();
+        if imp.supports(self.block_type) {
+            Ok(())
+        } else {
+            Err(format!(
+                "a {} implementation is not valid for a {:?} block (allowed: {:?})",
+                imp.tag(),
+                self.block_type,
+                BlockImpl::allowed_for(self.block_type)
+                    .iter()
+                    .map(|i| i.tag())
+                    .collect::<Vec<_>>(),
+            ))
+        }
     }
 
     /// Display label: explicit `name`, else the asset file stem, else the block
@@ -545,6 +605,9 @@ fn build_block(
     block: &RigBlock,
     sample_rate: u32,
 ) -> Result<(Box<dyn PluginInstance>, String, Option<f64>, Option<f64>), String> {
+    // Reject implementations that don't fit the block type (e.g. NAM on a Delay)
+    // before touching a loader.
+    block.validate()?;
     if block.is_nam() {
         let mut nam = NamProcessor::load(&block.nam, sample_rate as f64, MAX_BLOCK)?;
         nam.input_gain_db = block.input_trim_db;
@@ -1370,6 +1433,32 @@ mod tests {
         assert!(RigBlock::cab_ir("v30.wav").is_cab_ir());
         assert!(RigBlock::plugin("/x/Reverb.clap").is_plugin());
         assert!(!RigBlock::nam("a.nam").is_cab_ir());
+    }
+
+    #[test]
+    fn impl_is_constrained_by_block_type() {
+        // NAM is only for amp-shaped blocks.
+        assert!(BlockImpl::Nam.supports(BlockType::Amp));
+        assert!(BlockImpl::Nam.supports(BlockType::Drive));
+        assert!(BlockImpl::Nam.supports(BlockType::Saturator));
+        assert!(!BlockImpl::Nam.supports(BlockType::Delay));
+        assert!(!BlockImpl::Nam.supports(BlockType::Cabinet));
+        // IR is only for a cabinet.
+        assert!(BlockImpl::Ir.supports(BlockType::Cabinet));
+        assert!(!BlockImpl::Ir.supports(BlockType::Amp));
+        // Plugin + Native fit anything.
+        assert!(BlockImpl::Plugin.supports(BlockType::Reverb));
+        assert!(BlockImpl::Native.supports(BlockType::Pitch));
+
+        // A NAM asset on a Delay block is rejected by validate().
+        let bad = RigBlock::of_type(BlockType::Delay).with_nam("echo.nam");
+        assert!(bad.validate().is_err());
+        // A NAM amp is fine.
+        assert!(RigBlock::nam("amp.nam").validate().is_ok());
+        // allowed_for a Delay excludes Nam/Ir.
+        let allowed = BlockImpl::allowed_for(BlockType::Delay);
+        assert!(allowed.contains(&BlockImpl::Native) && allowed.contains(&BlockImpl::Plugin));
+        assert!(!allowed.contains(&BlockImpl::Nam));
     }
 
     #[test]

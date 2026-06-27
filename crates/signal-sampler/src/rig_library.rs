@@ -217,6 +217,29 @@ impl Library {
         lib.presets.sort_by(|a, b| a.name.cmp(&b.name));
         lib.profiles.sort_by(|a, b| a.name.cmp(&b.name));
         lib.songs.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // Validate every block's implementation fits its type (e.g. no NAM on a
+        // Delay) — surfaced in the browser without needing audio.
+        for preset in &lib.presets {
+            for scene in &preset.scenes {
+                for block in &scene.chain {
+                    if let Err(e) = block.validate() {
+                        lib.errors
+                            .push(format!("preset {} / {}: {e}", preset.name, scene.name));
+                    }
+                }
+            }
+        }
+        for profile in &lib.profiles {
+            for patch in &profile.patches {
+                for block in &patch.chain {
+                    if let Err(e) = block.validate() {
+                        lib.errors
+                            .push(format!("profile {} / {}: {e}", profile.name, patch.name));
+                    }
+                }
+            }
+        }
         lib
     }
 
