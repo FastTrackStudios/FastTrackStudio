@@ -98,6 +98,9 @@ pub struct Container {
     pub modulators: Vec<RigBlock>,
     /// Cross-tree audio sends from this node's output.
     pub sends: Vec<Send>,
+    /// Container-level settings that aren't blocks — e.g. a Layer's `voice_mode`,
+    /// `unison`, `octave`, `level`; an Engine's menu options. `(name, value)`.
+    pub params: Vec<(String, String)>,
     /// Whether this whole subtree is bypassed.
     pub bypassed: bool,
 }
@@ -139,6 +142,7 @@ impl Container {
             children: Vec::new(),
             modulators: Vec::new(),
             sends: Vec::new(),
+            params: Vec::new(),
             bypassed: false,
         }
     }
@@ -203,6 +207,13 @@ impl Container {
             target: target.into(),
             label: label.into(),
         });
+        self
+    }
+
+    /// Set a container-level setting (e.g. `voice_mode`, `unison`, `octave`).
+    #[must_use]
+    pub fn param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.params.push((name.into(), value.into()));
         self
     }
 
@@ -307,6 +318,14 @@ impl Container {
             self.name,
             self.combine.tag()
         ));
+        if !self.params.is_empty() {
+            let ps: Vec<String> = self
+                .params
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect();
+            out.push_str(&format!("  {{{}}}", ps.join(", ")));
+        }
         for m in &self.modulators {
             out.push_str(&format!("  ~{}:{}", m.block_type_tag(), m.display_name()));
         }

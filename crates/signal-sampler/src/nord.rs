@@ -78,12 +78,26 @@ fn fx_chain() -> Vec<RigNode> {
 /// at the engine level (the flexible-tree case). Routes to Rotary by default.
 fn organ_engine() -> Container {
     Container::engine("Organ")
+        // engine-level menu (B3 system params)
+        .param("tonewheel_mode", "Vintage 1")
+        .param("click_level", "Normal")
+        .param("trigger_point", "High")
         .add(
             Container::parallel("Organ Voices")
-                .add(Container::layer("Organ A").block(BlockType::Tonewheel, "Organ A"))
-                .add(Container::layer("Organ B").block(BlockType::Tonewheel, "Organ B")),
+                .add(organ_layer("Organ A"))
+                .add(organ_layer("Organ B")),
         )
         .add(Container::module("Organ FX").extend(fx_chain()))
+}
+
+fn organ_layer(name: &str) -> Container {
+    Container::layer(name)
+        .param("model", "B3") // B3 | B3Bass | Vox | Farfisa | Pipe1 | Pipe2
+        .param("level", "0 dB")
+        .param("octave", "0")
+        .param("vc", "Off") // V1..V3 | C1..C3 | Off
+        .param("percussion", "Off")
+        .add(Container::module("Organ Source").block(BlockType::Tonewheel, name))
 }
 
 /// Keys (piano) — 2 layers, each a self-contained Sampler source → its own FX.
@@ -97,6 +111,8 @@ fn keys_engine() -> Container {
 
 fn keys_layer(name: &str) -> Container {
     Container::layer(name)
+        .param("level", "0 dB")
+        .param("octave", "0")
         .add(Container::module("Piano Source").block(BlockType::Sampler, "Piano"))
         .extend(fx_chain())
 }
@@ -114,6 +130,12 @@ fn synth_engine() -> Container {
 
 fn synth_layer(name: &str) -> Container {
     Container::layer(name)
+        // per-layer settings (not blocks)
+        .param("level", "0 dB")
+        .param("octave", "0")
+        .param("voice_mode", "Poly") // Poly | Mono | Legato
+        .param("unison", "Off") // Off | 1 | 2 | 3
+        .param("glide", "0")
         // voice: oscillator → filter → amp
         .add(
             Container::module("Osc")
@@ -145,9 +167,31 @@ pub fn nord_stage_preset() -> Container {
                 .add(keys_engine())
                 .add(synth_engine()),
         )
-        // Global tail: the single shared Rotary (always last). The Global-mode
-        // Delay/Comp/Reverb instances would also live here when enabled.
-        .add(Container::module("Global").block(BlockType::Rotary, ROTARY))
+        // Global tail. The Global-mode Delay/Comp/Reverb instances live here when
+        // a layer promotes that effect to Global (Shift+On); the single shared
+        // Rotary is always last. All disabled by default (per-layer FX is the norm).
+        .add(
+            Container::module("Global")
+                .param("delay_scope", "PerLayer") // PerLayer | Global
+                .param("comp_scope", "PerLayer")
+                .param("reverb_scope", "PerLayer")
+                .add(
+                    Container::module("Global Delay")
+                        .param("enabled", "false")
+                        .block(BlockType::Delay, "Global Delay"),
+                )
+                .add(
+                    Container::module("Global Comp")
+                        .param("enabled", "false")
+                        .block(BlockType::Compressor, "Global Comp"),
+                )
+                .add(
+                    Container::module("Global Reverb")
+                        .param("enabled", "false")
+                        .block(BlockType::Reverb, "Global Reverb"),
+                )
+                .block(BlockType::Rotary, ROTARY),
+        )
 }
 
 #[cfg(test)]
