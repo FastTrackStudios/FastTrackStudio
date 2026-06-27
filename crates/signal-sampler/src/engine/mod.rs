@@ -80,6 +80,11 @@ const RELEASE_MAX_LIFETIME_MS: u32 = 2_000;
 /// Default legato crossfade — old sustain ramps out over this many ms.
 const LEGATO_FADE_MS: u32 = 30;
 
+/// Velocity used for the legato transition back to a held note when the
+/// sounding note is released (a medium transition speed — there's no real
+/// "release velocity" for a fall-back).
+const LEGATO_FALLBACK_VELOCITY: u8 = 80;
+
 /// Maximum gain for a release-tail voice at MIDI release-velocity 127. The
 /// per-fire gain scales linearly down with release velocity so soft releases
 /// produce a quiet damper click while hard releases ring out.
@@ -150,6 +155,13 @@ pub struct SampleEngine {
     /// directional legato zone (CSS records a separate sample per direction).
     /// Defaults to `"up"`; updated per note from the interval played.
     play_direction: String,
+    /// The note currently sounding on the monophonic legato line (zoned legato
+    /// mode). `None` when the line is silent. A new note transitions FROM this
+    /// note; releasing it falls back to the most-recent still-held note.
+    legato_note: Option<u8>,
+    /// Press order of held keys (most-recent last) for last-note-priority mono
+    /// legato fall-back when the sounding note is released.
+    legato_order: Vec<u8>,
 
     /// True when the source pack is a percussion / drum-kit library
     /// (`category` ~ "drum-kit", or a percussion `instrument`). Percussion
@@ -358,6 +370,8 @@ impl SampleEngine {
             solo_mic: None,
             keyswitch_notes,
             play_direction: "up".to_string(),
+            legato_note: None,
+            legato_order: Vec::new(),
             percussion,
             single_attack_key,
             pinned_articulation: None,
@@ -879,15 +893,29 @@ impl SampleEngine {
                 kind,
                 Some(ArticulationKind::Sustain | ArticulationKind::Looped)
             );
-            let other_held = self.held_notes.keys().any(|&n| n != note);
             self.held_notes.insert(note, velocity);
-            if is_legato && self.legato_enabled && other_held {
-                // Sets LegatoState::Pending with the velocity-mapped delay;
-                // render() fires fire_legato when it elapses.
-                self.initiate_legato(note, velocity);
+
+            if is_legato && self.legato_enabled {
+                // Monophonic legato line (CSS default). Track press order for
+                // last-note-priority fall-back on release.
+                self.legato_order.retain(|&n| n != note);
+                self.legato_order.push(note);
+                match self.legato_note {
+                    // First note of the phrase: sounds immediately, no transition.
+                    None => {
+                        self.play_direction = "up".to_string();
+                        self.trigger_zoned_sustain(note);
+                        self.legato_note = Some(note);
+                    }
+                    // Transition from the currently-sounding note to this one,
+                    // delayed by the velocity-mapped legato latency. A note that
+                    // arrives mid-transition just re-targets it (fast runs
+                    // collapse to the latest note — never dropped, never stacked).
+                    Some(cur) => self.start_legato_transition(cur, note, velocity),
+                }
             } else if is_legato || is_sustain {
-                // First note of a phrase (or any sustain): play immediately with
-                // the full CC1 dynamic + CC2 vibrato blend. Default direction up.
+                // Polyphonic sustain (legato OFF): each note independent, full
+                // CC1 dynamic + CC2 vibrato blend.
                 self.play_direction = "up".to_string();
                 self.trigger_zoned_sustain(note);
             } else {
@@ -958,6 +986,21 @@ impl SampleEngine {
         self.held_notes.remove(&note);
         self.deferred_note_off_velocities.remove(&note);
         if self.patch.is_zoned() {
+            self.legato_order.retain(|&n| n != note);
+            // Monophonic legato: releasing the SOUNDING note falls back to the
+            // most-recent still-held note via a legato transition; releasing the
+            // line's last note ends it. Lifting a held-but-silent key is a no-op.
+            if self.legato_enabled && self.legato_note.is_some() {
+                if self.legato_note != Some(note) {
+                    return;
+                }
+                if let Some(&prev) = self.legato_order.last() {
+                    // Fall back at a medium transition speed.
+                    self.start_legato_transition(note, prev, LEGATO_FALLBACK_VELOCITY);
+                    return;
+                }
+                self.legato_note = None;
+            }
             self.trigger_zoned(note, release_velocity, ZoneTrigger::Release, false);
             self.voices
                 .note_off_with_release_frames(note, Some(release_frames));
@@ -976,6 +1019,8 @@ impl SampleEngine {
             self.articulation = orig;
         }
         self.legato_state = LegatoState::Idle;
+        self.legato_note = None;
+        self.legato_order.clear();
         self.voices.all_notes_off();
     }
 
@@ -988,6 +1033,8 @@ impl SampleEngine {
             self.articulation = orig;
         }
         self.legato_state = LegatoState::Idle;
+        self.legato_note = None;
+        self.legato_order.clear();
         self.voices.panic();
     }
 
@@ -1060,15 +1107,17 @@ impl SampleEngine {
         let rr = self.zone_rr_counter;
         self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
 
-        let vib = self.cc2_blend();
-        let nv_scale = 1.0 - vib;
-        let vb_scale = vib;
+        // Equal-power crossfade in both dimensions (CSS-style): CC2 picks the
+        // non-vib vs vib balance, CC1 the dynamic-layer balance, perceived
+        // loudness held constant across each fade.
+        let (nv_scale, vb_scale) = Self::equal_power(self.cc2_blend());
 
         let nv_artic = self.articulation.clone();
         let vib_artic = self.find_vibrato_pair_id(&nv_artic);
 
         // Non-vibrato dynamic layers.
         let (nv_lo, nv_hi, nv_blend) = self.layers_for_artic(&nv_artic);
+        let (nv_lo_g, nv_hi_g) = Self::equal_power(nv_blend);
         self.spawn_zone_layer(
             &nv_artic,
             &direction,
@@ -1076,7 +1125,7 @@ impl SampleEngine {
             note,
             rr,
             VoiceKind::SustainNVLo,
-            nv_scale * (1.0 - nv_blend),
+            nv_scale * nv_lo_g,
         );
         if nv_hi != nv_lo {
             self.spawn_zone_layer(
@@ -1086,13 +1135,14 @@ impl SampleEngine {
                 note,
                 rr,
                 VoiceKind::SustainNVHi,
-                nv_scale * nv_blend,
+                nv_scale * nv_hi_g,
             );
         }
 
         // Vibrato dynamic layers (only if a vibrato pair exists).
         if let Some(vib_id) = vib_artic {
             let (vb_lo, vb_hi, vb_blend) = self.layers_for_artic(&vib_id);
+            let (vb_lo_g, vb_hi_g) = Self::equal_power(vb_blend);
             self.spawn_zone_layer(
                 &vib_id,
                 &direction,
@@ -1100,7 +1150,7 @@ impl SampleEngine {
                 note,
                 rr,
                 VoiceKind::SustainVibLo,
-                vb_scale * (1.0 - vb_blend),
+                vb_scale * vb_lo_g,
             );
             if vb_hi != vb_lo {
                 self.spawn_zone_layer(
@@ -1110,10 +1160,55 @@ impl SampleEngine {
                     note,
                     rr,
                     VoiceKind::SustainVibHi,
-                    vb_scale * vb_blend,
+                    vb_scale * vb_hi_g,
                 );
             }
         }
+    }
+
+    /// Start a monophonic legato transition `from` → `to` at `velocity`. The
+    /// note is delayed by the velocity-mapped legato latency (CSS's three
+    /// transition speeds); when it elapses, `render()` calls `fire_legato`,
+    /// which fades the old note and plays the directional transition zone. A
+    /// zero delay (portamento) fires immediately.
+    fn start_legato_transition(&mut self, from: u8, to: u8, velocity: u8) {
+        let (delay_ms, portamento) = self.legato_timing(velocity);
+        let frames = ms_to_frames(delay_ms, self.sample_rate);
+        if frames == 0 {
+            self.play_direction = if to >= from { "up" } else { "down" }.to_string();
+            self.fire_legato(from, to, velocity, portamento);
+        } else {
+            self.legato_state = LegatoState::Pending {
+                frames_remaining: frames,
+                from_note: from,
+                to_note: to,
+                to_note_velocity: velocity,
+                portamento,
+            };
+        }
+    }
+
+    /// The legato transition delay (ms) + portamento flag for a target
+    /// velocity: portamento below the threshold, else the expressive or
+    /// low-latency velocity→delay curve from the spec.
+    fn legato_timing(&self, velocity: u8) -> (u32, bool) {
+        let port_thresh = self
+            .patch
+            .spec
+            .legato_engine
+            .as_ref()
+            .and_then(|le| le.portamento.as_ref())
+            .map(|p| p.trigger_vel_max)
+            .unwrap_or(0);
+        let portamento = port_thresh > 0 && velocity <= port_thresh;
+        let delay_ms = if portamento {
+            0
+        } else if self.legato_expressive {
+            self.patch.legato_delay_expressive(velocity).unwrap_or(100)
+        } else {
+            self.patch.legato_delay_low_latency(velocity).unwrap_or(100)
+        };
+        (delay_ms, portamento)
     }
 
     /// Find + spawn one crossfade-corner voice (articulation × direction ×
@@ -1867,6 +1962,7 @@ impl SampleEngine {
         if self.patch.is_zoned() {
             let _ = velocity;
             self.play_direction = direction.to_string();
+            self.legato_note = Some(to_note);
             self.trigger_zoned_sustain(to_note);
             return;
         }
@@ -2092,9 +2188,9 @@ impl SampleEngine {
 
     /// Recompute and ramp all 4 sustain voice gains when CC1 or CC2 changes.
     fn update_sustain_gains(&mut self) {
-        let vib_blend = self.cc2_blend();
-        let nv = 1.0 - vib_blend;
-        let vb = vib_blend;
+        // Equal-power crossfade (CSS-style) in both dimensions — see
+        // trigger_zoned_sustain. CC2 → non-vib/vib balance, CC1 → dynamic layer.
+        let (nv, vb) = Self::equal_power(self.cc2_blend());
         let ramp = self.cc1_ramp_frames;
 
         // Use per-articulation layer sets so NV and Vib voices each use
@@ -2106,14 +2202,25 @@ impl SampleEngine {
             .as_deref()
             .map(|id| self.layers_for_artic(id))
             .unwrap_or((String::new(), String::new(), nv_blend));
+        let (nv_lo_g, nv_hi_g) = Self::equal_power(nv_blend);
+        let (vb_lo_g, vb_hi_g) = Self::equal_power(vb_blend);
 
         self.voices.update_sustain_blend(
-            nv * (1.0 - nv_blend), // NVLo
-            nv * nv_blend,         // NVHi
-            vb * (1.0 - vb_blend), // VibLo
-            vb * vb_blend,         // VibHi
+            nv * nv_lo_g, // NVLo
+            nv * nv_hi_g, // NVHi
+            vb * vb_lo_g, // VibLo
+            vb * vb_hi_g, // VibHi
             ramp,
         );
+    }
+
+    /// Equal-power crossfade gains for a blend in `[0,1]`: returns `(lo, hi)` =
+    /// `(cos, sin)` of the quarter-turn. Keeps perceived loudness constant
+    /// across the fade — the smooth curve CSS uses for dynamics/vibrato, vs a
+    /// linear fade which dips ~3 dB through the middle.
+    fn equal_power(blend: f32) -> (f32, f32) {
+        let b = blend.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2;
+        (b.cos(), b.sin())
     }
 
     /// Compute the vibrato blend factor [0.0, 1.0] from the current CC2 value.
@@ -3377,6 +3484,67 @@ mod tests {
 
         // A normal (non-keyswitch) note is NOT consumed — it should sound.
         assert!(!eng.try_keyswitch(60, 100));
+    }
+
+    /// Build a zoned NVLeg legato engine with directional zones for a set of
+    /// notes (synthetic paths so it reads as zoned; samples never load).
+    fn mono_legato_engine(notes: &[u8]) -> SampleEngine {
+        let mut styx = String::from(
+            "name \"s\"\n\
+             articulations ( {id NVLeg, label NVLeg, kind @Legato} )\n\
+             zones (\n",
+        );
+        for &n in notes {
+            for dir in ["up", "down"] {
+                styx.push_str(&format!(
+                    "{{file \"{n}_{dir}.wav\", key_min {n}, key_max {n}, root_key {n}, vel_min 0, vel_max 127, articulation \"NVLeg\", direction \"{dir}\"}}\n"
+                ));
+            }
+        }
+        styx.push_str(")\n");
+        let spec = crate::LibrarySpec::from_styx(&styx).expect("parse styx");
+        let mut patch = crate::PlayerPatch::from_spec(spec);
+        patch.zone_paths = (0..patch.spec.zones.len())
+            .map(|i| std::path::PathBuf::from(format!("z{i}.wav")))
+            .collect();
+        let mut eng = SampleEngine::new(patch, 48_000, "", "");
+        eng.set_articulation("NVLeg");
+        eng
+    }
+
+    fn render_ms(eng: &mut SampleEngine, ms: usize) {
+        let frames = (eng.sample_rate as usize / 1000) * ms;
+        let mut out = vec![0.0f32; frames * 2];
+        eng.render(&mut out);
+    }
+
+    #[test]
+    fn mono_legato_falls_back_to_held_on_release() {
+        let mut eng = mono_legato_engine(&[60, 62]);
+
+        // First note sounds immediately and becomes the line head.
+        eng.note_on(60, 100);
+        assert_eq!(eng.legato_note, Some(60));
+
+        // Second note transitions (delayed), then becomes the head.
+        eng.note_on(62, 100);
+        assert!(matches!(eng.legato_state, LegatoState::Pending { .. }));
+        render_ms(&mut eng, 200);
+        assert_eq!(eng.legato_note, Some(62));
+
+        // Releasing the SOUNDING note (62) while 60 is still held falls back to
+        // 60 via a legato transition — a true monophonic line.
+        eng.note_off(62);
+        assert!(matches!(
+            eng.legato_state,
+            LegatoState::Pending { to_note: 60, .. }
+        ));
+        render_ms(&mut eng, 200);
+        assert_eq!(eng.legato_note, Some(60));
+
+        // Releasing the last held note ends the line.
+        eng.note_off(60);
+        assert_eq!(eng.legato_note, None);
     }
 
     #[test]
