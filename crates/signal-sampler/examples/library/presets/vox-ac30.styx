@@ -1,0 +1,20 @@
+// Vox AC30 — ML Sound Lab full-rig NAM captures (amp + cab baked in).
+// Scenes are the maker's voicings; each chain is the single FULL .nam.
+name "Vox AC30"
+vendor "ML Sound Lab"
+category "Chime"
+default_scene 0
+scenes (
+    {
+        name Clean
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Vox AC30/Full Rig/ML VX30 1964 Clean FULL.nam", role amp } )
+    }
+    {
+        name Drive
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Vox AC30/Full Rig/ML VX30 1964 Drive FULL.nam", role amp } )
+    }
+    {
+        name Overdrive
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Vox AC30/Full Rig/ML VX30 1964 Overdrive FULL.nam", role amp } )
+    }
+)

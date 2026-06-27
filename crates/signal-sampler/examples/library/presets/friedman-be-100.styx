@@ -1,0 +1,20 @@
+// Friedman BE-100 — ML Sound Lab full-rig NAM captures (amp + cab baked in).
+// Scenes are the maker's voicings; each chain is the single FULL .nam.
+name "Friedman BE-100"
+vendor "ML Sound Lab"
+category "Hi-Gain"
+default_scene 0
+scenes (
+    {
+        name Drive
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Friedman BE-100/Full Rig/ML FMAN BE Drive FULL.nam", role amp } )
+    }
+    {
+        name Plexi
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Friedman BE-100/Full Rig/ML FMAN BE Plexi FULL.nam", role amp } )
+    }
+    {
+        name Lead
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Friedman BE-100/Full Rig/ML FMAN HBE Lead FULL.nam", role amp } )
+    }
+)

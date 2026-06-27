@@ -1,0 +1,20 @@
+// Mesa Mark IV — ML Sound Lab full-rig NAM captures (amp + cab baked in).
+// Scenes are the maker's voicings; each chain is the single FULL .nam.
+name "Mesa Mark IV"
+vendor "ML Sound Lab"
+category "Lead"
+default_scene 0
+scenes (
+    {
+        name Clean
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Mesa Boogie Mark IV/Full Rig/ML MEGA MK4 Clean FULL.nam", role amp } )
+    }
+    {
+        name Drive
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Mesa Boogie Mark IV/Full Rig/ML MEGA MK4 Drive FULL.nam", role amp } )
+    }
+    {
+        name Lead
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Mesa Boogie Mark IV/Full Rig/ML MEGA MK4 Lead FULL.nam", role amp } )
+    }
+)

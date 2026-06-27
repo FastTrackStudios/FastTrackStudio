@@ -59,6 +59,7 @@ pub mod pack_rewrite;
 pub mod preset_spec;
 pub mod retag;
 pub mod rig;
+pub mod rig_library;
 pub mod rig_manager;
 pub mod rig_prefs;
 pub mod rig_profile;
@@ -86,6 +87,7 @@ pub use preset_spec::{
     RoutingRule,
 };
 pub use rig::{DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
+pub use rig_library::{Library, RigPreset, RigScene, RigSection, RigSong};
 pub use rig_manager::RigManager;
 pub use rig_prefs::RigAudioPrefs;
 pub use rig_profile::{ProfileRig, RigPatch, RigProfile};

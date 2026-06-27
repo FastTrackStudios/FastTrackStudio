@@ -1083,6 +1083,8 @@ impl Profile {
             collect_rig_blocks(&p.chain.nodes, &mut chain);
             rp.patches.push(RigPatch {
                 name: p.id.as_str().to_string(),
+                preset: String::new(),
+                scene: String::new(),
                 chain,
                 input_trim_db: p.input_trim.0,
                 output_trim_db: p.output_trim.0,

@@ -17,6 +17,7 @@
 //! intent (which device / channel / output) through [`RigManager`] prefs and
 //! asks daw to (re)open.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use daw_audio_io::pw::{self, ClockSettings, DeviceLatency};
@@ -24,9 +25,9 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Gauge, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
-use signal_sampler::{DeviceInfo, GuitarRig, ProfileRig, RigManager};
+use signal_sampler::{DeviceInfo, GuitarRig, Library, ProfileRig, RigManager};
 
 fn arg(args: &[String], flag: &str) -> Option<String> {
     args.iter()
@@ -46,6 +47,20 @@ fn main() -> eyre::Result<()> {
     let mut mgr = RigManager::load(&name);
     let mut prig = mgr.open()?;
 
+    // Library root for the Preset / Profile / Song browser. `--library <dir>`
+    // overrides; default is the shipped example library (resolved at build time
+    // so `just guitar` finds it without extra config).
+    let lib_root = arg(&args, "--library").map(PathBuf::from).unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/library")
+    });
+    let mut browser = Browser::load(lib_root);
+
+    // If the rig opened with no profile (e.g. a fresh "Guitar Rig"), seed it with
+    // the library's first profile so there's something to play + browse from.
+    if prig.patches().is_empty() {
+        browser.load_first_profile(&mut prig);
+    }
+
     let mut settings = Settings::load(&mgr);
 
     // ratatui draws to stdout; send any stray stderr (engine/library logs that
@@ -53,9 +68,154 @@ fn main() -> eyre::Result<()> {
     redirect_stderr_to_log();
 
     let mut term = ratatui::init();
-    let res = run(&mut term, &mut prig, &mut mgr, &mut settings, &name);
+    let res = run(&mut term, &mut prig, &mut mgr, &mut settings, &mut browser, &name);
     ratatui::restore();
     res
+}
+
+// ── Preset / Profile / Song browser ──────────────────────────────────────────
+
+/// Which browser column has focus.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pane {
+    Presets,
+    Profiles,
+    Songs,
+}
+
+impl Pane {
+    fn title(self) -> &'static str {
+        match self {
+            Pane::Presets => "Presets",
+            Pane::Profiles => "Profiles",
+            Pane::Songs => "Songs",
+        }
+    }
+    fn next(self) -> Self {
+        match self {
+            Pane::Presets => Pane::Profiles,
+            Pane::Profiles => Pane::Songs,
+            Pane::Songs => Pane::Presets,
+        }
+    }
+    fn prev(self) -> Self {
+        match self {
+            Pane::Presets => Pane::Songs,
+            Pane::Profiles => Pane::Presets,
+            Pane::Songs => Pane::Profiles,
+        }
+    }
+}
+
+/// The library browser overlay: the in-memory catalog plus per-pane selection.
+/// Selecting a Preset / Profile / Song and pressing Enter resolves it to a
+/// playable `RigProfile` and loads it into the live rig.
+struct Browser {
+    lib: Library,
+    open: bool,
+    pane: Pane,
+    presets: ListState,
+    profiles: ListState,
+    songs: ListState,
+    /// One-line status (what was loaded / any error).
+    status: Option<String>,
+}
+
+impl Browser {
+    fn load(root: PathBuf) -> Self {
+        let lib = Library::load_dir(&root);
+        let sel = |n: usize| {
+            let mut s = ListState::default();
+            if n > 0 {
+                s.select(Some(0));
+            }
+            s
+        };
+        Self {
+            presets: sel(lib.presets.len()),
+            profiles: sel(lib.profiles.len()),
+            songs: sel(lib.songs.len()),
+            status: (!lib.errors.is_empty()).then(|| format!("{} load error(s)", lib.errors.len())),
+            lib,
+            open: false,
+            pane: Pane::Profiles,
+        }
+    }
+
+    /// Load the library's first profile into the rig (startup seeding).
+    fn load_first_profile(&mut self, prig: &mut ProfileRig) {
+        if self.lib.profiles.is_empty() {
+            return;
+        }
+        self.profiles.select(Some(0));
+        self.pane = Pane::Profiles;
+        self.load_selected(prig);
+    }
+
+    fn state_for(&mut self, pane: Pane) -> &mut ListState {
+        match pane {
+            Pane::Presets => &mut self.presets,
+            Pane::Profiles => &mut self.profiles,
+            Pane::Songs => &mut self.songs,
+        }
+    }
+
+    fn len_for(&self, pane: Pane) -> usize {
+        match pane {
+            Pane::Presets => self.lib.presets.len(),
+            Pane::Profiles => self.lib.profiles.len(),
+            Pane::Songs => self.lib.songs.len(),
+        }
+    }
+
+    fn move_sel(&mut self, delta: i32) {
+        let pane = self.pane;
+        let len = self.len_for(pane);
+        if len == 0 {
+            return;
+        }
+        let st = self.state_for(pane);
+        let cur = st.selected().unwrap_or(0) as i32;
+        let next = (cur + delta).rem_euclid(len as i32) as usize;
+        st.select(Some(next));
+    }
+
+    /// Resolve + load the focused entity into the live rig.
+    fn load_selected(&mut self, prig: &mut ProfileRig) {
+        let base = Some(self.lib.root.as_path());
+        let (label, profile) = match self.pane {
+            Pane::Presets => {
+                let Some(p) = self
+                    .presets
+                    .selected()
+                    .and_then(|i| self.lib.presets.get(i))
+                else {
+                    return;
+                };
+                (format!("preset {}", p.name), self.lib.preset_as_profile(p))
+            }
+            Pane::Profiles => {
+                let Some(p) = self
+                    .profiles
+                    .selected()
+                    .and_then(|i| self.lib.profiles.get(i))
+                else {
+                    return;
+                };
+                (format!("profile {}", p.name), self.lib.resolve_profile(p))
+            }
+            Pane::Songs => {
+                let Some(s) = self.songs.selected().and_then(|i| self.lib.songs.get(i)) else {
+                    return;
+                };
+                (format!("song {}", s.name), self.lib.song_as_profile(s))
+            }
+        };
+        match prig.load_profile(profile, base) {
+            Ok(()) => self.status = Some(format!("loaded {label}")),
+            Err(e) => self.status = Some(format!("load {label} failed: {e}")),
+        }
+    }
 }
 
 /// Point the process's stderr at `$TMPDIR/fts-signal-rig.log` for the rest of
@@ -418,15 +578,36 @@ fn run(
     prig: &mut ProfileRig,
     mgr: &mut RigManager,
     settings: &mut Settings,
+    browser: &mut Browser,
     rig_name: &str,
 ) -> eyre::Result<()> {
     let mut status: Option<String> = None;
     loop {
-        term.draw(|f| ui(f, prig, mgr, settings, rig_name, status.as_deref()))?;
+        term.draw(|f| ui(f, prig, mgr, settings, browser, rig_name, status.as_deref()))?;
 
         if event::poll(Duration::from_millis(33))? {
             if let Event::Key(k) = event::read()? {
                 if k.kind != KeyEventKind::Press {
+                    continue;
+                }
+                // Library browser swallows input while open.
+                if browser.open {
+                    match k.code {
+                        KeyCode::Char('l') | KeyCode::Esc => browser.open = false,
+                        KeyCode::Char('q') => break,
+                        KeyCode::Tab | KeyCode::Right => browser.pane = browser.pane.next(),
+                        KeyCode::BackTab | KeyCode::Left => browser.pane = browser.pane.prev(),
+                        KeyCode::Up | KeyCode::Char('k') => browser.move_sel(-1),
+                        KeyCode::Down | KeyCode::Char('j') => browser.move_sel(1),
+                        KeyCode::Enter => {
+                            term.draw(|f| {
+                                ui(f, prig, mgr, settings, browser, rig_name, Some("loading…"))
+                            })?;
+                            browser.load_selected(prig);
+                            status = browser.status.clone();
+                        }
+                        _ => {}
+                    }
                     continue;
                 }
                 if settings.open {
@@ -445,7 +626,7 @@ fn run(
                         KeyCode::Right | KeyCode::Char('l') => settings.adjust(1),
                         KeyCode::Char('r') => settings.refresh(mgr),
                         KeyCode::Enter => {
-                            term.draw(|f| ui(f, prig, mgr, settings, rig_name, Some("applying…")))?;
+                            term.draw(|f| ui(f, prig, mgr, settings, browser, rig_name, Some("applying…")))?;
                             status = Some(apply_settings(settings, prig, mgr));
                             settings.refresh(mgr);
                             settings.open = false;
@@ -456,6 +637,9 @@ fn run(
                 }
                 match k.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Char('l') => {
+                        browser.open = true;
+                    }
                     KeyCode::Char('s') => {
                         settings.refresh(mgr);
                         settings.open = true;
@@ -463,6 +647,17 @@ fn run(
                     KeyCode::Char('b') | KeyCode::Char(' ') => {
                         let b = !prig.rig().is_bypassed();
                         prig.rig().set_bypass(b);
+                    }
+                    // Global time-bypass (kills the Time module on the active
+                    // patch — delay/reverb). "Funk switch".
+                    KeyCode::Char('t') => {
+                        let on = prig.toggle_fx_bypass();
+                        status = Some(if on { "time bypass ON".into() } else { "time bypass off".into() });
+                    }
+                    // F1–F8 are the footswitch stacks: press to engage the
+                    // stack's current patch, press again to rotate within it.
+                    KeyCode::F(n) if (1..=12).contains(&n) => {
+                        prig.activate_stack((n - 1) as usize);
                     }
                     KeyCode::Char('n') | KeyCode::Right => {
                         prig.next_patch();
@@ -474,7 +669,7 @@ fn run(
                     // re-opens (only the rig's device follows, not the graph).
                     KeyCode::Char('[') | KeyCode::Char(']') => {
                         step_buffer(mgr, if k.code == KeyCode::Char('[') { -1 } else { 1 });
-                        term.draw(|f| ui(f, prig, mgr, settings, rig_name, Some("applying…")))?;
+                        term.draw(|f| ui(f, prig, mgr, settings, browser, rig_name, Some("applying…")))?;
                         status = Some(match reopen(prig, mgr) {
                             Ok(()) => format!("buffer {} fr", mgr.audio.buffer_size),
                             Err(e) => format!("open failed: {e}"),
@@ -516,19 +711,22 @@ fn ui(
     prig: &ProfileRig,
     mgr: &RigManager,
     settings: &Settings,
+    browser: &mut Browser,
     rig_name: &str,
     status: Option<&str>,
 ) {
     let rig = prig.rig();
+    let has_stacks = !prig.stacks().is_empty();
     let rows = Layout::vertical([
-        Constraint::Length(2), // header
-        Constraint::Length(2), // patches
-        Constraint::Length(3), // input meter
-        Constraint::Length(3), // output meter
-        Constraint::Length(3), // dsp load
-        Constraint::Length(2), // stats (buffer/latency + xruns)
-        Constraint::Min(0),    // spacer
-        Constraint::Length(1), // footer
+        Constraint::Length(2),                              // header
+        Constraint::Length(2),                              // patches
+        Constraint::Length(if has_stacks { 2 } else { 0 }), // stacks (footswitches)
+        Constraint::Length(3),                              // input meter
+        Constraint::Length(3),                              // output meter
+        Constraint::Length(3),                              // dsp load
+        Constraint::Length(2),                              // stats (buffer/latency + xruns)
+        Constraint::Min(0),                                 // spacer
+        Constraint::Length(1),                              // footer
     ])
     .split(f.area());
 
@@ -551,6 +749,11 @@ fn ui(
         Span::styled(audio_line(mgr, prig), Style::new().fg(Color::DarkGray)),
         if bypassed {
             Span::styled("   [BYPASS]", Style::new().fg(Color::Yellow).bold())
+        } else {
+            Span::raw("")
+        },
+        if prig.fx_bypass() {
+            Span::styled("   [TIME OFF]", Style::new().fg(Color::Magenta).bold())
         } else {
             Span::raw("")
         },
@@ -584,9 +787,37 @@ fn ui(
     }
     f.render_widget(Paragraph::new(Line::from(spans)), rows[1]);
 
+    // Stacks (footswitches) — F1..Fn. The active stack is highlighted; its
+    // rotation position shows as "(2/4)".
+    if has_stacks {
+        let active_stack = prig.active_stack();
+        let mut sspans = vec![Span::styled("stack: ", Style::new().fg(Color::DarkGray))];
+        for (i, st) in prig.stacks().iter().enumerate() {
+            let on = Some(i) == active_stack;
+            let pos = prig.stack_position(i);
+            let count = st.patches.len();
+            let rot = if count > 1 {
+                format!(" ({}/{})", pos + 1, count)
+            } else {
+                String::new()
+            };
+            let label = format!(" F{}:{}{} ", i + 1, st.name, rot);
+            let style = if on {
+                Style::new()
+                    .fg(Color::Black)
+                    .bg(Color::Rgb(232, 129, 58))
+                    .bold()
+            } else {
+                Style::new().fg(Color::Gray)
+            };
+            sspans.push(Span::styled(label, style));
+        }
+        f.render_widget(Paragraph::new(Line::from(sspans)), rows[2]);
+    }
+
     // Meters
-    meter(f, rows[2], "INPUT  (guitar)", rig.input_peak());
-    meter(f, rows[3], "OUTPUT (to speakers)", rig.output_peak());
+    meter(f, rows[3], "INPUT  (guitar)", rig.input_peak());
+    meter(f, rows[4], "OUTPUT (to speakers)", rig.output_peak());
 
     // DSP load — render time vs the per-block budget (buffer / sample-rate).
     let bf = rig.block_frames().max(1) as f64;
@@ -613,7 +844,7 @@ fn ui(
             budget_us / 1000.0,
             peak_us / 1000.0
         ));
-    f.render_widget(dsp, rows[4]);
+    f.render_widget(dsp, rows[5]);
 
     // Stats — buffer + honest latency estimate + xruns.
     let ms = |frames: f64| frames / sr * 1000.0;
@@ -651,21 +882,155 @@ fn ui(
             ),
         ]),
     ];
-    f.render_widget(Paragraph::new(stats), rows[5]);
+    f.render_widget(Paragraph::new(stats), rows[6]);
 
     // Footer (status line, then key hints)
     let footer = if let Some(s) = status {
         Line::from(Span::styled(format!(" {s}"), Style::new().fg(Color::Green)))
     } else {
         Line::from(Span::styled(
-            " [1-9] patch  ←/→ patch  [b] bypass  [ / ] buffer  [s] audio settings  [q] quit",
+            " [l] browse  [F1-8] stack  [1-9] patch  ←/→ patch  [t] time-bypass  [b] bypass  [ / ] buffer  [s] settings  [q] quit",
             Style::new().fg(Color::DarkGray),
         ))
     };
-    f.render_widget(Paragraph::new(footer), rows[7]);
+    f.render_widget(Paragraph::new(footer), rows[8]);
 
     if settings.open {
         settings_overlay(f, settings, rig.sample_rate, rig.ring_frames());
+    }
+    if browser.open {
+        browser_overlay(f, browser);
+    }
+}
+
+/// The Preset / Profile / Song browser modal: three columns + a detail panel
+/// for the focused entity's children (scenes / patches+stacks / sections).
+fn browser_overlay(f: &mut Frame, b: &mut Browser) {
+    let area = centered(f.area(), 96, 30);
+    f.render_widget(Clear, area);
+    let outer = Block::bordered()
+        .title(" Library — [Tab] pane  ↑/↓ select  [Enter] load → rig  [l/Esc] close ")
+        .border_style(Style::new().fg(Color::Rgb(232, 129, 58)));
+    let inner = outer.inner(area);
+    f.render_widget(outer, area);
+
+    let rows = Layout::vertical([Constraint::Min(6), Constraint::Length(10)]).split(inner);
+    let cols = Layout::horizontal([
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+    ])
+    .split(rows[0]);
+
+    // Snapshot the names/focus before borrowing list state mutably.
+    let preset_names: Vec<String> = b.lib.presets.iter().map(|p| p.name.clone()).collect();
+    let profile_names: Vec<String> = b.lib.profiles.iter().map(|p| p.name.clone()).collect();
+    let song_names: Vec<String> = b.lib.songs.iter().map(|s| s.name.clone()).collect();
+    let focus = b.pane;
+    render_browser_col(f, cols[0], Pane::Presets, &preset_names, focus, &mut b.presets);
+    render_browser_col(f, cols[1], Pane::Profiles, &profile_names, focus, &mut b.profiles);
+    render_browser_col(f, cols[2], Pane::Songs, &song_names, focus, &mut b.songs);
+
+    // Detail panel for the focused entity.
+    let detail = browser_detail(b);
+    let title = format!(" {} ", focus.title());
+    f.render_widget(
+        Paragraph::new(detail).block(Block::bordered().title(title)),
+        rows[1],
+    );
+}
+
+fn render_browser_col(
+    f: &mut Frame,
+    area: Rect,
+    pane: Pane,
+    names: &[String],
+    focus: Pane,
+    state: &mut ListState,
+) {
+    let focused = pane == focus;
+    let items: Vec<ListItem> = if names.is_empty() {
+        vec![ListItem::new(Span::styled(
+            "(none)",
+            Style::new().fg(Color::DarkGray),
+        ))]
+    } else {
+        names
+            .iter()
+            .map(|n| ListItem::new(Span::raw(n.clone())))
+            .collect()
+    };
+    let border = if focused { Color::Rgb(232, 129, 58) } else { Color::DarkGray };
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(pane.title())
+                .border_style(Style::new().fg(border)),
+        )
+        .highlight_style(Style::new().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▸ ");
+    f.render_stateful_widget(list, area, state);
+}
+
+/// Lines describing the focused entity's children.
+fn browser_detail(b: &Browser) -> Vec<Line<'static>> {
+    let dim = Style::new().fg(Color::DarkGray);
+    match b.pane {
+        Pane::Presets => {
+            let Some(p) = b.presets.selected().and_then(|i| b.lib.presets.get(i)) else {
+                return vec![Line::from(Span::styled("no preset selected", dim))];
+            };
+            let mut lines = vec![Line::from(vec![
+                Span::styled(format!("{}  ", p.name), Style::new().fg(Color::White).bold()),
+                Span::styled(
+                    format!("{} · {}", p.vendor, p.category),
+                    dim,
+                ),
+            ])];
+            for (i, s) in p.scenes.iter().enumerate() {
+                let mark = if i == p.default_scene { "● " } else { "  " };
+                lines.push(Line::from(format!("{mark}{}  ({} block)", s.name, s.chain.len())));
+            }
+            lines
+        }
+        Pane::Profiles => {
+            let Some(p) = b.profiles.selected().and_then(|i| b.lib.profiles.get(i)) else {
+                return vec![Line::from(Span::styled("no profile selected", dim))];
+            };
+            let mut lines = vec![Line::from(vec![
+                Span::styled(format!("{}  ", p.name), Style::new().fg(Color::White).bold()),
+                Span::styled(
+                    format!("{} patches · {} stacks", p.patches.len(), p.stacks.len()),
+                    dim,
+                ),
+            ])];
+            for (i, st) in p.stacks.iter().enumerate() {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("F{}:{}  ", i + 1, st.name), Style::new().fg(Color::Rgb(232, 129, 58))),
+                    Span::raw(st.patches.join(" · ")),
+                ]));
+            }
+            lines
+        }
+        Pane::Songs => {
+            let Some(s) = b.songs.selected().and_then(|i| b.lib.songs.get(i)) else {
+                return vec![Line::from(Span::styled("no song selected", dim))];
+            };
+            let mut lines = vec![Line::from(vec![
+                Span::styled(format!("{}  ", s.name), Style::new().fg(Color::White).bold()),
+                Span::styled(s.artist.clone(), dim),
+            ])];
+            for sec in &s.sections {
+                let target = if sec.patch.is_empty() {
+                    format!("{} / {}", sec.preset, sec.scene)
+                } else {
+                    format!("{} · {}", sec.profile, sec.patch)
+                };
+                lines.push(Line::from(format!("  {} → {}", sec.name, target)));
+            }
+            lines
+        }
     }
 }
 

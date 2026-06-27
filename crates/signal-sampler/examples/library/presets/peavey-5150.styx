@@ -1,0 +1,20 @@
+// Peavey 5150 — ML Sound Lab full-rig NAM captures (amp + cab baked in).
+// Scenes are the maker's voicings; each chain is the single FULL .nam.
+name "Peavey 5150"
+vendor "ML Sound Lab"
+category "Metal"
+default_scene 0
+scenes (
+    {
+        name Clean
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Peavey 5150/Full Rig/ML PEAV Block Clean FULL.nam", role amp } )
+    }
+    {
+        name Drive
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Peavey 5150/Full Rig/ML PEAV Block Drive FULL.nam", role amp } )
+    }
+    {
+        name Lead
+        chain ( { kind nam, path "/run/media/starcommand/Resources/Music/Audio Haven/NAM Captures/Amps/ML Sound Labs/Peavey 5150/Full Rig/ML PEAV Block Lead FULL.nam", role amp } )
+    }
+)

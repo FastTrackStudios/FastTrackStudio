@@ -1,0 +1,194 @@
+// Worship — the live worship profile.
+//
+// MODEL (see the `stacks-footswitch-model` design note):
+//   Profile → Stack → Patch → (Preset, Scene)
+//
+// • `patches` is the profile's pool of tones. Each patch points at a PRESET
+//   SCENE (the amp/cab core, from an ML Sound Lab full-rig NAM) and then appends
+//   its own blocks — its effects. Most patches carry a "Time" module (delay +
+//   reverb); the global TIME-BYPASS footswitch bypasses that whole module, so
+//   "Funk" is just Clean with Time bypassed (no dedicated patch needed).
+//
+// • `stacks` are the 8 footswitches. Each stack is an ordered ROTATION of
+//   patches: press once to engage the stack's current patch; press again while
+//   it's active to rotate to the next patch in that stack (wraps).
+//
+// Effects here are PLACEHOLDER blocks (kind plugin, empty path) — real plugins
+// drop in by filling the `path`. Placeholders are skipped at install (silent)
+// but keep the chain structure + bypass grouping real.
+
+name Worship
+default_patch 0
+
+patches (
+    // ── Stack 1 · Clean ──────────────────────────────────────────────
+    {
+        name Main
+        preset "Fender Deluxe Reverb"
+        scene Clean
+        chain (
+            { kind plugin, path "", name "Hall", role time, module Time }
+            { kind plugin, path "", name "Delay", role time, module Time }
+        )
+    }
+    {
+        // Funk = the clean core, dry. (Or just hit Time-bypass on Main.)
+        name Funk
+        preset "Roland JC-120"
+        scene Clean
+    }
+    {
+        name Effects
+        preset "Fender Deluxe Reverb"
+        scene Clean
+        chain (
+            { kind plugin, path "", name "Shimmer", role time, module Time }
+            { kind plugin, path "", name "Delay", role time, module Time }
+            { kind plugin, path "", name "Chorus", role mod, module Mod }
+        )
+    }
+
+    // ── Stack 2 · Crunch ─────────────────────────────────────────────
+    {
+        name Crunch
+        preset "Vox AC30"
+        scene Drive
+        chain ( { kind plugin, path "", name "Room", role time, module Time } )
+    }
+    {
+        name Edge
+        preset "Vox AC30"
+        scene Drive
+        chain ( { kind plugin, path "", name "Dotted Delay", role time, module Time } )
+    }
+    {
+        name Chug
+        preset "Marshall JCM800"
+        scene Drive
+    }
+
+    // ── Stack 3 · Drive ──────────────────────────────────────────────
+    {
+        name Drive
+        preset "Marshall JCM800"
+        scene Drive
+        chain ( { kind plugin, path "", name "Plate", role time, module Time } )
+    }
+
+    // ── Stack 4 · Lead ───────────────────────────────────────────────
+    {
+        name Lead
+        preset "Friedman BE-100"
+        scene Lead
+        chain (
+            { kind plugin, path "", name "Delay", role time, module Time }
+            { kind plugin, path "", name "Hall", role time, module Time }
+        )
+        output_trim_db -1.0
+    }
+    {
+        name "POG Lead"
+        preset "Friedman BE-100"
+        scene Lead
+        chain (
+            { kind plugin, path "", name "POG", role pitch, module Pitch }
+            { kind plugin, path "", name "Delay", role time, module Time }
+        )
+        output_trim_db -1.0
+    }
+    {
+        name "Delayed Lead"
+        preset "Friedman BE-100"
+        scene Lead
+        chain (
+            { kind plugin, path "", name "Long Delay", role time, module Time }
+            { kind plugin, path "", name "Hall", role time, module Time }
+        )
+        output_trim_db -1.0
+    }
+    {
+        name Extreme
+        preset "Peavey 5150"
+        scene Lead
+        chain ( { kind plugin, path "", name "Delay", role time, module Time } )
+        output_trim_db -2.0
+    }
+
+    // ── Stack 5 · Ambient ────────────────────────────────────────────
+    {
+        name "Super Verb"
+        preset "Fender Deluxe Reverb"
+        scene Clean
+        chain (
+            { kind plugin, path "", name "Big Hall", role time, module Time }
+            { kind plugin, path "", name "Shimmer", role time, module Time }
+        )
+    }
+    {
+        name Delay
+        preset "Fender Deluxe Reverb"
+        scene Clean
+        chain ( { kind plugin, path "", name "Swell Delay", role time, module Time } )
+    }
+    {
+        name Craze
+        preset "Fender Deluxe Reverb"
+        scene Clean
+        chain (
+            { kind plugin, path "", name "Reverse Verb", role time, module Time }
+            { kind plugin, path "", name "Warp", role mod, module Mod }
+        )
+    }
+    {
+        name Swells
+        preset "Roland JC-120"
+        scene Clean
+        chain (
+            { kind plugin, path "", name "Volume Swell", role util, module Util }
+            { kind plugin, path "", name "Hall", role time, module Time }
+        )
+    }
+    {
+        name Tremolo
+        preset "Fender Deluxe Reverb"
+        scene Clean
+        chain (
+            { kind plugin, path "", name "Tremolo", role mod, module Mod }
+            { kind plugin, path "", name "Spring", role time, module Time }
+        )
+    }
+
+    // ── Stack 6 · Special / Stack 7 · POG / Stack 8 · Aux ────────────
+    {
+        name Special
+        preset "Mesa Dual Rectifier"
+        scene Lead
+        chain ( { kind plugin, path "", name "Delay", role time, module Time } )
+        output_trim_db -2.0
+    }
+    {
+        name POG
+        preset "Friedman BE-100"
+        scene Lead
+        chain (
+            { kind plugin, path "", name "POG +1 oct", role pitch, module Pitch }
+            { kind plugin, path "", name "Hall", role time, module Time }
+        )
+    }
+    {
+        name "Aux Clean"
+        preset "Roland JC-120"
+        scene Clean
+    }
+)
+
+stacks (
+    { name Clean,   patches ( Main "Funk" Effects ) }
+    { name Crunch,  patches ( Crunch Edge Chug ) }
+    { name Drive,   patches ( Drive ) }
+    { name Lead,    patches ( Lead "POG Lead" "Delayed Lead" Extreme ) }
+    { name Ambient, patches ( "Super Verb" Delay Craze Swells Tremolo ) }
+    { name Special, patches ( Special ) }
+    { name POG,     patches ( POG ) }
+    { name Aux,     patches ( "Aux Clean" ) }
+)

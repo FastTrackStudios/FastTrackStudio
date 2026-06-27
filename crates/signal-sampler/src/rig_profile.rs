@@ -29,13 +29,31 @@ use facet::Facet;
 use crate::rig::{GuitarRig, ModelId, RigBlock};
 use crate::SamplerError;
 
-/// One patch in a rig profile: a named tone = an ordered FX chain + patch trims.
+/// One patch in a rig profile: a named tone whose chain is either inlined or
+/// **referenced** from a [`RigPreset`](crate::rig_library::RigPreset) scene.
+///
+/// Per the Signal domain model, a Patch (a Profile entry) *points at* a Preset
+/// Snapshot — here, a named `scene` of a named `preset`. When `preset`/`scene`
+/// are set, the [`Library`](crate::rig_library::Library) resolves them into the
+/// actual `chain` (folding the scene's trims into the patch's). When they're
+/// empty, the inline `chain` is used directly — the standalone rig stays usable
+/// without a library.
 #[derive(Debug, Clone, Facet)]
 pub struct RigPatch {
     /// Patch name shown on the switcher (e.g. "Clean", "Lead").
     pub name: String,
+    /// Name of the [`RigPreset`](crate::rig_library::RigPreset) this patch points
+    /// at. Empty = inline `chain`.
+    #[facet(default)]
+    pub preset: String,
+    /// Scene (snapshot) name within `preset`. Empty with a non-empty `preset`
+    /// uses the preset's default scene.
+    #[facet(default)]
+    pub scene: String,
     /// Ordered FX chain (drive → amp → cab → …). Each block is a NAM model or a
-    /// cabinet IR; see [`RigBlock`].
+    /// cabinet IR; see [`RigBlock`]. Populated inline, or filled by the library
+    /// when this patch references a preset scene.
+    #[facet(default)]
     pub chain: Vec<RigBlock>,
     /// Patch-level trim before the chain (dB).
     #[facet(default)]
@@ -50,6 +68,8 @@ impl RigPatch {
     pub fn amp(name: impl Into<String>, model_path: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            preset: String::new(),
+            scene: String::new(),
             chain: vec![RigBlock::nam(model_path)],
             input_trim_db: 0.0,
             output_trim_db: 0.0,
@@ -60,6 +80,26 @@ impl RigPatch {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            preset: String::new(),
+            scene: String::new(),
+            chain: Vec::new(),
+            input_trim_db: 0.0,
+            output_trim_db: 0.0,
+        }
+    }
+
+    /// A patch that *references* a [`RigPreset`](crate::rig_library::RigPreset)
+    /// scene (resolved by the [`Library`](crate::rig_library::Library)). An empty
+    /// `scene` uses the preset's default scene.
+    pub fn from_preset(
+        name: impl Into<String>,
+        preset: impl Into<String>,
+        scene: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            preset: preset.into(),
+            scene: scene.into(),
             chain: Vec::new(),
             input_trim_db: 0.0,
             output_trim_db: 0.0,
@@ -80,8 +120,34 @@ impl RigPatch {
     }
 }
 
+/// A **Stack** — a footswitch group holding an ordered *rotation* of patches.
+///
+/// Per the user's FM9-style model: a stack maps to one footswitch. Press it to
+/// activate its current patch; press again while it's already active to rotate
+/// to the next patch in the stack (wraps). Patches live on the owning
+/// [`RigProfile`]'s `patches` pool — a stack just lists their names, so a patch
+/// can appear in more than one stack. See the `stacks-footswitch-model` note.
+#[derive(Debug, Clone, Facet)]
+pub struct RigStack {
+    /// Stack / footswitch name (e.g. "Clean", "Crunch", "Lead").
+    pub name: String,
+    /// Patch names — references into the profile's `patches` — in rotation order.
+    pub patches: Vec<String>,
+}
+
+impl RigStack {
+    pub fn new(name: impl Into<String>, patches: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            name: name.into(),
+            patches: patches.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 /// A named collection of patches — the standalone-rig analogue of a
-/// `signal_proto::Profile`.
+/// `signal_proto::Profile`. Patches can be activated directly (flat, by index)
+/// or grouped into [`RigStack`]s (footswitch rotation); both views share the
+/// same `patches` pool.
 #[derive(Debug, Clone, Facet)]
 pub struct RigProfile {
     pub name: String,
@@ -89,6 +155,10 @@ pub struct RigProfile {
     /// Index of the patch to make active on load. Defaults to 0.
     #[facet(default)]
     pub default_patch: usize,
+    /// Footswitch stacks grouping the patches. Empty = flat (index-activated)
+    /// profile; existing profiles without stacks still parse.
+    #[facet(default)]
+    pub stacks: Vec<RigStack>,
 }
 
 impl RigProfile {
@@ -97,6 +167,7 @@ impl RigProfile {
             name: name.into(),
             patches: Vec::new(),
             default_patch: 0,
+            stacks: Vec::new(),
         }
     }
 
@@ -104,6 +175,19 @@ impl RigProfile {
     pub fn with_patch(mut self, patch: RigPatch) -> Self {
         self.patches.push(patch);
         self
+    }
+
+    #[must_use]
+    pub fn with_stack(mut self, stack: RigStack) -> Self {
+        self.stacks.push(stack);
+        self
+    }
+
+    /// Index of the patch named `name` (case-insensitive) in `patches`.
+    pub fn patch_index(&self, name: &str) -> Option<usize> {
+        self.patches
+            .iter()
+            .position(|p| p.name.eq_ignore_ascii_case(name))
     }
 
     /// Parse a profile from a `.styx` file (see `examples/worship.styx`).
@@ -165,6 +249,8 @@ impl RigProfile {
             }
             patches.push(RigPatch {
                 name: patch.name.clone(),
+                preset: String::new(),
+                scene: String::new(),
                 chain,
                 input_trim_db: 0.0,
                 output_trim_db: 0.0,
@@ -174,6 +260,7 @@ impl RigProfile {
             name: profile.name.clone(),
             patches,
             default_patch,
+            stacks: Vec::new(),
         })
     }
 }
@@ -251,6 +338,12 @@ pub struct ProfileRig {
     /// `ModelId` for each patch, parallel to `profile.patches`.
     patch_ids: Vec<ModelId>,
     active: Option<usize>,
+    /// Per-stack rotation cursor, parallel to `profile.stacks`. Advancing a
+    /// stack (re-pressing its footswitch) bumps its cursor (wrapping).
+    stack_pos: Vec<usize>,
+    /// Global "time bypass": when on, every time/fx block (the Time module) on
+    /// the active patch is bypassed. Re-applied on each `activate`.
+    fx_bypass: bool,
     /// Auto level-match patches from NAM loudness metadata.
     level_match: bool,
     /// Target loudness (dB) patches normalize toward when level-matching.
@@ -264,6 +357,8 @@ impl ProfileRig {
             profile: None,
             patch_ids: Vec::new(),
             active: None,
+            stack_pos: Vec::new(),
+            fx_bypass: false,
             level_match: false,
             target_loudness_db: -18.0,
         }
@@ -306,14 +401,19 @@ impl ProfileRig {
         self.rig.clear();
         self.patch_ids.clear();
         self.active = None;
+        self.stack_pos = vec![0; profile.stacks.len()];
 
         let mut loaded = 0usize;
         let mut first_ok: Option<usize> = None;
         for (i, patch) in profile.patches.iter().enumerate() {
-            // Resolve every block's path against the base dir.
+            // Resolve every real block's path against the base dir; skip
+            // placeholder blocks (empty path — e.g. a not-yet-chosen Time-module
+            // effect) so they don't fail the install. They stay in the patch for
+            // display and become live once a plugin path replaces them.
             let blocks: Vec<RigBlock> = patch
                 .chain
                 .iter()
+                .filter(|b| !b.is_placeholder())
                 .map(|b| {
                     let mut rb = b.clone();
                     rb.path = resolve_path(&b.path, base_dir)
@@ -400,7 +500,113 @@ impl ProfileRig {
         self.rig.set_output_trim_db(output_trim);
         self.rig.set_active(Some(id));
         self.active = Some(index);
+        self.apply_fx_bypass(index);
         true
+    }
+
+    /// Push the current global time-bypass state onto the active patch: bypass
+    /// every installed time/fx block (the Time module) of patch `index`. The
+    /// installed chain skips placeholder blocks, so we zip the live block ids
+    /// against the patch's non-placeholder blocks to find which are time/fx.
+    fn apply_fx_bypass(&self, index: usize) {
+        let Some(profile) = &self.profile else {
+            return;
+        };
+        let Some(patch) = profile.patches.get(index) else {
+            return;
+        };
+        let live_ids = self.rig.active_block_ids();
+        let real = patch.chain.iter().filter(|b| !b.is_placeholder());
+        for (block, id) in real.zip(live_ids.iter()) {
+            if block.is_time_fx() {
+                self.rig.set_block_slot_bypass(id, self.fx_bypass);
+            }
+        }
+    }
+
+    // ── Global time / FX bypass ──────────────────────────────────────────
+
+    /// Set the global time-bypass (kills the Time module — delay/reverb/mod —
+    /// across the active patch). Re-applies immediately.
+    pub fn set_fx_bypass(&mut self, on: bool) {
+        self.fx_bypass = on;
+        if let Some(i) = self.active {
+            self.apply_fx_bypass(i);
+        }
+    }
+
+    /// Toggle the global time-bypass; returns the new state.
+    pub fn toggle_fx_bypass(&mut self) -> bool {
+        self.set_fx_bypass(!self.fx_bypass);
+        self.fx_bypass
+    }
+
+    pub fn fx_bypass(&self) -> bool {
+        self.fx_bypass
+    }
+
+    // ── Footswitch stacks ────────────────────────────────────────────────
+
+    /// The active profile's stacks (footswitch groups), or empty.
+    pub fn stacks(&self) -> &[RigStack] {
+        self.profile
+            .as_ref()
+            .map(|p| p.stacks.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// The rotation cursor (index into the stack's patch list) for `stack_idx`.
+    pub fn stack_position(&self, stack_idx: usize) -> usize {
+        self.stack_pos.get(stack_idx).copied().unwrap_or(0)
+    }
+
+    /// The stack the currently-active patch belongs to at its current cursor, if
+    /// any — for highlighting the active footswitch.
+    pub fn active_stack(&self) -> Option<usize> {
+        let profile = self.profile.as_ref()?;
+        let active = self.active?;
+        for (si, stack) in profile.stacks.iter().enumerate() {
+            let pos = self.stack_position(si);
+            if let Some(name) = stack.patches.get(pos) {
+                if profile.patch_index(name) == Some(active) {
+                    return Some(si);
+                }
+            }
+        }
+        None
+    }
+
+    /// Press stack `stack_idx` (footswitch). FM9-style rotation: if the stack's
+    /// current patch is **not** already active, activate it; if it **is** active,
+    /// rotate to the next patch in the stack (wrapping) and activate that.
+    /// Returns true if a patch was activated.
+    pub fn activate_stack(&mut self, stack_idx: usize) -> bool {
+        // Pull what we need out from under the immutable profile borrow.
+        let (patches, cur_pos, cur_active_idx) = {
+            let Some(profile) = self.profile.as_ref() else {
+                return false;
+            };
+            let Some(stack) = profile.stacks.get(stack_idx) else {
+                return false;
+            };
+            if stack.patches.is_empty() {
+                return false;
+            }
+            let pos = self.stack_position(stack_idx) % stack.patches.len();
+            let cur_idx = profile.patch_index(&stack.patches[pos]);
+            (stack.patches.clone(), pos, cur_idx)
+        };
+
+        let already_active = cur_active_idx.is_some() && self.active == cur_active_idx;
+        let target_pos = if already_active {
+            (cur_pos + 1) % patches.len()
+        } else {
+            cur_pos
+        };
+        if let Some(slot) = self.stack_pos.get_mut(stack_idx) {
+            *slot = target_pos;
+        }
+        self.activate_named(&patches[target_pos])
     }
 
     /// Activate a patch by name (case-insensitive).

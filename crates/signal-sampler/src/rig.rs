@@ -102,8 +102,28 @@ pub struct RigBlock {
     /// from the file). The generic alias for a hosted-plugin block.
     pub kind: String,
     /// Path to the `.nam` model, `.wav` IR, or `.clap` / `.vst3` plugin
-    /// (resolved by the caller).
+    /// (resolved by the caller). May be empty for a **placeholder** block
+    /// (e.g. a yet-to-be-chosen "Delay" in a Time module) — placeholder blocks
+    /// carry a `name`/`role`/`module` but no audio backend and are skipped at
+    /// install time.
     pub path: String,
+    /// Display name for the block (e.g. "Delay", "POG", "Big Verb"). Falls back
+    /// to the file stem when empty. Required for placeholder blocks.
+    #[facet(default)]
+    pub name: String,
+    /// Semantic role driving display, level-match and **bypass grouping**:
+    /// `"amp"`, `"cab"`, `"drive"`, `"fx"`, `"time"` (delay/reverb/mod), `"util"`.
+    /// Empty = inferred from `kind` (nam→amp, cab_ir→cab, plugin→fx).
+    #[facet(default)]
+    pub role: String,
+    /// Optional module this block belongs to (e.g. "Time"). Blocks sharing a
+    /// module name bypass together — the global "time bypass" footswitch
+    /// bypasses every block in the "Time" module. Empty = ungrouped.
+    #[facet(default)]
+    pub module: String,
+    /// Initial bypass state when the chain is installed.
+    #[facet(default)]
+    pub bypassed: bool,
     /// Per-block input trim (dB) before this block. NAM only.
     #[facet(default)]
     pub input_trim_db: f32,
@@ -138,14 +158,93 @@ impl RigBlock {
         }
     }
 
+    /// A **placeholder** effect block: no audio backend yet (empty path), just a
+    /// `name` / `role` / `module` so the chain structure is real and bypass
+    /// grouping works. Replace `path` with a plugin once chosen.
+    pub fn placeholder(
+        name: impl Into<String>,
+        role: impl Into<String>,
+        module: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            role: role.into(),
+            module: module.into(),
+            ..Self::bare("plugin", "")
+        }
+    }
+
+    #[must_use]
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.role = role.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_module(mut self, module: impl Into<String>) -> Self {
+        self.module = module.into();
+        self
+    }
+
+    #[must_use]
+    pub fn named(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
     fn bare(kind: &str, path: impl Into<String>) -> Self {
         Self {
             kind: kind.into(),
             path: path.into(),
+            name: String::new(),
+            role: String::new(),
+            module: String::new(),
+            bypassed: false,
             input_trim_db: 0.0,
             output_trim_db: 0.0,
             state_b64: None,
         }
+    }
+
+    /// True for a placeholder block (no backend path). Skipped at install.
+    pub fn is_placeholder(&self) -> bool {
+        self.path.trim().is_empty()
+    }
+
+    /// The block's effective role: explicit `role` if set, else inferred from
+    /// `kind` (nam→"amp", cab_ir→"cab", plugin→"fx").
+    pub fn resolved_role(&self) -> &str {
+        if !self.role.is_empty() {
+            return &self.role;
+        }
+        if self.is_nam() {
+            "amp"
+        } else if self.is_cab_ir() {
+            "cab"
+        } else {
+            "fx"
+        }
+    }
+
+    /// Display label: explicit `name`, else the file stem, else the kind.
+    pub fn display_name(&self) -> String {
+        if !self.name.is_empty() {
+            return self.name.clone();
+        }
+        std::path::Path::new(&self.path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| self.kind.clone())
+    }
+
+    /// Whether the global "time bypass" footswitch should hit this block: it's
+    /// in the "Time" module or its role is "time" (delay / reverb). Deliberately
+    /// narrow — drive pedals, pitch (POG) and modulation are NOT killed by the
+    /// time switch (Funk = clean with the Time module bypassed).
+    pub fn is_time_fx(&self) -> bool {
+        self.module.eq_ignore_ascii_case("time") || self.resolved_role().eq_ignore_ascii_case("time")
     }
 
     pub fn is_nam(&self) -> bool {
