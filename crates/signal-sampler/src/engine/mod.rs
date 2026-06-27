@@ -80,6 +80,11 @@ const RELEASE_MAX_LIFETIME_MS: u32 = 2_000;
 /// Default legato crossfade — old sustain ramps out over this many ms.
 const LEGATO_FADE_MS: u32 = 30;
 
+/// Loudness (dB) at CC1=0 relative to CC1=127 for the continuous dynamics
+/// curve. CSS sweeps a wide dynamic range; the recorded layers add timbre on
+/// top. Tune for more/less dramatic mod-wheel dynamics.
+const CC1_DYN_FLOOR_DB: f32 = -18.0;
+
 /// Max semitones to pitch-shift from the nearest recorded zone when no zone
 /// spans a note. CSS samples a whole-tone grid (±1 to fill); 2 covers grid
 /// gaps + edge rounding without obviously detuning.
@@ -1170,14 +1175,15 @@ impl SampleEngine {
             .map(|l| l.label.clone())
             .collect();
         if labels.is_empty() {
-            // No declared CC1 layers — a single layer at full side scale.
+            // No declared CC1 layers — a single layer, loudness from CC1.
             let (lo, _, _) = self.layers_for_artic(artic);
+            let gain = side_scale * Self::cc1_expression(self.cc1);
             if let Some(idx) = self.find_layer_zone(artic, direction, &lo, note, rr) {
                 self.spawn_zone_voice(
                     idx,
                     note,
                     VoiceKind::SustainLayer,
-                    side_scale,
+                    gain,
                     Some(DynLayer { vib, index: 0 }),
                 );
             }
@@ -1185,8 +1191,9 @@ impl SampleEngine {
         }
         let (lo_idx, hi_idx, blend) = Self::cc1_blend_idx(self.cc1_layers_for(artic), self.cc1);
         let (lo_g, hi_g) = Self::equal_power(blend);
+        let expr = Self::cc1_expression(self.cc1);
         for (i, label) in labels.iter().enumerate() {
-            let gain = side_scale * layer_gain(i, lo_idx, hi_idx, lo_g, hi_g);
+            let gain = side_scale * expr * layer_gain(i, lo_idx, hi_idx, lo_g, hi_g);
             if let Some(idx) = self.find_layer_zone(artic, direction, label, note, rr) {
                 self.spawn_zone_voice(
                     idx,
@@ -2322,6 +2329,8 @@ impl SampleEngine {
             None => (0, 0, 0.0, 0.0),
         };
 
+        // Continuous loudness sweep on top of the (short) timbre crossfade.
+        let expr = Self::cc1_expression(self.cc1);
         for v in self.voices.voices_mut() {
             if let Some(layer) = v.dyn_layer {
                 let i = layer.index as usize;
@@ -2330,7 +2339,7 @@ impl SampleEngine {
                 } else {
                     nv * layer_gain(i, nv_lo, nv_hi, nv_lo_g, nv_hi_g)
                 };
-                v.ramp_gain(g, ramp);
+                v.ramp_gain(g * expr, ramp);
             }
         }
 
@@ -2701,33 +2710,39 @@ impl SampleEngine {
         (top.label.clone(), top.label.clone(), 0.0)
     }
 
-    /// Active layer pair `(lo, hi, blend)` for the N-layer zoned crossfade —
-    /// CONTINUOUS across the whole 0–127 range. Anchored on each layer's centre
-    /// (midpoint of its cc_range) and interpolated between adjacent centres, so
-    /// there are no flat "solo" plateaus in the middle (those made CC1 feel like
-    /// just 3 fixed dynamics). Below the softest / above the loudest centre the
-    /// extreme layer plays solo.
+    /// Active layer pair `(lo, hi, blend)` for the N-layer zoned crossfade.
+    /// Crossfade only within each layer pair's overlap (`cc_range`) — kept SHORT
+    /// because CSS crossfades differently-recorded dynamic samples briefly to
+    /// avoid phasing/doubling. The continuous loudness sweep is handled
+    /// separately by [`cc1_expression`](Self::cc1_expression), so short timbre
+    /// crossfades don't make CC1 feel stepped.
     fn cc1_blend_idx(layers: &[Cc1Layer], cc1: u8) -> (usize, usize, f32) {
         if layers.is_empty() {
             return (0, 0, 0.0);
         }
-        let center = |i: usize| -> f32 {
-            let r = layers[i].cc_range;
-            (r[0] as f32 + r[1] as f32) * 0.5
-        };
-        let c = cc1 as f32;
-        if c <= center(0) {
-            return (0, 0, 0.0);
-        }
         for i in 0..layers.len() - 1 {
-            let (ci, cj) = (center(i), center(i + 1));
-            if c <= cj {
-                let blend = if cj > ci { (c - ci) / (cj - ci) } else { 0.0 };
-                return (i, i + 1, blend.clamp(0.0, 1.0));
+            let xfade_start = layers[i + 1].cc_range[0];
+            let xfade_end = layers[i].cc_range[1];
+            if cc1 <= xfade_end {
+                if cc1 < xfade_start {
+                    return (i, i, 0.0);
+                }
+                let span = (xfade_end - xfade_start + 1).max(1) as f32;
+                return (i, i + 1, (cc1 - xfade_start) as f32 / span);
             }
         }
         let top = layers.len() - 1;
         (top, top, 0.0)
+    }
+
+    /// Continuous CC1 → loudness curve applied on top of the (short) dynamic
+    /// crossfade — this is what makes the dynamics feel smooth across the whole
+    /// 0–127 range rather than stepping between the recorded layers. A dB ramp
+    /// from `CC1_DYN_FLOOR_DB` at CC1=0 up to 0 dB at CC1=127.
+    fn cc1_expression(cc1: u8) -> f32 {
+        let t = cc1 as f32 / 127.0;
+        let db = CC1_DYN_FLOOR_DB * (1.0 - t);
+        10f32.powf(db / 20.0)
     }
 
     /// The CC1 layer slice for a given articulation (by its dynamics count).
