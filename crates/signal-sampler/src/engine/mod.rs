@@ -1646,6 +1646,10 @@ impl SampleEngine {
                     }
                 }
             }
+            // All Sound Off (immediate) / All Notes Off (release held) — standard
+            // MIDI panic CCs, so they work through the one MIDI dispatch path.
+            120 => self.panic(),
+            123 => self.all_notes_off(),
             _ => {}
         }
     }

@@ -726,100 +726,67 @@ impl SamplerRig {
         }
     }
 
-    // ── MIDI driving (bank-backed; SamplerPlayer-equivalent) ──────────────────
+    // ── MIDI driving — ONE path for live and offline ─────────────────────────
     //
-    // Live: pushed onto the bank track's daw MIDI queue, drained by the
-    // renderer each block. Offline: applied to the bank directly (there is no
-    // renderer to drain a queue).
+    // Every note/CC funnels through [`dispatch`](Self::dispatch). Live: pushed
+    // full-fidelity into daw's live-MIDI ring, drained by the renderer →
+    // `BankInstrument::process_block` → `apply_midi` → `bank.midi_message`.
+    // Offline: the SAME `apply_midi` directly on the bank. So both modes hit the
+    // identical bank routing + engine code — no behaviour can differ between
+    // "tested offline" and "played live". The `id` args are kept for API
+    // compatibility; the bank-track rig is monotimbral and routes by channel /
+    // its default instrument (per-instrument addressing uses the per-track API).
 
-    pub fn note_on(&self, id: &str, note: u8, velocity: u8) {
+    /// The single MIDI entry point shared by live + offline.
+    fn dispatch(&self, msg: daw::service::MidiMessage) {
         if let Some((daw, track)) = self.bank_io() {
-            // Bank-track MIDI is monotimbral (channel 0); the bank's own id
-            // routing isn't reachable through push_*, so a bank-track rig
-            // plays its loaded instrument id. (Per-instrument addressing uses
-            // the per-track add_instrument API.) velocity 0 = note-off.
-            daw.push_note_on(&track, note, velocity);
+            daw.push_live_midi(&track, msg);
         } else if let Ok(mut bank) = self.bank().lock() {
-            bank.note_on(id, note, velocity);
+            apply_midi(&mut bank, &msg);
         }
     }
 
-    pub fn note_off(&self, id: &str, note: u8) {
-        if let Some((daw, track)) = self.bank_io() {
-            daw.push_note_off(&track, note);
-        } else if let Ok(mut bank) = self.bank().lock() {
-            bank.note_off(id, note);
-        }
+    pub fn note_on(&self, _id: &str, note: u8, velocity: u8) {
+        self.dispatch(daw::service::MidiMessage::note_on(0, note, velocity));
     }
 
-    pub fn note_off_with_velocity(&self, id: &str, note: u8, velocity: u8) {
-        if let Some((daw, track)) = self.bank_io() {
-            // daw's push has no release-velocity variant; the velocity is
-            // dropped (documented divergence). Use the per-track API or
-            // offline mode if release velocity is required.
-            let _ = velocity;
-            daw.push_note_off(&track, note);
-        } else if let Ok(mut bank) = self.bank().lock() {
-            bank.note_off_with_velocity(id, note, velocity);
-        }
+    pub fn note_off(&self, _id: &str, note: u8) {
+        self.dispatch(daw::service::MidiMessage::note_off(0, note, 0));
     }
 
-    pub fn cc(&self, id: &str, controller: u8, value: u8) {
-        if let Some((daw, track)) = self.bank_io() {
-            daw.push_cc(&track, controller, value);
-        } else if let Ok(mut bank) = self.bank().lock() {
-            bank.cc(id, controller, value);
-        }
+    pub fn note_off_with_velocity(&self, _id: &str, note: u8, velocity: u8) {
+        self.dispatch(daw::service::MidiMessage::note_off(0, note, velocity));
     }
 
-    /// All-notes-off for `id`. Live: CC 123 (All Notes Off) on the bank
-    /// track; offline: the bank's `all_notes_off`.
-    pub fn all_notes_off(&self, id: &str) {
-        if let Some((daw, track)) = self.bank_io() {
-            daw.push_cc(&track, 123, 0);
-        } else if let Ok(mut bank) = self.bank().lock() {
-            bank.all_notes_off(id);
-        }
+    pub fn cc(&self, _id: &str, controller: u8, value: u8) {
+        self.dispatch(daw::service::MidiMessage::control_change(0, controller, value));
     }
 
-    /// Panic for `id`. Live: CC 120 (All Sound Off) + CC 123 (All Notes Off)
-    /// on the bank track; offline: the bank's `panic`.
-    pub fn panic(&self, id: &str) {
-        if let Some((daw, track)) = self.bank_io() {
-            daw.push_cc(&track, 120, 0);
-            daw.push_cc(&track, 123, 0);
-        } else if let Ok(mut bank) = self.bank().lock() {
-            bank.panic(id);
-        }
+    /// All Notes Off (CC 123) — release every held note.
+    pub fn all_notes_off(&self, _id: &str) {
+        self.dispatch(daw::service::MidiMessage::control_change(0, 123, 0));
     }
 
-    /// Dispatch a raw MIDI message, routed by channel assignment
-    /// (`SamplerPlayer::midi_message`-equivalent).
-    ///
-    /// Offline: applied to the bank directly, so the bank's full
-    /// per-channel routing (`set_midi_channel`) is honoured. Live: the raw
-    /// status is decoded and pushed onto the bank track via daw's
-    /// monotimbral channel-0 push primitives (same documented divergence as
-    /// [`note_on`](Self::note_on) — the bank-track plays its loaded
-    /// instrument id; channel routing isn't reachable through `push_*`).
+    /// Panic — All Sound Off (CC 120): immediate silence.
+    pub fn panic(&self, _id: &str) {
+        self.dispatch(daw::service::MidiMessage::control_change(0, 120, 0));
+    }
+
+    /// Dispatch a raw MIDI message (status + 2 data bytes) — same path as
+    /// hardware MIDI. Channel is preserved (full fidelity).
     pub fn midi_message(&self, channel: u8, status: u8, data1: u8, data2: u8) {
-        if let Some((daw, track)) = self.bank_io() {
-            match status & 0xF0 {
-                0x90 if data2 > 0 => {
-                    daw.push_note_on(&track, data1, data2);
-                }
-                // Note-on velocity 0 is a note-off by convention.
-                0x90 | 0x80 => {
-                    daw.push_note_off(&track, data1);
-                }
-                0xB0 => {
-                    daw.push_cc(&track, data1, data2);
-                }
-                _ => {}
-            }
-        } else if let Ok(mut bank) = self.bank().lock() {
-            bank.midi_message(channel, status, data1, data2);
-        }
+        let msg = match status & 0xF0 {
+            0x90 if data2 > 0 => daw::service::MidiMessage::note_on(channel, data1, data2),
+            0x90 | 0x80 => daw::service::MidiMessage::note_off(channel, data1, data2),
+            0xB0 => daw::service::MidiMessage::control_change(channel, data1, data2),
+            0xC0 => daw::service::MidiMessage::program_change(channel, data1),
+            0xE0 => daw::service::MidiMessage::pitch_bend(
+                channel,
+                (((data2 as i16) << 7) | data1 as i16) - 8192,
+            ),
+            _ => return,
+        };
+        self.dispatch(msg);
     }
 
     /// `(daw, bank_track_guid)` when running live with a bank track.

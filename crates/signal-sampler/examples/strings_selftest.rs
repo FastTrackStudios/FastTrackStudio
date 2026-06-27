@@ -62,6 +62,21 @@ fn main() -> eyre::Result<()> {
         rig.active_voices(ID)
     );
 
+    // CC1-on-held-notes sweep: hold the note, sweep CC1, render each step.
+    // If the per-step peak doesn't change, CC1 isn't swelling held voices.
+    rig.panic(ID);
+    rig.cc(ID, 2, 90);
+    rig.cc(ID, 1, 64);
+    rig.warm_note(ID, note);
+    rig.note_on(ID, note, 100);
+    for cc1 in [10u8, 64, 110, 30] {
+        rig.cc(ID, 1, cc1);
+        let mut b = vec![0.0f32; frames * 2];
+        rig.render_offline(&mut b)?;
+        let p = b.iter().fold(0f32, |m, &s| m.max(s.abs()));
+        println!("  CC1={cc1:<3} held-note peak={p:.5}");
+    }
+
     if peak > 0.0 {
         println!("✅ direct note_on path produces audio.");
     } else {
