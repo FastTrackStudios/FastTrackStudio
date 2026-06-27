@@ -20,8 +20,9 @@ use std::path::{Path, PathBuf};
 use facet::Facet;
 
 use crate::rig::GuitarRig;
+use crate::rig_library::Library;
 use crate::rig_prefs::{signal_config_dir, RigAudioPrefs};
-use crate::rig_profile::ProfileRig;
+use crate::rig_profile::{ProfileRig, RigProfile};
 use crate::SamplerError;
 
 /// Saved settings for a specific rig.
@@ -32,10 +33,20 @@ pub struct RigManager {
     /// Audio I/O: device, input channel, sample rate, buffer.
     #[facet(default)]
     pub audio: RigAudioPrefs,
-    /// Profile (`.styx`) this rig loads — its patches. Empty = none. Relative
-    /// paths resolve against the manager file's directory.
+    /// Legacy single-file profile (`.styx`) this rig loads — its patches. Empty
+    /// = none. Relative paths resolve against the manager file's directory.
+    /// Superseded by the library (`library_path` + `library_profile`); kept as a
+    /// fallback for hand-written inline-chain profiles.
     #[facet(default)]
     pub profile_path: String,
+    /// Directory of the Preset/Profile/Song **library** (`presets/ profiles/
+    /// songs/`). Empty = use the default ([`library_root`](Self::library_root)).
+    #[facet(default)]
+    pub library_path: String,
+    /// Name of the library **profile** to open. Empty = the library's first
+    /// profile (so a default Guitar Rig opens "Worship").
+    #[facet(default)]
+    pub library_profile: String,
     /// Auto level-match patches from NAM loudness metadata.
     #[facet(default)]
     pub level_match: bool,
@@ -50,6 +61,8 @@ impl Default for RigManager {
             name: "Guitar Rig".to_string(),
             audio: RigAudioPrefs::default(),
             profile_path: String::new(),
+            library_path: String::new(),
+            library_profile: String::new(),
             level_match: false,
             target_loudness_db: -18.0,
         }
@@ -136,6 +149,35 @@ impl RigManager {
         std::fs::write(path, text).map_err(|e| e.to_string())
     }
 
+    /// Directory of the library this rig browses/loads from: `library_path` if
+    /// set, else the user library (`<config>/signal/library`) if it exists, else
+    /// the shipped example library (`signal-sampler/examples/library`).
+    pub fn library_root(&self) -> PathBuf {
+        if !self.library_path.is_empty() {
+            return PathBuf::from(&self.library_path);
+        }
+        let user = signal_config_dir().join("library");
+        if user.is_dir() {
+            return user;
+        }
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/library")
+    }
+
+    /// Build the library and resolve the chosen profile into a playable
+    /// [`RigProfile`] (preset/scene references inlined). Returns it with the
+    /// library root (the base dir for relative block paths). `None` when the
+    /// library has no profiles. Picks `library_profile`, else the first profile.
+    fn resolve_library_profile(&self) -> Option<(RigProfile, PathBuf)> {
+        let root = self.library_root();
+        let lib = Library::load_dir(&root);
+        let profile = if self.library_profile.is_empty() {
+            lib.profiles.first()
+        } else {
+            lib.profile(&self.library_profile)
+        }?;
+        Some((lib.resolve_profile(profile), root))
+    }
+
     /// Resolve a (possibly relative) profile path against the manager file dir.
     fn resolved_profile_path(&self) -> Option<PathBuf> {
         if self.profile_path.is_empty() {
@@ -161,11 +203,33 @@ impl RigManager {
         let rig = GuitarRig::open(&self.audio)?;
         let mut prig = ProfileRig::new(rig);
         prig.set_target_loudness_db(self.target_loudness_db);
-        if let Some(path) = self.resolved_profile_path() {
-            if let Err(e) = prig.load_profile_file(&path) {
-                tracing::warn!(path = %path.display(), error = %e, "RigManager: profile load failed");
+
+        // Prefer the library (resolves preset/scene references into chains),
+        // unless the rig explicitly pins a legacy `profile_path` and makes no
+        // library choice — then honor the legacy file. A default rig (no
+        // `profile_path`) opens the library's first profile (e.g. "Worship").
+        let want_library = !self.library_path.is_empty()
+            || !self.library_profile.is_empty()
+            || self.profile_path.is_empty();
+        let mut loaded = false;
+        if want_library {
+            if let Some((profile, base)) = self.resolve_library_profile() {
+                match prig.load_profile(profile, Some(&base)) {
+                    Ok(()) => loaded = true,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "RigManager: library profile load failed")
+                    }
+                }
             }
         }
+        if !loaded {
+            if let Some(path) = self.resolved_profile_path() {
+                if let Err(e) = prig.load_profile_file(&path) {
+                    tracing::warn!(path = %path.display(), error = %e, "RigManager: profile load failed");
+                }
+            }
+        }
+
         // Apply after load so it re-activates the default patch level-matched.
         prig.set_level_match(self.level_match);
         Ok(prig)
@@ -194,6 +258,8 @@ mod tests {
                 buffer_size: 256,
             },
             profile_path: "testing.styx".into(),
+            library_path: String::new(),
+            library_profile: String::new(),
             level_match: true,
             target_loudness_db: -18.0,
         };
@@ -207,6 +273,32 @@ mod tests {
         assert!(back.level_match);
         assert_eq!(back.profile_path, "testing.styx");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolves_worship_from_shipped_library() {
+        let mgr = RigManager {
+            name: "Guitar Rig".into(),
+            library_path: concat!(env!("CARGO_MANIFEST_DIR"), "/examples/library").into(),
+            library_profile: "Worship".into(),
+            ..Default::default()
+        };
+        let (profile, base) = mgr
+            .resolve_library_profile()
+            .expect("Worship resolves from the library");
+        assert_eq!(profile.name, "Worship");
+        assert_eq!(profile.stacks.len(), 8);
+        assert!(base.ends_with("examples/library"));
+        // Patches are resolved to inline chains (amp NAM first).
+        assert!(profile
+            .patches
+            .iter()
+            .all(|p| p.preset.is_empty()), "all patch refs inlined");
+        assert!(profile.patches[0]
+            .chain
+            .first()
+            .map(|b| b.is_nam())
+            .unwrap_or(false));
     }
 
     #[test]

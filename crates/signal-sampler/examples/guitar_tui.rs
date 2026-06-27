@@ -47,12 +47,12 @@ fn main() -> eyre::Result<()> {
     let mut mgr = RigManager::load(&name);
     let mut prig = mgr.open()?;
 
-    // Library root for the Preset / Profile / Song browser. `--library <dir>`
-    // overrides; default is the shipped example library (resolved at build time
-    // so `just guitar` finds it without extra config).
-    let lib_root = arg(&args, "--library").map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/library")
-    });
+    // Library root for the Preset / Profile / Song browser — the same root the
+    // rig loaded its profile from (so browser + rig agree). `--library <dir>`
+    // overrides.
+    let lib_root = arg(&args, "--library")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| mgr.library_root());
     let mut browser = Browser::load(lib_root);
 
     // If the rig opened with no profile (e.g. a fresh "Guitar Rig"), seed it with
