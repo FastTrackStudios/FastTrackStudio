@@ -177,6 +177,11 @@ pub struct SamplerBank {
     /// to the preset prefix that owns it, when applicable. Lets
     /// note_on/note_off route to the right engine inside the preset.
     instrument_to_preset: HashMap<InstrumentId, (String, String)>, // id -> (prefix, engine_id)
+    /// Instrument that unrouted MIDI falls back to — the most recently loaded
+    /// free-standing instrument. Lets a single-instrument live rig play without
+    /// an explicit `set_midi_channel` mapping (a keyboard on any channel reaches
+    /// the loaded instrument).
+    default_instrument: Option<InstrumentId>,
     sample_rate: u32,
     block_frames: usize,
     preload_generation: Arc<AtomicU64>,
@@ -196,6 +201,7 @@ impl SamplerBank {
             midi_channels: HashMap::new(),
             note_routing: HashMap::new(),
             instrument_to_preset: HashMap::new(),
+            default_instrument: None,
             sample_rate,
             block_frames: DEFAULT_BLOCK_FRAMES,
             preload_generation: Arc::new(AtomicU64::new(0)),
@@ -316,6 +322,8 @@ impl SamplerBank {
         let synth_spec = Self::synth_default_engine_spec(&block.name.clone());
         let instance = EngineInstance::new(synth_spec, block, self.block_frames);
         tracing::info!("signal-sampler: loaded instrument {id:?}");
+        // Unrouted live MIDI falls back to the most-recently loaded instrument.
+        self.default_instrument = Some(id.clone());
         self.instruments.insert(
             id,
             InstrumentSlot {
@@ -1191,8 +1199,16 @@ impl SamplerBank {
     }
 
     pub fn midi_message(&mut self, channel: u8, status: u8, data1: u8, data2: u8) {
-        let id = match self.midi_channels.get(&channel) {
-            Some(id) => id.clone(),
+        // Explicit channel mapping wins; otherwise fall back to the default
+        // instrument so a single-instrument live rig plays on any channel
+        // without needing `set_midi_channel`.
+        let id = match self
+            .midi_channels
+            .get(&channel)
+            .cloned()
+            .or_else(|| self.default_instrument.clone())
+        {
+            Some(id) => id,
             None => return,
         };
         let kind = status & 0xF0;

@@ -63,8 +63,32 @@ fn main() -> eyre::Result<()> {
     );
 
     if peak > 0.0 {
-        println!("\n✅ AUDIO PRODUCED — the engine + sample path work. If the live");
-        println!("   rig is silent, the issue is output-device routing, not the engine.");
+        println!("✅ direct note_on path produces audio.");
+    } else {
+        println!("❌ direct note_on path SILENT — see warm/voice counts above.");
+    }
+
+    // Exercise the LIVE routing path: rig.midi_message → bank.midi_message,
+    // routed by channel. This is what hardware MIDI hits in the live rig; it was
+    // dropping notes when no MIDI-channel mapping existed.
+    rig.panic(ID);
+    let note2 = 67u8; // G4 (a recorded odd key)
+    rig.warm_note(ID, note2);
+    rig.midi_message(0, 0x90, note2, 100); // note-on, channel 0
+    let mut out2 = vec![0.0f32; frames * 2];
+    rig.render_offline(&mut out2)?;
+    let peak2 = out2.iter().fold(0f32, |m, &s| m.max(s.abs()));
+    println!(
+        "live routing (midi_message ch0): voices={}  peak={peak2:.5}",
+        rig.active_voices(ID)
+    );
+
+    if peak > 0.0 && peak2 > 0.0 {
+        println!("\n✅ BOTH paths produce audio. If the live rig is still silent,");
+        println!("   the issue is output-device routing (check the OUTPUT meter / qpwgraph).");
+    } else if peak > 0.0 {
+        println!("\n⚠️  Engine works but the LIVE channel-routing path is silent —");
+        println!("   that's the bug that mutes the hardware-MIDI rig.");
     } else {
         println!("\n❌ SILENT — no audio from the engine. See warm/voice counts above.");
     }
