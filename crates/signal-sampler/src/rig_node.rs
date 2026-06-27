@@ -92,6 +92,12 @@ pub struct Container {
     pub role: Role,
     pub name: String,
     pub combine: Combine,
+    /// Input trim (dB) applied before this container's children. Modules use it
+    /// as their input volume; Layers/Engines normally leave it at 0.
+    pub input_db: f32,
+    /// Output volume (dB) — the "fader". A Layer's and an Engine's native volume;
+    /// a Module's output trim. Paired with [`input_db`](Self::input_db).
+    pub output_db: f32,
     /// Audio children, in order.
     pub children: Vec<RigNode>,
     /// Control-rate modulators attached here (drive params via routes, not audio).
@@ -139,6 +145,8 @@ impl Container {
             role,
             name: name.into(),
             combine,
+            input_db: 0.0,
+            output_db: 0.0,
             children: Vec::new(),
             modulators: Vec::new(),
             sends: Vec::new(),
@@ -214,6 +222,21 @@ impl Container {
     #[must_use]
     pub fn param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.params.push((name.into(), value.into()));
+        self
+    }
+
+    /// Set the output volume (dB) — the Layer/Engine fader, or a Module's output
+    /// trim.
+    #[must_use]
+    pub fn volume(mut self, db: f32) -> Self {
+        self.output_db = db;
+        self
+    }
+
+    /// Set the input trim (dB) — a Module's input volume.
+    #[must_use]
+    pub fn input_db(mut self, db: f32) -> Self {
+        self.input_db = db;
         self
     }
 
@@ -318,6 +341,17 @@ impl Container {
             self.name,
             self.combine.tag()
         ));
+        match self.role {
+            // Layers/Engines/Presets have one native volume (the fader).
+            Role::Layer | Role::Engine | Role::Preset => {
+                out.push_str(&format!("  vol {:+.0}dB", self.output_db));
+            }
+            // Modules show in/out trim only when set.
+            Role::Module if self.input_db != 0.0 || self.output_db != 0.0 => {
+                out.push_str(&format!("  trim {:+.0}/{:+.0}dB", self.input_db, self.output_db));
+            }
+            Role::Module => {}
+        }
         if !self.params.is_empty() {
             let ps: Vec<String> = self
                 .params
@@ -393,6 +427,21 @@ mod tests {
             .block(BlockType::Filter, "fb-filter");
         // Delay + fb + fb-filter = 3 leaf blocks across the nested modules.
         assert_eq!(m.blocks().len(), 3);
+    }
+
+    #[test]
+    fn containers_carry_volume_and_trim() {
+        let layer = Container::layer("A").volume(-3.0);
+        assert_eq!(layer.output_db, -3.0);
+        assert_eq!(layer.input_db, 0.0);
+        // Layers show their fader in the dump.
+        assert!(layer.dump().contains("vol -3dB"));
+
+        // A Module has both input and output volume.
+        let m = Container::module("Amp/EQ").input_db(2.0).volume(-1.0);
+        assert_eq!(m.input_db, 2.0);
+        assert_eq!(m.output_db, -1.0);
+        assert!(m.dump().contains("trim +2/-1dB"));
     }
 
     #[test]

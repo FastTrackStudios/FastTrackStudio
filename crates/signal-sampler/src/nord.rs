@@ -93,7 +93,6 @@ fn organ_engine() -> Container {
 fn organ_layer(name: &str) -> Container {
     Container::layer(name)
         .param("model", "B3") // B3 | B3Bass | Vox | Farfisa | Pipe1 | Pipe2
-        .param("level", "0 dB")
         .param("octave", "0")
         .param("vc", "Off") // V1..V3 | C1..C3 | Off
         .param("percussion", "Off")
@@ -111,7 +110,6 @@ fn keys_engine() -> Container {
 
 fn keys_layer(name: &str) -> Container {
     Container::layer(name)
-        .param("level", "0 dB")
         .param("octave", "0")
         .add(Container::module("Piano Source").block(BlockType::Sampler, "Piano"))
         .extend(fx_chain())
@@ -131,7 +129,6 @@ fn synth_engine() -> Container {
 fn synth_layer(name: &str) -> Container {
     Container::layer(name)
         // per-layer settings (not blocks)
-        .param("level", "0 dB")
         .param("octave", "0")
         .param("voice_mode", "Poly") // Poly | Mono | Legato
         .param("unison", "Off") // Off | 1 | 2 | 3
