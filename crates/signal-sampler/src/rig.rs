@@ -326,11 +326,14 @@ impl RigBlock {
     }
 
     /// Whether the rig can build an audio backend for this block **today**. NAM,
-    /// IR and Plugin implementations are buildable; `Native` is not yet (the
-    /// built-in DSP for these block types — `daw-builtin-fx` — isn't written),
-    /// so Native blocks are skipped at install until that lands.
+    /// IR and Plugin implementations are always buildable; a `Native` block is
+    /// buildable only for the block types whose built-in DSP is implemented (see
+    /// [`native_dsp_available`]) — the rest are placeholders until their DSP lands.
     pub fn has_backend(&self) -> bool {
-        self.implementation() != BlockImpl::Native
+        match self.implementation() {
+            BlockImpl::Native => native_dsp_available(self.block_type),
+            _ => true,
+        }
     }
 
     /// Check the block's implementation is valid for its type (e.g. a NAM model
@@ -600,8 +603,15 @@ impl PluginInstance for Identity {
     }
 }
 
+/// Block types whose built-in `Native` DSP is implemented today. Grows as
+/// `daw-builtin-fx`-style backends are written, one block type at a time; a
+/// Native block of a listed type reports `has_backend() == true` and builds.
+pub fn native_dsp_available(block_type: BlockType) -> bool {
+    matches!(block_type, BlockType::Oscillator)
+}
+
 /// Build a prepared box for one [`RigBlock`] at `sample_rate`.
-fn build_block(
+pub(crate) fn build_block(
     block: &RigBlock,
     sample_rate: u32,
 ) -> Result<(Box<dyn PluginInstance>, String, Option<f64>, Option<f64>), String> {

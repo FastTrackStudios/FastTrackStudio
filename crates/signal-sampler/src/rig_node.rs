@@ -371,17 +371,17 @@ mod tests {
         let preset = Container::preset("P")
             .add(
                 Container::parallel("Voices")
-                    .add(Container::layer("A").block(BlockType::Oscillator, "Osc"))
-                    .add(Container::layer("B").block(BlockType::Oscillator, "Osc")),
+                    .add(Container::layer("A").block(BlockType::Filter, "Filter"))
+                    .add(Container::layer("B").block(BlockType::Filter, "Filter")),
             )
             .add(Container::module("Global").block(BlockType::Rotary, "Rotary"));
 
-        // Two layers, three blocks (2 osc + rotary).
+        // Two layers, three blocks (2 filters + rotary).
         assert_eq!(preset.of_role(Role::Layer).len(), 2);
         assert_eq!(preset.blocks().len(), 3);
         assert!(preset.find("Voices").is_some());
         assert!(preset.find("Rotary").is_none()); // Rotary is a Block, not a container
-        // Every block is a placeholder (no DSP yet).
+        // Filter/Rotary have no Native DSP yet — all placeholders.
         assert!(preset.blocks().iter().all(|b| !b.has_backend()));
     }
 

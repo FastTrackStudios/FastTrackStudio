@@ -219,8 +219,17 @@ mod tests {
         assert!(types.contains(&"sampler"), "piano source");
         assert!(types.contains(&"oscillator"), "synth source");
         assert!(types.contains(&"rotary"), "global rotary");
-        // Nothing is implemented yet — every block is a placeholder.
-        assert!(p.blocks().iter().all(|b| !b.has_backend()));
+        // Only the Oscillator has DSP today; everything else is still a
+        // placeholder. (As more Native DSP lands, more blocks gain a backend.)
+        for b in p.blocks() {
+            let expected = b.block_type_tag() == "oscillator";
+            assert_eq!(
+                b.has_backend(),
+                expected,
+                "{} backend expectation",
+                b.block_type_tag()
+            );
+        }
     }
 
     #[test]
