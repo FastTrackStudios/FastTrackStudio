@@ -1055,7 +1055,7 @@ impl Profile {
         for p in &rp.patches {
             let mut cb = Chain::builder();
             for rb in &p.chain {
-                let path = resolve(&rb.path, base_dir);
+                let path = resolve(rb.asset_path(), base_dir);
                 cb = cb.boxed(load_rig_block(rb, &path)?);
             }
             let mut patch = Patch::new(PatchId::new(&p.name), cb.build());
@@ -1108,7 +1108,7 @@ impl From<&RigProfile> for Profile {
         for p in &rp.patches {
             let mut cb = Chain::builder();
             for rb in &p.chain {
-                if let Ok(b) = load_rig_block(rb, Path::new(&rb.path)) {
+                if let Ok(b) = load_rig_block(rb, Path::new(rb.asset_path())) {
                     cb = cb.boxed(b);
                 }
             }
@@ -1137,7 +1137,10 @@ fn load_rig_block(rb: &RigBlock, path: &Path) -> Result<Box<dyn Block>, String> 
     } else if rb.is_plugin() {
         Ok(Box::new(block::plugin(path, BlockRole::Plugin)?))
     } else {
-        Err(format!("unknown rig block kind: {:?}", rb.kind))
+        Err(format!(
+            "placeholder block (type {:?}) has no realization",
+            rb.block_type
+        ))
     }
 }
 
@@ -2213,7 +2216,7 @@ mod tests {
         let api_id = block::default_id_for_test(Path::new("/amps/Soldano.nam"));
         // ...and GuitarRig records the same stem id for the installed block.
         let rig_block = RigBlock::nam("/amps/Soldano.nam");
-        let rig_id = crate::rig::default_block_id_for_test(&rig_block.path);
+        let rig_id = crate::rig::default_block_id_for_test(rig_block.asset_path());
         assert_eq!(api_id.as_str(), "Soldano");
         assert_eq!(
             api_id.as_str(),

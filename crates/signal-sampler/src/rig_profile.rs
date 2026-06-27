@@ -410,15 +410,22 @@ impl ProfileRig {
             // placeholder blocks (empty path — e.g. a not-yet-chosen Time-module
             // effect) so they don't fail the install. They stay in the patch for
             // display and become live once a plugin path replaces them.
+            let resolve = |p: &str| -> String {
+                if p.is_empty() {
+                    String::new()
+                } else {
+                    resolve_path(p, base_dir).to_string_lossy().to_string()
+                }
+            };
             let blocks: Vec<RigBlock> = patch
                 .chain
                 .iter()
                 .filter(|b| !b.is_placeholder())
                 .map(|b| {
                     let mut rb = b.clone();
-                    rb.path = resolve_path(&b.path, base_dir)
-                        .to_string_lossy()
-                        .to_string();
+                    rb.nam = resolve(&b.nam);
+                    rb.ir = resolve(&b.ir);
+                    rb.plugin = resolve(&b.plugin);
                     rb
                 })
                 .collect();
@@ -756,14 +763,14 @@ mod tests {
             patches (
                 {
                     name Clean
-                    chain ( { kind nam, path amps/clean.nam } )
+                    chain ( { block_type @Amp, nam amps/clean.nam } )
                 }
                 {
                     name Lead
                     chain (
-                        { kind nam, path amps/drive.nam }
-                        { kind nam, path amps/lead.nam }
-                        { kind cab_ir, path cabs/v30.wav }
+                        { block_type @Drive, nam amps/drive.nam }
+                        { block_type @Amp, nam amps/lead.nam }
+                        { block_type @Cabinet, ir cabs/v30.wav }
                     )
                     input_trim_db 3.0
                     output_trim_db -2.0
@@ -774,7 +781,7 @@ mod tests {
         assert_eq!(profile.patches.len(), 2);
         assert_eq!(profile.patches[1].chain.len(), 3);
         assert!(profile.patches[1].chain[2].is_cab_ir());
-        assert_eq!(profile.patches[1].chain[0].path, "amps/drive.nam");
+        assert_eq!(profile.patches[1].chain[0].nam, "amps/drive.nam");
         assert_eq!(profile.patches[1].output_trim_db, -2.0);
     }
 
@@ -786,9 +793,9 @@ mod tests {
                 {
                     name Lead
                     chain (
-                        { kind nam, path amps/amp.nam }
-                        { kind cab_ir, path cabs/v30.wav }
-                        { kind plugin, path /usr/lib/clap/ValhallaDelay.clap }
+                        { block_type @Amp, nam amps/amp.nam }
+                        { block_type @Cabinet, ir cabs/v30.wav }
+                        { block_type @Delay, plugin /usr/lib/clap/ValhallaDelay.clap }
                     )
                 }
             )
@@ -797,7 +804,7 @@ mod tests {
         let chain = &profile.patches[0].chain;
         assert_eq!(chain.len(), 3);
         assert!(chain[2].is_plugin());
-        assert_eq!(chain[2].path, "/usr/lib/clap/ValhallaDelay.clap");
+        assert_eq!(chain[2].plugin, "/usr/lib/clap/ValhallaDelay.clap");
         assert!(chain[2].state_b64.is_none());
     }
 
@@ -827,7 +834,7 @@ mod tests {
         assert_eq!(chain.len(), 2);
         assert!(chain[0].is_nam());
         assert!(chain[1].is_plugin());
-        assert_eq!(chain[1].path, "/plugins/Reverb.clap");
+        assert_eq!(chain[1].plugin, "/plugins/Reverb.clap");
         assert_eq!(chain[1].state_b64.as_deref(), Some("c3RhdGU="));
     }
 
@@ -896,7 +903,7 @@ mod tests {
         assert_eq!(lead.name, "Lead");
         assert_eq!(lead.chain.len(), 2);
         assert!(lead.chain[0].is_nam());
-        assert_eq!(lead.chain[0].path, "lead.nam");
+        assert_eq!(lead.chain[0].nam, "lead.nam");
         assert!(lead.chain[1].is_cab_ir());
     }
 }

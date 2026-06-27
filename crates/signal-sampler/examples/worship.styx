@@ -1,13 +1,14 @@
 // A live guitar-rig profile for the standalone Signal rig.
 //
-// Each patch is a named tone whose chain is an ordered list of blocks:
-//   kind nam     → a Neural Amp Modeler model (.nam)  — amp or drive/pedal
-//   kind cab_ir  → a cabinet impulse response (.wav)
-//   kind plugin  → any third-party CLAP / VST3 plugin (format auto-detected);
-//                  optional `state_b64 "..."` restores saved plugin parameters
-// Switching patches at runtime is instant + click-free (every chain is
-// pre-loaded into the bank). Example plugin block:
-//   { kind plugin, path /usr/lib/clap/ValhallaSupermassive.clap }
+// Each patch is a named tone whose chain is an ordered list of blocks. A block
+// has a `block_type` (what it is) and a realization (how it's built):
+//   { block_type @Amp,     nam amps/clean.nam }     // Amp realized by a NAM model
+//   { block_type @Drive,   nam pedals/ts808.nam }   // any nonlinear block can be NAM
+//   { block_type @Cabinet, ir cabs/v30.wav }        // cabinet impulse response
+//   { block_type @Delay,   plugin /lib/clap/Echo.clap }  // hosted CLAP/VST3
+//                  // optional `state_b64 "..."` restores saved plugin params
+// An empty realization (no nam/ir/plugin) is a placeholder block. Switching
+// patches at runtime is instant + click-free (every chain is pre-loaded).
 //
 // Paths are relative to THIS file's directory (or absolute). Edit them to point
 // at your own models/IRs, then run:
@@ -20,8 +21,8 @@ patches (
     {
         name Clean
         chain (
-            { kind nam, path amps/clean_twin.nam }
-            { kind cab_ir, path cabs/twin_jensen.wav }
+            { block_type @Amp, nam amps/clean_twin.nam }
+            { block_type @Cabinet, ir cabs/twin_jensen.wav }
         )
         input_trim_db 0.0
         output_trim_db 0.0
@@ -29,8 +30,8 @@ patches (
     {
         name Crunch
         chain (
-            { kind nam, path amps/crunch_ac30.nam }
-            { kind cab_ir, path cabs/greenback.wav }
+            { block_type @Amp, nam amps/crunch_ac30.nam }
+            { block_type @Cabinet, ir cabs/greenback.wav }
         )
         output_trim_db -1.0
     }
@@ -38,9 +39,9 @@ patches (
         name Lead
         // drive pedal → amp → cab
         chain (
-            { kind nam, path amps/ts808.nam }
-            { kind nam, path amps/lead_boost.nam }
-            { kind cab_ir, path cabs/v30.wav }
+            { block_type @Drive, nam amps/ts808.nam }
+            { block_type @Amp, nam amps/lead_boost.nam }
+            { block_type @Cabinet, ir cabs/v30.wav }
         )
         input_trim_db 3.0
         output_trim_db -2.0
@@ -48,8 +49,8 @@ patches (
     {
         name Ambient
         chain (
-            { kind nam, path amps/ambient_clean.nam }
-            { kind cab_ir, path cabs/twin_jensen.wav }
+            { block_type @Amp, nam amps/ambient_clean.nam }
+            { block_type @Cabinet, ir cabs/twin_jensen.wav }
         )
     }
 )

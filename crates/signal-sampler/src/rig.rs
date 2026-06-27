@@ -39,6 +39,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
+use signal_proto::block::{BlockCategory, BlockType};
+
 use facet::Facet;
 
 use daw::service::{
@@ -89,36 +91,46 @@ fn db_to_lin(db: f32) -> f32 {
     }
 }
 
-/// One block in a patch's FX chain — a backend kind plus a file path.
+/// One block in a patch's FX chain, modeled on the two orthogonal axes from
+/// `DOMAIN.md`:
 ///
-/// Kept stringly-typed (`kind`) rather than an enum so it loads cleanly from
-/// styx and maps trivially from a proto `BlockKind`. Build with [`RigBlock::nam`]
-/// / [`RigBlock::cab_ir`].
+/// - **`block_type`** — *what the block does* (proto [`BlockType`]: `Amp`,
+///   `Cabinet`, `Drive`, `Reverb`, `Delay`, `Pitch`, …). This is the block's
+///   identity in the module system.
+/// - **realization** — *how that type is realized*, expressed by which asset
+///   field is set: a NAM model ([`nam`](Self::nam)), a cabinet impulse response
+///   ([`ir`](Self::ir)), or a hosted CLAP/VST3 ([`plugin`](Self::plugin)). All
+///   three empty = a **placeholder** (kept in the chain for structure + bypass
+///   grouping, skipped at install).
+///
+/// So an amp is just `{ block_type @Amp, nam "…/amp.nam" }` — the NAM model is
+/// the amp block's model option, not a special block "kind". The global
+/// time-bypass acts on every block whose type is in [`BlockCategory::Time`]
+/// (`Delay` / `Reverb` / `Freeze`).
 #[derive(Clone, Debug, Facet)]
 pub struct RigBlock {
-    /// `"nam"` — neural amp/drive/pedal model (`.nam`).
-    /// `"cab_ir"` — cabinet impulse response (`.wav`).
-    /// `"plugin"` — any third-party CLAP / VST3 plugin (format auto-detected
-    /// from the file). The generic alias for a hosted-plugin block.
-    pub kind: String,
-    /// Path to the `.nam` model, `.wav` IR, or `.clap` / `.vst3` plugin
-    /// (resolved by the caller). May be empty for a **placeholder** block
-    /// (e.g. a yet-to-be-chosen "Delay" in a Time module) — placeholder blocks
-    /// carry a `name`/`role`/`module` but no audio backend and are skipped at
-    /// install time.
-    pub path: String,
-    /// Display name for the block (e.g. "Delay", "POG", "Big Verb"). Falls back
-    /// to the file stem when empty. Required for placeholder blocks.
+    /// What the block is — its semantic type (Amp, Cabinet, Reverb, Delay, …).
+    pub block_type: BlockType,
+    /// Realization: path to a `.nam` model. Set ⇒ realized by Neural Amp
+    /// Modeler. (Works for any nonlinear block — amp, drive, even a neural cab.)
+    #[facet(default)]
+    pub nam: String,
+    /// Realization: path to a cabinet impulse response `.wav` (convolved).
+    #[facet(default)]
+    pub ir: String,
+    /// Realization: path to a hosted CLAP / VST3 plugin (format auto-detected).
+    #[facet(default)]
+    pub plugin: String,
+    /// For a `plugin` realization: optional base64 state chunk restored on load.
+    #[facet(default)]
+    pub state_b64: Option<String>,
+    /// Display name (e.g. "Big Hall", "Dotted Delay"). Falls back to the asset
+    /// file stem, then the block type. Useful for placeholder blocks.
     #[facet(default)]
     pub name: String,
-    /// Semantic role driving display, level-match and **bypass grouping**:
-    /// `"amp"`, `"cab"`, `"drive"`, `"fx"`, `"time"` (delay/reverb/mod), `"util"`.
-    /// Empty = inferred from `kind` (nam→amp, cab_ir→cab, plugin→fx).
-    #[facet(default)]
-    pub role: String,
-    /// Optional module this block belongs to (e.g. "Time"). Blocks sharing a
-    /// module name bypass together — the global "time bypass" footswitch
-    /// bypasses every block in the "Time" module. Empty = ungrouped.
+    /// Optional explicit module grouping (e.g. "Time"). Empty = grouped by the
+    /// block type's category. The time-bypass hits this module or the Time
+    /// category.
     #[facet(default)]
     pub module: String,
     /// Initial bypass state when the chain is installed.
@@ -130,53 +142,74 @@ pub struct RigBlock {
     /// Per-block output trim (dB) after this block. NAM only.
     #[facet(default)]
     pub output_trim_db: f32,
-    /// For `"plugin"` blocks: optional base64 state chunk (saved plugin
-    /// parameters) restored after load. Absent = the plugin's defaults.
-    #[facet(default)]
-    pub state_b64: Option<String>,
 }
 
 impl RigBlock {
-    pub fn nam(path: impl Into<String>) -> Self {
-        Self::bare("nam", path)
+    /// An **Amp** block realized by a NAM model — the common case.
+    pub fn nam(model_path: impl Into<String>) -> Self {
+        Self::of_type(BlockType::Amp).with_nam(model_path)
     }
 
-    pub fn cab_ir(path: impl Into<String>) -> Self {
-        Self::bare("cab_ir", path)
+    /// A **Cabinet** block realized by an impulse response.
+    pub fn cab_ir(ir_path: impl Into<String>) -> Self {
+        Self::of_type(BlockType::Cabinet).with_ir(ir_path)
     }
 
-    /// A hosted CLAP / VST3 plugin block (no saved state).
+    /// A hosted CLAP / VST3 plugin block (no saved state). Untyped — defaults to
+    /// `Custom`; prefer [`effect`](Self::effect) to give it a real type.
     pub fn plugin(path: impl Into<String>) -> Self {
-        Self::bare("plugin", path)
+        Self::of_type(BlockType::Custom).with_plugin(path)
     }
 
     /// A hosted plugin block that restores a saved state chunk.
     pub fn plugin_with_state(path: impl Into<String>, state_b64: Option<String>) -> Self {
         Self {
             state_b64,
-            ..Self::bare("plugin", path)
+            ..Self::of_type(BlockType::Custom).with_plugin(path)
         }
     }
 
-    /// A **placeholder** effect block: no audio backend yet (empty path), just a
-    /// `name` / `role` / `module` so the chain structure is real and bypass
-    /// grouping works. Replace `path` with a plugin once chosen.
-    pub fn placeholder(
-        name: impl Into<String>,
-        role: impl Into<String>,
-        module: impl Into<String>,
-    ) -> Self {
+    /// A typed effect placeholder: a block with a real `block_type` and `name`
+    /// but no realization yet (drop a plugin/model in later). Kept in the chain
+    /// for structure + bypass grouping; skipped at install.
+    pub fn effect(block_type: BlockType, name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            role: role.into(),
-            module: module.into(),
-            ..Self::bare("plugin", "")
+            ..Self::of_type(block_type)
+        }
+    }
+
+    /// A bare block of `block_type` with no realization (a placeholder).
+    pub fn of_type(block_type: BlockType) -> Self {
+        Self {
+            block_type,
+            nam: String::new(),
+            ir: String::new(),
+            plugin: String::new(),
+            state_b64: None,
+            name: String::new(),
+            module: String::new(),
+            bypassed: false,
+            input_trim_db: 0.0,
+            output_trim_db: 0.0,
         }
     }
 
     #[must_use]
-    pub fn with_role(mut self, role: impl Into<String>) -> Self {
-        self.role = role.into();
+    pub fn with_nam(mut self, path: impl Into<String>) -> Self {
+        self.nam = path.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_ir(mut self, path: impl Into<String>) -> Self {
+        self.ir = path.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_plugin(mut self, path: impl Into<String>) -> Self {
+        self.plugin = path.into();
         self
     }
 
@@ -192,77 +225,56 @@ impl RigBlock {
         self
     }
 
-    fn bare(kind: &str, path: impl Into<String>) -> Self {
-        Self {
-            kind: kind.into(),
-            path: path.into(),
-            name: String::new(),
-            role: String::new(),
-            module: String::new(),
-            bypassed: false,
-            input_trim_db: 0.0,
-            output_trim_db: 0.0,
-            state_b64: None,
-        }
-    }
-
-    /// True for a placeholder block (no backend path). Skipped at install.
-    pub fn is_placeholder(&self) -> bool {
-        self.path.trim().is_empty()
-    }
-
-    /// The block's effective role: explicit `role` if set, else inferred from
-    /// `kind` (nam→"amp", cab_ir→"cab", plugin→"fx").
-    pub fn resolved_role(&self) -> &str {
-        if !self.role.is_empty() {
-            return &self.role;
-        }
-        if self.is_nam() {
-            "amp"
-        } else if self.is_cab_ir() {
-            "cab"
+    /// The realization's asset path — the `.nam`, `.wav` IR, or plugin path,
+    /// whichever is set (empty for a placeholder).
+    pub fn asset_path(&self) -> &str {
+        if !self.nam.is_empty() {
+            &self.nam
+        } else if !self.ir.is_empty() {
+            &self.ir
         } else {
-            "fx"
+            &self.plugin
         }
     }
 
-    /// Display label: explicit `name`, else the file stem, else the kind.
+    /// True for a placeholder block (no realization). Skipped at install.
+    pub fn is_placeholder(&self) -> bool {
+        self.nam.trim().is_empty() && self.ir.trim().is_empty() && self.plugin.trim().is_empty()
+    }
+
+    /// Display label: explicit `name`, else the asset file stem, else the block
+    /// type's display name.
     pub fn display_name(&self) -> String {
         if !self.name.is_empty() {
             return self.name.clone();
         }
-        std::path::Path::new(&self.path)
+        std::path::Path::new(self.asset_path())
             .file_stem()
             .and_then(|s| s.to_str())
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| self.kind.clone())
+            .unwrap_or_else(|| self.block_type.display_name().to_string())
     }
 
-    /// Whether the global "time bypass" footswitch should hit this block: it's
-    /// in the "Time" module or its role is "time" (delay / reverb). Deliberately
-    /// narrow — drive pedals, pitch (POG) and modulation are NOT killed by the
-    /// time switch (Funk = clean with the Time module bypassed).
+    /// Whether the global "time bypass" footswitch should hit this block: its
+    /// type is a Time effect (Delay / Reverb / Freeze) or it's tagged into a
+    /// "Time" module. Deliberately narrow — drive, pitch (POG) and modulation
+    /// are NOT killed by the time switch (Funk = clean with Time bypassed).
     pub fn is_time_fx(&self) -> bool {
-        self.module.eq_ignore_ascii_case("time") || self.resolved_role().eq_ignore_ascii_case("time")
+        self.module.eq_ignore_ascii_case("time")
+            || self.block_type.category() == BlockCategory::Time
     }
 
     pub fn is_nam(&self) -> bool {
-        self.kind.eq_ignore_ascii_case("nam")
+        !self.nam.is_empty()
     }
 
     pub fn is_cab_ir(&self) -> bool {
-        matches!(
-            self.kind.to_ascii_lowercase().as_str(),
-            "cab_ir" | "cabir" | "cab" | "ir"
-        )
+        !self.ir.is_empty()
     }
 
     pub fn is_plugin(&self) -> bool {
-        matches!(
-            self.kind.to_ascii_lowercase().as_str(),
-            "plugin" | "clap" | "vst3"
-        )
+        !self.plugin.is_empty()
     }
 }
 
@@ -484,7 +496,7 @@ fn build_block(
     sample_rate: u32,
 ) -> Result<(Box<dyn PluginInstance>, String, Option<f64>, Option<f64>), String> {
     if block.is_nam() {
-        let mut nam = NamProcessor::load(&block.path, sample_rate as f64, MAX_BLOCK)?;
+        let mut nam = NamProcessor::load(&block.nam, sample_rate as f64, MAX_BLOCK)?;
         nam.input_gain_db = block.input_trim_db;
         nam.output_gain_db = block.output_trim_db;
         if let Some(exp) = nam.expected_sample_rate() {
@@ -502,35 +514,38 @@ fn build_block(
         let dn = nam.display_name.clone();
         Ok((Box::new(nam), dn, loud, exp_sr))
     } else if block.is_cab_ir() {
-        let conv = Convolver::load(&block.path)?;
+        let conv = Convolver::load(&block.ir)?;
         let dn = conv.display_name.clone();
         Ok((Box::new(conv), format!("{dn} (cab)"), None, None))
     } else if block.is_plugin() {
         // Hosted CLAP/VST3: go through daw's own plugin loader, which returns a
         // `Box<dyn PluginInstance>` ready to drop straight into the FX chain —
         // no signal-side re-wrapping needed (the renderer drives it directly).
-        let mut plugin = daw::plugin::load_plugin(&block.path)
-            .map_err(|e| format!("load plugin {}: {e}", block.path))?
-            .ok_or_else(|| format!("not a recognized CLAP/VST3 plugin: {}", block.path))?;
+        let mut plugin = daw::plugin::load_plugin(&block.plugin)
+            .map_err(|e| format!("load plugin {}: {e}", block.plugin))?
+            .ok_or_else(|| format!("not a recognized CLAP/VST3 plugin: {}", block.plugin))?;
         plugin
             .prepare(sample_rate as f64, FX_PREPARE_BLOCK)
-            .map_err(|e| format!("prepare plugin {}: {e}", block.path))?;
+            .map_err(|e| format!("prepare plugin {}: {e}", block.plugin))?;
         if let Some(state) = &block.state_b64 {
             match base64_decode(state) {
                 Ok(bytes) => {
                     if let Err(e) = plugin.load_state(&bytes) {
-                        tracing::warn!(plugin = %block.path, error = %e, "failed to restore plugin state");
+                        tracing::warn!(plugin = %block.plugin, error = %e, "failed to restore plugin state");
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(plugin = %block.path, error = %e, "invalid base64 plugin state");
+                    tracing::warn!(plugin = %block.plugin, error = %e, "invalid base64 plugin state");
                 }
             }
         }
         let dn = plugin.descriptor().name;
         Ok((plugin, format!("{dn} (plugin)"), None, None))
     } else {
-        Err(format!("unknown rig block kind: {:?}", block.kind))
+        Err(format!(
+            "placeholder block (type {:?}) has no realization to build",
+            block.block_type
+        ))
     }
 }
 
@@ -803,7 +818,7 @@ impl GuitarRig {
     /// [`set_active`](Self::set_active). A failed block load fails the whole
     /// install.
     pub fn install_chain(&mut self, blocks: &[RigBlock]) -> Result<ModelId, String> {
-        let ids: Vec<String> = blocks.iter().map(|b| default_block_id(&b.path)).collect();
+        let ids: Vec<String> = blocks.iter().map(|b| default_block_id(b.asset_path())).collect();
         self.install_chain_with_ids(blocks, &ids)
     }
 
@@ -843,7 +858,7 @@ impl GuitarRig {
                 block_ids
                     .get(i)
                     .cloned()
-                    .unwrap_or_else(|| default_block_id(&b.path)),
+                    .unwrap_or_else(|| default_block_id(b.asset_path())),
             );
             boxes.push(Some(boxed));
         }

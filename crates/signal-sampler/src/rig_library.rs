@@ -456,7 +456,7 @@ mod tests {
     fn preset_scene_lookup_is_case_insensitive() {
         let p = jcm800();
         assert_eq!(p.scene("clean").unwrap().name, "Clean");
-        assert_eq!(p.scene("LEAD").unwrap().chain[0].path, "mars-lead.nam");
+        assert_eq!(p.scene("LEAD").unwrap().chain[0].nam, "mars-lead.nam");
         assert!(p.scene("nope").is_none());
         assert_eq!(p.default_scene().unwrap().name, "Clean");
     }
@@ -468,7 +468,7 @@ mod tests {
         assert_eq!(prof.name, "Marshall JCM800");
         assert_eq!(prof.patches.len(), 2);
         assert_eq!(prof.patches[0].name, "Clean");
-        assert_eq!(prof.patches[1].chain[0].path, "mars-lead.nam");
+        assert_eq!(prof.patches[1].chain[0].nam, "mars-lead.nam");
         // Scene trims folded into the patch.
         assert_eq!(prof.patches[1].input_trim_db, 2.0);
         assert_eq!(prof.patches[1].output_trim_db, -1.0);
@@ -486,7 +486,7 @@ mod tests {
         let resolved = lib.resolve_patch(&patch);
         assert!(resolved.preset.is_empty(), "reference is consumed");
         assert_eq!(resolved.chain.len(), 1);
-        assert_eq!(resolved.chain[0].path, "mars-lead.nam");
+        assert_eq!(resolved.chain[0].nam, "mars-lead.nam");
         // Patch trim + scene trim are summed.
         assert_eq!(resolved.output_trim_db, -3.0);
         assert_eq!(resolved.input_trim_db, 2.0);
@@ -498,7 +498,7 @@ mod tests {
         lib.presets.push(jcm800());
         let patch = RigPatch::from_preset("Base", "Marshall JCM800", "");
         let resolved = lib.resolve_patch(&patch);
-        assert_eq!(resolved.chain[0].path, "mars-clean.nam");
+        assert_eq!(resolved.chain[0].nam, "mars-clean.nam");
     }
 
     #[test]
@@ -539,7 +539,7 @@ mod tests {
         assert_eq!(prof.patches.len(), 1);
         // Section name is used, chain resolved from the profile's patch → preset.
         assert_eq!(prof.patches[0].name, "Solo");
-        assert_eq!(prof.patches[0].chain[0].path, "mars-lead.nam");
+        assert_eq!(prof.patches[0].chain[0].nam, "mars-lead.nam");
     }
 
     #[test]
@@ -552,7 +552,10 @@ mod tests {
         let jcm = lib.preset("Marshall JCM800").expect("JCM800 preset");
         assert_eq!(jcm.scenes.len(), 3);
         assert!(jcm.scene("Clean").unwrap().chain[0].is_nam());
-        assert_eq!(jcm.scene("Clean").unwrap().chain[0].resolved_role(), "amp");
+        assert_eq!(
+            jcm.scene("Clean").unwrap().chain[0].block_type,
+            signal_proto::block::BlockType::Amp
+        );
     }
 
     #[test]
@@ -586,9 +589,9 @@ mod tests {
             .expect("Lead patch");
         assert!(lead.chain[0].is_nam(), "Lead's first block is the amp NAM");
         assert!(
-            lead.chain[0].path.contains("FMAN") && lead.chain[0].path.contains("Lead"),
+            lead.chain[0].nam.contains("FMAN") && lead.chain[0].nam.contains("Lead"),
             "Lead resolves to the Friedman BE Lead capture, got {:?}",
-            lead.chain[0].path
+            lead.chain[0].nam
         );
         // The appended Time-module effects are placeholders (empty path) and
         // flagged for the global time-bypass.
@@ -641,6 +644,6 @@ mod tests {
         };
         let prof = lib.song_as_profile(&song);
         assert_eq!(prof.patches[0].name, "Intro");
-        assert_eq!(prof.patches[0].chain[0].path, "mars-clean.nam");
+        assert_eq!(prof.patches[0].chain[0].nam, "mars-clean.nam");
     }
 }
