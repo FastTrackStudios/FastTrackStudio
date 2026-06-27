@@ -178,7 +178,19 @@ fn main() -> eyre::Result<()> {
     // notes aren't silent. Re-armed whenever the articulation / mic changes.
     let warm = WarmJob::spawn(&rig);
 
+    // Route stderr (and tracing) to $TMPDIR/fts-signal-rig.log — ratatui owns
+    // stdout, so logs must go to a file. Tail it while playing to see engine
+    // activity: `tail -f "$TMPDIR/fts-signal-rig.log"`. Override verbosity with
+    // RUST_LOG (e.g. RUST_LOG=signal_sampler=debug for per-sample cache logs).
     redirect_stderr_to_log();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "signal_sampler=info,daw=warn".into()),
+        )
+        .with_ansi(false)
+        .init();
+
     let mut term = ratatui::init();
     let res = run(
         &mut term,

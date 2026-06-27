@@ -80,6 +80,11 @@ const RELEASE_MAX_LIFETIME_MS: u32 = 2_000;
 /// Default legato crossfade — old sustain ramps out over this many ms.
 const LEGATO_FADE_MS: u32 = 30;
 
+/// Max semitones to pitch-shift from the nearest recorded zone when no zone
+/// spans a note. CSS samples a whole-tone grid (±1 to fill); 2 covers grid
+/// gaps + edge rounding without obviously detuning.
+const ZONE_PITCH_TOLERANCE: u8 = 2;
+
 /// Velocity used for the legato transition back to a held note when the
 /// sounding note is released (a medium transition speed — there's no real
 /// "release velocity" for a fall-back).
@@ -586,7 +591,12 @@ impl SampleEngine {
             if !zone_trigger_matches(z, ZoneTrigger::Attack) {
                 continue;
             }
-            if note < z.key_min || note > z.key_max {
+            // Within the zone's range, or within pitch-shift tolerance of its
+            // recorded key (whole-tone grid → even notes warm their neighbour).
+            let in_range = note >= z.key_min && note <= z.key_max;
+            let near = (z.root_key as i32 - note as i32).unsigned_abs() as u8
+                <= ZONE_PITCH_TOLERANCE;
+            if !in_range && !near {
                 continue;
             }
             if let Some(p) = artic.as_deref() {
@@ -1239,11 +1249,13 @@ impl SampleEngine {
         rr: usize,
     ) -> Option<usize> {
         let mut matches: Vec<usize> = Vec::new();
+        // Nearest single-key zone when no zone spans the note: CSS records a
+        // whole-tone grid (every other semitone) and pitch-shifts ±1 to fill,
+        // and the extracted zones are single-key (key_min == key_max), so even
+        // notes have no exact zone — fall back to the closest recorded pitch.
+        let mut nearest: Option<(u8, usize)> = None;
         for (i, z) in self.patch.spec.zones.iter().enumerate() {
             if !zone_trigger_matches(z, ZoneTrigger::Attack) {
-                continue;
-            }
-            if note < z.key_min || note > z.key_max {
                 continue;
             }
             if !z.articulation.eq_ignore_ascii_case(artic) {
@@ -1263,12 +1275,23 @@ impl SampleEngine {
                     continue;
                 }
             }
-            matches.push(i);
+            if note >= z.key_min && note <= z.key_max {
+                matches.push(i);
+            } else {
+                let dist = (z.root_key as i32 - note as i32).unsigned_abs() as u8;
+                if nearest.is_none_or(|(d, _)| dist < d) {
+                    nearest = Some((dist, i));
+                }
+            }
         }
-        if matches.is_empty() {
-            return None;
+        if !matches.is_empty() {
+            return Some(matches[rr % matches.len()]);
         }
-        Some(matches[rr % matches.len()])
+        // No exact zone — use the nearest recorded pitch within range and let
+        // spawn_zone_voice pitch-shift it (note - root_key semitones).
+        nearest
+            .filter(|(d, _)| *d <= ZONE_PITCH_TOLERANCE)
+            .map(|(_, i)| i)
     }
 
     /// Spawn a voice from zone `idx` for `note` with a layer `kind` and
