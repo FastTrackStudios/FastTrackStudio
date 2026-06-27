@@ -13,12 +13,12 @@
 //! rather than the realtime callback (which will pre-allocate). MIDI events are
 //! delivered to every node; sources consume note on/off, effects ignore them.
 
-use signal_plugin_host::{PluginEvents, PluginInstance};
+use signal_plugin_host::{PluginEvents, PluginInstance, PluginMidiEvent};
 use signal_proto::block::BlockType;
 
 use crate::native_osc::NativeOscillator;
 use crate::rig::{build_block, RigBlock};
-use crate::rig_node::{Combine, Container, RigNode};
+use crate::rig_node::{Combine, Container, RigNode, Zone};
 
 /// Build the audio backend for one block at `sample_rate`, or `None` when the
 /// block is a placeholder or an unimplemented `Native` type (→ pass-through).
@@ -49,19 +49,36 @@ pub enum RenderNode {
     Serial(Vec<RenderNode>),
     /// Children summed.
     Parallel(Vec<RenderNode>),
+    /// A keyboard-routed subtree: incoming MIDI is filtered + velocity-scaled by
+    /// the [`Zone`] (key split + velocity crossfade) before reaching `inner`.
+    /// This is the central-MIDI-input router, expressed in the render tree.
+    Zoned {
+        zone: Zone,
+        inner: Box<RenderNode>,
+    },
 }
 
 impl RenderNode {
-    /// Compile a container subtree into a render tree at `sample_rate`.
+    /// Compile a container subtree into a render tree at `sample_rate`. A
+    /// container with a non-full [`Zone`] is wrapped in [`RenderNode::Zoned`] so
+    /// only its in-window notes reach it.
     pub fn compile(container: &Container, sample_rate: u32) -> RenderNode {
         let kids = container
             .children
             .iter()
             .map(|n| Self::compile_node(n, sample_rate))
             .collect();
-        match container.combine {
+        let base = match container.combine {
             Combine::Serial => RenderNode::Serial(kids),
             Combine::Parallel => RenderNode::Parallel(kids),
+        };
+        if container.zone.is_full() {
+            base
+        } else {
+            RenderNode::Zoned {
+                zone: container.zone,
+                inner: Box::new(base),
+            }
         }
     }
 
@@ -82,6 +99,7 @@ impl RenderNode {
             RenderNode::Serial(v) | RenderNode::Parallel(v) => {
                 v.iter_mut().for_each(|n| n.prepare(sample_rate, block_size));
             }
+            RenderNode::Zoned { inner, .. } => inner.prepare(sample_rate, block_size),
         }
     }
 
@@ -92,6 +110,7 @@ impl RenderNode {
             RenderNode::Serial(v) | RenderNode::Parallel(v) => {
                 v.iter().map(|n| n.live_leaves()).sum()
             }
+            RenderNode::Zoned { inner, .. } => inner.live_leaves(),
         }
     }
 
@@ -144,6 +163,18 @@ impl RenderNode {
                     }
                 }
             }
+            RenderNode::Zoned { zone, inner } => {
+                // Central-MIDI-input routing: keep only notes in this zone's
+                // window, scaling each NoteOn's velocity by the crossfade gain.
+                // Note-offs and CC pass through (so held notes always release).
+                let filtered = filter_events_by_zone(*zone, events);
+                let fe = PluginEvents {
+                    params: events.params,
+                    midi: &filtered,
+                    note_expressions: events.note_expressions,
+                };
+                inner.process(in_l, in_r, out_l, out_r, &fe);
+            }
         }
     }
 
@@ -153,6 +184,34 @@ impl RenderNode {
         let silence = vec![0.0f32; frames];
         self.process(&silence, &silence, out_l, out_r, midi);
     }
+}
+
+/// Apply a [`Zone`] to a MIDI stream: drop NoteOns outside the window, scale
+/// the rest by the crossfade gain (velocity × gain), and pass everything else
+/// (NoteOff / CC / …) through unchanged so releases always land.
+fn filter_events_by_zone(zone: Zone, events: &PluginEvents<'_>) -> Vec<PluginMidiEvent> {
+    use daw::service::MidiMessage;
+    let mut out = Vec::with_capacity(events.midi.len());
+    for ev in events.midi {
+        match ev.message {
+            MidiMessage::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => {
+                let gain = zone.note_gain(note, velocity);
+                if gain > 0.0 {
+                    let scaled = ((velocity as f32 * gain).round() as u8).clamp(1, 127);
+                    out.push(PluginMidiEvent {
+                        offset: ev.offset,
+                        message: MidiMessage::note_on(channel, note, scaled),
+                    });
+                }
+            }
+            _ => out.push(ev.clone()),
+        }
+    }
+    out
 }
 
 fn copy_in(in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32], frames: usize) {
@@ -217,6 +276,51 @@ mod tests {
         };
         rn.render(&mut l, &mut r, &ev);
         assert!(rms(&l) > 1e-3);
+    }
+
+    fn render_note(rn: &mut RenderNode, note: u8, vel: u8) -> f32 {
+        let (mut l, mut r) = (vec![0.0; 256], vec![0.0; 256]);
+        let midi = [note_on(note, vel)];
+        let ev = PluginEvents {
+            params: &[],
+            midi: &midi,
+            note_expressions: &[],
+        };
+        rn.render(&mut l, &mut r, &ev);
+        rms(&l)
+    }
+
+    #[test]
+    fn key_split_routes_notes_to_their_zone() {
+        // Low osc keys 0-50, High osc keys 70-127 — with a silent gap 51..69.
+        let split = Container::parallel("Split")
+            .add(Container::layer("Low").keys(0, 50).block(BlockType::Oscillator, "Osc"))
+            .add(Container::layer("High").keys(70, 127).block(BlockType::Oscillator, "Osc"));
+
+        // A note in the low zone sounds.
+        let mut rn = RenderNode::compile(&split, 48_000);
+        rn.prepare(48_000.0, 256);
+        assert!(render_note(&mut rn, 40, 100) > 1e-3, "low zone note sounds");
+
+        // A note in the gap reaches no layer → silence.
+        let mut rn = RenderNode::compile(&split, 48_000);
+        rn.prepare(48_000.0, 256);
+        assert!(render_note(&mut rn, 60, 100) < 1e-5, "gap note is silent");
+    }
+
+    #[test]
+    fn velocity_window_gates_notes() {
+        let loud = Container::layer("Loud")
+            .velocity(64, 127)
+            .block(BlockType::Oscillator, "Osc");
+
+        let mut rn = RenderNode::compile(&loud, 48_000);
+        rn.prepare(48_000.0, 256);
+        assert!(render_note(&mut rn, 60, 110) > 1e-3, "hard hit sounds");
+
+        let mut rn = RenderNode::compile(&loud, 48_000);
+        rn.prepare(48_000.0, 256);
+        assert!(render_note(&mut rn, 60, 30) < 1e-5, "soft hit is below the window");
     }
 
     #[test]

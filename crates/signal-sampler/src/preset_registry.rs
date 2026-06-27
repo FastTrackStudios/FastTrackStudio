@@ -40,10 +40,12 @@ impl PresetRegistry {
         Self::default()
     }
 
-    /// A registry seeded with the built-in **code** presets (Nord Stage, …).
+    /// A registry seeded with the built-in **code** presets (Nord Stage, the
+    /// layering demo, …).
     pub fn with_builtins() -> Self {
         let mut r = Self::new();
         r.register_code(crate::nord::nord_stage_preset());
+        r.register_code(crate::nord::layering_demo());
         r
     }
 
@@ -189,10 +191,11 @@ mod tests {
             override_tree.to_styx_string().unwrap(),
         )
         .unwrap();
+        let before = reg.len();
         reg.load_styx_dir(&dir);
 
-        // Still one "Nord Stage", now sourced from styx with the override shape.
-        assert_eq!(reg.len(), 1);
+        // Same count (override, not add); "Nord Stage" now sourced from styx.
+        assert_eq!(reg.len(), before);
         let nord = reg.get("Nord Stage").unwrap();
         assert!(matches!(nord.source, PresetSource::Styx(_)));
         assert_eq!(nord.tree.of_role(Role::Layer).len(), 1);

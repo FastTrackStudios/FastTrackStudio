@@ -104,6 +104,95 @@ pub struct Param {
     pub value: String,
 }
 
+/// The **keyboard-routing zone** a container occupies — the central MIDI input
+/// router's per-container rule. A note must fall in both the key window and the
+/// velocity window to reach this subtree; crossfade edges blend it in/out
+/// (Nord-style key splits + Omnisphere-style velocity crossfades).
+///
+/// The combined gain (`key_gain × vel_gain`, 0..1) scales the note's velocity
+/// into the subtree, so a note in a crossfade region plays adjacent layers at
+/// partial level — a true blend. Nested zones multiply (a key-split Layer
+/// holding velocity-split Modules). The default [`Zone::full`] passes everything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub struct Zone {
+    /// Lowest playable key (MIDI note).
+    pub key_lo: u8,
+    /// Highest playable key.
+    pub key_hi: u8,
+    /// Crossfade width in semitones at each key edge. 0 = hard split.
+    pub key_xfade: u8,
+    /// Lowest velocity that sounds.
+    pub vel_lo: u8,
+    /// Highest velocity that sounds.
+    pub vel_hi: u8,
+    /// Crossfade width in velocity units at each edge. 0 = hard. (Omnisphere-style.)
+    pub vel_xfade: u8,
+}
+
+impl Default for Zone {
+    fn default() -> Self {
+        Zone::full()
+    }
+}
+
+impl Zone {
+    /// The everything-passes zone (full key + velocity range, no crossfade).
+    pub const fn full() -> Self {
+        Self {
+            key_lo: 0,
+            key_hi: 127,
+            key_xfade: 0,
+            vel_lo: 1,
+            vel_hi: 127,
+            vel_xfade: 0,
+        }
+    }
+
+    pub fn is_full(&self) -> bool {
+        *self == Zone::full()
+    }
+
+    /// Key-axis gain for `key` (0 outside the window, ramped across the xfade).
+    pub fn key_gain(&self, key: u8) -> f32 {
+        ramp(key, self.key_lo, self.key_hi, self.key_xfade)
+    }
+
+    /// Velocity-axis gain for `vel`.
+    pub fn vel_gain(&self, vel: u8) -> f32 {
+        ramp(vel, self.vel_lo, self.vel_hi, self.vel_xfade)
+    }
+
+    /// Combined routing gain for a note — `key_gain × vel_gain`, in `0..=1`.
+    pub fn note_gain(&self, key: u8, vel: u8) -> f32 {
+        self.key_gain(key) * self.vel_gain(vel)
+    }
+}
+
+/// Trapezoidal window gain: 0 outside `[lo, hi]`, linearly ramped 0→1 over the
+/// `xfade` at each edge, 1 in the middle. `xfade == 0` ⇒ a hard 0/1 window.
+fn ramp(x: u8, lo: u8, hi: u8, xfade: u8) -> f32 {
+    let (x, lo, hi, xf) = (x as f32, lo as f32, hi as f32, xfade as f32);
+    let rising = if xf == 0.0 {
+        if x >= lo {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        (x - lo) / xf
+    };
+    let falling = if xf == 0.0 {
+        if x <= hi {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        (hi - x) / xf
+    };
+    rising.min(falling).clamp(0.0, 1.0)
+}
+
 /// A container node: a named folder of children with a combine rule, plus the
 /// routing-axis attachments (modulators + sends).
 #[derive(Debug, Clone, Facet)]
@@ -132,6 +221,11 @@ pub struct Container {
     /// `unison`, `octave`; an Engine's menu options.
     #[facet(default)]
     pub params: Vec<Param>,
+    /// Keyboard-routing zone (key split + velocity crossfade). Default = full
+    /// (everything passes); a Layer with a narrower zone only sounds notes in
+    /// its window, scaled by the crossfade.
+    #[facet(default)]
+    pub zone: Zone,
     /// Whether this whole subtree is bypassed.
     #[facet(default)]
     pub bypassed: bool,
@@ -177,6 +271,7 @@ impl Container {
             modulators: Vec::new(),
             sends: Vec::new(),
             params: Vec::new(),
+            zone: Zone::full(),
             bypassed: false,
         }
     }
@@ -284,6 +379,45 @@ impl Container {
     #[must_use]
     pub fn input_db(mut self, db: f32) -> Self {
         self.input_db = db;
+        self
+    }
+
+    // ── Keyboard routing (central-MIDI-input zone) ───────────────────────
+
+    /// Restrict this subtree to a key range (MIDI notes `lo..=hi`).
+    #[must_use]
+    pub fn keys(mut self, lo: u8, hi: u8) -> Self {
+        self.zone.key_lo = lo;
+        self.zone.key_hi = hi;
+        self
+    }
+
+    /// Crossfade width (semitones) at the key-split edges.
+    #[must_use]
+    pub fn key_xfade(mut self, semitones: u8) -> Self {
+        self.zone.key_xfade = semitones;
+        self
+    }
+
+    /// Restrict this subtree to a velocity range (`lo..=hi`).
+    #[must_use]
+    pub fn velocity(mut self, lo: u8, hi: u8) -> Self {
+        self.zone.vel_lo = lo;
+        self.zone.vel_hi = hi;
+        self
+    }
+
+    /// Crossfade width (velocity units) at the velocity edges (Omnisphere-style).
+    #[must_use]
+    pub fn vel_xfade(mut self, width: u8) -> Self {
+        self.zone.vel_xfade = width;
+        self
+    }
+
+    /// Set the whole routing zone at once.
+    #[must_use]
+    pub fn zone(mut self, zone: Zone) -> Self {
+        self.zone = zone;
         self
     }
 
@@ -398,6 +532,26 @@ impl Container {
                 out.push_str(&format!("  trim {:+.0}/{:+.0}dB", self.input_db, self.output_db));
             }
             Role::Module => {}
+        }
+        if !self.zone.is_full() {
+            let z = &self.zone;
+            out.push_str(&format!(
+                "  ⌨ keys {}-{}{}  vel {}-{}{}",
+                z.key_lo,
+                z.key_hi,
+                if z.key_xfade > 0 {
+                    format!("~{}", z.key_xfade)
+                } else {
+                    String::new()
+                },
+                z.vel_lo,
+                z.vel_hi,
+                if z.vel_xfade > 0 {
+                    format!("~{}", z.vel_xfade)
+                } else {
+                    String::new()
+                },
+            ));
         }
         if !self.params.is_empty() {
             let ps: Vec<String> = self
@@ -523,6 +677,48 @@ mod tests {
         assert_eq!(a.output_db, -3.0);
         assert_eq!(a.params[0].value, "Poly");
         assert_eq!(back.find("Global").unwrap().input_db, 1.0);
+    }
+
+    #[test]
+    fn zone_split_and_crossfade_gains() {
+        // Key crossfade window 60..72, 4-semitone edges.
+        let z = Zone {
+            key_lo: 60,
+            key_hi: 72,
+            key_xfade: 4,
+            vel_lo: 1,
+            vel_hi: 127,
+            vel_xfade: 0,
+        };
+        assert_eq!(z.key_gain(59), 0.0, "below window");
+        assert_eq!(z.key_gain(60), 0.0, "edge starts the fade at 0");
+        assert!((z.key_gain(62) - 0.5).abs() < 1e-6, "half through the fade");
+        assert_eq!(z.key_gain(66), 1.0, "centre is full");
+        assert!((z.key_gain(70) - 0.5).abs() < 1e-6, "fading out");
+        assert_eq!(z.key_gain(72), 0.0, "top edge");
+        assert_eq!(z.key_gain(80), 0.0, "above window");
+
+        // Hard split (no crossfade): full inside, zero outside.
+        let hard = Zone {
+            key_lo: 0,
+            key_hi: 59,
+            key_xfade: 0,
+            ..Zone::full()
+        };
+        assert_eq!(hard.key_gain(48), 1.0);
+        assert_eq!(hard.key_gain(60), 0.0);
+
+        // Velocity crossfade (Omnisphere-style) — soft layer fading out by 80.
+        let v = Zone {
+            vel_lo: 1,
+            vel_hi: 80,
+            vel_xfade: 20,
+            ..Zone::full()
+        };
+        assert!((v.vel_gain(70) - 0.5).abs() < 1e-6);
+        assert_eq!(v.vel_gain(100), 0.0);
+        // Combined gain multiplies key × velocity.
+        assert!((z.note_gain(66, 64) - 1.0).abs() < 1e-6);
     }
 
     #[test]

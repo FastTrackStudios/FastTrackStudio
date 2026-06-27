@@ -191,10 +191,62 @@ pub fn nord_stage_preset() -> Container {
         )
 }
 
+/// A small, fully-traceable **layering demo** preset showing the central-MIDI
+/// router: a keyboard split (left-hand bass / right-hand) plus an Omnisphere-
+/// style **velocity crossfade** on the right hand (a soft pad fading into a
+/// bright lead). Demonstrates **nested zones** — the right-hand key split holds
+/// two velocity-windowed layers, so gains multiply (key × velocity).
+pub fn layering_demo() -> Container {
+    Container::preset("Layering Demo").add(
+        Container::parallel("Keys")
+            // Left hand: bass below the split, with a short key crossfade.
+            .add(
+                Container::layer("Bass")
+                    .keys(0, 59)
+                    .key_xfade(3)
+                    .block(BlockType::Oscillator, "Bass Osc"),
+            )
+            // Right hand: above the split, a velocity crossfade between two voices.
+            .add(
+                Container::parallel("Right Hand")
+                    .keys(60, 127)
+                    .key_xfade(3)
+                    .add(
+                        Container::layer("Soft Pad")
+                            .velocity(1, 90)
+                            .vel_xfade(40)
+                            .block(BlockType::Oscillator, "Pad Osc"),
+                    )
+                    .add(
+                        Container::layer("Bright Lead")
+                            .velocity(50, 127)
+                            .vel_xfade(40)
+                            .block(BlockType::Oscillator, "Lead Osc"),
+                    ),
+            ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::rig_node::Role;
+
+    #[test]
+    fn layering_demo_has_nested_split_and_velocity_zones() {
+        let p = layering_demo();
+        assert_eq!(p.of_role(Role::Layer).len(), 3, "Bass + Soft Pad + Bright Lead");
+        // Left-hand key split.
+        let bass = p.find("Bass").unwrap();
+        assert_eq!((bass.zone.key_lo, bass.zone.key_hi), (0, 59));
+        // Right hand is a key-split container holding velocity-windowed layers.
+        let rh = p.find("Right Hand").unwrap();
+        assert_eq!(rh.zone.key_lo, 60);
+        let pad = p.find("Soft Pad").unwrap();
+        assert_eq!((pad.zone.vel_lo, pad.zone.vel_hi, pad.zone.vel_xfade), (1, 90, 40));
+        let lead = p.find("Bright Lead").unwrap();
+        assert_eq!(lead.zone.vel_lo, 50);
+    }
 
     #[test]
     fn nord_stage_has_the_full_layer_topology() {

@@ -96,7 +96,7 @@ pub use rig_library::{Library, RigPreset, RigScene, RigSection, RigSong};
 pub use native_osc::{NativeOscillator, OscWave};
 pub use node_render::{build_node_backend, RenderNode};
 pub use preset_registry::{PresetRegistry, PresetSource, RegisteredPreset};
-pub use rig_node::{Combine, Container, Param, RigNode, Role, Send};
+pub use rig_node::{Combine, Container, Param, RigNode, Role, Send, Zone};
 pub use rig_manager::RigManager;
 pub use rig_prefs::RigAudioPrefs;
 pub use rig_profile::{ProfileRig, RigPatch, RigProfile};
