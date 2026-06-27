@@ -29,9 +29,15 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Gauge, Paragraph};
 use ratatui::Frame;
-use signal_sampler::{MidiSelection, SamplerRig};
+use signal_sampler::{MidiInputHandle, MidiMessage, MidiMonitor, MidiSelection, SamplerRig};
 
 const INSTRUMENT_ID: &str = "strings_1v";
+
+/// One entry in the MIDI input selector.
+struct MidiChoice {
+    label: String,
+    sel: MidiSelection,
+}
 
 /// Default Cinematic Studio Strings install (the WAV root the zone paths in
 /// `_patches/<section>/library.styx` are relative to).
@@ -89,15 +95,6 @@ fn main() -> eyre::Result<()> {
         .position(|a| Some(*a) == arg(&args, "--artic").as_deref())
         .unwrap_or(0);
     let buffer: u32 = arg(&args, "--buffer").and_then(|s| s.parse().ok()).unwrap_or(256);
-    // `all` (default), `virtual[:Name]`, or a device-name substring.
-    let midi_sel = match arg(&args, "--midi").as_deref() {
-        None | Some("all") => MidiSelection::All,
-        Some("virtual") => MidiSelection::Virtual("FTS-Signal Strings".into()),
-        Some(other) if other.starts_with("virtual:") => {
-            MidiSelection::Virtual(other["virtual:".len()..].to_string())
-        }
-        Some(name) => MidiSelection::Port(name.to_string()),
-    };
 
     if !spec_path.exists() {
         eyre::bail!(
@@ -146,11 +143,36 @@ fn main() -> eyre::Result<()> {
     rig.cc(INSTRUMENT_ID, 1, 90);
     rig.cc(INSTRUMENT_ID, 2, 90);
 
-    // Hardware MIDI in → daw live-MIDI ring → bank track. Held for the run.
-    let _midi = rig
-        .attach_midi(midi_sel)
-        .map_err(|e| eyre::eyre!("MIDI input: {e} (is a keyboard connected? try `--midi all`)"))?;
-    let midi_ports = _midi.opened.join(", ");
+    // MIDI input device choices: All inputs (default) + each detected port + a
+    // virtual port. Cycle them live in the TUI with `i`. Detected once at start;
+    // hot-plugged devices need a relaunch.
+    let mut midi_choices: Vec<MidiChoice> = vec![MidiChoice {
+        label: "All inputs".to_string(),
+        sel: MidiSelection::All,
+    }];
+    for port in SamplerRig::midi_input_ports() {
+        midi_choices.push(MidiChoice {
+            label: port.clone(),
+            sel: MidiSelection::Port(port),
+        });
+    }
+    midi_choices.push(MidiChoice {
+        label: "Virtual port (FTS-Signal Strings)".to_string(),
+        sel: MidiSelection::Virtual("FTS-Signal Strings".into()),
+    });
+    let mut midi_idx = match arg(&args, "--midi").as_deref() {
+        None | Some("all") => 0,
+        Some("virtual") => midi_choices.len() - 1,
+        Some(name) => midi_choices
+            .iter()
+            .position(|c| c.label.to_lowercase().contains(&name.to_lowercase()))
+            .unwrap_or(0),
+    };
+
+    // Open the initial selection. Don't hard-fail if it can't open (no device,
+    // virtual unsupported) — the TUI still runs so you can switch with `i` and
+    // watch the MIDI monitor.
+    let mut midi: Option<MidiInputHandle> = rig.attach_midi(midi_choices[midi_idx].sel.clone()).ok();
 
     // Background-warm the playable range for the current pin + mic so the first
     // notes aren't silent. Re-armed whenever the articulation / mic changes.
@@ -159,18 +181,55 @@ fn main() -> eyre::Result<()> {
     redirect_stderr_to_log();
     let mut term = ratatui::init();
     let res = run(
-        &mut term, &rig, &_midi_label(&midi_ports), &mut artic_idx, &mut mic_idx, &warm,
+        &mut term,
+        &rig,
+        &midi_choices,
+        &mut midi_idx,
+        &mut midi,
+        &mut artic_idx,
+        &mut mic_idx,
+        &warm,
     );
     ratatui::restore();
     res
 }
 
-fn _midi_label(ports: &str) -> String {
-    if ports.is_empty() {
-        "(virtual / none)".to_string()
-    } else {
-        ports.to_string()
+/// One-line summary of a MIDI message for the monitor.
+fn fmt_midi(msg: &MidiMessage) -> String {
+    match msg {
+        MidiMessage::NoteOn {
+            channel,
+            note,
+            velocity,
+        } => format!("ch{:<2} NoteOn  {:<10} v{}", channel + 1, note_name(*note), velocity),
+        MidiMessage::NoteOff {
+            channel,
+            note,
+            velocity,
+        } => format!("ch{:<2} NoteOff {:<10} v{}", channel + 1, note_name(*note), velocity),
+        MidiMessage::ControlChange {
+            channel,
+            controller,
+            value,
+        } => format!("ch{:<2} CC{:<3}  = {}", channel + 1, controller, value),
+        MidiMessage::PitchBend { channel, value } => format!("ch{:<2} PitchBend {}", channel + 1, value),
+        MidiMessage::ProgramChange { channel, program } => {
+            format!("ch{:<2} Program {}", channel + 1, program)
+        }
+        MidiMessage::ChannelPressure { channel, pressure } => {
+            format!("ch{:<2} Aftertouch {}", channel + 1, pressure)
+        }
+        other => format!("{other:?}"),
     }
+}
+
+/// MIDI note number → name like `C4` (convention C-1 = 0, so middle C = C4).
+fn note_name(note: u8) -> String {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    let octave = note as i32 / 12 - 1;
+    format!("{}{}", NAMES[note as usize % 12], octave)
 }
 
 /// A cancelable background warm of `WARM_LO..=WARM_HI` for the rig's current
@@ -207,10 +266,13 @@ impl WarmJob {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     term: &mut ratatui::DefaultTerminal,
     rig: &SamplerRig,
-    midi_ports: &str,
+    midi_choices: &[MidiChoice],
+    midi_idx: &mut usize,
+    midi: &mut Option<MidiInputHandle>,
     artic_idx: &mut usize,
     mic_idx: &mut usize,
     warm: &WarmJob,
@@ -220,13 +282,26 @@ fn run(
         total: warm.total,
         cancel: warm.cancel.clone(),
     };
+    let monitor = rig.midi_monitor();
     // Track the live articulation + mic so a change from ANY source — the TUI
     // keys OR a keyswitch / CC58 from the keyboard — re-warms the new samples.
     let mut last_artic = rig.articulation(INSTRUMENT_ID).unwrap_or_default();
     let mut last_mic = MICS[*mic_idx].to_string();
     loop {
         let live_artic = rig.articulation(INSTRUMENT_ID).unwrap_or_default();
-        term.draw(|f| ui(f, rig, midi_ports, &live_artic, *mic_idx, &warm))?;
+        let midi_ok = midi.is_some();
+        term.draw(|f| {
+            ui(
+                f,
+                rig,
+                &midi_choices[*midi_idx].label,
+                midi_ok,
+                &monitor,
+                &live_artic,
+                *mic_idx,
+                &warm,
+            )
+        })?;
 
         if live_artic != last_artic || MICS[*mic_idx] != last_mic {
             last_artic = live_artic.clone();
@@ -242,6 +317,18 @@ fn run(
                 match k.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Char(' ') => rig.panic(INSTRUMENT_ID),
+                    // Cycle the MIDI input device: drop the old connection, open
+                    // the next. `I` goes backwards.
+                    KeyCode::Char('i') | KeyCode::Char('I') => {
+                        let n = midi_choices.len();
+                        *midi_idx = if k.code == KeyCode::Char('I') {
+                            (*midi_idx + n - 1) % n
+                        } else {
+                            (*midi_idx + 1) % n
+                        };
+                        *midi = None; // close current before opening next
+                        *midi = rig.attach_midi(midi_choices[*midi_idx].sel.clone()).ok();
+                    }
                     KeyCode::Char(']') => {
                         *artic_idx = (*artic_idx + 1) % ARTICULATIONS.len();
                         rig.set_articulation(INSTRUMENT_ID, ARTICULATIONS[*artic_idx]);
@@ -275,10 +362,13 @@ fn rearm(rig: &SamplerRig, prev: &WarmJob) -> WarmJob {
     WarmJob::spawn(rig)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ui(
     f: &mut Frame,
     rig: &SamplerRig,
-    midi_ports: &str,
+    midi_label: &str,
+    midi_ok: bool,
+    monitor: &MidiMonitor,
     live_artic: &str,
     mic_idx: usize,
     warm: &WarmJob,
@@ -287,9 +377,10 @@ fn ui(
         Constraint::Length(3), // title
         Constraint::Length(3), // output meter
         Constraint::Length(3), // warm progress
-        Constraint::Length(6), // status
+        Constraint::Length(5), // status
+        Constraint::Min(6),    // MIDI monitor
         Constraint::Length(5), // keyswitch + expression hint
-        Constraint::Min(0),    // help
+        Constraint::Length(3), // help
     ])
     .split(f.area());
 
@@ -340,9 +431,8 @@ fn ui(
                 Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             ),
         ]),
-        Line::from(format!("MIDI in       {midi_ports}")),
         Line::from(format!(
-            "voices {voices}   sample rate {} Hz   midi msgs {}",
+            "voices {voices}   sample rate {} Hz   engine midi {}",
             rig.sample_rate(),
             stats.midi_messages
         )),
@@ -353,6 +443,40 @@ fn ui(
     ])
     .block(Block::bordered().title("status"));
     f.render_widget(status, rows[3]);
+
+    // ── MIDI monitor — confirm MIDI is arriving, and from which device. ──
+    let count = monitor.count();
+    let (dev_color, dev_state) = if !midi_ok {
+        (Color::Red, "NOT OPEN")
+    } else if count == 0 {
+        (Color::Yellow, "open, no events yet")
+    } else {
+        (Color::Green, "receiving")
+    };
+    let area = rows[4];
+    let max_events = (area.height.saturating_sub(3)) as usize; // borders + header line
+    let recent = monitor.recent();
+    let mut lines = vec![Line::from(vec![
+        Span::raw("device "),
+        Span::styled(
+            midi_label,
+            Style::default().fg(dev_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!("  [{dev_state}]   total {count}   (i / I to switch)")),
+    ])];
+    if recent.is_empty() {
+        lines.push(Line::styled(
+            "  …play a note or move a controller…",
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else {
+        for msg in recent.iter().rev().take(max_events).rev() {
+            lines.push(Line::from(format!("  {}", fmt_midi(msg))));
+        }
+    }
+    let monitor_panel =
+        Paragraph::new(lines).block(Block::bordered().title("MIDI monitor"));
+    f.render_widget(monitor_panel, rows[4]);
 
     // CSS-style velocity keyswitches: play these low notes (below the G2 range)
     // to switch articulation live — soft vs hard pick the variant.
@@ -369,14 +493,14 @@ fn ui(
     ])
     .style(Style::default().fg(Color::Cyan))
     .block(Block::bordered().title("keyswitches + expression"));
-    f.render_widget(ks, rows[4]);
+    f.render_widget(ks, rows[5]);
 
     let help = Paragraph::new(Line::from(
-        "[ ] articulation   , . mic   space panic   q quit",
+        "i MIDI device   [ ] articulation   , . mic   space panic   q quit",
     ))
     .style(Style::default().fg(Color::DarkGray))
     .block(Block::bordered());
-    f.render_widget(help, rows[5]);
+    f.render_widget(help, rows[6]);
 }
 
 fn meter_color(db: f64) -> Color {

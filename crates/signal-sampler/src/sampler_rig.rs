@@ -286,6 +286,52 @@ pub struct BusTrack {
     pub meter_index: usize,
 }
 
+// ── MIDI monitor ─────────────────────────────────────────────────────────────
+
+/// Number of recent MIDI messages the monitor keeps for display.
+const MIDI_MONITOR_CAP: usize = 48;
+
+/// A thread-safe tap on the live MIDI stream for UI monitoring: a rolling log
+/// of the most recent messages plus a running total. Cloning shares the buffer
+/// (`Arc`), so the rig's MIDI input sink can record from the device callback
+/// thread while a UI reads on its own thread. Lets a TUI confirm MIDI is
+/// actually arriving (and from where).
+#[derive(Clone, Default)]
+pub struct MidiMonitor {
+    inner: Arc<Mutex<MidiMonitorInner>>,
+}
+
+#[derive(Default)]
+struct MidiMonitorInner {
+    count: u64,
+    recent: std::collections::VecDeque<daw_midi_io::MidiMessage>,
+}
+
+impl MidiMonitor {
+    fn record(&self, msg: &daw_midi_io::MidiMessage) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.count = g.count.saturating_add(1);
+            if g.recent.len() >= MIDI_MONITOR_CAP {
+                g.recent.pop_front();
+            }
+            g.recent.push_back(msg.clone());
+        }
+    }
+
+    /// Total MIDI messages seen since the monitor was attached.
+    pub fn count(&self) -> u64 {
+        self.inner.lock().map(|g| g.count).unwrap_or(0)
+    }
+
+    /// Snapshot of the most recent messages, oldest first.
+    pub fn recent(&self) -> Vec<daw_midi_io::MidiMessage> {
+        self.inner
+            .lock()
+            .map(|g| g.recent.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
 // ── SamplerRig ───────────────────────────────────────────────────────────────
 
 /// Shared inner state, behind an `Arc` so [`SamplerRig`] is cheap to
@@ -312,6 +358,10 @@ struct Inner {
 
     /// Per-instrument-track routing table (alternate per-track API).
     tracks: Mutex<TrackTables>,
+
+    /// Tap on the live MIDI stream for UI monitoring (populated by
+    /// [`SamplerRig::attach_midi`]).
+    midi_monitor: MidiMonitor,
 
     pub sample_rate: u32,
 }
@@ -456,6 +506,7 @@ impl SamplerRig {
                 bank_track: Some(bank_track),
                 stats,
                 tracks: Mutex::new(TrackTables::default()),
+                midi_monitor: MidiMonitor::default(),
                 sample_rate,
             }),
         })
@@ -487,6 +538,7 @@ impl SamplerRig {
                 bank_track: None,
                 stats: Arc::new(BankStats::default()),
                 tracks: Mutex::new(TrackTables::default()),
+                midi_monitor: MidiMonitor::default(),
                 sample_rate,
             }),
         }
@@ -803,9 +855,18 @@ impl SamplerRig {
             (Some(d), Some(t)) => (d.clone(), t.clone()),
             _ => eyre::bail!("attach_midi requires a live rig with a bank track (not offline)"),
         };
+        let monitor = self.inner.midi_monitor.clone();
         daw_midi_io::MidiInput::open(selection, move |msg| {
+            // Tap for the UI monitor, then forward full-fidelity to the engine.
+            monitor.record(&msg);
             daw.push_live_midi(&track, msg);
         })
+    }
+
+    /// The live MIDI monitor — a rolling log + total count of messages reaching
+    /// the rig, so a UI can confirm MIDI is arriving (and from which device).
+    pub fn midi_monitor(&self) -> MidiMonitor {
+        self.inner.midi_monitor.clone()
     }
 
     // ── Drum mixer (bank-backed; SamplerPlayer-equivalent) ────────────────────
