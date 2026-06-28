@@ -64,21 +64,57 @@ fn main() -> eyre::Result<()> {
     };
     let mut rig = KeysRig::open(&prefs, &tree)?;
 
-    // MIDI input: all ports merged by default. `--midi virtual` for a virtual port.
-    let selection = match arg(&args, "--midi").as_deref() {
-        Some("virtual") => MidiSelection::Virtual("FTS-Signal Keys".into()),
-        Some(name) if name != "all" => MidiSelection::Port(name.to_string()),
-        _ => MidiSelection::All,
+    // MIDI input choices: All merged (default) + each detected port + a virtual
+    // port. Cycle live in the TUI with `i`/`I` (same as the strings rig).
+    let mut midi_choices: Vec<MidiChoice> = vec![MidiChoice {
+        label: "All inputs".to_string(),
+        sel: MidiSelection::All,
+    }];
+    for port in KeysRig::midi_input_ports() {
+        midi_choices.push(MidiChoice {
+            label: port.clone(),
+            sel: MidiSelection::Port(port),
+        });
+    }
+    midi_choices.push(MidiChoice {
+        label: "Virtual port (FTS-Signal Keys)".to_string(),
+        sel: MidiSelection::Virtual("FTS-Signal Keys".into()),
+    });
+    let mut midi_idx = match arg(&args, "--midi").as_deref() {
+        None | Some("all") => 0,
+        Some("virtual") => midi_choices.len() - 1,
+        Some(name) => midi_choices
+            .iter()
+            .position(|c| c.label.to_lowercase().contains(&name.to_lowercase()))
+            .unwrap_or(0),
     };
-    let _midi: Option<MidiInputHandle> = rig.attach_midi(selection).ok();
+    // Don't hard-fail if the device can't open — the TUI still runs so you can
+    // switch with `i` and watch the monitor.
+    let mut midi: Option<MidiInputHandle> = rig.attach_midi(midi_choices[midi_idx].sel.clone()).ok();
     let monitor = rig.midi_monitor();
 
     redirect_stderr_to_log();
 
     let mut term = ratatui::init();
-    let res = run(&mut term, &mut rig, &registry, &tree, &monitor, &preset_name);
+    let res = run(
+        &mut term,
+        &mut rig,
+        &registry,
+        &tree,
+        &monitor,
+        &preset_name,
+        &midi_choices,
+        &mut midi_idx,
+        &mut midi,
+    );
     ratatui::restore();
     res
+}
+
+/// One entry in the MIDI input selector.
+struct MidiChoice {
+    label: String,
+    sel: MidiSelection,
 }
 
 /// A key-split band collected from the tree (a container with a non-full KEY range).
@@ -143,6 +179,7 @@ fn key_to_semitone(c: char) -> Option<i32> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     term: &mut ratatui::DefaultTerminal,
     rig: &mut KeysRig,
@@ -150,6 +187,9 @@ fn run(
     tree: &Container,
     monitor: &signal_sampler::MidiMonitor,
     preset_name: &str,
+    midi_choices: &[MidiChoice],
+    midi_idx: &mut usize,
+    midi: &mut Option<MidiInputHandle>,
 ) -> eyre::Result<()> {
     let (bands, vels) = collect_routing(tree);
     let mut octave: i32 = 60; // C4 base for the computer keyboard
@@ -166,8 +206,13 @@ fn run(
         fold_monitor_held(monitor, &mut held);
 
         let peak = rig.output_peak();
+        let midi_label = midi_choices[*midi_idx].label.as_str();
+        let midi_open = midi.is_some();
         term.draw(|f| {
-            ui(f, preset_name, rig, &bands, &vels, &held, peak, monitor, octave, status.as_deref())
+            ui(
+                f, preset_name, rig, &bands, &vels, &held, peak, monitor, octave, midi_label,
+                midi_open, status.as_deref(),
+            )
         })?;
 
         if !event::poll(Duration::from_millis(20))? {
@@ -184,6 +229,18 @@ fn run(
                     }
                     KeyCode::Char('[') => octave = (octave - 12).max(0),
                     KeyCode::Char(']') => octave = (octave + 12).min(108),
+                    // Cycle the MIDI input device (i forward / I back) — re-attach.
+                    KeyCode::Char('i') | KeyCode::Char('I') => {
+                        let n = midi_choices.len();
+                        *midi_idx = if k.code == KeyCode::Char('I') {
+                            (*midi_idx + n - 1) % n
+                        } else {
+                            (*midi_idx + 1) % n
+                        };
+                        *midi = None; // close current before opening next
+                        *midi = rig.attach_midi(midi_choices[*midi_idx].sel.clone()).ok();
+                        status = Some(format!("MIDI in: {}", midi_choices[*midi_idx].label));
+                    }
                     // Tab cycles presets in the registry (re-host without restart).
                     KeyCode::Tab => {
                         if let Some(cur) = preset_names.iter().position(|n| n == preset_name) {
@@ -252,6 +309,8 @@ fn ui(
     peak: f32,
     monitor: &signal_sampler::MidiMonitor,
     octave: i32,
+    midi_label: &str,
+    midi_open: bool,
     status: Option<&str>,
 ) {
     let rows = Layout::vertical([
@@ -272,9 +331,14 @@ fn ui(
             format!("   {} Hz", rig.sample_rate()),
             Style::new().fg(Color::DarkGray),
         ),
+        Span::raw("   in: "),
         Span::styled(
-            format!("   MIDI {} msgs", monitor.count()),
-            Style::new().fg(Color::Cyan),
+            midi_label.to_string(),
+            Style::new().fg(if midi_open { Color::Cyan } else { Color::Red }),
+        ),
+        Span::styled(
+            format!("  ({} msgs)", monitor.count()),
+            Style::new().fg(Color::DarkGray),
         ),
     ]);
     f.render_widget(Paragraph::new(header), rows[0]);
@@ -312,7 +376,7 @@ fn ui(
     } else {
         Line::from(Span::styled(
             format!(
-                " play: z–m / q–p   [ ] octave (C{})   space: panic   Tab: preset   q: quit",
+                " play: z–m / q–p   [ ] octave (C{})   i: MIDI device   space: panic   Tab: preset   q: quit",
                 octave / 12 - 1
             ),
             Style::new().fg(Color::DarkGray),
