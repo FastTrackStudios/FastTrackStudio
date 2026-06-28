@@ -563,6 +563,12 @@ impl SamplerBank {
         self.with_block(id, |b| b.set_release_ms(ms));
     }
 
+    /// Pin an instrument's RR-bearing triggers to a specific round-robin slot;
+    /// `None` restores normal CC59 / cycle / random behaviour (A/B null harness).
+    pub fn set_forced_rr(&mut self, id: &str, slot: Option<u32>) {
+        self.with_block(id, |b| b.set_forced_rr(slot));
+    }
+
     /// Warm the samples `note` would trigger for `id` under its current pin +
     /// solo mic (read-only on the cache; safe to call off-thread).
     pub fn warm_note(&self, id: &str, note: u8) -> PreloadStats {

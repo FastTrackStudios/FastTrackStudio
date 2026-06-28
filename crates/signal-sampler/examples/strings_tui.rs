@@ -74,7 +74,7 @@ const WARM_HI: u8 = 88;
 /// Default attack / release envelope (ms). Attack 0 keeps the sample's natural
 /// onset; a small value softens it. Release is the fade under the release tail.
 const DEFAULT_ATTACK_MS: u32 = 20;
-const DEFAULT_RELEASE_MS: u32 = 300;
+const DEFAULT_RELEASE_MS: u32 = 400; // matches CSS default release tail (A/B-tuned)
 
 fn arg(args: &[String], flag: &str) -> Option<String> {
     args.iter()

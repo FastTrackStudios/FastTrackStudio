@@ -696,6 +696,16 @@ impl SamplerRig {
         }
     }
 
+    /// Pin an instrument's RR-bearing triggers (shorts, legato, releases) to a
+    /// specific round-robin slot; `None` restores normal CC59 / cycle / random.
+    /// The A/B null harness sweeps this to align our RR ordering with a
+    /// deterministic CSS render (CC59 cycle, per the v1.7 manual).
+    pub fn set_forced_rr(&self, id: &str, slot: Option<u32>) {
+        if let Ok(mut bank) = self.bank().lock() {
+            bank.set_forced_rr(id, slot);
+        }
+    }
+
     /// Switch an instrument's active microphone position (e.g. `"Mix"`).
     pub fn set_mic(&self, id: &str, mic_id: impl Into<String>) {
         match self.bank().lock() {

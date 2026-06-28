@@ -365,6 +365,13 @@ impl SamplerBlock {
             .set_release_frames(crate::engine::ms_to_frames(ms, sr));
     }
 
+    /// Test/render override: pin RR-bearing triggers to a specific round-robin
+    /// slot (`None` restores normal CC59 / cycle / random). See
+    /// [`SampleEngine::set_forced_rr`].
+    pub fn set_forced_rr(&mut self, slot: Option<u32>) {
+        self.engine.set_forced_rr(slot);
+    }
+
     /// Switch this block's engine to a microphone position (e.g. `"Mix"`).
     /// See [`SampleEngine::set_mic`].
     pub fn set_mic(&mut self, mic_id: impl Into<String>) {

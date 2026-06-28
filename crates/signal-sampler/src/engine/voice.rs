@@ -220,9 +220,20 @@ impl Voice {
 
     pub fn with_pan(mut self, pan: f32) -> Self {
         let pan = pan.clamp(-1.0, 1.0);
-        let theta = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
-        self.pan_l = theta.cos();
-        self.pan_r = theta.sin();
+        if self.data.channels >= 2 {
+            // Stereo source: use a *balance* law so a centered (pan=0) stereo
+            // sample passes L→L / R→R at unity. An equal-power law would apply
+            // a spurious −3 dB at center to material that is already stereo —
+            // which is how CSS (all-stereo) ships, and was making everything
+            // 3 dB too quiet. Only attenuate the far channel as we pan off-center.
+            self.pan_l = if pan <= 0.0 { 1.0 } else { 1.0 - pan };
+            self.pan_r = if pan >= 0.0 { 1.0 } else { 1.0 + pan };
+        } else {
+            // Mono source: equal-power pan (constant perceived loudness).
+            let theta = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
+            self.pan_l = theta.cos();
+            self.pan_r = theta.sin();
+        }
         self
     }
 
@@ -381,7 +392,11 @@ impl Voice {
         } else {
             self.position += self.rate;
         }
-        if matches!(self.state, VoiceState::Playing) {
+        // Keep looping while Releasing too — a looped body (sustain/legato) must
+        // fade out over its loop, not stop looping and run forward into the
+        // sample's abrupt end (which clicks → "note-off noise"). Only a Done
+        // voice ignores the loop.
+        if matches!(self.state, VoiceState::Playing | VoiceState::Releasing { .. }) {
             if let Some((loop_start, loop_end)) = self.loop_range {
                 if self.alternating_loop {
                     if !self.reverse && self.position >= loop_end as f64 {

@@ -83,7 +83,26 @@ const LEGATO_FADE_MS: u32 = 30;
 /// Loudness (dB) at CC1=0 relative to CC1=127 for the continuous dynamics
 /// curve. CSS sweeps a wide dynamic range; the recorded layers add timbre on
 /// top. Tune for more/less dramatic mod-wheel dynamics.
-const CC1_DYN_FLOOR_DB: f32 = -18.0;
+const CC1_DYN_FLOOR_DB: f32 = -12.0;
+
+/// Global output makeup (dB) applied to every spawned voice. CSS's Kontakt
+/// instrument plays its samples ~+6 dB above their raw file level (measured:
+/// raw ff sustain steady −32.3 dB → CSS default render −26.5 dB). Matching it
+/// puts our default output at CSS's default level so the two render at parity.
+const OUTPUT_MAKEUP: f32 = 1.995_262; // +6 dB = 10^(6/20)
+
+/// Minimum attack fade (ms) for a synthesized-loop sustain that starts mid-sample
+/// at full level — just enough to avoid an onset click without slowing the attack.
+const SUSTAIN_DECLICK_MS: u32 = 12;
+
+/// CSS legato is recorded on the whole-tone grid: each directional transition
+/// spans one whole step (2 semitones) from its source-labelled note.
+const LEGATO_GRID_SEMITONES: u8 = 2;
+
+/// Gain scale for recorded release-tail samples (NVrel/Vsusrel). They're
+/// normalised loud; played at unity they spike louder than the note. CSS's
+/// release is a subtle tail under the decay — keep it well below the note.
+const RELEASE_GAIN: f32 = 0.3;
 
 /// Max semitones to pitch-shift from the nearest recorded zone when no zone
 /// spans a note. CSS samples a whole-tone grid (±1 to fill); 2 covers grid
@@ -269,6 +288,12 @@ pub struct SampleEngine {
     /// Last-used RR slot per (trigger, note, velocity), keyed by a packed
     /// integer so note-on allocates nothing (was a `format!`-built String key).
     zone_rr_last_slots: HashMap<u64, u32>,
+    /// Test/render override: when `Some(slot)`, every RR-bearing trigger (shorts,
+    /// legato transitions, releases) is pinned to this slot instead of cycling /
+    /// randomising. Used by the A/B null harness to sweep round-robins and align
+    /// our RR ordering with a deterministic CSS render (CC59 cycle). `None` =
+    /// normal CC59 / cycle / random behaviour.
+    forced_rr: Option<u32>,
 
     /// Reusable scratch for the zoned trigger path so note-on doesn't allocate.
     /// Drained/refilled each note-on via `mem::take` + restore.
@@ -423,6 +448,7 @@ impl SampleEngine {
             zone_rr_counter: 0,
             zone_rr_random_state: 0x9e37_79b9_7f4a_7c15,
             zone_rr_last_slots: HashMap::with_capacity(128),
+            forced_rr: None,
             zone_indices_scratch: Vec::with_capacity(32),
             zone_choked_scratch: Vec::with_capacity(16),
             zone_capped_scratch: Vec::with_capacity(16),
@@ -596,6 +622,14 @@ impl SampleEngine {
         self.release_frames = frames;
     }
 
+    /// Test/render override: pin every RR-bearing trigger (shorts, legato,
+    /// releases) to a specific round-robin slot, or `None` to restore normal
+    /// CC59 / cycle / random behaviour. The A/B null harness uses this to sweep
+    /// round-robins and align our RR ordering with a deterministic CSS render.
+    pub fn set_forced_rr(&mut self, slot: Option<u32>) {
+        self.forced_rr = slot;
+    }
+
     /// Sample rate (frames/s) — for ms↔frame conversion by callers.
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
@@ -618,6 +652,35 @@ impl SampleEngine {
         // directional legato samples come in up/down pairs (warmed by ignoring
         // direction below), so any combination is ready without a cold first hit.
         let vib_pair = artic.as_deref().and_then(|a| self.find_vibrato_pair_id(a));
+        // And the recorded RELEASE samples (e.g. NVrel/Vsusrel) for both the main
+        // articulation and its vib pair — otherwise note-off cache-misses and the
+        // release tail is silent (CSS rings out ~0.7s). These are separate
+        // articulations triggered on key-up by `spawn_release`.
+        let rel = |a: &str| {
+            self.patch
+                .spec
+                .articulation(a)
+                .and_then(|art| art.release_artic.clone())
+        };
+        // And the legato + portamento TRANSITION articulations (Leg/NVLeg/port),
+        // which `spawn_legato_transition` fires on overlapping notes — same
+        // cache-miss-→-silent trap as releases. warm_note ignores direction, so
+        // both up/down transitions warm. find_legato_artic_id(false) keys off the
+        // current articulation; warm it plus its release for the tail.
+        let leg = self.find_legato_artic_id(false);
+        let leg_rel = leg.as_deref().and_then(rel);
+        let warm_ids: Vec<String> = [
+            artic.clone(),
+            vib_pair.clone(),
+            artic.as_deref().and_then(rel),
+            vib_pair.as_deref().and_then(rel),
+            leg,
+            leg_rel,
+            self.find_port_artic_id(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let mut stats = PreloadStats::default();
         for (i, z) in self.patch.spec.zones.iter().enumerate() {
             if !zone_trigger_matches(z, ZoneTrigger::Attack) {
@@ -631,12 +694,11 @@ impl SampleEngine {
             if !in_range && !near {
                 continue;
             }
-            if let Some(p) = artic.as_deref() {
+            if artic.is_some() {
                 let matches_artic = z.articulation.is_empty()
-                    || z.articulation.eq_ignore_ascii_case(p)
-                    || vib_pair
-                        .as_deref()
-                        .is_some_and(|v| z.articulation.eq_ignore_ascii_case(v));
+                    || warm_ids
+                        .iter()
+                        .any(|id| z.articulation.eq_ignore_ascii_case(id));
                 if !matches_artic {
                     continue;
                 }
@@ -943,9 +1005,12 @@ impl SampleEngine {
             );
             self.held_notes.insert(note, velocity);
 
-            if is_legato && self.legato_enabled {
-                // Monophonic legato line (CSS default). Track press order for
-                // last-note-priority fall-back on release.
+            if (is_legato || is_sustain) && self.legato_enabled {
+                // Monophonic legato line (CSS default). CSS plays its *sustain*
+                // articulation (e.g. "Nonvib") legato — the Leg/NVLeg samples are
+                // the sustain body's transitions — so any long articulation, not
+                // just a Legato-kind one, takes this path when legato is enabled.
+                // Track press order for last-note-priority fall-back on release.
                 self.legato_order.retain(|&n| n != note);
                 self.legato_order.push(note);
                 match self.legato_note {
@@ -1176,13 +1241,23 @@ impl SampleEngine {
     /// velocity picks the dynamic layer, nearest recorded key is pitch-shifted,
     /// and it plays to completion (no CC1 crossfade, no loop).
     fn trigger_zoned_short(&mut self, note: u8, velocity: u8) {
-        let rr = self.zone_rr_counter;
+        let rr = self.forced_rr.map(|f| f as usize).unwrap_or(self.zone_rr_counter);
         self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
         let artic = self.articulation.clone();
         let dynamic = self.short_note_dynamic(velocity);
-        let gain = velocity_gain(velocity);
+        // Multi-dynamic shorts (CSS: pp/p/mf/ff) have the loudness baked into the
+        // velocity-selected sample — applying a velocity² gain on top would
+        // double-attenuate (mirrors the non-zoned path's n_dyn unity rule). Only
+        // articulations with a single recorded dynamic get a velocity curve.
+        let n_dyn = self
+            .patch
+            .spec
+            .articulation(&artic)
+            .map(|a| a.dynamics.len())
+            .unwrap_or(0);
+        let gain = if n_dyn > 1 { 1.0 } else { velocity_gain(velocity) };
         if let Some(idx) = self.find_layer_zone(&artic, "", &dynamic, note, rr) {
-            self.spawn_zone_voice(idx, note, VoiceKind::Short, gain, None);
+            self.spawn_zone_voice(idx, note, VoiceKind::Short, gain, None, 0.0);
         }
     }
 
@@ -1215,6 +1290,7 @@ impl SampleEngine {
                     VoiceKind::SustainLayer,
                     gain,
                     Some(DynLayer { vib, index: 0 }),
+                    0.0,
                 );
             }
             return;
@@ -1234,6 +1310,7 @@ impl SampleEngine {
                         vib,
                         index: i as u8,
                     }),
+                    0.0,
                 );
             }
         }
@@ -1307,9 +1384,24 @@ impl SampleEngine {
         } else {
             1.0
         };
-        let rr = self.zone_rr_counter;
-        if let Some(idx) = self.find_layer_zone(&leg_id, direction, &dynamic, to, rr) {
-            self.spawn_zone_voice(idx, to, VoiceKind::Legato, gain, None);
+        let rr = self.forced_rr.map(|f| f as usize).unwrap_or(self.zone_rr_counter);
+        // CSS legato samples are SOURCE-labelled whole-tone transitions: "up_C#"
+        // is C#→D# (a whole step UP from the labelled note), "down_X" is X→X-2.
+        // Looking one up by `to` and playing it as-is landed a whole step too
+        // high (C→D came out as D→E). Tag/select by `to` (so note-off + silence
+        // find this voice), but pitch DOWN a grid step (up) / up (down) so the
+        // transition's END lands on `to`. The looped tail holds the arrived note.
+        let src = if direction.eq_ignore_ascii_case("down") {
+            to.saturating_add(LEGATO_GRID_SEMITONES)
+        } else {
+            to.saturating_sub(LEGATO_GRID_SEMITONES)
+        };
+        // Select the transition by its SOURCE-labelled note, but tag the voice
+        // with `to` (so note-off/silence find it) and offset the pitch so the
+        // arrived note still lands on `to`.
+        let pitch_offset = src as f64 - to as f64;
+        if let Some(idx) = self.find_layer_zone(&leg_id, direction, &dynamic, src, rr) {
+            self.spawn_zone_voice(idx, to, VoiceKind::Legato, gain, None, pitch_offset);
         }
     }
 
@@ -1327,10 +1419,13 @@ impl SampleEngine {
         };
         let (lo, hi, blend) = self.layers_for_artic(&rel_id);
         let dynamic = if blend >= 0.5 { hi } else { lo };
-        let rr = self.zone_rr_counter;
+        let rr = self.forced_rr.map(|f| f as usize).unwrap_or(self.zone_rr_counter);
         // Release samples are non-directional → pass "" (no direction filter).
+        // CSS's recorded releases are a subtle bow-off tail UNDER the note's
+        // decay — but these samples are normalised loud, so at unity (×makeup)
+        // they spike louder than the note itself ("note-off noise"). Trim them.
         if let Some(idx) = self.find_layer_zone(&rel_id, "", &dynamic, note, rr) {
-            self.spawn_zone_voice(idx, note, VoiceKind::Release, 1.0, None);
+            self.spawn_zone_voice(idx, note, VoiceKind::Release, RELEASE_GAIN, None, 0.0);
         }
     }
 
@@ -1401,6 +1496,7 @@ impl SampleEngine {
         kind: VoiceKind,
         gain_scale: f32,
         dyn_layer: Option<DynLayer>,
+        pitch_offset: f64,
     ) -> bool {
         // Copy out the zone fields up front so no borrow of `self.patch`
         // outlives the `&mut self` cache-miss bookkeeping below.
@@ -1421,10 +1517,13 @@ impl SampleEngine {
         };
         let num_frames = data.num_frames;
 
-        let semitones = note as f64 - root_key as f64;
+        // `pitch_offset` lets legato keep the correct note-tag (`to`, for
+        // note-off/silence) while shifting the recorded transition so it lands
+        // on the target (CSS legato samples are source-labelled a grid step away).
+        let semitones = note as f64 - root_key as f64 + pitch_offset;
         let total_cents = semitones * 100.0 + tune_cents as f64;
         let rate = 2.0f64.powf(total_cents / 1200.0);
-        let gain = 10.0f32.powf(gain_db / 20.0) * gain_scale;
+        let gain = 10.0f32.powf(gain_db / 20.0) * gain_scale * OUTPUT_MAKEUP;
         let mic_index = self.mic_index_for(&mic);
         let is_sustain_layer = matches!(
             kind,
@@ -1437,15 +1536,55 @@ impl SampleEngine {
                 | VoiceKind::SustainLayer
         );
 
+        // CSS-style sustains ship no loop points but have a slow ~0.8s natural
+        // attack pre-roll that CSS skips (Kontakt sample-start) for a fast attack.
+        // Start such bodies at the loud steady region so onsets aren't sluggish.
+        let synth_loop = is_sustain_layer
+            && loop_end <= loop_start
+            && playback_mode.is_empty()
+            && !alternating
+            && num_frames > 0;
+        let (sus_lo, sus_hi) = if synth_loop {
+            let lo = num_frames / 6;
+            (lo, ((num_frames as f32 * 0.55) as usize).max(lo + 2))
+        } else {
+            (0, 0)
+        };
+        // A CSS legato TRANSITION sample is long-form (recorded bow change +
+        // the sustained target note, ~2.3s). It must carry the held note by
+        // itself — playing it AND a separate sustain body doubles the note into
+        // a chorus. So play it from the start (transition intact) and loop its
+        // sustained TAIL (back portion, past the transition) to hold.
+        let legato_hold = matches!(kind, VoiceKind::Legato)
+            && loop_end <= loop_start
+            && playback_mode.is_empty()
+            && !alternating
+            && num_frames > 0;
+        let (leg_lo, leg_hi) = if legato_hold {
+            // Loop a STABLE mid-sustain region — past the bow-change transition
+            // at the front, but before the recorded note's end-swell, which made
+            // the held note pulse loudly every loop. ~0.4..0.65 of the long-form
+            // sample sits in the steady arrived-note body.
+            let lo = (num_frames as f32 * 0.4) as usize;
+            (lo, ((num_frames as f32 * 0.65) as usize).max(lo + 2))
+        } else {
+            (0, 0)
+        };
+        // Play from the sample's actual start so the recorded attack (the bow
+        // onset) is heard — we want the start of the sample, not a mid-sample
+        // jump. The loop below still holds the body for indefinite sustain.
+        let start_frame = sample_start as usize;
+
         // Attack envelope on the sustained body only (the legato transition and
         // shorts keep their natural recorded attack).
+        let _ = SUSTAIN_DECLICK_MS;
         let attack = if is_sustain_layer { self.attack_frames } else { 0 };
         let mut voice = Voice::with_rate(data, note, kind, rate, gain, self.release_frames)
             .with_mic_index(mic_index)
             .with_pan(pan)
             .with_attack(attack)
             .with_sample_window(
-                sample_start as usize,
+                start_frame,
                 (sample_end > 0).then_some(sample_end as usize),
             );
         if let Some(layer) = dyn_layer {
@@ -1457,13 +1596,17 @@ impl SampleEngine {
             voice = voice.with_alternating_loop(loop_start as usize, loop_end as usize);
         } else if loop_end > loop_start {
             voice = voice.with_forward_loop(loop_start as usize, loop_end as usize);
-        } else if is_sustain_layer && num_frames > 0 {
+        } else if synth_loop {
             // CSS sustain samples ship no loop points but must hold indefinitely.
-            // Loop the steady region (past the attack, before the tail). Crude
-            // vs real loop markers, but lets a held note sustain forever.
-            let lo = num_frames / 4;
-            let hi = num_frames.saturating_sub(num_frames / 20).max(lo + 2);
-            voice = voice.with_forward_loop(lo, hi);
+            // Loop the loud steady region just past the attack — NOT the back half,
+            // which dilutes into the sample's natural end-decay and made held notes
+            // a few dB too quiet over time. Playback also STARTS at sus_lo (above),
+            // skipping the slow natural attack for a CSS-fast onset.
+            voice = voice.with_forward_loop(sus_lo, sus_hi);
+        } else if legato_hold {
+            // Legato transition: keep the slur at the front, loop the sustained
+            // tail so the note holds without a doubling sustain body.
+            voice = voice.with_forward_loop(leg_lo, leg_hi);
         }
         self.voices.spawn(voice);
         true
@@ -1518,6 +1661,7 @@ impl SampleEngine {
             rr_idx,
             last_slot,
             &mut self.zone_rr_random_state,
+            self.forced_rr,
         );
         self.zone_rr_last_slots.insert(rr_key, selected_rr_slot);
         self.zone_indices_scratch = all_indices;
@@ -2138,9 +2282,16 @@ impl SampleEngine {
         // the slur; the sustain holds the note.
         if self.patch.is_zoned() {
             self.play_direction = direction.to_string();
+            // The long-form legato sample carries both the bow change AND the
+            // sustained target note (it loops its tail to hold). Do NOT also start
+            // a sustain body — that doubles the note into a chorus ("weird"
+            // legato). If no legato sample exists, fall back to the sustain body.
+            let before = self.voices.active_count();
             self.spawn_legato_transition(to_note, direction, velocity, portamento);
             self.legato_note = Some(to_note);
-            self.trigger_zoned_sustain(to_note);
+            if self.voices.active_count() == before {
+                self.trigger_zoned_sustain(to_note);
+            }
             return;
         }
 
@@ -3227,6 +3378,7 @@ fn select_zone_rr_slot(
     rr_counter: usize,
     last_slot: Option<u32>,
     random_state: &mut u64,
+    forced: Option<u32>,
 ) -> u32 {
     debug_assert!(!indices.is_empty());
     let mut rr_slots = indices
@@ -3237,6 +3389,12 @@ fn select_zone_rr_slot(
     rr_slots.dedup();
     if rr_slots.len() == 1 {
         return rr_slots[0];
+    }
+    // Test/render override: pin to a specific slot. Index into the available
+    // slots modulo their count so a 0..N sweep is always valid (the harness
+    // sweeps positions, not raw rr_index values, which may be sparse).
+    if let Some(f) = forced {
+        return rr_slots[(f as usize) % rr_slots.len()];
     }
 
     let mode = zones[indices[0]].rr_mode.trim().to_ascii_lowercase();
@@ -3403,10 +3561,10 @@ mod tests {
         let indices = vec![0, 1, 2];
         let mut rng = 1;
 
-        assert_eq!(select_zone_rr_slot(&zones, &indices, 0, None, &mut rng), 10);
-        assert_eq!(select_zone_rr_slot(&zones, &indices, 1, None, &mut rng), 20);
-        assert_eq!(select_zone_rr_slot(&zones, &indices, 2, None, &mut rng), 30);
-        assert_eq!(select_zone_rr_slot(&zones, &indices, 3, None, &mut rng), 10);
+        assert_eq!(select_zone_rr_slot(&zones, &indices, 0, None, &mut rng, None), 10);
+        assert_eq!(select_zone_rr_slot(&zones, &indices, 1, None, &mut rng, None), 20);
+        assert_eq!(select_zone_rr_slot(&zones, &indices, 2, None, &mut rng, None), 30);
+        assert_eq!(select_zone_rr_slot(&zones, &indices, 3, None, &mut rng, None), 10);
         assert_eq!(select_zone_rr_index_by_slot(&zones, &indices, 20), 1);
     }
 
@@ -3416,8 +3574,8 @@ mod tests {
         let left_mic = vec![0, 1];
         let right_mic = vec![2, 3];
         let mut rng = 1;
-        let first_slot = select_zone_rr_slot(&zones, &left_mic, 0, None, &mut rng);
-        let second_slot = select_zone_rr_slot(&zones, &left_mic, 1, None, &mut rng);
+        let first_slot = select_zone_rr_slot(&zones, &left_mic, 0, None, &mut rng, None);
+        let second_slot = select_zone_rr_slot(&zones, &left_mic, 1, None, &mut rng, None);
 
         assert_eq!(first_slot, 0);
         assert_eq!(second_slot, 2);
@@ -3450,7 +3608,7 @@ mod tests {
         let mut last = None;
 
         for _ in 0..64 {
-            let slot = select_zone_rr_slot(&zones, &indices, 0, last, &mut rng);
+            let slot = select_zone_rr_slot(&zones, &indices, 0, last, &mut rng, None);
             assert_ne!(Some(slot), last);
             last = Some(slot);
         }
