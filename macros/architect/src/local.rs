@@ -94,3 +94,78 @@ where
 {
     LocalServer::serve(backend.into_router(), Arc::clone(scope))
 }
+
+/// Lane client that captures the raw [`vox_core::Caller`] (plus its
+/// connection handle) — for consumers that construct many per-service
+/// clients over one shared caller (client registries,
+/// `daw_control::Daw`-style facades) instead of establishing one
+/// typed client.
+#[derive(Clone)]
+pub struct RawLaneCaller {
+    /// The established lane's caller.
+    pub caller: vox_core::Caller,
+    /// The underlying connection. Keep this alive for as long as the
+    /// caller is in use — dropping it tears down server→client
+    /// streams (`Tx` subscriptions die with "request scope
+    /// terminated").
+    pub connection: Option<vox_core::ConnectionHandle>,
+}
+
+impl vox_core::FromVoxLane for RawLaneCaller {
+    const SERVICE_NAME: &'static str = "architect-local";
+
+    fn from_vox_lane(
+        caller: vox_core::Caller,
+        connection: Option<vox_core::ConnectionHandle>,
+    ) -> Self {
+        Self { caller, connection }
+    }
+}
+
+impl LocalServer {
+    /// Establish a lane and return its raw [`vox_core::Caller`] — the
+    /// untyped sibling of [`establish`](Self::establish), for callers
+    /// that fan one connection out into many per-service clients.
+    ///
+    /// Unlike `establish`, this opens an explicit client connection
+    /// (`establish_connection` + `open_lane`) and parks its handle on
+    /// the server's [`Scope`] — server→client streams (`Tx`
+    /// subscriptions) stay alive until the scope closes.
+    pub async fn caller(&self) -> eyre::Result<vox_core::Caller> {
+        let (client_link, server_link) = vox_core::memory_link_pair(256);
+        let router = self.router.clone();
+
+        let task = tokio::task::spawn(async move {
+            let acceptor = vox_core::lane_acceptor_fn(move |_req, connection| {
+                connection.handle_with(router.clone());
+                Ok(())
+            });
+            match vox_core::acceptor_on(server_link)
+                .on_lane(acceptor)
+                .establish_connection()
+                .await
+            {
+                Ok(connection) => {
+                    let _connection = connection;
+                    std::future::pending::<()>().await;
+                }
+                Err(e) => tracing::warn!(error = %e, "local vox acceptor failed"),
+            }
+        });
+
+        let connection = vox_core::initiator_on(client_link)
+            .establish_connection()
+            .await
+            .map_err(|e| eyre::eyre!("local establish_connection: {e:?}"))?;
+        let client = connection
+            .open_lane::<RawLaneCaller>()
+            .await
+            .map_err(|e| eyre::eyre!("local open_lane: {e:?}"))?;
+
+        self.scope.defer(move || async move {
+            drop(connection);
+            task.abort();
+        });
+        Ok(client.caller)
+    }
+}
