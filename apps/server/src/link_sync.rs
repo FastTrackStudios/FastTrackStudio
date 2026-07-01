@@ -1,8 +1,9 @@
-//! Auto-sync note `[[wikilinks]]` → `note → verse` typed links, driven by
-//! vault change events. Keeps the knowledge graph live as notes are saved
-//! — the always-on counterpart to the `links` crate's `sync_vault_links`
-//! example (which also handles video clips; here we sync verse refs, the
-//! common case).
+//! Auto-sync note `[[wikilinks]]` → typed links, driven by vault change
+//! events. Keeps the knowledge graph live as notes are saved — the
+//! always-on counterpart to the `links` crate's `sync_vault_links`
+//! example (which also handles video clips). Verse refs become
+//! `note → verse` links; wikilinks that resolve to another vault page
+//! become `note → note` links.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -11,6 +12,7 @@ use links::{Confidence, LinksService, NodeKind, NodeRef, Relation, Store, TypedL
 use regex::Regex;
 use scripture::VerseRange;
 use tokio::sync::broadcast;
+use vault::VaultGraph as _;
 use vault_proto::VaultEvent;
 
 /// Provenance tag for links this sync owns — so a re-sync replaces only
@@ -45,8 +47,22 @@ fn remove_synced(store: &Store, src: &NodeRef) {
     }
 }
 
-/// Replace a note's auto-synced verse links from its current content.
-fn sync_note(store: &Store, rel_path: &str, content: &str) {
+/// One auto-synced link, provenance-tagged so re-syncs replace it.
+fn synced_link(src: &NodeRef, target: NodeRef) -> TypedLink {
+    let mut link = TypedLink::new(src.clone(), target, Relation::Mentions, Confidence::Certain);
+    link.visibility = Visibility::Private; // prose notes are the private layer
+    link.provenance.created_by = SOURCE_REF.to_string();
+    link.provenance.source_ref = SOURCE_REF.to_string();
+    link.provenance.derived = true;
+    link
+}
+
+/// Replace a note's auto-synced links from its current content: verse
+/// refs from the body text, note→note edges from the vault link graph
+/// (which owns Obsidian-style resolution — exact path, basename,
+/// aliases). Unresolved wikilinks are skipped; they sync once the
+/// target page exists and this note is next saved.
+fn sync_note(store: &Store, graph: &vault::GraphBackend, rel_path: &str, content: &str) {
     let src = NodeRef::new(NodeKind::Note, rel_path);
     remove_synced(store, &src);
 
@@ -64,29 +80,49 @@ fn sync_note(store: &Store, rel_path: &str, content: &str) {
         if !seen.insert(osis.clone()) {
             continue;
         }
-        let mut link = TypedLink::new(
-            src.clone(),
-            NodeRef::verse(osis),
-            Relation::Mentions,
-            Confidence::Certain,
-        );
-        link.visibility = Visibility::Private; // prose notes are the private layer
-        link.provenance.created_by = SOURCE_REF.to_string();
-        link.provenance.source_ref = SOURCE_REF.to_string();
-        link.provenance.derived = true;
-        let _ = store.create(link);
+        let _ = store.create(synced_link(&src, NodeRef::verse(osis)));
+    }
+
+    // FUTURE: `links()` rebuilds the vault LinkIndex per save — O(vault).
+    // Fine at MVP scale; make it incremental if vaults grow.
+    let mut seen_notes = std::collections::HashSet::new();
+    for l in graph.links(VAULT_ID, rel_path).unwrap_or_default() {
+        let Some(resolved) = l.resolved else { continue };
+        if resolved == rel_path {
+            continue; // self-link
+        }
+        // Verse refs are already synced above; don't double-edge when a
+        // page happens to shadow a verse name (`John 3:16.md`).
+        let sans_anchor = l.linkpath.split('#').next().unwrap_or("").trim();
+        if VerseRange::parse(sans_anchor).is_ok() {
+            continue;
+        }
+        if !seen_notes.insert(resolved.clone()) {
+            continue;
+        }
+        let _ = store.create(synced_link(&src, NodeRef::new(NodeKind::Note, resolved)));
     }
 }
 
-/// Subscribe to the vault's change broadcast and keep `note → verse` links
-/// in sync as notes are saved (`Put`) or removed (`Delete`).
-pub fn spawn(store: Store, vault_root: PathBuf, mut rx: broadcast::Receiver<VaultEvent>) {
+/// The per-org vault id the server mounts everywhere (`GraphBackend::
+/// single("default", …)` in `lib.rs`).
+const VAULT_ID: &str = "default";
+
+/// Subscribe to the vault's change broadcast and keep `note → verse` +
+/// `note → note` links in sync as notes are saved (`Put`) or removed
+/// (`Delete`).
+pub fn spawn(
+    store: Store,
+    vault_root: PathBuf,
+    graph: vault::GraphBackend,
+    mut rx: broadcast::Receiver<VaultEvent>,
+) {
     tokio::spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(VaultEvent::Put { path, .. }) if is_md(&path) => {
                     if let Ok(content) = std::fs::read_to_string(vault_root.join(&path)) {
-                        sync_note(&store, &path, &content);
+                        sync_note(&store, &graph, &path, &content);
                     }
                 }
                 Ok(VaultEvent::Delete { path }) if is_md(&path) => {
@@ -104,32 +140,72 @@ pub fn spawn(store: Store, vault_root: PathBuf, mut rx: broadcast::Receiver<Vaul
 mod tests {
     use super::*;
 
-    #[test]
-    fn syncs_verse_wikilinks_deduped_and_replaceable() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(dir.path().join("links.jsonl"));
-        let src = NodeRef::new(NodeKind::Note, "Notes/study.md");
+    fn write(root: &Path, rel: &str, content: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
 
-        sync_note(
-            &store,
-            "Notes/study.md",
-            "See [[John 3:16]] and again [[John 3:16]], plus [[Romans 5:8]], \
-             a plain [[Some Note]], and a block ref [[John 3:16#^abc]].",
-        );
-        let mut targets: Vec<String> = store
+    fn targets(store: &Store, src: &NodeRef) -> Vec<String> {
+        let mut t: Vec<String> = store
             .links_for(src.clone())
             .unwrap()
             .iter()
             .map(|l| l.target.to_token())
             .collect();
-        targets.sort();
-        // Deduped, verses only (note ref + block-anchored ref dropped).
-        assert_eq!(targets, vec!["verse:John.3.16", "verse:Rom.5.8"]);
+        t.sort();
+        t
+    }
+
+    #[test]
+    fn syncs_verse_wikilinks_deduped_and_replaceable() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault_root = dir.path().join("vault");
+        std::fs::create_dir_all(&vault_root).unwrap();
+        let graph = vault::GraphBackend::single(VAULT_ID, vault_root);
+        let store = Store::open(dir.path().join("links.jsonl"));
+        let src = NodeRef::new(NodeKind::Note, "Notes/study.md");
+
+        sync_note(
+            &store,
+            &graph,
+            "Notes/study.md",
+            "See [[John 3:16]] and again [[John 3:16]], plus [[Romans 5:8]], \
+             a plain [[Some Note]], and a block ref [[John 3:16#^abc]].",
+        );
+        // Deduped, verses only ([[Some Note]] resolves to nothing in an
+        // empty vault; block-anchored ref dropped).
+        assert_eq!(
+            targets(&store, &src),
+            vec!["verse:John.3.16", "verse:Rom.5.8"]
+        );
 
         // Re-sync with fewer refs replaces the prior set (stale removed).
-        sync_note(&store, "Notes/study.md", "Only [[John 3:16]] now.");
+        sync_note(&store, &graph, "Notes/study.md", "Only [[John 3:16]] now.");
         let after = store.links_for(src).unwrap();
         assert_eq!(after.len(), 1);
         assert_eq!(after[0].target.to_token(), "verse:John.3.16");
+    }
+
+    #[test]
+    fn syncs_note_wikilinks_resolved_against_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault_root = dir.path().join("vault");
+        let content = "Links [[Some Note]] twice: [[Some Note|alias]], itself \
+                       [[study]], a heading [[Some Note#Intro]], a ghost \
+                       [[No Such Page]], and [[John 3:16]].";
+        write(&vault_root, "Notes/study.md", content);
+        write(&vault_root, "Pages/Some Note.md", "target");
+        let graph = vault::GraphBackend::single(VAULT_ID, vault_root);
+        let store = Store::open(dir.path().join("links.jsonl"));
+        let src = NodeRef::new(NodeKind::Note, "Notes/study.md");
+
+        sync_note(&store, &graph, "Notes/study.md", content);
+        // One note edge (deduped across alias + heading forms), self-link
+        // and unresolved ghost dropped, verse still synced as a verse.
+        assert_eq!(
+            targets(&store, &src),
+            vec!["note:Pages/Some Note.md", "verse:John.3.16"]
+        );
     }
 }

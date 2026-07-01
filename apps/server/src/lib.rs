@@ -862,11 +862,16 @@ pub(crate) async fn build_org_state(
                 );
         // Typed-link store (user-asserted verse/note/wiki links).
         let links = links::Store::open(org_root.path().join("links.jsonl"));
-        // Keep `note → verse` links live as notes are saved: a background
-        // task syncs each changed note's `[[wikilinks]]` into the store.
+        // Link-graph reader over the same `"default"` vault root
+        // the sync backend serves — read-only, so no dir creation.
+        let vault_graph = vault::GraphBackend::single("default", vault_root.clone());
+        // Keep `note → verse` + `note → note` links live as notes are
+        // saved: a background task syncs each changed note's
+        // `[[wikilinks]]` into the store.
         crate::link_sync::spawn(
             links.clone(),
             vault_root.clone(),
+            vault_graph.clone(),
             vault_sync_state.channel("default").await.subscribe(),
         );
         // Resource Library reader (transcript sidecars under resources/).
@@ -908,10 +913,6 @@ pub(crate) async fn build_org_state(
         let intake_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open intake vault: {e}"))?;
         let intake = intake::Store::new(intake_vault);
-
-        // Link-graph reader over the same `"default"` vault root
-        // the sync backend serves — read-only, so no dir creation.
-        let vault_graph = vault::GraphBackend::single("default", vault_root.clone());
 
         // Every open sqlite pool, for the snapshot engine's
         // wal_checkpoint pass. Keep in lockstep with the pools
