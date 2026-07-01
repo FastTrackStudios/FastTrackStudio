@@ -389,6 +389,28 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         None => quote! {},
     };
 
+    // Bare module-scope aliases completing the uniform five-name set
+    // (`Service` / `layer` / `serve` are already emitted bare):
+    // `Dispatcher` and `descriptor`. One `#[rpc]` trait per module is
+    // already the rule (the `Service` token collides otherwise), so
+    // these can't clash. Proto-crate modules then re-export the whole
+    // surface with a single `pub use service::*;`.
+    let bare_aliases = match shape {
+        Shape::Empty => quote! {},
+        _ => {
+            let descriptor_fn = format_ident!(
+                "{}_rpc_service_descriptor",
+                to_snake_case(&trait_name.to_string())
+            );
+            quote! {
+                #[cfg(feature = "vox")]
+                #vis use #rpc_dispatcher_name as Dispatcher;
+                #[cfg(feature = "vox")]
+                #vis use #descriptor_fn as descriptor;
+            }
+        }
+    };
+
     Ok(quote! {
         #user_trait
         #mirror_trait
@@ -401,6 +423,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         #sync_client
         #scoped_client
         #ops_block
+        #bare_aliases
         #prelude
     })
 }
