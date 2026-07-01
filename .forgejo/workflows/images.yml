@@ -31,6 +31,12 @@ on:
 
 env:
   REGISTRY: registry.starcommand.live:30050
+  # skopeo floats with nixpkgs; newer skopeo rejects the runner host's
+  # v1-format /etc/containers/registries.conf outright ("must be in v2
+  # format"). We don't need any registries.conf — every copy names the
+  # registry explicitly with --dest-tls-verify/--no-creds — so point
+  # skopeo at an empty (valid-v2) config instead of the host's.
+  CONTAINERS_REGISTRIES_CONF: /dev/null
 
 jobs:
   images:
