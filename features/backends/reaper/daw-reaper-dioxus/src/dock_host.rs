@@ -76,6 +76,9 @@ fn pointer_event_at(x: f32, y: f32, button: u8) -> blitz_traits::events::BlitzPo
         buttons,
         mods: keyboard_types::Modifiers::empty(),
         details: blitz_traits::events::PointerDetails::default(),
+        // Same value as every other coord field — no page/screen
+        // offsets inside REAPER docker windows.
+        element: blitz_traits::events::Point { x, y },
     }
 }
 

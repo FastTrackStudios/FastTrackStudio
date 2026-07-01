@@ -30,7 +30,7 @@ impl EventBus for crate::Reaper {
         let mut position_rx = filter.transport_position.then(|| hub.subscribe_position());
         let mut project_rx = filter.projects.then(|| hub.subscribe_projects());
 
-        tokio::task::spawn(async move {
+        moire::task::spawn(async move {
             loop {
                 tokio::select! {
                     biased;

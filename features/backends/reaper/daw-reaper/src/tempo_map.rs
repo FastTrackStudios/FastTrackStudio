@@ -418,7 +418,7 @@ impl TempoMap for crate::Reaper {
         tx: vox::Tx<daw_proto::tempo_map::TempoMapStreamEvent>,
     ) {
         let mut rx = crate::event_hub::hub().subscribe_tempo_map();
-        tokio::task::spawn(async move {
+        moire::task::spawn(async move {
             use tokio::sync::broadcast::error::RecvError;
             loop {
                 match rx.recv().await {

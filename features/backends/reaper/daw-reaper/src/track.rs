@@ -858,7 +858,7 @@ impl Tracks for crate::Reaper {
 
     async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<TrackStreamEvent>) {
         let mut rx = crate::event_hub::hub().subscribe_tracks();
-        tokio::task::spawn(async move {
+        moire::task::spawn(async move {
             use tokio::sync::broadcast::error::RecvError;
             loop {
                 match rx.recv().await {

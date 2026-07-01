@@ -259,7 +259,7 @@ impl Markers for Reaper {
 
     async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<MarkerStreamEvent>) {
         let mut rx = crate::event_hub::hub().subscribe_markers();
-        tokio::task::spawn(async move {
+        moire::task::spawn(async move {
             use tokio::sync::broadcast::error::RecvError;
             loop {
                 match rx.recv().await {

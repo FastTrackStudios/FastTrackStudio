@@ -461,7 +461,7 @@ impl Transport for crate::Reaper {
             return;
         }
 
-        tokio::task::spawn(async move {
+        moire::task::spawn(async move {
             loop {
                 tokio::select! {
                     biased;

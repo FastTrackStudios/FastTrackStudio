@@ -168,7 +168,7 @@ wgpu = { version = "29", features = ["wgsl"] }
 vello = { version = "0.9", features = ["wgpu"] }
 skrifa = "0.37"
 pollster = "0.4"
-anyrender_vello = "0.10"
+anyrender_vello = "0.11"
 
 # Dioxus native rendering (used by daw-reaper-dioxus)
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = [
