@@ -105,7 +105,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
         NavTab {
             label: "Home",
             icon: icon_house,
-            route: Route::HomeRoute {},
+            route: Route::DashboardRoute {},
         },
         NavTab {
             label: "Inbox",
@@ -249,7 +249,7 @@ pub fn primary_mobile_tabs() -> Vec<NavTab> {
         NavTab {
             label: "Home",
             icon: icon_house,
-            route: Route::HomeRoute {},
+            route: Route::DashboardRoute {},
         },
         NavTab {
             label: "Tasks",
@@ -275,7 +275,8 @@ pub fn tabs_match(current: &Route, tab: &NavTab) -> bool {
 
 pub fn route_title(route: &Route) -> &'static str {
     match route {
-        Route::HomeRoute {} => "Home",
+        Route::HomeRoute {} => "Tasks",
+        Route::DashboardRoute {} => "Home",
         Route::InboxRoute {} => "Inbox",
         Route::EmailRoute {} => "Email",
         Route::ProjectsRoute {} => "Projects",

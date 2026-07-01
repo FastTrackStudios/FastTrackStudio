@@ -72,6 +72,13 @@ pub struct TaskListFilter {
     /// "what's due today" queries.
     #[serde(default)]
     pub due_on_or_before: Option<String>,
+    /// Contextual relevance (see [`crate::relevance`]): keep only
+    /// tasks relevant under this context, then rank active-project /
+    /// due-today rows first (rank sorts within the stable path
+    /// order). Combine with [`Self::open_only`] for the canonical
+    /// "Active + Relevant" view.
+    #[serde(default)]
+    pub relevance: Option<crate::relevance::RelevanceContext>,
     /// Page size. `None` = no cap.
     pub limit: Option<u32>,
     /// Rows to skip (after filtering). `None` = 0.

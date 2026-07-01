@@ -16,6 +16,7 @@ pub mod gantt_adapt;
 pub mod nav;
 pub mod orgs;
 pub mod pages;
+pub mod prefs;
 pub mod presence;
 pub mod routes;
 pub mod server_registry;

@@ -251,11 +251,21 @@ impl TaskService for TaskBackend {
                     crate::is_due_on_or_before(t.due.as_deref(), t.scheduled.as_deref(), date)
                 })
             })
+            .filter(|t| {
+                filter
+                    .relevance
+                    .as_ref()
+                    .is_none_or(|ctx| crate::relevance::is_relevant(t, ctx))
+            })
             .collect();
         // Stable page windows: order by vault-relative path
         // (unique per task) before slicing, so offset/limit
-        // pages don't shear between calls.
+        // pages don't shear between calls. Relevance rank (when
+        // asked for) sorts on top of that stable order.
         rows.sort_by(|a, b| a.path.cmp(&b.path));
+        if let Some(ctx) = &filter.relevance {
+            rows.sort_by_key(|t| crate::relevance::relevance_rank(t, ctx));
+        }
         let offset = filter.offset.unwrap_or(0) as usize;
         let rows = rows.into_iter().skip(offset);
         Ok(match filter.limit {

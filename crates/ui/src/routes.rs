@@ -18,6 +18,9 @@ pub enum Route {
         #[route("/")]
         HomeRoute {},
 
+        #[route("/home")]
+        DashboardRoute {},
+
         #[route("/inbox")]
         InboxRoute {},
 
@@ -125,6 +128,14 @@ pub enum Route {
 
 #[component]
 fn HomeRoute() -> Element {
+    // Default landing = the todo list (Active + Relevant) — the
+    // product's center of gravity (plans/relevancy-and-inbox.md).
+    // The dashboard moved to /home.
+    rsx! { pages::tasks::TasksView {} }
+}
+
+#[component]
+fn DashboardRoute() -> Element {
     rsx! { pages::home::HomeView {} }
 }
 

@@ -42,6 +42,7 @@ pub mod capture;
 pub mod model;
 pub mod parse;
 pub mod relations;
+pub mod relevance;
 pub mod service;
 
 // FS-dependent modules (vault::Vault, std::fs walks). The
@@ -61,6 +62,7 @@ pub use model::{
     status_is_open, status_is_terminal,
 };
 pub use relations::ReverseRelation;
+pub use relevance::{RelevanceContext, filter_relevant, is_relevant, relevance_rank};
 // Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
 // so UI consumers don't need their own workflows-proto dep.
 pub use parse::{ParseError, parse_page, parse_str};

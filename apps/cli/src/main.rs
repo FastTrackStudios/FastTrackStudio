@@ -3500,6 +3500,23 @@ enum TaskCmd {
         /// Only tasks whose status is not done.
         #[arg(long)]
         open: bool,
+        /// Only tasks relevant *right now* (see task::relevance):
+        /// time-window contexts (`@morning` / `@mealprep` /
+        /// `@evening`) gate to their windows, `@<location>` /
+        /// `@<device>` gate to `--location` / `--device`,
+        /// due/scheduled-today always shows. Implies `--open`;
+        /// active-timer-project rows sort first.
+        #[arg(long)]
+        relevant: bool,
+        /// Override the clock for `--relevant` (`HH:MM`, local).
+        #[arg(long)]
+        at: Option<String>,
+        /// Where you are, for `--relevant` (`home`, `studio`, …).
+        #[arg(long)]
+        location: Option<String>,
+        /// What you're on, for `--relevant` (`phone`, `computer`).
+        #[arg(long)]
+        device: Option<String>,
         /// Page size — at most this many rows (applied
         /// server-side, after `--status`/`--project`, over a
         /// stable path ordering; other filters then apply
@@ -12876,6 +12893,10 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             project,
             milestone,
             open,
+            relevant,
+            at,
+            location,
+            device,
             limit,
             offset,
             org,
@@ -12917,8 +12938,11 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             // path when a page window combines with
             // client-only filters: slicing before --tag /
             // --context / --milestone / --open would drop rows.
-            let has_client_only_filters =
-                tag.is_some() || ctx_filter.is_some() || milestone_filter.is_some() || open;
+            let has_client_only_filters = tag.is_some()
+                || ctx_filter.is_some()
+                || milestone_filter.is_some()
+                || open
+                || relevant;
             let want_server_query =
                 (status.is_some() || project_id.is_some() || limit.is_some() || offset.is_some())
                     && !((limit.is_some() || offset.is_some()) && has_client_only_filters);
@@ -12981,6 +13005,23 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     !open || !task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
                 })
                 .collect();
+            // Same business logic the web store applies — one
+            // relevance implementation (task::relevance), two
+            // renderers. FUTURE: read the running timer session
+            // for the active-project boost.
+            let relevance_ctx = relevant.then(|| {
+                let now = chrono::Local::now();
+                task::RelevanceContext {
+                    local_hhmm: Some(at.unwrap_or_else(|| now.format("%H:%M").to_string())),
+                    local_date: Some(now.format("%Y-%m-%d").to_string()),
+                    location,
+                    device,
+                    active_project: None,
+                }
+            });
+            if let Some(ctx) = &relevance_ctx {
+                rows.retain(|t| task::status_is_open(&t.status) && task::is_relevant(t, ctx));
+            }
             rows.sort_by(|a, b| {
                 let a_done = task::Status::from_str(&a.status).is_some_and(task::Status::is_done);
                 let b_done = task::Status::from_str(&b.status).is_some_and(task::Status::is_done);
@@ -12990,6 +13031,11 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     .then_with(|| a.due.cmp(&b.due))
                     .then_with(|| a.title.cmp(&b.title))
             });
+            // Stable rank pass on top of the general order:
+            // active-project / due-today rows lead.
+            if let Some(ctx) = &relevance_ctx {
+                rows.sort_by_key(|t| task::relevance_rank(t, ctx));
+            }
             // Page window that couldn't go server-side (combined
             // with client-only filters, or the query fallback):
             // slice after filtering + sorting.
