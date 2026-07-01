@@ -135,7 +135,7 @@ pub fn omnisphere_preset() -> Container {
 /// Root of the local Omnisphere soundsource extraction — family dirs holding
 /// per-soundsource `library.styx` dirs (multisample) or flat `<name>.styx` +
 /// FLAC pairs (one-shots). Override with `FTS_OMNISPHERE_ROOT`.
-const OMNISPHERE_ROOT: &str = "/run/media/AudioHaven/Sampled/Keys/Omnisphere";
+pub(crate) const OMNISPHERE_ROOT: &str = "/run/media/AudioHaven/Sampled/Keys/Omnisphere";
 
 /// Spec path for one extracted soundsource (relative to the Core
 /// Soundsources dir), if present.

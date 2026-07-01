@@ -1,0 +1,789 @@
+//! **Omnisphere patch import** — parse Spectrasonics `.prt_omn` patch files
+//! (the "AmberPart" XML dialect) and map them onto the composition tree from
+//! [`crate::omni`], realizing Soundsource blocks against the local
+//! soundsource extraction by name.
+//!
+//! Format notes (reverse-engineered from the Settings Library):
+//! - Plain XML, no declaration; root `<AmberPart><SynthEngine>…`.
+//! - Numeric attributes are IEEE-754 `f32` bit patterns as 8 hex digits
+//!   (`3f800000` = 1.0); small integers are written as decimal.
+//! - `SYNTHENG` holds `VOICE` (one per layer: FILTER, WAVESHAPER, OSC + HARM,
+//!   AENV/FENV + params, a 4-slot `EFFRACK`), a parallel `MULTISAMPLE` list
+//!   (its `MS_IM_0 name= library=` names the layer's soundsource), the
+//!   common `EFFRACK` + `AUXEFFRACK`, `LFO_SET` (6 LFOs), 6 `MODENV`s and
+//!   the flat-attribute `MOD_MATRIX` (`source0`/`target0`/…).
+//! - `ENTRYDESCR` carries the patch name, library and the browser tag string
+//!   (`Author=…;Genre=…;Mood=…`).
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use signal_proto::block::BlockType;
+
+use crate::rig_node::Container;
+
+// ── Minimal XML ──────────────────────────────────────────────────────────────
+
+/// One parsed element. The dialect uses no text content — only nested
+/// elements and attributes — so text is ignored.
+#[derive(Debug, Clone)]
+pub struct XmlNode {
+    pub tag: String,
+    pub attrs: Vec<(String, String)>,
+    pub children: Vec<XmlNode>,
+}
+
+impl XmlNode {
+    pub fn attr(&self, name: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Decode a numeric attribute (hex-bits float or decimal integer).
+    pub fn num(&self, name: &str) -> Option<f32> {
+        self.attr(name).map(omni_num)
+    }
+
+    pub fn child(&self, tag: &str) -> Option<&XmlNode> {
+        self.children.iter().find(|c| c.tag == tag)
+    }
+
+    pub fn children_tagged<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = &'a XmlNode> {
+        self.children.iter().filter(move |c| c.tag == tag)
+    }
+
+    /// Depth-first search for the first element with `tag`.
+    pub fn find(&self, tag: &str) -> Option<&XmlNode> {
+        if self.tag == tag {
+            return Some(self);
+        }
+        self.children.iter().find_map(|c| c.find(tag))
+    }
+}
+
+/// Decode an attribute value: 8 hex digits → `f32` from bits; otherwise a
+/// plain decimal number; otherwise 0.
+pub fn omni_num(s: &str) -> f32 {
+    let t = s.trim();
+    if t.len() == 8 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if let Ok(bits) = u32::from_str_radix(t, 16) {
+            let f = f32::from_bits(bits);
+            if f.is_finite() {
+                return f;
+            }
+        }
+    }
+    t.parse::<f32>().unwrap_or(0.0)
+}
+
+fn decode_entities(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(&rest[..pos]);
+        rest = &rest[pos..];
+        let end = match rest.find(';') {
+            Some(e) if e <= 12 => e,
+            _ => {
+                out.push('&');
+                rest = &rest[1..];
+                continue;
+            }
+        };
+        let ent = &rest[1..end];
+        match ent {
+            "amp" => out.push('&'),
+            "lt" => out.push('<'),
+            "gt" => out.push('>'),
+            "quot" => out.push('"'),
+            "apos" => out.push('\''),
+            _ if ent.starts_with('#') => {
+                let n = if let Some(hex) = ent.strip_prefix("#x") {
+                    u32::from_str_radix(hex, 16).ok()
+                } else {
+                    ent[1..].parse::<u32>().ok()
+                };
+                match n.and_then(char::from_u32) {
+                    Some(c) => out.push(c),
+                    None => out.push_str(&rest[..=end]),
+                }
+            }
+            _ => out.push_str(&rest[..=end]),
+        }
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Parse the AmberPart XML dialect (elements + attributes only; comments,
+/// PIs and text content are skipped).
+pub fn parse_xml(input: &str) -> Result<XmlNode, String> {
+    let b = input.as_bytes();
+    let mut i = 0usize;
+    let mut stack: Vec<XmlNode> = Vec::new();
+    let mut root: Option<XmlNode> = None;
+
+    fn skip_ws(b: &[u8], i: &mut usize) {
+        while *i < b.len() && b[*i].is_ascii_whitespace() {
+            *i += 1;
+        }
+    }
+
+    while i < b.len() {
+        // Find the next tag; ignore any stray text between elements.
+        match b[i..].iter().position(|&c| c == b'<') {
+            Some(off) => i += off,
+            None => break,
+        }
+        if b[i..].starts_with(b"<?") || b[i..].starts_with(b"<!--") {
+            let close: &[u8] = if b[i..].starts_with(b"<?") { b"?>" } else { b"-->" };
+            match b[i..]
+                .windows(close.len())
+                .position(|w| w == close)
+            {
+                Some(off) => {
+                    i += off + close.len();
+                    continue;
+                }
+                None => return Err("unterminated <? or <!--".into()),
+            }
+        }
+        if b[i..].starts_with(b"</") {
+            // Closing tag: pop.
+            let end = b[i..]
+                .iter()
+                .position(|&c| c == b'>')
+                .ok_or("unterminated close tag")?;
+            i += end + 1;
+            let done = stack.pop().ok_or("unbalanced close tag")?;
+            match stack.last_mut() {
+                Some(parent) => parent.children.push(done),
+                None => {
+                    root = Some(done);
+                    break;
+                }
+            }
+            continue;
+        }
+        // Opening tag.
+        i += 1;
+        let start = i;
+        while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'>' && b[i] != b'/' {
+            i += 1;
+        }
+        let tag = std::str::from_utf8(&b[start..i])
+            .map_err(|_| "bad utf8 in tag")?
+            .to_string();
+        let mut node = XmlNode {
+            tag,
+            attrs: Vec::new(),
+            children: Vec::new(),
+        };
+        // Attributes.
+        loop {
+            skip_ws(b, &mut i);
+            if i >= b.len() {
+                return Err("unterminated tag".into());
+            }
+            if b[i] == b'>' {
+                i += 1;
+                stack.push(node);
+                break;
+            }
+            if b[i] == b'/' {
+                // Self-closing.
+                i += 1;
+                if i < b.len() && b[i] == b'>' {
+                    i += 1;
+                }
+                match stack.last_mut() {
+                    Some(parent) => parent.children.push(node),
+                    None => root = Some(node),
+                }
+                break;
+            }
+            let astart = i;
+            while i < b.len() && b[i] != b'=' && !b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            let name = std::str::from_utf8(&b[astart..i])
+                .map_err(|_| "bad utf8 in attr")?
+                .to_string();
+            skip_ws(b, &mut i);
+            if i < b.len() && b[i] == b'=' {
+                i += 1;
+                skip_ws(b, &mut i);
+                if i >= b.len() || b[i] != b'"' {
+                    return Err(format!("attr {name} missing quote"));
+                }
+                i += 1;
+                let vstart = i;
+                while i < b.len() && b[i] != b'"' {
+                    i += 1;
+                }
+                let value = std::str::from_utf8(&b[vstart..i])
+                    .map_err(|_| "bad utf8 in attr value")?;
+                i += 1; // closing quote
+                node.attrs.push((name, decode_entities(value)));
+            } else {
+                node.attrs.push((name, String::new()));
+            }
+        }
+        if root.is_some() {
+            break;
+        }
+    }
+    root.or_else(|| stack.pop()).ok_or_else(|| "no root element".into())
+}
+
+// ── Patch model ──────────────────────────────────────────────────────────────
+
+/// One layer extracted from a patch (a `VOICE` + its `MULTISAMPLE`).
+#[derive(Debug, Clone, Default)]
+pub struct OmniLayer {
+    /// Soundsource name from `MS_IM_0 name=` (empty ⇒ synth mode / none).
+    pub soundsource: String,
+    /// Soundsource library from `MS_IM_0 library=`.
+    pub ss_library: String,
+    /// `FILTER NameStr=` display name (e.g. "LPF UVI 3").
+    pub filter_name: String,
+    /// `FILTER para=` ≠ 0 ⇒ the two filters run in parallel.
+    pub filter_parallel: bool,
+    /// Normalized filter cutoff / resonance (`freq` / `res`).
+    pub filter_freq: f32,
+    pub filter_res: f32,
+    /// `OSC level` (normalized).
+    pub level: f32,
+    /// Layer FX rack: the four `EFFMODULE Type=` names ("No Effect" ⇒ empty).
+    pub fx: Vec<String>,
+}
+
+/// One mod-matrix route (`sourceN` → `targetN`).
+#[derive(Debug, Clone)]
+pub struct OmniModRoute {
+    pub source: String,
+    pub target: String,
+    pub depth: f32,
+}
+
+/// A parsed `.prt_omn` patch.
+#[derive(Debug, Clone, Default)]
+pub struct OmniPatch {
+    pub name: String,
+    pub library: String,
+    /// Browser tags from `ENTRYDESCR ATTRIB_VALUE_DATA` (`key=value` pairs).
+    pub tags: Vec<(String, String)>,
+    pub layers: Vec<OmniLayer>,
+    /// Common FX rack module names.
+    pub common_fx: Vec<String>,
+    /// Aux FX rack module names.
+    pub aux_fx: Vec<String>,
+    pub mod_routes: Vec<OmniModRoute>,
+    pub arp_on: bool,
+}
+
+fn rack_types(rack: &XmlNode) -> Vec<String> {
+    rack.children_tagged("EFFMODULE")
+        .map(|m| m.attr("Type").unwrap_or("").to_string())
+        .collect()
+}
+
+/// Parse a `.prt_omn` document into an [`OmniPatch`].
+pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
+    let root = parse_xml(xml)?;
+    let engine = root
+        .find("SYNTHENG")
+        .ok_or("no SYNTHENG element (not an Omnisphere patch?)")?;
+
+    let mut patch = OmniPatch::default();
+
+    if let Some(descr) = engine.child("ENTRYDESCR") {
+        patch.name = descr.attr("name").unwrap_or("").to_string();
+        patch.library = descr.attr("library").unwrap_or("").to_string();
+        if let Some(tags) = descr.attr("ATTRIB_VALUE_DATA") {
+            patch.tags = tags
+                .split(';')
+                .filter_map(|kv| {
+                    let (k, v) = kv.split_once('=')?;
+                    Some((k.trim().to_string(), v.trim().to_string()))
+                })
+                .collect();
+        }
+    }
+
+    // Layers: VOICE[i] pairs with MULTISAMPLE[i].
+    let voices: Vec<&XmlNode> = engine.children_tagged("VOICE").collect();
+    let multis: Vec<&XmlNode> = engine.children_tagged("MULTISAMPLE").collect();
+    for (i, voice) in voices.iter().enumerate() {
+        let mut layer = OmniLayer::default();
+        if let Some(ms) = multis.get(i).and_then(|m| m.child("MS_IM_0")) {
+            layer.soundsource = ms.attr("name").unwrap_or("").to_string();
+            layer.ss_library = ms.attr("library").unwrap_or("").to_string();
+        }
+        if let Some(f) = voice.child("FILTER") {
+            layer.filter_name = f.attr("NameStr").unwrap_or("").to_string();
+            layer.filter_parallel = f.num("para").unwrap_or(0.0) != 0.0;
+            layer.filter_freq = f.num("freq").unwrap_or(0.5);
+            layer.filter_res = f.num("res").unwrap_or(0.0);
+        }
+        if let Some(osc) = voice.child("OSC") {
+            layer.level = osc.num("level").unwrap_or(0.5);
+        }
+        if let Some(rack) = voice.child("EFFRACK") {
+            layer.fx = rack_types(rack);
+        }
+        patch.layers.push(layer);
+    }
+
+    // Part racks: the SYNTHENG-level EFFRACK is the Common rack.
+    if let Some(rack) = engine.child("EFFRACK") {
+        patch.common_fx = rack_types(rack);
+    }
+    if let Some(rack) = engine.child("AUXEFFRACK") {
+        patch.aux_fx = rack_types(rack);
+    }
+
+    // Mod matrix: flat sourceN/targetN attribute pairs.
+    if let Some(matrix) = engine.child("MOD_MATRIX") {
+        for n in 0..64 {
+            let (Some(source), Some(target)) = (
+                matrix.attr(&format!("source{n}")),
+                matrix.attr(&format!("target{n}")),
+            ) else {
+                break;
+            };
+            if source.is_empty() && target.is_empty() {
+                continue;
+            }
+            patch.mod_routes.push(OmniModRoute {
+                source: source.to_string(),
+                target: target.to_string(),
+                depth: matrix.num(&format!("hi{n}")).unwrap_or(0.0),
+            });
+        }
+    }
+
+    if let Some(arp) = root.find("ARP") {
+        patch.arp_on = arp.num("ArpOnOff").unwrap_or(0.0) != 0.0;
+    }
+
+    Ok(patch)
+}
+
+// ── Soundsource index ────────────────────────────────────────────────────────
+
+/// Name → spec-path index over the local soundsource extraction. Multisample
+/// sources are `<Name>/library.styx` dirs; one-shots are flat `<Name>.styx`.
+#[derive(Debug, Default)]
+pub struct SoundsourceIndex {
+    by_name: HashMap<String, PathBuf>,
+}
+
+impl SoundsourceIndex {
+    /// Walk `root` (e.g. `…/Omnisphere`) up to a few levels, collecting every
+    /// soundsource spec keyed by lower-cased name.
+    pub fn scan(root: &Path) -> Self {
+        let mut idx = Self::default();
+        idx.scan_dir(root, 0);
+        idx
+    }
+
+    /// Scan the default extraction root (`FTS_OMNISPHERE_ROOT` override).
+    pub fn scan_default() -> Self {
+        let root = std::env::var("FTS_OMNISPHERE_ROOT")
+            .unwrap_or_else(|_| crate::omni::OMNISPHERE_ROOT.into());
+        Self::scan(Path::new(&root))
+    }
+
+    fn scan_dir(&mut self, dir: &Path, depth: usize) {
+        if depth > 4 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // A multisample soundsource dir: <Name>/library.styx.
+                let lib = path.join("library.styx");
+                if lib.exists() {
+                    if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                        self.by_name.insert(name.to_lowercase(), lib);
+                    }
+                } else {
+                    self.scan_dir(&path, depth + 1);
+                }
+            } else if path.extension().is_some_and(|e| e == "styx")
+                && path.file_name().is_some_and(|f| f != "library.styx")
+            {
+                // A flat one-shot: <Name>.styx beside its FLAC.
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    self.by_name.insert(stem.to_lowercase(), path.clone());
+                }
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_name.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_name.is_empty()
+    }
+
+    /// Look a soundsource up by its patch name (case-insensitive).
+    pub fn find(&self, name: &str) -> Option<&Path> {
+        self.by_name.get(&name.to_lowercase()).map(|p| p.as_path())
+    }
+}
+
+// ── Patch → composition tree ─────────────────────────────────────────────────
+
+const LAYER_NAMES: [&str; 4] = ["Layer A", "Layer B", "Layer C", "Layer D"];
+
+fn fx_rack_from(name: &str, types: &[String]) -> Container {
+    let mut rack = Container::module(name);
+    for slot in 0..4 {
+        let label = types
+            .get(slot)
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty() && *s != "No Effect");
+        rack = match label {
+            Some(fx) => rack.block(BlockType::Custom, fx),
+            None => rack.block(BlockType::Custom, format!("{name} Slot {}", slot + 1)),
+        };
+    }
+    rack
+}
+
+/// Map a parsed patch onto the Omnisphere composition tree, realizing each
+/// layer's Soundsource block against `index` (unmatched names stay
+/// placeholders — the structure still routes).
+pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Container {
+    let mut quadzone = Container::parallel("Quadzone").param("mode", "Fader");
+    for (i, layer) in patch.layers.iter().take(4).enumerate() {
+        let name = LAYER_NAMES[i];
+
+        let mut osc = Container::module("Oscillator");
+        osc = if layer.soundsource.is_empty() {
+            osc.block(BlockType::Wavetable, "Synth Osc")
+        } else {
+            match index.find(&layer.soundsource) {
+                Some(spec) => {
+                    osc.sample_block(&layer.soundsource, spec.to_string_lossy().to_string())
+                }
+                None => {
+                    tracing::warn!(
+                        soundsource = %layer.soundsource,
+                        library = %layer.ss_library,
+                        "omni import: soundsource not in the local extraction — placeholder"
+                    );
+                    osc.block(BlockType::Sampler, &layer.soundsource)
+                }
+            }
+        };
+        let osc = osc
+            .block(BlockType::Unison, "Unison")
+            .block(BlockType::Harmonic, "Harmonia")
+            .block(BlockType::FmOperator, "FM")
+            .block(BlockType::RingModulator, "Ring Mod")
+            .block(BlockType::Waveshaper, "Waveshaper")
+            .block(BlockType::Granular, "Granular");
+
+        let filter_label = if layer.filter_name.is_empty() {
+            "Filter 1".to_string()
+        } else {
+            layer.filter_name.clone()
+        };
+        quadzone = quadzone.add(
+            Container::layer(name)
+                .param("level", format!("{:.3}", layer.level))
+                .param(
+                    "filter_routing",
+                    if layer.filter_parallel { "Parallel" } else { "Series" },
+                )
+                .param("filter_freq", format!("{:.3}", layer.filter_freq))
+                .param("filter_res", format!("{:.3}", layer.filter_res))
+                .add(osc)
+                .add(
+                    Container::module("Filters")
+                        .block(BlockType::Filter, filter_label)
+                        .block(BlockType::Filter, "Filter 2"),
+                )
+                .add(Container::module("Amp").block(BlockType::Amp, "Amp"))
+                .add(fx_rack_from("Layer FX", &layer.fx))
+                .send("Aux Rack", "To Aux")
+                .modulator(BlockType::Envelope, "Amp Env")
+                .modulator(BlockType::Envelope, "Filter Env")
+                .modulator(BlockType::MultisegEnvelope, "Mod Env"),
+        );
+    }
+
+    let title = if patch.name.is_empty() {
+        "Omnisphere Patch".to_string()
+    } else {
+        patch.name.clone()
+    };
+    let mut preset = Container::preset(title)
+        .add(quadzone)
+        .add(fx_rack_from("Common FX", &patch.common_fx))
+        .add(fx_rack_from("Aux Rack", &patch.aux_fx))
+        .modulator(BlockType::ModMatrix, "Mod Matrix");
+    for n in 1..=8 {
+        preset = preset.modulator(BlockType::Lfo, format!("LFO {n}"));
+    }
+    if patch.arp_on {
+        preset = preset.modulator(BlockType::Arpeggiator, "Arp");
+    }
+    // Carry the browser tags + mod routes as preset params (inspectable in
+    // dumps and the TUI; the mod routes become live once the ModMatrix
+    // runtime lands).
+    for (k, v) in &patch.tags {
+        preset = preset.param(format!("tag:{k}"), v.clone());
+    }
+    for (i, route) in patch.mod_routes.iter().enumerate() {
+        preset = preset.param(
+            format!("mod{i}"),
+            format!("{} -> {} @ {:.3}", route.source, route.target, route.depth),
+        );
+    }
+    preset
+}
+
+/// Convenience: read + parse + map a `.prt_omn` file.
+pub fn load_patch_file(path: &Path, index: &SoundsourceIndex) -> Result<Container, String> {
+    let xml = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let patch = parse_patch(&xml)?;
+    Ok(patch_to_container(&patch, index))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINI_PATCH: &str = r#"<AmberPart >
+<SynthEngine >
+<ARP ArpOnOff="3f800000" >
+</ARP>
+<SYNTHENG >
+<ENTRYDESCR name="Test Patch" library="Test Library" ATTRIB_VALUE_DATA="Author=Cody;Mood=Fun" >
+</ENTRYDESCR>
+<MOD_MATRIX source0="Layer A FENV" target0="A freq" hi0="3f000000" >
+</MOD_MATRIX>
+<VOICE >
+<FILTER NameStr="LPF Test" para="0" freq="3f000000" res="3e800000" >
+</FILTER>
+<OSC level="3f400000" >
+</OSC>
+<EFFRACK >
+<EFFMODULE Type="Chorus Echo" Active="3f800000" >
+</EFFMODULE>
+<EFFMODULE Type="No Effect" Active="0" >
+</EFFMODULE>
+</EFFRACK>
+</VOICE>
+<MULTISAMPLE >
+<MS_IM_0 name="My Source" library="Core Library" >
+</MS_IM_0>
+</MULTISAMPLE>
+<EFFRACK >
+<EFFMODULE Type="PRO-Verb" Active="3f800000" >
+</EFFMODULE>
+</EFFRACK>
+<AUXEFFRACK >
+</AUXEFFRACK>
+</SYNTHENG>
+</SynthEngine>
+</AmberPart>
+"#;
+
+    #[test]
+    fn hex_floats_decode() {
+        assert_eq!(omni_num("3f800000"), 1.0);
+        assert_eq!(omni_num("3f000000"), 0.5);
+        assert_eq!(omni_num("0"), 0.0);
+        assert_eq!(omni_num("1200"), 1200.0);
+    }
+
+    #[test]
+    fn parses_the_mini_patch() {
+        let p = parse_patch(MINI_PATCH).unwrap();
+        assert_eq!(p.name, "Test Patch");
+        assert_eq!(p.library, "Test Library");
+        assert_eq!(p.tags, vec![
+            ("Author".to_string(), "Cody".to_string()),
+            ("Mood".to_string(), "Fun".to_string())
+        ]);
+        assert!(p.arp_on);
+        assert_eq!(p.layers.len(), 1);
+        let l = &p.layers[0];
+        assert_eq!(l.soundsource, "My Source");
+        assert_eq!(l.filter_name, "LPF Test");
+        assert_eq!(l.filter_freq, 0.5);
+        assert_eq!(l.level, 0.75);
+        assert_eq!(l.fx[0], "Chorus Echo");
+        assert_eq!(p.common_fx[0], "PRO-Verb");
+        assert_eq!(p.mod_routes.len(), 1);
+        assert_eq!(p.mod_routes[0].source, "Layer A FENV");
+        assert_eq!(p.mod_routes[0].target, "A freq");
+    }
+
+    #[test]
+    fn maps_to_a_container() {
+        let p = parse_patch(MINI_PATCH).unwrap();
+        let tree = patch_to_container(&p, &SoundsourceIndex::default());
+        assert_eq!(tree.name, "Test Patch");
+        let layer = tree.find("Layer A").expect("layer A");
+        // Unmatched soundsource stays a placeholder block with the name.
+        let names: Vec<_> = layer
+            .find("Oscillator")
+            .unwrap()
+            .blocks()
+            .iter()
+            .map(|b| b.display_name())
+            .collect();
+        assert!(names.iter().any(|n| n == "My Source"));
+        // The layer FX slot carries the effect name.
+        let fx: Vec<_> = layer
+            .find("Layer FX")
+            .unwrap()
+            .blocks()
+            .iter()
+            .map(|b| b.display_name())
+            .collect();
+        assert_eq!(fx[0], "Chorus Echo");
+        // Tags + mod routes survive as params.
+        assert!(tree.params.iter().any(|p| p.name == "tag:Author"));
+        assert!(tree.params.iter().any(|p| p.name == "mod0"));
+        // Renders (placeholder-safe).
+        let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
+        rn.prepare(48_000.0, 256);
+        assert!(rn.live_leaves() >= 3, "native filters/amp are live");
+    }
+
+    /// Machine-local: import one of the user's own patches from the synced
+    /// voyager Settings Library, realize its soundsources against the local
+    /// extraction, and render it audibly.
+    /// `cargo test -p signal-sampler --lib voyager_patch -- --ignored`
+    #[test]
+    #[ignore = "requires the voyager patch sync + soundsource extraction"]
+    fn voyager_patch_imports_and_sounds() {
+        use signal_plugin_host::{PluginEvents, PluginMidiEvent};
+        let root = Path::new(
+            "/run/media/AudioHaven/Sampled/Synth/Spectrasonics-Patches/Omnisphere-Voyager/Settings Library/Patches",
+        );
+        if !root.exists() {
+            eprintln!("skipping: {root:?} not present");
+            return;
+        }
+        let index = SoundsourceIndex::scan_default();
+        assert!(!index.is_empty(), "soundsource extraction indexed");
+        // First SAMPLE-mode patch whose soundsource resolves against the
+        // extraction (pure synth-mode patches are placeholder-silent until
+        // the Wavetable DSP lands).
+        let mut patch_path = None;
+        let mut stack = vec![root.to_path_buf()];
+        'outer: while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let mut entries: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+            entries.sort();
+            for p in entries {
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().is_some_and(|x| x == "prt_omn") {
+                    let xml = std::fs::read_to_string(&p).unwrap_or_default();
+                    if let Ok(parsed) = parse_patch(&xml) {
+                        if parsed
+                            .layers
+                            .iter()
+                            .any(|l| !l.soundsource.is_empty() && index.find(&l.soundsource).is_some())
+                        {
+                            patch_path = Some(p);
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+        }
+        let patch_path = patch_path.expect("a sample-mode .prt_omn with a matched soundsource");
+        let tree = load_patch_file(&patch_path, &index).expect("import");
+        eprintln!("imported {:?} as {:?}", patch_path.file_name(), tree.name);
+
+        let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
+        rn.prepare(48_000.0, 512);
+        let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+        let midi = [PluginMidiEvent {
+            offset: 0,
+            message: daw::service::MidiMessage::note_on(0, 60, 100),
+        }];
+        let mut heard = 0.0f32;
+        for _ in 0..600 {
+            let ev = PluginEvents {
+                params: &[],
+                midi: &midi,
+                note_expressions: &[],
+            };
+            rn.render(&mut l, &mut r, &ev);
+            let rms = (l.iter().map(|s| s * s).sum::<f32>() / l.len() as f32).sqrt();
+            heard = heard.max(rms);
+            if heard > 1e-3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(heard > 1e-3, "imported patch should be audible, rms={heard}");
+    }
+
+    /// Machine-local: parse every factory patch in the on-disk Settings
+    /// Library without errors (format coverage sweep).
+    /// `cargo test -p signal-sampler --lib factory_patches -- --ignored`
+    #[test]
+    #[ignore = "requires the local Spectrasonics patch library"]
+    fn factory_patches_all_parse() {
+        let root = Path::new(
+            "/run/media/AudioHaven/Sampled/Synth/Spectrasonics-Patches/Omnisphere/Settings Library/Patches",
+        );
+        if !root.exists() {
+            eprintln!("skipping: {root:?} not present");
+            return;
+        }
+        let mut total = 0usize;
+        let mut failed = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().is_some_and(|x| x == "prt_omn") {
+                    total += 1;
+                    let xml = std::fs::read_to_string(&p).unwrap_or_default();
+                    if let Err(err) = parse_patch(&xml) {
+                        failed.push(format!("{p:?}: {err}"));
+                    }
+                }
+            }
+        }
+        eprintln!("parsed {total} patches, {} failures", failed.len());
+        for f in failed.iter().take(10) {
+            eprintln!("  {f}");
+        }
+        assert!(total > 1000, "expected a big factory library, got {total}");
+        assert!(
+            failed.is_empty(),
+            "{} of {total} factory patches failed to parse",
+            failed.len()
+        );
+    }
+}

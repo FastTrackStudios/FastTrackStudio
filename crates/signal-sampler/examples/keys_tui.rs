@@ -57,6 +57,19 @@ fn main() -> eyre::Result<()> {
     if let Some(dir) = arg(&args, "--library") {
         registry.load_styx_dir(&dir);
     }
+    // --omni <patch.prt_omn>: import an Omnisphere patch, realize its
+    // soundsources against the local extraction, and select it.
+    let mut preset_name = preset_name;
+    if let Some(patch_path) = arg(&args, "--omni") {
+        let index = signal_sampler::omni_import::SoundsourceIndex::scan_default();
+        let tree = signal_sampler::omni_import::load_patch_file(
+            std::path::Path::new(&patch_path),
+            &index,
+        )
+        .map_err(|e| eyre::eyre!("omni import: {e}"))?;
+        preset_name = tree.name.clone();
+        registry.register_code(tree);
+    }
     let tree = registry
         .tree(&preset_name)
         .cloned()
