@@ -10,6 +10,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 daw-proto = { path = "../daw-proto" }
+architect = { workspace = true, features = ["vox"] }
 vox = { workspace = true }
 eyre = { workspace = true }
 serde = { workspace = true }

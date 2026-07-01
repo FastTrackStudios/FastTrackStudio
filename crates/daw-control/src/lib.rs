@@ -208,81 +208,40 @@ pub use self::transport::Transport;
 pub use self::window_geometry::WindowGeometry;
 pub use self::window_manager::WindowManager;
 
-/// Service clients for a DAW connection
-#[derive(Clone)]
-pub struct DawClients {
-    pub(crate) action_registry: ActionRegistrationClient,
-    pub(crate) dock_host: DockHostingClient,
-    pub(crate) transport: TransportClient,
-    pub(crate) project: ProjectsClient,
-    pub(crate) marker: MarkersClient,
-    pub(crate) region: RegionsClient,
-    pub(crate) tempo_map: TempoMapClient,
-    pub(crate) track: TracksClient,
-    pub(crate) fx: EffectsClient,
-    pub(crate) position_conversion: PositionConversionClient,
-    pub(crate) item: ItemsClient,
-    pub(crate) take: TakesClient,
-    pub(crate) routing: RoutingClient,
-    pub(crate) screenset: ScreensetsClient,
-    pub(crate) dawfile: DawFileOpsClient,
-    pub(crate) window_geometry: WindowGeometryClient,
-    pub(crate) window_manager: WindowManagerClient,
-    pub(crate) automation: AutomationClient,
-    pub(crate) live_midi: LiveMidiClient,
-    pub(crate) midi: MidiClient,
-    pub(crate) peaks: PeaksClient,
-    pub(crate) audio_engine: AudioEngineClient,
-    pub(crate) ext_state: ExtStateClient,
-    pub(crate) health: HealthClient,
-    pub(crate) input: InputClient,
-    pub(crate) toolbar: ToolbarClient,
-    pub(crate) plugin_loader: PluginLoadingClient,
-    pub(crate) batch: BatchExecutionClient,
-    pub(crate) diagnostics: DiagnosticsClient,
-    pub(crate) event_bus: EventBusClient,
-    /// Original `Caller` kept around so consumers can build additional
-    /// service clients on the same in-process channel (e.g.
-    /// `keyflow_daw_analysis::MidiChartServiceClient`).
-    pub(crate) caller: Caller,
-}
-
-impl DawClients {
-    /// Create service clients from a connection handle
-    pub fn new(handle: Caller) -> Self {
-        Self {
-            action_registry: ActionRegistrationClient::new(handle.clone()),
-            dock_host: DockHostingClient::new(handle.clone()),
-            transport: TransportClient::new(handle.clone()),
-            project: ProjectsClient::new(handle.clone()),
-            marker: MarkersClient::new(handle.clone()),
-            region: RegionsClient::new(handle.clone()),
-            tempo_map: TempoMapClient::new(handle.clone()),
-            track: TracksClient::new(handle.clone()),
-            fx: EffectsClient::new(handle.clone()),
-            position_conversion: PositionConversionClient::new(handle.clone()),
-            item: ItemsClient::new(handle.clone()),
-            take: TakesClient::new(handle.clone()),
-            routing: RoutingClient::new(handle.clone()),
-            screenset: ScreensetsClient::new(handle.clone()),
-            dawfile: DawFileOpsClient::new(handle.clone()),
-            window_geometry: WindowGeometryClient::new(handle.clone()),
-            window_manager: WindowManagerClient::new(handle.clone()),
-            automation: AutomationClient::new(handle.clone()),
-            live_midi: LiveMidiClient::new(handle.clone()),
-            midi: MidiClient::new(handle.clone()),
-            peaks: PeaksClient::new(handle.clone()),
-            audio_engine: AudioEngineClient::new(handle.clone()),
-            ext_state: ExtStateClient::new(handle.clone()),
-            health: HealthClient::new(handle.clone()),
-            input: InputClient::new(handle.clone()),
-            toolbar: ToolbarClient::new(handle.clone()),
-            plugin_loader: PluginLoadingClient::new(handle.clone()),
-            batch: BatchExecutionClient::new(handle.clone()),
-            diagnostics: DiagnosticsClient::new(handle.clone()),
-            event_bus: EventBusClient::new(handle.clone()),
-            caller: handle,
-        }
+architect::clients! {
+    /// Service clients for a DAW connection — one generated client per
+    /// service over one shared `Caller` (kept; see `Daw::caller`).
+    pub struct DawClients {
+        pub(crate) action_registry: ActionRegistrationClient,
+        pub(crate) dock_host: DockHostingClient,
+        pub(crate) transport: TransportClient,
+        pub(crate) project: ProjectsClient,
+        pub(crate) marker: MarkersClient,
+        pub(crate) region: RegionsClient,
+        pub(crate) tempo_map: TempoMapClient,
+        pub(crate) track: TracksClient,
+        pub(crate) fx: EffectsClient,
+        pub(crate) position_conversion: PositionConversionClient,
+        pub(crate) item: ItemsClient,
+        pub(crate) take: TakesClient,
+        pub(crate) routing: RoutingClient,
+        pub(crate) screenset: ScreensetsClient,
+        pub(crate) dawfile: DawFileOpsClient,
+        pub(crate) window_geometry: WindowGeometryClient,
+        pub(crate) window_manager: WindowManagerClient,
+        pub(crate) automation: AutomationClient,
+        pub(crate) live_midi: LiveMidiClient,
+        pub(crate) midi: MidiClient,
+        pub(crate) peaks: PeaksClient,
+        pub(crate) audio_engine: AudioEngineClient,
+        pub(crate) ext_state: ExtStateClient,
+        pub(crate) health: HealthClient,
+        pub(crate) input: InputClient,
+        pub(crate) toolbar: ToolbarClient,
+        pub(crate) plugin_loader: PluginLoadingClient,
+        pub(crate) batch: BatchExecutionClient,
+        pub(crate) diagnostics: DiagnosticsClient,
+        pub(crate) event_bus: EventBusClient,
     }
 }
 
@@ -337,7 +296,7 @@ impl Daw {
     /// service clients (e.g. `keyflow_daw_analysis::MidiChartServiceClient`)
     /// that share the same in-process channel as the daw services.
     pub fn caller(&self) -> &Caller {
-        &self.clients.caller
+        self.clients.caller()
     }
 
     /// Cross-domain event-bus handle. Subscribe with a `BusFilter` to
