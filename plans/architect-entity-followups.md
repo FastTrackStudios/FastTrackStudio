@@ -1,5 +1,7 @@
 # architect::Entity migration — remaining work
 
+**Status: complete (audited 2026-07-01).** Every "blocked on design" item below has since shipped: `task::TaskInfo` carries `#[architect(primary_key, on_create = Uuid::new_v4())] id: Uuid`; `cookbook::Recipe`, `pantry::PantryItem`, `mealplan::{Meal, ShoppingList, SubstitutionRule}` are Entities (mealplan tests pass); wiki (`IndexEntry` path-PK, `LogEntry`, `PeerWiki`), scheduling-proto (booking/schedule/time_block/day_plan/event_type/cal_event), and `vault-proto::manifest` are Entities — String PKs confirmed supported in-tree. Deliberate non-migrations stand: git-proto (wire mirror of external forge), email-config (TOML + keyring, defer to federation), attachments-proto (RPC-only). The sections below are kept as the historical design record.
+
 Tracks the crates still to migrate after PRs #67–#73. Each is blocked on a design call that needs user input rather than a mechanical pattern application.
 
 ## Done (PRs #67–#73)
@@ -88,7 +90,7 @@ Tracks the crates still to migrate after PRs #67–#73. Each is blocked on a des
 
 ## Path forward
 
-1. **String PK support check** in architect — does `#[architect(primary_key)]` work with `String`? Quick test crate; informs wiki/scheduling/git/email paths.
+1. **String PK support check** — ✅ answered in-tree (2026-07-01): `wiki-proto::IndexEntry` uses `#[architect(primary_key, auto_increment = false)] pub path: String` and `PeerWiki.id: String`; both compile + serve. Wiki/scheduling/vault-proto can keep String ids as-is.
 2. **Cookbook first** — migrate `Recipe` / `Ingredient` / `Nutrition` (with new `id: Uuid` on Recipe). Unblocks pantry + intake.
 3. **Pantry** — follows immediately.
 4. **Task** — separate PR; adds `id: Uuid` with backfill.
