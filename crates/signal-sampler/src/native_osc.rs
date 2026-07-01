@@ -14,6 +14,8 @@ use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
 };
 
+use crate::native::{Adsr, AdsrParams};
+
 /// Oscillator waveform. (A stand-in for the eventual Nord category/Osc-Ctrl set.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OscWave {
@@ -49,6 +51,8 @@ struct Voice {
     /// Per-frame phase increment (= freq / sample_rate).
     inc: f32,
     amp: f32,
+    /// Per-voice amplitude envelope; the voice is dropped once it goes idle.
+    env: Adsr,
 }
 
 /// A polyphonic native oscillator.
@@ -87,23 +91,30 @@ impl NativeOscillator {
         let freq = 440.0 * 2f32.powf((note as f32 - 69.0) / 12.0);
         // Keep total level sane under polyphony.
         let amp = (velocity as f32 / 127.0) * 0.15;
-        // Retrigger if the note is already held.
+        // Retrigger if the note is already held (envelope continues from its
+        // current level, so no click).
         if let Some(v) = self.voices.iter_mut().find(|v| v.note == note) {
             v.inc = freq / self.sample_rate;
             v.amp = amp;
-            v.phase = 0.0;
+            v.env.note_on();
         } else {
+            let mut env = Adsr::new(self.sample_rate, AdsrParams::default());
+            env.note_on();
             self.voices.push(Voice {
                 note,
                 phase: 0.0,
                 inc: freq / self.sample_rate,
                 amp,
+                env,
             });
         }
     }
 
     fn note_off(&mut self, note: u8) {
-        self.voices.retain(|v| v.note != note);
+        // Enter the release tail; the render loop drops the voice at idle.
+        for v in self.voices.iter_mut().filter(|v| v.note == note) {
+            v.env.note_off();
+        }
     }
 
     fn apply_midi(&mut self, message: &daw::service::MidiMessage) {
@@ -150,6 +161,7 @@ impl PluginInstance for NativeOscillator {
             let ratio = self.sample_rate / new_sr;
             for v in &mut self.voices {
                 v.inc *= ratio;
+                v.env.set_sample_rate(new_sr);
             }
             self.sample_rate = new_sr;
         }
@@ -176,7 +188,7 @@ impl PluginInstance for NativeOscillator {
         for f in 0..frames {
             let mut s = 0.0f32;
             for v in &mut self.voices {
-                s += self.wave.sample(v.phase) * v.amp;
+                s += self.wave.sample(v.phase) * v.amp * v.env.tick();
                 v.phase += v.inc;
                 if v.phase >= 1.0 {
                     v.phase -= 1.0;
@@ -185,6 +197,8 @@ impl PluginInstance for NativeOscillator {
             out_l[f] = s;
             out_r[f] = s;
         }
+        // Reap voices whose release finished.
+        self.voices.retain(|v| !v.env.is_idle());
         Ok(())
     }
 
@@ -225,12 +239,27 @@ mod tests {
     }
 
     #[test]
-    fn note_off_silences() {
+    fn note_off_releases_then_silences() {
         let mut osc = NativeOscillator::new(48_000);
-        osc.prepare(48_000.0, 64).unwrap();
+        osc.prepare(48_000.0, 512).unwrap();
         osc.note_on(60, 100);
         assert_eq!(osc.active_voices(), 1);
         osc.note_off(60);
-        assert_eq!(osc.active_voices(), 0);
+        // The voice rides its release tail, then is reaped.
+        assert_eq!(osc.active_voices(), 1, "release tail keeps the voice alive");
+        let (inl, inr) = (vec![0.0; 512], vec![0.0; 512]);
+        let (mut outl, mut outr) = (vec![0.0; 512], vec![0.0; 512]);
+        let ev = PluginEvents {
+            params: &[],
+            midi: &[],
+            note_expressions: &[],
+        };
+        // 1 s of blocks ≫ the 150 ms release.
+        for _ in 0..(48_000 / 512 + 1) * 1 {
+            osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev).unwrap();
+        }
+        assert_eq!(osc.active_voices(), 0, "voice reaped after release");
+        let rms = (outl.iter().map(|s| s * s).sum::<f32>() / 512.0).sqrt();
+        assert!(rms < 1e-5, "output silent after release, rms={rms}");
     }
 }

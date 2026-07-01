@@ -56,6 +56,7 @@ pub mod mixer;
 pub mod module_spec;
 pub mod keys_rig;
 pub mod nam;
+pub mod native;
 pub mod native_osc;
 pub mod node_render;
 pub mod nord;

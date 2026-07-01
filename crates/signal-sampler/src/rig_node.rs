@@ -321,6 +321,16 @@ impl Container {
         self
     }
 
+    /// Add a **Sampler** block realized by a sample library spec (keys/piano
+    /// layers, drum kits, orchestral sections). See [`RigBlock::sample_lib`].
+    #[must_use]
+    pub fn sample_block(mut self, name: impl Into<String>, spec_path: impl Into<String>) -> Self {
+        self.children.push(RigNode::Block {
+            block: RigBlock::sample_lib(spec_path).named(name),
+        });
+        self
+    }
+
     /// Attach a control-rate modulator (placeholder block) to this container.
     #[must_use]
     pub fn modulator(mut self, block_type: BlockType, name: impl Into<String>) -> Self {
@@ -616,8 +626,11 @@ mod tests {
         assert_eq!(preset.blocks().len(), 3);
         assert!(preset.find("Voices").is_some());
         assert!(preset.find("Rotary").is_none()); // Rotary is a Block, not a container
-        // Filter/Rotary have no Native DSP yet — all placeholders.
-        assert!(preset.blocks().iter().all(|b| !b.has_backend()));
+        // Filters have Native DSP; the Rotary is still a placeholder.
+        assert!(preset
+            .blocks()
+            .iter()
+            .all(|b| b.has_backend() == (b.block_type_tag() == "filter")));
     }
 
     #[test]

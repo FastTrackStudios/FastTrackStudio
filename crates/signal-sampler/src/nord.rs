@@ -268,10 +268,10 @@ mod tests {
         assert!(types.contains(&"sampler"), "piano source");
         assert!(types.contains(&"oscillator"), "synth source");
         assert!(types.contains(&"rotary"), "global rotary");
-        // Only the Oscillator has DSP today; everything else is still a
-        // placeholder. (As more Native DSP lands, more blocks gain a backend.)
+        // Oscillator / Filter / Amp have Native DSP today; everything else is
+        // still a placeholder. (More blocks gain a backend as DSP lands.)
         for b in p.blocks() {
-            let expected = b.block_type_tag() == "oscillator";
+            let expected = matches!(b.block_type_tag(), "oscillator" | "filter" | "amp");
             assert_eq!(
                 b.has_backend(),
                 expected,

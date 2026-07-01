@@ -112,6 +112,10 @@ pub enum BlockImpl {
     /// An external CLAP / VST3 plugin loaded for this block (e.g. a third-party
     /// delay or reverb).
     Plugin,
+    /// A sample library played by the built-in [`SampleEngine`](crate::SampleEngine)
+    /// — the implementation for `Sampler` blocks (keys/piano layers, drum kits,
+    /// orchestral instruments). The block carries the library spec path.
+    Sample,
 }
 
 impl BlockImpl {
@@ -131,6 +135,7 @@ impl BlockImpl {
                 BlockType::Amp | BlockType::Drive | BlockType::Saturator
             ),
             BlockImpl::Ir => block_type == BlockType::Cabinet,
+            BlockImpl::Sample => block_type == BlockType::Sampler,
         }
     }
 
@@ -138,10 +143,16 @@ impl BlockImpl {
     /// always leads (the default), then the type-specific specials, then
     /// `Plugin`.
     pub fn allowed_for(block_type: BlockType) -> Vec<BlockImpl> {
-        [BlockImpl::Native, BlockImpl::Nam, BlockImpl::Ir, BlockImpl::Plugin]
-            .into_iter()
-            .filter(|i| i.supports(block_type))
-            .collect()
+        [
+            BlockImpl::Native,
+            BlockImpl::Nam,
+            BlockImpl::Ir,
+            BlockImpl::Sample,
+            BlockImpl::Plugin,
+        ]
+        .into_iter()
+        .filter(|i| i.supports(block_type))
+        .collect()
     }
 
     /// Short identifier for logs / UI.
@@ -151,6 +162,7 @@ impl BlockImpl {
             BlockImpl::Nam => "nam",
             BlockImpl::Ir => "ir",
             BlockImpl::Plugin => "plugin",
+            BlockImpl::Sample => "sample",
         }
     }
 }
@@ -191,6 +203,23 @@ pub struct RigBlock {
     /// For a `plugin` realization: optional base64 state chunk restored on load.
     #[facet(default)]
     pub state_b64: Option<String>,
+    /// Realization: path to a sample-library spec (`library.styx`). Set ⇒ the
+    /// block is a sample-playback instrument driven by the built-in
+    /// [`SampleEngine`](crate::SampleEngine) — keys/piano layers, drum kits,
+    /// orchestral sections.
+    #[facet(default)]
+    pub sample: String,
+    /// Samples root dir for `sample` (WAV/zone paths resolve relative to it).
+    /// Empty ⇒ the spec file's parent directory.
+    #[facet(default)]
+    pub samples_root: String,
+    /// Section id inside the library (e.g. `"1v"`). Empty ⇒ the spec's first
+    /// section (fine for single-instrument libraries).
+    #[facet(default)]
+    pub sample_section: String,
+    /// Mic position id (e.g. `"Mix"`). Empty ⇒ the spec's first mic.
+    #[facet(default)]
+    pub sample_mic: String,
     /// Display name (e.g. "Big Hall", "Dotted Delay"). Falls back to the asset
     /// file stem, then the block type. Useful for placeholder blocks.
     #[facet(default)]
@@ -254,12 +283,22 @@ impl RigBlock {
             ir: String::new(),
             plugin: String::new(),
             state_b64: None,
+            sample: String::new(),
+            samples_root: String::new(),
+            sample_section: String::new(),
+            sample_mic: String::new(),
             name: String::new(),
             module: String::new(),
             bypassed: false,
             input_trim_db: 0.0,
             output_trim_db: 0.0,
         }
+    }
+
+    /// A **Sampler** block realized by a sample library spec — the keys/piano,
+    /// drum-kit and orchestral instrument case.
+    pub fn sample_lib(spec_path: impl Into<String>) -> Self {
+        Self::of_type(BlockType::Sampler).with_sample(spec_path)
     }
 
     #[must_use]
@@ -281,6 +320,30 @@ impl RigBlock {
     }
 
     #[must_use]
+    pub fn with_sample(mut self, spec_path: impl Into<String>) -> Self {
+        self.sample = spec_path.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_samples_root(mut self, root: impl Into<String>) -> Self {
+        self.samples_root = root.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_sample_section(mut self, section: impl Into<String>) -> Self {
+        self.sample_section = section.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_sample_mic(mut self, mic: impl Into<String>) -> Self {
+        self.sample_mic = mic.into();
+        self
+    }
+
+    #[must_use]
     pub fn with_module(mut self, module: impl Into<String>) -> Self {
         self.module = module.into();
         self
@@ -292,13 +355,15 @@ impl RigBlock {
         self
     }
 
-    /// The realization's asset path — the `.nam`, `.wav` IR, or plugin path,
-    /// whichever is set (empty for a placeholder).
+    /// The realization's asset path — the `.nam`, `.wav` IR, sample-library
+    /// spec, or plugin path, whichever is set (empty for a placeholder).
     pub fn asset_path(&self) -> &str {
         if !self.nam.is_empty() {
             &self.nam
         } else if !self.ir.is_empty() {
             &self.ir
+        } else if !self.sample.is_empty() {
+            &self.sample
         } else {
             &self.plugin
         }
@@ -312,6 +377,8 @@ impl RigBlock {
             BlockImpl::Nam
         } else if !self.ir.trim().is_empty() {
             BlockImpl::Ir
+        } else if !self.sample.trim().is_empty() {
+            BlockImpl::Sample
         } else if !self.plugin.trim().is_empty() {
             BlockImpl::Plugin
         } else {
@@ -388,6 +455,10 @@ impl RigBlock {
 
     pub fn is_plugin(&self) -> bool {
         !self.plugin.is_empty()
+    }
+
+    pub fn is_sample(&self) -> bool {
+        !self.sample.is_empty()
     }
 }
 
@@ -607,7 +678,10 @@ impl PluginInstance for Identity {
 /// `daw-builtin-fx`-style backends are written, one block type at a time; a
 /// Native block of a listed type reports `has_backend() == true` and builds.
 pub fn native_dsp_available(block_type: BlockType) -> bool {
-    matches!(block_type, BlockType::Oscillator)
+    matches!(
+        block_type,
+        BlockType::Oscillator | BlockType::Filter | BlockType::Amp
+    )
 }
 
 /// Build a prepared box for one [`RigBlock`] at `sample_rate`.
@@ -664,6 +738,64 @@ pub(crate) fn build_block(
         }
         let dn = plugin.descriptor().name;
         Ok((plugin, format!("{dn} (plugin)"), None, None))
+    } else if block.is_sample() {
+        // Sample library → SampleEngine wrapped as an instrument, same as the
+        // sampler TUI's loading path (PlayerPatch::load + SampleEngine::new).
+        let spec_path = std::path::Path::new(&block.sample);
+        let root = if block.samples_root.trim().is_empty() {
+            spec_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(""))
+                .to_path_buf()
+        } else {
+            std::path::PathBuf::from(&block.samples_root)
+        };
+        let patch = crate::PlayerPatch::load(spec_path, &root)
+            .map_err(|e| format!("load sample library {}: {e}", block.sample))?;
+        let section = if block.sample_section.trim().is_empty() {
+            patch
+                .spec
+                .sections
+                .first()
+                .map(|s| s.id.clone())
+                .unwrap_or_default()
+        } else {
+            block.sample_section.clone()
+        };
+        let mic = if block.sample_mic.trim().is_empty() {
+            patch
+                .spec
+                .mics
+                .first()
+                .map(|m| m.id.clone())
+                .unwrap_or_default()
+        } else {
+            block.sample_mic.clone()
+        };
+        let name = patch.spec.name.clone();
+        let engine = crate::SampleEngine::new(patch, sample_rate, section, mic);
+        // Decode in the background, middle-out from middle C, so the block is
+        // playable almost immediately and never blocks the caller (same
+        // pattern as `SamplerBank::load_block`).
+        let cache = engine.cache_handle();
+        let paths = engine.sample_paths_centered(60);
+        let label = name.clone();
+        if let Err(err) = std::thread::Builder::new()
+            .name(format!("signal-preload:{label}"))
+            .spawn(move || {
+                let stats = cache.preload(paths.iter().map(|p| p.as_path()));
+                tracing::info!(
+                    library = %label,
+                    loaded = stats.loaded,
+                    failed = stats.failed,
+                    "sample block preload complete"
+                );
+            })
+        {
+            tracing::warn!(err = %err, "failed to spawn sample block preload thread");
+        }
+        let inst = crate::SamplerInstrument::new(engine);
+        Ok((Box::new(inst), format!("{name} (sample)"), None, None))
     } else {
         // Native implementation: built-in DSP for this block type isn't written
         // yet (no `daw-builtin-fx`). Callers filter these out before install.

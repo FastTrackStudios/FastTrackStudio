@@ -16,6 +16,7 @@
 use signal_plugin_host::{PluginEvents, PluginInstance, PluginMidiEvent};
 use signal_proto::block::BlockType;
 
+use crate::native::{NativeAmp, NativeFilter};
 use crate::native_osc::NativeOscillator;
 use crate::rig::{build_block, RigBlock};
 use crate::rig_node::{Combine, Container, RigNode, Zone};
@@ -30,6 +31,8 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
         // Built-in DSP dispatch by block type. Grows one type at a time.
         match block.block_type {
             BlockType::Oscillator => Some(Box::new(NativeOscillator::new(sample_rate))),
+            BlockType::Filter => Some(Box::new(NativeFilter::new(sample_rate))),
+            BlockType::Amp => Some(Box::new(NativeAmp::new(sample_rate))),
             _ => None,
         }
     } else {
@@ -239,13 +242,13 @@ mod tests {
 
     #[test]
     fn oscillator_block_renders_through_a_serial_module() {
-        // Module [serial] { Oscillator (native), Filter (placeholder thru) }
+        // Module [serial] { Oscillator (native), Filter (native SVF) }
         let tree = Container::module("Osc")
             .block(BlockType::Oscillator, "Osc")
             .block(BlockType::Filter, "Filter");
         let mut rn = RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 256);
-        assert_eq!(rn.live_leaves(), 1, "only the oscillator has a backend");
+        assert_eq!(rn.live_leaves(), 2, "oscillator + filter both have backends");
 
         let (mut l, mut r) = (vec![0.0; 256], vec![0.0; 256]);
         let midi = [note_on(69, 110)];
@@ -255,7 +258,7 @@ mod tests {
             note_expressions: &[],
         };
         rn.render(&mut l, &mut r, &ev);
-        assert!(rms(&l) > 1e-3, "audio flows osc → (placeholder filter thru) → out");
+        assert!(rms(&l) > 1e-3, "audio flows osc → filter (default open) → out");
     }
 
     #[test]
@@ -323,16 +326,82 @@ mod tests {
         assert!(render_note(&mut rn, 60, 30) < 1e-5, "soft hit is below the window");
     }
 
+    /// A Sampler block (BlockImpl::Sample) plays a real library through the
+    /// render tree — the keys/piano/drums/orchestral loading path.
+    #[test]
+    fn sampler_block_plays_a_library() {
+        // Fixture: one 220 Hz sine zone covering the whole keyboard.
+        let dir = std::env::temp_dir().join(format!(
+            "signal-sampler-block-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("note.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+        for i in 0..48_000 {
+            let t = i as f32 / 48_000.0;
+            w.write_sample((core::f32::consts::TAU * 220.0 * t).sin() * 0.8)
+                .unwrap();
+        }
+        w.finalize().unwrap();
+        let styx = "\
+name TestZoneLib
+zones (
+    { file note.wav, key_min 0, key_max 127, root_key 60, vel_min 0, vel_max 127 }
+)
+";
+        let spec_path = dir.join("lib.styx");
+        std::fs::write(&spec_path, styx).unwrap();
+
+        // Layer { Sampler(lib) } — samples_root defaults to the spec's dir.
+        let tree = Container::layer("Keys")
+            .sample_block("Piano", spec_path.to_string_lossy().to_string());
+        let mut rn = RenderNode::compile(&tree, 48_000);
+        rn.prepare(48_000.0, 512);
+        assert_eq!(rn.live_leaves(), 1, "sampler block has a backend");
+
+        let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+        let midi = [note_on(60, 100)];
+        // The cache fills on a background thread — keep (re)triggering the
+        // note until the sample is decoded and audible.
+        let mut heard = 0.0f32;
+        for _ in 0..200 {
+            let ev = PluginEvents {
+                params: &[],
+                midi: &midi,
+                note_expressions: &[],
+            };
+            rn.render(&mut l, &mut r, &ev);
+            heard = heard.max(rms(&l));
+            if heard > 1e-3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(heard > 1e-3, "sampler block should be audible, rms={heard}");
+    }
+
     #[test]
     fn full_nord_preset_renders_synth_oscillators() {
-        // The whole Nord routing: only the 3 synth Oscillators have DSP today;
-        // everything else is a placeholder pass-through. A held note must reach
-        // the output through the entire tree (synth voices → engines-sum →
-        // global thru).
+        // The whole Nord routing: the 3 synth Oscillators plus every native
+        // Filter/Amp are live DSP; the rest are placeholder pass-throughs. A
+        // held note must reach the output through the entire tree (synth
+        // voices → engines-sum → global thru).
         let preset = crate::nord::nord_stage_preset();
         let mut rn = RenderNode::compile(&preset, 48_000);
         rn.prepare(48_000.0, 512);
-        assert_eq!(rn.live_leaves(), 3, "3 synth oscillators are the only live DSP");
+        assert_eq!(
+            rn.live_leaves(),
+            27,
+            "3 oscillators + the tree's native Filter/Amp blocks are live"
+        );
 
         let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
         let midi = [note_on(64, 100)];
