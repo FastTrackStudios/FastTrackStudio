@@ -9,13 +9,8 @@ mod event;
 mod service;
 
 pub use event::{BusFilter, DawEvent};
-pub use service::EventBus;
+pub use service::*;
 
 // vox::service is applied to `EventBus` directly (all-async shape), so
 // the emitted client/dispatcher/descriptor have no `Rpc` infix.
 // Architect emits the `Rpc`-suffixed aliases for serve/layer plumbing.
-#[cfg(feature = "vox")]
-pub use service::{
-    EventBusClient, EventBusDispatcher as Dispatcher, Service,
-    event_bus_service_descriptor as descriptor, layer, serve,
-};

@@ -37,7 +37,3 @@ pub trait UiDialogs {
     fn set_prevent_ui_refresh(&self, prevent: bool);
 }
 
-#[cfg(feature = "vox")]
-pub use UiDialogsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use ui_dialogs_rpc_service_descriptor as descriptor;

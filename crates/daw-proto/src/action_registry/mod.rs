@@ -5,11 +5,9 @@ mod service;
 mod types;
 
 pub use event::ActionEvent;
-pub use service::{ActionRegistration, ActionRegistrationRpc};
+pub use service::*;
 pub use types::{
     ActionExecutionResult, ActionInfo, ActionListFilter, ActionListRequest, ActionListResponse,
     ActionOrigin, ActionSection,
 };
 
-#[cfg(feature = "vox")]
-pub use service::{ActionRegistrationClient, Dispatcher, Service, descriptor, layer, serve};

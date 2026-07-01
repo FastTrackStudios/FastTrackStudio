@@ -20,7 +20,3 @@ pub trait DawFileOps {
     ) -> CombineSetlistResult;
 }
 
-#[cfg(feature = "vox")]
-pub use DawFileOpsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use daw_file_ops_rpc_service_descriptor as descriptor;

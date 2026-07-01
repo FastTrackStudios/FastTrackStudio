@@ -2,7 +2,5 @@
 
 mod service;
 
-pub use service::{FxParams, FxParamsRpc};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, FxParamsClient, Service, descriptor, layer, serve};

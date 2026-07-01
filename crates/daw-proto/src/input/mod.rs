@@ -6,10 +6,8 @@
 mod service;
 mod types;
 
-pub use service::{Input, InputRpc};
+pub use service::*;
 pub use types::{
     InputContext, InputEvent, KeyCode, KeyEvent, KeyFilter, KeyModifiers, KeyMsgKind, KeyPattern,
 };
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, InputClient, Service, descriptor, layer, serve};

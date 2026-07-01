@@ -25,7 +25,3 @@ pub trait Input {
     fn execute_action(&self, action_id: &str);
 }
 
-#[cfg(feature = "vox")]
-pub use InputRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use input_rpc_service_descriptor as descriptor;

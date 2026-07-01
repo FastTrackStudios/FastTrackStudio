@@ -2,7 +2,5 @@
 
 mod service;
 
-pub use service::{PositionConversion, PositionConversionRpc};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, PositionConversionClient, Service, descriptor, layer, serve};

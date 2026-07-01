@@ -2,7 +2,5 @@
 
 mod service;
 
-pub use service::{Health, HealthRpc};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, HealthClient, Service, descriptor, layer, serve};

@@ -27,9 +27,4 @@ pub use transport::{
 // architect-emitted RPC face from `service.rs`. The trait itself
 // (`Transport`) is re-exported from `crate::sync` to avoid the name
 // collision with the `Transport` struct re-exported above.
-pub use service::TransportRpc;
-#[cfg(feature = "vox")]
-pub use service::{
-    Service, TransportClient, TransportRpcDispatcher as Dispatcher, layer, serve,
-    transport_rpc_service_descriptor as descriptor,
-};
+pub use service::*;

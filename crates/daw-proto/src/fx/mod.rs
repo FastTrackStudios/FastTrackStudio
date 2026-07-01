@@ -15,9 +15,7 @@ mod types;
 
 pub use error::*;
 pub use event::*;
-pub use service::{Effects, EffectsRpc};
+pub use service::*;
 pub use tree::*;
 pub use types::*;
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, EffectsClient, Service, descriptor, layer, serve};

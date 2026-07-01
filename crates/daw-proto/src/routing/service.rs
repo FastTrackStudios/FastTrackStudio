@@ -139,7 +139,3 @@ pub trait Routing {
     ) -> DawResult<()>;
 }
 
-#[cfg(feature = "vox")]
-pub use RoutingRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use routing_rpc_service_descriptor as descriptor;

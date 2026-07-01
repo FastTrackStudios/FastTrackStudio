@@ -3,8 +3,6 @@
 mod service;
 mod types;
 
-pub use service::{AudioAccessors, AudioAccessorsRpc};
+pub use service::*;
 pub use types::*;
 
-#[cfg(feature = "vox")]
-pub use service::{AudioAccessorsClient, Dispatcher, Service, descriptor, layer, serve};

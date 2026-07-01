@@ -18,7 +18,3 @@ pub trait Screensets {
     fn delete(&self, id: &str, options: ScreensetOptions) -> ScreensetResult;
 }
 
-#[cfg(feature = "vox")]
-pub use ScreensetsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use screensets_rpc_service_descriptor as descriptor;

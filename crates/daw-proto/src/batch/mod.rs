@@ -11,7 +11,5 @@ pub use args::*;
 pub use op::*;
 pub use output::*;
 pub use program::*;
-pub use service::{BatchExecution, BatchExecutionRpc};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{BatchExecutionClient, Dispatcher, Service, descriptor, layer, serve};

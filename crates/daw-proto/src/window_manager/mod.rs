@@ -3,11 +3,9 @@
 mod service;
 mod types;
 
-pub use service::{WindowManager, WindowManagerRpc};
+pub use service::*;
 pub use types::{
     LayoutPlacement, LayoutToolbar, ModeDockerLayout, MonitorRect, WindowLayout,
     WindowLayoutOptions, WindowLayoutResult, WindowLayoutSummary,
 };
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, Service, WindowManagerClient, descriptor, layer, serve};

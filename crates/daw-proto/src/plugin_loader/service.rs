@@ -14,7 +14,3 @@ pub trait PluginLoading {
     fn is_loaded(&self, path: &str) -> bool;
 }
 
-#[cfg(feature = "vox")]
-pub use PluginLoadingRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use plugin_loading_rpc_service_descriptor as descriptor;

@@ -134,7 +134,3 @@ pub trait Automation {
     fn set_global_automation_override(&self, project: ProjectContext, mode: Option<AutomationMode>);
 }
 
-#[cfg(feature = "vox")]
-pub use AutomationRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use automation_rpc_service_descriptor as descriptor;

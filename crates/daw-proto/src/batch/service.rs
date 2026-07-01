@@ -13,7 +13,3 @@ pub trait BatchExecution {
     fn execute(&self, request: BatchRequest) -> BatchResponse;
 }
 
-#[cfg(feature = "vox")]
-pub use BatchExecutionRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use batch_execution_rpc_service_descriptor as descriptor;

@@ -29,7 +29,3 @@ pub trait AudioAccessors {
     fn destroy_accessor(&self, accessor_id: &str);
 }
 
-#[cfg(feature = "vox")]
-pub use AudioAccessorsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use audio_accessors_rpc_service_descriptor as descriptor;

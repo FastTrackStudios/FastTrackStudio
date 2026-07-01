@@ -35,7 +35,3 @@ pub trait WindowManager {
     fn delete_layout(&self, name: String) -> WindowLayoutResult;
 }
 
-#[cfg(feature = "vox")]
-pub use WindowManagerRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use window_manager_rpc_service_descriptor as descriptor;

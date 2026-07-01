@@ -42,7 +42,3 @@ pub trait LiveMidi {
     fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage);
 }
 
-#[cfg(feature = "vox")]
-pub use LiveMidiRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use live_midi_rpc_service_descriptor as descriptor;

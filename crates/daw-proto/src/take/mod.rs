@@ -6,10 +6,5 @@
 
 pub mod service;
 
-pub use service::{Takes, TakesRpc};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{
-    Service, TakesClient, TakesRpcDispatcher as Dispatcher, layer, serve,
-    takes_rpc_service_descriptor as descriptor,
-};

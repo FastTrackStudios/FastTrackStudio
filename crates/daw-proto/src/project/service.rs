@@ -75,7 +75,3 @@ pub trait Projects {
     fn ruler_lane_count(&self, project: ProjectContext) -> u32;
 }
 
-#[cfg(feature = "vox")]
-pub use ProjectsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use projects_rpc_service_descriptor as descriptor;

@@ -22,15 +22,10 @@ pub use error::TrackError;
 pub use event::{TrackEvent, TrackStreamEvent};
 pub use hierarchy::{FolderDepthChange, TrackHierarchy, TrackNode};
 pub use hierarchy_builder::{AddChildren, TrackHierarchyBuilder};
-pub use service::{TrackExtStateRequest, Tracks, TracksRpc};
+pub use service::*;
 
 // vox-emitted names from the architect macro mirror. Aliased to short
 // names so mounting reads `track::descriptor()` + `track::serve(Reaper)`.
-#[cfg(feature = "vox")]
-pub use service::{
-    Service, TracksClient, TracksRpcDispatcher as Dispatcher, layer, serve,
-    tracks_rpc_service_descriptor as descriptor,
-};
 
 pub use test_utils::{
     TrackGroup, TrackStructureBuilder, assert_tracks_equal, display_tracklist, format_tracklist,

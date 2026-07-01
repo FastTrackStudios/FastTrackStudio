@@ -49,7 +49,3 @@ pub trait ExtState {
     fn has_project(&self, project: ProjectContext, section: &str, key: &str) -> bool;
 }
 
-#[cfg(feature = "vox")]
-pub use ExtStateRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use ext_state_rpc_service_descriptor as descriptor;

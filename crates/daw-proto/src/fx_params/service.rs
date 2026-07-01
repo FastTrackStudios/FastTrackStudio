@@ -19,7 +19,3 @@ pub trait FxParams {
     fn info(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32) -> Option<FxParameter>;
 }
 
-#[cfg(feature = "vox")]
-pub use FxParamsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use fx_params_rpc_service_descriptor as descriptor;

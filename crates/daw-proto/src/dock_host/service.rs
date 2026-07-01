@@ -36,7 +36,3 @@ pub trait DockHosting {
     fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool;
 }
 
-#[cfg(feature = "vox")]
-pub use DockHostingRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use dock_hosting_rpc_service_descriptor as descriptor;

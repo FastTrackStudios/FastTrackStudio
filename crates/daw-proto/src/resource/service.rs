@@ -15,7 +15,3 @@ pub trait ResourcePaths {
     fn color_theme_path(&self) -> Option<PathBuf>;
 }
 
-#[cfg(feature = "vox")]
-pub use ResourcePathsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use resource_paths_rpc_service_descriptor as descriptor;

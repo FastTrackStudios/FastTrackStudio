@@ -10,11 +10,5 @@ pub use cc::*;
 pub use error::*;
 pub use event::*;
 pub use note::*;
-pub use service::{
-    HumanizeParams, Midi, MidiCCCreate, MidiChannelPressureCreate, MidiNoteExpressionCreate,
-    MidiPitchBendCreate, MidiPolyPressureCreate, MidiProgramChangeCreate, MidiRpc, MidiSysExCreate,
-    MidiTakeLocation, PpqRange, QuantizeParams,
-};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, MidiClient, Service, descriptor, layer, serve};

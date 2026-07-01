@@ -123,7 +123,3 @@ pub trait Items {
     ) -> DawResult<()>;
 }
 
-#[cfg(feature = "vox")]
-pub use ItemsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use items_rpc_service_descriptor as descriptor;

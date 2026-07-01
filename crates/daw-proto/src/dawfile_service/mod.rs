@@ -3,10 +3,8 @@
 mod service;
 mod types;
 
-pub use service::{DawFileOps, DawFileOpsRpc};
+pub use service::*;
 pub use types::{
     CombineSetlistOptions, CombineSetlistResult, ProjectSummary, ProjectTrackSummary, SetlistSong,
 };
 
-#[cfg(feature = "vox")]
-pub use service::{DawFileOpsClient, Dispatcher, Service, descriptor, layer, serve};

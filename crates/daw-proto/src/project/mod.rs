@@ -11,8 +11,6 @@ mod service;
 mod types;
 
 pub use event::{ProjectEvent, ProjectStreamEvent};
-pub use service::{Projects, ProjectsRpc};
+pub use service::*;
 pub use types::{ProjectContext, ProjectInfo};
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, ProjectsClient, Service, descriptor, layer, serve};

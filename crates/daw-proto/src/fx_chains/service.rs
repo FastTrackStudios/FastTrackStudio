@@ -27,7 +27,3 @@ pub trait FxChains {
     fn set_state_chunk(&self, ctx: FxChainContext, fx_idx: u32, chunk: &str) -> DawResult<()>;
 }
 
-#[cfg(feature = "vox")]
-pub use FxChainsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use fx_chains_rpc_service_descriptor as descriptor;

@@ -68,7 +68,3 @@ pub trait ActionRegistration {
     fn get_toggle_state(&self, command_name: &str) -> Option<bool>;
 }
 
-#[cfg(feature = "vox")]
-pub use ActionRegistrationRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use action_registration_rpc_service_descriptor as descriptor;

@@ -8,7 +8,5 @@ mod service;
 pub use envelope::*;
 pub use error::*;
 pub use event::*;
-pub use service::{AddPointParams, Automation, AutomationRpc, SetPointParams, TimeRangeParams};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{AutomationClient, Dispatcher, Service, descriptor, layer, serve};

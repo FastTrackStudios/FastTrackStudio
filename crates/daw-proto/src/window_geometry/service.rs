@@ -18,7 +18,3 @@ pub trait WindowGeometry {
     fn set_rect(&self, target: WindowTarget, rect: ScreensetRect) -> DawResult<()>;
 }
 
-#[cfg(feature = "vox")]
-pub use WindowGeometryRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use window_geometry_rpc_service_descriptor as descriptor;

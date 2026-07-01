@@ -38,7 +38,3 @@ pub trait Toolbar {
     fn tracked_buttons(&self) -> Vec<TrackedButton>;
 }
 
-#[cfg(feature = "vox")]
-pub use ToolbarRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use toolbar_rpc_service_descriptor as descriptor;

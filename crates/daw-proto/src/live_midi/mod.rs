@@ -13,7 +13,5 @@ pub use device::*;
 pub use error::*;
 pub use event::*;
 pub use message::*;
-pub use service::{LiveMidi, LiveMidiRpc};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, LiveMidiClient, Service, descriptor, layer, serve};

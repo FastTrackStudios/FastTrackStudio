@@ -9,10 +9,5 @@ mod tempo_point;
 pub use engine::*;
 pub use error::*;
 pub use event::*;
-#[cfg(feature = "vox")]
-pub use service::{
-    Service, TempoMapClient, TempoMapRpcDispatcher as Dispatcher, layer, serve,
-    tempo_map_rpc_service_descriptor as descriptor,
-};
-pub use service::{TempoMap, TempoMapRpc};
+pub use service::*;
 pub use tempo_point::*;

@@ -21,7 +21,3 @@ pub trait AudioEngine {
     fn quit(&self) -> DawResult<()>;
 }
 
-#[cfg(feature = "vox")]
-pub use AudioEngineRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use audio_engine_rpc_service_descriptor as descriptor;

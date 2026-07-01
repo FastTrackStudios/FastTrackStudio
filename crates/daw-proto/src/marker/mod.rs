@@ -18,14 +18,9 @@ mod service;
 pub use error::MarkerError;
 pub use event::{MarkerEvent, MarkerStreamEvent};
 pub use marker::Marker;
-pub use service::{Markers, MarkersRpc};
+pub use service::*;
 
 // vox-emitted names from the auto-generated mirror trait. Re-exported
 // with shorter aliases (`descriptor`, `dispatcher`) so consumer
 // mounting code reads `marker::descriptor()` and `marker::serve(Reaper)`
 // rather than juggling the underscored mirror names directly.
-#[cfg(feature = "vox")]
-pub use service::{
-    MarkersClient, MarkersRpcDispatcher as Dispatcher, Service, layer,
-    markers_rpc_service_descriptor as descriptor, serve,
-};

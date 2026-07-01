@@ -2,4 +2,4 @@
 
 mod service;
 
-pub use service::Daw;
+pub use service::*;

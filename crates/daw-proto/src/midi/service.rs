@@ -301,7 +301,3 @@ pub trait Midi {
     fn set_note_expression_value(&self, location: MidiTakeLocation, index: u32, value: f64);
 }
 
-#[cfg(feature = "vox")]
-pub use MidiRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use midi_rpc_service_descriptor as descriptor;

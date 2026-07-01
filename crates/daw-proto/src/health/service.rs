@@ -11,7 +11,3 @@ pub trait Health {
     fn show_console_msg(&self, msg: &str);
 }
 
-#[cfg(feature = "vox")]
-pub use HealthRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use health_rpc_service_descriptor as descriptor;

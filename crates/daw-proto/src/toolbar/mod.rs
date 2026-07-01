@@ -3,11 +3,9 @@
 mod service;
 mod types;
 
-pub use service::{Toolbar, ToolbarRpc};
+pub use service::*;
 pub use types::{
     ToolbarButton, ToolbarIcon, ToolbarIconKind, ToolbarItemInfo, ToolbarPlacement, ToolbarResult,
     ToolbarSnapshot, ToolbarSnapshotSource, ToolbarTarget, TrackedButton,
 };
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, Service, ToolbarClient, descriptor, layer, serve};

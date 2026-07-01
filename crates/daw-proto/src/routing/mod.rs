@@ -8,7 +8,5 @@ mod service;
 pub use error::*;
 pub use event::*;
 pub use route::*;
-pub use service::{RouteLocation, Routing, RoutingRpc};
+pub use service::*;
 
-#[cfg(feature = "vox")]
-pub use service::{Dispatcher, RoutingClient, Service, descriptor, layer, serve};

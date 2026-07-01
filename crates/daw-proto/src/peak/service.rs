@@ -23,7 +23,3 @@ pub trait Peaks {
     ) -> TakePeakData;
 }
 
-#[cfg(feature = "vox")]
-pub use PeaksRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use peaks_rpc_service_descriptor as descriptor;

@@ -9,12 +9,7 @@ mod service;
 pub use error::RegionError;
 pub use event::{RegionEvent, RegionStreamEvent};
 pub use region::Region;
-pub use service::{AddRegionInLaneRequest, Regions, RegionsRpc};
+pub use service::*;
 
 // vox-emitted names from the architect macro mirror. Aliased to short
 // names so mounting reads `region::descriptor()` + `region::serve(Reaper)`.
-#[cfg(feature = "vox")]
-pub use service::{
-    RegionsClient, RegionsRpcDispatcher as Dispatcher, Service, layer,
-    regions_rpc_service_descriptor as descriptor, serve,
-};

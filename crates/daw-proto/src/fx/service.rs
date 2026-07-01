@@ -274,7 +274,3 @@ pub trait Effects {
     ) -> DawResult<()>;
 }
 
-#[cfg(feature = "vox")]
-pub use EffectsRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use effects_rpc_service_descriptor as descriptor;

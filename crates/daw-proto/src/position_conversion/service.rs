@@ -56,7 +56,3 @@ pub trait PositionConversion {
     ) -> PositionInBeats;
 }
 
-#[cfg(feature = "vox")]
-pub use PositionConversionRpcDispatcher as Dispatcher;
-#[cfg(feature = "vox")]
-pub use position_conversion_rpc_service_descriptor as descriptor;
