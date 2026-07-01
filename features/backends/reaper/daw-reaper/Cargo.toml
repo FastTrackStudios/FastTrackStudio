@@ -18,7 +18,7 @@ path = "src/lib.rs"
 daw-proto = { path = "../../../../crates/daw-proto" }
 daw-audio-sync = { path = "../../../sync/daw-audio-sync" }
 uuid = { workspace = true }
-architect = { workspace = true, features = ["vox"] }
+architect = { workspace = true, features = ["vox", "local"] }
 vox.workspace = true
 vox-stream.workspace = true
 tracing.workspace = true
