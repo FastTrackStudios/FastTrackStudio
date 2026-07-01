@@ -97,6 +97,9 @@ wiki-live.workspace = true
 # `task-cli wiki graph|gaps` — pure-computation graph layer
 # (no LLM).
 wiki-graph.workspace = true
+# `task-cli wiki context --links` — overlay typed-link-store
+# edges onto the context subgraph.
+links.workspace = true
 wiki-proto.workspace = true
 wiki-search.workspace = true
 # `task-cli wiki archive <url|file>` — URL router + content

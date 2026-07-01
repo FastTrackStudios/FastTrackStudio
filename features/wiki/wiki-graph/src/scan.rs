@@ -83,3 +83,47 @@ pub(crate) fn scan_wiki(vault_root: &Path) -> Result<Vec<Page>, ScanError> {
     out.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     Ok(out)
 }
+
+/// Housekeeping dirs a prose-notes walk never descends into.
+const NOTES_SKIP_DIRS: &[&str] = &[".obsidian", ".trash", ".git"];
+
+/// Walk a prose-notes tree (typically the org vault) and return one
+/// `Page` per markdown file, ids prefixed `note:/` so they can't
+/// collide with wiki page paths when the two sets are merged (the
+/// trailing slash keeps `Path::file_stem` — which drives Obsidian
+/// link-by-stem resolution — working for top-level notes). Pages
+/// without a `type:` frontmatter key default to `note` (not
+/// `untyped`) so callers can filter on it. A missing root reads as
+/// an empty tree, not an error — a fresh org has no notes yet.
+pub(crate) fn scan_notes(notes_root: &Path) -> Result<Vec<Page>, ScanError> {
+    let mut out: Vec<Page> = Vec::new();
+    if !notes_root.is_dir() {
+        return Ok(out);
+    }
+    for entry in WalkDir::new(notes_root)
+        .into_iter()
+        .filter_entry(|e| {
+            !(e.file_type().is_dir()
+                && e.file_name()
+                    .to_str()
+                    .is_some_and(|n| NOTES_SKIP_DIRS.contains(&n)))
+        })
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        let Ok(rel) = path.strip_prefix(notes_root) else {
+            continue;
+        };
+        let body = std::fs::read_to_string(path)?;
+        let mut page = parse_page(format!("note:/{}", rel.to_string_lossy()), &body);
+        if page.page_type == "untyped" {
+            page.page_type = "note".to_string();
+        }
+        out.push(page);
+    }
+    out.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    Ok(out)
+}

@@ -2396,6 +2396,19 @@ enum WikiCmd {
         /// 600 (~150 tokens).
         #[arg(long, default_value_t = 600)]
         summary_chars: usize,
+        /// Also merge prose notes from this tree (typically
+        /// the org vault) into the graph as `note:/<path>`
+        /// nodes — notes and wiki pages cross-link through
+        /// the usual title/stem wikilink resolution.
+        #[arg(long)]
+        notes: Option<std::path::PathBuf>,
+        /// Overlay a typed-link store (`links.jsonl`) as
+        /// direct-link edges — picks up user-asserted
+        /// note↔note links that aren't wikilinks in any
+        /// body. Pair with `--notes` (the endpoints must be
+        /// nodes to land).
+        #[arg(long)]
+        links: Option<std::path::PathBuf>,
     },
     /// Tree-sitter-extracted **code-symbol graph** for a
     /// project root. Walks `.rs` files (TS/JS/Python come in
@@ -9214,10 +9227,37 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             budget_tokens,
             max_nodes,
             summary_chars,
+            notes,
+            links,
         } => {
             let vault = vault
                 .canonicalize()
                 .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            // Typed-link overlay: note↔note links become
+            // direct-link edges (verses aren't graph nodes;
+            // endpoints missing from the graph are dropped
+            // inside `build_context`).
+            let extra_edges = match links {
+                Some(path) => {
+                    use links::LinksService as _;
+                    links::Store::open(path)
+                        .graph(links::Confidence::Speculative, true)
+                        .map_err(|e| eyre::eyre!("links store: {e}"))?
+                        .into_iter()
+                        .filter(|l| {
+                            l.source.kind == links::NodeKind::Note
+                                && l.target.kind == links::NodeKind::Note
+                        })
+                        .map(|l| {
+                            (
+                                format!("{}{}", wiki_graph::NOTE_ID_PREFIX, l.source.id),
+                                format!("{}{}", wiki_graph::NOTE_ID_PREFIX, l.target.id),
+                            )
+                        })
+                        .collect()
+                }
+                None => Vec::new(),
+            };
             let result = wiki_graph::build_context(
                 &vault,
                 wiki_graph::ContextOpts {
@@ -9226,6 +9266,8 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     budget_tokens,
                     max_nodes,
                     summary_chars,
+                    notes_root: notes,
+                    extra_edges,
                 },
             )
             .map_err(|e| eyre::eyre!("build_context: {e}"))?;

@@ -15692,6 +15692,7 @@ dependencies = [
  "inbox-proto",
  "intake",
  "label-proto",
+ "links",
  "locations",
  "mealplan",
  "milestone",

@@ -42,12 +42,18 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use wiki_proto::graph::{GraphOpts, RelevanceWeights};
+use wiki_proto::graph::{GraphEdge, GraphOpts, RelevanceScore, RelevanceWeights};
 
-use crate::scan::{ScanError, scan_wiki};
+use crate::scan::{ScanError, scan_notes, scan_wiki};
 use crate::scoring::{Indices, score_graph};
+
+/// Node-id prefix for prose notes merged in via
+/// [`ContextOpts::notes_root`]. Callers injecting
+/// [`ContextOpts::extra_edges`] address a note as
+/// `format!("{NOTE_ID_PREFIX}{vault_rel_path}")`.
+pub const NOTE_ID_PREFIX: &str = "note:/";
 
 /// Caller knobs for [`build_context`].
 #[derive(Debug, Clone)]
@@ -73,6 +79,21 @@ pub struct ContextOpts {
     /// Default 600 (≈ 150 tokens) — enough for a couple
     /// paragraphs and an example.
     pub summary_chars: usize,
+    /// Also scan this prose-notes tree (typically the org
+    /// vault) and merge its pages into the graph as
+    /// `note:/<rel_path>` nodes. Notes and wiki pages link
+    /// to each other through the same case-insensitive
+    /// title/stem resolution wikilinks already use, so
+    /// cross-tree edges emerge without extra plumbing.
+    /// `None` = wiki-only (previous behavior).
+    pub notes_root: Option<PathBuf>,
+    /// Extra edges to overlay, as `(node_id, node_id)`
+    /// pairs — the caller's channel for typed-link-store
+    /// edges (user-asserted links that aren't `[[wikilinks]]`
+    /// in any body). Pairs whose endpoints aren't in the
+    /// graph, self-pairs, and already-connected pairs are
+    /// dropped; survivors score as a direct link.
+    pub extra_edges: Vec<(String, String)>,
 }
 
 impl Default for ContextOpts {
@@ -83,6 +104,8 @@ impl Default for ContextOpts {
             budget_tokens: 8000,
             max_nodes: 0,
             summary_chars: 600,
+            notes_root: None,
+            extra_edges: Vec::new(),
         }
     }
 }
@@ -107,7 +130,10 @@ pub struct ContextResult {
 /// per the given [`ContextOpts`]. Pure I/O + computation; no
 /// LLM calls.
 pub fn build_context(vault_root: &Path, opts: ContextOpts) -> Result<ContextResult, ScanError> {
-    let pages = scan_wiki(vault_root)?;
+    let mut pages = scan_wiki(vault_root)?;
+    if let Some(notes_root) = &opts.notes_root {
+        pages.extend(scan_notes(notes_root)?);
+    }
     let by_path: HashMap<String, &crate::parse::Page> =
         pages.iter().map(|p| (p.rel_path.clone(), p)).collect();
     let by_title: HashMap<String, &crate::parse::Page> =
@@ -129,6 +155,50 @@ pub fn build_context(vault_root: &Path, opts: ContextOpts) -> Result<ContextResu
         &graph_opts.query,
         &graph_opts.node_type,
     );
+
+    // Overlay caller-supplied edges (typed-link store). Scored
+    // as a direct link — a user-asserted link is at least as
+    // strong a relevance signal as a body wikilink.
+    if !opts.extra_edges.is_empty() {
+        let node_idx: HashMap<String, usize> = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.id.clone(), i))
+            .collect();
+        let mut connected: HashSet<(String, String)> = graph
+            .edges
+            .iter()
+            .map(|e| ordered_pair(&e.source, &e.target))
+            .collect();
+        let weights = RelevanceWeights::default();
+        for (a, b) in &opts.extra_edges {
+            if a == b {
+                continue;
+            }
+            let (Some(&ia), Some(&ib)) = (node_idx.get(a.as_str()), node_idx.get(b.as_str()))
+            else {
+                continue;
+            };
+            if !connected.insert(ordered_pair(a, b)) {
+                continue;
+            }
+            graph.edges.push(GraphEdge {
+                source: a.clone(),
+                target: b.clone(),
+                weight: weights.direct_link,
+                signals: RelevanceScore {
+                    direct_link: weights.direct_link,
+                    source_overlap: 0.0,
+                    adamic_adar: 0.0,
+                    type_affinity: 0.0,
+                    total: weights.direct_link,
+                },
+            });
+            graph.nodes[ia].link_count += 1;
+            graph.nodes[ib].link_count += 1;
+        }
+    }
 
     // Sort by relevance (descending). With no query, this is
     // pure degree; with a query the filter already happened
@@ -192,6 +262,16 @@ pub fn build_context(vault_root: &Path, opts: ContextOpts) -> Result<ContextResu
         tokens_estimate,
         nodes_considered,
     })
+}
+
+/// Canonical undirected key for an edge (edges are scored
+/// undirected; overlay dedup must match).
+fn ordered_pair(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
 }
 
 fn format_entry(n: &wiki_proto::graph::GraphNode, summary: &str, connects: &[String]) -> String {
@@ -313,6 +393,61 @@ mod tests {
         assert!(s.contains("Second line of it."));
         assert!(!s.contains("Not this."));
         assert!(!s.contains("# My Title"));
+    }
+
+    fn write(root: &Path, rel: &str, content: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn notes_root_merges_and_extra_edges_overlay() {
+        let dir = tempfile::tempdir().unwrap();
+        let wiki = dir.path().join("wiki");
+        let vault = dir.path().join("vault");
+        write(
+            &wiki,
+            "Concepts/Grace.md",
+            "---\ntype: concept\n---\nUnmerited favor.\n",
+        );
+        write(
+            &vault,
+            "Notes/study.md",
+            "Reflections on [[Grace]] from Sunday.\n",
+        );
+        write(&vault, "Notes/prayer.md", "No wikilinks here.\n");
+
+        let result = build_context(
+            &wiki,
+            ContextOpts {
+                notes_root: Some(vault),
+                // User-asserted link between the two notes —
+                // no [[wikilink]] exists between them.
+                extra_edges: vec![(
+                    format!("{NOTE_ID_PREFIX}Notes/study.md"),
+                    format!("{NOTE_ID_PREFIX}Notes/prayer.md"),
+                )],
+                ..ContextOpts::default()
+            },
+        )
+        .unwrap();
+
+        // Wiki page + both notes are all in the graph; the
+        // note→wiki wikilink and the overlaid note↔note edge
+        // give every node degree ≥ 1.
+        assert!(result.included.contains(&"Concepts/Grace.md".to_string()));
+        assert!(
+            result
+                .included
+                .contains(&format!("{NOTE_ID_PREFIX}Notes/study.md"))
+        );
+        assert!(
+            result
+                .included
+                .contains(&format!("{NOTE_ID_PREFIX}Notes/prayer.md"))
+        );
+        assert!(result.markdown.contains("[[Grace]]"));
     }
 
     #[test]

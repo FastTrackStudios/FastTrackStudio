@@ -51,7 +51,7 @@ pub use code_extract::{
     CodeEdge, CodeExtractError, CodeExtraction, CodeLang, CodeNode, Confidence, Relation,
     SymbolKind, extract_file, extract_source, scan_code_tree,
 };
-pub use context::{ContextOpts, ContextResult, build_context};
+pub use context::{ContextOpts, ContextResult, NOTE_ID_PREFIX, build_context};
 pub use gaps::find_gaps;
 pub use parse::extract_wikilinks;
 pub use scan::ScanError;
