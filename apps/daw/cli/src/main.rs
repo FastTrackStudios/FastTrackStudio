@@ -281,6 +281,24 @@ enum Command {
     Ping,
     /// Return generated DAW service and method catalog
     ServiceCatalog,
+    /// Call any ops-covered service method: `daw call transport.play --args '{"project":{"Literal":"Current"}}'`
+    Call {
+        /// Target as <service>.<method> (see `daw service-catalog`)
+        target: String,
+        /// Method arguments as JSON (named fields; defaults to {})
+        #[arg(long)]
+        args: Option<String>,
+    },
+    /// Execute one reified op from externally-tagged JSON
+    Op {
+        /// Op JSON: {"<Service>":{"<Method>":{..args..}}}
+        op: String,
+    },
+    /// Execute a JSON batch program (path, or '-' for stdin) in one round trip
+    Batch {
+        /// Path to a BatchRequest JSON file, or '-' to read stdin
+        program: String,
+    },
     // -- Process & Project Management --
     /// Launch a REAPER instance
     Launch {
@@ -1055,6 +1073,25 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
         Command::Info => daw_cli::cmd_info(daw, json).await?,
         Command::Tracks => daw_cli::cmd_tracks(daw, json).await?,
         Command::Track { ref track } => daw_cli::cmd_track(daw, track, json).await?,
+        Command::Call {
+            ref target,
+            ref args,
+        } => print_value(
+            daw_cli::ops::run_call(daw, target, args.as_deref()).await?,
+            json,
+        )?,
+        Command::Op { ref op } => print_value(daw_cli::ops::run_op(daw, op).await?, json)?,
+        Command::Batch { ref program } => {
+            let text = if program == "-" {
+                use std::io::Read;
+                let mut buf = String::new();
+                std::io::stdin().read_to_string(&mut buf)?;
+                buf
+            } else {
+                std::fs::read_to_string(program)?
+            };
+            print_value(daw_cli::ops::run_batch(daw, &text).await?, json)?
+        }
         Command::Fx { ref track } => daw_cli::cmd_fx(daw, track, json).await?,
         Command::Params { ref track, ref fx } => daw_cli::cmd_params(daw, track, fx, json).await?,
         Command::LastTouchedFx => print_value(daw_cli::ops::last_touched_fx(daw).await?, json)?,

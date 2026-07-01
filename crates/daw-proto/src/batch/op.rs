@@ -20,10 +20,15 @@ use facet::Facet;
 
 use super::args::{FxChainArg, ProjectArg, TrackArg};
 use super::program::{BatchRequest, BatchResponse, StepOutcome, StepResult};
+use crate::ext_state::{ExtStateOp, ExtStateOpOutput};
 use crate::fx::{EffectsOp, EffectsOpOutput, FxChainContext};
+use crate::item::{ItemsOp, ItemsOpOutput};
 use crate::marker::{MarkersOp, MarkersOpOutput};
 use crate::project::{ProjectContext, ProjectsOp, ProjectsOpOutput};
+use crate::region::{RegionsOp, RegionsOpOutput};
 use crate::routing::{RoutingOp, RoutingOpOutput};
+use crate::take::{TakesOp, TakesOpOutput};
+use crate::tempo_map::{TempoMapOp, TempoMapOpOutput};
 use crate::track::{TrackRef, TracksOp, TracksOpOutput};
 use crate::transport::{TransportOp, TransportOpOutput};
 
@@ -38,6 +43,11 @@ pub enum BatchOp {
     Marker(MarkersOp),
     Fx(EffectsOp),
     Routing(RoutingOp),
+    Region(RegionsOp),
+    TempoMap(TempoMapOp),
+    ExtState(ExtStateOp),
+    Item(ItemsOp),
+    Take(TakesOp),
 }
 
 /// Output of one applied [`BatchOp`] — mirrors [`BatchOp`]'s shape,
@@ -53,6 +63,11 @@ pub enum BatchOpOutput {
     Marker(MarkersOpOutput),
     Fx(EffectsOpOutput),
     Routing(RoutingOpOutput),
+    Region(RegionsOpOutput),
+    TempoMap(TempoMapOpOutput),
+    ExtState(ExtStateOpOutput),
+    Item(ItemsOpOutput),
+    Take(TakesOpOutput),
 }
 
 /// Everything a backend must implement to execute batch programs.
@@ -64,6 +79,11 @@ pub trait BatchBackend:
     + crate::marker::Markers
     + crate::fx::Effects
     + crate::routing::Routing
+    + crate::region::Regions
+    + crate::tempo_map::prelude::TempoMap
+    + crate::ext_state::prelude::ExtState
+    + crate::item::Items
+    + crate::take::Takes
 {
 }
 
@@ -74,6 +94,11 @@ impl<B> BatchBackend for B where
         + crate::marker::Markers
         + crate::fx::Effects
         + crate::routing::Routing
+        + crate::region::Regions
+        + crate::tempo_map::prelude::TempoMap
+        + crate::ext_state::prelude::ExtState
+        + crate::item::Items
+        + crate::take::Takes
 {
 }
 
@@ -92,6 +117,11 @@ impl BatchOp {
             BatchOp::Marker(op) => BatchOpOutput::Marker(op.apply(backend, outputs)?),
             BatchOp::Fx(op) => BatchOpOutput::Fx(op.apply(backend, outputs)?),
             BatchOp::Routing(op) => BatchOpOutput::Routing(op.apply(backend, outputs)?),
+            BatchOp::Region(op) => BatchOpOutput::Region(op.apply(backend, outputs)?),
+            BatchOp::TempoMap(op) => BatchOpOutput::TempoMap(op.apply(backend, outputs)?),
+            BatchOp::ExtState(op) => BatchOpOutput::ExtState(op.apply(backend, outputs)?),
+            BatchOp::Item(op) => BatchOpOutput::Item(op.apply(backend, outputs)?),
+            BatchOp::Take(op) => BatchOpOutput::Take(op.apply(backend, outputs)?),
         })
     }
 }
@@ -300,4 +330,79 @@ pub fn run<B: BatchBackend + ?Sized>(backend: &B, request: BatchRequest) -> Batc
     }
 
     BatchResponse { results }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::batch::program::{BatchInstruction, BatchOptions};
+
+    /// Lock the JSON wire shape agents use with `daw op` / `daw batch`:
+    /// externally-tagged nesting service → method → named args.
+    #[test]
+    fn batch_op_json_round_trip() {
+        let op = BatchOp::Marker(MarkersOp::Add {
+            project: ProjectArg::Literal(ProjectContext::Current),
+            position: 1.5,
+            name: "verse".into(),
+        });
+        let json = facet_json::to_string(&op).expect("serialize");
+        let back: BatchOp = facet_json::from_str(&json).expect("deserialize");
+        let BatchOp::Marker(MarkersOp::Add { position, name, .. }) = back else {
+            panic!("wrong variant after round trip: {json}");
+        };
+        assert_eq!(position, 1.5);
+        assert_eq!(name, "verse");
+        println!("wire JSON: {json}");
+    }
+
+    /// Every batch wire type must survive phon's schema-exchange
+    /// decode path (what vox runs per method) — a tuple or foreign
+    /// std type in any op signature poisons the whole batch schema.
+    #[test]
+    fn batch_wire_types_survive_phon_schema_exchange() {
+        fn probe<T>(value: &T)
+        where
+            T: for<'a> facet::Facet<'a> + core::fmt::Debug,
+        {
+            let name = core::any::type_name::<T>();
+            let bytes = vox_phon::to_vec(value)
+                .unwrap_or_else(|e| panic!("{name}: encode: {e:?}"));
+            let schema = vox_phon::schema_bytes::<T>()
+                .unwrap_or_else(|e| panic!("{name}: schema: {e:?}"));
+            let bundle = vox_phon::parse_schema_bytes(&schema)
+                .unwrap_or_else(|e| panic!("{name}: parse: {e:?}"));
+            let program = vox_phon::build_decode_program::<T>(&bundle)
+                .unwrap_or_else(|e| panic!("{name}: compat program: {e:?}"));
+            vox_phon::decode_owned_with_program::<T>(&program, &bytes)
+                .unwrap_or_else(|e| panic!("{name}: compat decode: {e:?}"));
+        }
+
+        probe(&BatchRequest {
+            instructions: vec![BatchInstruction {
+                step: 0,
+                op: BatchOp::Marker(MarkersOp::Add {
+                    project: ProjectArg::Literal(ProjectContext::Current),
+                    position: 1.0,
+                    name: "x".into(),
+                }),
+            }],
+            options: Default::default(),
+        });
+        probe(&BatchResponse {
+            results: vec![StepResult {
+                step: 0,
+                outcome: StepOutcome::Ok(BatchOpOutput::Marker(MarkersOpOutput::Add(Ok(1)))),
+            }],
+        });
+        // What actually crosses the wire: the vox caller-signature root.
+        let wire: Result<BatchResponse, vox::VoxError<core::convert::Infallible>> =
+            Ok(BatchResponse {
+                results: vec![StepResult {
+                    step: 0,
+                    outcome: StepOutcome::Ok(BatchOpOutput::Marker(MarkersOpOutput::Add(Ok(1)))),
+                }],
+            });
+        probe(&wire);
+    }
 }

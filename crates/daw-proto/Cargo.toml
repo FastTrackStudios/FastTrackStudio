@@ -34,5 +34,13 @@ vox = []
 #   daw-proto = { path = "...", features = ["test-utils"] }
 test-utils = []
 
+[dev-dependencies]
+# Locks the externally-tagged JSON wire shape of the batch op enums.
+facet-json = { workspace = true }
+# Locks phon schema-exchange compatibility of the batch wire types
+# (what vox runs per method) — a tuple or std type sneaking into an
+# op signature would otherwise poison the whole batch schema.
+vox-phon = { workspace = true }
+
 [lints]
 workspace = true

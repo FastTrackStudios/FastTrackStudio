@@ -15,6 +15,7 @@ use super::event::RegionStreamEvent;
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
 use vox::Tx;
+use crate::batch::ProjectArg;
 
 /// Lane placement request — kept here so retired batch ops can still
 /// name it without dragging in the full lane surface.
@@ -27,7 +28,7 @@ pub struct AddRegionInLaneRequest {
 }
 
 /// Operations on the regions of a project.
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait Regions {
     /// Every region in the project, ordered by position.
     fn all(&self, project: ProjectContext) -> Vec<Region>;

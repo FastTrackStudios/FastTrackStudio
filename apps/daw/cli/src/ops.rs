@@ -1522,3 +1522,101 @@ pub async fn combine_rpl(
         "total_seconds": result.total_seconds,
     }))
 }
+
+// =============================================================================
+// Reified-op execution — the agent-facing generic surface
+// =============================================================================
+
+/// Names accepted by `daw call <service>.<method>` mapped to the
+/// `BatchOp` wrapper key, one entry per ops-covered service.
+const OP_SERVICES: &[(&str, &str)] = &[
+    ("transport", "Transport"),
+    ("project", "Project"),
+    ("projects", "Project"),
+    ("track", "Track"),
+    ("tracks", "Track"),
+    ("marker", "Marker"),
+    ("markers", "Marker"),
+    ("fx", "Fx"),
+    ("effects", "Fx"),
+    ("routing", "Routing"),
+    ("region", "Region"),
+    ("regions", "Region"),
+    ("tempo_map", "TempoMap"),
+    ("ext_state", "ExtState"),
+    ("item", "Item"),
+    ("items", "Item"),
+    ("take", "Take"),
+    ("takes", "Take"),
+];
+
+fn parse_response_json(response: &daw::service::batch::BatchResponse) -> Result<Value> {
+    let json = facet_json::to_string(response)
+        .map_err(|e| eyre::eyre!("serialize batch response: {e}"))?;
+    Ok(serde_json::from_str(&json)?)
+}
+
+/// Execute a whole JSON batch program in one RPC round trip. The
+/// program is a facet-JSON `BatchRequest`; see `daw service-catalog`
+/// for methods and `daw op` for the per-op shape.
+pub async fn run_batch(daw: &Daw, program_json: &str) -> Result<Value> {
+    let request: daw::service::batch::BatchRequest = facet_json::from_str(program_json)
+        .map_err(|e| eyre::eyre!("invalid batch program JSON: {e}"))?;
+    let response = daw.execute_batch(request).await?;
+    parse_response_json(&response)
+}
+
+/// Execute one reified op (externally-tagged JSON, e.g.
+/// `{"Marker":{"Add":{"project":{"Literal":"Current"},"position":1.5,"name":"x"}}}`).
+pub async fn run_op(daw: &Daw, op_json: &str) -> Result<Value> {
+    let op: daw::service::batch::BatchOp = facet_json::from_str(op_json).map_err(|e| {
+        eyre::eyre!(
+            "invalid op JSON: {e}\n(expected {{\"<Service>\":{{\"<Method>\":{{..args..}}}}}}; \
+             see `daw service-catalog` for methods)"
+        )
+    })?;
+    let request = daw::service::batch::BatchRequest {
+        instructions: vec![daw::service::batch::BatchInstruction { step: 0, op }],
+        options: daw::service::batch::BatchOptions::default(),
+    };
+    let response = daw.execute_batch(request).await?;
+    let value = parse_response_json(&response)?;
+    // Single-op sugar: unwrap to the one outcome.
+    Ok(value
+        .get("results")
+        .and_then(|r| r.get(0))
+        .and_then(|r| r.get("outcome"))
+        .cloned()
+        .unwrap_or(value))
+}
+
+/// `daw call <service>.<method> --args '<json>'` — assembles the
+/// externally-tagged op from a human-friendly target name and runs it.
+pub async fn run_call(daw: &Daw, target: &str, args_json: Option<&str>) -> Result<Value> {
+    let (service, method) = target.split_once('.').ok_or_else(|| {
+        eyre::eyre!("call target must be <service>.<method>, e.g. transport.play")
+    })?;
+    let key = OP_SERVICES
+        .iter()
+        .find(|(name, _)| *name == service.to_lowercase())
+        .map(|(_, key)| *key)
+        .ok_or_else(|| {
+            let mut names: Vec<&str> = OP_SERVICES.iter().map(|(n, _)| *n).collect();
+            names.dedup();
+            eyre::eyre!("unknown service `{service}` — one of: {}", names.join(", "))
+        })?;
+    // snake_case method → PascalCase op variant.
+    let variant: String = method
+        .split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    let args = args_json.unwrap_or("{}");
+    let op_json = format!("{{\"{key}\":{{\"{variant}\":{args}}}}}");
+    run_op(daw, &op_json).await
+}

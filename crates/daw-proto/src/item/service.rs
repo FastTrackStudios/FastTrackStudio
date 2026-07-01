@@ -8,8 +8,9 @@
 use super::{FadeShape, Item, ItemRef};
 use crate::primitives::{BeatAttachMode, Duration, PositionInSeconds};
 use crate::{DawResult, ProjectContext, TrackRef};
+use crate::batch::{ProjectArg, TrackArg};
 
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg, TrackRef as TrackArg))]
 pub trait Items {
     // ── Queries ──────────────────────────────────────────────────────
 

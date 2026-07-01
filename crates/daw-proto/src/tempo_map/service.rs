@@ -9,8 +9,9 @@ use super::TempoPoint;
 use super::event::TempoMapStreamEvent;
 use crate::{DawResult, ProjectContext};
 use vox::Tx;
+use crate::batch::ProjectArg;
 
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait TempoMap {
     // ── Queries ─────────────────────────────────────────────────────
 
@@ -22,8 +23,10 @@ pub trait TempoMap {
 
     fn get_tempo_at(&self, project: ProjectContext, seconds: f64) -> f64;
 
+    #[ops(skip)]
     fn get_time_signature_at(&self, project: ProjectContext, seconds: f64) -> (i32, i32);
 
+    #[ops(skip)]
     fn time_to_musical(&self, project: ProjectContext, seconds: f64) -> (i32, i32, f64);
 
     /// `(measure, beat, fraction)` → seconds.
@@ -59,6 +62,7 @@ pub trait TempoMap {
 
     fn set_default_tempo(&self, project: ProjectContext, bpm: f64) -> DawResult<()>;
 
+    #[ops(skip)]
     fn get_default_time_signature(&self, project: ProjectContext) -> (i32, i32);
 
     fn set_default_time_signature(
