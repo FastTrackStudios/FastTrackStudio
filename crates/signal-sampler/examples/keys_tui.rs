@@ -42,7 +42,14 @@ fn arg(args: &[String], flag: &str) -> Option<String> {
 
 fn main() -> eyre::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let preset_name = arg(&args, "--preset").unwrap_or_else(|| "Nord Stage".to_string());
+    // Default to the sample-realized program when the machine has the piano
+    // libraries; the placeholder program otherwise.
+    let default_preset = if signal_sampler::nord::nord_stage_piano_preset().is_some() {
+        "Nord Stage (Piano)"
+    } else {
+        "Nord Stage"
+    };
+    let preset_name = arg(&args, "--preset").unwrap_or_else(|| default_preset.to_string());
     let buffer: u32 = arg(&args, "--buffer").and_then(|s| s.parse().ok()).unwrap_or(256);
 
     // Build the registry (code builtins + any styx library dir passed via --library).

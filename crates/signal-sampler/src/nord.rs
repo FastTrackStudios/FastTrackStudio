@@ -103,16 +103,51 @@ fn organ_layer(name: &str) -> Container {
 fn keys_engine() -> Container {
     Container::engine("Keys").add(
         Container::parallel("Keys Voices")
-            .add(keys_layer("Keys A"))
-            .add(keys_layer("Keys B")),
+            .add(keys_layer("Keys A", None))
+            .add(keys_layer("Keys B", None)),
     )
 }
 
-fn keys_layer(name: &str) -> Container {
+/// `sample_spec` = a library spec path realizing the Sampler
+/// ([`BlockImpl::Sample`](crate::rig::BlockImpl)); `None` keeps the placeholder
+/// (structure only, no DSP).
+fn keys_layer(name: &str, sample_spec: Option<String>) -> Container {
+    let source = match sample_spec {
+        Some(spec) => Container::module("Piano Source").sample_block("Piano", spec),
+        None => Container::module("Piano Source").block(BlockType::Sampler, "Piano"),
+    };
     Container::layer(name)
         .param("octave", "0")
-        .add(Container::module("Piano Source").block(BlockType::Sampler, "Piano"))
+        .add(source)
         .extend(fx_chain())
+}
+
+// ── Sample-realized Keys (machine-local libraries) ───────────────────────────
+
+/// Root of the local Keyscape extraction — per-instrument dirs each holding a
+/// `library.styx` + FLAC samples. Override with `FTS_KEYSCAPE_ROOT`.
+const KEYSCAPE_ROOT: &str = "/run/media/AudioHaven/Sampled/Keys/Keyscape";
+
+/// Spec path for one Keyscape instrument, if the local extraction has it.
+fn keyscape_spec(instrument: &str) -> Option<String> {
+    let root = std::env::var("FTS_KEYSCAPE_ROOT").unwrap_or_else(|_| KEYSCAPE_ROOT.into());
+    let p = std::path::Path::new(&root).join(instrument).join("library.styx");
+    p.exists().then(|| p.to_string_lossy().into_owned())
+}
+
+/// The Nord Stage program with its Keys layers realized by real Keyscape
+/// libraries (Layer A = LA Custom C7 Grand, Layer B = Classic Rhodes).
+/// `None` on machines without the extraction — callers register it
+/// conditionally so [`nord_stage_preset`] stays deterministic for tests.
+pub fn nord_stage_piano_preset() -> Option<Container> {
+    let grand = keyscape_spec("LA Custom C7 Grand")?;
+    let rhodes = keyscape_spec("Rhodes - Classic");
+    let keys = Container::engine("Keys").add(
+        Container::parallel("Keys Voices")
+            .add(keys_layer("Keys A", Some(grand)))
+            .add(keys_layer("Keys B", rhodes)),
+    );
+    Some(build_program("Nord Stage (Piano)", keys))
 }
 
 /// Synth — 3 layers, each the full voice (Osc → Filter → Amp) + FX, with the
@@ -157,11 +192,17 @@ fn synth_layer(name: &str) -> Container {
 /// The complete Nord Stage 4 program as a placeholder routing tree. Inspect with
 /// [`Container::dump`].
 pub fn nord_stage_preset() -> Container {
-    Container::preset("Nord Stage")
+    build_program("Nord Stage", keys_engine())
+}
+
+/// The program shell shared by the placeholder and sample-realized variants:
+/// same Organ/Synth engines and global tail, parameterized Keys engine.
+fn build_program(name: &str, keys: Container) -> Container {
+    Container::preset(name)
         .add(
             Container::parallel("Engines")
                 .add(organ_engine())
-                .add(keys_engine())
+                .add(keys)
                 .add(synth_engine()),
         )
         // Global tail. The Global-mode Delay/Comp/Reverb instances live here when

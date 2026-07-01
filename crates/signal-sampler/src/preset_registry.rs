@@ -45,6 +45,11 @@ impl PresetRegistry {
     pub fn with_builtins() -> Self {
         let mut r = Self::new();
         r.register_code(crate::nord::nord_stage_preset());
+        // Sample-realized variant — only on machines with the Keyscape
+        // extraction (nord_stage_piano_preset probes the library paths).
+        if let Some(piano) = crate::nord::nord_stage_piano_preset() {
+            r.register_code(piano);
+        }
         r.register_code(crate::nord::layering_demo());
         r
     }

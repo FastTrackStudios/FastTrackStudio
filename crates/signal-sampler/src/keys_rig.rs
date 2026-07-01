@@ -280,4 +280,43 @@ mod tests {
         let rms = (outl.iter().map(|s| s * s).sum::<f32>() / 256.0).sqrt();
         assert!(rms > 1e-3, "keys instrument should render audible output, rms={rms}");
     }
+
+    /// Machine-local: the full `just keys` render path plays the Keyscape-
+    /// realized program (piano through the whole Nord tree). Run explicitly:
+    /// `cargo test -p signal-sampler --lib piano_program -- --ignored`
+    #[test]
+    #[ignore = "requires the local Keyscape extraction on AudioHaven"]
+    fn keys_instrument_renders_the_piano_program() {
+        let Some(preset) = crate::nord::nord_stage_piano_preset() else {
+            eprintln!("skipping: Keyscape extraction not present");
+            return;
+        };
+        let mut inst = KeysInstrument::new(&preset, 48_000);
+        inst.prepare(48_000.0, 512).unwrap();
+
+        let (inl, inr) = (vec![0.0f32; 512], vec![0.0f32; 512]);
+        let (mut outl, mut outr) = (vec![0.0f32; 512], vec![0.0f32; 512]);
+        let midi = [PluginMidiEvent {
+            offset: 0,
+            message: daw::service::MidiMessage::note_on(0, 60, 100),
+        }];
+        // Samples decode on a background thread — retrigger until audible.
+        let mut heard = 0.0f32;
+        for _ in 0..600 {
+            let ev = PluginEvents {
+                params: &[],
+                midi: &midi,
+                note_expressions: &[],
+            };
+            inst.process_block(&inl, &inr, &mut outl, &mut outr, &ev)
+                .unwrap();
+            let rms = (outl.iter().map(|s| s * s).sum::<f32>() / 512.0).sqrt();
+            heard = heard.max(rms);
+            if heard > 1e-3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(heard > 1e-3, "piano program should be audible, rms={heard}");
+    }
 }

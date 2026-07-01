@@ -388,6 +388,42 @@ zones (
         assert!(heard > 1e-3, "sampler block should be audible, rms={heard}");
     }
 
+    /// Machine-local: the real Keyscape LA Custom C7 Grand extraction loads
+    /// through a Sampler block and makes sound. Run explicitly:
+    /// `cargo test -p signal-sampler --lib keyscape -- --ignored`
+    #[test]
+    #[ignore = "requires the local Keyscape extraction on AudioHaven"]
+    fn keyscape_c7_grand_loads_and_sounds() {
+        let spec =
+            "/run/media/AudioHaven/Sampled/Keys/Keyscape/LA Custom C7 Grand/library.styx";
+        if !std::path::Path::new(spec).exists() {
+            eprintln!("skipping: {spec} not present");
+            return;
+        }
+        let tree = Container::layer("Keys").sample_block("C7 Grand", spec);
+        let mut rn = RenderNode::compile(&tree, 48_000);
+        rn.prepare(48_000.0, 512);
+        assert_eq!(rn.live_leaves(), 1, "keyscape sampler block builds");
+
+        let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+        let midi = [note_on(60, 100)];
+        let mut heard = 0.0f32;
+        for _ in 0..600 {
+            let ev = PluginEvents {
+                params: &[],
+                midi: &midi,
+                note_expressions: &[],
+            };
+            rn.render(&mut l, &mut r, &ev);
+            heard = heard.max(rms(&l));
+            if heard > 1e-3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(heard > 1e-3, "C7 grand should be audible, rms={heard}");
+    }
+
     #[test]
     fn full_nord_preset_renders_synth_oscillators() {
         // The whole Nord routing: the 3 synth Oscillators plus every native
