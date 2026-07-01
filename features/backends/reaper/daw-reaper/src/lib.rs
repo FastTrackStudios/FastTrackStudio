@@ -34,17 +34,13 @@ pub mod batch;
 pub mod bootstrap;
 pub mod local_caller;
 pub mod plugin_services;
-pub mod remote;
 pub mod services;
 
 pub mod extension_setup;
 pub mod safe_wrappers;
 pub mod socket_publisher;
-pub mod sync;
 pub mod sync_api;
 pub use local_caller::LocalCaller;
-pub use remote::ReaperRemote;
-pub use sync::ReaperMainThread;
 pub use sync_api::DawMainThread;
 
 pub mod action_registry;

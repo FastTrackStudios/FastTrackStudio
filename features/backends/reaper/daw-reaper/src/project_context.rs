@@ -86,6 +86,18 @@ pub fn find_project_by_guid(guid: &str) -> Option<Project> {
     find_project_by_guid_raw(guid).map(Project::new)
 }
 
+/// Find a track on a project by GUID (linear scan).
+pub(crate) fn find_track_by_guid(project: &Project, guid: &str) -> Option<reaper_high::Track> {
+    for i in 0..project.track_count() {
+        if let Some(track) = project.track_by_index(i)
+            && track.guid().to_string_without_braces() == guid
+        {
+            return Some(track);
+        }
+    }
+    None
+}
+
 /// Convert a daw-proto ProjectContext to a REAPER ProjectContext
 ///
 /// If the project is found by GUID, returns a ProjectContext::Proj with the raw pointer.

@@ -9,7 +9,7 @@ use daw_proto::{DawError, DawResult, FxChainContext, FxParameter};
 use reaper_high::{FxChain, Reaper as ReaperHigh, Track};
 
 use crate::fx::build_fx_parameter;
-use crate::sync::find_track_by_guid;
+use crate::project_context::find_track_by_guid;
 
 fn resolve_chain(ctx: &FxChainContext) -> Option<(Track, FxChain)> {
     let project = ReaperHigh::get().current_project();
