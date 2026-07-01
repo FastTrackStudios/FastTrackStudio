@@ -47,7 +47,7 @@ fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
         service::fx::descriptor(),
         service::health::descriptor(),
         service::input::descriptor(),
-        service::item::items_descriptor(),
+        service::item::descriptor(),
         service::live_midi::descriptor(),
         service::marker::descriptor(),
         service::midi::descriptor(),
