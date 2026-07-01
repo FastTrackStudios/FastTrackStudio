@@ -100,6 +100,30 @@ struct RpcArgs {
     /// surfaces get owned `T`), and the client gains a `.scoped(ctx)`
     /// wrapper so call sites set it once per scope.
     context: Option<Type>,
+    /// `ops` / `ops(Src as Dst, ...)` — additionally emit the
+    /// `<Trait>Op` / `<Trait>OpOutput` reified-call enums plus an
+    /// `apply` that replays an op against any backend. Substitution
+    /// pairs (`ProjectContext as ProjectArg`) swap a parameter type
+    /// for a deferred wire representation resolved at apply time via
+    /// `architect::ops::ResolveArg`.
+    ops: Option<Vec<OpsSubst>>,
+}
+
+/// One `Src as Dst` substitution inside `ops(...)`: parameters of
+/// type `src` are carried on the op enum as `dst` and resolved back
+/// at `apply` time.
+struct OpsSubst {
+    src: Type,
+    dst: Type,
+}
+
+impl syn::parse::Parse for OpsSubst {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let src: Type = input.parse()?;
+        input.parse::<syn::Token![as]>()?;
+        let dst: Type = input.parse()?;
+        Ok(OpsSubst { src, dst })
+    }
 }
 
 impl RpcArgs {
@@ -112,12 +136,30 @@ impl RpcArgs {
             self.context = Some(meta.value()?.parse()?);
             return Ok(());
         }
+        if meta.path.is_ident("ops") {
+            if self.ops.is_some() {
+                return Err(meta.error("duplicate `ops` argument"));
+            }
+            if meta.input.peek(syn::token::Paren) {
+                let content;
+                syn::parenthesized!(content in meta.input);
+                let pairs = content
+                    .parse_terminated(<OpsSubst as syn::parse::Parse>::parse, syn::Token![,])?
+                    .into_iter()
+                    .collect();
+                self.ops = Some(pairs);
+            } else {
+                self.ops = Some(Vec::new());
+            }
+            return Ok(());
+        }
         Err(meta.error(
             "unknown #[architect::rpc] argument — supported: `sync_client` \
              (emit the blocking <Trait>SyncClient facade), `context = Type` \
-             (ambient per-call context threaded through every method). \
-             Backend requirements are declared per backend at the bundle \
-             site, not on the trait.",
+             (ambient per-call context threaded through every method), \
+             `ops` / `ops(Src as Dst, ...)` (emit the <Trait>Op reified-call \
+             enum + apply). Backend requirements are declared per backend \
+             at the bundle site, not on the trait.",
         ))
     }
 }
@@ -311,6 +353,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         &subscriptions,
         args.sync_client,
         args.context.is_some(),
+        args.ops.is_some(),
     );
 
     // Stream sibling — emitted when the trait declares `#[subscribe]`
@@ -339,6 +382,13 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         _ => quote! {},
     };
 
+    // Reified-call enums — emitted with `ops`: `<Trait>Op` (one
+    // variant per sync method) + `<Trait>OpOutput` + `apply`.
+    let ops_block = match &args.ops {
+        Some(substs) => emit_ops_block(trait_name, vis, &methods, ctx, substs)?,
+        None => quote! {},
+    };
+
     Ok(quote! {
         #user_trait
         #mirror_trait
@@ -350,6 +400,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         #stream_block
         #sync_client
         #scoped_client
+        #ops_block
         #prelude
     })
 }
@@ -493,6 +544,7 @@ fn emit_prelude(
     subs: &[Subscription],
     sync_client: bool,
     has_context: bool,
+    has_ops: bool,
 ) -> TokenStream2 {
     let snake = to_snake_case(&trait_name.to_string());
     let service_alias = format_ident!("{}Service", trait_name);
@@ -545,6 +597,18 @@ fn emit_prelude(
         quote! {}
     };
 
+    // Op enums are plain data — no vox gate; names are already
+    // trait-prefixed so they stay glob-safe.
+    let ops_items = if has_ops {
+        let op_name = format_ident!("{}Op", trait_name);
+        let op_output_name = format_ident!("{}OpOutput", trait_name);
+        quote! {
+            pub use super::{#op_name, #op_output_name};
+        }
+    } else {
+        quote! {}
+    };
+
     let vox_items = match shape {
         Shape::Empty => quote! {},
         // AllAsync: vox::service decorates the user trait directly, so
@@ -583,8 +647,239 @@ fn emit_prelude(
             #stream_items
             #sync_items
             #scoped_items
+            #ops_items
         }
     }
+}
+
+/// PascalCase a snake_case identifier — op-enum variant names are the
+/// method names recased (`set_muted` → `SetMuted`).
+fn to_pascal_case(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut upper_next = true;
+    for ch in input.chars() {
+        if ch == '_' {
+            upper_next = true;
+        } else if upper_next {
+            out.extend(ch.to_uppercase());
+            upper_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Emit the reified-call surface requested by `#[architect::rpc(ops)]`:
+///
+/// - `<Trait>Op` — one struct variant per **sync** method, fields =
+///   the method's owned wire arguments (async methods don't reify —
+///   ops exist to batch/replay synchronous calls).
+/// - `<Trait>OpOutput` — one variant per method wrapping its return.
+/// - `impl <Trait>Op { fn apply(self, backend) }` — replays the op
+///   against any `impl Trait`.
+///
+/// Substitution pairs (`ops(ProjectContext as ProjectArg)`) swap every
+/// parameter of the source type for the target type on the enum, and
+/// `apply` grows a `resolver` argument that converts each deferred
+/// value back via [`architect::ops::ResolveArg`] before the call —
+/// this is what lets a batch step reference the output of an earlier
+/// step instead of a literal.
+///
+/// Both enums derive `Clone, Debug, Facet` (facet via architect's
+/// unconditional re-export) so they can ride any vox wire unchanged.
+fn emit_ops_block(
+    trait_name: &syn::Ident,
+    vis: &syn::Visibility,
+    methods: &[Method],
+    ctx: Option<&Type>,
+    substs: &[OpsSubst],
+) -> syn::Result<TokenStream2> {
+    let sync_methods: Vec<&Method> = methods.iter().filter(|m| !m.is_async).collect();
+    if sync_methods.is_empty() {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[architect::rpc(ops)] requires at least one sync method — \
+             ops reify synchronous calls for batching/replay; an \
+             all-async trait has nothing to reify.",
+        ));
+    }
+
+    let op_name = format_ident!("{}Op", trait_name);
+    let op_output_name = format_ident!("{}OpOutput", trait_name);
+
+    // Type-token comparison for substitution matching: normalize both
+    // sides through `quote` so spacing differences don't matter.
+    let subst_for = |ty: &Type| -> Option<&OpsSubst> {
+        let ty_str = quote!(#ty).to_string();
+        substs.iter().find(|s| {
+            let src = &s.src;
+            quote!(#src).to_string() == ty_str
+        })
+    };
+
+    let ctx_field = ctx.map(|t| quote! { ctx: #t, });
+
+    let mut op_variants = Vec::new();
+    let mut output_variants = Vec::new();
+    let mut apply_arms = Vec::new();
+
+    for m in &sync_methods {
+        let method_name = &m.decl.sig.ident;
+        let variant = format_ident!("{}", to_pascal_case(&method_name.to_string()));
+        let docs: Vec<_> = m
+            .decl
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("doc"))
+            .collect();
+
+        // Per-arg: field type after substitution + how apply rebuilds
+        // the call argument (resolve substituted, `&` re-borrowed).
+        let mut fields = Vec::new();
+        let mut binds = Vec::new();
+        let mut resolves = Vec::new();
+        let mut call_args = Vec::new();
+
+        let typed_inputs = m.mirror_inputs.iter().filter_map(|a| match a {
+            FnArg::Typed(t) => Some(t),
+            FnArg::Receiver(_) => None,
+        });
+        for (pat_ty, (ident, &was_ref)) in
+            typed_inputs.zip(m.arg_idents.iter().zip(m.arg_was_ref.iter()))
+        {
+            let owned_ty = &*pat_ty.ty;
+            if let Some(sub) = subst_for(owned_ty) {
+                let dst = &sub.dst;
+                let src = &sub.src;
+                fields.push(quote! { #ident: #dst });
+                resolves.push(quote! {
+                    let #ident: #src =
+                        ::architect::ops::ResolveArg::resolve_arg(resolver, #ident)?;
+                });
+            } else {
+                fields.push(quote! { #ident: #owned_ty });
+            }
+            binds.push(quote! { #ident });
+            if was_ref {
+                call_args.push(quote! { &#ident });
+            } else {
+                call_args.push(quote! { #ident });
+            }
+        }
+
+        // Variant shape: unit when field-free (and no ambient ctx).
+        let has_fields = !fields.is_empty() || ctx.is_some();
+        if has_fields {
+            op_variants.push(quote! {
+                #(#docs)*
+                #variant { #ctx_field #(#fields),* }
+            });
+        } else {
+            op_variants.push(quote! {
+                #(#docs)*
+                #variant
+            });
+        }
+
+        // Output variant wraps the method's return; unit for `()`.
+        let (out_variant, wrap): (TokenStream2, bool) = match &m.return_ty {
+            ReturnType::Default => (quote! { #variant }, false),
+            ReturnType::Type(_, ty) => (quote! { #variant(#ty) }, true),
+        };
+        output_variants.push(out_variant);
+
+        let ctx_bind = ctx.map(|_| quote! { ctx, });
+        let ctx_call = ctx.map(|_| quote! { &ctx, });
+        let pattern = if has_fields {
+            quote! { Self::#variant { #ctx_bind #(#binds),* } }
+        } else {
+            quote! { Self::#variant }
+        };
+        let call = quote! { backend.#method_name(#ctx_call #(#call_args),*) };
+        // `resolves` is empty when the method has no substituted args
+        // (and always, without `ops(...)` pairs) — the block collapses
+        // to the bare call.
+        let body = if wrap {
+            quote! { { #(#resolves)* #op_output_name::#variant(#call) } }
+        } else {
+            quote! { { #(#resolves)* #call; #op_output_name::#variant } }
+        };
+        apply_arms.push(quote! { #pattern => #body, });
+    }
+
+    // With substitutions, `apply` takes a resolver and is fallible;
+    // without, it's infallible and resolver-free.
+    let dst_bounds: Vec<TokenStream2> = substs
+        .iter()
+        .map(|s| {
+            let src = &s.src;
+            let dst = &s.dst;
+            quote! { ::architect::ops::ResolveArg<#dst, #src> }
+        })
+        .collect();
+
+    let op_doc = format!(
+        "Reified call into [`{trait_name}`] — one variant per sync \
+         method, carrying the owned wire arguments. Build a program of \
+         these, ship it as data, replay with [`{op_name}::apply`]."
+    );
+    let output_doc = format!(
+        "Return value of one applied [`{op_name}`] — one variant per \
+         method, wrapping that method's return type."
+    );
+
+    let apply_fn = if substs.is_empty() {
+        quote! {
+            /// Replay this op against a backend.
+            #vis fn apply<__B>(self, backend: &__B) -> #op_output_name
+            where
+                __B: #trait_name + ?::core::marker::Sized,
+            {
+                match self { #(#apply_arms)* }
+            }
+        }
+    } else {
+        quote! {
+            /// Replay this op against a backend, resolving deferred
+            /// arguments through `resolver` first. Fails only if the
+            /// resolver rejects a deferred value.
+            #vis fn apply<__B, __R>(
+                self,
+                backend: &__B,
+                resolver: &__R,
+            ) -> ::core::result::Result<
+                #op_output_name,
+                <__R as ::architect::ops::OpResolver>::Error,
+            >
+            where
+                __B: #trait_name + ?::core::marker::Sized,
+                __R: ::architect::ops::OpResolver #(+ #dst_bounds)*,
+            {
+                Ok(match self { #(#apply_arms)* })
+            }
+        }
+    };
+
+    Ok(quote! {
+        #[doc = #op_doc]
+        #[repr(u8)]
+        #[derive(Clone, Debug, ::architect::facet::Facet)]
+        #vis enum #op_name {
+            #(#op_variants),*
+        }
+
+        #[doc = #output_doc]
+        #[repr(u8)]
+        #[derive(Clone, Debug, ::architect::facet::Facet)]
+        #vis enum #op_output_name {
+            #(#output_variants),*
+        }
+
+        impl #op_name {
+            #apply_fn
+        }
+    })
 }
 
 /// Snake-case an UpperCamelCase identifier. Mirrors what `#[vox::service]`

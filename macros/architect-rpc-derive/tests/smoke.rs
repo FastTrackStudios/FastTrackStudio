@@ -458,3 +458,162 @@ mod empty {
         impl Empty for Backend {}
     }
 }
+
+// ── Reified ops: #[rpc(ops)] ────────────────────────────────────────
+
+mod ops_plain {
+    use super::rpc;
+
+    #[rpc(ops)]
+    pub trait Counter {
+        /// Bump by `n`, returning the new value.
+        fn add(&self, n: u32) -> u32;
+        fn reset(&self);
+        fn label(&self, prefix: &str) -> String;
+    }
+
+    #[derive(Default)]
+    struct Backend {
+        value: std::sync::Mutex<u32>,
+    }
+
+    impl Counter for Backend {
+        fn add(&self, n: u32) -> u32 {
+            let mut v = self.value.lock().unwrap();
+            *v += n;
+            *v
+        }
+
+        fn reset(&self) {
+            *self.value.lock().unwrap() = 0;
+        }
+
+        fn label(&self, prefix: &str) -> String {
+            format!("{prefix}:{}", self.value.lock().unwrap())
+        }
+    }
+
+    #[test]
+    fn ops_replay_against_backend() {
+        let backend = Backend::default();
+        let program = vec![
+            CounterOp::Add { n: 2 },
+            CounterOp::Add { n: 3 },
+            CounterOp::Label { prefix: "v".into() },
+        ];
+        let outputs: Vec<CounterOpOutput> =
+            program.into_iter().map(|op| op.apply(&backend)).collect();
+        assert!(matches!(outputs[0], CounterOpOutput::Add(2)));
+        assert!(matches!(outputs[1], CounterOpOutput::Add(5)));
+        match &outputs[2] {
+            CounterOpOutput::Label(s) => assert_eq!(s, "v:5"),
+            other => panic!("unexpected output: {other:?}"),
+        }
+
+        // Unit-return method → unit output variant; unit variant op.
+        let out = CounterOp::Reset.apply(&backend);
+        assert!(matches!(out, CounterOpOutput::Reset));
+        assert!(matches!(
+            CounterOp::Label { prefix: "v".into() }.apply(&backend),
+            CounterOpOutput::Label(_)
+        ));
+    }
+}
+
+mod ops_subst {
+    use architect::ops::{OpResolver, ResolveArg};
+
+    use super::rpc;
+
+    /// The literal parameter type the trait methods take.
+    #[derive(Clone, Debug, PartialEq, facet::Facet)]
+    pub struct TrackRef(pub u32);
+
+    /// Deferred wire representation — literal or an earlier step's output.
+    #[repr(u8)]
+    #[derive(Clone, Debug, facet::Facet)]
+    pub enum TrackArg {
+        Literal(TrackRef),
+        FromStep(u32),
+    }
+
+    #[rpc(ops(TrackRef as TrackArg))]
+    pub trait Mixer {
+        fn mute(&self, track: TrackRef, muted: bool) -> bool;
+        fn first_track(&self) -> TrackRef;
+    }
+
+    #[derive(Default)]
+    struct Backend;
+
+    impl Mixer for Backend {
+        fn mute(&self, track: TrackRef, muted: bool) -> bool {
+            track.0 == 7 && muted
+        }
+
+        fn first_track(&self) -> TrackRef {
+            TrackRef(7)
+        }
+    }
+
+    /// Resolver holding prior step outputs.
+    struct Steps(Vec<TrackRef>);
+
+    impl OpResolver for Steps {
+        type Error = String;
+    }
+
+    impl ResolveArg<TrackArg, TrackRef> for Steps {
+        fn resolve_arg(&self, arg: TrackArg) -> Result<TrackRef, String> {
+            match arg {
+                TrackArg::Literal(t) => Ok(t),
+                TrackArg::FromStep(n) => self
+                    .0
+                    .get(n as usize)
+                    .cloned()
+                    .ok_or_else(|| format!("no step {n}")),
+            }
+        }
+    }
+
+    #[test]
+    fn substituted_ops_resolve_deferred_args() {
+        let backend = Backend;
+        let mut steps = Steps(Vec::new());
+
+        // Step 0: produce a track; record its output for later steps.
+        let out = MixerOp::FirstTrack.apply(&backend, &steps).unwrap();
+        let MixerOpOutput::FirstTrack(track) = out else {
+            panic!("wrong output variant");
+        };
+        steps.0.push(track);
+
+        // Step 1: reference step 0's output instead of a literal.
+        let op = MixerOp::Mute {
+            track: TrackArg::FromStep(0),
+            muted: true,
+        };
+        match op.apply(&backend, &steps).unwrap() {
+            MixerOpOutput::Mute(hit) => assert!(hit),
+            other => panic!("unexpected output: {other:?}"),
+        }
+
+        // Literal path + resolver failure path.
+        let op = MixerOp::Mute {
+            track: TrackArg::Literal(TrackRef(1)),
+            muted: true,
+        };
+        assert!(matches!(
+            op.apply(&backend, &steps).unwrap(),
+            MixerOpOutput::Mute(false)
+        ));
+        let missing = MixerOp::Mute {
+            track: TrackArg::FromStep(99),
+            muted: true,
+        };
+        assert_eq!(
+            missing.apply(&backend, &steps).unwrap_err(),
+            "no step 99".to_string()
+        );
+    }
+}

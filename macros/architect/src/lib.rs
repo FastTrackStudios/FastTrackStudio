@@ -296,6 +296,16 @@ pub use handle::{Handle, HandleRegistry, RawHandle};
 pub mod plan;
 pub use plan::{LayerDiagnostic, LayerGraph, LayerNode, LayerPlan, LayerPlanError};
 
+// Deferred-argument resolution for `#[architect::rpc(ops)]` enums.
+// Pure data + traits, wasm-clean, vox-free.
+pub mod ops;
+pub use ops::{LiteralResolver, OpResolver, ResolveArg};
+
+// `clients!` — client-registry struct generation (macro lands at the
+// crate root via #[macro_export]; the module carries the docs).
+#[cfg(feature = "vox")]
+pub mod clients;
+
 // In-process transport — serve a `LayerRouter` over a vox in-memory link
 // so a typed client consumes a local backend with no server. Native only
 // (vox's `MemoryLink` isn't compiled for wasm).
@@ -732,6 +742,67 @@ pub mod dispatch {
         }
     }
 
+    // ── Standard dispatcher: caller-supplied spawn (main-thread queues) ─
+
+    /// Marshals each closure through a caller-supplied spawn function
+    /// and awaits the result over a oneshot. This is the dispatcher for
+    /// backends whose work must run under a specific thread affinity —
+    /// a REAPER defer queue, a moiré main-thread executor, a GUI event
+    /// loop — where the queue itself already exists and architect only
+    /// needs a way to enqueue:
+    ///
+    /// ```ignore
+    /// // REAPER: TaskSupport-backed main-thread queue.
+    /// let dispatcher = SpawnDispatcher::new(|task| {
+    ///     main_thread_queue.defer(task);
+    /// });
+    /// ```
+    ///
+    /// If the spawner drops the task without running it (queue shut
+    /// down, host tearing down), the call resolves to
+    /// [`DispatchError::ShutDown`]. A panic inside the task is not
+    /// caught here — the owning queue's panic policy applies.
+    ///
+    /// Backends holding one of these implement `HasDispatcher`
+    /// manually (the dispatcher carries runtime state, so the derive's
+    /// `Default` path doesn't apply).
+    #[derive(Clone)]
+    pub struct SpawnDispatcher {
+        spawn: std::sync::Arc<dyn Fn(Box<dyn FnOnce() + Send + 'static>) + Send + Sync>,
+    }
+    impl core::fmt::Debug for SpawnDispatcher {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.debug_struct("SpawnDispatcher").finish_non_exhaustive()
+        }
+    }
+
+    impl SpawnDispatcher {
+        /// Wrap a spawn function that enqueues a task onto the target
+        /// execution context.
+        pub fn new<F>(spawn: F) -> Self
+        where
+            F: Fn(Box<dyn FnOnce() + Send + 'static>) + Send + Sync + 'static,
+        {
+            Self {
+                spawn: std::sync::Arc::new(spawn),
+            }
+        }
+    }
+
+    impl Dispatcher for SpawnDispatcher {
+        fn dispatch(
+            &self,
+            f: Box<dyn FnOnce() -> BoxedAny + Send + 'static>,
+        ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + Send + 'static>>
+        {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            (self.spawn)(Box::new(move || {
+                let _ = tx.send(f());
+            }));
+            Box::pin(async move { rx.await.map_err(|_| DispatchError::ShutDown) })
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -744,6 +815,33 @@ pub mod dispatch {
             let fut = run(&d, || 1u32 + 2);
             let result = futures_lite::future::block_on(fut).unwrap();
             assert_eq!(result, 3);
+        }
+
+        #[test]
+        fn spawn_dispatcher_marshals_through_queue_and_reports_shutdown() {
+            // "Main thread" stand-in: a channel drained by a worker.
+            let (queue_tx, queue_rx) =
+                std::sync::mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>();
+            let worker = std::thread::spawn(move || {
+                while let Ok(task) = queue_rx.recv() {
+                    task();
+                }
+            });
+
+            let d = SpawnDispatcher::new(move |task| {
+                let _ = queue_tx.send(task);
+            });
+            let result = futures_lite::future::block_on(run(&d, || 40u32 + 2)).unwrap();
+            assert_eq!(result, 42);
+
+            // Dropped-task path: a spawner that never runs the task
+            // resolves ShutDown instead of hanging.
+            let dead = SpawnDispatcher::new(|task| drop(task));
+            let err = futures_lite::future::block_on(run(&dead, || 0u32)).unwrap_err();
+            assert_eq!(err, DispatchError::ShutDown);
+
+            drop(d);
+            worker.join().unwrap();
         }
 
         #[test]
