@@ -617,3 +617,40 @@ mod ops_subst {
         );
     }
 }
+
+mod ops_skip {
+    use super::rpc;
+
+    #[rpc(ops)]
+    pub trait Meter {
+        fn level(&self) -> f64;
+        /// Tuple returns can't cross phon — callable, but not reified.
+        #[ops(skip)]
+        fn signature(&self) -> (i32, i32);
+    }
+
+    struct Backend;
+    impl Meter for Backend {
+        fn level(&self) -> f64 {
+            0.5
+        }
+        fn signature(&self) -> (i32, i32) {
+            (4, 4)
+        }
+    }
+
+    #[test]
+    fn skipped_methods_stay_callable_but_are_not_reified() {
+        let backend = Backend;
+        assert_eq!(backend.signature(), (4, 4));
+        assert!(matches!(
+            MeterOp::Level.apply(&backend),
+            MeterOpOutput::Level(v) if v == 0.5
+        ));
+        // MeterOp has exactly one variant — Signature was skipped.
+        // (Compile-time proof: this match is exhaustive.)
+        match MeterOp::Level {
+            MeterOp::Level => {}
+        }
+    }
+}

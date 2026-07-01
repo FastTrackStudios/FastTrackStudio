@@ -718,7 +718,10 @@ fn emit_ops_block(
     ctx: Option<&Type>,
     substs: &[OpsSubst],
 ) -> syn::Result<TokenStream2> {
-    let sync_methods: Vec<&Method> = methods.iter().filter(|m| !m.is_async).collect();
+    let sync_methods: Vec<&Method> = methods
+        .iter()
+        .filter(|m| !m.is_async && !m.ops_skip)
+        .collect();
     if sync_methods.is_empty() {
         return Err(syn::Error::new(
             proc_macro2::Span::call_site(),
@@ -1107,6 +1110,24 @@ struct Subscription {
 
 fn has_subscribe_attr(method: &TraitItemFn) -> bool {
     method.attrs.iter().any(|a| a.path().is_ident("subscribe"))
+}
+
+/// `#[ops(skip)]` on a trait method — recognized (and stripped) by the
+/// rpc macro so the method stays callable but is not reified into the
+/// `<Trait>Op` enum.
+fn has_ops_skip_attr(method: &TraitItemFn) -> bool {
+    method.attrs.iter().any(|a| {
+        a.path().is_ident("ops")
+            && a.parse_args::<syn::Ident>()
+                .map(|id| id == "skip")
+                .unwrap_or(false)
+    })
+}
+
+/// Strip `#[ops(...)]` marker attributes before re-emitting a method —
+/// they are directives to this macro, not real attributes.
+fn strip_ops_attrs(method: &mut TraitItemFn) {
+    method.attrs.retain(|a| !a.path().is_ident("ops"));
 }
 
 fn classify_subscription(method: &TraitItemFn) -> syn::Result<Subscription> {
@@ -1541,6 +1562,9 @@ struct Method {
     /// bridge passes `&owned` when calling back into the sync trait).
     arg_was_ref: Vec<bool>,
     return_ty: ReturnType,
+    /// `#[ops(skip)]` — excluded from the `<Trait>Op` reified-call
+    /// enum (e.g. a return type phon cannot lower, like a tuple).
+    ops_skip: bool,
 }
 
 fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
@@ -1621,13 +1645,18 @@ fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
         }
     }
 
+    let ops_skip = has_ops_skip_attr(method);
+    let mut decl = method.clone();
+    strip_ops_attrs(&mut decl);
+
     Ok(Method {
-        decl: method.clone(),
+        decl,
         is_async,
         mirror_inputs,
         arg_idents,
         arg_was_ref,
         return_ty: method.sig.output.clone(),
+        ops_skip,
     })
 }
 
@@ -1704,6 +1733,11 @@ fn emit_user_trait(trait_item: &ItemTrait, shape: Shape, ctx: Option<&Type>) -> 
         TraitItem::Fn(f) => !has_subscribe_attr(f),
         _ => true,
     });
+    for item in &mut out.items {
+        if let TraitItem::Fn(f) = item {
+            strip_ops_attrs(f);
+        }
+    }
     // Ambient context: declared once on the attribute, threaded here
     // into every method — sync methods borrow it (`ctx: &T`, direct
     // callers pay nothing), async methods own it (they're the wire
