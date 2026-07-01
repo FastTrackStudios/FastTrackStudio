@@ -25,18 +25,10 @@ use daw_proto::{ProjectContext, Region};
 /// let all = regions.all().await?;
 /// let count = regions.count().await?;
 ///
-/// // Find region at current position
-/// if let Some(region) = regions.at_position(10.5).await? {
-///     println!("Currently in: {}", region.name);
-/// }
-///
 /// // Add and manipulate regions
 /// let id = regions.add(0.0, 30.0, "Intro").await?;
 /// regions.rename(id, "Extended Intro").await?;
 /// regions.set_bounds(id, 0.0, 45.0).await?;
-///
-/// // Navigation
-/// regions.goto_start(id).await?;
 /// # Ok(())
 /// # }
 /// ```
