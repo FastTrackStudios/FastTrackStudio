@@ -19,10 +19,11 @@ use crate::transport::event::{TransportStreamEvent, TransportSubscription};
 use crate::transport::transport::{LoopRegion, PlayState, Transport as TransportState};
 use crate::{DawResult, ProjectContext, TimeSignature};
 use vox::Tx;
+use crate::batch::ProjectArg;
 
 /// Operations on the transport of a project. `ProjectContext` flows
 /// through each call so a single backend instance serves every project.
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait Transport {
     // ── Playback ────────────────────────────────────────────────────
 

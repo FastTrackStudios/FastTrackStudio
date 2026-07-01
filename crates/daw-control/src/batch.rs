@@ -1,5 +1,10 @@
 //! Batch builder for constructing batch programs with type-safe step handles.
 //!
+//! Ops are the `#[architect::rpc(ops)]`-generated per-service enums —
+//! every covered trait method is expressible; the named builder
+//! methods below are conveniences for the common flows, and
+//! [`BatchBuilder::push_raw`] covers the rest.
+//!
 //! # Example
 //!
 //! ```no_run
@@ -18,32 +23,46 @@
 //! # }
 //! ```
 
-use std::marker::PhantomData;
-
 use daw_proto::batch::*;
+use daw_proto::fx::{EffectsOp, EffectsOpOutput};
+use daw_proto::marker::{MarkersOp, MarkersOpOutput};
+use daw_proto::project::{ProjectsOp, ProjectsOpOutput};
+use daw_proto::routing::{RoutingOp, RoutingOpOutput};
+use daw_proto::track::{TracksOp, TracksOpOutput};
+use daw_proto::transport::{TransportOp, TransportOpOutput};
 use daw_proto::*;
+
+/// Extraction function baked into a [`StepHandle`] by the builder
+/// method that created it — each method knows exactly which output
+/// variant its op produces.
+type Extractor<T> = fn(&BatchOpOutput, u32) -> Result<T, BatchExtractError>;
 
 /// A typed handle to a step in a batch program.
 ///
-/// The type parameter `T` represents the expected output type of the step.
-/// This is used at extraction time to safely downcast the `StepOutput`.
+/// Created by [`BatchBuilder`] methods; redeem it against the
+/// [`BatchResponse`] with [`BatchResponseExt::get`].
 pub struct StepHandle<T> {
     index: u32,
-    _phantom: PhantomData<T>,
+    extract: Extractor<T>,
 }
 
 impl<T> StepHandle<T> {
-    fn new(index: u32) -> Self {
-        Self {
-            index,
-            _phantom: PhantomData,
-        }
-    }
-
     /// Get the step index.
     pub fn index(&self) -> u32 {
         self.index
     }
+}
+
+fn mismatch<T>(step: u32, expected: &'static str) -> Result<T, BatchExtractError> {
+    Err(BatchExtractError::TypeMismatch { step, expected })
+}
+
+/// Flatten an application-level `DawResult` into the extraction
+/// error channel.
+fn flatten<T: Clone>(r: &DawResult<T>) -> Result<T, BatchExtractError> {
+    r.as_ref()
+        .map(T::clone)
+        .map_err(|e| BatchExtractError::StepFailed(e.to_string()))
 }
 
 /// Builder for constructing batch programs with automatic step numbering.
@@ -81,11 +100,12 @@ impl BatchBuilder {
         }
     }
 
-    /// Add a raw instruction and return a typed handle.
-    fn push<T>(&mut self, op: BatchOp) -> StepHandle<T> {
+    /// Add an instruction and return a typed handle carrying its
+    /// output extractor.
+    fn push<T>(&mut self, op: BatchOp, extract: Extractor<T>) -> StepHandle<T> {
         let index = self.instructions.len() as u32;
         self.instructions.push(BatchInstruction { step: index, op });
-        StepHandle::new(index)
+        StepHandle { index, extract }
     }
 
     // =========================================================================
@@ -94,17 +114,31 @@ impl BatchBuilder {
 
     /// Get the current project.
     pub fn current_project(&mut self) -> StepHandle<Option<ProjectInfo>> {
-        self.push(BatchOp::Project(ProjectOp::GetCurrent))
+        self.push(BatchOp::Project(ProjectsOp::Current), |o, step| match o {
+            BatchOpOutput::Project(ProjectsOpOutput::Current(v)) => Ok(v.clone()),
+            _ => mismatch(step, "Option<ProjectInfo>"),
+        })
     }
 
     /// Get a specific project by GUID.
     pub fn get_project(&mut self, guid: impl Into<String>) -> StepHandle<Option<ProjectInfo>> {
-        self.push(BatchOp::Project(ProjectOp::Get(guid.into())))
+        self.push(
+            BatchOp::Project(ProjectsOp::Get {
+                project_id: guid.into(),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Project(ProjectsOpOutput::Get(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Option<ProjectInfo>"),
+            },
+        )
     }
 
     /// List all open projects.
     pub fn list_projects(&mut self) -> StepHandle<Vec<ProjectInfo>> {
-        self.push(BatchOp::Project(ProjectOp::List))
+        self.push(BatchOp::Project(ProjectsOp::List), |o, step| match o {
+            BatchOpOutput::Project(ProjectsOpOutput::List(v)) => Ok(v.clone()),
+            _ => mismatch(step, "Vec<ProjectInfo>"),
+        })
     }
 
     // =========================================================================
@@ -113,16 +147,28 @@ impl BatchBuilder {
 
     /// Play the project.
     pub fn play(&mut self, project: &StepHandle<Option<ProjectInfo>>) -> StepHandle<()> {
-        self.push(BatchOp::Transport(TransportOp::Play(ProjectArg::FromStep(
-            project.index,
-        ))))
+        self.push(
+            BatchOp::Transport(TransportOp::Play {
+                project: ProjectArg::FromStep(project.index),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Transport(TransportOpOutput::Play(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     /// Stop the project.
     pub fn stop(&mut self, project: &StepHandle<Option<ProjectInfo>>) -> StepHandle<()> {
-        self.push(BatchOp::Transport(TransportOp::Stop(ProjectArg::FromStep(
-            project.index,
-        ))))
+        self.push(
+            BatchOp::Transport(TransportOp::Stop {
+                project: ProjectArg::FromStep(project.index),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Transport(TransportOpOutput::Stop(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     /// Get transport state.
@@ -130,16 +176,28 @@ impl BatchBuilder {
         &mut self,
         project: &StepHandle<Option<ProjectInfo>>,
     ) -> StepHandle<transport::transport::Transport> {
-        self.push(BatchOp::Transport(TransportOp::GetState(
-            ProjectArg::FromStep(project.index),
-        )))
+        self.push(
+            BatchOp::Transport(TransportOp::GetState {
+                project: ProjectArg::FromStep(project.index),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Transport(TransportOpOutput::GetState(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Transport"),
+            },
+        )
     }
 
     /// Get tempo.
     pub fn get_tempo(&mut self, project: &StepHandle<Option<ProjectInfo>>) -> StepHandle<f64> {
-        self.push(BatchOp::Transport(TransportOp::GetTempo(
-            ProjectArg::FromStep(project.index),
-        )))
+        self.push(
+            BatchOp::Transport(TransportOp::GetTempo {
+                project: ProjectArg::FromStep(project.index),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Transport(TransportOpOutput::GetTempo(v)) => Ok(*v),
+                _ => mismatch(step, "f64"),
+            },
+        )
     }
 
     /// Set tempo.
@@ -148,10 +206,16 @@ impl BatchBuilder {
         project: &StepHandle<Option<ProjectInfo>>,
         bpm: f64,
     ) -> StepHandle<()> {
-        self.push(BatchOp::Transport(TransportOp::SetTempo(
-            ProjectArg::FromStep(project.index),
-            bpm,
-        )))
+        self.push(
+            BatchOp::Transport(TransportOp::SetTempo {
+                project: ProjectArg::FromStep(project.index),
+                bpm,
+            }),
+            |o, step| match o {
+                BatchOpOutput::Transport(TransportOpOutput::SetTempo(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     // =========================================================================
@@ -163,9 +227,15 @@ impl BatchBuilder {
         &mut self,
         project: &StepHandle<Option<ProjectInfo>>,
     ) -> StepHandle<Vec<Track>> {
-        self.push(BatchOp::Track(TrackOp::GetTracks(ProjectArg::FromStep(
-            project.index,
-        ))))
+        self.push(
+            BatchOp::Track(TracksOp::All {
+                project: ProjectArg::FromStep(project.index),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Track(TracksOpOutput::All(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Vec<Track>"),
+            },
+        )
     }
 
     /// Get a specific track by reference.
@@ -174,17 +244,29 @@ impl BatchBuilder {
         project: &StepHandle<Option<ProjectInfo>>,
         track: TrackRef,
     ) -> StepHandle<Option<Track>> {
-        self.push(BatchOp::Track(TrackOp::GetTrack(
-            ProjectArg::FromStep(project.index),
-            TrackArg::Literal(track),
-        )))
+        self.push(
+            BatchOp::Track(TracksOp::Get {
+                project: ProjectArg::FromStep(project.index),
+                track: TrackArg::Literal(track),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Track(TracksOpOutput::Get(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Option<Track>"),
+            },
+        )
     }
 
     /// Get track count.
     pub fn track_count(&mut self, project: &StepHandle<Option<ProjectInfo>>) -> StepHandle<u32> {
-        self.push(BatchOp::Track(TrackOp::TrackCount(ProjectArg::FromStep(
-            project.index,
-        ))))
+        self.push(
+            BatchOp::Track(TracksOp::Count {
+                project: ProjectArg::FromStep(project.index),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Track(TracksOpOutput::Count(v)) => Ok(*v),
+                _ => mismatch(step, "u32"),
+            },
+        )
     }
 
     /// Add a track and get its GUID.
@@ -194,11 +276,17 @@ impl BatchBuilder {
         name: impl Into<String>,
         at_index: Option<u32>,
     ) -> StepHandle<String> {
-        self.push(BatchOp::Track(TrackOp::AddTrack(
-            ProjectArg::FromStep(project.index),
-            name.into(),
-            at_index,
-        )))
+        self.push(
+            BatchOp::Track(TracksOp::Add {
+                project: ProjectArg::FromStep(project.index),
+                name: name.into(),
+                at_index,
+            }),
+            |o, step| match o {
+                BatchOpOutput::Track(TracksOpOutput::Add(r)) => flatten(r),
+                _ => mismatch(step, "String"),
+            },
+        )
     }
 
     /// Set track muted using a step handle from get_tracks (by index).
@@ -209,11 +297,17 @@ impl BatchBuilder {
         track_index: u32,
         muted: bool,
     ) -> StepHandle<()> {
-        self.push(BatchOp::Track(TrackOp::SetMuted(
-            ProjectArg::FromStep(project.index),
-            TrackArg::FromStepIndex(tracks.index, track_index),
-            muted,
-        )))
+        self.push(
+            BatchOp::Track(TracksOp::SetMuted {
+                project: ProjectArg::FromStep(project.index),
+                track: TrackArg::FromStepIndex(tracks.index, track_index),
+                muted,
+            }),
+            |o, step| match o {
+                BatchOpOutput::Track(TracksOpOutput::SetMuted(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     /// Set track muted using a literal TrackRef.
@@ -223,11 +317,17 @@ impl BatchBuilder {
         track: TrackRef,
         muted: bool,
     ) -> StepHandle<()> {
-        self.push(BatchOp::Track(TrackOp::SetMuted(
-            ProjectArg::FromStep(project.index),
-            TrackArg::Literal(track),
-            muted,
-        )))
+        self.push(
+            BatchOp::Track(TracksOp::SetMuted {
+                project: ProjectArg::FromStep(project.index),
+                track: TrackArg::Literal(track),
+                muted,
+            }),
+            |o, step| match o {
+                BatchOpOutput::Track(TracksOpOutput::SetMuted(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     /// Set track volume.
@@ -237,11 +337,17 @@ impl BatchBuilder {
         track: TrackRef,
         volume: f64,
     ) -> StepHandle<()> {
-        self.push(BatchOp::Track(TrackOp::SetVolume(
-            ProjectArg::FromStep(project.index),
-            TrackArg::Literal(track),
-            volume,
-        )))
+        self.push(
+            BatchOp::Track(TracksOp::SetVolume {
+                project: ProjectArg::FromStep(project.index),
+                track: TrackArg::Literal(track),
+                volume,
+            }),
+            |o, step| match o {
+                BatchOpOutput::Track(TracksOpOutput::SetVolume(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     /// Rename a track.
@@ -251,11 +357,17 @@ impl BatchBuilder {
         track: TrackRef,
         name: impl Into<String>,
     ) -> StepHandle<()> {
-        self.push(BatchOp::Track(TrackOp::RenameTrack(
-            ProjectArg::FromStep(project.index),
-            TrackArg::Literal(track),
-            name.into(),
-        )))
+        self.push(
+            BatchOp::Track(TracksOp::Rename {
+                project: ProjectArg::FromStep(project.index),
+                track: TrackArg::Literal(track),
+                name: name.into(),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Track(TracksOpOutput::Rename(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     // =========================================================================
@@ -268,10 +380,16 @@ impl BatchBuilder {
         project: &StepHandle<Option<ProjectInfo>>,
         track: &StepHandle<String>,
     ) -> StepHandle<Vec<Fx>> {
-        self.push(BatchOp::Fx(FxOp::GetFxList(
-            ProjectArg::FromStep(project.index),
-            FxChainArg::TrackFromStep(track.index),
-        )))
+        self.push(
+            BatchOp::Fx(EffectsOp::List {
+                project: ProjectArg::FromStep(project.index),
+                chain: FxChainArg::TrackFromStep(track.index),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Fx(EffectsOpOutput::List(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Vec<Fx>"),
+            },
+        )
     }
 
     /// Get the FX list using a literal chain context.
@@ -280,40 +398,54 @@ impl BatchBuilder {
         project: &StepHandle<Option<ProjectInfo>>,
         chain: FxChainContext,
     ) -> StepHandle<Vec<Fx>> {
-        self.push(BatchOp::Fx(FxOp::GetFxList(
-            ProjectArg::FromStep(project.index),
-            FxChainArg::Literal(chain),
-        )))
+        self.push(
+            BatchOp::Fx(EffectsOp::List {
+                project: ProjectArg::FromStep(project.index),
+                chain: FxChainArg::Literal(chain),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Fx(EffectsOpOutput::List(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Vec<Fx>"),
+            },
+        )
     }
 
     /// Get FX parameters.
     pub fn get_fx_parameters(
         &mut self,
         project: &StepHandle<Option<ProjectInfo>>,
-        chain: FxChainContext,
-        fx: FxRef,
+        target: FxTarget,
     ) -> StepHandle<Vec<FxParameter>> {
-        self.push(BatchOp::Fx(FxOp::GetParameters(
-            ProjectArg::FromStep(project.index),
-            FxChainArg::Literal(chain),
-            fx,
-        )))
+        self.push(
+            BatchOp::Fx(EffectsOp::Parameters {
+                project: ProjectArg::FromStep(project.index),
+                target,
+            }),
+            |o, step| match o {
+                BatchOpOutput::Fx(EffectsOpOutput::Parameters(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Vec<FxParameter>"),
+            },
+        )
     }
 
     /// Set FX enabled state.
     pub fn set_fx_enabled(
         &mut self,
         project: &StepHandle<Option<ProjectInfo>>,
-        chain: FxChainContext,
-        fx: FxRef,
+        target: FxTarget,
         enabled: bool,
     ) -> StepHandle<()> {
-        self.push(BatchOp::Fx(FxOp::SetFxEnabled(
-            ProjectArg::FromStep(project.index),
-            FxChainArg::Literal(chain),
-            fx,
-            enabled,
-        )))
+        self.push(
+            BatchOp::Fx(EffectsOp::SetEnabled {
+                project: ProjectArg::FromStep(project.index),
+                target,
+                enabled,
+            }),
+            |o, step| match o {
+                BatchOpOutput::Fx(EffectsOpOutput::SetEnabled(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     /// Add an FX plugin to a chain.
@@ -323,11 +455,17 @@ impl BatchBuilder {
         chain: FxChainContext,
         name: impl Into<String>,
     ) -> StepHandle<Option<String>> {
-        self.push(BatchOp::Fx(FxOp::AddFx(
-            ProjectArg::FromStep(project.index),
-            FxChainArg::Literal(chain),
-            name.into(),
-        )))
+        self.push(
+            BatchOp::Fx(EffectsOp::Add {
+                project: ProjectArg::FromStep(project.index),
+                chain: FxChainArg::Literal(chain),
+                name: name.into(),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Fx(EffectsOpOutput::Add(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Option<String>"),
+            },
+        )
     }
 
     /// Set an FX parameter value.
@@ -336,10 +474,16 @@ impl BatchBuilder {
         project: &StepHandle<Option<ProjectInfo>>,
         request: SetParameterRequest,
     ) -> StepHandle<()> {
-        self.push(BatchOp::Fx(FxOp::SetParameter(
-            ProjectArg::FromStep(project.index),
-            request,
-        )))
+        self.push(
+            BatchOp::Fx(EffectsOp::SetParameter {
+                project: ProjectArg::FromStep(project.index),
+                request,
+            }),
+            |o, step| match o {
+                BatchOpOutput::Fx(EffectsOpOutput::SetParameter(r)) => flatten(r),
+                _ => mismatch(step, "()"),
+            },
+        )
     }
 
     // =========================================================================
@@ -352,10 +496,16 @@ impl BatchBuilder {
         project: &StepHandle<Option<ProjectInfo>>,
         track: TrackRef,
     ) -> StepHandle<Vec<TrackRoute>> {
-        self.push(BatchOp::Routing(RoutingOp::GetSends(
-            ProjectArg::FromStep(project.index),
-            TrackArg::Literal(track),
-        )))
+        self.push(
+            BatchOp::Routing(RoutingOp::Sends {
+                project: ProjectArg::FromStep(project.index),
+                track: TrackArg::Literal(track),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Routing(RoutingOpOutput::Sends(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Vec<TrackRoute>"),
+            },
+        )
     }
 
     /// Add a send between two tracks.
@@ -365,11 +515,17 @@ impl BatchBuilder {
         source: TrackRef,
         dest: TrackRef,
     ) -> StepHandle<Option<u32>> {
-        self.push(BatchOp::Routing(RoutingOp::AddSend(
-            ProjectArg::FromStep(project.index),
-            TrackArg::Literal(source),
-            TrackArg::Literal(dest),
-        )))
+        self.push(
+            BatchOp::Routing(RoutingOp::AddSend {
+                project: ProjectArg::FromStep(project.index),
+                source: TrackArg::Literal(source),
+                dest: TrackArg::Literal(dest),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Routing(RoutingOpOutput::AddSend(v)) => Ok(*v),
+                _ => mismatch(step, "Option<u32>"),
+            },
+        )
     }
 
     // =========================================================================
@@ -381,9 +537,15 @@ impl BatchBuilder {
         &mut self,
         project: &StepHandle<Option<ProjectInfo>>,
     ) -> StepHandle<Vec<Marker>> {
-        self.push(BatchOp::Marker(MarkerOp::GetMarkers(ProjectArg::FromStep(
-            project.index,
-        ))))
+        self.push(
+            BatchOp::Marker(MarkersOp::All {
+                project: ProjectArg::FromStep(project.index),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Marker(MarkersOpOutput::All(v)) => Ok(v.clone()),
+                _ => mismatch(step, "Vec<Marker>"),
+            },
+        )
     }
 
     /// Add a marker.
@@ -393,21 +555,35 @@ impl BatchBuilder {
         position: f64,
         name: impl Into<String>,
     ) -> StepHandle<u32> {
-        self.push(BatchOp::Marker(MarkerOp::AddMarker(
-            ProjectArg::FromStep(project.index),
-            position,
-            name.into(),
-        )))
+        self.push(
+            BatchOp::Marker(MarkersOp::Add {
+                project: ProjectArg::FromStep(project.index),
+                position,
+                name: name.into(),
+            }),
+            |o, step| match o {
+                BatchOpOutput::Marker(MarkersOpOutput::Add(r)) => flatten(r),
+                _ => mismatch(step, "u32"),
+            },
+        )
     }
 
     // =========================================================================
     // Raw op — for ops not covered by convenience methods
     // =========================================================================
 
-    /// Push a raw batch operation. Use this for operations not covered by
-    /// convenience methods above.
-    pub fn push_raw<T>(&mut self, op: BatchOp) -> StepHandle<T> {
-        self.push(op)
+    /// Push a raw batch operation with a custom extractor. Use this
+    /// for operations not covered by convenience methods above; pass
+    /// an extractor matching the op's output variant (or one that
+    /// always succeeds for fire-and-forget steps).
+    pub fn push_raw<T>(&mut self, op: BatchOp, extract: Extractor<T>) -> StepHandle<T> {
+        self.push(op, extract)
+    }
+
+    /// Push a raw batch operation whose result the caller never
+    /// redeems (fire-and-forget mutation).
+    pub fn push_unchecked(&mut self, op: BatchOp) -> StepHandle<()> {
+        self.push(op, |_, _| Ok(()))
     }
 }
 
@@ -456,11 +632,11 @@ impl std::error::Error for BatchExtractError {}
 /// Extension trait for extracting typed results from a `BatchResponse`.
 pub trait BatchResponseExt {
     /// Extract a typed result from a batch response using a step handle.
-    fn get<T: FromStepOutput>(&self, handle: &StepHandle<T>) -> Result<T, BatchExtractError>;
+    fn get<T>(&self, handle: &StepHandle<T>) -> Result<T, BatchExtractError>;
 }
 
 impl BatchResponseExt for BatchResponse {
-    fn get<T: FromStepOutput>(&self, handle: &StepHandle<T>) -> Result<T, BatchExtractError> {
+    fn get<T>(&self, handle: &StepHandle<T>) -> Result<T, BatchExtractError> {
         let result = self
             .results
             .iter()
@@ -468,232 +644,9 @@ impl BatchResponseExt for BatchResponse {
             .ok_or(BatchExtractError::StepNotFound(handle.index))?;
 
         match &result.outcome {
-            StepOutcome::Ok(output) => T::from_output(output, handle.index),
+            StepOutcome::Ok(output) => (handle.extract)(output, handle.index),
             StepOutcome::Error(msg) => Err(BatchExtractError::StepFailed(msg.clone())),
             StepOutcome::Skipped(dep) => Err(BatchExtractError::StepSkipped(*dep)),
-        }
-    }
-}
-
-/// Trait for extracting typed values from `StepOutput`.
-pub trait FromStepOutput: Sized {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError>;
-}
-
-// Implement FromStepOutput for common types
-
-impl FromStepOutput for () {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::Unit => Ok(()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "()",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for bool {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::Bool(v) => Ok(*v),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "bool",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for u32 {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::U32(v) => Ok(*v),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "u32",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for f64 {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::F64(v) => Ok(*v),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "f64",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for String {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::Str(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "String",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Option<String> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::OptStr(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Option<String>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Option<ProjectInfo> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::OptProjectInfo(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Option<ProjectInfo>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Vec<ProjectInfo> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::ProjectInfoList(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Vec<ProjectInfo>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Vec<Track> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::TrackList(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Vec<Track>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Option<Track> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::OptTrack(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Option<Track>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Vec<Fx> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::FxList(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Vec<Fx>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Vec<FxParameter> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::FxParameterList(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Vec<FxParameter>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for transport::transport::Transport {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::Transport(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Transport",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Vec<TrackRoute> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::RouteList(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Vec<TrackRoute>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Option<u32> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::OptU32(v) => Ok(*v),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Option<u32>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Vec<Marker> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::MarkerList(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Vec<Marker>",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for TimeSignature {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::TimeSignature(v) => Ok(*v),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "TimeSignature",
-            }),
-        }
-    }
-}
-
-impl FromStepOutput for Vec<Item> {
-    fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
-        match output {
-            StepOutput::ItemList(v) => Ok(v.clone()),
-            _ => Err(BatchExtractError::TypeMismatch {
-                step,
-                expected: "Vec<Item>",
-            }),
         }
     }
 }

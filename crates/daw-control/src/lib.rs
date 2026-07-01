@@ -184,7 +184,7 @@ pub use self::action_registry::ActionRegistry;
 pub use self::audio_engine::AudioEngine;
 pub use self::automation::{EnvelopeHandle, Envelopes};
 pub use self::batch::{
-    BatchBuilder, BatchExtractError, BatchResponseExt, FromStepOutput, StepHandle,
+    BatchBuilder, BatchExtractError, BatchResponseExt, StepHandle,
 };
 pub use self::dawfile::DawFile;
 pub use self::diagnostics::Probes;

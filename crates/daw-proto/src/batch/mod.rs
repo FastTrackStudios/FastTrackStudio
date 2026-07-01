@@ -3,13 +3,11 @@
 
 mod args;
 mod op;
-mod output;
 mod program;
 mod service;
 
 pub use args::*;
 pub use op::*;
-pub use output::*;
 pub use program::*;
 pub use service::*;
 

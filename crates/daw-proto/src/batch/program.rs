@@ -1,6 +1,6 @@
 //! Batch program types — request, response, and instruction containers.
 
-use super::{BatchOp, StepOutput};
+use super::{BatchOp, BatchOpOutput};
 use facet::Facet;
 
 /// A batch program to execute as a single RPC call.
@@ -55,7 +55,7 @@ pub struct StepResult {
 #[derive(Clone, Debug, Facet)]
 pub enum StepOutcome {
     /// Step completed successfully with this output.
-    Ok(StepOutput),
+    Ok(BatchOpOutput),
     /// Step failed with this error message.
     Error(String),
     /// Step was skipped because dependency step `n` failed.
@@ -64,7 +64,7 @@ pub enum StepOutcome {
 
 impl BatchResponse {
     /// Get the output of a specific step, if it succeeded.
-    pub fn step_output(&self, step: u32) -> Option<&StepOutput> {
+    pub fn step_output(&self, step: u32) -> Option<&BatchOpOutput> {
         self.results.iter().find_map(|r| {
             if r.step == step {
                 if let StepOutcome::Ok(ref output) = r.outcome {

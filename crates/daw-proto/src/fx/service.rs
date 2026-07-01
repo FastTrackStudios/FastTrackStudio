@@ -16,8 +16,9 @@ use super::{
     SetParameterRequest,
 };
 use crate::{DawResult, ProjectContext};
+use crate::batch::{FxChainArg, ProjectArg};
 
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg, FxChainContext as FxChainArg))]
 pub trait Effects {
     // ── Installed plugins ──────────────────────────────────────────
 

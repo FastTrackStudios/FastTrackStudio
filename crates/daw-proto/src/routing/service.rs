@@ -4,6 +4,7 @@ use super::{RouteRef, RouteType, SendMode, TrackRoute};
 use crate::DawResult;
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
+use crate::batch::{ProjectArg, TrackArg};
 
 /// Specifies a route location (track + route type + route reference).
 #[derive(Clone, Debug, facet::Facet)]
@@ -35,7 +36,7 @@ impl RouteLocation {
     }
 }
 
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg, TrackRef as TrackArg))]
 pub trait Routing {
     // ── Queries ────────────────────────────────────────────────────
 

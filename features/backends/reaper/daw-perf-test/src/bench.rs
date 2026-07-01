@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use daw::rpc::{BatchBuilder, Daw};
 use daw::service::batch::*;
+use daw::service::track::TracksOp;
 
-use daw_reaper::batch::BatchExecutor;
 use tracing::info;
 
 // ============================================================================
@@ -234,22 +234,22 @@ async fn native_remove_all_markers() {
 }
 
 // ============================================================================
-// In-process batch benchmarks (BatchExecutor, no socket/serialization)
+// In-process batch benchmarks (direct BatchExecution, no socket/serialization)
 // ============================================================================
 
-async fn inproc_create_tracks(executor: &BatchExecutor, n: u32) -> Duration {
+async fn inproc_create_tracks(executor: &daw_reaper::Reaper, n: u32) -> Duration {
     let mut b = BatchBuilder::new().with_undo("In-proc create tracks");
     let proj = b.current_project();
     for i in 0..n {
         b.add_track(&proj, format!("InprocTrack-{i}"), None);
     }
     let start = Instant::now();
-    executor.execute_sync(b.build());
+    BatchExecution::execute(executor, b.build());
     start.elapsed()
 }
 
 async fn inproc_mutate_tracks(
-    executor: &BatchExecutor,
+    executor: &daw_reaper::Reaper,
     daw: &Daw,
     n: u32,
 ) -> eyre::Result<Duration> {
@@ -263,19 +263,19 @@ async fn inproc_mutate_tracks(
         let tref = daw::service::TrackRef::Guid(all[i as usize].guid.clone());
         b.rename_track(&proj, tref.clone(), format!("InprocMutated-{i}"));
         b.set_track_volume(&proj, tref.clone(), 0.5 + (i as f64) * 0.001);
-        b.push_raw::<()>(BatchOp::Track(TrackOp::SetMuted(
-            ProjectArg::FromStep(proj.index()),
-            TrackArg::Literal(tref),
-            i % 2 == 0,
-        )));
+        b.push_unchecked(BatchOp::Track(TracksOp::SetMuted {
+            project: ProjectArg::FromStep(proj.index()),
+            track: TrackArg::Literal(tref),
+            muted: i % 2 == 0,
+        }));
     }
 
     let start = Instant::now();
-    executor.execute_sync(b.build());
+    BatchExecution::execute(executor, b.build());
     Ok(start.elapsed())
 }
 
-async fn inproc_create_and_mutate(executor: &BatchExecutor, n: u32) -> Duration {
+async fn inproc_create_and_mutate(executor: &daw_reaper::Reaper, n: u32) -> Duration {
     let mut b = BatchBuilder::new().with_undo("In-proc create+mutate");
     let proj = b.current_project();
 
@@ -285,31 +285,31 @@ async fn inproc_create_and_mutate(executor: &BatchExecutor, n: u32) -> Duration 
         handles.push(h);
     }
     for (i, handle) in handles.iter().enumerate() {
-        b.push_raw::<()>(BatchOp::Track(TrackOp::SetVolume(
-            ProjectArg::FromStep(proj.index()),
-            TrackArg::FromStep(handle.index()),
-            0.7,
-        )));
-        b.push_raw::<()>(BatchOp::Track(TrackOp::SetMuted(
-            ProjectArg::FromStep(proj.index()),
-            TrackArg::FromStep(handle.index()),
-            i % 2 == 0,
-        )));
+        b.push_unchecked(BatchOp::Track(TracksOp::SetVolume {
+            project: ProjectArg::FromStep(proj.index()),
+            track: TrackArg::FromStep(handle.index()),
+            volume: 0.7,
+        }));
+        b.push_unchecked(BatchOp::Track(TracksOp::SetMuted {
+            project: ProjectArg::FromStep(proj.index()),
+            track: TrackArg::FromStep(handle.index()),
+            muted: i % 2 == 0,
+        }));
     }
 
     let start = Instant::now();
-    executor.execute_sync(b.build());
+    BatchExecution::execute(executor, b.build());
     start.elapsed()
 }
 
-async fn inproc_add_markers(executor: &BatchExecutor, n: u32) -> Duration {
+async fn inproc_add_markers(executor: &daw_reaper::Reaper, n: u32) -> Duration {
     let mut b = BatchBuilder::new().with_undo("In-proc add markers");
     let proj = b.current_project();
     for i in 0..n {
         b.add_marker(&proj, i as f64 * 0.5, format!("InprocMarker-{i}"));
     }
     let start = Instant::now();
-    executor.execute_sync(b.build());
+    BatchExecution::execute(executor, b.build());
     start.elapsed()
 }
 
@@ -395,11 +395,11 @@ async fn batch_mutate_tracks(daw: &Daw, n: u32) -> eyre::Result<Duration> {
         let tref = daw::service::TrackRef::Guid(all[i as usize].guid.clone());
         b.rename_track(&proj, tref.clone(), format!("BatchMutated-{i}"));
         b.set_track_volume(&proj, tref.clone(), 0.5 + (i as f64) * 0.001);
-        b.push_raw::<()>(BatchOp::Track(TrackOp::SetMuted(
-            ProjectArg::FromStep(proj.index()),
-            TrackArg::Literal(tref),
-            i % 2 == 0,
-        )));
+        b.push_unchecked(BatchOp::Track(TracksOp::SetMuted {
+            project: ProjectArg::FromStep(proj.index()),
+            track: TrackArg::Literal(tref),
+            muted: i % 2 == 0,
+        }));
     }
 
     let start = Instant::now();
@@ -476,16 +476,16 @@ async fn batch_create_and_mutate(daw: &Daw, n: u32) -> eyre::Result<Duration> {
         handles.push(h);
     }
     for (i, handle) in handles.iter().enumerate() {
-        b.push_raw::<()>(BatchOp::Track(TrackOp::SetVolume(
-            ProjectArg::FromStep(proj.index()),
-            TrackArg::FromStep(handle.index()),
-            0.7,
-        )));
-        b.push_raw::<()>(BatchOp::Track(TrackOp::SetMuted(
-            ProjectArg::FromStep(proj.index()),
-            TrackArg::FromStep(handle.index()),
-            i % 2 == 0,
-        )));
+        b.push_unchecked(BatchOp::Track(TracksOp::SetVolume {
+            project: ProjectArg::FromStep(proj.index()),
+            track: TrackArg::FromStep(handle.index()),
+            volume: 0.7,
+        }));
+        b.push_unchecked(BatchOp::Track(TracksOp::SetMuted {
+            project: ProjectArg::FromStep(proj.index()),
+            track: TrackArg::FromStep(handle.index()),
+            muted: i % 2 == 0,
+        }));
     }
 
     let total_ops = n * 3; // create + volume + mute
@@ -532,9 +532,9 @@ pub async fn run_all() -> eyre::Result<()> {
     let daw = connect_to_daw_bridge().await?;
     info!("Connected.");
 
-    // Create in-process BatchExecutor (bypasses socket entirely)
-    let executor = BatchExecutor::new();
-    info!("In-process BatchExecutor created.");
+    // In-process executor: the Reaper backend itself (bypasses socket entirely)
+    let executor = daw_reaper::Reaper;
+    info!("In-process batch executor ready.");
     info!("");
 
     // Clean slate

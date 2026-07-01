@@ -16,6 +16,7 @@ use super::{RecordInput, ReorderTracksBehavior, Track, TrackRef};
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
 use vox::Tx;
+use crate::batch::{ProjectArg, TrackArg};
 
 /// Track-scoped ext state payload — groups section + key + value into
 /// a single Facet struct. Kept here so batch op definitions can name
@@ -27,7 +28,7 @@ pub struct TrackExtStateRequest {
     pub value: String,
 }
 
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg, TrackRef as TrackArg))]
 pub trait Tracks {
     // ── Queries ─────────────────────────────────────────────────────
 

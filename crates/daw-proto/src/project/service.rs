@@ -3,8 +3,9 @@
 
 use super::{ProjectContext, ProjectInfo};
 use crate::{DawResult, UndoScope};
+use crate::batch::ProjectArg;
 
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait Projects {
     // ── Per-project handle ──────────────────────────────────────────
     //

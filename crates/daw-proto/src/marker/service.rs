@@ -14,10 +14,11 @@
 use crate::marker::event::MarkerStreamEvent;
 use crate::{DawResult, Marker, ProjectContext};
 use vox::Tx;
+use crate::batch::ProjectArg;
 
 /// Operations on the markers of a project. `ProjectContext` flows
 /// through each call so backends can serve any project.
-#[architect::rpc]
+#[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait Markers {
     /// Every marker in the project, ordered by position.
     fn all(&self, project: ProjectContext) -> Vec<Marker>;
