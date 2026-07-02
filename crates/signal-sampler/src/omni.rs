@@ -237,8 +237,8 @@ mod tests {
         let p = omnisphere_preset();
         let mut rn = crate::node_render::RenderNode::compile(&p, 48_000);
         rn.prepare(48_000.0, 256);
-        // 4 layers × (2 native filters + 1 native amp) = 12 live leaves.
-        assert_eq!(rn.live_leaves(), 12);
+        // 4 layers × (2 native filters + 1 native amp + 1 wavetable) = 16.
+        assert_eq!(rn.live_leaves(), 16);
     }
 
     /// Machine-local: the realized Part plays a real Omnisphere soundsource.

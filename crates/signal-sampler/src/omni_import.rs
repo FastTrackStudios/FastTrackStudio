@@ -830,6 +830,41 @@ mod tests {
         assert!(heard > 1e-3, "imported patch should be audible, rms={heard}");
     }
 
+    /// Machine-local: a pure SYNTH-mode patch (no soundsources) now sounds
+    /// via the native wavetable oscillator.
+    /// `cargo test -p signal-sampler --lib synth_mode_patch -- --ignored`
+    #[test]
+    #[ignore = "requires the voyager patch sync"]
+    fn synth_mode_patch_sounds() {
+        use signal_plugin_host::{PluginEvents, PluginMidiEvent};
+        let path = Path::new(
+            "/run/media/AudioHaven/Sampled/Synth/Spectrasonics-Patches/Omnisphere-Voyager/Settings Library/Patches/User/My Category/1975 Attempt.prt_omn",
+        );
+        if !path.exists() {
+            eprintln!("skipping: {path:?} not present");
+            return;
+        }
+        let tree = load_patch_file(path, &SoundsourceIndex::default()).expect("import");
+        let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
+        rn.prepare(48_000.0, 512);
+        let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+        let midi = [PluginMidiEvent {
+            offset: 0,
+            message: daw::service::MidiMessage::note_on(0, 60, 100),
+        }];
+        let mut heard = 0.0f32;
+        for b in 0..8 {
+            let ev = PluginEvents {
+                params: &[],
+                midi: if b == 0 { &midi } else { &[] },
+                note_expressions: &[],
+            };
+            rn.render(&mut l, &mut r, &ev);
+            heard = heard.max((l.iter().map(|s| s * s).sum::<f32>() / 512.0).sqrt());
+        }
+        assert!(heard > 1e-3, "synth-mode patch audible, rms={heard}");
+    }
+
     /// Machine-local: parse every factory patch in the on-disk Settings
     /// Library without errors (format coverage sweep).
     /// `cargo test -p signal-sampler --lib factory_patches -- --ignored`

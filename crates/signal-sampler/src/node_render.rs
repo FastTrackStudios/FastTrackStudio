@@ -26,7 +26,7 @@ use signal_plugin_host::{PluginEvents, PluginInstance, PluginMidiEvent};
 use signal_proto::block::BlockType;
 
 use crate::native::{
-    ControlEnv, ControlLfo, LfoWave, ModSource, NativeAmp, NativeFilter,
+    ControlEnv, ControlLfo, LfoWave, ModSource, NativeAmp, NativeFilter, NativeWavetable,
 };
 use crate::native_osc::NativeOscillator;
 use crate::rig::{build_block, RigBlock};
@@ -44,6 +44,13 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
         // instance; mod routes then modulate around those bases.
         match block.block_type {
             BlockType::Oscillator => Some(Box::new(NativeOscillator::new(sample_rate))),
+            BlockType::Wavetable => {
+                let mut w = NativeWavetable::new(sample_rate);
+                if let Some(v) = block.param_f32("shape") {
+                    w = w.with_shape(v);
+                }
+                Some(Box::new(w))
+            }
             BlockType::Filter => {
                 let mut f = NativeFilter::new(sample_rate);
                 if let Some(v) = block.param_f32("cutoff") {

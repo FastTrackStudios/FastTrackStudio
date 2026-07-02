@@ -704,7 +704,7 @@ impl PluginInstance for Identity {
 pub fn native_dsp_available(block_type: BlockType) -> bool {
     matches!(
         block_type,
-        BlockType::Oscillator | BlockType::Filter | BlockType::Amp
+        BlockType::Oscillator | BlockType::Filter | BlockType::Amp | BlockType::Wavetable
     )
 }
 
