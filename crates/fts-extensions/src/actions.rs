@@ -312,6 +312,39 @@ pub fn build_action_defs() -> ActionDefs {
         crate::volume_balancer::unlink_selected_tracks,
     ));
 
+    // ── MIDI mirror — source tracks with live performance twins ────────────
+    #[cfg(feature = "mod-mirror")]
+    {
+        defs.push(action(
+            "FTS_MIRROR_LINK_SELECTED",
+            "Mirror: make selected tracks mirror sources (creates hidden performance twins)",
+            crate::mirror::link_selected_tracks,
+        ));
+        defs.push(action(
+            "FTS_MIRROR_UNLINK_SELECTED",
+            "Mirror: unlink selected source tracks",
+            crate::mirror::unlink_selected_tracks,
+        ));
+        defs.push(action(
+            "FTS_MIRROR_REGENERATE",
+            "Mirror: force regeneration of all mirror items",
+            crate::mirror::regenerate_all,
+        ));
+        defs.push(action(
+            "FTS_MIRROR_TOGGLE",
+            "Mirror: toggle live mirroring",
+            || {
+                let on = !crate::mirror::is_enabled();
+                crate::mirror::set_enabled(on);
+                sync_toggle_state("FTS_MIRROR_TOGGLE", on);
+                show(format!(
+                    "FTS Mirror: {}\n",
+                    if on { "enabled" } else { "disabled" }
+                ));
+            },
+        ));
+    }
+
     // Module actions (launcher, session-owned template/keyflow, sync, input)
     // are collected via daw::module::collect_actions() in lib.rs — not here.
 

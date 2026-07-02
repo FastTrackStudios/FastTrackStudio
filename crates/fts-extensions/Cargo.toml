@@ -28,6 +28,11 @@ mod-launcher = ["dep:fts-launcher", "ui-dock"]
 mod-session = ["dep:session", "dep:dynamic-template"]
 mod-sync = ["dep:daw-synchronization"]
 mod-input = ["dep:reaper-input"]
+# Live MIDI mirror: source-of-truth tracks with hidden, library-timing-
+# adjusted twins regenerated on edit (keyflow-orchestra mirror pass).
+# Off by default — kept as the fallback path for third-party samplers
+# while the signal-sampler document-mode lookahead design supersedes it.
+mod-mirror = ["dep:keyflow-orchestra"]
 
 # Dioxus dock host (panels, ui_test_panel, dock_state restore, update_panels tick)
 ui-dock = ["daw/reaper-ui"]
@@ -57,6 +62,10 @@ dynamic-template = { workspace = true, optional = true }
 # one the workspace's `[patch]` table redirects to.
 reaper-input = { path = "../../../input/crates/reaper-input", optional = true, default-features = false }
 daw-synchronization = { workspace = true, optional = true }
+# Orchestral mirror pass (pure Rust, no Reaper deps). Consumed from the
+# published keyflow workspace on Codeberg — the crate is dependency-light
+# (musicxml/thiserror/zip only) so it can't split the shared dependency graph.
+keyflow-orchestra = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main", optional = true }
 
 # DAW API. `reaper-ui` pulls in the Dioxus panel rendering host and is gated
 # behind the `ui-dock` feature. `daw-extension-runtime` is a public sibling

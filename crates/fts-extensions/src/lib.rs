@@ -142,6 +142,8 @@ mod item_actions;
 mod menu;
 mod midi_flam;
 mod midi_mode;
+#[cfg(feature = "mod-mirror")]
+mod mirror;
 #[cfg(feature = "mod-input")]
 mod midi_mode_input;
 #[cfg(all(feature = "mod-session", feature = "mod-input"))]
@@ -196,6 +198,10 @@ extern "C" fn timer_callback() {
         );
         // Constant-sum fader linking (Parallel drum tracks, user groups).
         catch_panic("volume_balancer_poll", crate::volume_balancer::poll);
+        // Live MIDI mirror: source-track edits → regenerated performance
+        // copies on their hidden mirror tracks (keyflow-orchestra).
+        #[cfg(feature = "mod-mirror")]
+        catch_panic("mirror_poll", crate::mirror::poll);
         // Project-tab switches are handled by dynamic-template's event-hub
         // subscription (ProjectEvent::CurrentChanged via
         // poll_and_broadcast_transport below) — no watcher needed here.
