@@ -204,9 +204,9 @@ fn ProjectCard(
             // Done/total as a hairline bar — the project's pulse in
             // 6 vertical pixels.
             div { class: "flex items-center gap-2",
-                div { class: "h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/50",
+                div { class: "h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/20",
                     div {
-                        class: "h-full rounded-full bg-primary/70 transition-[width]",
+                        class: "h-full rounded-full bg-primary transition-[width]",
                         style: "width: {pct}%",
                     }
                 }
