@@ -177,7 +177,7 @@ pub enum SetlistEvent {
 /// This service extracts song structure from DAW projects by analyzing
 /// markers, regions, and tempo maps.
 pub mod song_service {
-    use super::*;
+    use super::{SessionServiceError, Song};
 
     #[architect::rpc]
     pub trait SongService {
@@ -207,7 +207,10 @@ pub use song_service::{
 /// This service provides high-level control over setlist playback,
 /// navigation, and state tracking.
 pub mod setlist_service {
-    use super::*;
+    use super::{
+        ActiveIndices, AudioLatencyInfo, MeasureInfo, MusicalPosition, Section,
+        SessionServiceError, Setlist, SetlistEvent, Song, Tx,
+    };
 
     #[architect::rpc]
     pub trait SetlistService {
@@ -456,7 +459,7 @@ pub use setlist_service::{
 /// session state changes. This avoids the need for vox channels (which don't
 /// work on WASM) by using regular bidirectional RPC instead.
 pub mod web_client_service {
-    use super::*;
+    use super::SetlistEvent;
 
     #[architect::rpc]
     pub trait WebClientService {
@@ -486,7 +489,7 @@ pub use web_client_service::{
 /// any other Vox peer (e.g. a mobile app). State is host-process-
 /// global; per-project mode is a future extension.
 pub mod session_mode_service {
-    use super::*;
+    use super::{SessionServiceError, Tx};
 
     #[architect::rpc]
     pub trait SessionModeService {
@@ -547,7 +550,7 @@ pub enum TakeRankLevel {
 }
 
 pub mod take_ranking_service {
-    use super::*;
+    use super::{SessionServiceError, TakeRankLevel, TakeRankScope};
 
     #[architect::rpc]
     pub trait TakeRankingService {
@@ -573,7 +576,7 @@ pub use take_ranking_service::{
 // ─── Record control ────────────────────────────────────────────────────
 
 pub mod record_control_service {
-    use super::*;
+    use super::SessionServiceError;
 
     #[architect::rpc]
     pub trait RecordControlService {
