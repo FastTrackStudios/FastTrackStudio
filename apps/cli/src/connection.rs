@@ -59,7 +59,7 @@ async fn discover_newest_socket() -> Result<PathBuf> {
         candidates.push((path, mtime));
     }
     // Newest first.
-    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.1));
 
     for (path, _) in candidates {
         if tokio::net::UnixStream::connect(&path).await.is_ok() {
