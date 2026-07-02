@@ -15,11 +15,16 @@
 //! [`task::RelevanceContext`] (browser clock + the running timer
 //! session's project) and renders toggle chips. Toggles persist
 //! per-account ([`crate::prefs`]).
+//!
+//! The page opens with the **Now bar**: the in-progress task, its
+//! live clock, and a complete button — the checkbox-timer made
+//! spatial. Idle (nothing running) renders no bar at all.
 
 use dioxus::prelude::*;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
 
 use crate::auth::AuthCtx;
+use crate::chrome::use_second_tick;
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::{prefs, stores};
 
@@ -85,38 +90,62 @@ pub fn TasksView() -> Element {
             let hidden = total - domain.len();
             let ui_tasks: Vec<UiTask> = domain.iter().map(|t| stores::to_ui(t)).collect();
 
+            // The running task (in-progress with a live entry) — the
+            // whole board's rows are candidates, filters or not: a
+            // running clock is never invisible.
+            let running: Option<UiTask> = rows
+                .iter()
+                .map(|(_, r)| &r.task)
+                .find(|t| {
+                    task::Status::from_str(&t.status) == Some(task::Status::InProgress)
+                        && t.time_entries.0.iter().any(|e| e.end_time.is_none())
+                })
+                .map(|t| stores::to_ui(t));
+
             let email_a = email.clone();
             let email_r = email.clone();
+            let chips = rsx! {
+                div { class: "flex items-center gap-1.5",
+                    FilterChip {
+                        label: "Active",
+                        title: "Hide done/cancelled tasks",
+                        on: active_only(),
+                        on_toggle: move |on| {
+                            active_only.set(on);
+                            prefs::save_bool(&email_a, PREF_ACTIVE, on);
+                        },
+                    }
+                    FilterChip {
+                        label: "Relevant",
+                        title: "Only what matters right now — routines in their time windows, deadlines always, timer project first",
+                        on: relevant_only(),
+                        on_toggle: move |on| {
+                            relevant_only.set(on);
+                            prefs::save_bool(&email_r, PREF_RELEVANT, on);
+                        },
+                    }
+                    if hidden > 0 {
+                        span { class: "text-xs tabular-nums text-muted-foreground", "{hidden} hidden" }
+                    }
+                }
+            };
             rsx! {
                 div { class: "flex h-full w-full flex-col",
-                    // Filter chips — the page's representation of the
-                    // domain filter, nothing more.
-                    div { class: "mx-auto flex w-full max-w-5xl items-center gap-2 px-4 pt-3 sm:px-6 lg:px-10",
-                        FilterChip {
-                            label: "Active",
-                            title: "Hide done/cancelled tasks",
-                            on: active_only(),
-                            on_toggle: move |on| {
-                                active_only.set(on);
-                                prefs::save_bool(&email_a, PREF_ACTIVE, on);
+                    if let Some(t) = running {
+                        NowBar {
+                            task: t,
+                            on_complete: move |id| {
+                                muts.apply(
+                                    &crate::orgs::create_target(&selection.read(), &org_list.read()),
+                                    TaskMutation::SetStatus { id, status: "done".into() },
+                                );
                             },
-                        }
-                        FilterChip {
-                            label: "Relevant",
-                            title: "Only what matters right now — routines in their time windows, deadlines always, timer project first",
-                            on: relevant_only(),
-                            on_toggle: move |on| {
-                                relevant_only.set(on);
-                                prefs::save_bool(&email_r, PREF_RELEVANT, on);
-                            },
-                        }
-                        if hidden > 0 {
-                            span { class: "text-xs text-muted-foreground", "{hidden} hidden" }
                         }
                     }
                     div { class: "min-h-0 flex-1",
                         TasksApp {
                             tasks: ui_tasks,
+                            header_extra: chips,
                             on_event: move |mu: TaskMutation| {
                                 let create_slug =
                                     crate::orgs::create_target(&selection.read(), &org_list.read());
@@ -145,13 +174,42 @@ pub fn TasksView() -> Element {
     }
 }
 
+/// The page's opening statement: what's running right now. A slim
+/// full-width strip — pulsing dot, task title, live elapsed clock,
+/// one button to land it. Rendered only while a clock is live, so an
+/// idle board stays clean.
+#[component]
+fn NowBar(task: UiTask, on_complete: EventHandler<uuid::Uuid>) -> Element {
+    let tick = use_signal(|| 0u64);
+    use_second_tick(tick);
+    let _ = tick(); // subscribe: the clock re-renders each second
+
+    let id = task.id;
+    let elapsed = task.tracked_seconds(chrono::Utc::now());
+    rsx! {
+        div { class: "flex items-center gap-3 border-b border-sky-500/30 bg-sky-500/10 px-4 py-2 sm:px-6 lg:px-8",
+            span { class: "h-2 w-2 shrink-0 animate-pulse rounded-full bg-sky-400" }
+            span { class: "min-w-0 truncate text-sm font-medium text-foreground", "{task.title}" }
+            span { class: "shrink-0 font-mono text-sm tabular-nums text-sky-300",
+                {task_ui::duration_label(elapsed)}
+            }
+            button {
+                r#type: "button",
+                class: "ml-auto shrink-0 rounded-md border border-sky-500/40 px-2.5 py-0.5 text-xs font-medium text-sky-200 transition-colors hover:bg-sky-500/20",
+                onclick: move |_| on_complete.call(id),
+                "Complete"
+            }
+        }
+    }
+}
+
 /// Small on/off filter chip.
 #[component]
 fn FilterChip(label: String, title: String, on: bool, on_toggle: EventHandler<bool>) -> Element {
     let cls = if on {
-        "rounded-full border border-primary/50 bg-primary/10 px-3 py-0.5 text-xs font-medium text-primary transition-colors"
+        "rounded-full border border-primary/50 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary transition-colors"
     } else {
-        "rounded-full border border-border px-3 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        "rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
     };
     rsx! {
         button {

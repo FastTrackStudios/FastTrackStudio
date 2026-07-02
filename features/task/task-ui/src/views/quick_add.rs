@@ -29,7 +29,9 @@ pub fn QuickAdd(props: QuickAddProps) -> Element {
 
     rsx! {
         form {
-            class: "flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-primary/50",
+            // Quiet until used: hairline border, no card fill — the
+            // list is the page, capture is one thin line above it.
+            class: "flex items-center gap-2 rounded-lg border border-border/60 bg-transparent px-3 py-1.5 focus-within:border-border focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/50",
             onsubmit: move |e: Event<FormData>| {
                 e.prevent_default();
                 submit();

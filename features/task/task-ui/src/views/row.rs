@@ -31,9 +31,74 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
         "text-sm text-foreground truncate"
     };
 
+    let tracked = t.tracked_seconds(chrono::Utc::now());
+    // Meta pills — rendered once, placed on the title line from `sm:`
+    // up (single-line density) and on a second line on touch widths.
+    let meta = {
+        let has_meta = t.due.is_some()
+            || !t.contexts.is_empty()
+            || !t.projects.is_empty()
+            || priority != Priority::Normal
+            || (status != Status::Open && status != Status::Done)
+            || tracked > 0;
+        if has_meta {
+            rsx! {
+                if let Some(d) = t.due_date() {
+                    {
+                        let (label, cls) = due_pill(d, done);
+                        rsx! {
+                            span { class: "{cls}", "{label}" }
+                        }
+                    }
+                }
+                if priority != Priority::Normal {
+                    span {
+                        class: "inline-flex items-center rounded-full px-1.5 py-0 text-[10px] uppercase tracking-wider {priority_pill(priority)}",
+                        "{priority.label()}"
+                    }
+                }
+                if status != Status::Open && status != Status::Done && status != Status::InProgress {
+                    span {
+                        class: "inline-flex items-center rounded-full px-1.5 py-0 text-[10px] uppercase tracking-wider {status_pill(status)}",
+                        "{status.label()}"
+                    }
+                }
+                if tracked > 0 {
+                    // The task's time receipt — sky while the clock
+                    // runs, muted once it's banked.
+                    span {
+                        class: if status == Status::InProgress {
+                            "inline-flex items-center rounded-full bg-sky-500/15 px-1.5 py-0 text-[10px] tabular-nums text-sky-400"
+                        } else {
+                            "inline-flex items-center rounded-full bg-muted/50 px-1.5 py-0 text-[10px] tabular-nums text-muted-foreground"
+                        },
+                        {crate::model::duration_label(tracked)}
+                    }
+                }
+                for c in t.contexts.iter() {
+                    span {
+                        key: "{c}",
+                        class: "inline-flex items-center gap-0.5 rounded-full bg-muted/50 px-1.5 py-0 text-[10px] text-muted-foreground",
+                        "@{c}"
+                    }
+                }
+                for p in t.projects.iter() {
+                    span {
+                        key: "{p}",
+                        class: "inline-flex items-center gap-0.5 rounded-full bg-violet-900/30 px-1.5 py-0 text-[10px] text-violet-200",
+                        Hash { size: 9 }
+                        "{strip_wikilink(p)}"
+                    }
+                }
+            }
+        } else {
+            rsx! {}
+        }
+    };
+
     rsx! {
         div {
-            class: "group flex min-h-[44px] items-center gap-3 rounded-md border border-transparent px-2 py-2.5 hover:border-border hover:bg-accent/30 cursor-pointer sm:min-h-0 sm:py-2",
+            class: "group flex min-h-[44px] items-center gap-2.5 rounded-md border border-transparent px-2 py-2 hover:border-border hover:bg-accent/30 cursor-pointer sm:min-h-0 sm:py-1.5",
             onclick: move |_| props.on_open.call(id),
             CheckboxButton {
                 status,
@@ -43,56 +108,15 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
             div { class: "flex-1 min-w-0 flex flex-col gap-0.5",
                 div { class: "flex items-center gap-2 min-w-0",
                     span { class: "{title_cls}", "{t.title}" }
-                }
-                {
-                    let has_meta = t.due.is_some()
-                        || !t.contexts.is_empty()
-                        || !t.projects.is_empty()
-                        || priority != Priority::Normal
-                        || (status != Status::Open && status != Status::Done);
-                    if has_meta {
-                        rsx! {
-                            div { class: "flex items-center gap-1.5 flex-wrap",
-                                if let Some(d) = t.due_date() {
-                                    {
-                                        let (label, cls) = due_pill(d, done);
-                                        rsx! {
-                                            span { class: "{cls}", "{label}" }
-                                        }
-                                    }
-                                }
-                                if priority != Priority::Normal {
-                                    span {
-                                        class: "inline-flex items-center rounded-full px-1.5 py-0 text-[10px] uppercase tracking-wider {priority_pill(priority)}",
-                                        "{priority.label()}"
-                                    }
-                                }
-                                if status != Status::Open && status != Status::Done {
-                                    span {
-                                        class: "inline-flex items-center rounded-full px-1.5 py-0 text-[10px] uppercase tracking-wider {status_pill(status)}",
-                                        "{status.label()}"
-                                    }
-                                }
-                                for c in t.contexts.iter() {
-                                    span {
-                                        key: "{c}",
-                                        class: "inline-flex items-center gap-0.5 rounded-full bg-muted/50 px-1.5 py-0 text-[10px] text-muted-foreground",
-                                        "@{c}"
-                                    }
-                                }
-                                for p in t.projects.iter() {
-                                    span {
-                                        key: "{p}",
-                                        class: "inline-flex items-center gap-0.5 rounded-full bg-violet-900/30 px-1.5 py-0 text-[10px] text-violet-200",
-                                        Hash { size: 9 }
-                                        "{strip_wikilink(p)}"
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        rsx! {}
+                    // Wide screens: meta rides the title line, pushed
+                    // to the right edge — one row per task.
+                    div { class: "ml-auto hidden shrink-0 items-center gap-1.5 sm:flex",
+                        {meta.clone()}
                     }
+                }
+                // Touch widths: meta wraps below the title.
+                div { class: "flex items-center gap-1.5 flex-wrap sm:hidden empty:hidden",
+                    {meta}
                 }
             }
         }

@@ -93,10 +93,19 @@ pub fn TaskList(props: TaskListProps) -> Element {
         });
     }
 
-    rsx! {
-        div { class: "flex flex-col gap-4",
-            for (group, items) in groups.into_iter() {
-                if !items.is_empty() {
+    // Two lanes on wide screens, split by urgency horizon: the left
+    // lane is what deserves attention now (overdue, today, undated),
+    // the right lane is what's scheduled to come (this week, later,
+    // done). One lane on mobile — the same order, stacked.
+    let (now_lane, later_lane): (Vec<_>, Vec<_>) = groups
+        .into_iter()
+        .filter(|(_, items)| !items.is_empty())
+        .partition(|(g, _)| matches!(g, Group::Overdue | Group::Today | Group::NoDate));
+
+    let lane = |groups: Vec<(Group, Vec<TaskInfo>)>| {
+        rsx! {
+            div { class: "flex min-w-0 flex-col gap-3",
+                for (group, items) in groups.into_iter() {
                     Section {
                         key: "{group.label()}",
                         label: group.label(),
@@ -107,6 +116,17 @@ pub fn TaskList(props: TaskListProps) -> Element {
                         TaskList_Children { items, on_toggle: props.on_toggle, on_open: props.on_open }
                     }
                 }
+            }
+        }
+    };
+
+    rsx! {
+        if later_lane.is_empty() || now_lane.is_empty() {
+            {lane(if now_lane.is_empty() { later_lane } else { now_lane })}
+        } else {
+            div { class: "grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-x-10",
+                {lane(now_lane)}
+                {lane(later_lane)}
             }
         }
     }
@@ -130,7 +150,9 @@ fn TaskList_Children(props: TaskListChildrenProps) -> Element {
             for (depth, t) in arranged.into_iter() {
                 div {
                     key: "{t.id}",
-                    class: if depth > 0 { "pl-6" } else { "" },
+                    // Subtasks hang off a hairline rail — family
+                    // membership as structure, not fat indentation.
+                    class: if depth > 0 { "ml-2.5 border-l border-border/60 pl-2.5" } else { "" },
                     TaskRow {
                         task: t,
                         on_toggle: props.on_toggle,

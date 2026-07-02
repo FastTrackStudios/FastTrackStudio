@@ -93,6 +93,54 @@ impl TaskInfo {
     pub fn is_done(&self) -> bool {
         self.state_group() == project::StateGroup::Completed
     }
+
+    /// The running time entry's start, when this task's clock is live.
+    #[must_use]
+    pub fn running_since(&self) -> Option<DateTime<Utc>> {
+        self.time_entries
+            .iter()
+            .find(|e| e.end_time.is_none())
+            .map(|e| e.start_time)
+    }
+
+    /// Total tracked seconds (running entry counted up to `now`).
+    #[must_use]
+    pub fn tracked_seconds(&self, now: DateTime<Utc>) -> i64 {
+        self.time_entries
+            .iter()
+            .map(|e| {
+                (e.end_time.unwrap_or(now) - e.start_time)
+                    .num_seconds()
+                    .max(0)
+            })
+            .sum()
+    }
+}
+
+/// Compact duration label: `47s` under a minute, `12m` under an
+/// hour, `1h05` beyond. Shared by the row chips and the Now bar.
+#[must_use]
+pub fn duration_label(seconds: i64) -> String {
+    let s = seconds.max(0);
+    if s < 60 {
+        format!("{s}s")
+    } else if s < 3600 {
+        format!("{}m", s / 60)
+    } else {
+        format!("{}h{:02}", s / 3600, (s % 3600) / 60)
+    }
+}
+
+#[cfg(test)]
+mod duration_tests {
+    use super::duration_label;
+
+    #[test]
+    fn duration_label_scales() {
+        assert_eq!(duration_label(47), "47s");
+        assert_eq!(duration_label(150), "2m");
+        assert_eq!(duration_label(3900), "1h05");
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

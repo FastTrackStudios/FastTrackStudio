@@ -39,6 +39,10 @@ pub struct TasksAppProps {
     /// emits the task id — the page layer routes it (`/tasks/:id`).
     #[props(default)]
     pub on_open_full: Option<EventHandler<Uuid>>,
+    /// Page-owned controls (filter chips) rendered inline in the
+    /// header row — one row of chrome, not two.
+    #[props(default)]
+    pub header_extra: Option<Element>,
 }
 
 #[component]
@@ -55,20 +59,42 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
     // the Status enum, so custom completed-group names count.
     let done = props.tasks.iter().filter(|t| t.is_done()).count();
     let open_count = total - done;
+    // Time tracked today across the board — the day's receipt.
+    let now = chrono::Utc::now();
+    let today = chrono::Local::now().date_naive();
+    let tracked_today: i64 = props
+        .tasks
+        .iter()
+        .flat_map(|t| &t.time_entries)
+        .filter(|e| chrono::DateTime::<chrono::Local>::from(e.start_time).date_naive() == today)
+        .map(|e| {
+            (e.end_time.unwrap_or(now) - e.start_time)
+                .num_seconds()
+                .max(0)
+        })
+        .sum();
 
     rsx! {
-        div { class: "relative mx-auto flex max-w-5xl flex-col gap-4 p-4 sm:p-6 lg:p-10 h-full",
+        div { class: "relative mx-auto flex max-w-6xl flex-col gap-3 p-3 sm:p-5 lg:px-8 lg:py-6 h-full",
             div { class: "flex flex-wrap items-center gap-x-3 gap-y-2",
                 Heading { level: HeadingLevel::H1, "Tasks" }
-                span { class: "text-xs text-muted-foreground", "{open_count} open · {done} done" }
+                span { class: "text-xs tabular-nums text-muted-foreground",
+                    "{open_count} open · {done} done"
+                    if tracked_today > 0 {
+                        " · {crate::model::duration_label(tracked_today)} tracked today"
+                    }
+                }
+                if let Some(extra) = props.header_extra.clone() {
+                    {extra}
+                }
                 div { class: "ml-auto inline-flex items-center gap-0.5 rounded-lg bg-muted/40 p-0.5 text-xs",
                     for v in [ViewMode::List, ViewMode::Kanban] {
                         {
                             let active = v == view();
                             let cls = if active {
-                                "bg-background text-foreground shadow-sm font-medium px-3 py-1 rounded-md transition-colors"
+                                "bg-background text-foreground shadow-sm font-medium px-2.5 py-0.5 rounded-md transition-colors"
                             } else {
-                                "text-muted-foreground hover:text-foreground px-3 py-1 rounded-md transition-colors"
+                                "text-muted-foreground hover:text-foreground px-2.5 py-0.5 rounded-md transition-colors"
                             };
                             rsx! {
                                 button {
