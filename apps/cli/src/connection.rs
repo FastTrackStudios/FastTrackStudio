@@ -77,8 +77,8 @@ async fn discover_newest_socket() -> Result<PathBuf> {
 
 /// Minimal `FromVoxLane` client that captures the extension service
 /// lane's `Caller` (vox 0.10 replacement for the removed `NoopClient`
-/// + manual `open_connection` bootstrap). The lane's service name is
-/// carried as metadata automatically; the extension's LayerRouter
+/// and manual `open_connection` bootstrap). The lane's service name
+/// is carried as metadata automatically; the extension's LayerRouter
 /// dispatches by method id, so any generated service client can be
 /// constructed on top of the returned `Caller`.
 #[derive(Clone)]
