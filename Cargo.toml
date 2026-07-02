@@ -99,3 +99,24 @@ moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", r
 moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+[workspace.lints.rust]
+dead_code = "allow"
+unused = "allow"
+unused_unsafe = "allow"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "allow"
+private_intra_doc_links = "allow"
+redundant_explicit_links = "allow"
+
+[workspace.lints.clippy]
+# Stylistic lints that don't reflect actual bugs and create churn on a
+# fast-moving codebase — same posture as the daw workspace. Re-tighten
+# per-crate when a sweep is done.
+collapsible_if = "allow"
+enum_variant_names = "allow"
+manual_c_str_literals = "allow"
+manual_is_multiple_of = "allow"
+manual_range_contains = "allow"
+not_unsafe_ptr_arg_deref = "allow"

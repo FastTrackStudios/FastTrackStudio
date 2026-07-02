@@ -58,10 +58,7 @@ fn on_mode_changed(mode: Mode) {
 /// `register_actions_sync`, so a named-command lookup would miss the startup
 /// application. Modes without a rule set are a logged no-op on that side.
 fn apply_mode_visibility(mode: Mode) {
-    let command = format!(
-        "FTS_VISIBILITY_MANAGER_MODE_{}",
-        mode.slug().to_uppercase()
-    );
+    let command = format!("FTS_VISIBILITY_MANAGER_MODE_{}", mode.slug().to_uppercase());
     dynamic_template::daw_module::dispatch_session_command(&command);
     tracing::info!(mode = %mode, "[mode-visibility] applied mode visibility rules");
 }

@@ -33,3 +33,6 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 dify = "0.8"
 
 clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true

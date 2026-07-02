@@ -214,12 +214,7 @@ pub fn poll() {
     }
 
     let tracks = project_tracks();
-    let find = |guid: &str| {
-        tracks
-            .iter()
-            .find(|(g, _)| g == guid)
-            .map(|(_, tr)| *tr)
-    };
+    let find = |guid: &str| tracks.iter().find(|(g, _)| g == guid).map(|(_, tr)| *tr);
 
     for group in &mut state.groups {
         // Resolve all members; a group with missing tracks (deleted, other

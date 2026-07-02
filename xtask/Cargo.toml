@@ -9,3 +9,6 @@ edition = "2024"
 # Same Codeberg git dep as the rest of the workspace — the .pinned clones
 # are retired.
 daw = { workspace = true, features = ["test-harness"] }
+
+[lints]
+workspace = true

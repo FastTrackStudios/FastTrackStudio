@@ -84,16 +84,18 @@ fn get_track_ext(track: *mut MediaTrack, key: &str) -> Option<String> {
     let low = reaper_low::Reaper::get();
     let key = CString::new(key).ok()?;
     let mut buf = [0 as c_char; 256];
-    let ok = unsafe {
-        low.GetSetMediaTrackInfo_String(track, key.as_ptr(), buf.as_mut_ptr(), false)
-    };
+    let ok =
+        unsafe { low.GetSetMediaTrackInfo_String(track, key.as_ptr(), buf.as_mut_ptr(), false) };
     let s = buf_to_string(&buf);
     (ok && !s.is_empty()).then_some(s)
 }
 
 fn set_track_ext(track: *mut MediaTrack, key: &str, value: &str) {
     let low = reaper_low::Reaper::get();
-    let (Ok(key), Ok(mut value)) = (CString::new(key), CString::new(value).map(|v| v.into_bytes_with_nul())) else {
+    let (Ok(key), Ok(mut value)) = (
+        CString::new(key),
+        CString::new(value).map(|v| v.into_bytes_with_nul()),
+    ) else {
         return;
     };
     unsafe {
@@ -110,24 +112,21 @@ fn get_item_ext(item: *mut MediaItem, key: &str) -> Option<String> {
     let low = reaper_low::Reaper::get();
     let key = CString::new(key).ok()?;
     let mut buf = [0 as c_char; 256];
-    let ok =
-        unsafe { low.GetSetMediaItemInfo_String(item, key.as_ptr(), buf.as_mut_ptr(), false) };
+    let ok = unsafe { low.GetSetMediaItemInfo_String(item, key.as_ptr(), buf.as_mut_ptr(), false) };
     let s = buf_to_string(&buf);
     (ok && !s.is_empty()).then_some(s)
 }
 
 fn set_item_ext(item: *mut MediaItem, key: &str, value: &str) {
     let low = reaper_low::Reaper::get();
-    let (Ok(key), Ok(mut value)) = (CString::new(key), CString::new(value).map(|v| v.into_bytes_with_nul())) else {
+    let (Ok(key), Ok(mut value)) = (
+        CString::new(key),
+        CString::new(value).map(|v| v.into_bytes_with_nul()),
+    ) else {
         return;
     };
     unsafe {
-        low.GetSetMediaItemInfo_String(
-            item,
-            key.as_ptr(),
-            value.as_mut_ptr() as *mut c_char,
-            true,
-        );
+        low.GetSetMediaItemInfo_String(item, key.as_ptr(), value.as_mut_ptr() as *mut c_char, true);
     }
 }
 
@@ -224,7 +223,14 @@ fn read_source(item: *mut MediaItem, take: *mut MediaItem_Take) -> SourceMidi {
         let (mut chanmsg, mut chan, mut msg2, mut msg3) = (0, 0, 0, 0);
         let ok = unsafe {
             low.MIDI_GetCC(
-                take, idx, &mut sel, &mut muted, &mut ppq, &mut chanmsg, &mut chan, &mut msg2,
+                take,
+                idx,
+                &mut sel,
+                &mut muted,
+                &mut ppq,
+                &mut chanmsg,
+                &mut chan,
+                &mut msg2,
                 &mut msg3,
             )
         };
@@ -523,8 +529,7 @@ pub fn link_selected_tracks() {
         linked += 1;
     }
     *HASHES.lock().unwrap() = None; // force full regeneration
-    reaper_high::Reaper::get()
-        .show_console_msg(format!("FTS Mirror: linked {linked} track(s)\n"));
+    reaper_high::Reaper::get().show_console_msg(format!("FTS Mirror: linked {linked} track(s)\n"));
 }
 
 /// Action: unlink selected source tracks (tags cleared; mirror tracks are

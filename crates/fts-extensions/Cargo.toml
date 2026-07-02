@@ -103,3 +103,6 @@ tracing-appender.workspace = true
 daw = { workspace = true, features = ["reaper", "test-harness"] }
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros"] }
+
+[lints]
+workspace = true

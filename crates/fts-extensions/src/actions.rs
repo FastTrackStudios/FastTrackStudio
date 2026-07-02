@@ -176,7 +176,7 @@ pub fn build_action_defs() -> ActionDefs {
         action(
             "FTS_SPLIT_ITEMS_CROSSFADE_LEFT",
             "Split selected items at cursor with crossfade on left",
-            || item_actions::split_items_with_crossfade_left(),
+            item_actions::split_items_with_crossfade_left,
         ),
         toggle_menu_action("FTS_TEST_TOGGLE", "Test Toggle", toggle_test_toggle_handler),
         // ── Modes ────────────────────────────────────────────────────────────

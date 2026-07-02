@@ -142,10 +142,10 @@ mod item_actions;
 mod menu;
 mod midi_flam;
 mod midi_mode;
-#[cfg(feature = "mod-mirror")]
-mod mirror;
 #[cfg(feature = "mod-input")]
 mod midi_mode_input;
+#[cfg(feature = "mod-mirror")]
+mod mirror;
 #[cfg(all(feature = "mod-session", feature = "mod-input"))]
 mod mode_input;
 #[cfg(feature = "mod-session")]
@@ -155,9 +155,9 @@ mod mode_toolbars;
 mod reaper_utils;
 mod sync_settings;
 mod tempo;
-mod volume_balancer;
 #[cfg(feature = "ui-dock")]
 mod ui_test_panel;
+mod volume_balancer;
 
 // ── Timer callback ───────────────────────────────────────────────────────────
 
@@ -286,7 +286,7 @@ extern "C" fn timer_callback() {
 static ACTION_CHANNEL: OnceLock<(Sender<String>, Receiver<String>)> = OnceLock::new();
 
 fn action_channel() -> &'static (Sender<String>, Receiver<String>) {
-    ACTION_CHANNEL.get_or_init(|| crossbeam_channel::unbounded())
+    ACTION_CHANNEL.get_or_init(crossbeam_channel::unbounded)
 }
 
 fn process_pending_actions(app: &App) {
@@ -640,11 +640,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Combine all defs for REAPER registration
     let mut all_defs: actions::ActionDefs = legacy_defs;
-    all_defs.extend(module_actions.into_iter().map(
-        |(id, display_name, handler, show_in_menu, toggleable)| {
-            (id, display_name, handler, show_in_menu, toggleable)
-        },
-    ));
+    all_defs.extend(module_actions);
     #[cfg(feature = "ui-dock")]
     all_defs.extend(
         ui_test_panel::action_defs()
