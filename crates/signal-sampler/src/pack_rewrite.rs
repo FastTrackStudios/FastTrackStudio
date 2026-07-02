@@ -170,7 +170,6 @@ fn invalid_data(msg: impl Into<String>) -> SamplerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
 
     fn build_minimal_pack(spec: &str) -> Vec<u8> {
         // Synthetic pack: 64-byte header + 16-byte fake audio body + index.

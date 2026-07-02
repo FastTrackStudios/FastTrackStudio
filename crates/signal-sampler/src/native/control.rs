@@ -38,6 +38,7 @@ pub struct ControlLfo {
     pub sync_beats: Option<f32>,
     /// Reset phase (and redraw S&H) on every note-on.
     pub retrigger: bool,
+    pub(crate) sample_rate: f32,
     phase: f32,
     held: f32,
     rng: u32,
@@ -50,6 +51,7 @@ impl ControlLfo {
             rate_hz,
             sync_beats: None,
             retrigger: false,
+            sample_rate: 48_000.0,
             phase: 0.0,
             held: 0.0,
             rng: 0x2F6E_2B1,
@@ -81,7 +83,7 @@ impl ControlLfo {
 
     /// Advance by `frames` at `sample_rate` and `tempo_bpm`; returns the
     /// value at the block start (one value per block — block-rate control).
-    fn tick(&mut self, frames: usize, sample_rate: f32, tempo_bpm: f32) -> f32 {
+    fn advance(&mut self, frames: usize, sample_rate: f32, tempo_bpm: f32) -> f32 {
         let v = match self.wave {
             LfoWave::Sine => (core::f32::consts::TAU * self.phase).sin(),
             LfoWave::Triangle => 4.0 * (self.phase - 0.5).abs() - 1.0,
@@ -124,7 +126,7 @@ impl ControlEnv {
         }
     }
 
-    fn tick(&mut self, events: &PluginEvents<'_>, frames: usize) -> f32 {
+    fn advance(&mut self, events: &PluginEvents<'_>, frames: usize) -> f32 {
         use daw::service::MidiMessage;
         for ev in events.midi {
             match ev.message {
@@ -177,43 +179,142 @@ pub enum MidiMod {
     Cc(u8),
 }
 
-/// One compiled modulation source.
-pub struct ModSource {
-    kind: SourceKind,
-    sample_rate: f32,
-    /// Last computed value (also the held state for MIDI sources).
+/// A **control-rate modulation source**: produces one value per render
+/// block. Implement this to add a new source kind (a sequencer, a follower,
+/// a macro…) — the ModMatrix engine only sees the trait.
+pub trait ControlSource: Send {
+    /// Rate change (voices/coefficients survive).
+    fn set_sample_rate(&mut self, _sample_rate: f32) {}
+    /// Advance through one block; returns the source's current value.
+    /// Bipolar sources return −1..+1, unipolar 0..1.
+    fn tick(&mut self, events: &PluginEvents<'_>, frames: usize, tempo_bpm: f32) -> f32;
+}
+
+impl ControlSource for ControlLfo {
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
+    }
+
+    fn tick(&mut self, events: &PluginEvents<'_>, frames: usize, tempo_bpm: f32) -> f32 {
+        if self.retrigger
+            && events.midi.iter().any(|ev| {
+                matches!(
+                    ev.message,
+                    daw::service::MidiMessage::NoteOn { velocity, .. } if velocity > 0
+                )
+            })
+        {
+            self.reset();
+        }
+        let sr = self.sample_rate;
+        self.advance(frames, sr, tempo_bpm)
+    }
+}
+
+impl ControlSource for ControlEnv {
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.env.set_sample_rate(sample_rate);
+    }
+
+    fn tick(&mut self, events: &PluginEvents<'_>, frames: usize, _tempo_bpm: f32) -> f32 {
+        self.advance(events, frames)
+    }
+}
+
+/// A [`MidiMod`] with its held value — MIDI sources are event-driven and
+/// hold their last value between blocks.
+pub struct MidiSource {
+    mode: MidiMod,
     value: f32,
 }
 
-enum SourceKind {
-    Lfo(ControlLfo),
-    Env(ControlEnv),
-    Midi(MidiMod),
-}
-
-impl ModSource {
-    pub fn lfo(lfo: ControlLfo, sample_rate: f32) -> Self {
+impl MidiSource {
+    pub fn new(mode: MidiMod) -> Self {
         Self {
-            kind: SourceKind::Lfo(lfo),
-            sample_rate,
-            value: 0.0,
+            mode,
+            value: if mode == MidiMod::Constant { 1.0 } else { 0.0 },
         }
     }
+}
 
-    pub fn env(env: ControlEnv, sample_rate: f32) -> Self {
-        Self {
-            kind: SourceKind::Env(env),
-            sample_rate,
-            value: 0.0,
+impl ControlSource for MidiSource {
+    fn tick(&mut self, events: &PluginEvents<'_>, _frames: usize, _tempo_bpm: f32) -> f32 {
+        use daw::service::MidiMessage;
+        let m = self.mode;
+        let mut v = self.value;
+        for ev in events.midi {
+            match (m, &ev.message) {
+                (MidiMod::Wheel, MidiMessage::ControlChange { controller, value, .. })
+                    if *controller == 1 =>
+                {
+                    v = *value as f32 / 127.0;
+                }
+                (MidiMod::Cc(n), MidiMessage::ControlChange { controller, value, .. })
+                    if *controller == n =>
+                {
+                    v = *value as f32 / 127.0;
+                }
+                (MidiMod::Aftertouch, MidiMessage::ChannelPressure { pressure, .. }) => {
+                    v = *pressure as f32 / 127.0;
+                }
+                (MidiMod::Bender, MidiMessage::PitchBend { value, .. }) => {
+                    // −8192..8191 → −1..+1.
+                    v = *value as f32 / 8192.0;
+                }
+                (MidiMod::Velocity, MidiMessage::NoteOn { velocity, .. }) if *velocity > 0 => {
+                    v = *velocity as f32 / 127.0;
+                }
+                (MidiMod::Key, MidiMessage::NoteOn { note, velocity, .. }) if *velocity > 0 => {
+                    v = *note as f32 / 127.0;
+                }
+                (MidiMod::Random, MidiMessage::NoteOn { velocity, .. }) if *velocity > 0 => {
+                    // Redraw from a running hash of the previous value.
+                    let bits = (v.to_bits() ^ 0x9E37_79B9).wrapping_mul(0xC2B2_AE35);
+                    v = ((bits >> 8) as f32 / (u32::MAX >> 8) as f32) * 2.0 - 1.0;
+                }
+                (MidiMod::Alt, MidiMessage::NoteOn { velocity, .. }) if *velocity > 0 => {
+                    v = if v > 0.5 { 0.0 } else { 1.0 };
+                }
+                _ => {}
+            }
         }
+        // MPE dimensions ride the note-expression stream.
+        for ex in events.note_expressions {
+            use daw::service::midi::NoteExpressionDim as Dim;
+            match (m, ex.dimension) {
+                (MidiMod::MpePressure, Dim::Pressure) | (MidiMod::MpeTimbre, Dim::Brightness) => {
+                    v = (ex.value as f32).clamp(0.0, 1.0);
+                }
+                _ => {}
+            }
+        }
+        self.value = v;
+        v
+    }
+}
+
+/// One compiled modulation source — a boxed [`ControlSource`] with the
+/// convenience constructors the compiler and tests use.
+pub struct ModSource(Box<dyn ControlSource>);
+
+impl ModSource {
+    pub fn lfo(mut lfo: ControlLfo, sample_rate: f32) -> Self {
+        lfo.sample_rate = sample_rate;
+        Self(Box::new(lfo))
+    }
+
+    pub fn env(mut env: ControlEnv, sample_rate: f32) -> Self {
+        env.env.set_sample_rate(sample_rate);
+        Self(Box::new(env))
     }
 
     pub fn midi(m: MidiMod) -> Self {
-        Self {
-            kind: SourceKind::Midi(m),
-            sample_rate: 0.0,
-            value: if m == MidiMod::Constant { 1.0 } else { 0.0 },
-        }
+        Self(Box::new(MidiSource::new(m)))
+    }
+
+    /// Wrap any custom source implementation.
+    pub fn custom(source: Box<dyn ControlSource>) -> Self {
+        Self(source)
     }
 
     /// Map a MIDI source name (ours or Omnisphere's) to a [`MidiMod`].
@@ -237,96 +338,17 @@ impl ModSource {
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.sample_rate = sample_rate;
-        if let SourceKind::Env(e) = &mut self.kind {
-            e.env.set_sample_rate(sample_rate);
-        }
+        self.0.set_sample_rate(sample_rate);
     }
 
     /// Advance through one block; returns the source's current value.
     pub fn tick(&mut self, events: &PluginEvents<'_>, frames: usize) -> f32 {
-        self.tick_at(events, frames, 120.0)
+        self.0.tick(events, frames, 120.0)
     }
 
     /// [`tick`](Self::tick) with an explicit tempo (for synced LFOs).
     pub fn tick_at(&mut self, events: &PluginEvents<'_>, frames: usize, tempo_bpm: f32) -> f32 {
-        self.value = match &mut self.kind {
-            SourceKind::Lfo(l) => {
-                if l.retrigger
-                    && events.midi.iter().any(|ev| {
-                        matches!(
-                            ev.message,
-                            daw::service::MidiMessage::NoteOn { velocity, .. } if velocity > 0
-                        )
-                    })
-                {
-                    l.reset();
-                }
-                l.tick(frames, self.sample_rate, tempo_bpm)
-            }
-            SourceKind::Env(e) => e.tick(events, frames),
-            SourceKind::Midi(m) => {
-                use daw::service::MidiMessage;
-                let mut v = self.value;
-                for ev in events.midi {
-                    match (*m, &ev.message) {
-                        (MidiMod::Wheel, MidiMessage::ControlChange { controller, value, .. })
-                            if *controller == 1 =>
-                        {
-                            v = *value as f32 / 127.0;
-                        }
-                        (MidiMod::Cc(n), MidiMessage::ControlChange { controller, value, .. })
-                            if *controller == n =>
-                        {
-                            v = *value as f32 / 127.0;
-                        }
-                        (MidiMod::Aftertouch, MidiMessage::ChannelPressure { pressure, .. }) => {
-                            v = *pressure as f32 / 127.0;
-                        }
-                        (MidiMod::Bender, MidiMessage::PitchBend { value, .. }) => {
-                            // −8192..8191 → −1..+1.
-                            v = *value as f32 / 8192.0;
-                        }
-                        (MidiMod::Velocity, MidiMessage::NoteOn { velocity, .. })
-                            if *velocity > 0 =>
-                        {
-                            v = *velocity as f32 / 127.0;
-                        }
-                        (MidiMod::Key, MidiMessage::NoteOn { note, velocity, .. })
-                            if *velocity > 0 =>
-                        {
-                            v = *note as f32 / 127.0;
-                        }
-                        (MidiMod::Random, MidiMessage::NoteOn { velocity, .. })
-                            if *velocity > 0 =>
-                        {
-                            // Redraw from a running hash of the previous value.
-                            let bits = (v.to_bits() ^ 0x9E37_79B9).wrapping_mul(0xC2B2_AE35);
-                            v = ((bits >> 8) as f32 / (u32::MAX >> 8) as f32) * 2.0 - 1.0;
-                        }
-                        (MidiMod::Alt, MidiMessage::NoteOn { velocity, .. })
-                            if *velocity > 0 =>
-                        {
-                            v = if v > 0.5 { 0.0 } else { 1.0 };
-                        }
-                        _ => {}
-                    }
-                }
-                // MPE dimensions ride the note-expression stream.
-                for ex in events.note_expressions {
-                    use daw::service::midi::NoteExpressionDim as Dim;
-                    match (*m, ex.dimension) {
-                        (MidiMod::MpePressure, Dim::Pressure)
-                        | (MidiMod::MpeTimbre, Dim::Brightness) => {
-                            v = (ex.value as f32).clamp(0.0, 1.0);
-                        }
-                        _ => {}
-                    }
-                }
-                v
-            }
-        };
-        self.value
+        self.0.tick(events, frames, tempo_bpm)
     }
 }
 

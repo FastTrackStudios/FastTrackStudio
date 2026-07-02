@@ -698,19 +698,11 @@ impl PluginInstance for Identity {
     }
 }
 
-/// Block types whose built-in `Native` DSP is implemented today. Grows as
-/// `daw-builtin-fx`-style backends are written, one block type at a time; a
-/// Native block of a listed type reports `has_backend() == true` and builds.
+/// Block types whose built-in `Native` DSP is implemented today — delegated
+/// to the [`native` registry](crate::native::native_dsp_available), the one
+/// place a new block type's DSP is declared.
 pub fn native_dsp_available(block_type: BlockType) -> bool {
-    matches!(
-        block_type,
-        BlockType::Oscillator
-            | BlockType::Filter
-            | BlockType::Amp
-            | BlockType::Wavetable
-            | BlockType::Waveshaper
-            | BlockType::Dfs
-    )
+    crate::native::native_dsp_available(block_type)
 }
 
 /// Build a prepared box for one [`RigBlock`] at `sample_rate`.

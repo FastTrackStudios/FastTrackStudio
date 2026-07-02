@@ -18,14 +18,16 @@ mod arp;
 mod control;
 mod filter;
 mod freq_shifter;
+mod registry;
 mod waveshaper;
 mod wavetable;
 
 pub use adsr::{Adsr, AdsrParams};
 pub use arp::{ArpEngine, ArpStep};
 pub use amp::NativeAmp;
-pub use control::{ControlEnv, ControlLfo, LfoWave, MidiMod, ModSource};
+pub use control::{ControlEnv, ControlLfo, ControlSource, LfoWave, MidiMod, MidiSource, ModSource};
 pub use filter::{FilterCharacter, FilterMode, Ladder, NativeFilter, Svf};
 pub use freq_shifter::NativeDfs;
+pub use registry::{build_native, native_dsp_available};
 pub use waveshaper::NativeWaveshaper;
 pub use wavetable::{HarmVoice, NativeWavetable, SynthConfig};
