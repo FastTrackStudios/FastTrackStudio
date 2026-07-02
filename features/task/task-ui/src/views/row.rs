@@ -36,7 +36,7 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
             class: "group flex min-h-[44px] items-center gap-3 rounded-md border border-transparent px-2 py-2.5 hover:border-border hover:bg-accent/30 cursor-pointer sm:min-h-0 sm:py-2",
             onclick: move |_| props.on_open.call(id),
             CheckboxButton {
-                done,
+                status,
                 priority,
                 on_click: move |()| props.on_toggle.call(id),
             }
@@ -101,42 +101,51 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 struct CheckboxButtonProps {
-    done: bool,
+    status: Status,
     priority: Priority,
     on_click: EventHandler<()>,
 }
 
+/// Three-state checkbox: empty (open) → pulsing ring (in-progress,
+/// the timer is running) → filled check (done). Clicks walk the
+/// domain's `click_transition` cycle via `on_toggle`.
 #[component]
 fn CheckboxButton(props: CheckboxButtonProps) -> Element {
-    let cls = if props.done {
-        "flex h-6 w-6 sm:h-5 sm:w-5 items-center justify-center rounded-md border-2 bg-emerald-500 border-emerald-500 text-white shrink-0"
-    } else {
-        let edge = match props.priority {
-            Priority::Critical => "border-rose-500",
-            Priority::High => "border-amber-500",
-            _ => "border-border",
-        };
-        let base = "flex h-6 w-6 sm:h-5 sm:w-5 items-center justify-center rounded-md border-2 bg-transparent hover:bg-accent/30 shrink-0";
-        return rsx! {
-            button {
-                r#type: "button",
-                class: "{base} {edge}",
-                onclick: move |e: MouseEvent| {
-                    e.stop_propagation();
-                    props.on_click.call(());
-                },
-            }
-        };
+    let base =
+        "flex h-6 w-6 sm:h-5 sm:w-5 items-center justify-center rounded-md border-2 shrink-0";
+    let (cls, glyph) = match props.status {
+        Status::Done | Status::Cancelled => (
+            format!("{base} bg-emerald-500 border-emerald-500 text-white"),
+            Some(rsx! { Check { size: 12 } }),
+        ),
+        Status::InProgress => (
+            format!("{base} border-sky-500 text-sky-500 hover:bg-sky-500/10"),
+            // Running-timer dot — pulses so the active task reads at
+            // a glance.
+            Some(rsx! { span { class: "h-2 w-2 animate-pulse rounded-full bg-sky-500" } }),
+        ),
+        _ => {
+            let edge = match props.priority {
+                Priority::Critical => "border-rose-500",
+                Priority::High => "border-amber-500",
+                _ => "border-border",
+            };
+            (
+                format!("{base} bg-transparent hover:bg-accent/30 {edge}"),
+                None,
+            )
+        }
     };
     rsx! {
         button {
             r#type: "button",
             class: "{cls}",
+            title: if props.status == Status::InProgress { "Tracking — click to complete" } else { "" },
             onclick: move |e: MouseEvent| {
                 e.stop_propagation();
                 props.on_click.call(());
             },
-            Check { size: 12 }
+            {glyph}
         }
     }
 }

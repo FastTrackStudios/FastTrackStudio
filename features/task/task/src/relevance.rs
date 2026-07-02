@@ -115,20 +115,24 @@ pub fn is_relevant(task: &TaskInfo, ctx: &RelevanceContext) -> bool {
     gates.iter().any(|g| gate_matches(g, ctx))
 }
 
-/// Ordering weight — smaller sorts first. Active-timer project tasks
-/// lead, then due/overdue, then everything else in the caller's
-/// existing order (stable sorts keep it).
+/// Ordering weight — smaller sorts first. The task being worked on
+/// right now (in-progress — its timer is running) leads, then
+/// active-timer project tasks, then due/overdue, then everything else
+/// in the caller's existing order (stable sorts keep it).
 #[must_use]
 pub fn relevance_rank(task: &TaskInfo, ctx: &RelevanceContext) -> u8 {
-    if ctx.active_project.is_some() && task.project_id == ctx.active_project {
+    if crate::model::Status::from_str(&task.status) == Some(crate::model::Status::InProgress) {
         return 0;
+    }
+    if ctx.active_project.is_some() && task.project_id == ctx.active_project {
+        return 1;
     }
     if let Some(today) = ctx.local_date.as_deref() {
         if is_due_on_or_before(task.due.as_deref(), task.scheduled.as_deref(), today) {
-            return 1;
+            return 2;
         }
     }
-    2
+    3
 }
 
 /// The shared "Active + Relevant" pipeline: keep open tasks that are

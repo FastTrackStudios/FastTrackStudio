@@ -73,6 +73,18 @@ optimistic store keeps working offline; the CLI gets them via
    per-account (`task.prefs.<email>.*` in localStorage for now).
 5. `/` lands on the task list.
 
+## Shipped since (2026-07-02)
+
+- Checkbox click cycle (`task::click_transition`): open →
+  in-progress → done; subtask under a running parent completes
+  directly (the parent's timer owns the process).
+- Automatic time tracking (`task::track_status_transition`):
+  in-progress opens an inline `TimeEntry`, leaving it closes the
+  entry; enforced in `TaskBackend::update` so cascade completions
+  stop the parent's clock. In-progress tasks rank first in Relevant.
+- CLI `task task start`; `[~]` list marker; web three-state checkbox
+  (pulsing ring while tracking).
+
 ## Later
 
 - **Per-user prefs entity** (architect::Entity, per-org auth user):
@@ -89,6 +101,10 @@ optimistic store keeps working offline; the CLI gets them via
   [inbox-agent-ingestion.md](inbox-agent-ingestion.md) — daily
   processing pass proposes task/note promotions; user approves in
   ProcessReview.
+- **Timer-page task picker**: fuzzy-search tasks to start a tracked
+  `WorkSession` (`task_note_path` already links sessions to notes) —
+  the second entry point besides the checkbox; would also feed the
+  topbar timer widget from task work.
 - Account switcher: switching accounts applies that user's prefs
   (today it only changes identity/presence — reads as "nothing
   happens").

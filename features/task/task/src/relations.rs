@@ -403,21 +403,8 @@ pub fn cascade_status(all: &[TaskInfo], changed: &TaskInfo) -> Vec<(Uuid, String
 #[cfg(test)]
 mod cascade_tests {
     use super::cascade_status;
-    use crate::model::WorkflowAttrs;
+    use super::cascade_tests_support::task;
     use uuid::Uuid;
-
-    fn task(id: Uuid, status: &str, parent: Option<Uuid>) -> crate::TaskInfo {
-        let mut t = crate::capture("t");
-        t.id = id;
-        t.status = status.into();
-        if let Some(p) = parent {
-            t.workflow = Some(WorkflowAttrs {
-                parent: Some(p),
-                ..Default::default()
-            });
-        }
-        t
-    }
 
     #[test]
     fn last_child_done_completes_parent() {
@@ -462,5 +449,75 @@ mod cascade_tests {
         // Reopening the parent leaves children alone.
         let changed = task(p, "open", None);
         assert!(cascade_status(&all, &changed).is_empty());
+    }
+}
+
+/// The checkbox click state machine: first click starts work
+/// (`in-progress` — automatic time tracking begins), second click
+/// completes, a click on a completed task reopens it.
+///
+/// Family exception: while a task's PARENT is in-progress, clicking
+/// the subtask goes straight to `done` — the parent's timer owns the
+/// whole process ("start Wind down, then tick the steps off; the
+/// wind-down timer is the one that matters"). To time an individual
+/// subtask instead, click it before starting the parent.
+///
+/// Pure over status strings (caller resolves the parent) so every
+/// renderer's row model can use it directly.
+#[must_use]
+pub fn click_transition(status: &str, parent_status: Option<&str>) -> &'static str {
+    use crate::model::{Status, status_is_terminal};
+    if status_is_terminal(status) {
+        return "open";
+    }
+    if Status::from_str(status) == Some(Status::InProgress) {
+        return "done";
+    }
+    let parent_in_progress =
+        parent_status.is_some_and(|p| Status::from_str(p) == Some(Status::InProgress));
+    if parent_in_progress {
+        "done"
+    } else {
+        "in-progress"
+    }
+}
+
+#[cfg(test)]
+mod click_tests {
+    use super::click_transition;
+
+    #[test]
+    fn click_cycles_open_in_progress_done_open() {
+        assert_eq!(click_transition("open", None), "in-progress");
+        assert_eq!(click_transition("in-progress", None), "done");
+        assert_eq!(click_transition("done", None), "open");
+    }
+
+    #[test]
+    fn subtask_under_running_parent_completes_directly() {
+        // Parent idle → subtask gets its own in-progress leg.
+        assert_eq!(click_transition("open", Some("open")), "in-progress");
+        // Parent running → subtask is just a check.
+        assert_eq!(click_transition("open", Some("in-progress")), "done");
+    }
+}
+
+/// Shared test constructor for the cascade + click tests.
+#[cfg(test)]
+mod cascade_tests_support {
+    use crate::model::WorkflowAttrs;
+    use uuid::Uuid;
+
+    pub fn task(id: Uuid, status: &str, parent: Option<Uuid>) -> crate::TaskInfo {
+        let mut t = crate::capture("t");
+        t.id = id;
+        t.status = status.into();
+        if let Some(p) = parent {
+            t.workflow = Some(WorkflowAttrs {
+                parent: Some(p),
+                ..Default::default()
+            });
+        }
+        t
     }
 }

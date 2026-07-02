@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use crate::TaskInfo;
 use crate::TaskMutation;
-use crate::model::Status;
 
 use super::detail::TaskDetail;
 use super::kanban::KanbanBoard;
@@ -93,11 +92,18 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                         TaskList {
                             tasks: props.tasks.clone(),
                             on_toggle: move |id: Uuid| {
+                                // Domain click cycle: open → in-progress
+                                // (timer starts) → done; a subtask under a
+                                // running parent completes directly.
                                 let next = props.tasks.iter().find(|t| t.id == id).map(|t| {
-                                    if t.is_done() { Status::Open } else { Status::Done }
+                                    let parent_status = t
+                                        .parent
+                                        .and_then(|p| props.tasks.iter().find(|x| x.id == p))
+                                        .map(|p| p.status.as_str());
+                                    task::click_transition(&t.status, parent_status)
                                 });
                                 if let Some(s) = next {
-                                    props.on_event.call(TaskMutation::SetStatus { id, status: s.as_str().to_string() });
+                                    props.on_event.call(TaskMutation::SetStatus { id, status: s.to_string() });
                                 }
                             },
                             on_open: move |id: Uuid| open_id.set(Some(id)),

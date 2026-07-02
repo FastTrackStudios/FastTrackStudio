@@ -384,6 +384,36 @@ pub fn status_is_terminal(status: &str) -> bool {
     )
 }
 
+/// Close every open inline time entry. Invariant: a task that isn't
+/// in-progress never keeps a running clock — the backend enforces
+/// this on every status write (cascades included), so completing a
+/// parent "Wind down" also stops its timer.
+pub fn close_open_time_entries(t: &mut TaskInfo, now: DateTime<Utc>) {
+    for e in &mut t.time_entries.0 {
+        if e.end_time.is_none() {
+            e.end_time = Some(now);
+        }
+    }
+}
+
+/// Automatic time tracking for a status transition: entering
+/// `in-progress` starts an inline [`TimeEntry`] (unless one is
+/// already running), leaving it closes the open entry. The entries
+/// stay ordinary frontmatter — editable after the fact when the
+/// tracked time needs correcting.
+pub fn track_status_transition(prev_status: &str, t: &mut TaskInfo, now: DateTime<Utc>) {
+    let was = Status::from_str(prev_status) == Some(Status::InProgress);
+    let is = Status::from_str(&t.status) == Some(Status::InProgress);
+    if !was && is && t.time_entries.0.iter().all(|e| e.end_time.is_some()) {
+        t.time_entries.0.push(TimeEntry {
+            start_time: now,
+            end_time: None,
+        });
+    } else if was && !is {
+        close_open_time_entries(t, now);
+    }
+}
+
 /// A task is open while its status isn't [`status_is_terminal`].
 #[must_use]
 pub fn status_is_open(status: &str) -> bool {

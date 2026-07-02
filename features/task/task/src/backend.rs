@@ -147,6 +147,12 @@ impl TaskService for TaskBackend {
         next.path = existing.path;
         next.date_created = existing.date_created.or(next.date_created);
         next.date_modified = Some(Utc::now());
+        // Automatic time tracking on status transitions (authoritative
+        // here so CLI / cascade / any client gets it): entering
+        // in-progress starts an inline TimeEntry, leaving it closes the
+        // open one. Compared against the on-disk status, so a client
+        // that already mirrored the tracking optimistically is a no-op.
+        crate::model::track_status_transition(&existing.status, &mut next, Utc::now());
         write_task(&self.vault_root, &mut next, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
         self.publish(TaskEvent::Upserted(next.clone()));
@@ -361,6 +367,39 @@ mod tests {
             });
         }
         be.create(t).expect("create")
+    }
+
+    #[test]
+    fn status_transitions_track_time_and_cascade_stops_the_parent_clock() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let be = TaskBackend::new(tmp.path());
+
+        let parent = make(&be, "wind down", "open", None, None);
+        let mut child = crate::capture("floss");
+        child.workflow = Some(WorkflowAttrs {
+            parent: Some(parent.id),
+            ..Default::default()
+        });
+        let child = be.create(child).expect("create child");
+
+        // Start the parent → an open TimeEntry appears.
+        let mut p = be.get(parent.id).expect("get");
+        p.status = "in-progress".into();
+        be.update(p).expect("start parent");
+        let p = be.get(parent.id).expect("get");
+        assert_eq!(p.time_entries.0.len(), 1);
+        assert!(p.time_entries.0[0].end_time.is_none());
+
+        // Complete the only child → cascade completes the parent AND
+        // closes its running entry ("when it's done the wind down
+        // timer is done").
+        let mut c = be.get(child.id).expect("get");
+        c.status = "done".into();
+        be.update(c).expect("finish child");
+        let p = be.get(parent.id).expect("get");
+        assert_eq!(p.status, "done");
+        assert_eq!(p.time_entries.0.len(), 1);
+        assert!(p.time_entries.0[0].end_time.is_some());
     }
 
     #[test]

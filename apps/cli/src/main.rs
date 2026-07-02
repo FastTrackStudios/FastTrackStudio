@@ -3574,6 +3574,20 @@ enum TaskCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Start working: sets `status: in-progress`, which begins
+    /// automatic time tracking (an inline TimeEntry on the task —
+    /// edit it afterwards if the tracked time needs correcting).
+    /// `done` stops the clock; `set-status open` pauses it.
+    Start {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Mark done. Sets `status: done` + `completedDate`.
     Done {
         target: String,
@@ -13096,11 +13110,10 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 |t| t.workflow.as_ref().and_then(|w| w.parent),
             );
             for (depth, t) in &arranged {
-                let marker = if task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
-                {
-                    "[x]"
-                } else {
-                    "[ ]"
+                let marker = match task::Status::from_str(&t.status) {
+                    Some(s) if s.is_done() => "[x]",
+                    Some(task::Status::InProgress) => "[~]",
+                    _ => "[ ]",
                 };
                 let due = t
                     .due
@@ -13234,6 +13247,17 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 println!("created {} ({})", created.title, created.path);
                 println!("  id: {}", created.id);
             }
+        }
+        TaskCmd::Start {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            mutate_task(target, org, server, json, |t| {
+                t.status = "in-progress".into();
+            })
+            .await?;
         }
         TaskCmd::Done {
             target,

@@ -58,10 +58,10 @@ pub mod backend;
 
 pub use capture::capture;
 pub use model::{
-    Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry, is_due_on_or_before,
-    status_is_open, status_is_terminal,
+    Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry, close_open_time_entries,
+    is_due_on_or_before, status_is_open, status_is_terminal, track_status_transition,
 };
-pub use relations::{ReverseRelation, arrange_families, cascade_status};
+pub use relations::{ReverseRelation, arrange_families, cascade_status, click_transition};
 pub use relevance::{RelevanceContext, filter_relevant, is_relevant, relevance_rank};
 // Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
 // so UI consumers don't need their own workflows-proto dep.

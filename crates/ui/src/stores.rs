@@ -265,9 +265,19 @@ impl TaskMutations {
                         task::cascade_status(&all, &changed)
                     })
                     .unwrap_or_default();
-                self.edit(id, move |t| t.status = status);
+                self.edit(id, move |t| {
+                    let prev = t.status.clone();
+                    t.status = status;
+                    // Mirror the server's automatic time tracking so the
+                    // running-timer state shows instantly.
+                    task::track_status_transition(&prev, t, chrono::Utc::now());
+                });
                 for (fid, fstatus) in follow_ups {
-                    self.edit(fid, move |t| t.status = fstatus);
+                    self.edit(fid, move |t| {
+                        let prev = t.status.clone();
+                        t.status = fstatus;
+                        task::track_status_transition(&prev, t, chrono::Utc::now());
+                    });
                 }
             }
             TaskMutation::SetPriority { id, priority } => {
