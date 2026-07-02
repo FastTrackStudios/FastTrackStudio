@@ -15,11 +15,9 @@
 //! - `ENTRYDESCR` carries the patch name, library and the browser tag string
 //!   (`Author=…;Genre=…;Mood=…`).
 
-
-
 mod xml;
 
-pub use xml::{omni_num, parse_xml, XmlNode};
+pub use xml::{XmlNode, omni_num, parse_xml};
 mod index;
 mod model;
 mod multi;
@@ -27,8 +25,8 @@ pub mod state;
 mod tree;
 
 pub use index::SoundsourceIndex;
-pub use model::{parse_patch, OmniLayer, OmniModRoute, OmniPatch};
-pub use multi::{load_multi_file, multi_to_container, parse_multi, OmniMulti};
+pub use model::{OmniLayer, OmniModRoute, OmniPatch, parse_patch};
+pub use multi::{OmniMulti, load_multi_file, multi_to_container, parse_multi};
 pub use tree::{load_patch_file, patch_to_container};
 
 #[cfg(test)]
@@ -97,15 +95,39 @@ mod tests {
 
     #[test]
     fn filter_names_classify() {
-        assert_eq!(classify_filter_full("Classic LPF 4-pole"), ("lowpass", 4, "clean"));
-        assert_eq!(classify_filter_full("Basic 12db Lowpass"), ("lowpass", 2, "clean"));
-        assert_eq!(classify_filter_full("HPF Juicy 24db"), ("highpass", 4, "clean"));
-        assert_eq!(classify_filter_full("Bandpass Juicy 12db"), ("bandpass", 2, "clean"));
+        assert_eq!(
+            classify_filter_full("Classic LPF 4-pole"),
+            ("lowpass", 4, "clean")
+        );
+        assert_eq!(
+            classify_filter_full("Basic 12db Lowpass"),
+            ("lowpass", 2, "clean")
+        );
+        assert_eq!(
+            classify_filter_full("HPF Juicy 24db"),
+            ("highpass", 4, "clean")
+        );
+        assert_eq!(
+            classify_filter_full("Bandpass Juicy 12db"),
+            ("bandpass", 2, "clean")
+        );
         assert_eq!(classify_filter_full("Notch Filter"), ("notch", 2, "clean"));
-        assert_eq!(classify_filter_full("Classic LPF 8-pole"), ("lowpass", 8, "clean"));
-        assert_eq!(classify_filter_full("LPF Juicy 24db"), ("lowpass", 4, "ladder"));
-        assert_eq!(classify_filter_full("Rich and Moogie2"), ("lowpass", 2, "ladder"));
-        assert_eq!(classify_filter_full("Jupiter LPF 4-pole"), ("lowpass", 4, "ladder"));
+        assert_eq!(
+            classify_filter_full("Classic LPF 8-pole"),
+            ("lowpass", 8, "clean")
+        );
+        assert_eq!(
+            classify_filter_full("LPF Juicy 24db"),
+            ("lowpass", 4, "ladder")
+        );
+        assert_eq!(
+            classify_filter_full("Rich and Moogie2"),
+            ("lowpass", 2, "ladder")
+        );
+        assert_eq!(
+            classify_filter_full("Jupiter LPF 4-pole"),
+            ("lowpass", 4, "ladder")
+        );
         assert_eq!(classify_filter_full("untitled"), ("lowpass", 2, "clean"));
     }
 
@@ -122,10 +144,13 @@ mod tests {
         let p = parse_patch(MINI_PATCH).unwrap();
         assert_eq!(p.name, "Test Patch");
         assert_eq!(p.library, "Test Library");
-        assert_eq!(p.tags, vec![
-            ("Author".to_string(), "Cody".to_string()),
-            ("Mood".to_string(), "Fun".to_string())
-        ]);
+        assert_eq!(
+            p.tags,
+            vec![
+                ("Author".to_string(), "Cody".to_string()),
+                ("Mood".to_string(), "Fun".to_string())
+            ]
+        );
         assert!(p.arp_on);
         assert_eq!(p.layers.len(), 1);
         let l = &p.layers[0];
@@ -245,7 +270,9 @@ mod tests {
         let mut patch_path = None;
         let mut stack = vec![root.to_path_buf()];
         'outer: while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             let mut entries: Vec<_> = entries.flatten().map(|e| e.path()).collect();
             entries.sort();
             for p in entries {
@@ -254,11 +281,9 @@ mod tests {
                 } else if p.extension().is_some_and(|x| x == "prt_omn") {
                     let xml = std::fs::read_to_string(&p).unwrap_or_default();
                     if let Ok(parsed) = parse_patch(&xml) {
-                        if parsed
-                            .layers
-                            .iter()
-                            .any(|l| !l.soundsource.is_empty() && index.find(&l.soundsource).is_some())
-                        {
+                        if parsed.layers.iter().any(|l| {
+                            !l.soundsource.is_empty() && index.find(&l.soundsource).is_some()
+                        }) {
                             patch_path = Some(p);
                             break 'outer;
                         }
@@ -292,7 +317,10 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert!(heard > 1e-3, "imported patch should be audible, rms={heard}");
+        assert!(
+            heard > 1e-3,
+            "imported patch should be audible, rms={heard}"
+        );
     }
 
     /// Machine-local: a pure SYNTH-mode patch (no soundsources) now sounds
@@ -416,4 +444,3 @@ mod tests {
         );
     }
 }
-

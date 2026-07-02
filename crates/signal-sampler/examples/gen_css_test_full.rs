@@ -67,7 +67,10 @@ struct Smf {
 
 impl Smf {
     fn new() -> Self {
-        Self { ev: Vec::new(), seq: 0 }
+        Self {
+            ev: Vec::new(),
+            seq: 0,
+        }
     }
     fn raw(&mut self, sec: f64, bytes: Vec<u8>) {
         let t = (sec * TPS).round() as u32;
@@ -139,7 +142,9 @@ fn write_vlq(out: &mut Vec<u8>, mut v: u32) {
 }
 
 fn main() -> std::io::Result<()> {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "css_test_full.mid".into());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "css_test_full.mid".into());
     let mut m = Smf::new();
     let mut t = 1.0;
 
@@ -155,7 +160,10 @@ fn main() -> std::io::Result<()> {
     m.cc(t, 58, EXPR_LEGATO);
     m.cc(t, 2, 127);
     m.cc(t, 1, 127);
-    println!("{:7.2}  CALIB  sustain G4 ff held 6s (output-gain reference)", t + 0.1);
+    println!(
+        "{:7.2}  CALIB  sustain G4 ff held 6s (output-gain reference)",
+        t + 0.1
+    );
     m.note(t + 0.1, 6.0, NOTE, 100);
     t += 8.0;
 
@@ -165,7 +173,10 @@ fn main() -> std::io::Result<()> {
         m.cc(t, 58, *ks);
         m.cc(t, 59, 0); // RR reset → deterministic cycle from slot 0
         let start = t + 0.2;
-        println!("{:7.2}  SHORT-VEL {name:<14} G4 @ vel 1,9,..127 (15 notes, 1.0s apart)", start);
+        println!(
+            "{:7.2}  SHORT-VEL {name:<14} G4 @ vel 1,9,..127 (15 notes, 1.0s apart)",
+            start
+        );
         for (i, vel) in (1u8..=127).step_by(9).enumerate() {
             m.note(start + i as f64 * 1.0, 0.35, NOTE, vel.max(1));
         }
@@ -178,7 +189,10 @@ fn main() -> std::io::Result<()> {
         m.cc(t, 58, *ks);
         m.cc(t, 59, 0);
         let start = t + 0.2;
-        println!("{:7.2}  SHORT-RR  {name:<14} G4 vel100 ×12 @ 0.8s (RR0..11 in cycle order)", start);
+        println!(
+            "{:7.2}  SHORT-RR  {name:<14} G4 vel100 ×12 @ 0.8s (RR0..11 in cycle order)",
+            start
+        );
         for i in 0..12 {
             m.note(start + i as f64 * 0.8, 0.35, NOTE, 100);
         }
@@ -191,8 +205,15 @@ fn main() -> std::io::Result<()> {
         m.cc(t, 58, *ks);
         m.cc(t, 59, 0);
         let start = t + 0.2;
-        let keys: String = RECORDED_RANGE.iter().map(|(_, n)| *n).collect::<Vec<_>>().join(",");
-        println!("{:7.2}  SHORT-RANGE {name:<14} {keys} @ vel100 (0.9s apart)", start);
+        let keys: String = RECORDED_RANGE
+            .iter()
+            .map(|(_, n)| *n)
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{:7.2}  SHORT-RANGE {name:<14} {keys} @ vel100 (0.9s apart)",
+            start
+        );
         for (i, (key, _)) in RECORDED_RANGE.iter().enumerate() {
             m.note(start + i as f64 * 0.9, 0.4, *key, 100);
         }
@@ -204,7 +225,10 @@ fn main() -> std::io::Result<()> {
     m.cc(t, 58, SPICCATO);
     m.cc(t, 59, 0);
     let start = t + 0.2;
-    println!("{:7.2}  SHORT-INTERP Spiccato G#4(68),A#4(70),F#4(66),D4(62) vel100", start);
+    println!(
+        "{:7.2}  SHORT-INTERP Spiccato G#4(68),A#4(70),F#4(66),D4(62) vel100",
+        start
+    );
     for (i, key) in [68u8, 70, 66, 62].iter().enumerate() {
         m.note(start + i as f64 * 0.9, 0.4, *key, 100);
     }
@@ -246,20 +270,30 @@ fn main() -> std::io::Result<()> {
         m.cc(t, 1, cc1);
         let s = t + 0.1;
         m.note(s, 3.0, NOTE, 90);
-        println!("{:7.2}  SUS-ENV G4 CC1={cc1} hold 3s + 4s tail (attack+release)", s);
+        println!(
+            "{:7.2}  SUS-ENV G4 CC1={cc1} hold 3s + 4s tail (attack+release)",
+            s
+        );
         t += 7.5;
     }
 
     // ── 9. LONGS: Trills / Tremolo / Harmonics CC1 sweeps + envelope ──
     println!("\n# 9. LONGS (Trills/Tremolo/Harmonics): CC1 sweep + release tail");
-    for (name, ks) in [("Tremolo", TREMOLO), ("Harmonics", HARMONICS), ("MeasTrem", MEAS_TREMOLO)] {
+    for (name, ks) in [
+        ("Tremolo", TREMOLO),
+        ("Harmonics", HARMONICS),
+        ("MeasTrem", MEAS_TREMOLO),
+    ] {
         m.cc(t, 58, ks);
         m.cc(t, 2, 100);
         m.cc(t, 1, 0);
         let s = t + 0.1;
         m.note(s, 8.0, NOTE, 90);
         m.cc_ramp(s, 8.0, 1, 0, 127);
-        println!("{:7.2}  LONG {name:<10} G4 held 8s, CC1 0→127 (+3s tail)", s);
+        println!(
+            "{:7.2}  LONG {name:<10} G4 held 8s, CC1 0→127 (+3s tail)",
+            s
+        );
         t += 12.0;
     }
     // Trills: two keys held together (halftone then wholetone).
@@ -289,7 +323,10 @@ fn main() -> std::io::Result<()> {
                 65..=100 => "med~250",
                 _ => "fast~100",
             };
-            println!("{:7.2}  LEG-LAT {mode:<10} vel{vel:<3} G4→A4 (Expr zone {zone}ms)", s);
+            println!(
+                "{:7.2}  LEG-LAT {mode:<10} vel{vel:<3} G4→A4 (Expr zone {zone}ms)",
+                s
+            );
             t += 4.5;
         }
     }
@@ -304,7 +341,11 @@ fn main() -> std::io::Result<()> {
             m.cc(t, 1, 90);
             let s = t + 0.1;
             m.legato(s, NOTE, b, 85, 2.0);
-            println!("{:7.2}  LEG-INT {} {semi} semitone(s) G4→{b}", s, if dir > 0 { "up  " } else { "down" });
+            println!(
+                "{:7.2}  LEG-INT {} {semi} semitone(s) G4→{b}",
+                s,
+                if dir > 0 { "up  " } else { "down" }
+            );
             t += 4.0;
         }
     }

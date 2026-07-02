@@ -344,7 +344,11 @@ impl PluginInstance for NativeWavetable {
         vec![
             mk(0, "shape", self.cfg.shape as f64),
             // Normalized 0..1 → 0..100 cents.
-            mk(1, "unison_detune", (self.cfg.unison_detune_cents / 100.0) as f64),
+            mk(
+                1,
+                "unison_detune",
+                (self.cfg.unison_detune_cents / 100.0) as f64,
+            ),
             mk(2, "fm_depth", self.cfg.fm_depth as f64),
             mk(3, "ring_mix", self.cfg.ring_mix as f64),
             // 0.5 center → ±24 semitones.
@@ -471,7 +475,11 @@ impl PluginInstance for NativeWavetable {
                     let inc = s.inc * self.pitch_mult;
                     let ph = (s.phase + pm).rem_euclid(1.0);
                     // Harmonia subs (past the unison set) scale by harm_mix.
-                    let lvl = if si >= n_unison { s.level * self.harm_mix } else { s.level };
+                    let lvl = if si >= n_unison {
+                        s.level * self.harm_mix
+                    } else {
+                        s.level
+                    };
                     let smp = morph(ph, inc, s.shape, self.duty) * lvl;
                     vl += smp * s.gain_l;
                     vr += smp * s.gain_r;
@@ -523,7 +531,8 @@ mod tests {
             midi: &midi,
             note_expressions: &[],
         };
-        osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev).unwrap();
+        osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev)
+            .unwrap();
         (outl, outr)
     }
 
@@ -552,14 +561,29 @@ mod tests {
 
     #[test]
     fn saw_is_brighter_than_sine() {
-        let (sine, _) = render_cfg(SynthConfig { shape: 0.0, ..Default::default() }, 4_096);
-        let (saw, _) = render_cfg(SynthConfig { shape: 2.0 / 3.0, ..Default::default() }, 4_096);
+        let (sine, _) = render_cfg(
+            SynthConfig {
+                shape: 0.0,
+                ..Default::default()
+            },
+            4_096,
+        );
+        let (saw, _) = render_cfg(
+            SynthConfig {
+                shape: 2.0 / 3.0,
+                ..Default::default()
+            },
+            4_096,
+        );
         assert!(hf(&saw) > hf(&sine) * 2.0, "saw carries harmonics");
     }
 
     #[test]
     fn unison_widens_the_stereo_image() {
-        let mono = SynthConfig { unison_voices: 1, ..Default::default() };
+        let mono = SynthConfig {
+            unison_voices: 1,
+            ..Default::default()
+        };
         let wide = SynthConfig {
             unison_voices: 6,
             unison_detune_cents: 30.0,
@@ -582,7 +606,10 @@ mod tests {
 
     #[test]
     fn harmonia_adds_the_interval_voice() {
-        let mut cfg = SynthConfig { shape: 0.0, ..Default::default() };
+        let mut cfg = SynthConfig {
+            shape: 0.0,
+            ..Default::default()
+        };
         let (base, _) = render_cfg(cfg, 8_192);
         cfg.harmonia[0] = HarmVoice {
             on: true,
@@ -603,7 +630,10 @@ mod tests {
 
     #[test]
     fn fm_brightens_a_sine() {
-        let plain = SynthConfig { shape: 0.0, ..Default::default() };
+        let plain = SynthConfig {
+            shape: 0.0,
+            ..Default::default()
+        };
         let fm = SynthConfig {
             shape: 0.0,
             fm_depth: 0.8,
@@ -622,7 +652,10 @@ mod tests {
 
     #[test]
     fn ring_mod_reshapes_the_spectrum() {
-        let plain = SynthConfig { shape: 0.0, ..Default::default() };
+        let plain = SynthConfig {
+            shape: 0.0,
+            ..Default::default()
+        };
         let ring = SynthConfig {
             shape: 0.0,
             ring_mix: 1.0,
@@ -639,7 +672,10 @@ mod tests {
 
     #[test]
     fn square_is_band_limited_enough() {
-        let cfg = SynthConfig { shape: 1.0, ..Default::default() };
+        let cfg = SynthConfig {
+            shape: 1.0,
+            ..Default::default()
+        };
         let mut osc = NativeWavetable::new(48_000).with_config(cfg);
         osc.prepare(48_000.0, 2_048).unwrap();
         let (inl, inr) = (vec![0.0; 2_048], vec![0.0; 2_048]);
@@ -653,7 +689,8 @@ mod tests {
             midi: &midi,
             note_expressions: &[],
         };
-        osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev).unwrap();
+        osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev)
+            .unwrap();
         let peak = outl.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!(peak < 0.4, "bounded output at C8, peak={peak}");
     }

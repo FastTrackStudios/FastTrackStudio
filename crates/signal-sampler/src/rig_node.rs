@@ -23,8 +23,8 @@
 use facet::Facet;
 use signal_proto::block::BlockType;
 
-use crate::rig::RigBlock;
 use crate::SamplerError;
+use crate::rig::RigBlock;
 
 /// A node in the composition tree: a leaf processor or a container.
 ///
@@ -191,20 +191,12 @@ impl Zone {
 fn ramp(x: u8, lo: u8, hi: u8, xfade: u8) -> f32 {
     let (x, lo, hi, xf) = (x as f32, lo as f32, hi as f32, xfade as f32);
     let rising = if xf == 0.0 {
-        if x >= lo {
-            1.0
-        } else {
-            0.0
-        }
+        if x >= lo { 1.0 } else { 0.0 }
     } else {
         (x - lo) / xf
     };
     let falling = if xf == 0.0 {
-        if x <= hi {
-            1.0
-        } else {
-            0.0
-        }
+        if x <= hi { 1.0 } else { 0.0 }
     } else {
         (hi - x) / xf
     };
@@ -338,8 +330,9 @@ impl Container {
     /// Convenience: append a placeholder leaf block of `block_type`, named.
     #[must_use]
     pub fn block(mut self, block_type: BlockType, name: impl Into<String>) -> Self {
-        self.children
-            .push(RigNode::Block { block: RigBlock::of_type(block_type).named(name) });
+        self.children.push(RigNode::Block {
+            block: RigBlock::of_type(block_type).named(name),
+        });
         self
     }
 
@@ -543,11 +536,8 @@ impl Container {
 
     /// All cross-tree sends in this subtree, as `(from_name, Send)`.
     pub fn sends_recursive(&self) -> Vec<(&str, &Send)> {
-        let mut out: Vec<(&str, &Send)> = self
-            .sends
-            .iter()
-            .map(|s| (self.name.as_str(), s))
-            .collect();
+        let mut out: Vec<(&str, &Send)> =
+            self.sends.iter().map(|s| (self.name.as_str(), s)).collect();
         for child in &self.children {
             if let RigNode::Container { container: c } = child {
                 out.extend(c.sends_recursive());
@@ -586,7 +576,10 @@ impl Container {
             }
             // Modules show in/out trim only when set.
             Role::Module if self.input_db != 0.0 || self.output_db != 0.0 => {
-                out.push_str(&format!("  trim {:+.0}/{:+.0}dB", self.input_db, self.output_db));
+                out.push_str(&format!(
+                    "  trim {:+.0}/{:+.0}dB",
+                    self.input_db, self.output_db
+                ));
             }
             Role::Module => {}
         }
@@ -630,7 +623,9 @@ impl Container {
         for (i, child) in self.children.iter().enumerate() {
             let is_last = i + 1 == n;
             match child {
-                RigNode::Container { container: c } => c.dump_into(out, &child_prefix, is_last, false),
+                RigNode::Container { container: c } => {
+                    c.dump_into(out, &child_prefix, is_last, false)
+                }
                 RigNode::Block { block: b } => {
                     let bb = if is_last { "└─ " } else { "├─ " };
                     out.push_str(&child_prefix);
@@ -639,7 +634,11 @@ impl Container {
                         "Block {} \"{}\"{}\n",
                         b.block_type_tag(),
                         b.display_name(),
-                        if b.has_backend() { "" } else { " (placeholder)" }
+                        if b.has_backend() {
+                            ""
+                        } else {
+                            " (placeholder)"
+                        }
                     ));
                 }
             }
@@ -674,10 +673,12 @@ mod tests {
         assert!(preset.find("Voices").is_some());
         assert!(preset.find("Rotary").is_none()); // Rotary is a Block, not a container
         // Filters have Native DSP; the Rotary is still a placeholder.
-        assert!(preset
-            .blocks()
-            .iter()
-            .all(|b| b.has_backend() == (b.block_type_tag() == "filter")));
+        assert!(
+            preset
+                .blocks()
+                .iter()
+                .all(|b| b.has_backend() == (b.block_type_tag() == "filter"))
+        );
     }
 
     #[test]

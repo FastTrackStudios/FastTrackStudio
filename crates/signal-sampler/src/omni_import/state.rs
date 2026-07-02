@@ -19,14 +19,17 @@
 const MAGIC: u32 = 999_999_999;
 const TRAILER: &[u8] = &[
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 20 zeros
-    b'J', b'U', b'C', b'E', b'P', b'r', b'i', b'v', b'a', b't', b'e', b'D', b'a', b't', b'a',
-    0, 0, 0, 0,
+    b'J', b'U', b'C', b'E', b'P', b'r', b'i', b'v', b'a', b't', b'e', b'D', b'a', b't', b'a', 0, 0,
+    0, 0,
 ];
 
 /// Wrap a `SynthMaster` Multi XML (`.mlt_omn` content) into a VST3 state
 /// chunk Omnisphere accepts via `load_state`.
 pub fn build_state(multi_xml: &str) -> Vec<u8> {
-    let mut payload = multi_xml.trim_end_matches(['\0', ' ', '\n']).as_bytes().to_vec();
+    let mut payload = multi_xml
+        .trim_end_matches(['\0', ' ', '\n'])
+        .as_bytes()
+        .to_vec();
     payload.extend_from_slice(b" \0");
     let counted_len = 20 + payload.len() + TRAILER.len();
     let mut out = Vec::with_capacity(12 + counted_len);
@@ -47,9 +50,7 @@ pub fn parse_state(chunk: &[u8]) -> Result<String, String> {
         return Err("not a DAW3 state chunk".into());
     }
     let xml_len = u32::from_le_bytes(chunk[24..28].try_into().unwrap()) as usize;
-    let xml = chunk
-        .get(32..32 + xml_len)
-        .ok_or("truncated state chunk")?;
+    let xml = chunk.get(32..32 + xml_len).ok_or("truncated state chunk")?;
     Ok(String::from_utf8_lossy(xml)
         .trim_end_matches(['\0', ' '])
         .to_string())
@@ -133,8 +134,14 @@ mod tests {
             u32::from_le_bytes(chunk[4..8].try_into().unwrap()) as usize,
             chunk.len() - 12
         );
-        assert_eq!(u32::from_le_bytes(chunk[8..12].try_into().unwrap()), 999_999_999);
-        assert!(chunk.ends_with(&[b'a', 0, 0, 0, 0][..]) || chunk.windows(15).any(|w| w == b"JUCEPrivateData"));
+        assert_eq!(
+            u32::from_le_bytes(chunk[8..12].try_into().unwrap()),
+            999_999_999
+        );
+        assert!(
+            chunk.ends_with(&[b'a', 0, 0, 0, 0][..])
+                || chunk.windows(15).any(|w| w == b"JUCEPrivateData")
+        );
         let back = parse_state(&chunk).unwrap();
         assert_eq!(back.trim_end(), xml);
         // Rebuilding from the parsed XML is byte-identical (stable format).

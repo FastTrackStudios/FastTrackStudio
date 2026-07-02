@@ -32,8 +32,16 @@ fn main() -> eyre::Result<()> {
         .join("library.styx");
     let config = PathBuf::from(CSS_CONFIG);
 
-    println!("zones spec : {}  (exists: {})", spec.display(), spec.exists());
-    println!("config spec: {}  (exists: {})", config.display(), config.exists());
+    println!(
+        "zones spec : {}  (exists: {})",
+        spec.display(),
+        spec.exists()
+    );
+    println!(
+        "config spec: {}  (exists: {})",
+        config.display(),
+        config.exists()
+    );
 
     let rig = SamplerRig::new_offline_with_cache_budget(48_000, Some(6 * 1024 * 1024 * 1024));
     rig.load_instrument_with_config(ID, &config, &spec, &css_root, "1st Violins", "Mix")?;

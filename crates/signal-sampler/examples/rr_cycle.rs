@@ -70,11 +70,20 @@ fn read_wav(path: &str) -> (Vec<f32>, u32) {
                 (3, 32) => f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]),
                 (1, 16) => i16::from_le_bytes([data[o], data[o + 1]]) as f32 / 32768.0,
                 (1, 24) => {
-                    let v = (data[o] as i32) | ((data[o + 1] as i32) << 8) | ((data[o + 2] as i32) << 16);
-                    let v = if v & 0x80_0000 != 0 { v | !0xFF_FFFF } else { v };
+                    let v = (data[o] as i32)
+                        | ((data[o + 1] as i32) << 8)
+                        | ((data[o + 2] as i32) << 16);
+                    let v = if v & 0x80_0000 != 0 {
+                        v | !0xFF_FFFF
+                    } else {
+                        v
+                    };
                     v as f32 / 8_388_608.0
                 }
-                (1, 32) => i32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]) as f32 / 2_147_483_648.0,
+                (1, 32) => {
+                    i32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]) as f32
+                        / 2_147_483_648.0
+                }
                 _ => 0.0,
             };
             acc += s;
@@ -169,16 +178,31 @@ fn cosine(a: &[f32; BANDS], b: &[f32; BANDS]) -> f32 {
 }
 
 fn main() -> eyre::Result<()> {
-    let refp = std::env::args().nth(1).unwrap_or_else(|| "css_test_full_export.wav".into());
-    let ks: u8 = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(13);
+    let refp = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "css_test_full_export.wav".into());
+    let ks: u8 = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(13);
     let block = SHORT_KS_ORDER.iter().position(|&k| k == ks).unwrap_or(0);
     let sec_start = RR_SECTION_START + block as f64 * 10.6 + 0.2; // first note time
     let (css, css_sr) = read_wav(&refp);
 
     let css_root = PathBuf::from(CSS_ROOT);
-    let spec = css_root.join("_patches").join("1st Violins").join("library.styx");
+    let spec = css_root
+        .join("_patches")
+        .join("1st Violins")
+        .join("library.styx");
     let rig = SamplerRig::new_offline_with_cache_budget(SR, Some(8 * 1024 * 1024 * 1024));
-    rig.load_instrument_with_config(ID, &PathBuf::from(CSS_CONFIG), &spec, &css_root, "1st Violins", "Mix")?;
+    rig.load_instrument_with_config(
+        ID,
+        &PathBuf::from(CSS_CONFIG),
+        &spec,
+        &css_root,
+        "1st Violins",
+        "Mix",
+    )?;
     rig.set_solo_mic(ID, Some("Mix".into()));
     rig.cc(ID, 58, ks);
 
@@ -205,7 +229,9 @@ fn main() -> eyre::Result<()> {
         }
     }
     println!("CC58={ks} RR-cycle analysis (G4 vel100), section @{sec_start:.1}s");
-    println!("our-slot distinguishability: min pairwise cos = {min_pair:.3}  (1.0 = identical → unresolvable)\n");
+    println!(
+        "our-slot distinguishability: min pairwise cos = {min_pair:.3}  (1.0 = identical → unresolvable)\n"
+    );
 
     println!("CSS hit → best-matching our slot (and full row):");
     let mut seq = Vec::new();
@@ -217,10 +243,24 @@ fn main() -> eyre::Result<()> {
         }
         let cspec = band_spectrum(&css[start..start + FFT_N]);
         let sims: Vec<f32> = our.iter().map(|o| cosine(&cspec, o)).collect();
-        let (best, bv) = sims.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, v)| (i, *v)).unwrap();
-        let margin = bv - sims.iter().cloned().filter(|&v| v < bv).fold(0.0f32, f32::max);
+        let (best, bv) = sims
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, v)| (i, *v))
+            .unwrap();
+        let margin = bv
+            - sims
+                .iter()
+                .cloned()
+                .filter(|&v| v < bv)
+                .fold(0.0f32, f32::max);
         seq.push(best);
-        let row: String = sims.iter().map(|v| format!("{v:.3}")).collect::<Vec<_>>().join(" ");
+        let row: String = sims
+            .iter()
+            .map(|v| format!("{v:.3}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         println!("  hit{hit:>2} → RR{best} (cos {bv:.3}, margin {margin:+.3})  [{row}]");
     }
     println!("\ncycle as our-slots: {seq:?}");

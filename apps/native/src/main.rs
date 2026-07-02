@@ -19,8 +19,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dioxus::prelude::*;
 use daw_midi_io::MidiStream;
+use dioxus::prelude::*;
 use signal_sampler::{PreloadProfile, SamplerRig};
 use signal_ui::components::Piano;
 

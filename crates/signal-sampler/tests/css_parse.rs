@@ -56,12 +56,15 @@ fn parse_css_descriptive_styx_mix_default() {
         le.expressive.as_ref().unwrap().delay_for_velocity(110),
         Some(100)
     );
+    // Same velocity→speed direction as Expressive (softer = slower): low
+    // velocity = medium (150 ms), high velocity = fast (100 ms). The spec was
+    // corrected to match the CSS v1.7 manual (it used to be inverted).
     assert_eq!(
         le.low_latency.as_ref().unwrap().delay_for_velocity(30),
-        Some(100)
+        Some(150)
     );
     assert_eq!(
         le.low_latency.as_ref().unwrap().delay_for_velocity(80),
-        Some(150)
+        Some(100)
     );
 }

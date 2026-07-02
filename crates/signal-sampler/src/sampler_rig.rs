@@ -52,20 +52,20 @@ use daw::service::{
     FxChainContext, FxChains, ProjectContext, ProjectInfo, RouteRef, Routing, SendMode, TrackRef,
     Tracks,
 };
-use daw::standalone::audio_engine::AudioEngine;
-use daw::standalone::metering::{linear_to_db, Meters};
-use daw::standalone::transport_engine::{PlayStateRepr, TransportShared};
 use daw::standalone::Standalone;
+use daw::standalone::audio_engine::AudioEngine;
+use daw::standalone::metering::{Meters, linear_to_db};
+use daw::standalone::transport_engine::{PlayStateRepr, TransportShared};
 use daw_audio_io::AudioIoPrefs;
 use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
 };
 
 use crate::bank::{PreloadProfile, SamplerBank};
-use crate::engine::cache::{EvictStats, PreloadStats};
 use crate::engine::SampleEngine;
+use crate::engine::cache::{EvictStats, PreloadStats};
 use crate::instrument::SamplerInstrument;
-use crate::mixer::{MixerLayout, FX_PREPARE_BLOCK};
+use crate::mixer::{FX_PREPARE_BLOCK, MixerLayout};
 use crate::stats::AudioStatsSnapshot;
 
 /// Stable identifier for a loaded instrument within the rig (e.g. a piece id
@@ -670,7 +670,9 @@ impl SamplerRig {
     pub fn set_articulation(&self, id: &str, artic: impl Into<String>) {
         match self.bank().lock() {
             Ok(mut bank) => bank.set_articulation(id, artic),
-            Err(_) => tracing::warn!("signal-sampler: bank lock poisoned; set_articulation skipped"),
+            Err(_) => {
+                tracing::warn!("signal-sampler: bank lock poisoned; set_articulation skipped")
+            }
         }
     }
 
@@ -704,6 +706,84 @@ impl SamplerRig {
         if let Ok(mut bank) = self.bank().lock() {
             bank.set_forced_rr(id, slot);
         }
+    }
+
+    /// Clone an instrument's loaded [`LibrarySpec`](crate::spec::LibrarySpec).
+    pub fn instrument_spec(&self, id: &str) -> Option<crate::spec::LibrarySpec> {
+        self.bank().lock().ok().and_then(|b| b.instrument_spec(id))
+    }
+
+    /// Explicitly set an instrument's legato mode (`enabled`, `expressive`).
+    pub fn set_legato_mode(&self, id: &str, enabled: bool, expressive: bool) {
+        if let Ok(mut bank) = self.bank().lock() {
+            bank.set_legato_mode(id, enabled, expressive);
+        }
+    }
+
+    /// Enable/disable an instrument's legato transition fire log (tests /
+    /// offline analysis).
+    pub fn set_legato_fire_log_enabled(&self, id: &str, enabled: bool) {
+        if let Ok(mut bank) = self.bank().lock() {
+            bank.set_legato_fire_log_enabled(id, enabled);
+        }
+    }
+
+    /// Recorded legato transition firings for an instrument.
+    pub fn legato_fire_log(&self, id: &str) -> Vec<crate::engine::LegatoFireEvent> {
+        self.bank()
+            .lock()
+            .map(|b| b.legato_fire_log(id))
+            .unwrap_or_default()
+    }
+
+    /// Document-mode legato prefire, addressed by instrument id — see
+    /// [`SampleEngine::legato_prefire`](crate::engine::SampleEngine::legato_prefire).
+    pub fn legato_prefire(&self, id: &str, note: u8, velocity: u8) {
+        if let Ok(mut bank) = self.bank().lock() {
+            bank.legato_prefire(id, note, velocity);
+        }
+    }
+
+    // ── Document mode (offline; see docs/plan/document-mode.md) ───────────────
+
+    /// Render a [`TrackDocument`](crate::document::TrackDocument) offline
+    /// through instrument `id`: annotate against the instrument's spec (legato
+    /// prefires land transition arrivals ON the grid; shorts pre-roll), then
+    /// walk the schedule sample-accurately. Deterministic: same document +
+    /// seed + sample rate ⇒ byte-identical audio (round-robin is pinned per
+    /// note from a stable hash of the seed — see `document::stable_rr_slot`).
+    /// Only available on an offline rig.
+    pub fn render_offline_document(
+        &self,
+        id: &str,
+        doc: &crate::document::TrackDocument,
+        opts: &crate::document::DocumentRenderOptions,
+    ) -> eyre::Result<crate::document::DocumentRenderResult> {
+        if !self.is_offline() {
+            return Err(eyre::eyre!(
+                "render_offline_document is only available on SamplerRig::new_offline"
+            ));
+        }
+        let mut bank = self
+            .bank()
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?;
+        let spec = bank
+            .instrument_spec(id)
+            .ok_or_else(|| eyre::eyre!("no instrument loaded under '{id}'"))?;
+        let schedule = crate::document::annotate(doc, &spec, self.inner.sample_rate);
+        // Warm every pitch the document plays (current articulation + vib
+        // pair + releases + legato/portamento transitions) so the offline
+        // walk never cache-misses into silence.
+        let mut pitches: Vec<u8> = doc.notes.iter().map(|n| n.pitch).collect();
+        pitches.sort_unstable();
+        pitches.dedup();
+        for p in pitches {
+            let _ = bank.warm_note(id, p);
+        }
+        Ok(crate::document::render_schedule(
+            &mut bank, id, &schedule, opts,
+        ))
     }
 
     /// Switch an instrument's active microphone position (e.g. `"Mix"`).
@@ -786,7 +866,9 @@ impl SamplerRig {
     }
 
     pub fn cc(&self, _id: &str, controller: u8, value: u8) {
-        self.dispatch(daw::service::MidiMessage::control_change(0, controller, value));
+        self.dispatch(daw::service::MidiMessage::control_change(
+            0, controller, value,
+        ));
     }
 
     /// All Notes Off (CC 123) — release every held note.

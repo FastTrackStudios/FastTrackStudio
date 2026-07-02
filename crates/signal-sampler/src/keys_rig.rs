@@ -15,18 +15,18 @@
 use std::sync::Arc;
 
 use daw::service::{FxChainContext, FxChains, ProjectContext, ProjectInfo, Tracks};
+use daw::standalone::Standalone;
 use daw::standalone::audio_engine::AudioEngine;
 use daw::standalone::metering::Meters;
 use daw::standalone::transport_engine::{PlayStateRepr, TransportShared};
-use daw::standalone::Standalone;
 use daw_audio_io::AudioIoPrefs;
 use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
 };
 
+use crate::MidiMonitor;
 use crate::node_render::RenderNode;
 use crate::rig_node::Container;
-use crate::MidiMonitor;
 
 /// Block size the keys instrument is prepared for.
 const PREPARE_BLOCK: u32 = 1024;
@@ -197,7 +197,9 @@ impl KeysRig {
         self.dispatch(daw::service::MidiMessage::note_off(0, note, 0));
     }
     pub fn cc(&self, controller: u8, value: u8) {
-        self.dispatch(daw::service::MidiMessage::control_change(0, controller, value));
+        self.dispatch(daw::service::MidiMessage::control_change(
+            0, controller, value,
+        ));
     }
     /// All Notes Off (CC 123).
     pub fn all_notes_off(&self) {
@@ -278,7 +280,10 @@ mod tests {
         inst.process_block(&inl, &inr, &mut outl, &mut outr, &ev)
             .unwrap();
         let rms = (outl.iter().map(|s| s * s).sum::<f32>() / 256.0).sqrt();
-        assert!(rms > 1e-3, "keys instrument should render audible output, rms={rms}");
+        assert!(
+            rms > 1e-3,
+            "keys instrument should render audible output, rms={rms}"
+        );
     }
 
     /// Machine-local: the full `just keys` render path plays the Keyscape-

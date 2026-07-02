@@ -14,12 +14,12 @@
 
 use dioxus::prelude::*;
 
-use signal::{Signal, connect_db_seeded};
 use daw_midi_io::MidiStream;
-#[cfg(not(feature = "dev"))]
-use signal_ui::ProcessingChain;
+use signal::{Signal, connect_db_seeded};
 #[cfg(not(feature = "dev"))]
 use signal_sampler::SamplerRig;
+#[cfg(not(feature = "dev"))]
+use signal_ui::ProcessingChain;
 use signal_ui::SignalRoot;
 
 /// Compiled Tailwind CSS for signal-ui components.

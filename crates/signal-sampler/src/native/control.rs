@@ -244,14 +244,20 @@ impl ControlSource for MidiSource {
         let mut v = self.value;
         for ev in events.midi {
             match (m, &ev.message) {
-                (MidiMod::Wheel, MidiMessage::ControlChange { controller, value, .. })
-                    if *controller == 1 =>
-                {
+                (
+                    MidiMod::Wheel,
+                    MidiMessage::ControlChange {
+                        controller, value, ..
+                    },
+                ) if *controller == 1 => {
                     v = *value as f32 / 127.0;
                 }
-                (MidiMod::Cc(n), MidiMessage::ControlChange { controller, value, .. })
-                    if *controller == n =>
-                {
+                (
+                    MidiMod::Cc(n),
+                    MidiMessage::ControlChange {
+                        controller, value, ..
+                    },
+                ) if *controller == n => {
                     v = *value as f32 / 127.0;
                 }
                 (MidiMod::Aftertouch, MidiMessage::ChannelPressure { pressure, .. }) => {
@@ -437,10 +443,7 @@ mod tests {
 
     #[test]
     fn sample_hold_steps_per_cycle() {
-        let mut src = ModSource::lfo(
-            ControlLfo::new(LfoWave::SampleHold, 4.0),
-            48_000.0,
-        );
+        let mut src = ModSource::lfo(ControlLfo::new(LfoWave::SampleHold, 4.0), 48_000.0);
         // 4 Hz over 1 s in 100 ms blocks → value changes several times but
         // holds within a cycle.
         let mut values = Vec::new();

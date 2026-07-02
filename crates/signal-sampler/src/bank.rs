@@ -12,8 +12,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::block::{BlockSpec, ParamOverride, SamplerBlock};
 use crate::engine::cache::{EvictStats, PreloadStats, SampleCache};
@@ -105,11 +105,7 @@ struct PendingPreload {
 
 fn resolve_relative(path_str: &str, base_dir: &Path) -> PathBuf {
     let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        base_dir.join(p)
-    }
+    if p.is_absolute() { p } else { base_dir.join(p) }
 }
 
 /// Map an instrument tag to a drum-kit preload priority. Lower values are
@@ -567,6 +563,76 @@ impl SamplerBank {
     /// `None` restores normal CC59 / cycle / random behaviour (A/B null harness).
     pub fn set_forced_rr(&mut self, id: &str, slot: Option<u32>) {
         self.with_block(id, |b| b.set_forced_rr(slot));
+    }
+
+    /// Read an instrument's block for inspection (spec, fire log, …),
+    /// resolving both the direct-slot and the `preset:engine` cases.
+    fn read_block<T>(
+        &self,
+        id: &str,
+        f: impl FnOnce(&crate::block::SamplerBlock) -> T,
+    ) -> Option<T> {
+        if let Some(slot) = self.instruments.get(id) {
+            return Some(f(&slot.engine.block));
+        }
+        if let Some((prefix, engine_id)) = self.instrument_to_preset.get(id) {
+            if let Some(preset) = self.presets.get(prefix) {
+                if let Some(&idx) = preset.engine_id_to_idx.get(engine_id) {
+                    return Some(f(&preset.engines[idx].block));
+                }
+            }
+        }
+        None
+    }
+
+    /// Clone an instrument's loaded [`LibrarySpec`](crate::spec::LibrarySpec)
+    /// (document annotation reads keyswitch / legato / short-note tables).
+    pub fn instrument_spec(&self, id: &str) -> Option<crate::spec::LibrarySpec> {
+        self.read_block(id, |b| b.patch().spec.clone())
+    }
+
+    /// Document-mode legato prefire — see
+    /// [`SampleEngine::legato_prefire`](crate::engine::SampleEngine::legato_prefire).
+    pub fn legato_prefire(&mut self, id: &str, note: u8, velocity: u8) {
+        self.with_block(id, |b| b.legato_prefire(note, velocity));
+    }
+
+    /// Per-instrument note-on, addressed by id (bypasses MIDI-channel
+    /// routing — used by the document scheduler).
+    pub fn note_on_instrument(&mut self, id: &str, note: u8, velocity: u8) {
+        self.with_block(id, |b| b.note_on(note, velocity));
+    }
+
+    /// Per-instrument note-off, addressed by id.
+    pub fn note_off_instrument(&mut self, id: &str, note: u8) {
+        self.with_block(id, |b| b.note_off(note));
+    }
+
+    /// Per-instrument CC, addressed by id.
+    pub fn cc_instrument(&mut self, id: &str, controller: u8, value: u8) {
+        self.with_block(id, |b| b.cc(controller, value));
+    }
+
+    /// Explicitly set an instrument's legato mode (document mode forces
+    /// expressive).
+    pub fn set_legato_mode(&mut self, id: &str, enabled: bool, expressive: bool) {
+        self.with_block(id, |b| b.set_legato_mode(enabled, expressive));
+    }
+
+    /// Enable/disable an instrument's legato transition fire log.
+    pub fn set_legato_fire_log_enabled(&mut self, id: &str, enabled: bool) {
+        self.with_block(id, |b| b.set_legato_fire_log_enabled(enabled));
+    }
+
+    /// Recorded legato transition firings for an instrument.
+    pub fn legato_fire_log(&self, id: &str) -> Vec<crate::engine::LegatoFireEvent> {
+        self.read_block(id, |b| b.legato_fire_log().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// An instrument engine's running render position in frames.
+    pub fn engine_frames_rendered(&self, id: &str) -> Option<u64> {
+        self.read_block(id, |b| b.frames_rendered())
     }
 
     /// Warm the samples `note` would trigger for `id` under its current pin +

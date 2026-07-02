@@ -159,9 +159,10 @@ mod tests {
     #[test]
     fn register_a_code_preset() {
         let mut reg = PresetRegistry::new();
-        reg.register_code(Container::preset("My Test").add(
-            Container::layer("A").block(BlockType::Oscillator, "Osc"),
-        ));
+        reg.register_code(
+            Container::preset("My Test")
+                .add(Container::layer("A").block(BlockType::Oscillator, "Osc")),
+        );
         assert_eq!(reg.len(), 1);
         assert_eq!(reg.get("my test").unwrap().source, PresetSource::Code);
         assert_eq!(reg.tree("My Test").unwrap().blocks().len(), 1);
@@ -173,8 +174,7 @@ mod tests {
         // registry — proving the styx registration path end to end.
         let tree = Container::preset("Disk Preset")
             .add(Container::layer("A").block(BlockType::Sampler, "Piano"));
-        let dir =
-            std::env::temp_dir().join(format!("signal-preset-reg-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("signal-preset-reg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("disk-preset.styx");
         std::fs::write(&path, tree.to_styx_string().unwrap()).unwrap();

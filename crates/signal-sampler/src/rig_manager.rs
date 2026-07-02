@@ -19,11 +19,11 @@ use std::path::{Path, PathBuf};
 
 use facet::Facet;
 
+use crate::SamplerError;
 use crate::rig::GuitarRig;
 use crate::rig_library::Library;
-use crate::rig_prefs::{signal_config_dir, RigAudioPrefs};
+use crate::rig_prefs::{RigAudioPrefs, signal_config_dir};
 use crate::rig_profile::{ProfileRig, RigProfile};
-use crate::SamplerError;
 
 /// Saved settings for a specific rig.
 #[derive(Clone, Debug, Facet)]
@@ -290,15 +290,17 @@ mod tests {
         assert_eq!(profile.stacks.len(), 8);
         assert!(base.ends_with("examples/library"));
         // Patches are resolved to inline chains (amp NAM first).
-        assert!(profile
-            .patches
-            .iter()
-            .all(|p| p.preset.is_empty()), "all patch refs inlined");
-        assert!(profile.patches[0]
-            .chain
-            .first()
-            .map(|b| b.is_nam())
-            .unwrap_or(false));
+        assert!(
+            profile.patches.iter().all(|p| p.preset.is_empty()),
+            "all patch refs inlined"
+        );
+        assert!(
+            profile.patches[0]
+                .chain
+                .first()
+                .map(|b| b.is_nam())
+                .unwrap_or(false)
+        );
     }
 
     #[test]

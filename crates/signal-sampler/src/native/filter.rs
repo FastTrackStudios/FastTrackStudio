@@ -195,13 +195,19 @@ impl NativeFilter {
     fn update_coeffs(&mut self) {
         for i in 0..self.sections {
             // Resonance on the first section only; the cascade stays flat.
-            let q = if i == 0 { self.q } else { core::f32::consts::FRAC_1_SQRT_2 };
+            let q = if i == 0 {
+                self.q
+            } else {
+                core::f32::consts::FRAC_1_SQRT_2
+            };
             self.left[i].set(self.cutoff_hz, q, self.sample_rate);
             self.right[i].set(self.cutoff_hz, q, self.sample_rate);
         }
         let res_norm = ((self.q - 0.5) / 11.5).clamp(0.0, 1.0);
-        self.ladder_l.set(self.cutoff_hz, res_norm, self.sample_rate);
-        self.ladder_r.set(self.cutoff_hz, res_norm, self.sample_rate);
+        self.ladder_l
+            .set(self.cutoff_hz, res_norm, self.sample_rate);
+        self.ladder_r
+            .set(self.cutoff_hz, res_norm, self.sample_rate);
     }
 
     /// Run one sample through the cascade of one channel.
@@ -389,7 +395,10 @@ mod tests {
         f.prepare(48_000.0, 4_096).unwrap(); // reset state
         let high = sine_response(&mut f, 10_000.0, sr);
         assert!(low > 0.6, "passband ~unity, rms={low}");
-        assert!(high < 0.1, "10 kHz through a 1 kHz LP is >20 dB down, rms={high}");
+        assert!(
+            high < 0.1,
+            "10 kHz through a 1 kHz LP is >20 dB down, rms={high}"
+        );
     }
 
     #[test]
@@ -469,7 +478,10 @@ mod tests {
             "resonant peak at cutoff: peak={at_cutoff} passband={below}"
         );
         // Saturation keeps it bounded even when resonating.
-        assert!(at_cutoff < 3.0, "tanh bounds the resonance, rms={at_cutoff}");
+        assert!(
+            at_cutoff < 3.0,
+            "tanh bounds the resonance, rms={at_cutoff}"
+        );
     }
 
     #[test]

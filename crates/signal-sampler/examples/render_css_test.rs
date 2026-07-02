@@ -64,7 +64,8 @@ fn parse_smf(d: &[u8]) -> Vec<(f64, u8, u8, u8)> {
                 p += 1;
                 let len = read_vlq(d, &mut p) as usize;
                 if meta == 0x51 {
-                    us_per_q = ((d[p] as f64) * 65536.0) + (d[p + 1] as f64) * 256.0 + d[p + 2] as f64;
+                    us_per_q =
+                        ((d[p] as f64) * 65536.0) + (d[p + 1] as f64) * 256.0 + d[p + 2] as f64;
                 }
                 p += len;
             }
@@ -123,16 +124,30 @@ fn render_until(rig: &SamplerRig, out: &mut Vec<f32>, cur: &mut f64, t: f64) {
 }
 
 fn main() -> eyre::Result<()> {
-    let inp = std::env::args().nth(1).unwrap_or_else(|| "css_test.mid".into());
-    let outp = std::env::args().nth(2).unwrap_or_else(|| "our_render.wav".into());
+    let inp = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "css_test.mid".into());
+    let outp = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "our_render.wav".into());
     let bytes = std::fs::read(&inp)?;
     let events = parse_smf(&bytes);
     eprintln!("parsed {} events from {inp}", events.len());
 
     let css_root = PathBuf::from(CSS_ROOT);
-    let spec = css_root.join("_patches").join("1st Violins").join("library.styx");
+    let spec = css_root
+        .join("_patches")
+        .join("1st Violins")
+        .join("library.styx");
     let rig = SamplerRig::new_offline_with_cache_budget(SR, Some(8 * 1024 * 1024 * 1024));
-    rig.load_instrument_with_config(ID, &PathBuf::from(CSS_CONFIG), &spec, &css_root, "1st Violins", "Mix")?;
+    rig.load_instrument_with_config(
+        ID,
+        &PathBuf::from(CSS_CONFIG),
+        &spec,
+        &css_root,
+        "1st Violins",
+        "Mix",
+    )?;
     rig.set_solo_mic(ID, Some("Mix".into()));
     rig.set_articulation(ID, "Nonvib");
     // CSS-default envelope: fast attack (sustains start at the steady region) and

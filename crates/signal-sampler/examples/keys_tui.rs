@@ -15,12 +15,12 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use daw_audio_io::AudioIoPrefs;
+use ratatui::Frame;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Gauge, Paragraph};
-use ratatui::Frame;
 use signal_sampler::{
     Container, KeysRig, MidiInputHandle, MidiMessage, MidiSelection, PresetRegistry, RigNode,
 };
@@ -37,7 +37,9 @@ const BAND_COLORS: [Color; 6] = [
 ];
 
 fn arg(args: &[String], flag: &str) -> Option<String> {
-    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1).cloned())
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn main() -> eyre::Result<()> {
@@ -50,7 +52,9 @@ fn main() -> eyre::Result<()> {
         "Nord Stage"
     };
     let preset_name = arg(&args, "--preset").unwrap_or_else(|| default_preset.to_string());
-    let buffer: u32 = arg(&args, "--buffer").and_then(|s| s.parse().ok()).unwrap_or(256);
+    let buffer: u32 = arg(&args, "--buffer")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(256);
 
     // Build the registry (code builtins + any styx library dir passed via --library).
     let mut registry = PresetRegistry::with_builtins();
@@ -62,18 +66,18 @@ fn main() -> eyre::Result<()> {
     let mut preset_name = preset_name;
     if let Some(patch_path) = arg(&args, "--omni") {
         let index = signal_sampler::omni_import::SoundsourceIndex::scan_default();
-        let tree = signal_sampler::omni_import::load_patch_file(
-            std::path::Path::new(&patch_path),
-            &index,
-        )
-        .map_err(|e| eyre::eyre!("omni import: {e}"))?;
+        let tree =
+            signal_sampler::omni_import::load_patch_file(std::path::Path::new(&patch_path), &index)
+                .map_err(|e| eyre::eyre!("omni import: {e}"))?;
         preset_name = tree.name.clone();
         registry.register_code(tree);
     }
-    let tree = registry
-        .tree(&preset_name)
-        .cloned()
-        .ok_or_else(|| eyre::eyre!("preset {preset_name:?} not found; have: {:?}", registry.names()))?;
+    let tree = registry.tree(&preset_name).cloned().ok_or_else(|| {
+        eyre::eyre!(
+            "preset {preset_name:?} not found; have: {:?}",
+            registry.names()
+        )
+    })?;
 
     // Open audio + host the preset BEFORE taking the terminal (errors print normally).
     let prefs = AudioIoPrefs {
@@ -110,7 +114,8 @@ fn main() -> eyre::Result<()> {
     };
     // Don't hard-fail if the device can't open — the TUI still runs so you can
     // switch with `i` and watch the monitor.
-    let mut midi: Option<MidiInputHandle> = rig.attach_midi(midi_choices[midi_idx].sel.clone()).ok();
+    let mut midi: Option<MidiInputHandle> =
+        rig.attach_midi(midi_choices[midi_idx].sel.clone()).ok();
     let monitor = rig.midi_monitor();
 
     redirect_stderr_to_log();
@@ -158,24 +163,29 @@ fn collect_routing(tree: &Container) -> (Vec<Band>, Vec<VelLayer>) {
     let mut bands = Vec::new();
     let mut vels = Vec::new();
     let mut ci = 0usize;
-    fn walk(
-        c: &Container,
-        bands: &mut Vec<Band>,
-        vels: &mut Vec<VelLayer>,
-        ci: &mut usize,
-    ) {
+    fn walk(c: &Container, bands: &mut Vec<Band>, vels: &mut Vec<VelLayer>, ci: &mut usize) {
         let z = c.zone;
         let key_split = z.key_lo > 0 || z.key_hi < 127;
         let vel_split = z.vel_lo > 1 || z.vel_hi < 127;
         if key_split {
             let color = BAND_COLORS[*ci % BAND_COLORS.len()];
             *ci += 1;
-            bands.push(Band { name: c.name.clone(), lo: z.key_lo, hi: z.key_hi, color });
+            bands.push(Band {
+                name: c.name.clone(),
+                lo: z.key_lo,
+                hi: z.key_hi,
+                color,
+            });
         }
         if vel_split {
             let color = BAND_COLORS[*ci % BAND_COLORS.len()];
             *ci += 1;
-            vels.push(VelLayer { name: c.name.clone(), lo: z.vel_lo, hi: z.vel_hi, color });
+            vels.push(VelLayer {
+                name: c.name.clone(),
+                lo: z.vel_lo,
+                hi: z.vel_hi,
+                color,
+            });
         }
         for child in &c.children {
             if let RigNode::Container { container } = child {
@@ -191,10 +201,40 @@ fn collect_routing(tree: &Container) -> (Vec<Band>, Vec<VelLayer>) {
 
 fn key_to_semitone(c: char) -> Option<i32> {
     Some(match c {
-        'z' => 0, 's' => 1, 'x' => 2, 'd' => 3, 'c' => 4, 'v' => 5, 'g' => 6, 'b' => 7,
-        'h' => 8, 'n' => 9, 'j' => 10, 'm' => 11, ',' => 12, 'l' => 13, '.' => 14, ';' => 15, '/' => 16,
-        'q' => 12, '2' => 13, 'w' => 14, '3' => 15, 'e' => 16, 'r' => 17, '5' => 18, 't' => 19,
-        '6' => 20, 'y' => 21, '7' => 22, 'u' => 23, 'i' => 24, '9' => 25, 'o' => 26, '0' => 27, 'p' => 28,
+        'z' => 0,
+        's' => 1,
+        'x' => 2,
+        'd' => 3,
+        'c' => 4,
+        'v' => 5,
+        'g' => 6,
+        'b' => 7,
+        'h' => 8,
+        'n' => 9,
+        'j' => 10,
+        'm' => 11,
+        ',' => 12,
+        'l' => 13,
+        '.' => 14,
+        ';' => 15,
+        '/' => 16,
+        'q' => 12,
+        '2' => 13,
+        'w' => 14,
+        '3' => 15,
+        'e' => 16,
+        'r' => 17,
+        '5' => 18,
+        't' => 19,
+        '6' => 20,
+        'y' => 21,
+        '7' => 22,
+        'u' => 23,
+        'i' => 24,
+        '9' => 25,
+        'o' => 26,
+        '0' => 27,
+        'p' => 28,
         _ => return None,
     })
 }
@@ -215,7 +255,11 @@ fn run(
     let mut octave: i32 = 60; // C4 base for the computer keyboard
     let mut held_kbd: HashSet<char> = HashSet::new();
     let mut status: Option<String> = None;
-    let preset_names = registry.names().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let preset_names = registry
+        .names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
 
     loop {
         // Held notes for the viz: computer keys + a fold of recent hardware MIDI.
@@ -230,8 +274,18 @@ fn run(
         let midi_open = midi.is_some();
         term.draw(|f| {
             ui(
-                f, preset_name, rig, &bands, &vels, &held, peak, monitor, octave, midi_label,
-                midi_open, status.as_deref(),
+                f,
+                preset_name,
+                rig,
+                &bands,
+                &vels,
+                &held,
+                peak,
+                monitor,
+                octave,
+                midi_label,
+                midi_open,
+                status.as_deref(),
             )
         })?;
 
@@ -344,9 +398,15 @@ fn ui(
 
     // ── Header (Nord red) ──
     let header = Line::from(vec![
-        Span::styled("  NORD STAGE 4  ", Style::new().fg(Color::White).bg(NORD_RED).bold()),
+        Span::styled(
+            "  NORD STAGE 4  ",
+            Style::new().fg(Color::White).bg(NORD_RED).bold(),
+        ),
         Span::raw("  "),
-        Span::styled(preset_name.to_string(), Style::new().fg(Color::White).bold()),
+        Span::styled(
+            preset_name.to_string(),
+            Style::new().fg(Color::White).bold(),
+        ),
         Span::styled(
             format!("   {} Hz", rig.sample_rate()),
             Style::new().fg(Color::DarkGray),
@@ -364,7 +424,11 @@ fn ui(
     f.render_widget(Paragraph::new(header), rows[0]);
 
     // ── Output meter ──
-    let db = if peak <= 1e-6 { -120.0 } else { 20.0 * peak.log10() };
+    let db = if peak <= 1e-6 {
+        -120.0
+    } else {
+        20.0 * peak.log10()
+    };
     let ratio = (((db + 60.0) / 60.0) as f64).clamp(0.0, 1.0);
     let color = if db >= -1.0 {
         Color::Red
@@ -378,12 +442,17 @@ fn ui(
             .block(Block::bordered().title("OUTPUT"))
             .gauge_style(Style::new().fg(color))
             .ratio(ratio)
-            .label(if db <= -119.0 { "—".into() } else { format!("{db:.1} dB") }),
+            .label(if db <= -119.0 {
+                "—".into()
+            } else {
+                format!("{db:.1} dB")
+            }),
         rows[1],
     );
 
     // ── Sections (left) + Velocity layers (right) ──
-    let mid = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)]).split(rows[2]);
+    let mid =
+        Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)]).split(rows[2]);
     render_sections(f, mid[0], bands);
     render_velocity(f, mid[1], vels, held);
 
@@ -417,7 +486,10 @@ fn render_sections(f: &mut Frame, area: Rect, bands: &[Band]) {
     for b in bands {
         lines.push(Line::from(vec![
             Span::styled("██ ", Style::new().fg(b.color)),
-            Span::styled(format!("{:<14}", b.name), Style::new().fg(Color::White).bold()),
+            Span::styled(
+                format!("{:<14}", b.name),
+                Style::new().fg(Color::White).bold(),
+            ),
             Span::styled(
                 format!("keys {}–{}", note_name(b.lo), note_name(b.hi)),
                 Style::new().fg(Color::Gray),
@@ -449,7 +521,10 @@ fn render_velocity(f: &mut Frame, area: Rect, vels: &[VelLayer], _held: &HashSet
         lines.push(Line::from(vec![
             Span::styled(format!("{:<10}", v.name), Style::new().fg(Color::White)),
             Span::styled(bar, Style::new().fg(v.color)),
-            Span::styled(format!(" {}–{}", v.lo, v.hi), Style::new().fg(Color::DarkGray)),
+            Span::styled(
+                format!(" {}–{}", v.lo, v.hi),
+                Style::new().fg(Color::DarkGray),
+            ),
         ]));
     }
     f.render_widget(
@@ -473,7 +548,13 @@ fn render_keyboard(f: &mut Frame, area: Rect, bands: &[Band], held: &HashSet<u8>
         let is_black = matches!(n % 12, 1 | 3 | 6 | 8 | 10);
         let held_here = held.contains(&n);
         let (ch, mut style) = if held_here {
-            ('▀', Style::new().fg(Color::White).bg(band_color.unwrap_or(Color::Gray)).bold())
+            (
+                '▀',
+                Style::new()
+                    .fg(Color::White)
+                    .bg(band_color.unwrap_or(Color::Gray))
+                    .bold(),
+            )
         } else if let Some(c) = band_color {
             ('▄', Style::new().fg(c))
         } else if is_black {
@@ -502,7 +583,9 @@ fn render_keyboard(f: &mut Frame, area: Rect, bands: &[Band], held: &HashSet<u8>
 }
 
 fn note_name(n: u8) -> String {
-    const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
     format!("{}{}", NAMES[(n % 12) as usize], n as i32 / 12 - 1)
 }
 
@@ -510,7 +593,11 @@ fn note_name(n: u8) -> String {
 fn redirect_stderr_to_log() {
     use std::os::fd::AsRawFd;
     let path = std::env::temp_dir().join("fts-signal-keys.log");
-    if let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         unsafe { libc::dup2(f.as_raw_fd(), libc::STDERR_FILENO) };
         std::mem::forget(f);
     }

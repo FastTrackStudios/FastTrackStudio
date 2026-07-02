@@ -117,7 +117,8 @@ mod tests {
             midi: &[],
             note_expressions: &[],
         };
-        amp.process_block(&input, &input, &mut l, &mut r, &ev).unwrap();
+        amp.process_block(&input, &input, &mut l, &mut r, &ev)
+            .unwrap();
         assert!((l[0] - 0.501).abs() < 0.01, "-6 dB ≈ ×0.5, got {}", l[0]);
     }
 }

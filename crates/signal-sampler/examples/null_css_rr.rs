@@ -132,9 +132,14 @@ fn read_wav(path: &str) -> (Vec<f32>, u32) {
                 (3, 32) => f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]),
                 (1, 16) => i16::from_le_bytes([data[o], data[o + 1]]) as f32 / 32768.0,
                 (1, 24) => {
-                    let v = (data[o] as i32) | ((data[o + 1] as i32) << 8)
+                    let v = (data[o] as i32)
+                        | ((data[o + 1] as i32) << 8)
                         | ((data[o + 2] as i32) << 16);
-                    let v = if v & 0x80_0000 != 0 { v | !0xFF_FFFF } else { v };
+                    let v = if v & 0x80_0000 != 0 {
+                        v | !0xFF_FFFF
+                    } else {
+                        v
+                    };
                     v as f32 / 8_388_608.0
                 }
                 (1, 32) => {
@@ -206,7 +211,9 @@ fn render_window(rig: &SamplerRig, frames: usize) -> Vec<f32> {
 }
 
 fn main() -> eyre::Result<()> {
-    let mid = std::env::args().nth(1).unwrap_or_else(|| "css_test.mid".into());
+    let mid = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "css_test.mid".into());
     let refp = std::env::args()
         .nth(2)
         .unwrap_or_else(|| "css_test_export.wav".into());
@@ -221,9 +228,19 @@ fn main() -> eyre::Result<()> {
     );
 
     let css_root = PathBuf::from(CSS_ROOT);
-    let spec = css_root.join("_patches").join("1st Violins").join("library.styx");
+    let spec = css_root
+        .join("_patches")
+        .join("1st Violins")
+        .join("library.styx");
     let rig = SamplerRig::new_offline_with_cache_budget(SR, Some(8 * 1024 * 1024 * 1024));
-    rig.load_instrument_with_config(ID, &PathBuf::from(CSS_CONFIG), &spec, &css_root, "1st Violins", "Mix")?;
+    rig.load_instrument_with_config(
+        ID,
+        &PathBuf::from(CSS_CONFIG),
+        &spec,
+        &css_root,
+        "1st Violins",
+        "Mix",
+    )?;
     rig.set_solo_mic(ID, Some("Mix".into()));
 
     let win_s = 0.45f64; // short-note window
@@ -239,8 +256,7 @@ fn main() -> eyre::Result<()> {
         if status & 0xF0 == 0xB0 && *d1 == 58 {
             cur_cc58 = *d2;
         }
-        let is_short_note_on =
-            status & 0xF0 == 0x90 && *d2 > 0 && SHORT_KS.contains(&cur_cc58);
+        let is_short_note_on = status & 0xF0 == 0x90 && *d2 > 0 && SHORT_KS.contains(&cur_cc58);
         if !is_short_note_on {
             continue;
         }

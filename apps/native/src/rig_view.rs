@@ -148,7 +148,11 @@ pub fn RigPanel() -> Element {
             level_match: prig.is_level_matching(),
             audio: {
                 let p = prig.rig().prefs();
-                let dev = if p.input_device.is_empty() { "default" } else { p.input_device.as_str() };
+                let dev = if p.input_device.is_empty() {
+                    "default"
+                } else {
+                    p.input_device.as_str()
+                };
                 format!("{dev} · ch{}", p.input_channel + 1)
             },
         })
@@ -425,7 +429,9 @@ fn patch_style(active: bool, avail: bool) -> String {
     let base = "min-width:96px; padding:10px 12px; border-radius:5px; font-size:13px; \
                 font-weight:600;";
     if !avail {
-        format!("{base} background:#1a1a1c; color:#555; border:1px solid #2c2c2e; cursor:not-allowed;")
+        format!(
+            "{base} background:#1a1a1c; color:#555; border:1px solid #2c2c2e; cursor:not-allowed;"
+        )
     } else if active {
         format!("{base} background:{ACCENT}; color:#111; border:none; cursor:pointer;")
     } else {
@@ -434,5 +440,9 @@ fn patch_style(active: bool, avail: bool) -> String {
 }
 
 fn lin_to_db(lin: f32) -> f32 {
-    if lin <= 1e-9 { -120.0 } else { 20.0 * lin.log10() }
+    if lin <= 1e-9 {
+        -120.0
+    } else {
+        20.0 * lin.log10()
+    }
 }

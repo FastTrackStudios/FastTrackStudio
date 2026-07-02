@@ -2,9 +2,9 @@
 
 use nice_plug_dioxus::prelude::*;
 
+use crate::ProcessingChain;
 use audio_gui::meters::GrMeter;
 use audio_gui::viz::{EqBand, EqBandShape, EqGraph};
-use crate::ProcessingChain;
 
 // ── Top-level FX view ──────────────────────────────────────────────────────────
 

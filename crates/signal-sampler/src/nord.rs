@@ -67,7 +67,9 @@ fn fx_chain() -> Vec<RigNode> {
         mod2().into(),
         delay().into(),
         amp_eq().into(),
-        RigNode::Block { block: crate::rig::RigBlock::of_type(BlockType::Compressor).named("Comp") },
+        RigNode::Block {
+            block: crate::rig::RigBlock::of_type(BlockType::Compressor).named("Comp"),
+        },
         reverb().into(),
     ]
 }
@@ -131,7 +133,9 @@ const KEYSCAPE_ROOT: &str = "/run/media/AudioHaven/Sampled/Keys/Keyscape";
 /// Spec path for one Keyscape instrument, if the local extraction has it.
 fn keyscape_spec(instrument: &str) -> Option<String> {
     let root = std::env::var("FTS_KEYSCAPE_ROOT").unwrap_or_else(|_| KEYSCAPE_ROOT.into());
-    let p = std::path::Path::new(&root).join(instrument).join("library.styx");
+    let p = std::path::Path::new(&root)
+        .join(instrument)
+        .join("library.styx");
     p.exists().then(|| p.to_string_lossy().into_owned())
 }
 
@@ -280,7 +284,11 @@ mod tests {
     #[test]
     fn layering_demo_has_nested_split_and_velocity_zones() {
         let p = layering_demo();
-        assert_eq!(p.of_role(Role::Layer).len(), 3, "Bass + Soft Pad + Bright Lead");
+        assert_eq!(
+            p.of_role(Role::Layer).len(),
+            3,
+            "Bass + Soft Pad + Bright Lead"
+        );
         // Left-hand key split.
         let bass = p.find("Bass").unwrap();
         assert_eq!((bass.zone.key_lo, bass.zone.key_hi), (0, 59));
@@ -288,7 +296,10 @@ mod tests {
         let rh = p.find("Right Hand").unwrap();
         assert_eq!(rh.zone.key_lo, 60);
         let pad = p.find("Soft Pad").unwrap();
-        assert_eq!((pad.zone.vel_lo, pad.zone.vel_hi, pad.zone.vel_xfade), (1, 90, 40));
+        assert_eq!(
+            (pad.zone.vel_lo, pad.zone.vel_hi, pad.zone.vel_xfade),
+            (1, 90, 40)
+        );
         let lead = p.find("Bright Lead").unwrap();
         assert_eq!(lead.zone.vel_lo, 50);
     }
@@ -349,7 +360,10 @@ mod tests {
             .into_iter()
             .filter(|(_, s)| s.target == "Rotary")
             .count();
-        assert!(to_rotary >= 6, "each FX chain routes To Rotary, got {to_rotary}");
+        assert!(
+            to_rotary >= 6,
+            "each FX chain routes To Rotary, got {to_rotary}"
+        );
     }
 
     #[test]

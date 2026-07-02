@@ -233,6 +233,35 @@ impl SamplerBlock {
         self.engine.note_off(n);
     }
 
+    /// Document-mode legato prefire — see [`SampleEngine::legato_prefire`].
+    pub fn legato_prefire(&mut self, note: u8, velocity: u8) {
+        let n = transposed(note, self.params.transpose);
+        self.engine.legato_prefire(n, velocity);
+    }
+
+    /// Explicitly set the legato mode — see [`SampleEngine::set_legato_mode`].
+    pub fn set_legato_mode(&mut self, enabled: bool, expressive: bool) {
+        self.engine.set_legato_mode(enabled, expressive);
+    }
+
+    /// Enable/disable the legato transition fire log —
+    /// see [`SampleEngine::set_legato_fire_log_enabled`].
+    pub fn set_legato_fire_log_enabled(&mut self, enabled: bool) {
+        self.engine.set_legato_fire_log_enabled(enabled);
+    }
+
+    /// Recorded legato transition firings —
+    /// see [`SampleEngine::legato_fire_log`].
+    pub fn legato_fire_log(&self) -> &[crate::engine::LegatoFireEvent] {
+        self.engine.legato_fire_log()
+    }
+
+    /// Running engine render position in frames —
+    /// see [`SampleEngine::frames_rendered`].
+    pub fn frames_rendered(&self) -> u64 {
+        self.engine.frames_rendered()
+    }
+
     pub fn note_off_with_velocity(&mut self, note: u8, velocity: u8) {
         let n = transposed(note, self.params.transpose);
         self.engine.note_off_with_velocity(n, velocity);
@@ -355,7 +384,8 @@ impl SamplerBlock {
     /// Sustain attack envelope in milliseconds (CSS attack parameter).
     pub fn set_attack_ms(&mut self, ms: u32) {
         let sr = self.engine.sample_rate();
-        self.engine.set_attack_frames(crate::engine::ms_to_frames(ms, sr));
+        self.engine
+            .set_attack_frames(crate::engine::ms_to_frames(ms, sr));
     }
 
     /// Sustain release fade in milliseconds (CSS release parameter).

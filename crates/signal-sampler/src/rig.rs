@@ -36,8 +36,8 @@
 //! (post-input-trim, pre-amp) into a shared atomic.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use signal_proto::block::{BlockCategory, BlockType};
 
@@ -50,13 +50,13 @@ use daw::service::{
 // native duplex `pw_filter` engine (one callback, no ring, low latency); the
 // cpal `AudioEngine` is the fallback. Both share `with_project_prefs` +
 // `sample_rate`, so the open path below is engine-agnostic.
+use daw::standalone::Standalone;
 #[cfg(not(all(feature = "pipewire", target_os = "linux")))]
 use daw::standalone::audio_engine::AudioEngine as RigEngine;
 #[cfg(all(feature = "pipewire", target_os = "linux"))]
 use daw::standalone::audio_engine::DuplexAudioEngine as RigEngine;
-use daw::standalone::metering::{linear_to_db, Meters};
+use daw::standalone::metering::{Meters, linear_to_db};
 use daw::standalone::transport_engine::{PlayStateRepr, TransportShared};
-use daw::standalone::Standalone;
 use daw_audio_io::duplex::EngineStats;
 use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
@@ -799,7 +799,11 @@ pub(crate) fn build_block(
         if let Some(v) = block.param_f32("unison_voices") {
             engine.set_unison(
                 v.round() as u8,
-                block.param_f32("unison_detune").unwrap_or(0.1).clamp(0.0, 2.0) * 100.0,
+                block
+                    .param_f32("unison_detune")
+                    .unwrap_or(0.1)
+                    .clamp(0.0, 2.0)
+                    * 100.0,
                 block.param_f32("unison_width").unwrap_or(0.7),
             );
         }
@@ -1110,7 +1114,10 @@ impl GuitarRig {
     /// [`set_active`](Self::set_active). A failed block load fails the whole
     /// install.
     pub fn install_chain(&mut self, blocks: &[RigBlock]) -> Result<ModelId, String> {
-        let ids: Vec<String> = blocks.iter().map(|b| default_block_id(b.asset_path())).collect();
+        let ids: Vec<String> = blocks
+            .iter()
+            .map(|b| default_block_id(b.asset_path()))
+            .collect();
         self.install_chain_with_ids(blocks, &ids)
     }
 

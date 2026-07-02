@@ -121,11 +121,12 @@ pub fn parse_xml(input: &str) -> Result<XmlNode, String> {
             None => break,
         }
         if b[i..].starts_with(b"<?") || b[i..].starts_with(b"<!--") {
-            let close: &[u8] = if b[i..].starts_with(b"<?") { b"?>" } else { b"-->" };
-            match b[i..]
-                .windows(close.len())
-                .position(|w| w == close)
-            {
+            let close: &[u8] = if b[i..].starts_with(b"<?") {
+                b"?>"
+            } else {
+                b"-->"
+            };
+            match b[i..].windows(close.len()).position(|w| w == close) {
                 Some(off) => {
                     i += off + close.len();
                     continue;
@@ -206,8 +207,8 @@ pub fn parse_xml(input: &str) -> Result<XmlNode, String> {
                 while i < b.len() && b[i] != b'"' {
                     i += 1;
                 }
-                let value = std::str::from_utf8(&b[vstart..i])
-                    .map_err(|_| "bad utf8 in attr value")?;
+                let value =
+                    std::str::from_utf8(&b[vstart..i]).map_err(|_| "bad utf8 in attr value")?;
                 i += 1; // closing quote
                 node.attrs.push((name, decode_entities(value)));
             } else {
@@ -218,6 +219,6 @@ pub fn parse_xml(input: &str) -> Result<XmlNode, String> {
             break;
         }
     }
-    root.or_else(|| stack.pop()).ok_or_else(|| "no root element".into())
+    root.or_else(|| stack.pop())
+        .ok_or_else(|| "no root element".into())
 }
-

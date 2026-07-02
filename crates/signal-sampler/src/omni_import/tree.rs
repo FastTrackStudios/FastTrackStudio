@@ -5,14 +5,14 @@ use std::path::Path;
 
 use signal_proto::block::BlockType;
 
-use super::model::{classify_filter_full, classify_type1, omni_cutoff_hz, OmniModRoute, OmniPatch};
+use super::model::{OmniModRoute, OmniPatch, classify_filter_full, classify_type1, omni_cutoff_hz};
 
 /// Omnisphere's normalized cutoff → OUR normalized cutoff param, via the
 /// calibrated Hz curve.
 fn omni_cutoff_norm(v: f32) -> f32 {
     crate::native::NativeFilter::norm_from_cutoff(omni_cutoff_hz(v))
 }
-use super::{parse_patch, SoundsourceIndex};
+use super::{SoundsourceIndex, parse_patch};
 use crate::rig::RigBlock;
 use crate::rig_node::Container;
 
@@ -136,7 +136,10 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                     // Calibrated: udpth → ~185 cents total spread (measured
                     // 189/184/182 across a 3-point sweep). Our param is
                     // cents/100, so scale by 1.85.
-                    .with_param("unison_detune", format!("{:.4}", layer.unison_detune * 1.85))
+                    .with_param(
+                        "unison_detune",
+                        format!("{:.4}", layer.unison_detune * 1.85),
+                    )
                     .with_param("unison_width", format!("{:.4}", layer.unison_width));
                 if layer.unison_octave > 0.0 {
                     wt = wt.with_param("unison_octave", format!("{:.4}", layer.unison_octave));
@@ -184,9 +187,12 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                         sb = sb
                             .with_param("unison_voices", layer.unison_count.to_string())
                             // Calibrated: udpth → ~185 cents total spread (measured
-                    // 189/184/182 across a 3-point sweep). Our param is
-                    // cents/100, so scale by 1.85.
-                    .with_param("unison_detune", format!("{:.4}", layer.unison_detune * 1.85))
+                            // 189/184/182 across a 3-point sweep). Our param is
+                            // cents/100, so scale by 1.85.
+                            .with_param(
+                                "unison_detune",
+                                format!("{:.4}", layer.unison_detune * 1.85),
+                            )
                             .with_param("unison_width", format!("{:.4}", layer.unison_width));
                     }
                     if let Some((a, _d, _s, r)) = layer.amp_env {
@@ -234,72 +240,80 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
 
         let filter_label = filter_labels[i].clone();
         let mut built = Container::layer(name)
-                .param("level", format!("{:.3}", layer.level))
-                .param(
-                    "filter_routing",
-                    if layer.filter_parallel { "Parallel" } else { "Series" },
-                )
-                .param("filter_freq", format!("{:.3}", layer.filter_freq))
-                .param("filter_res", format!("{:.3}", layer.filter_res))
-                .add(osc)
-                .add({
-                    // Filter 1 carries the imported cutoff/resonance when the
-                    // section is engaged. The algorithm comes from the
-                    // MEASURED type1 table (per-slot fingerprints through the
-                    // real engine); the factory name only decides the ladder
-                    // character. Cutoff goes through the calibrated
-                    // 15 Hz × 2^(9.55·v) curve into our normalized map.
-                    let mut f1 = RigBlock::of_type(BlockType::Filter).named(filter_label.clone());
-                    if layer.filter_active {
-                        let (_, _, character) = classify_filter_full(&layer.filter_name);
-                        let (mode, poles) = layer
+            .param("level", format!("{:.3}", layer.level))
+            .param(
+                "filter_routing",
+                if layer.filter_parallel {
+                    "Parallel"
+                } else {
+                    "Series"
+                },
+            )
+            .param("filter_freq", format!("{:.3}", layer.filter_freq))
+            .param("filter_res", format!("{:.3}", layer.filter_res))
+            .add(osc)
+            .add({
+                // Filter 1 carries the imported cutoff/resonance when the
+                // section is engaged. The algorithm comes from the
+                // MEASURED type1 table (per-slot fingerprints through the
+                // real engine); the factory name only decides the ladder
+                // character. Cutoff goes through the calibrated
+                // 15 Hz × 2^(9.55·v) curve into our normalized map.
+                let mut f1 = RigBlock::of_type(BlockType::Filter).named(filter_label.clone());
+                if layer.filter_active {
+                    let (_, _, character) = classify_filter_full(&layer.filter_name);
+                    let (mode, poles) =
+                        layer
                             .filter_type1
                             .and_then(classify_type1)
                             .unwrap_or_else(|| {
                                 let (m, p, _) = classify_filter_full(&layer.filter_name);
                                 (m, p)
                             });
-                        f1 = f1
-                            .with_param("cutoff", format!("{:.4}", omni_cutoff_norm(layer.filter_freq)))
-                            .with_param("resonance", format!("{:.4}", layer.filter_res))
-                            .with_param("mode", mode)
-                            .with_param("poles", poles.to_string())
-                            .with_param("character", character);
+                    f1 = f1
+                        .with_param(
+                            "cutoff",
+                            format!("{:.4}", omni_cutoff_norm(layer.filter_freq)),
+                        )
+                        .with_param("resonance", format!("{:.4}", layer.filter_res))
+                        .with_param("mode", mode)
+                        .with_param("poles", poles.to_string())
+                        .with_param("character", character);
+                }
+                let mut f2 = RigBlock::of_type(BlockType::Filter).named("Filter 2");
+                if let Some((freq, res)) = layer.filter2 {
+                    if layer.filter_active {
+                        f2 = f2
+                            .with_param("cutoff", format!("{:.4}", omni_cutoff_norm(freq)))
+                            .with_param("resonance", format!("{res:.4}"));
                     }
-                    let mut f2 = RigBlock::of_type(BlockType::Filter).named("Filter 2");
-                    if let Some((freq, res)) = layer.filter2 {
-                        if layer.filter_active {
-                            f2 = f2
-                                .with_param("cutoff", format!("{:.4}", omni_cutoff_norm(freq)))
-                                .with_param("resonance", format!("{res:.4}"));
-                        }
-                    }
-                    // SERIES chains the filters; PARALLEL sums them.
-                    let filters = if layer.filter_parallel {
-                        Container::parallel("Filters")
-                    } else {
-                        Container::module("Filters")
-                    };
-                    filters.add(f1).add(f2)
-                })
-                .add(Container::module("Amp").block(BlockType::Amp, "Amp"))
-                .add(fx_rack_from("Layer FX", &layer.fx))
-                .send("Aux Rack", "To Aux")
-                .modulator(BlockType::Envelope, "Amp Env")
-                .modulator_block({
-                    // The filter envelope carries its imported ADSR so the
-                    // mod engine gates/sweeps with the patch's own shape.
-                    let mut fe = RigBlock::of_type(BlockType::Envelope).named("Filter Env");
-                    if let Some((a, d, s, r)) = layer.filter_env {
-                        fe = fe
-                            .with_param("attack", format!("{a:.4}"))
-                            .with_param("decay", format!("{d:.4}"))
-                            .with_param("sustain", format!("{s:.4}"))
-                            .with_param("release", format!("{r:.4}"));
-                    }
-                    fe
-                })
-                .modulator(BlockType::MultisegEnvelope, "Mod Env");
+                }
+                // SERIES chains the filters; PARALLEL sums them.
+                let filters = if layer.filter_parallel {
+                    Container::parallel("Filters")
+                } else {
+                    Container::module("Filters")
+                };
+                filters.add(f1).add(f2)
+            })
+            .add(Container::module("Amp").block(BlockType::Amp, "Amp"))
+            .add(fx_rack_from("Layer FX", &layer.fx))
+            .send("Aux Rack", "To Aux")
+            .modulator(BlockType::Envelope, "Amp Env")
+            .modulator_block({
+                // The filter envelope carries its imported ADSR so the
+                // mod engine gates/sweeps with the patch's own shape.
+                let mut fe = RigBlock::of_type(BlockType::Envelope).named("Filter Env");
+                if let Some((a, d, s, r)) = layer.filter_env {
+                    fe = fe
+                        .with_param("attack", format!("{a:.4}"))
+                        .with_param("decay", format!("{d:.4}"))
+                        .with_param("sustain", format!("{s:.4}"))
+                        .with_param("release", format!("{r:.4}"));
+                }
+                fe
+            })
+            .modulator(BlockType::MultisegEnvelope, "Mod Env");
         // The filter section's own envelope depth (independent of matrix rows).
         if layer.filter_active && layer.filter_env_depth != 0.0 {
             built = built.route(
@@ -347,7 +361,10 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
         let mut arp = RigBlock::of_type(BlockType::Arpeggiator)
             .named("Arp")
             .with_param("on", "1")
-            .with_param("step_beats", format!("{:.5}", patch.arp_step_beats.max(0.03125)))
+            .with_param(
+                "step_beats",
+                format!("{:.5}", patch.arp_step_beats.max(0.03125)),
+            )
             .with_param("steps", patch.arp_steps.len().to_string());
         for (i, (on, vel, gate)) in patch.arp_steps.iter().enumerate() {
             arp = arp

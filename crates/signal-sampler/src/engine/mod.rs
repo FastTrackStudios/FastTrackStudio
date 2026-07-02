@@ -138,6 +138,23 @@ enum LegatoState {
     },
 }
 
+/// One legato transition firing, recorded for tests / offline analysis when
+/// the fire log is enabled (see [`SampleEngine::set_legato_fire_log_enabled`]).
+/// `frame` is the engine's running render position ([`SampleEngine::frames_rendered`])
+/// at the moment the transition voice spawned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegatoFireEvent {
+    pub frame: u64,
+    pub from_note: u8,
+    pub to_note: u8,
+    pub velocity: u8,
+    pub portamento: bool,
+}
+
+/// Cap on the fire log so an enabled log can never grow unbounded on the
+/// audio thread (the Vec is pre-allocated to this capacity when enabled).
+const LEGATO_FIRE_LOG_CAP: usize = 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ZoneTrigger {
     Attack,
@@ -266,6 +283,17 @@ pub struct SampleEngine {
 
     /// Legato pre-delay countdown.
     legato_state: LegatoState,
+
+    /// Running render position in frames since construction — advanced by
+    /// every `render`/`render_multi` call. Document-mode schedulers and the
+    /// legato fire log use it as a stable per-engine clock.
+    frames_rendered: u64,
+    /// When true, every legato transition firing is appended to
+    /// `legato_fire_log` (up to `LEGATO_FIRE_LOG_CAP`). Off by default —
+    /// enabled by tests and offline document renders only.
+    legato_fire_log_enabled: bool,
+    /// Recorded legato transition firings (see [`LegatoFireEvent`]).
+    legato_fire_log: Vec<LegatoFireEvent>,
 
     /// Con Sordino bus-level filter (placeholder lowpass — see filter.rs).
     sord_filter: BiquadFilter,
@@ -398,7 +426,9 @@ impl SampleEngine {
                     .iter()
                     .enumerate()
                     .filter_map(|(i, kn)| {
-                        crate::midi::note_name_to_midi(&kn.note).ok().map(|n| (n, i))
+                        crate::midi::note_name_to_midi(&kn.note)
+                            .ok()
+                            .map(|n| (n, i))
                     })
                     .collect()
             })
@@ -445,6 +475,9 @@ impl SampleEngine {
             body_voiced: std::collections::HashSet::with_capacity(128),
             deferred_note_off_velocities: HashMap::with_capacity(128),
             legato_state: LegatoState::Idle,
+            frames_rendered: 0,
+            legato_fire_log_enabled: false,
+            legato_fire_log: Vec::new(),
             legato_fade_frames,
             cc1_ramp_frames,
             release_frames,
@@ -631,7 +664,11 @@ impl SampleEngine {
     /// symmetrically across ±`detune_cents`/2 and panned by `width` (0..1),
     /// level-compensated 1/√n. `voices <= 1` disables.
     pub fn set_unison(&mut self, voices: u8, detune_cents: f32, width: f32) {
-        self.unison = (voices.clamp(1, 8), detune_cents.max(0.0), width.clamp(0.0, 1.0));
+        self.unison = (
+            voices.clamp(1, 8),
+            detune_cents.max(0.0),
+            width.clamp(0.0, 1.0),
+        );
     }
 
     /// Test/render override: pin every RR-bearing trigger (shorts, legato,
@@ -640,6 +677,83 @@ impl SampleEngine {
     /// round-robins and align our RR ordering with a deterministic CSS render.
     pub fn set_forced_rr(&mut self, slot: Option<u32>) {
         self.forced_rr = slot;
+    }
+
+    /// Explicitly set the legato mode (document mode forces
+    /// `enabled = true, expressive = true` — the full-authenticity mode —
+    /// regardless of the CC58 stream, per the document-mode design).
+    pub fn set_legato_mode(&mut self, enabled: bool, expressive: bool) {
+        self.legato_enabled = enabled;
+        self.legato_expressive = expressive;
+    }
+
+    /// Enable/disable the legato transition fire log (tests / offline
+    /// document renders). Enabling clears any previous entries and
+    /// pre-allocates the capped log so the audio thread never allocates.
+    pub fn set_legato_fire_log_enabled(&mut self, enabled: bool) {
+        self.legato_fire_log_enabled = enabled;
+        self.legato_fire_log.clear();
+        if enabled {
+            self.legato_fire_log.reserve(LEGATO_FIRE_LOG_CAP);
+        } else {
+            self.legato_fire_log.shrink_to_fit();
+        }
+    }
+
+    /// Recorded legato transition firings since the log was enabled.
+    pub fn legato_fire_log(&self) -> &[LegatoFireEvent] {
+        &self.legato_fire_log
+    }
+
+    /// Running render position in frames since construction.
+    pub fn frames_rendered(&self) -> u64 {
+        self.frames_rendered
+    }
+
+    /// Document-mode note-on for a legato-followed note: fire the transition
+    /// NOW instead of arming the reactive countdown. The document scheduler
+    /// calls this `delay_ms` (the spec's expressive velocity→delay) *before*
+    /// the destination note's tick, so the transition's audible arrival lands
+    /// exactly on the grid — the inversion of the reactive path, where the
+    /// countdown makes the note speak `delay_ms` *after* its tick
+    /// (see `docs/plan/document-mode.md`).
+    ///
+    /// The scheduler emits this INSTEAD of a note-on for the note; all
+    /// held-note / mono-line bookkeeping happens here. Degrades gracefully:
+    /// non-zoned patches, legato-off, or an empty legato line fall back to
+    /// the plain note-on behaviour.
+    pub fn legato_prefire(&mut self, note: u8, velocity: u8) {
+        if velocity == 0 {
+            self.note_off(note);
+            return;
+        }
+        if self.try_keyswitch(note, velocity) {
+            return;
+        }
+        if !self.patch.is_zoned() || !self.legato_enabled {
+            self.note_on(note, velocity);
+            return;
+        }
+        self.held_notes.insert(note, velocity);
+        self.legato_order.retain(|&n| n != note);
+        self.legato_order.push(note);
+        match self.legato_note {
+            // No sounding line (document started mid-phrase, or annotation
+            // was optimistic): start the note plainly.
+            None => {
+                self.play_direction = "up".to_string();
+                self.trigger_zoned_sustain(note);
+                self.legato_note = Some(note);
+            }
+            // Fire the transition immediately — no Pending countdown. The
+            // caller already subtracted the velocity-mapped delay from the
+            // trigger time, so the arrival lands on the destination tick.
+            Some(cur) => {
+                let (_delay_ms, portamento) = self.legato_timing(velocity);
+                self.play_direction = if note >= cur { "up" } else { "down" }.to_string();
+                self.fire_legato(cur, note, velocity, portamento);
+            }
+        }
     }
 
     /// Sample rate (frames/s) — for ms↔frame conversion by callers.
@@ -701,8 +815,8 @@ impl SampleEngine {
             // Within the zone's range, or within pitch-shift tolerance of its
             // recorded key (whole-tone grid → even notes warm their neighbour).
             let in_range = note >= z.key_min && note <= z.key_max;
-            let near = (z.root_key as i32 - note as i32).unsigned_abs() as u8
-                <= ZONE_PITCH_TOLERANCE;
+            let near =
+                (z.root_key as i32 - note as i32).unsigned_abs() as u8 <= ZONE_PITCH_TOLERANCE;
             if !in_range && !near {
                 continue;
             }
@@ -839,7 +953,8 @@ impl SampleEngine {
         // Directional zones (CSS legato records up- vs down-transitions
         // separately): only the current play direction fires. Non-directional
         // zones (shorts, sustains) carry an empty `direction` and are unaffected.
-        if !zone.direction.is_empty() && !zone.direction.eq_ignore_ascii_case(&self.play_direction) {
+        if !zone.direction.is_empty() && !zone.direction.eq_ignore_ascii_case(&self.play_direction)
+        {
             return false;
         }
         // CC1 dynamic layer: CSS sustains/legato record p/mf/ff at full velocity
@@ -1008,7 +1123,9 @@ impl SampleEngine {
             // Held + CC1-crossfaded: sustains, tremolo, harmonics, and trills.
             let is_sustain = matches!(
                 kind,
-                Some(ArticulationKind::Sustain | ArticulationKind::Looped | ArticulationKind::Trill)
+                Some(
+                    ArticulationKind::Sustain | ArticulationKind::Looped | ArticulationKind::Trill
+                )
             );
             // One-shot, velocity-picked dynamic: spiccato/staccato/sfz/pizz/etc.
             let is_short = matches!(
@@ -1235,7 +1352,13 @@ impl SampleEngine {
     /// base; the vibrato pair is found and blended in by CC2.
     fn trigger_zoned_sustain(&mut self, note: u8) {
         let direction = self.play_direction.clone();
-        let rr = self.zone_rr_counter;
+        // Honour the forced-RR pin like every other RR-bearing trigger —
+        // document mode pins a stable per-note slot here so playback never
+        // consults the mutable counter (position-independent determinism).
+        let rr = self
+            .forced_rr
+            .map(|f| f as usize)
+            .unwrap_or(self.zone_rr_counter);
         self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
 
         // CC2 picks the non-vib vs vib balance (equal-power).
@@ -1253,7 +1376,10 @@ impl SampleEngine {
     /// velocity picks the dynamic layer, nearest recorded key is pitch-shifted,
     /// and it plays to completion (no CC1 crossfade, no loop).
     fn trigger_zoned_short(&mut self, note: u8, velocity: u8) {
-        let rr = self.forced_rr.map(|f| f as usize).unwrap_or(self.zone_rr_counter);
+        let rr = self
+            .forced_rr
+            .map(|f| f as usize)
+            .unwrap_or(self.zone_rr_counter);
         self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
         let artic = self.articulation.clone();
         let dynamic = self.short_note_dynamic(velocity);
@@ -1267,7 +1393,11 @@ impl SampleEngine {
             .articulation(&artic)
             .map(|a| a.dynamics.len())
             .unwrap_or(0);
-        let gain = if n_dyn > 1 { 1.0 } else { velocity_gain(velocity) };
+        let gain = if n_dyn > 1 {
+            1.0
+        } else {
+            velocity_gain(velocity)
+        };
         if let Some(idx) = self.find_layer_zone(&artic, "", &dynamic, note, rr) {
             self.spawn_zone_voice(idx, note, VoiceKind::Short, gain, None, 0.0);
         }
@@ -1396,7 +1526,10 @@ impl SampleEngine {
         } else {
             1.0
         };
-        let rr = self.forced_rr.map(|f| f as usize).unwrap_or(self.zone_rr_counter);
+        let rr = self
+            .forced_rr
+            .map(|f| f as usize)
+            .unwrap_or(self.zone_rr_counter);
         // CSS legato samples are SOURCE-labelled whole-tone transitions: "up_C#"
         // is C#→D# (a whole step UP from the labelled note), "down_X" is X→X-2.
         // Looking one up by `to` and playing it as-is landed a whole step too
@@ -1431,7 +1564,10 @@ impl SampleEngine {
         };
         let (lo, hi, blend) = self.layers_for_artic(&rel_id);
         let dynamic = if blend >= 0.5 { hi } else { lo };
-        let rr = self.forced_rr.map(|f| f as usize).unwrap_or(self.zone_rr_counter);
+        let rr = self
+            .forced_rr
+            .map(|f| f as usize)
+            .unwrap_or(self.zone_rr_counter);
         // Release samples are non-directional → pass "" (no direction filter).
         // CSS's recorded releases are a subtle bow-off tail UNDER the note's
         // decay — but these samples are normalised loud, so at unity (×makeup)
@@ -1440,7 +1576,6 @@ impl SampleEngine {
             self.spawn_zone_voice(idx, note, VoiceKind::Release, RELEASE_GAIN, None, 0.0);
         }
     }
-
 
     /// Pick the zone index for (articulation, direction, dynamic layer, note),
     /// honouring the solo mic, with simple round-robin over matches by `rr`.
@@ -1590,7 +1725,11 @@ impl SampleEngine {
         // Attack envelope on the sustained body only (the legato transition and
         // shorts keep their natural recorded attack).
         let _ = SUSTAIN_DECLICK_MS;
-        let attack = if is_sustain_layer { self.attack_frames } else { 0 };
+        let attack = if is_sustain_layer {
+            self.attack_frames
+        } else {
+            0
+        };
         // Unison: spawn N copies spread across ±detune/2 cents + a pan spread,
         // level-compensated. copies == 1 is the normal single-voice path.
         let (copies, det_cents, width) = self.unison;
@@ -1604,15 +1743,18 @@ impl SampleEngine {
             };
             let u_rate = rate * 2f64.powf((off * det_cents * 0.5) as f64 / 1200.0);
             let u_pan = (pan + off * width).clamp(-1.0, 1.0);
-            let mut voice =
-                Voice::with_rate(data.clone(), note, kind.clone(), u_rate, gain * comp, self.release_frames)
-                    .with_mic_index(mic_index)
-                    .with_pan(u_pan)
-                    .with_attack(attack)
-                    .with_sample_window(
-                        start_frame,
-                        (sample_end > 0).then_some(sample_end as usize),
-                    );
+            let mut voice = Voice::with_rate(
+                data.clone(),
+                note,
+                kind.clone(),
+                u_rate,
+                gain * comp,
+                self.release_frames,
+            )
+            .with_mic_index(mic_index)
+            .with_pan(u_pan)
+            .with_attack(attack)
+            .with_sample_window(start_frame, (sample_end > 0).then_some(sample_end as usize));
             if let Some(layer) = dyn_layer {
                 voice = voice.with_dyn_layer(layer);
             }
@@ -1997,6 +2139,7 @@ impl SampleEngine {
         }
 
         self.voices.render(output);
+        self.frames_rendered += block_frames as u64;
 
         // CSS "Volume" (CC11) — master output level.
         if self.cc11_volume != 1.0 {
@@ -2048,6 +2191,7 @@ impl SampleEngine {
         }
 
         self.voices.render_multi(outputs);
+        self.frames_rendered += block_frames as u64;
 
         // CSS "Volume" (CC11) — master output level, all mic buses.
         if self.cc11_volume != 1.0 {
@@ -2318,6 +2462,15 @@ impl SampleEngine {
     }
 
     fn fire_legato(&mut self, from_note: u8, to_note: u8, velocity: u8, portamento: bool) {
+        if self.legato_fire_log_enabled && self.legato_fire_log.len() < LEGATO_FIRE_LOG_CAP {
+            self.legato_fire_log.push(LegatoFireEvent {
+                frame: self.frames_rendered,
+                from_note,
+                to_note,
+                velocity,
+                portamento,
+            });
+        }
         let direction = if to_note > from_note { "up" } else { "down" };
 
         // Fade out old sustain voice.
@@ -2598,8 +2751,13 @@ impl SampleEngine {
         }
 
         // Legacy 2-layer kinds (non-zoned trigger_sustain path) — unchanged.
-        self.voices
-            .update_sustain_blend(nv * nv_lo_g, nv * nv_hi_g, vb * vb_lo_g, vb * vb_hi_g, ramp);
+        self.voices.update_sustain_blend(
+            nv * nv_lo_g,
+            nv * nv_hi_g,
+            vb * vb_lo_g,
+            vb * vb_hi_g,
+            ramp,
+        );
     }
 
     /// Equal-power crossfade gains for a blend in `[0,1]`: returns `(lo, hi)` =
@@ -3608,10 +3766,22 @@ mod tests {
         let indices = vec![0, 1, 2];
         let mut rng = 1;
 
-        assert_eq!(select_zone_rr_slot(&zones, &indices, 0, None, &mut rng, None), 10);
-        assert_eq!(select_zone_rr_slot(&zones, &indices, 1, None, &mut rng, None), 20);
-        assert_eq!(select_zone_rr_slot(&zones, &indices, 2, None, &mut rng, None), 30);
-        assert_eq!(select_zone_rr_slot(&zones, &indices, 3, None, &mut rng, None), 10);
+        assert_eq!(
+            select_zone_rr_slot(&zones, &indices, 0, None, &mut rng, None),
+            10
+        );
+        assert_eq!(
+            select_zone_rr_slot(&zones, &indices, 1, None, &mut rng, None),
+            20
+        );
+        assert_eq!(
+            select_zone_rr_slot(&zones, &indices, 2, None, &mut rng, None),
+            30
+        );
+        assert_eq!(
+            select_zone_rr_slot(&zones, &indices, 3, None, &mut rng, None),
+            10
+        );
         assert_eq!(select_zone_rr_index_by_slot(&zones, &indices, 20), 1);
     }
 
@@ -4058,7 +4228,10 @@ mod tests {
         let frames = (eng.sample_rate as usize / 1000) * 200; // 200 ms
         let mut out = vec![0.0f32; frames * 2];
         eng.render(&mut out);
-        assert!(matches!(eng.legato_state, LegatoState::Idle), "legato fired");
+        assert!(
+            matches!(eng.legato_state, LegatoState::Idle),
+            "legato fired"
+        );
         assert_eq!(eng.play_direction, "up");
         // The up-zone for the target is now selected; the down-zone is not.
         assert!(eng.zone_selected(&u62, 62, 100, ZoneTrigger::Attack));

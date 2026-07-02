@@ -48,13 +48,14 @@ pub mod api;
 pub mod bank;
 pub mod block;
 pub mod convolver;
+pub mod document;
 pub mod engine;
 pub mod engine_spec;
 pub mod instrument;
+pub mod keys_rig;
 pub mod midi;
 pub mod mixer;
 pub mod module_spec;
-pub mod keys_rig;
 pub mod nam;
 pub mod native;
 pub mod native_osc;
@@ -68,8 +69,8 @@ pub mod preset_spec;
 pub mod retag;
 pub mod rig;
 pub mod rig_library;
-pub mod rig_node;
 pub mod rig_manager;
+pub mod rig_node;
 pub mod rig_prefs;
 pub mod rig_profile;
 pub mod runtime;
@@ -81,28 +82,32 @@ pub mod stats;
 pub use bank::{PreloadProfile, SamplerBank};
 pub use block::{BlockParams, BlockSpec, SamplerBlock};
 pub use convolver::Convolver;
+pub use document::{
+    DocCc, DocEvent, DocNote, DocumentRenderOptions, DocumentRenderResult, Schedule,
+    ScheduledEvent, TempoPoint, TrackDocument, annotate,
+};
 pub use engine::cache::SignalPcmPack;
-pub use engine::SampleEngine;
+pub use engine::{LegatoFireEvent, SampleEngine};
 pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
 pub use instrument::SamplerInstrument;
+pub use keys_rig::{KeysInstrument, KeysRig};
 pub use mixer::{
     Bus, BusStrip, ChannelStrip, DirectChannel, DrumMixer, EngineStrip, FxBackend, FxSlotStrip,
     MixerLayout, MixerMeters, Send as MixerSend, SendStrip,
 };
 pub use module_spec::{ModulePort, ModuleSpec};
 pub use nam::NamProcessor;
+pub use native_osc::{NativeOscillator, OscWave};
+pub use node_render::{RenderNode, build_node_backend};
+pub use preset_registry::{PresetRegistry, PresetSource, RegisteredPreset};
 pub use preset_spec::{
     MacroDef, MacroTarget, MasterFxSlot, NoteRoute, PresetEngineRef, PresetModuleRef, PresetSpec,
     RoutingRule,
 };
 pub use rig::{BlockImpl, DeviceInfo, GuitarRig, ModelId, RigBlock, SlotInfo};
 pub use rig_library::{Library, RigPreset, RigScene, RigSection, RigSong};
-pub use keys_rig::{KeysInstrument, KeysRig};
-pub use native_osc::{NativeOscillator, OscWave};
-pub use node_render::{build_node_backend, RenderNode};
-pub use preset_registry::{PresetRegistry, PresetSource, RegisteredPreset};
-pub use rig_node::{Combine, Container, Param, RigNode, Role, Send, Zone};
 pub use rig_manager::RigManager;
+pub use rig_node::{Combine, Container, Param, RigNode, Role, Send, Zone};
 pub use rig_prefs::RigAudioPrefs;
 pub use rig_profile::{ProfileRig, RigPatch, RigProfile};
 pub use runtime::{
@@ -163,7 +168,7 @@ pub mod pack {
     }
 }
 
-pub use pack::{read_pack_header, PackHeader};
+pub use pack::{PackHeader, read_pack_header};
 
 /// Identifier for a loaded instrument within the bank.
 pub type InstrumentId = String;

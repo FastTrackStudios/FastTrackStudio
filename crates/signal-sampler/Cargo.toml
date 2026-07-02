@@ -82,3 +82,9 @@ tracing-subscriber = { workspace = true }
 ratatui = "0.29"
 # dup2 — redirect stray stderr to a log while the rig TUI owns the terminal.
 libc = "0.2"
+# MusicXML → score-time notes/CCs for the document-mode example ONLY
+# (examples/render_document_going_home.rs). Dependency-light (musicxml /
+# thiserror / zip). Deliberately a dev-dependency: the library's document
+# annotation stays keyflow-free for phase 1. TODO(document-mode): unify the
+# inference (ported from keyflow's mirror.rs) into one shared crate.
+keyflow-orchestra = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }

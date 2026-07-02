@@ -311,7 +311,8 @@ mod tests {
             note_expressions: &[],
         };
         dfs.prepare(48_000.0, n as u32).unwrap();
-        dfs.process_block(&input, &input, &mut l, &mut r, &ev).unwrap();
+        dfs.process_block(&input, &input, &mut l, &mut r, &ev)
+            .unwrap();
         l
     }
 
@@ -322,8 +323,12 @@ mod tests {
         let expect: Vec<f32> = (0..4_096)
             .map(|i| (core::f32::consts::TAU * 440.0 * i as f32 / 48_000.0).sin() * 0.8)
             .collect();
-        let diff: f32 =
-            out.iter().zip(&expect).map(|(a, b)| (a - b).abs()).sum::<f32>() / 4_096.0;
+        let diff: f32 = out
+            .iter()
+            .zip(&expect)
+            .map(|(a, b)| (a - b).abs())
+            .sum::<f32>()
+            / 4_096.0;
         assert!(diff < 1e-6, "bypassed shifter is exact, diff={diff}");
     }
 

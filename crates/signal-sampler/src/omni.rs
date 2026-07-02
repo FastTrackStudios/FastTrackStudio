@@ -140,8 +140,7 @@ pub(crate) const OMNISPHERE_ROOT: &str = "/run/media/AudioHaven/Sampled/Keys/Omn
 /// Spec path for one extracted soundsource (relative to the Core
 /// Soundsources dir), if present.
 fn soundsource_spec(relative: &str) -> Option<String> {
-    let root =
-        std::env::var("FTS_OMNISPHERE_ROOT").unwrap_or_else(|_| OMNISPHERE_ROOT.into());
+    let root = std::env::var("FTS_OMNISPHERE_ROOT").unwrap_or_else(|_| OMNISPHERE_ROOT.into());
     let p = std::path::Path::new(&root)
         .join("Core Soundsources")
         .join(relative);
@@ -213,14 +212,16 @@ mod tests {
             .filter(|m| m.block_type == BlockType::Lfo)
             .count();
         assert_eq!(lfos, 8, "8 independent LFOs");
-        assert!(p
-            .modulators
-            .iter()
-            .any(|m| m.block_type == BlockType::ModMatrix));
-        assert!(p
-            .modulators
-            .iter()
-            .any(|m| m.block_type == BlockType::Arpeggiator));
+        assert!(
+            p.modulators
+                .iter()
+                .any(|m| m.block_type == BlockType::ModMatrix)
+        );
+        assert!(
+            p.modulators
+                .iter()
+                .any(|m| m.block_type == BlockType::Arpeggiator)
+        );
         // 12 envelopes: 3 per layer × 4 layers (4 Amp + 4 Filter + 4 Mod).
         let envs: usize = p
             .of_role(Role::Layer)
@@ -267,14 +268,16 @@ mod tests {
                 note_expressions: &[],
             };
             rn.render(&mut l, &mut r, &ev);
-            let rms =
-                (l.iter().map(|s| s * s).sum::<f32>() / l.len() as f32).sqrt();
+            let rms = (l.iter().map(|s| s * s).sum::<f32>() / l.len() as f32).sqrt();
             heard = heard.max(rms);
             if heard > 1e-3 {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert!(heard > 1e-3, "soundsource part should be audible, rms={heard}");
+        assert!(
+            heard > 1e-3,
+            "soundsource part should be audible, rms={heard}"
+        );
     }
 }

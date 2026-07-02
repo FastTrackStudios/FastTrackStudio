@@ -133,7 +133,10 @@ fn main() {
             captured.extend_from_slice(&inter);
         }
     }
-    println!("peak    : {peak:.4} ({})", if peak > 1e-4 { "AUDIBLE" } else { "silent" });
+    println!(
+        "peak    : {peak:.4} ({})",
+        if peak > 1e-4 { "AUDIBLE" } else { "silent" }
+    );
     if let Some(path) = render_path {
         let spec = hound::WavSpec {
             channels: 2,

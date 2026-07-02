@@ -5940,6 +5940,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyflow-orchestra"
+version = "0.0.1"
+source = "git+https://codeberg.org/FastTrackStudios/keyflow.git?branch=main#3a52a92c3fe4c85b9a76486fe8d8478795056ba7"
+dependencies = [
+ "musicxml",
+ "thiserror 2.0.18",
+ "zip",
+]
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6720,6 +6730,36 @@ dependencies = [
  "png 0.17.16",
  "thiserror 2.0.18",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "musicxml"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "335bf6a8b110bc88d0bf2ba66d31e2d508816430c5cdd566b70505735965b866"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide 0.8.9",
+ "musicxml_internal",
+ "musicxml_macros",
+ "regex",
+]
+
+[[package]]
+name = "musicxml_internal"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e4097e51ea86c37057b75bbe8ba98080ea6474387f7bafcd6a0d2fe464b1252"
+
+[[package]]
+name = "musicxml_macros"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b191126817b79753855d079efa1edde8df37223073e7119de466e33eea83005"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -10037,6 +10077,7 @@ dependencies = [
  "facet-toml",
  "flacenc",
  "hound",
+ "keyflow-orchestra",
  "libc",
  "memmap2",
  "neural-amp-modeler",

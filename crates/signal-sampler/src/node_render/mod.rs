@@ -22,9 +22,9 @@
 //! rather than the realtime callback (which will pre-allocate). MIDI events are
 //! delivered to every node; sources consume note on/off, effects ignore them.
 
-use signal_plugin_host::{PluginEvents, PluginInstance, PluginMidiEvent};
-use crate::rig::{build_block, RigBlock};
+use crate::rig::{RigBlock, build_block};
 use crate::rig_node::{Combine, Container, RigNode, Zone};
+use signal_plugin_host::{PluginEvents, PluginInstance, PluginMidiEvent};
 
 /// Build the audio backend for one block at `sample_rate`, or `None` when the
 /// block is a placeholder or an unimplemented `Native` type (→ pass-through).
@@ -49,7 +49,7 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
 mod modmatrix;
 
 pub use modmatrix::ModEngine;
-use modmatrix::{build_arp, ModCompiler};
+use modmatrix::{ModCompiler, build_arp};
 
 /// A compiled, renderable node mirroring the container tree.
 pub enum RenderNode {
@@ -66,10 +66,7 @@ pub enum RenderNode {
     /// A keyboard-routed subtree: incoming MIDI is filtered + velocity-scaled by
     /// the [`Zone`] (key split + velocity crossfade) before reaching `inner`.
     /// This is the central-MIDI-input router, expressed in the render tree.
-    Zoned {
-        zone: Zone,
-        inner: Box<RenderNode>,
-    },
+    Zoned { zone: Zone, inner: Box<RenderNode> },
     /// Container volume: input trim applied before `inner`, output fader after.
     Gain {
         input: f32,
@@ -84,10 +81,7 @@ pub enum RenderNode {
     /// A send-bus **return**: `inner` processes the bus content and its
     /// output is summed with the pass-through main signal (send/return
     /// semantics — the main chain is not re-processed by the return).
-    BusInject {
-        bus: usize,
-        inner: Box<RenderNode>,
-    },
+    BusInject { bus: usize, inner: Box<RenderNode> },
     /// The tree root when any mod routes or send buses resolved: ticks the
     /// [`ModEngine`] each block and threads its parameter writes + bus
     /// buffers down the tree.
@@ -245,12 +239,15 @@ impl RenderNode {
     /// Prepare every leaf processor for `sample_rate` / `block_size`.
     pub fn prepare(&mut self, sample_rate: f64, block_size: u32) {
         match self {
-            RenderNode::Leaf { inst: Some(inst), .. } => {
+            RenderNode::Leaf {
+                inst: Some(inst), ..
+            } => {
                 let _ = inst.prepare(sample_rate, block_size);
             }
             RenderNode::Leaf { inst: None, .. } => {}
             RenderNode::Serial(v) | RenderNode::Parallel(v) => {
-                v.iter_mut().for_each(|n| n.prepare(sample_rate, block_size));
+                v.iter_mut()
+                    .for_each(|n| n.prepare(sample_rate, block_size));
             }
             RenderNode::Zoned { inner, .. }
             | RenderNode::Gain { inner, .. }
@@ -367,7 +364,10 @@ impl RenderNode {
     ) {
         let frames = out_l.len().min(out_r.len());
         match self {
-            RenderNode::Leaf { id, inst: Some(inst) } => {
+            RenderNode::Leaf {
+                id,
+                inst: Some(inst),
+            } => {
                 let mods = ctx.writes.get(*id).map(|w| w.as_slice()).unwrap_or(&[]);
                 if mods.is_empty() {
                     let _ = inst.process_block(in_l, in_r, out_l, out_r, events);
@@ -432,7 +432,11 @@ impl RenderNode {
                 };
                 inner.process_inner(in_l, in_r, out_l, out_r, &fe, ctx);
             }
-            RenderNode::Gain { input, output, inner } => {
+            RenderNode::Gain {
+                input,
+                output,
+                inner,
+            } => {
                 if *input == 1.0 {
                     inner.process_inner(in_l, in_r, out_l, out_r, events, ctx);
                 } else {
@@ -542,9 +546,9 @@ fn copy_in(in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32], fra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use signal_proto::block::BlockType;
     use crate::rig_node::Container;
     use signal_plugin_host::PluginMidiEvent;
+    use signal_proto::block::BlockType;
 
     fn note_on(note: u8, vel: u8) -> PluginMidiEvent {
         PluginMidiEvent {
@@ -565,7 +569,11 @@ mod tests {
             .block(BlockType::Filter, "Filter");
         let mut rn = RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 256);
-        assert_eq!(rn.live_leaves(), 2, "oscillator + filter both have backends");
+        assert_eq!(
+            rn.live_leaves(),
+            2,
+            "oscillator + filter both have backends"
+        );
 
         let (mut l, mut r) = (vec![0.0; 256], vec![0.0; 256]);
         let midi = [note_on(69, 110)];
@@ -575,7 +583,10 @@ mod tests {
             note_expressions: &[],
         };
         rn.render(&mut l, &mut r, &ev);
-        assert!(rms(&l) > 1e-3, "audio flows osc → filter (default open) → out");
+        assert!(
+            rms(&l) > 1e-3,
+            "audio flows osc → filter (default open) → out"
+        );
     }
 
     #[test]
@@ -614,8 +625,16 @@ mod tests {
     fn key_split_routes_notes_to_their_zone() {
         // Low osc keys 0-50, High osc keys 70-127 — with a silent gap 51..69.
         let split = Container::parallel("Split")
-            .add(Container::layer("Low").keys(0, 50).block(BlockType::Oscillator, "Osc"))
-            .add(Container::layer("High").keys(70, 127).block(BlockType::Oscillator, "Osc"));
+            .add(
+                Container::layer("Low")
+                    .keys(0, 50)
+                    .block(BlockType::Oscillator, "Osc"),
+            )
+            .add(
+                Container::layer("High")
+                    .keys(70, 127)
+                    .block(BlockType::Oscillator, "Osc"),
+            );
 
         // A note in the low zone sounds.
         let mut rn = RenderNode::compile(&split, 48_000);
@@ -640,7 +659,10 @@ mod tests {
 
         let mut rn = RenderNode::compile(&loud, 48_000);
         rn.prepare(48_000.0, 256);
-        assert!(render_note(&mut rn, 60, 30) < 1e-5, "soft hit is below the window");
+        assert!(
+            render_note(&mut rn, 60, 30) < 1e-5,
+            "soft hit is below the window"
+        );
     }
 
     /// A Sampler block (BlockImpl::Sample) plays a real library through the
@@ -648,10 +670,8 @@ mod tests {
     #[test]
     fn sampler_block_plays_a_library() {
         // Fixture: one 220 Hz sine zone covering the whole keyboard.
-        let dir = std::env::temp_dir().join(format!(
-            "signal-sampler-block-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("signal-sampler-block-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let wav = dir.join("note.wav");
         let spec = hound::WavSpec {
@@ -677,8 +697,8 @@ zones (
         std::fs::write(&spec_path, styx).unwrap();
 
         // Layer { Sampler(lib) } — samples_root defaults to the spec's dir.
-        let tree = Container::layer("Keys")
-            .sample_block("Piano", spec_path.to_string_lossy().to_string());
+        let tree =
+            Container::layer("Keys").sample_block("Piano", spec_path.to_string_lossy().to_string());
         let mut rn = RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 512);
         assert_eq!(rn.live_leaves(), 1, "sampler block has a backend");
@@ -736,8 +756,8 @@ zones (
                 "name U\nzones (\n    { file note.wav, key_min 0, key_max 127, root_key 60, vel_min 0, vel_max 127 }\n)\n",
             )
             .unwrap();
-            let mut sb = RigBlock::sample_lib(dir.join("lib.styx").to_string_lossy().to_string())
-                .named("S");
+            let mut sb =
+                RigBlock::sample_lib(dir.join("lib.styx").to_string_lossy().to_string()).named("S");
             if unison {
                 sb = sb
                     .with_param("unison_voices", "6")
@@ -786,8 +806,7 @@ zones (
     #[test]
     #[ignore = "requires the local Keyscape extraction on AudioHaven"]
     fn keyscape_c7_grand_loads_and_sounds() {
-        let spec =
-            "/run/media/AudioHaven/Sampled/Keys/Keyscape/LA Custom C7 Grand/library.styx";
+        let spec = "/run/media/AudioHaven/Sampled/Keys/Keyscape/LA Custom C7 Grand/library.styx";
         if !std::path::Path::new(spec).exists() {
             eprintln!("skipping: {spec} not present");
             return;
@@ -910,7 +929,15 @@ zones (
             note_expressions: &[],
         };
         rn.render(&mut l, &mut r, &ev);
-        rn.render(&mut l, &mut r, &PluginEvents { params: &[], midi: &[], note_expressions: &[] });
+        rn.render(
+            &mut l,
+            &mut r,
+            &PluginEvents {
+                params: &[],
+                midi: &[],
+                note_expressions: &[],
+            },
+        );
         let bright = rms(&l);
 
         // Wheel to max → cutoff floor → dark.
@@ -928,7 +955,15 @@ zones (
             note_expressions: &[],
         };
         rn.render(&mut l, &mut r, &ev);
-        rn.render(&mut l, &mut r, &PluginEvents { params: &[], midi: &[], note_expressions: &[] });
+        rn.render(
+            &mut l,
+            &mut r,
+            &PluginEvents {
+                params: &[],
+                midi: &[],
+                note_expressions: &[],
+            },
+        );
         let dark = rms(&l);
         assert!(
             dark < bright * 0.35,
@@ -986,9 +1021,13 @@ zones (
             let tree = Container::preset("P")
                 .add(src)
                 // Mute the main path after the tap (amp gain 0).
-                .add(Container::module("Mute").add(
-                    RigBlock::of_type(BlockType::Amp).named("Kill").with_param("gain", "0"),
-                ))
+                .add(
+                    Container::module("Mute").add(
+                        RigBlock::of_type(BlockType::Amp)
+                            .named("Kill")
+                            .with_param("gain", "0"),
+                    ),
+                )
                 // The return: placeholder inside = bus passes straight through.
                 .add(Container::module("Return"));
             let mut rn = RenderNode::compile(&tree, 48_000);
@@ -1007,8 +1046,14 @@ zones (
             }
             level
         }
-        assert!(level(false) < 1e-6, "muted main path is silent without a send");
-        assert!(level(true) > 1e-3, "audio reaches the output via the return bus");
+        assert!(
+            level(false) < 1e-6,
+            "muted main path is silent without a send"
+        );
+        assert!(
+            level(true) > 1e-3,
+            "audio reaches the output via the return bus"
+        );
     }
 
     /// Container volumes and bypass render: output_db scales the subtree,
@@ -1017,8 +1062,11 @@ zones (
     fn container_volume_and_bypass_apply() {
         // Volume: a −12 dB layer is quieter than a 0 dB one.
         fn level(db: f32) -> f32 {
-            let tree = Container::preset("P")
-                .add(Container::layer("L").volume(db).block(BlockType::Oscillator, "Osc"));
+            let tree = Container::preset("P").add(
+                Container::layer("L")
+                    .volume(db)
+                    .block(BlockType::Oscillator, "Osc"),
+            );
             let mut rn = RenderNode::compile(&tree, 48_000);
             rn.prepare(48_000.0, 256);
             render_note(&mut rn, 60, 100)
@@ -1035,8 +1083,11 @@ zones (
         // Bypass: a bypassed muting-amp module passes audio through.
         use crate::rig::RigBlock;
         fn with_mute(bypassed: bool) -> f32 {
-            let mut mute = Container::module("Mute")
-                .add(RigBlock::of_type(BlockType::Amp).named("Kill").with_param("gain", "0"));
+            let mut mute = Container::module("Mute").add(
+                RigBlock::of_type(BlockType::Amp)
+                    .named("Kill")
+                    .with_param("gain", "0"),
+            );
             mute.bypassed = bypassed;
             let tree = Container::preset("P")
                 .add(Container::layer("L").block(BlockType::Oscillator, "Osc"))

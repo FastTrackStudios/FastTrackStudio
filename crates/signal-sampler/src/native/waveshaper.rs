@@ -233,7 +233,12 @@ mod tests {
         let mut ws = NativeWaveshaper::new(48_000).with_drive(1.0);
         let out = run(&mut ws, &input);
         // Hard tanh drive flattens peaks → waveform differs and stays bounded.
-        let diff: f32 = input.iter().zip(&out).map(|(a, b)| (a - b).abs()).sum::<f32>() / 2_048.0;
+        let diff: f32 = input
+            .iter()
+            .zip(&out)
+            .map(|(a, b)| (a - b).abs())
+            .sum::<f32>()
+            / 2_048.0;
         assert!(diff > 0.05, "drive audibly shapes, diff={diff}");
         assert!(out.iter().all(|s| s.abs() <= 1.5));
     }
@@ -247,7 +252,11 @@ mod tests {
         let mut vals: Vec<i32> = out.iter().map(|s| (s * 1000.0).round() as i32).collect();
         vals.sort_unstable();
         vals.dedup();
-        assert!(vals.len() <= 8, "2-bit crush leaves few levels, got {}", vals.len());
+        assert!(
+            vals.len() <= 8,
+            "2-bit crush leaves few levels, got {}",
+            vals.len()
+        );
     }
 
     #[test]

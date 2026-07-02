@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use super::model::{parse_patch_node, OmniPatch};
+use super::model::{OmniPatch, parse_patch_node};
 use super::tree::patch_to_container;
-use super::{parse_xml, SoundsourceIndex};
+use super::{SoundsourceIndex, parse_xml};
 use crate::rig_node::Container;
 
 // ── Multis ───────────────────────────────────────────────────────────────────
@@ -56,11 +56,7 @@ pub fn multi_to_container(multi: &OmniMulti, index: &SoundsourceIndex) -> Contai
     for (i, (patch, level, muted)) in multi.parts.iter().enumerate() {
         // Skip empty default parts (no soundsource, no layers of note).
         let named = !patch.name.is_empty();
-        let has_content = named
-            || patch
-                .layers
-                .iter()
-                .any(|l| !l.soundsource.is_empty());
+        let has_content = named || patch.layers.iter().any(|l| !l.soundsource.is_empty());
         if !has_content {
             continue;
         }

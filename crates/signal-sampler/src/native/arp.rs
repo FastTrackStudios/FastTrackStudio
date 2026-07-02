@@ -103,8 +103,7 @@ impl ArpEngine {
             }
         }
 
-        let step_frames =
-            (self.step_beats * 60.0 / tempo_bpm.max(1.0)) * sample_rate.max(1.0);
+        let step_frames = (self.step_beats * 60.0 / tempo_bpm.max(1.0)) * sample_rate.max(1.0);
         let mut t = 0.0f32;
         while t < frames as f32 {
             // Close the sounding note when its gate ends inside this block.
@@ -145,11 +144,9 @@ impl ArpEngine {
                 self.frames_to_step += step_frames;
             }
             // Advance to the next event inside the block, or leave.
-            let next = self.frames_to_step.min(
-                self.sounding
-                    .map(|(_, off)| off)
-                    .unwrap_or(f32::INFINITY),
-            );
+            let next = self
+                .frames_to_step
+                .min(self.sounding.map(|(_, off)| off).unwrap_or(f32::INFINITY));
             if next >= frames as f32 {
                 break;
             }
@@ -193,7 +190,12 @@ mod tests {
     fn held_chord_steps_upward() {
         // 1/16 at 120 BPM = 0.125 s = 6000 frames at 48k.
         let mut arp = ArpEngine::new(vec![ArpStep::default(); 4], 0.25);
-        let first = arp.process(&[note_on(60), note_on(64), note_on(67)], 6_000, 48_000.0, 120.0);
+        let first = arp.process(
+            &[note_on(60), note_on(64), note_on(67)],
+            6_000,
+            48_000.0,
+            120.0,
+        );
         let ons: Vec<u8> = first
             .iter()
             .filter_map(|e| match e.message {
@@ -216,14 +218,27 @@ mod tests {
 
     #[test]
     fn gates_close_and_release_stops_everything() {
-        let mut arp = ArpEngine::new(vec![ArpStep { gate: 0.5, ..Default::default() }; 4], 0.25);
+        let mut arp = ArpEngine::new(
+            vec![
+                ArpStep {
+                    gate: 0.5,
+                    ..Default::default()
+                };
+                4
+            ],
+            0.25,
+        );
         let evs = arp.process(&[note_on(60)], 6_000, 48_000.0, 120.0);
         // Gate 0.5 of a 6000-frame step → note-off near frame 3000.
         let off = evs
             .iter()
             .find(|e| matches!(e.message, MidiMessage::NoteOff { .. }))
             .expect("gated note-off");
-        assert!((2_900..3_100).contains(&off.offset), "gate at ~3000, got {}", off.offset);
+        assert!(
+            (2_900..3_100).contains(&off.offset),
+            "gate at ~3000, got {}",
+            off.offset
+        );
 
         // Releasing the key silences the arp.
         let release = [PluginMidiEvent {
@@ -232,7 +247,8 @@ mod tests {
         }];
         let evs = arp.process(&release, 6_000, 48_000.0, 120.0);
         assert!(
-            !evs.iter().any(|e| matches!(e.message, MidiMessage::NoteOn { .. })),
+            !evs.iter()
+                .any(|e| matches!(e.message, MidiMessage::NoteOn { .. })),
             "no steps after release"
         );
     }
@@ -241,13 +257,17 @@ mod tests {
     fn rests_are_silent() {
         let steps = vec![
             ArpStep::default(),
-            ArpStep { on: false, ..Default::default() },
+            ArpStep {
+                on: false,
+                ..Default::default()
+            },
         ];
         let mut arp = ArpEngine::new(steps, 0.25);
         arp.process(&[note_on(60)], 6_000, 48_000.0, 120.0); // step 1 fires
         let evs = arp.process(&[], 6_000, 48_000.0, 120.0); // step 2 = rest
         assert!(
-            !evs.iter().any(|e| matches!(e.message, MidiMessage::NoteOn { .. })),
+            !evs.iter()
+                .any(|e| matches!(e.message, MidiMessage::NoteOn { .. })),
             "rest step emits no note"
         );
     }

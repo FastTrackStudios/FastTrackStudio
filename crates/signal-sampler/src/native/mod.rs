@@ -23,8 +23,8 @@ mod waveshaper;
 mod wavetable;
 
 pub use adsr::{Adsr, AdsrParams};
-pub use arp::{ArpEngine, ArpStep};
 pub use amp::NativeAmp;
+pub use arp::{ArpEngine, ArpStep};
 pub use control::{ControlEnv, ControlLfo, ControlSource, LfoWave, MidiMod, MidiSource, ModSource};
 pub use filter::{FilterCharacter, FilterMode, Ladder, NativeFilter, Svf};
 pub use freq_shifter::NativeDfs;

@@ -37,9 +37,9 @@ use std::path::{Path, PathBuf};
 
 use facet::Facet;
 
+use crate::SamplerError;
 use crate::rig::RigBlock;
 use crate::rig_profile::{RigPatch, RigProfile, RigStack};
-use crate::SamplerError;
 
 /// A **Scene** — one named variant (snapshot) of a [`RigPreset`]: an ordered FX
 /// chain plus scene-level trims. For an ML "full rig" capture a scene's chain is
@@ -263,7 +263,9 @@ impl Library {
     }
 
     pub fn song(&self, name: &str) -> Option<&RigSong> {
-        self.songs.iter().find(|s| s.name.eq_ignore_ascii_case(name))
+        self.songs
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(name))
     }
 
     // ── Resolution to a playable RigProfile ──────────────────────────────
@@ -375,10 +377,11 @@ impl Library {
     fn resolve_section(&self, sec: &RigSection) -> RigPatch {
         // Profile + patch reference.
         if !sec.profile.is_empty() {
-            if let Some(patch) = self
-                .profile(&sec.profile)
-                .and_then(|pr| pr.patches.iter().find(|p| p.name.eq_ignore_ascii_case(&sec.patch)))
-            {
+            if let Some(patch) = self.profile(&sec.profile).and_then(|pr| {
+                pr.patches
+                    .iter()
+                    .find(|p| p.name.eq_ignore_ascii_case(&sec.patch))
+            }) {
                 let mut resolved = self.resolve_patch(patch);
                 resolved.name = sec.name.clone();
                 return resolved;
@@ -541,7 +544,11 @@ mod tests {
         lib.profiles.push(RigProfile {
             name: "Rock".into(),
             default_patch: 0,
-            patches: vec![RigPatch::from_preset("Lead Tone", "Marshall JCM800", "Lead")],
+            patches: vec![RigPatch::from_preset(
+                "Lead Tone",
+                "Marshall JCM800",
+                "Lead",
+            )],
             stacks: Vec::new(),
         });
 
@@ -569,7 +576,11 @@ mod tests {
     fn shipped_example_library_loads() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/library");
         let lib = Library::load_dir(&root);
-        assert!(lib.errors.is_empty(), "library load errors: {:?}", lib.errors);
+        assert!(
+            lib.errors.is_empty(),
+            "library load errors: {:?}",
+            lib.errors
+        );
         // All 9 ML presets present, each with ≥ 3 scenes whose chains hold a NAM.
         assert_eq!(lib.presets.len(), 9, "expected 9 ML presets");
         let jcm = lib.preset("Marshall JCM800").expect("JCM800 preset");
@@ -585,7 +596,11 @@ mod tests {
     fn shipped_worship_profile_resolves_and_stacks_are_valid() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/library");
         let lib = Library::load_dir(&root);
-        assert!(lib.errors.is_empty(), "library load errors: {:?}", lib.errors);
+        assert!(
+            lib.errors.is_empty(),
+            "library load errors: {:?}",
+            lib.errors
+        );
 
         let worship = lib.profile("Worship").expect("Worship profile");
         assert_eq!(worship.stacks.len(), 8, "worship wants 8 stacks");
@@ -631,7 +646,11 @@ mod tests {
     fn shipped_example_songs_resolve_through_worship() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/library");
         let lib = Library::load_dir(&root);
-        assert!(lib.errors.is_empty(), "library load errors: {:?}", lib.errors);
+        assert!(
+            lib.errors.is_empty(),
+            "library load errors: {:?}",
+            lib.errors
+        );
         assert!(lib.songs.len() >= 2, "expected the example songs");
 
         let song = lib.song("Amazing Grace").expect("Amazing Grace");

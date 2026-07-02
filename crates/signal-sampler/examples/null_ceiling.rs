@@ -55,9 +55,14 @@ fn read_wav(path: &str, start_s: f64, dur_s: f64) -> (Vec<f32>, u32) {
                 (3, 32) => f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]),
                 (1, 16) => i16::from_le_bytes([data[o], data[o + 1]]) as f32 / 32768.0,
                 (1, 24) => {
-                    let v = (data[o] as i32) | ((data[o + 1] as i32) << 8)
+                    let v = (data[o] as i32)
+                        | ((data[o + 1] as i32) << 8)
                         | ((data[o + 2] as i32) << 16);
-                    let v = if v & 0x80_0000 != 0 { v | !0xFF_FFFF } else { v };
+                    let v = if v & 0x80_0000 != 0 {
+                        v | !0xFF_FFFF
+                    } else {
+                        v
+                    };
                     v as f32 / 8_388_608.0
                 }
                 (1, 32) => {
@@ -150,7 +155,10 @@ fn main() {
             let (b, _) = read_wav(c.to_str().unwrap(), 0.0, dur + 0.30);
             let (db, lag) = null_depth_db(&a, &b, max_lag);
             let name = c.file_name().unwrap().to_str().unwrap().to_string();
-            println!("   {name:<14} null={db:6.1}dB  lag={:+}ms", lag * 1000 / 48000);
+            println!(
+                "   {name:<14} null={db:6.1}dB  lag={:+}ms",
+                lag * 1000 / 48000
+            );
             if db < best.0 {
                 best = (db, name, lag);
             }

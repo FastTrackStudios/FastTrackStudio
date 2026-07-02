@@ -1,8 +1,8 @@
 //! The parsed **patch model** (`OmniPatch` / `OmniLayer`) and the AmberPart
 //! element walk that fills it.
 
-use super::xml::XmlNode;
 use super::parse_xml;
+use super::xml::XmlNode;
 
 // ── Patch model ──────────────────────────────────────────────────────────────
 
@@ -95,7 +95,6 @@ fn rack_types(rack: &XmlNode) -> Vec<String> {
         .collect()
 }
 
-
 /// `type1` slot → `(mode, poles)` — every slot measured through real
 /// Omnisphere 3 (8-band Goertzel fingerprint per slot, sweep at freq=0.5,
 /// res=0, keytrack off). Slot = `round(type1 × 50)`, 1-based. Pole counts
@@ -180,8 +179,8 @@ pub(crate) fn classify_filter_full(name: &str) -> (&'static str, u32, &'static s
     let (mode, poles) = classify_filter_inner(name);
     let k = name.to_ascii_lowercase();
     let saturating = [
-        "juicy", "moogie", "fatboy", "ob ", "jupiter", "sauce", "beefy", "warm", "power",
-        "french", "brit",
+        "juicy", "moogie", "fatboy", "ob ", "jupiter", "sauce", "beefy", "warm", "power", "french",
+        "brit",
     ]
     .iter()
     .any(|f| k.contains(f));
@@ -277,7 +276,7 @@ fn parse_env_breakpoints(e: &XmlNode) -> Option<(f32, f32, f32, f32)> {
     let peak_idx = pts
         .iter()
         .enumerate()
-        .max_by(|a, b| a.1 .0.total_cmp(&b.1 .0))
+        .max_by(|a, b| a.1.0.total_cmp(&b.1.0))
         .map(|(i, _)| i)?;
     let last = pts.len() - 1;
     let sus_idx = if last > peak_idx { last - 1 } else { peak_idx };
@@ -401,7 +400,9 @@ pub(crate) fn parse_patch_node(root: &XmlNode) -> Result<OmniPatch, String> {
                             let smi = (h.num(&format!("smi{i}")).unwrap_or(0.5) - 0.5) * 48.0;
                             let pan = h.num(&format!("pan{i}")).unwrap_or(0.5) * 2.0 - 1.0;
                             let shape = h.num(&format!("wfm{i}")).unwrap_or(0.0).clamp(0.0, 1.0);
-                            layer.harmonia.push((level.clamp(0.0, 1.0), smi.round(), pan, shape));
+                            layer
+                                .harmonia
+                                .push((level.clamp(0.0, 1.0), smi.round(), pan, shape));
                         }
                     }
                 }
@@ -413,11 +414,7 @@ pub(crate) fn parse_patch_node(root: &XmlNode) -> Result<OmniPatch, String> {
                 // inv flips the direction.
                 let hz = |f: Option<f32>, inv: bool| {
                     let v = (f.unwrap_or(0.5) - 0.5) * 4000.0;
-                    if inv {
-                        -v
-                    } else {
-                        v
-                    }
+                    if inv { -v } else { v }
                 };
                 layer.dfs = Some((
                     hz(dfs.num("freqA"), dfs.num("invA").unwrap_or(0.0) != 0.0),

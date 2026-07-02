@@ -396,7 +396,10 @@ impl Voice {
         // fade out over its loop, not stop looping and run forward into the
         // sample's abrupt end (which clicks → "note-off noise"). Only a Done
         // voice ignores the loop.
-        if matches!(self.state, VoiceState::Playing | VoiceState::Releasing { .. }) {
+        if matches!(
+            self.state,
+            VoiceState::Playing | VoiceState::Releasing { .. }
+        ) {
             if let Some((loop_start, loop_end)) = self.loop_range {
                 if self.alternating_loop {
                     if !self.reverse && self.position >= loop_end as f64 {
@@ -443,11 +446,7 @@ impl Voice {
 /// CPU. The branch is predictable (almost always false) and cheap.
 #[inline(always)]
 fn flush_denormal(x: f32) -> f32 {
-    if x.abs() < 1.0e-30 {
-        0.0
-    } else {
-        x
-    }
+    if x.abs() < 1.0e-30 { 0.0 } else { x }
 }
 
 // ── Voice pool ────────────────────────────────────────────────────────────────
@@ -766,10 +765,11 @@ mod tests {
 
         assert_eq!(pool.stolen_count(), 1);
         assert_eq!(pool.active_count(), MAX_VOICES + 1);
-        assert!(pool
-            .voices
-            .iter()
-            .any(|v| matches!(v.state, VoiceState::Releasing { .. })));
+        assert!(
+            pool.voices
+                .iter()
+                .any(|v| matches!(v.state, VoiceState::Releasing { .. }))
+        );
     }
 
     #[test]
@@ -783,10 +783,11 @@ mod tests {
         assert_eq!(pool.max_voices(), 2);
         assert_eq!(pool.stolen_count(), 1);
         assert_eq!(pool.active_count(), 3);
-        assert!(pool
-            .voices
-            .iter()
-            .any(|v| matches!(v.state, VoiceState::Releasing { .. })));
+        assert!(
+            pool.voices
+                .iter()
+                .any(|v| matches!(v.state, VoiceState::Releasing { .. }))
+        );
     }
 
     #[test]

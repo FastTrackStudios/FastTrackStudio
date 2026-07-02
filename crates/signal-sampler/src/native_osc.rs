@@ -232,7 +232,8 @@ mod tests {
             midi: &midi,
             note_expressions: &[],
         };
-        osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev).unwrap();
+        osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev)
+            .unwrap();
         assert_eq!(osc.active_voices(), 1);
         let rms = (outl.iter().map(|s| s * s).sum::<f32>() / 512.0).sqrt();
         assert!(rms > 1e-3, "oscillator should be audible, rms={rms}");
@@ -256,7 +257,8 @@ mod tests {
         };
         // 1 s of blocks ≫ the 150 ms release.
         for _ in 0..(48_000 / 512 + 1) * 1 {
-            osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev).unwrap();
+            osc.process_block(&inl, &inr, &mut outl, &mut outr, &ev)
+                .unwrap();
         }
         assert_eq!(osc.active_voices(), 0, "voice reaped after release");
         let rms = (outl.iter().map(|s| s * s).sum::<f32>() / 512.0).sqrt();

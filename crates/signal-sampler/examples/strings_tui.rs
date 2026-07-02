@@ -19,16 +19,16 @@
 //! warming — watch the WARM progress bar.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
+use ratatui::Frame;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Gauge, Paragraph};
-use ratatui::Frame;
 use signal_sampler::{MidiInputHandle, MidiMessage, MidiMonitor, MidiSelection, SamplerRig};
 
 const INSTRUMENT_ID: &str = "strings_1v";
@@ -88,9 +88,12 @@ fn main() -> eyre::Result<()> {
     let css_root = PathBuf::from(arg(&args, "--lib").unwrap_or_else(|| CSS_ROOT.to_string()));
     let section = arg(&args, "--section").unwrap_or_else(|| "1st Violins".to_string());
     // The per-section zone spec carries the actual sample paths.
-    let spec_path = arg(&args, "--spec")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| css_root.join("_patches").join(&section).join("library.styx"));
+    let spec_path = arg(&args, "--spec").map(PathBuf::from).unwrap_or_else(|| {
+        css_root
+            .join("_patches")
+            .join(&section)
+            .join("library.styx")
+    });
     let mut mic_idx = MICS
         .iter()
         .position(|m| Some(*m) == arg(&args, "--mic").as_deref())
@@ -99,7 +102,9 @@ fn main() -> eyre::Result<()> {
         .iter()
         .position(|a| Some(*a) == arg(&args, "--artic").as_deref())
         .unwrap_or(0);
-    let buffer: u32 = arg(&args, "--buffer").and_then(|s| s.parse().ok()).unwrap_or(256);
+    let buffer: u32 = arg(&args, "--buffer")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(256);
 
     if !spec_path.exists() {
         eyre::bail!(
@@ -137,7 +142,13 @@ fn main() -> eyre::Result<()> {
             "warning: config spec not found ({}) — articulations/keyswitches disabled",
             config_path.display()
         );
-        rig.load_instrument(INSTRUMENT_ID, &spec_path, Some(&css_root), &section, MICS[mic_idx])?;
+        rig.load_instrument(
+            INSTRUMENT_ID,
+            &spec_path,
+            Some(&css_root),
+            &section,
+            MICS[mic_idx],
+        )?;
     }
     rig.set_solo_mic(INSTRUMENT_ID, Some(MICS[mic_idx].to_string()));
     // Live articulation (keyswitch / CC58 equivalent) — NOT a pin: the low-octave
@@ -180,7 +191,8 @@ fn main() -> eyre::Result<()> {
     // Open the initial selection. Don't hard-fail if it can't open (no device,
     // virtual unsupported) — the TUI still runs so you can switch with `i` and
     // watch the MIDI monitor.
-    let mut midi: Option<MidiInputHandle> = rig.attach_midi(midi_choices[midi_idx].sel.clone()).ok();
+    let mut midi: Option<MidiInputHandle> =
+        rig.attach_midi(midi_choices[midi_idx].sel.clone()).ok();
 
     // Background-warm the playable range for the current pin + mic so the first
     // notes aren't silent. Re-armed whenever the articulation / mic changes.
@@ -221,18 +233,30 @@ fn fmt_midi(msg: &MidiMessage) -> String {
             channel,
             note,
             velocity,
-        } => format!("ch{:<2} NoteOn  {:<10} v{}", channel + 1, note_name(*note), velocity),
+        } => format!(
+            "ch{:<2} NoteOn  {:<10} v{}",
+            channel + 1,
+            note_name(*note),
+            velocity
+        ),
         MidiMessage::NoteOff {
             channel,
             note,
             velocity,
-        } => format!("ch{:<2} NoteOff {:<10} v{}", channel + 1, note_name(*note), velocity),
+        } => format!(
+            "ch{:<2} NoteOff {:<10} v{}",
+            channel + 1,
+            note_name(*note),
+            velocity
+        ),
         MidiMessage::ControlChange {
             channel,
             controller,
             value,
         } => format!("ch{:<2} CC{:<3}  = {}", channel + 1, controller, value),
-        MidiMessage::PitchBend { channel, value } => format!("ch{:<2} PitchBend {}", channel + 1, value),
+        MidiMessage::PitchBend { channel, value } => {
+            format!("ch{:<2} PitchBend {}", channel + 1, value)
+        }
         MidiMessage::ProgramChange { channel, program } => {
             format!("ch{:<2} Program {}", channel + 1, program)
         }
@@ -278,7 +302,11 @@ impl WarmJob {
                 }
             })
             .ok();
-        Self { done, total, cancel }
+        Self {
+            done,
+            total,
+            cancel,
+        }
     }
 
     fn ratio(&self) -> f64 {
@@ -431,7 +459,9 @@ fn ui(
         Span::raw("FTS-Signal · "),
         Span::styled(
             "Cinematic Studio Strings — 1st Violins",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
     ]))
     .block(Block::bordered());
@@ -465,13 +495,21 @@ fn ui(
         Line::from(vec![
             Span::raw("articulation  "),
             Span::styled(
-                if live_artic.is_empty() { "(all)" } else { live_artic },
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                if live_artic.is_empty() {
+                    "(all)"
+                } else {
+                    live_artic
+                },
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("    mic  "),
             Span::styled(
                 MICS[mic_idx],
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!("    attack {attack_ms}ms   release {release_ms}ms")),
         ]),
@@ -482,7 +520,10 @@ fn ui(
         )),
         Line::from(format!(
             "xruns {}   dropped {}   render {} µs / {} µs budget",
-            stats.callback_overruns, stats.dropped_events, stats.last_render_us, stats.buffer_budget_us
+            stats.callback_overruns,
+            stats.dropped_events,
+            stats.last_render_us,
+            stats.buffer_budget_us
         )),
     ])
     .block(Block::bordered().title("status"));
@@ -506,7 +547,9 @@ fn ui(
             midi_label,
             Style::default().fg(dev_color).add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!("  [{dev_state}]   total {count}   (i / I to switch)")),
+        Span::raw(format!(
+            "  [{dev_state}]   total {count}   (i / I to switch)"
+        )),
     ])];
     if recent.is_empty() {
         lines.push(Line::styled(
@@ -518,8 +561,7 @@ fn ui(
             lines.push(Line::from(format!("  {}", fmt_midi(msg))));
         }
     }
-    let monitor_panel =
-        Paragraph::new(lines).block(Block::bordered().title("MIDI monitor"));
+    let monitor_panel = Paragraph::new(lines).block(Block::bordered().title("MIDI monitor"));
     f.render_widget(monitor_panel, rows[4]);
 
     // CSS-style velocity keyswitches: play these low notes (below the G2 range)
@@ -562,7 +604,11 @@ fn meter_color(db: f64) -> Color {
 fn redirect_stderr_to_log() {
     use std::os::fd::AsRawFd;
     let path = std::env::temp_dir().join("fts-signal-rig.log");
-    if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         // SAFETY: dup2 onto STDERR_FILENO is the standard fd-redirect; the file's
         // fd is valid here. Leak it so the fd stays open for the process lifetime.
         unsafe { libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO) };

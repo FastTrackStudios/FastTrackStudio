@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 
 use facet::Facet;
 
-use crate::rig::{GuitarRig, ModelId, RigBlock};
 use crate::SamplerError;
+use crate::rig::{GuitarRig, ModelId, RigBlock};
 
 /// One patch in a rig profile: a named tone whose chain is either inlined or
 /// **referenced** from a [`RigPreset`](crate::rig_library::RigPreset) scene.
@@ -136,7 +136,10 @@ pub struct RigStack {
 }
 
 impl RigStack {
-    pub fn new(name: impl Into<String>, patches: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        patches: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         Self {
             name: name.into(),
             patches: patches.into_iter().map(Into::into).collect(),

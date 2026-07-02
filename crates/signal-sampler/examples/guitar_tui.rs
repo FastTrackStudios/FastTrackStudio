@@ -21,12 +21,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use daw_audio_io::pw::{self, ClockSettings, DeviceLatency};
+use ratatui::Frame;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph};
-use ratatui::Frame;
 use signal_sampler::{DeviceInfo, GuitarRig, Library, ProfileRig, RigManager};
 
 fn arg(args: &[String], flag: &str) -> Option<String> {
@@ -68,7 +68,14 @@ fn main() -> eyre::Result<()> {
     redirect_stderr_to_log();
 
     let mut term = ratatui::init();
-    let res = run(&mut term, &mut prig, &mut mgr, &mut settings, &mut browser, &name);
+    let res = run(
+        &mut term,
+        &mut prig,
+        &mut mgr,
+        &mut settings,
+        &mut browser,
+        &name,
+    );
     ratatui::restore();
     res
 }
@@ -626,7 +633,9 @@ fn run(
                         KeyCode::Right | KeyCode::Char('l') => settings.adjust(1),
                         KeyCode::Char('r') => settings.refresh(mgr),
                         KeyCode::Enter => {
-                            term.draw(|f| ui(f, prig, mgr, settings, browser, rig_name, Some("applying…")))?;
+                            term.draw(|f| {
+                                ui(f, prig, mgr, settings, browser, rig_name, Some("applying…"))
+                            })?;
                             status = Some(apply_settings(settings, prig, mgr));
                             settings.refresh(mgr);
                             settings.open = false;
@@ -652,7 +661,11 @@ fn run(
                     // patch — delay/reverb). The "Funk switch". (`t` alias.)
                     KeyCode::Char('0') | KeyCode::Char('t') => {
                         let on = prig.toggle_fx_bypass();
-                        status = Some(if on { "time bypass ON".into() } else { "time bypass off".into() });
+                        status = Some(if on {
+                            "time bypass ON".into()
+                        } else {
+                            "time bypass off".into()
+                        });
                     }
                     // 1–8 (and F1–F8) are the footswitch stacks: press to engage
                     // the stack's current patch, press again to rotate within it.
@@ -672,7 +685,9 @@ fn run(
                     // re-opens (only the rig's device follows, not the graph).
                     KeyCode::Char('[') | KeyCode::Char(']') => {
                         step_buffer(mgr, if k.code == KeyCode::Char('[') { -1 } else { 1 });
-                        term.draw(|f| ui(f, prig, mgr, settings, browser, rig_name, Some("applying…")))?;
+                        term.draw(|f| {
+                            ui(f, prig, mgr, settings, browser, rig_name, Some("applying…"))
+                        })?;
                         status = Some(match reopen(prig, mgr) {
                             Ok(()) => format!("buffer {} fr", mgr.audio.buffer_size),
                             Err(e) => format!("open failed: {e}"),
@@ -930,8 +945,22 @@ fn browser_overlay(f: &mut Frame, b: &mut Browser) {
     let profile_names: Vec<String> = b.lib.profiles.iter().map(|p| p.name.clone()).collect();
     let song_names: Vec<String> = b.lib.songs.iter().map(|s| s.name.clone()).collect();
     let focus = b.pane;
-    render_browser_col(f, cols[0], Pane::Presets, &preset_names, focus, &mut b.presets);
-    render_browser_col(f, cols[1], Pane::Profiles, &profile_names, focus, &mut b.profiles);
+    render_browser_col(
+        f,
+        cols[0],
+        Pane::Presets,
+        &preset_names,
+        focus,
+        &mut b.presets,
+    );
+    render_browser_col(
+        f,
+        cols[1],
+        Pane::Profiles,
+        &profile_names,
+        focus,
+        &mut b.profiles,
+    );
     render_browser_col(f, cols[2], Pane::Songs, &song_names, focus, &mut b.songs);
 
     // Detail panel for the focused entity.
@@ -963,7 +992,11 @@ fn render_browser_col(
             .map(|n| ListItem::new(Span::raw(n.clone())))
             .collect()
     };
-    let border = if focused { Color::Rgb(232, 129, 58) } else { Color::DarkGray };
+    let border = if focused {
+        Color::Rgb(232, 129, 58)
+    } else {
+        Color::DarkGray
+    };
     let list = List::new(items)
         .block(
             Block::default()
@@ -971,7 +1004,11 @@ fn render_browser_col(
                 .title(pane.title())
                 .border_style(Style::new().fg(border)),
         )
-        .highlight_style(Style::new().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::new()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▸ ");
     f.render_stateful_widget(list, area, state);
 }
@@ -985,15 +1022,19 @@ fn browser_detail(b: &Browser) -> Vec<Line<'static>> {
                 return vec![Line::from(Span::styled("no preset selected", dim))];
             };
             let mut lines = vec![Line::from(vec![
-                Span::styled(format!("{}  ", p.name), Style::new().fg(Color::White).bold()),
                 Span::styled(
-                    format!("{} · {}", p.vendor, p.category),
-                    dim,
+                    format!("{}  ", p.name),
+                    Style::new().fg(Color::White).bold(),
                 ),
+                Span::styled(format!("{} · {}", p.vendor, p.category), dim),
             ])];
             for (i, s) in p.scenes.iter().enumerate() {
                 let mark = if i == p.default_scene { "● " } else { "  " };
-                lines.push(Line::from(format!("{mark}{}  ({} block)", s.name, s.chain.len())));
+                lines.push(Line::from(format!(
+                    "{mark}{}  ({} block)",
+                    s.name,
+                    s.chain.len()
+                )));
             }
             lines
         }
@@ -1002,7 +1043,10 @@ fn browser_detail(b: &Browser) -> Vec<Line<'static>> {
                 return vec![Line::from(Span::styled("no profile selected", dim))];
             };
             let mut lines = vec![Line::from(vec![
-                Span::styled(format!("{}  ", p.name), Style::new().fg(Color::White).bold()),
+                Span::styled(
+                    format!("{}  ", p.name),
+                    Style::new().fg(Color::White).bold(),
+                ),
                 Span::styled(
                     format!("{} patches · {} stacks", p.patches.len(), p.stacks.len()),
                     dim,
@@ -1010,7 +1054,10 @@ fn browser_detail(b: &Browser) -> Vec<Line<'static>> {
             ])];
             for (i, st) in p.stacks.iter().enumerate() {
                 lines.push(Line::from(vec![
-                    Span::styled(format!("{}:{}  ", i + 1, st.name), Style::new().fg(Color::Rgb(232, 129, 58))),
+                    Span::styled(
+                        format!("{}:{}  ", i + 1, st.name),
+                        Style::new().fg(Color::Rgb(232, 129, 58)),
+                    ),
                     Span::raw(st.patches.join(" · ")),
                 ]));
             }
@@ -1021,7 +1068,10 @@ fn browser_detail(b: &Browser) -> Vec<Line<'static>> {
                 return vec![Line::from(Span::styled("no song selected", dim))];
             };
             let mut lines = vec![Line::from(vec![
-                Span::styled(format!("{}  ", s.name), Style::new().fg(Color::White).bold()),
+                Span::styled(
+                    format!("{}  ", s.name),
+                    Style::new().fg(Color::White).bold(),
+                ),
                 Span::styled(s.artist.clone(), dim),
             ])];
             for sec in &s.sections {
