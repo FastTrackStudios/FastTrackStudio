@@ -69,7 +69,7 @@ impl<'a, M: Metadata> Parser<'a, M> {
 
         // Sort groups by priority (metadata_only groups have low priority)
         let mut sorted_groups = self.config.groups.clone();
-        sorted_groups.sort_by(|a, b| b.priority.cmp(&a.priority));
+        sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         // First, extract metadata from metadata_only groups (they always match or have low priority)
         for group in &sorted_groups {
