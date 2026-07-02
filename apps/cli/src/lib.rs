@@ -223,7 +223,7 @@ pub enum ModeCommand {
     Get,
     /// Switch the active mode by slug.
     Set {
-        /// One of: organize, write, produce, record, edit, mix, master, live, video, minimal.
+        /// One of: organize, write, produce, record, edit, mix, master, live, video, scoring.
         slug: String,
     },
     /// List all known mode slugs (declaration order).
