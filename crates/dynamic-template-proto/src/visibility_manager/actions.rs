@@ -111,6 +111,72 @@ actions_proto::define_actions! {
             description: "Show and size MIDI-oriented template groups for editing",
             category: View,
         }
+        // ── Per-mode visibility (rule-based, applied on mode switch) ─────────
+        // One action per session Mode (slug matches session::Mode::slug()). The
+        // fts-extensions mode-change listener fires the matching action; the
+        // handler resolves that mode's rule set against the live session and
+        // applies per-surface (arrange/mixer) visibility + folder-collapse.
+        MODE_ORGANIZE = "mode_organize" {
+            name: "Visibility: Organize Mode",
+            description: "Apply the Organize mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+        MODE_WRITE = "mode_write" {
+            name: "Visibility: Write Mode",
+            description: "Apply the Write mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+        MODE_PRODUCE = "mode_produce" {
+            name: "Visibility: Produce Mode",
+            description: "Apply the Produce mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+        MODE_RECORD = "mode_record" {
+            name: "Visibility: Record Mode",
+            description: "Apply the Record mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+        MODE_EDIT = "mode_edit" {
+            name: "Visibility: Edit Mode",
+            description: "Apply the Edit mode visibility rules (mixer shows collapsed buses, arrange shows one audio track per instrument)",
+            category: View,
+            group: "Modes",
+        }
+        MODE_MIX = "mode_mix" {
+            name: "Visibility: Mix Mode",
+            description: "Apply the Mix mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+        MODE_MASTER = "mode_master" {
+            name: "Visibility: Master Mode",
+            description: "Apply the Master mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+        MODE_LIVE = "mode_live" {
+            name: "Visibility: Live Mode",
+            description: "Apply the Live mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+        MODE_VIDEO = "mode_video" {
+            name: "Visibility: Video Mode",
+            description: "Apply the Video mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+        MODE_SCORING = "mode_scoring" {
+            name: "Visibility: Scoring Mode",
+            description: "Apply the Scoring mode visibility rules",
+            category: View,
+            group: "Modes",
+        }
+
         REBUILD_CACHE = "rebuild_cache" {
             name: "Rebuild Cache",
             description: "Rebuild the track-to-group classification cache",

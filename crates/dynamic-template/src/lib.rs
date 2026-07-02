@@ -17,6 +17,7 @@ pub mod protools;
 pub mod song_name;
 mod tempo;
 pub mod track_schema;
+pub mod visibility_rules;
 
 pub use error::{Error, Result};
 pub use groups::{

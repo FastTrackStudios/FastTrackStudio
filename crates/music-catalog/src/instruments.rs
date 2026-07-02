@@ -12,9 +12,9 @@ pub mod groups {
 
     pub const DRUMS: Color = palette::red::S500;
     pub const PERCUSSION: Color = palette::orange::S500;
-    pub const BASS: Color = palette::amber::S500;
+    pub const BASS: Color = palette::yellow::S400;
     /// Defaults to electric guitar color since most "Guitars" folders contain electric
-    pub const GUITARS: Color = palette::sky::S600;
+    pub const GUITARS: Color = palette::sky::S700;
     pub const KEYS: Color = palette::green::S500;
     pub const SYNTHS: Color = palette::violet::S500;
     pub const HORNS: Color = palette::amber::S400;
@@ -32,8 +32,8 @@ pub mod groups {
 pub mod guitars {
     use super::*;
 
-    pub const ELECTRIC: Color = palette::sky::S600;
-    pub const ACOUSTIC: Color = palette::emerald::S400;
+    pub const ELECTRIC: Color = palette::sky::S700;
+    pub const ACOUSTIC: Color = palette::cyan::S400;
     pub const STEEL: Color = palette::sky::S400;
     pub const BANJO: Color = palette::amber::S600;
 }
@@ -64,8 +64,8 @@ pub mod drums {
 pub mod bass {
     use super::*;
 
-    pub const GUITAR: Color = palette::amber::S500;
-    pub const SYNTH: Color = palette::amber::S600;
+    pub const GUITAR: Color = palette::yellow::S400;
+    pub const SYNTH: Color = palette::yellow::S500;
     pub const UPRIGHT: Color = palette::amber::S700;
 }
 
@@ -96,8 +96,8 @@ pub mod synths {
 pub mod orchestra {
     use super::*;
 
-    pub const STRINGS: Color = palette::rose::S600;
-    pub const WOODWINDS: Color = palette::emerald::S600;
+    pub const STRINGS: Color = palette::amber::S800;
+    pub const WOODWINDS: Color = palette::sky::S300;
     pub const BRASS: Color = palette::amber::S500;
     pub const HARP: Color = palette::purple::S400;
     pub const PERCUSSION: Color = palette::orange::S600;
@@ -105,20 +105,20 @@ pub mod orchestra {
     pub mod strings {
         use super::*;
 
-        pub const VIOLINS: Color = palette::rose::S500;
-        pub const VIOLA: Color = palette::rose::S600;
-        pub const CELLO: Color = palette::rose::S700;
-        pub const CONTRABASS: Color = palette::rose::S800;
+        pub const VIOLINS: Color = palette::amber::S700;
+        pub const VIOLA: Color = palette::amber::S800;
+        pub const CELLO: Color = palette::amber::S900;
+        pub const CONTRABASS: Color = palette::amber::S950;
     }
 
     pub mod woodwinds {
         use super::*;
 
-        pub const FLUTES: Color = palette::emerald::S400;
-        pub const OBOES: Color = palette::emerald::S500;
-        pub const CLARINETS: Color = palette::emerald::S600;
-        pub const BASSOONS: Color = palette::emerald::S700;
-        pub const PICCOLO: Color = palette::emerald::S300;
+        pub const FLUTES: Color = palette::sky::S200;
+        pub const OBOES: Color = palette::sky::S300;
+        pub const CLARINETS: Color = palette::sky::S400;
+        pub const BASSOONS: Color = palette::sky::S500;
+        pub const PICCOLO: Color = palette::sky::S100;
     }
 
     pub mod brass {

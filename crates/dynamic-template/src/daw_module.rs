@@ -174,6 +174,7 @@ fn handle_action(command_name: &str, state: &Arc<Mutex<State>>) -> eyre::Result<
     let rebuild_cache_cmd = vm::REBUILD_CACHE.to_id().to_command_id();
     let vis_toggle_prefix = "FTS_VISIBILITY_MANAGER_TOGGLE_";
     let vis_profile_prefix = "FTS_VISIBILITY_MANAGER_PROFILE_";
+    let vis_mode_prefix = "FTS_VISIBILITY_MANAGER_MODE_";
     let create_prefix = "FTS_DYNAMIC_TEMPLATE_CREATE_NEW_";
 
     match command_name {
@@ -222,6 +223,10 @@ fn handle_action(command_name: &str, state: &Arc<Mutex<State>>) -> eyre::Result<
         cmd if cmd.starts_with(vis_profile_prefix) => {
             let profile = cmd.strip_prefix(vis_profile_prefix).unwrap();
             apply_visibility_profile(profile)?;
+        }
+        cmd if cmd.starts_with(vis_mode_prefix) => {
+            let slug = cmd.strip_prefix(vis_mode_prefix).unwrap().to_lowercase();
+            apply_mode_visibility(&slug)?;
         }
         cmd if cmd.starts_with(create_prefix) => {
             let suffix = cmd.strip_prefix(create_prefix).unwrap();
@@ -346,6 +351,54 @@ fn set_named_tracks_visible(target_names: &HashSet<String>, visible: bool) -> ey
 fn set_track_visibility(guid: &str, visible: bool) -> eyre::Result<()> {
     set_visibility_on_main_thread(guid, visible, visible)
         .map_err(|err| eyre::eyre!("failed to set visibility for track {guid}: {err}"))
+}
+
+/// Apply a session mode's rule-based, per-surface visibility to the live
+/// session. Resolves the mode's rules against the current track list (taxonomy
+/// + folder role) and applies arrange/mixer visibility plus folder-collapse.
+///
+/// No-op (logged) for modes without a rule set. Fired by the
+/// `FTS_VISIBILITY_MANAGER_MODE_<SLUG>` actions on a mode switch.
+fn apply_mode_visibility(slug: &str) -> eyre::Result<()> {
+    use crate::visibility_rules::{self, TrackInput};
+
+    let Some(mode) = visibility_rules::mode_visibility_for(slug) else {
+        tracing::info!("[dynamic-template] no visibility rules for mode '{slug}' — left as-is");
+        return Ok(());
+    };
+
+    let config = default_config();
+    let tracks: Vec<TrackInput> = daw_reaper::Reaper
+        .all(project())
+        .into_iter()
+        .map(|t| TrackInput {
+            guid: t.guid,
+            name: t.name,
+            index: t.index,
+            is_folder: t.is_folder,
+        })
+        .collect();
+
+    let plans = visibility_rules::resolve(&tracks, &config, &mode);
+    let mut fold_pending = 0usize;
+    for plan in &plans {
+        set_visibility_on_main_thread(&plan.guid, plan.arrange_show, plan.mixer_show)
+            .map_err(|err| eyre::eyre!("set visibility for {}: {err}", plan.guid))?;
+        // Folder-collapse (arrange `I_FOLDERCOMPACT` + mixer `BUSCOMP`) is planned
+        // here but its application is pending `daw_reaper::track::
+        // set_folder_compact_on_main_thread`, which lives in the local daw
+        // checkout and isn't yet published to the git dep this builds against.
+        // Re-enable once that primitive lands. See visibility_rules::TrackPlan.
+        if plan.arrange_fold.is_some() || plan.mixer_fold.is_some() {
+            fold_pending += 1;
+        }
+    }
+
+    tracing::info!(
+        "[dynamic-template] applied '{slug}' mode visibility to {} tracks ({fold_pending} folder-collapse(s) planned, pending daw-reaper primitive)",
+        plans.len()
+    );
+    Ok(())
 }
 
 fn set_track_height(guid: &str, height_pixels: u32) -> eyre::Result<()> {
