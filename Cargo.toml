@@ -12,15 +12,8 @@ authors = ["FastTrack Studio"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-# Facet ecosystem - use crates.io 0.43.x to match roam's constraint
-facet = { version = "0.46" }
-facet-core = { version = "0.46" }
-facet-json = { version = "0.46" }
-facet-toml = { version = "0.46" }
-facet-postcard = { version = "0.46" }
-facet-pretty = { version = "0.46" }
-facet-value = { version = "0.46" }
-facet-yaml = { version = "0.46" }
+# Facet ecosystem — 0.50 line (facet 0.50 / vox 0.10 migration)
+facet = { version = "0.50.0-rc.1" }
 
 # Common dependencies
 serde = { version = "1.0", features = ["derive"] }
