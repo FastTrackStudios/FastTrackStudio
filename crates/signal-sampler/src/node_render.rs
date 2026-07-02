@@ -40,10 +40,27 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
     }
     if block.is_native() {
         // Built-in DSP dispatch by block type. Grows one type at a time.
+        // Build-time `RigBlock.params` (imported preset values) configure the
+        // instance; mod routes then modulate around those bases.
         match block.block_type {
             BlockType::Oscillator => Some(Box::new(NativeOscillator::new(sample_rate))),
-            BlockType::Filter => Some(Box::new(NativeFilter::new(sample_rate))),
-            BlockType::Amp => Some(Box::new(NativeAmp::new(sample_rate))),
+            BlockType::Filter => {
+                let mut f = NativeFilter::new(sample_rate);
+                if let Some(v) = block.param_f32("cutoff") {
+                    f = f.with_cutoff(NativeFilter::cutoff_from_norm(v));
+                }
+                if let Some(v) = block.param_f32("resonance") {
+                    f = f.with_q(NativeFilter::q_from_norm(v));
+                }
+                Some(Box::new(f))
+            }
+            BlockType::Amp => {
+                let mut a = NativeAmp::new(sample_rate);
+                if let Some(v) = block.param_f32("gain") {
+                    a = a.with_gain_norm(v);
+                }
+                Some(Box::new(a))
+            }
             _ => None,
         }
     } else {
@@ -300,7 +317,20 @@ impl RenderNode {
         match node {
             RigNode::Block { block: b } => {
                 let mut inst = build_node_backend(b, sample_rate);
-                let params = inst.as_mut().map(|i| i.params()).unwrap_or_default();
+                // Snapshot the params with their LIVE values (build-time
+                // block params applied) — routes modulate around these bases.
+                let params = inst
+                    .as_mut()
+                    .map(|i| {
+                        let mut ps = i.params();
+                        for p in &mut ps {
+                            if let Some(v) = i.param_value(p.id) {
+                                p.default = v;
+                            }
+                        }
+                        ps
+                    })
+                    .unwrap_or_default();
                 let id = mc.leaves.len();
                 mc.leaves.push((b.display_name().to_lowercase(), params));
                 RenderNode::Leaf { id, inst }
@@ -825,6 +855,42 @@ zones (
         assert!(
             dark < bright * 0.35,
             "wheel closes the filter: bright={bright} dark={dark}"
+        );
+    }
+
+    /// Build-time block params configure the native backend: a filter block
+    /// built with a low imported cutoff is audibly darker than the default.
+    #[test]
+    fn block_params_configure_the_backend() {
+        use crate::rig::RigBlock;
+        fn level(cutoff_param: Option<&str>) -> f32 {
+            let mut f = RigBlock::of_type(BlockType::Filter).named("F");
+            if let Some(v) = cutoff_param {
+                f = f.with_param("cutoff", v);
+            }
+            let tree = Container::module("M")
+                .block(BlockType::Oscillator, "Osc")
+                .add(f);
+            let mut rn = RenderNode::compile(&tree, 48_000);
+            rn.prepare(48_000.0, 512);
+            let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+            let midi = [note_on(69, 110)]; // A4 = 440 Hz
+            for b in 0..4 {
+                let ev = PluginEvents {
+                    params: &[],
+                    midi: if b == 0 { &midi } else { &[] },
+                    note_expressions: &[],
+                };
+                rn.render(&mut l, &mut r, &ev);
+            }
+            rms(&l)
+        }
+        let open = level(None);
+        let dark = level(Some("0.15")); // ≈ 56 Hz cutoff under a 440 Hz note
+        assert!(open > 1e-3);
+        assert!(
+            dark < open * 0.35,
+            "imported cutoff darkens the block: open={open} dark={dark}"
         );
     }
 

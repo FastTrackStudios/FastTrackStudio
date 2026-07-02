@@ -24,6 +24,13 @@ impl NativeAmp {
         self.gain = 10f32.powf(db / 20.0);
         self
     }
+
+    /// Normalized 0..1 → amplitude 0..2 (unity at 0.5) — matches param 0.
+    #[must_use]
+    pub fn with_gain_norm(mut self, v: f32) -> Self {
+        self.gain = v.clamp(0.0, 1.0) * 2.0;
+        self
+    }
 }
 
 impl PluginInstance for NativeAmp {

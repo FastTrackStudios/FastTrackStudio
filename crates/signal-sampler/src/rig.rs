@@ -220,6 +220,11 @@ pub struct RigBlock {
     /// Mic position id (e.g. `"Mix"`). Empty ⇒ the spec's first mic.
     #[facet(default)]
     pub sample_mic: String,
+    /// Per-block parameter values applied at build time (`(name, value)`
+    /// matching the backend's parameter names; normalized values as decimal
+    /// strings — e.g. `("cutoff", "0.42")`). Imported presets set these.
+    #[facet(default)]
+    pub params: Vec<crate::rig_node::Param>,
     /// Display name (e.g. "Big Hall", "Dotted Delay"). Falls back to the asset
     /// file stem, then the block type. Useful for placeholder blocks.
     #[facet(default)]
@@ -287,6 +292,7 @@ impl RigBlock {
             samples_root: String::new(),
             sample_section: String::new(),
             sample_mic: String::new(),
+            params: Vec::new(),
             name: String::new(),
             module: String::new(),
             bypassed: false,
@@ -341,6 +347,24 @@ impl RigBlock {
     pub fn with_sample_mic(mut self, mic: impl Into<String>) -> Self {
         self.sample_mic = mic.into();
         self
+    }
+
+    /// Set one build-time parameter value (see the `params` field).
+    #[must_use]
+    pub fn with_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.params.push(crate::rig_node::Param {
+            name: name.into(),
+            value: value.into(),
+        });
+        self
+    }
+
+    /// A build-time parameter as `f32`, if present and numeric.
+    pub fn param_f32(&self, name: &str) -> Option<f32> {
+        self.params
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.value.trim().parse().ok())
     }
 
     #[must_use]

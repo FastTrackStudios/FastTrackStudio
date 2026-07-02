@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use signal_proto::block::BlockType;
 
+use crate::rig::RigBlock;
 use crate::rig_node::Container;
 
 // ── Minimal XML ──────────────────────────────────────────────────────────────
@@ -255,6 +256,8 @@ pub struct OmniLayer {
     pub filter_name: String,
     /// `FILTER para=` ≠ 0 ⇒ the two filters run in parallel.
     pub filter_parallel: bool,
+    /// `FILTER act=` ≠ 0 ⇒ the filter section is engaged.
+    pub filter_active: bool,
     /// Normalized filter cutoff / resonance (`freq` / `res`).
     pub filter_freq: f32,
     pub filter_res: f32,
@@ -329,6 +332,7 @@ pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
         if let Some(f) = voice.child("FILTER") {
             layer.filter_name = f.attr("NameStr").unwrap_or("").to_string();
             layer.filter_parallel = f.num("para").unwrap_or(0.0) != 0.0;
+            layer.filter_active = f.num("act").unwrap_or(0.0) != 0.0;
             layer.filter_freq = f.num("freq").unwrap_or(0.5);
             layer.filter_res = f.num("res").unwrap_or(0.0);
         }
@@ -569,11 +573,19 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                 .param("filter_freq", format!("{:.3}", layer.filter_freq))
                 .param("filter_res", format!("{:.3}", layer.filter_res))
                 .add(osc)
-                .add(
+                .add({
+                    // Filter 1 carries the imported cutoff/resonance when the
+                    // section is engaged; disengaged filters stay wide open.
+                    let mut f1 = RigBlock::of_type(BlockType::Filter).named(filter_label);
+                    if layer.filter_active {
+                        f1 = f1
+                            .with_param("cutoff", format!("{:.4}", layer.filter_freq))
+                            .with_param("resonance", format!("{:.4}", layer.filter_res));
+                    }
                     Container::module("Filters")
-                        .block(BlockType::Filter, filter_label)
-                        .block(BlockType::Filter, "Filter 2"),
-                )
+                        .add(f1)
+                        .block(BlockType::Filter, "Filter 2")
+                })
                 .add(Container::module("Amp").block(BlockType::Amp, "Amp"))
                 .add(fx_rack_from("Layer FX", &layer.fx))
                 .send("Aux Rack", "To Aux")
@@ -638,7 +650,7 @@ mod tests {
 <MOD_MATRIX source0="Layer A FENV" target0="A freq" hi0="3f000000" >
 </MOD_MATRIX>
 <VOICE >
-<FILTER NameStr="LPF Test" para="0" freq="3f000000" res="3e800000" >
+<FILTER NameStr="LPF Test" act="3f800000" para="0" freq="3f000000" res="3e800000" >
 </FILTER>
 <OSC level="3f400000" >
 </OSC>
@@ -729,6 +741,16 @@ mod tests {
         assert_eq!(r.source, "Filter Env");
         assert_eq!(r.target, "LPF Test.cutoff");
         assert!((r.depth - 0.5).abs() < 1e-6);
+        // The engaged filter carries the imported cutoff/res as build params.
+        let f1 = layer
+            .find("Filters")
+            .unwrap()
+            .blocks()
+            .into_iter()
+            .find(|b| b.display_name() == "LPF Test")
+            .expect("filter 1");
+        assert_eq!(f1.param_f32("cutoff"), Some(0.5));
+        assert_eq!(f1.param_f32("resonance"), Some(0.25));
         // Renders (placeholder-safe).
         let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 256);
