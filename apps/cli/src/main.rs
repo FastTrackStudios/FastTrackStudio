@@ -13064,6 +13064,9 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             });
             if let Some(ctx) = &relevance_ctx {
                 rows.retain(|t| task::status_is_open(&t.status) && task::is_relevant(t, ctx));
+                // One next action per project — task-dumping into a
+                // project can't inflate the "right now" list.
+                task::condense_next_per_project(&mut rows);
             }
             rows.sort_by(|a, b| {
                 let a_done = task::Status::from_str(&a.status).is_some_and(task::Status::is_done);

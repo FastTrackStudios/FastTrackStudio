@@ -284,6 +284,9 @@ impl TaskService for TaskBackend {
         // asked for) sorts on top of that stable order.
         rows.sort_by(|a, b| a.path.cmp(&b.path));
         if let Some(ctx) = &filter.relevance {
+            // Relevant = the condensed "right now" view: one next
+            // action per project, ranked.
+            crate::relevance::condense_next_per_project(&mut rows);
             rows.sort_by_key(|t| crate::relevance::relevance_rank(t, ctx));
         }
         let offset = filter.offset.unwrap_or(0) as usize;

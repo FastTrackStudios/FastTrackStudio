@@ -238,3 +238,106 @@ mod tests {
         assert_eq!(titles, vec!["on the clock", "other"]);
     }
 }
+
+/// Condense a Relevant view to the single **next action per project**
+/// — a project with forty queued tasks contributes one row ("what
+/// would I do on this project right now"), so task-dumping into a
+/// project can't inflate the list. Tasks with no `project_id` are
+/// untouched (routines, one-offs).
+///
+/// The pick within a project: anything in-progress wins outright
+/// (you're doing it), then soonest hard due date (undated last),
+/// then priority, then title — the same "first action" the project
+/// dashboard shows.
+pub fn condense_next_per_project<T: std::borrow::Borrow<TaskInfo>>(tasks: &mut Vec<T>) {
+    use std::collections::HashMap;
+
+    fn priority_rank(p: &str) -> u8 {
+        match crate::model::Priority::from_str(p) {
+            Some(crate::model::Priority::Critical) => 0,
+            Some(crate::model::Priority::High) => 1,
+            Some(crate::model::Priority::Normal) | None => 2,
+            Some(crate::model::Priority::Low) => 3,
+            Some(crate::model::Priority::None) => 4,
+        }
+    }
+    /// Sort key: (not-in-progress, undated, due, priority, title).
+    type NextKey = (bool, bool, String, u8, String);
+    fn key(t: &TaskInfo) -> NextKey {
+        let in_progress =
+            crate::model::Status::from_str(&t.status) == Some(crate::model::Status::InProgress);
+        (
+            !in_progress, // running work sorts first
+            t.due.is_none(),
+            t.due.clone().unwrap_or_default(),
+            priority_rank(&t.priority),
+            t.title.to_lowercase(),
+        )
+    }
+
+    let mut winner: HashMap<Uuid, (usize, NextKey)> = HashMap::new();
+    for (i, t) in tasks.iter().enumerate() {
+        let t = t.borrow();
+        let Some(pid) = t.project_id else { continue };
+        let k = key(t);
+        match winner.get(&pid) {
+            Some((_, best)) if *best <= k => {}
+            _ => {
+                winner.insert(pid, (i, k));
+            }
+        }
+    }
+    let keep: std::collections::HashSet<usize> = winner.into_values().map(|(i, _)| i).collect();
+    let mut i = 0;
+    tasks.retain(|t| {
+        let keep_it = t.borrow().project_id.is_none() || keep.contains(&i);
+        i += 1;
+        keep_it
+    });
+}
+
+#[cfg(test)]
+mod condense_tests {
+    use super::condense_next_per_project;
+    use uuid::Uuid;
+
+    fn task(
+        title: &str,
+        project: Option<Uuid>,
+        due: Option<&str>,
+        status: &str,
+    ) -> crate::TaskInfo {
+        let mut t = crate::capture(title);
+        t.project_id = project;
+        t.due = due.map(str::to_owned);
+        t.status = status.into();
+        t
+    }
+
+    #[test]
+    fn one_row_per_project_soonest_due_wins() {
+        let p = Uuid::new_v4();
+        let q = Uuid::new_v4();
+        let mut rows = vec![
+            task("slice 3", Some(p), None, "open"),
+            task("slice 2", Some(p), Some("2026-07-05"), "open"),
+            task("standalone", None, None, "open"),
+            task("wire the wiki", Some(q), None, "open"),
+        ];
+        condense_next_per_project(&mut rows);
+        let titles: Vec<&str> = rows.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["slice 2", "standalone", "wire the wiki"]);
+    }
+
+    #[test]
+    fn in_progress_beats_sooner_due() {
+        let p = Uuid::new_v4();
+        let mut rows = vec![
+            task("due soon", Some(p), Some("2026-07-03"), "open"),
+            task("on the clock", Some(p), None, "in-progress"),
+        ];
+        condense_next_per_project(&mut rows);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "on the clock");
+    }
+}

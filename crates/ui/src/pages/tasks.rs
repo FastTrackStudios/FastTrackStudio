@@ -52,6 +52,7 @@ pub fn TasksView() -> Element {
     let muts = stores::use_task_mutations();
     let store = stores::use_task_store();
     let sessions = stores::use_session_list();
+    let projects = stores::use_project_list();
 
     let email = account_email(&auth);
     let mut active_only = use_signal(|| prefs::load_bool(&email, PREF_ACTIVE, true));
@@ -85,10 +86,36 @@ pub fn TasksView() -> Element {
             }
             if relevant_only() {
                 domain.retain(|t| task::is_relevant(t, &ctx));
+                // One next action per project — the Relevant view is
+                // "what would I do right now", not the project backlog.
+                task::condense_next_per_project(&mut domain);
                 domain.sort_by_key(|t| task::relevance_rank(t, &ctx));
             }
             let hidden = total - domain.len();
-            let ui_tasks: Vec<UiTask> = domain.iter().map(|t| stores::to_ui(t)).collect();
+            // Project indication: resolve the authoritative project_id
+            // to its title when the frontmatter wikilink array is empty,
+            // so every project task carries its #project chip.
+            let project_names: std::collections::HashMap<uuid::Uuid, String> = projects
+                .value()
+                .as_ref()
+                .map(|rows| {
+                    rows.iter()
+                        .map(|(_, r)| (r.project.id, r.project.title.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let ui_tasks: Vec<UiTask> = domain
+                .iter()
+                .map(|t| {
+                    let mut ui = stores::to_ui(t);
+                    if ui.projects.is_empty() {
+                        if let Some(name) = t.project_id.and_then(|id| project_names.get(&id)) {
+                            ui.projects.push(name.clone());
+                        }
+                    }
+                    ui
+                })
+                .collect();
 
             // The running task (in-progress with a live entry) — the
             // whole board's rows are candidates, filters or not: a
