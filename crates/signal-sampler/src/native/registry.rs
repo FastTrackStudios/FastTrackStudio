@@ -60,7 +60,8 @@ fn build_wavetable(block: &RigBlock, sample_rate: u32) -> Box<dyn PluginInstance
         cfg.unison_voices = (v.round() as u32).clamp(1, 8);
     }
     if let Some(v) = p("unison_detune") {
-        cfg.unison_detune_cents = v.clamp(0.0, 1.0) * 100.0;
+        // 0..2 → 0..200 cents (Omnisphere full detune ≈ 185 cents).
+        cfg.unison_detune_cents = v.clamp(0.0, 2.0) * 100.0;
     }
     if let Some(v) = p("unison_width") {
         cfg.unison_width = v.clamp(0.0, 1.0);

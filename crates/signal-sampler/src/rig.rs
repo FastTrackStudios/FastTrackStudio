@@ -799,7 +799,7 @@ pub(crate) fn build_block(
         if let Some(v) = block.param_f32("unison_voices") {
             engine.set_unison(
                 v.round() as u8,
-                block.param_f32("unison_detune").unwrap_or(0.1) * 100.0,
+                block.param_f32("unison_detune").unwrap_or(0.1).clamp(0.0, 2.0) * 100.0,
                 block.param_f32("unison_width").unwrap_or(0.7),
             );
         }

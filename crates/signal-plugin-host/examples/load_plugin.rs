@@ -54,9 +54,19 @@ fn main() {
     }
     println!("latency : {} frames", plugin.latency());
 
-    // `--save-state <file>` dumps the plugin's state chunk after load —
-    // for state-format reverse engineering (e.g. Omnisphere embeds XML).
+    // `--load-state <file>` restores a chunk before rendering (A/B path).
+    // Runs BEFORE --save-state so the pair round-trips: what did the engine
+    // keep / normalize from an injected state?
     let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--load-state") {
+        let path = args.get(i + 1).expect("--load-state <file>");
+        let bytes = std::fs::read(path).expect("read state");
+        match plugin.load_state(&bytes) {
+            Ok(()) => println!("state   : loaded {} bytes from {path}", bytes.len()),
+            Err(e) => println!("state   : load failed: {e}"),
+        }
+    }
+    // `--save-state <file>` dumps the plugin's state chunk.
     if let Some(i) = args.iter().position(|a| a == "--save-state") {
         let path = args.get(i + 1).expect("--save-state <file>");
         match plugin.save_state() {
@@ -65,15 +75,6 @@ fn main() {
                 println!("state   : {} bytes -> {path}", state.len());
             }
             Err(e) => println!("state   : save failed: {e}"),
-        }
-    }
-    // `--load-state <file>` restores a chunk before rendering (A/B path).
-    if let Some(i) = args.iter().position(|a| a == "--load-state") {
-        let path = args.get(i + 1).expect("--load-state <file>");
-        let bytes = std::fs::read(path).expect("read state");
-        match plugin.load_state(&bytes) {
-            Ok(()) => println!("state   : loaded {} bytes from {path}", bytes.len()),
-            Err(e) => println!("state   : load failed: {e}"),
         }
     }
 

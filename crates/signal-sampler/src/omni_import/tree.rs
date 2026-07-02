@@ -133,7 +133,10 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
             if layer.unison_count > 1 {
                 wt = wt
                     .with_param("unison_voices", layer.unison_count.to_string())
-                    .with_param("unison_detune", format!("{:.4}", layer.unison_detune))
+                    // Calibrated: udpth → ~185 cents total spread (measured
+                    // 189/184/182 across a 3-point sweep). Our param is
+                    // cents/100, so scale by 1.85.
+                    .with_param("unison_detune", format!("{:.4}", layer.unison_detune * 1.85))
                     .with_param("unison_width", format!("{:.4}", layer.unison_width));
                 if layer.unison_octave > 0.0 {
                     wt = wt.with_param("unison_octave", format!("{:.4}", layer.unison_octave));
@@ -180,7 +183,10 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                     if layer.unison_count > 1 {
                         sb = sb
                             .with_param("unison_voices", layer.unison_count.to_string())
-                            .with_param("unison_detune", format!("{:.4}", layer.unison_detune))
+                            // Calibrated: udpth → ~185 cents total spread (measured
+                    // 189/184/182 across a 3-point sweep). Our param is
+                    // cents/100, so scale by 1.85.
+                    .with_param("unison_detune", format!("{:.4}", layer.unison_detune * 1.85))
                             .with_param("unison_width", format!("{:.4}", layer.unison_width));
                     }
                     if let Some((a, _d, _s, r)) = layer.amp_env {
