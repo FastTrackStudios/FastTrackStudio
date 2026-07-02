@@ -270,3 +270,73 @@ mod tests {
         assert!(edges(&[ta]).is_empty());
     }
 }
+
+/// Arrange a flat row list into parent→children display order:
+/// roots keep their incoming order, each root is immediately
+/// followed by its subtasks (`workflow.parent`, also in incoming
+/// order), and the returned depth is `0` for roots / `1` for
+/// subtasks. A child whose parent isn't in the list renders as a
+/// root — filtered views (Relevant, status) must not orphan rows
+/// invisibly.
+///
+/// Generic over the row type so the CLI (domain `TaskInfo`) and
+/// task-ui (its view model) arrange identically — one behavior,
+/// N renderers.
+pub fn arrange_families<T>(
+    rows: Vec<T>,
+    id_of: impl Fn(&T) -> uuid::Uuid,
+    parent_of: impl Fn(&T) -> Option<uuid::Uuid>,
+) -> Vec<(u8, T)> {
+    let present: std::collections::HashSet<uuid::Uuid> = rows.iter().map(&id_of).collect();
+    let mut children: std::collections::HashMap<uuid::Uuid, Vec<T>> =
+        std::collections::HashMap::new();
+    let mut roots: Vec<T> = Vec::new();
+    for row in rows {
+        match parent_of(&row).filter(|p| present.contains(p)) {
+            Some(p) => children.entry(p).or_default().push(row),
+            None => roots.push(row),
+        }
+    }
+    let mut out = Vec::with_capacity(present.len());
+    for root in roots {
+        let rid = id_of(&root);
+        out.push((0, root));
+        if let Some(kids) = children.remove(&rid) {
+            out.extend(kids.into_iter().map(|k| (1, k)));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod family_tests {
+    use super::arrange_families;
+    use uuid::Uuid;
+
+    #[test]
+    fn children_follow_their_parent_and_orphans_stay_roots() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let missing = Uuid::new_v4();
+        // (id, parent, label)
+        let rows = vec![
+            (Uuid::new_v4(), Some(a), "a-kid-1"),
+            (b, None, "b"),
+            (a, None, "a"),
+            (Uuid::new_v4(), Some(missing), "orphan"),
+            (Uuid::new_v4(), Some(a), "a-kid-2"),
+        ];
+        let out = arrange_families(rows, |r| r.0, |r| r.1);
+        let view: Vec<(u8, &str)> = out.iter().map(|(d, r)| (*d, r.2)).collect();
+        assert_eq!(
+            view,
+            vec![
+                (0, "b"),
+                (0, "a"),
+                (1, "a-kid-1"),
+                (1, "a-kid-2"),
+                (0, "orphan"),
+            ]
+        );
+    }
+}

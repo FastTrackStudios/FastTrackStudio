@@ -61,7 +61,7 @@ pub use model::{
     Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry, is_due_on_or_before,
     status_is_open, status_is_terminal,
 };
-pub use relations::ReverseRelation;
+pub use relations::{ReverseRelation, arrange_families};
 pub use relevance::{RelevanceContext, filter_relevant, is_relevant, relevance_rank};
 // Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
 // so UI consumers don't need their own workflows-proto dep.

@@ -122,14 +122,20 @@ struct TaskListChildrenProps {
 #[allow(non_snake_case)]
 #[component]
 fn TaskList_Children(props: TaskListChildrenProps) -> Element {
+    // Subtasks nest under their parent when both are in the bucket —
+    // the same domain arrangement the CLI list prints.
+    let arranged = task::arrange_families(props.items.clone(), |t| t.id, |t| t.parent);
     rsx! {
         div { class: "flex flex-col gap-0.5 pl-1",
-            for t in props.items.iter() {
-                TaskRow {
+            for (depth, t) in arranged.into_iter() {
+                div {
                     key: "{t.id}",
-                    task: t.clone(),
-                    on_toggle: props.on_toggle,
-                    on_open: props.on_open,
+                    class: if depth > 0 { "pl-6" } else { "" },
+                    TaskRow {
+                        task: t,
+                        on_toggle: props.on_toggle,
+                        on_open: props.on_open,
+                    }
                 }
             }
         }

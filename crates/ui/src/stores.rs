@@ -200,6 +200,7 @@ pub fn to_ui(t: &DbTask) -> UiTask {
         date_created: t.date_created,
         date_modified: t.date_modified,
         details: t.details.clone(),
+        parent: t.workflow.as_ref().and_then(|w| w.parent),
     }
 }
 

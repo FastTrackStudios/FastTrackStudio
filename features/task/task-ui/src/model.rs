@@ -30,6 +30,10 @@ pub struct TaskInfo {
     pub date_created: Option<DateTime<Utc>>,
     pub date_modified: Option<DateTime<Utc>>,
     pub details: String,
+    /// Parent task (`workflow.parent`) — this row is a subtask.
+    /// Read-only in the views: lists nest it under its parent;
+    /// parentage edits go through the domain, not the board.
+    pub parent: Option<Uuid>,
 }
 
 impl TaskInfo {
@@ -52,6 +56,7 @@ impl TaskInfo {
             date_created: Some(chrono::Utc::now()),
             date_modified: Some(chrono::Utc::now()),
             details: String::new(),
+            parent: None,
         }
     }
 

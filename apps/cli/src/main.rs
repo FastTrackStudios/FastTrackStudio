@@ -3672,6 +3672,20 @@ enum TaskCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Set or clear (`none`) the parent task — this task becomes a
+    /// subtask (`workflow.parent`), rolled up in the parent's
+    /// subtask list. Parent accepts an id or vault path.
+    SetParent {
+        target: String,
+        parent: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Replace the GTD context list (`@`-prefix optional; it's
     /// added when missing). Relevancy gates ride on these — see
     /// `list --relevant`.
@@ -13074,7 +13088,14 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 println!("(no tasks)");
                 return Ok(());
             }
-            for t in &rows {
+            // Subtasks render indented under their parent when both
+            // made the cut — same arrangement the web list uses.
+            let arranged = task::arrange_families(
+                rows,
+                |t| t.id,
+                |t| t.workflow.as_ref().and_then(|w| w.parent),
+            );
+            for (depth, t) in &arranged {
                 let marker = if task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
                 {
                     "[x]"
@@ -13092,7 +13113,8 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     _ => "",
                 };
                 let ms = if t.milestone_id.is_some() { " *" } else { "" };
-                println!("{marker} {}{prio}{due}{ms}    {}", t.title, t.path);
+                let indent = if *depth > 0 { "  ↳ " } else { "" };
+                println!("{marker} {indent}{}{prio}{due}{ms}    {}", t.title, t.path);
             }
         }
         TaskCmd::Get {
@@ -13326,6 +13348,29 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
         } => {
             mutate_task(target, org, server, json, |t| {
                 t.tags = task::model::StringList(tags);
+            })
+            .await?;
+        }
+        TaskCmd::SetParent {
+            target,
+            parent,
+            org,
+            server,
+            json,
+        } => {
+            let parent_id = match parent.as_str() {
+                "none" | "null" => None,
+                p => {
+                    let slug = resolve_active_org(org.clone())?;
+                    let url = resolve_org_vox_url(server.clone(), &slug);
+                    let client = connect_task_client(&url).await?;
+                    Some(json_out::resolve_task_flexible(&client, p).await?.id)
+                }
+            };
+            mutate_task(target, org, server, json, |t| {
+                let mut wf = t.workflow.clone().unwrap_or_default();
+                wf.parent = parent_id;
+                t.workflow = Some(wf);
             })
             .await?;
         }
