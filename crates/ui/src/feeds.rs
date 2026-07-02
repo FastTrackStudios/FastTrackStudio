@@ -360,6 +360,17 @@ pub async fn fetch_repos_for_project(
 
 /// Update a project (write-through to its markdown). Used to change the
 /// project type from the detail page.
+pub async fn create_project(
+    slug: &str,
+    project: project::ProjectInfo,
+) -> Result<project::ProjectInfo, String> {
+    let client = crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await?;
+    client
+        .create(project)
+        .await
+        .map_err(|e| format!("{slug}: create project: {e:?}"))
+}
+
 pub async fn update_project(
     slug: &str,
     project: project::ProjectInfo,

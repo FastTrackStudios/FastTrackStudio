@@ -27,6 +27,7 @@ pub fn HomeView() -> Element {
     let projects = stores::use_project_list();
     let tasks = stores::use_task_list();
     let muts = stores::use_task_mutations();
+    let project_muts = stores::use_project_mutations();
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
 
@@ -38,7 +39,16 @@ pub fn HomeView() -> Element {
         (Some(pr), Some(tr), _) => {
             let projects: Vec<&ProjectInfo> = pr.iter().map(|(_, r)| &r.project).collect();
             let tasks: Vec<&DbTask> = tr.iter().map(|(_, r)| &r.task).collect();
-            render_loaded(&projects, &tasks, move |id, status| {
+            let quick_add = rsx! {
+                super::projects::ProjectQuickAdd {
+                    compact: true,
+                    on_create: move |title: String| {
+                        let slug = crate::orgs::create_target(&selection.read(), &org_list.read());
+                        project_muts.create(slug, stores::draft_project(title));
+                    },
+                }
+            };
+            render_loaded(&projects, &tasks, quick_add, move |id, status| {
                 muts.apply(
                     &crate::orgs::create_target(&selection.read(), &org_list.read()),
                     task_ui::TaskMutation::SetStatus { id, status },
@@ -77,6 +87,7 @@ fn render_loading() -> Element {
 fn render_loaded(
     projects: &[&ProjectInfo],
     tasks: &[&DbTask],
+    quick_add: Element,
     on_status: impl Fn(uuid::Uuid, String) + Copy + 'static,
 ) -> Element {
     // Each active project with its task tally + single next action;
@@ -139,19 +150,24 @@ fn render_loaded(
                 }
                 Heading { level: HeadingLevel::H3, "You're all caught up" }
                 Text { variant: TextVariant::Muted, "No active projects have open tasks right now." }
+                {quick_add}
             }
         };
     }
 
     rsx! {
-        // One header line: what this page is + the week at a glance.
-        div { class: "flex flex-wrap items-baseline gap-x-3 gap-y-1",
+        // One header line: what this page is + the week at a glance +
+        // the door for new work — projects get made where they're seen.
+        div { class: "flex flex-wrap items-center gap-x-3 gap-y-2",
             Heading { level: HeadingLevel::H1, class: "tracking-tight", "Active work" }
             span { class: "text-xs tabular-nums text-muted-foreground",
                 "{cards.len()} projects"
                 if due_this_week > 0 {
                     " · {due_this_week} due within a week"
                 }
+            }
+            div { class: "ml-auto",
+                {quick_add}
             }
         }
         div { class: "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3",

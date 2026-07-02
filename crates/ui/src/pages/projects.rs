@@ -64,12 +64,24 @@ pub fn ProjectsView() -> Element {
     // makes `/projects/:id` instant after this visit.
     let projects = crate::stores::use_project_list();
     let store = crate::stores::use_project_store();
+    let muts = crate::stores::use_project_mutations();
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
     let view_mode = use_signal(initial_view_mode);
+
+    let quick_add = rsx! {
+        ProjectQuickAdd {
+            on_create: move |title: String| {
+                let slug = crate::orgs::create_target(&selection.read(), &org_list.read());
+                muts.create(slug, crate::stores::draft_project(title));
+            },
+        }
+    };
 
     let view = match (projects.value(), projects.error()) {
         (Some(rows), _) => {
             let rows: Vec<ProjectInfo> = rows.iter().map(|(_, r)| r.project.clone()).collect();
-            render_loaded(&rows, view_mode)
+            render_loaded(&rows, view_mode, quick_add)
         }
         (None, Some(e)) => rsx! {
             page_header { count_line: None }
@@ -131,13 +143,13 @@ fn render_loading() -> Element {
     }
 }
 
-fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>) -> Element {
+fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>, quick_add: Element) -> Element {
     // Archived projects stay out of the main grid.
     let live: Vec<&ProjectInfo> = rows.iter().filter(|p| !p.archived).collect();
 
     if live.is_empty() {
         return rsx! {
-            page_header { count_line: None, view_mode: None }
+            page_header { count_line: None, view_mode: None, quick_add: Some(quick_add.clone()) }
             div { class: "flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border/70 bg-card/40 px-6 py-16 text-center",
                 div { class: "flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground",
                     FolderKanban { size: 26 }
@@ -201,7 +213,11 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>) -> Element {
         .collect();
 
     rsx! {
-        page_header { count_line: Some(count_line), view_mode: Some(view_mode) }
+        page_header {
+            count_line: Some(count_line),
+            view_mode: Some(view_mode),
+            quick_add: Some(quick_add),
+        }
 
         // ── live stats band — hairline-divided tiles ───────────────
         div { class: "hidden grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border/70 bg-border/70 md:grid md:grid-cols-4",
@@ -252,10 +268,62 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>) -> Element {
 
 // ── header ──────────────────────────────────────────────────────────
 
+/// Slim project quick-create: type a name, hit enter, the project
+/// exists (optimistically — the store insert lands instantly, the
+/// backend scaffolds `Projects/<slug>.md` with active status). The
+/// dashboard reuses it in `compact` form.
+#[component]
+pub(crate) fn ProjectQuickAdd(
+    on_create: EventHandler<String>,
+    #[props(default)] compact: bool,
+) -> Element {
+    let mut value = use_signal(String::new);
+    let mut submit = move || {
+        let title = value.read().trim().to_string();
+        if title.is_empty() {
+            return;
+        }
+        on_create.call(title);
+        value.set(String::new());
+    };
+    let (form_cls, placeholder) = if compact {
+        (
+            "flex w-56 items-center gap-1.5 rounded-lg border border-border/60 bg-transparent px-2 py-1 focus-within:border-border focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/50",
+            "New project…",
+        )
+    } else {
+        (
+            "flex max-w-md items-center gap-2 rounded-lg border border-border/60 bg-transparent px-3 py-1.5 focus-within:border-border focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/50",
+            "New project — name it and go",
+        )
+    };
+    rsx! {
+        form {
+            class: "{form_cls}",
+            onsubmit: move |e: Event<FormData>| {
+                e.prevent_default();
+                submit();
+            },
+            span { class: "flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 text-primary",
+                FolderKanban { size: 12 }
+            }
+            input {
+                r#type: "text",
+                value: "{value}",
+                placeholder,
+                class: "min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none",
+                oninput: move |e| value.set(e.value()),
+            }
+        }
+    }
+}
+
 #[derive(Props, Clone, PartialEq)]
 struct PageHeaderProps {
     count_line: Option<String>,
     view_mode: Option<Signal<ViewMode>>,
+    #[props(default)]
+    quick_add: Option<Element>,
 }
 
 #[component]
@@ -282,6 +350,9 @@ fn page_header(props: PageHeaderProps) -> Element {
                 variant: TextVariant::Muted,
                 class: "max-w-prose",
                 "Everything in flight across the org, live from the project service."
+            }
+            if let Some(qa) = &props.quick_add {
+                {qa.clone()}
             }
         }
     }

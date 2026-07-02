@@ -422,10 +422,59 @@ pub fn use_project_mutations() -> ProjectMutations {
     }
 }
 
+/// A new project from just a title — active, normal priority, the
+/// backend fills id/path/dates. The one draft literal (CLI has its
+/// own flag-driven builder).
+#[must_use]
+pub fn draft_project(title: String) -> ProjectInfo {
+    ProjectInfo {
+        id: Uuid::nil(),
+        path: String::new(),
+        title,
+        status: "active".into(),
+        priority: "normal".into(),
+        project_type: "general".into(),
+        lead: String::new(),
+        tags: project::model::Tags::default(),
+        parent_id: None,
+        same_as: None,
+        target_date: None,
+        progress_percent: -1,
+        details: String::new(),
+        client_id: None,
+        billable_default: false,
+        currency: String::new(),
+        default_rate_cents: 0,
+        estimated_seconds: 0,
+        agent_profile: String::new(),
+        color: String::new(),
+        image: String::new(),
+        archived: false,
+        states: None,
+        date_created: None,
+        date_modified: None,
+    }
+}
+
 impl ProjectMutations {
     /// True while a project write is in flight.
     pub fn is_pending(&self) -> bool {
         self.write.is_pending()
+    }
+
+    /// Optimistically insert a new project (see [`draft_project`]),
+    /// then create it through the org's `ProjectService`.
+    pub fn create(&self, slug: String, draft: ProjectInfo) {
+        let row = OrgProject {
+            slug: slug.clone(),
+            project: draft,
+        };
+        run_create(self.write, self.store, row, |row| async move {
+            let slug = row.slug;
+            crate::feeds::create_project(&slug, row.project)
+                .await
+                .map(|project| OrgProject { slug, project })
+        });
     }
 
     /// The last failed write's error, for inline display.
