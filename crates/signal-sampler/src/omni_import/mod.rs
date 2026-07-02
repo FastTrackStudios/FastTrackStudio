@@ -51,6 +51,16 @@ mod tests {
 <VOICE >
 <FILTER NameStr="LPF Test" act="3f800000" para="0" freq="3f000000" res="3e800000" envdpth="3f000000" envdpthinv="0" >
 </FILTER>
+<AENV c="3" pan="0" zoom="0" >
+<p l="0" t="0" s="14" c="3f000000" >
+</p>
+<p l="3f800000" t="3a83126f" s="14" c="3f000000" >
+</p>
+<p l="3f000000" t="3c23d70a" s="14" c="3f000000" >
+</p>
+<p l="0" t="3ca3d70a" s="18" c="3f000000" >
+</p>
+</AENV>
 <AENVPARAMS onOff="3f800000" attk="0" decy="0" sust="3f800000" rels="3f000000" >
 </AENVPARAMS>
 <FENVPARAMS onOff="3f800000" attk="3e4ccccd" decy="3f000000" sust="3f000000" rels="3f000000" >
@@ -136,12 +146,14 @@ mod tests {
         assert_eq!(smi, 14.0);
         assert!(pan.abs() < 1e-3);
         assert_eq!(l.shaper, Some((0.5, 0.0, 0.0, 1.0)));
-        // Envelopes: amp release 0.5³·10 = 1.25 s; filter env present with
-        // its own cutoff depth of +0.5.
-        let (aa, _ad, asus, ar) = l.amp_env.expect("amp env");
-        assert_eq!(aa, 0.0);
-        assert!((asus - 1.0).abs() < 1e-6);
-        assert!((ar - 1.25).abs() < 1e-3);
+        // Amp env comes from the AENV breakpoints (t × 100 s, calibrated
+        // against the real engine): attack 0.1 s, decay 0.9 s, sustain 0.5,
+        // release 1.0 s. The AENVPARAMS fallback is ignored when present.
+        let (aa, ad, asus, ar) = l.amp_env.expect("amp env");
+        assert!((aa - 0.1).abs() < 1e-3, "attack {aa}");
+        assert!((ad - 0.9).abs() < 1e-2, "decay {ad}");
+        assert!((asus - 0.5).abs() < 1e-6, "sustain {asus}");
+        assert!((ar - 1.0).abs() < 1e-2, "release {ar}");
         assert!(l.filter_env.is_some());
         assert!((l.filter_env_depth - 0.5).abs() < 1e-6);
         assert_eq!(p.mod_routes.len(), 1);

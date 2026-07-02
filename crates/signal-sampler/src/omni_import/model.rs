@@ -159,6 +159,10 @@ pub(crate) fn env_seconds(v: f32) -> f32 {
 }
 
 /// Parse an `AENVPARAMS`/`FENVPARAMS` element into `(a, d, s, r)`.
+///
+/// FALLBACK ONLY: the engine renders the `AENV`/`FENV` **breakpoint list**
+/// (see [`parse_env_breakpoints`]); these attrs are derived UI state —
+/// sweeping them through the real plugin changed nothing.
 fn parse_env(e: &XmlNode) -> Option<(f32, f32, f32, f32)> {
     if e.num("onOff").unwrap_or(1.0) == 0.0 {
         return None;
@@ -169,6 +173,43 @@ fn parse_env(e: &XmlNode) -> Option<(f32, f32, f32, f32)> {
         e.num("sust").unwrap_or(1.0).clamp(0.0, 1.0),
         env_seconds(e.num("rels").unwrap_or(0.0)),
     ))
+}
+
+/// Breakpoint time unit: `t` is absolute time from note-on where
+/// **1.0 = 100 seconds** — measured against real Omnisphere 3 via the state
+/// injection harness (release Δt of 0.003/0.03 rendered 0.28 s / 2.92 s
+/// decays, the −26 dB points of linear 0.3 s / 3.0 s ramps).
+const ENV_T_SECONDS: f32 = 100.0;
+
+/// Parse an `AENV`/`FENV` **breakpoint envelope** (`<p l= t= s= c=>` children:
+/// `l` = linear level, `t` = absolute time ×[`ENV_T_SECONDS`], `s` = flags
+/// (18 marks the terminal point), `c` = segment curve, 0.5 ≈ linear) into an
+/// ADSR approximation `(attack_s, decay_s, sustain, release_s)`.
+///
+/// 4-point envelopes map exactly (start → peak → sustain → end). Longer MSEG
+/// lists approximate: attack = first peak, sustain = the point before the
+/// terminal one, release = the final segment.
+fn parse_env_breakpoints(e: &XmlNode) -> Option<(f32, f32, f32, f32)> {
+    let pts: Vec<(f32, f32)> = e
+        .children_tagged("p")
+        .map(|p| (p.num("l").unwrap_or(0.0), p.num("t").unwrap_or(0.0)))
+        .collect();
+    if pts.len() < 3 {
+        return None;
+    }
+    // Peak = first point at the maximum level.
+    let peak_idx = pts
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1 .0.total_cmp(&b.1 .0))
+        .map(|(i, _)| i)?;
+    let last = pts.len() - 1;
+    let sus_idx = if last > peak_idx { last - 1 } else { peak_idx };
+    let attack = pts[peak_idx].1 * ENV_T_SECONDS;
+    let decay = (pts[sus_idx].1 - pts[peak_idx].1).max(0.0) * ENV_T_SECONDS;
+    let sustain = pts[sus_idx].0.clamp(0.0, 1.0);
+    let release = (pts[last].1 - pts[sus_idx].1).max(0.0) * ENV_T_SECONDS;
+    Some((attack, decay, sustain, release))
 }
 
 /// Parse a `.prt_omn` document into an [`OmniPatch`].
@@ -225,8 +266,16 @@ pub(crate) fn parse_patch_node(root: &XmlNode) -> Result<OmniPatch, String> {
                 ));
             }
         }
-        layer.amp_env = voice.child("AENVPARAMS").and_then(parse_env);
-        layer.filter_env = voice.child("FENVPARAMS").and_then(parse_env);
+        // The engine renders the breakpoint envelopes; the PARAMS attrs are
+        // only a fallback for patches without a breakpoint list.
+        layer.amp_env = voice
+            .child("AENV")
+            .and_then(parse_env_breakpoints)
+            .or_else(|| voice.child("AENVPARAMS").and_then(parse_env));
+        layer.filter_env = voice
+            .child("FENV")
+            .and_then(parse_env_breakpoints)
+            .or_else(|| voice.child("FENVPARAMS").and_then(parse_env));
         if let Some(osc) = voice.child("OSC") {
             layer.level = osc.num("level").unwrap_or(0.5);
             layer.fm_depth = osc.num("fm").unwrap_or(0.0).clamp(0.0, 1.0);
