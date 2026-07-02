@@ -191,7 +191,7 @@ fn NowBar(task: UiTask, on_complete: EventHandler<uuid::Uuid>) -> Element {
             span { class: "h-2 w-2 shrink-0 animate-pulse rounded-full bg-sky-400" }
             span { class: "min-w-0 truncate text-sm font-medium text-foreground", "{task.title}" }
             span { class: "shrink-0 font-mono text-sm tabular-nums text-sky-300",
-                {task_ui::duration_label(elapsed)}
+                {task_ui::clock_label(elapsed)}
             }
             button {
                 r#type: "button",

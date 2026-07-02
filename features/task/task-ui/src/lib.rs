@@ -23,7 +23,7 @@ pub mod store;
 pub mod views;
 
 pub use markdown::{Markdown, MarkdownProps, parse_markdown};
-pub use model::{Priority, Status, TaskInfo, TimeEntry, duration_label};
+pub use model::{Priority, Status, TaskInfo, TimeEntry, clock_label, duration_label};
 pub use mutation::TaskMutation;
 pub use store::{TaskState, apply};
 pub use views::{

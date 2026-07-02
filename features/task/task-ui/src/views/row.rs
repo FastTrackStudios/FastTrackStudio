@@ -32,25 +32,17 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
     };
 
     let tracked = t.tracked_seconds(chrono::Utc::now());
-    // Meta pills — rendered once, placed on the title line from `sm:`
-    // up (single-line density) and on a second line on touch widths.
-    let meta = {
-        let has_meta = t.due.is_some()
-            || !t.contexts.is_empty()
+    // Identity chips (what/where kind of task) sit NEXT TO the title;
+    // temporal chips (due, tracked time) go to the right edge. Both
+    // ride the title line from `sm:` up and wrap below it on touch
+    // widths — no orphaned pills across a wide row.
+    let identity = {
+        let any = !t.contexts.is_empty()
             || !t.projects.is_empty()
             || priority != Priority::Normal
-            || (status != Status::Open && status != Status::Done)
-            || tracked > 0;
-        if has_meta {
+            || (status != Status::Open && status != Status::Done && status != Status::InProgress);
+        if any {
             rsx! {
-                if let Some(d) = t.due_date() {
-                    {
-                        let (label, cls) = due_pill(d, done);
-                        rsx! {
-                            span { class: "{cls}", "{label}" }
-                        }
-                    }
-                }
                 if priority != Priority::Normal {
                     span {
                         class: "inline-flex items-center rounded-full px-1.5 py-0 text-[10px] uppercase tracking-wider {priority_pill(priority)}",
@@ -61,18 +53,6 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
                     span {
                         class: "inline-flex items-center rounded-full px-1.5 py-0 text-[10px] uppercase tracking-wider {status_pill(status)}",
                         "{status.label()}"
-                    }
-                }
-                if tracked > 0 {
-                    // The task's time receipt — sky while the clock
-                    // runs, muted once it's banked.
-                    span {
-                        class: if status == Status::InProgress {
-                            "inline-flex items-center rounded-full bg-sky-500/15 px-1.5 py-0 text-[10px] tabular-nums text-sky-400"
-                        } else {
-                            "inline-flex items-center rounded-full bg-muted/50 px-1.5 py-0 text-[10px] tabular-nums text-muted-foreground"
-                        },
-                        {crate::model::duration_label(tracked)}
                     }
                 }
                 for c in t.contexts.iter() {
@@ -95,6 +75,34 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
             rsx! {}
         }
     };
+    let temporal = {
+        if t.due.is_some() || tracked > 0 {
+            rsx! {
+                if tracked > 0 {
+                    // The task's time receipt — sky while the clock
+                    // runs, muted once it's banked.
+                    span {
+                        class: if status == Status::InProgress {
+                            "inline-flex items-center rounded-full bg-sky-500/15 px-1.5 py-0 text-[10px] tabular-nums text-sky-400"
+                        } else {
+                            "inline-flex items-center rounded-full bg-muted/50 px-1.5 py-0 text-[10px] tabular-nums text-muted-foreground"
+                        },
+                        {crate::model::duration_label(tracked)}
+                    }
+                }
+                if let Some(d) = t.due_date() {
+                    {
+                        let (label, cls) = due_pill(d, done);
+                        rsx! {
+                            span { class: "{cls}", "{label}" }
+                        }
+                    }
+                }
+            }
+        } else {
+            rsx! {}
+        }
+    };
 
     rsx! {
         div {
@@ -108,15 +116,17 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
             div { class: "flex-1 min-w-0 flex flex-col gap-0.5",
                 div { class: "flex items-center gap-2 min-w-0",
                     span { class: "{title_cls}", "{t.title}" }
-                    // Wide screens: meta rides the title line, pushed
-                    // to the right edge — one row per task.
+                    div { class: "hidden shrink-0 items-center gap-1.5 sm:flex",
+                        {identity.clone()}
+                    }
                     div { class: "ml-auto hidden shrink-0 items-center gap-1.5 sm:flex",
-                        {meta.clone()}
+                        {temporal.clone()}
                     }
                 }
-                // Touch widths: meta wraps below the title.
+                // Touch widths: everything wraps below the title.
                 div { class: "flex items-center gap-1.5 flex-wrap sm:hidden empty:hidden",
-                    {meta}
+                    {identity}
+                    {temporal}
                 }
             }
         }

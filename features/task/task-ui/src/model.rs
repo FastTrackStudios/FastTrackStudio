@@ -131,15 +131,33 @@ pub fn duration_label(seconds: i64) -> String {
     }
 }
 
+/// Live-clock label with visible seconds: `4:32`, `1:04:32`. The
+/// Now bar ticks once a second — the label must move with it.
+#[must_use]
+pub fn clock_label(seconds: i64) -> String {
+    let s = seconds.max(0);
+    if s < 3600 {
+        format!("{}:{:02}", s / 60, s % 60)
+    } else {
+        format!("{}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
+    }
+}
+
 #[cfg(test)]
 mod duration_tests {
-    use super::duration_label;
+    use super::{clock_label, duration_label};
 
     #[test]
     fn duration_label_scales() {
         assert_eq!(duration_label(47), "47s");
         assert_eq!(duration_label(150), "2m");
         assert_eq!(duration_label(3900), "1h05");
+    }
+
+    #[test]
+    fn clock_label_shows_seconds() {
+        assert_eq!(clock_label(272), "4:32");
+        assert_eq!(clock_label(3872), "1:04:32");
     }
 }
 
