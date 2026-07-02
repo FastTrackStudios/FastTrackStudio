@@ -364,7 +364,22 @@ struct Inner {
     /// [`SamplerRig::attach_midi`]).
     midi_monitor: MidiMonitor,
 
+    /// Stem routing: articulation class → output bus id for
+    /// [`SamplerRig::render_offline_document_buses`]. Default: every class →
+    /// `"main"` (single bus, bit-identical to the plain document render).
+    class_routing: Mutex<std::collections::BTreeMap<crate::engine::ArticClass, String>>,
+
     pub sample_rate: u32,
+}
+
+fn default_class_routing() -> std::collections::BTreeMap<crate::engine::ArticClass, String> {
+    use crate::engine::ArticClass;
+    [
+        (ArticClass::Longs, "main".to_string()),
+        (ArticClass::Shorts, "main".to_string()),
+    ]
+    .into_iter()
+    .collect()
 }
 
 #[derive(Default)]
@@ -508,6 +523,7 @@ impl SamplerRig {
                 stats,
                 tracks: Mutex::new(TrackTables::default()),
                 midi_monitor: MidiMonitor::default(),
+                class_routing: Mutex::new(default_class_routing()),
                 sample_rate,
             }),
         })
@@ -540,6 +556,7 @@ impl SamplerRig {
                 stats: Arc::new(BankStats::default()),
                 tracks: Mutex::new(TrackTables::default()),
                 midi_monitor: MidiMonitor::default(),
+                class_routing: Mutex::new(default_class_routing()),
                 sample_rate,
             }),
         }
@@ -744,6 +761,30 @@ impl SamplerRig {
         }
     }
 
+    /// Line-addressed legato prefire — see
+    /// [`SampleEngine::legato_prefire_line`](crate::engine::SampleEngine::legato_prefire_line).
+    pub fn legato_prefire_line(
+        &self,
+        id: &str,
+        line: crate::engine::LineId,
+        note: u8,
+        velocity: u8,
+    ) {
+        if let Ok(mut bank) = self.bank().lock() {
+            bank.legato_prefire_line(id, line, note, velocity);
+        }
+    }
+
+    /// REACTIVE legato-path trigger count since an instrument's fire log was
+    /// last enabled — see
+    /// [`SampleEngine::reactive_legato_fires`](crate::engine::SampleEngine::reactive_legato_fires).
+    pub fn reactive_legato_fires(&self, id: &str) -> u64 {
+        self.bank()
+            .lock()
+            .map(|b| b.reactive_legato_fires(id))
+            .unwrap_or(0)
+    }
+
     // ── Document mode (offline; see docs/plan/document-mode.md) ───────────────
 
     /// Render a [`TrackDocument`](crate::document::TrackDocument) offline
@@ -783,6 +824,62 @@ impl SamplerRig {
         }
         Ok(crate::document::render_schedule(
             &mut bank, id, &schedule, opts,
+        ))
+    }
+
+    /// Route an articulation class (stem) to an output bus for
+    /// [`render_offline_document_buses`](Self::render_offline_document_buses).
+    /// Default: every class → `"main"`. Routing never perturbs voice order,
+    /// round-robin, or timing — it only decides which bus each voice's audio
+    /// lands in, so split buses sum back to the main render.
+    pub fn set_class_bus(&self, class: crate::engine::ArticClass, bus: impl Into<String>) {
+        if let Ok(mut map) = self.inner.class_routing.lock() {
+            map.insert(class, bus.into());
+        }
+    }
+
+    /// Current stem routing (class → bus id).
+    pub fn class_routing(&self) -> std::collections::BTreeMap<crate::engine::ArticClass, String> {
+        self.inner
+            .class_routing
+            .lock()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| default_class_routing())
+    }
+
+    /// [`render_offline_document`](Self::render_offline_document), split into
+    /// articulation-class output buses per the routing set with
+    /// [`set_class_bus`](Self::set_class_bus) (stem export: Longs / Shorts).
+    /// With the default routing the single `"main"` bus is bit-identical to
+    /// the plain document render. Only available on an offline rig.
+    pub fn render_offline_document_buses(
+        &self,
+        id: &str,
+        doc: &crate::document::TrackDocument,
+        opts: &crate::document::DocumentRenderOptions,
+    ) -> eyre::Result<crate::document::DocumentBusRenderResult> {
+        if !self.is_offline() {
+            return Err(eyre::eyre!(
+                "render_offline_document_buses is only available on SamplerRig::new_offline"
+            ));
+        }
+        let routing = self.class_routing();
+        let mut bank = self
+            .bank()
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?;
+        let spec = bank
+            .instrument_spec(id)
+            .ok_or_else(|| eyre::eyre!("no instrument loaded under '{id}'"))?;
+        let schedule = crate::document::annotate(doc, &spec, self.inner.sample_rate);
+        let mut pitches: Vec<u8> = doc.notes.iter().map(|n| n.pitch).collect();
+        pitches.sort_unstable();
+        pitches.dedup();
+        for p in pitches {
+            let _ = bank.warm_note(id, p);
+        }
+        Ok(crate::document::render_schedule_buses(
+            &mut bank, id, &schedule, opts, &routing,
         ))
     }
 

@@ -28,6 +28,17 @@ pub enum VoiceState {
     Done,
 }
 
+/// Stem class of the articulation that spawned a voice — the routing key for
+/// stem-aware output buses (see `docs/plan/document-mode.md`, "Stem-aware
+/// output buses"). Longs: sustain/legato/tremolo bodies + their releases.
+/// Shorts: short articulations (staccato/spiccato/pizz/…) + their releases.
+/// Default routing sends every class to the main bus (no behavior change).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ArticClass {
+    Longs,
+    Shorts,
+}
+
 /// Classification of what triggered this voice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VoiceKind {
@@ -112,6 +123,15 @@ pub struct Voice {
     /// For `SustainLayer` voices: which vib side + dynamic-layer index this is,
     /// so the engine can set its CC1/CC2 crossfade gain. `None` otherwise.
     pub dyn_layer: Option<DynLayer>,
+
+    /// Mono legato line this voice belongs to (engine `LineId`). Line-scoped
+    /// operations (legato fade of the outgoing note, per-line note-off,
+    /// per-line CC1 dynamics) match on it so divisi lines never silence each
+    /// other's voices. Single-line/live play leaves everything on line 0.
+    pub line: u8,
+
+    /// Stem class of the articulation that spawned this voice (bus routing).
+    pub artic_class: ArticClass,
 }
 
 /// Identifies a zoned sustain dynamic layer for CC1/CC2 crossfade gain control.
@@ -161,6 +181,8 @@ impl Voice {
             choke_group: None,
             release_frames,
             dyn_layer: None,
+            line: 0,
+            artic_class: ArticClass::Longs,
         }
     }
 
@@ -199,6 +221,8 @@ impl Voice {
             choke_group: None,
             release_frames,
             dyn_layer: None,
+            line: 0,
+            artic_class: ArticClass::Longs,
         }
     }
 
@@ -210,6 +234,18 @@ impl Voice {
 
     pub fn with_mic_index(mut self, mic_index: Option<u8>) -> Self {
         self.mic_index = mic_index;
+        self
+    }
+
+    /// Tag this voice with its mono legato line (engine `LineId`).
+    pub fn with_line(mut self, line: u8) -> Self {
+        self.line = line;
+        self
+    }
+
+    /// Tag this voice with the stem class of its source articulation.
+    pub fn with_artic_class(mut self, class: ArticClass) -> Self {
+        self.artic_class = class;
         self
     }
 
@@ -552,6 +588,21 @@ impl VoicePool {
         }
     }
 
+    /// Line-scoped note-off: only voices spawned by `line` release, so divisi
+    /// lines playing the same pitch don't cut each other off. Live/single-line
+    /// play (everything on line 0) behaves exactly like
+    /// [`note_off_with_release_frames`](Self::note_off_with_release_frames).
+    pub fn note_off_line(&mut self, line: u8, note: u8, release_frames: Option<usize>) {
+        for v in &mut self.voices {
+            if v.note == note && v.line == line {
+                match release_frames {
+                    Some(frames) => v.note_off_with_release_frames(frames),
+                    None => v.note_off(),
+                }
+            }
+        }
+    }
+
     /// Send note-off to every active voice.
     pub fn all_notes_off(&mut self) {
         for v in &mut self.voices {
@@ -578,8 +629,20 @@ impl VoicePool {
 
     /// Silence all voices for `note` immediately (used when legato transition fires).
     pub fn silence_note(&mut self, note: u8, fade_frames: usize) {
+        self.silence_note_filtered(note, fade_frames, None);
+    }
+
+    /// Line-scoped variant of [`silence_note`](Self::silence_note): a legato
+    /// transition firing on one divisi line must not fade a unison note held
+    /// by another line.
+    pub fn silence_note_line(&mut self, line: u8, note: u8, fade_frames: usize) {
+        self.silence_note_filtered(note, fade_frames, Some(line));
+    }
+
+    fn silence_note_filtered(&mut self, note: u8, fade_frames: usize, line: Option<u8>) {
         for v in &mut self.voices {
             if v.note == note
+                && line.is_none_or(|l| v.line == l)
                 && matches!(
                     v.kind,
                     VoiceKind::SustainNVLo
@@ -640,6 +703,34 @@ impl VoicePool {
                 _ => 0,
             };
             v.render_block(&mut outputs[idx]);
+        }
+        self.voices.retain(|v| !v.is_done());
+    }
+
+    /// Render voices into a flat (bus × mic) matrix of stereo buffers:
+    /// `outputs[bus * nmics + mic]`. Each voice routes to the bus of its
+    /// [`ArticClass`] (`route[0]` = Longs, `route[1]` = Shorts; out-of-range
+    /// folds to bus 0) and to its `mic_index` within that bus (like
+    /// [`render_multi`](Self::render_multi)). Voices are visited in exactly
+    /// the same order as `render`/`render_multi`, so when both classes route
+    /// to the same bus the per-buffer accumulation — and therefore the audio,
+    /// bit for bit — is identical to the unsplit render.
+    pub fn render_matrix(&mut self, outputs: &mut [Vec<f32>], nmics: usize, route: [usize; 2]) {
+        if outputs.is_empty() || nmics == 0 {
+            return;
+        }
+        let nbuses = outputs.len() / nmics;
+        for v in &mut self.voices {
+            let want = match v.artic_class {
+                ArticClass::Longs => route[0],
+                ArticClass::Shorts => route[1],
+            };
+            let bus = if want < nbuses { want } else { 0 };
+            let mic = match v.mic_index {
+                Some(i) if (i as usize) < nmics => i as usize,
+                _ => 0,
+            };
+            v.render_block(&mut outputs[bus * nmics + mic]);
         }
         self.voices.retain(|v| !v.is_done());
     }

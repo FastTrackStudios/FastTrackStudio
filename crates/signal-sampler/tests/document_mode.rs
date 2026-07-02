@@ -12,8 +12,8 @@
 
 use std::path::{Path, PathBuf};
 
-use signal_sampler::SamplerRig;
 use signal_sampler::document::{DocEvent, DocNote, DocumentRenderOptions, TrackDocument, annotate};
+use signal_sampler::{ArticClass, SamplerRig};
 
 const SR: u32 = 48_000;
 /// Fixture legato pre-delay for velocities 0–64 (see the styx below).
@@ -124,10 +124,14 @@ mod tempdir {
 }
 
 fn note(start_qn: f64, end_qn: f64, pitch: u8, vel: u8) -> DocNote {
+    note_ch(0, start_qn, end_qn, pitch, vel)
+}
+
+fn note_ch(chan: u8, start_qn: f64, end_qn: f64, pitch: u8, vel: u8) -> DocNote {
     DocNote {
         start_qn,
         end_qn,
-        chan: 0,
+        chan,
         pitch,
         vel,
     }
@@ -184,6 +188,77 @@ fn document_render_is_byte_identical_across_runs() {
         2,
         "both legato notes fired transitions"
     );
+    assert_eq!(a.reactive_fallbacks, 0, "document playback never reacts");
+}
+
+// ── 1b. Per-line divisi (one engine, many mono lines) ───────────────────────
+
+#[test]
+fn divisi_document_prefires_every_line_with_zero_reactive_fallbacks() {
+    // Two divisi channels, each a mono legato line. Phase 1 folded these
+    // into one line and the second channel degraded to the reactive path;
+    // per-line scheduling must prefire BOTH — reactive count exactly 0.
+    let doc = TrackDocument {
+        seed: 0xD1_7151,
+        notes: vec![
+            // line 0 (upper desk)
+            note_ch(0, 0.0, 2.1, 64, 90),
+            note_ch(0, 2.0, 4.0, 65, 30), // legato, slow zone
+            // line 1 (lower desk) — overlapping the same span
+            note_ch(1, 0.0, 2.6, 55, 90),
+            note_ch(1, 2.5, 4.5, 53, 80), // legato, fast zone
+        ],
+        ..Default::default()
+    };
+
+    let (rig, _g) = fixture_rig("divisi");
+    let spec = rig.instrument_spec("fixture").expect("spec");
+    let sched = annotate(&doc, &spec, SR);
+    assert_eq!(sched.legato_count, 2, "one legato edge per channel");
+
+    let res = rig
+        .render_offline_document(
+            "fixture",
+            &doc,
+            &DocumentRenderOptions {
+                tail_sec: 0.5,
+                ..Default::default()
+            },
+        )
+        .expect("render");
+
+    assert_eq!(
+        res.reactive_fallbacks, 0,
+        "every divisi line's transition must arrive via prefire, never the reactive path"
+    );
+    assert_eq!(res.transitions.len(), 2, "both lines fired transitions");
+    let mut lines: Vec<u8> = res.transitions.iter().map(|t| t.line).collect();
+    lines.sort_unstable();
+    assert_eq!(lines, vec![0, 1], "one transition per divisi line");
+
+    // Each line's arrival lands on its own tick: line 0 at QN 2 (vel 30 ⇒
+    // 333 ms), line 1 at QN 2.5 (vel 80 ⇒ 100 ms). 120 BPM ⇒ 0.5 s/QN.
+    let t0 = res.transitions.iter().find(|t| t.line == 0).unwrap();
+    let t1 = res.transitions.iter().find(|t| t.line == 1).unwrap();
+    assert_eq!(t0.to_note, 65);
+    assert_eq!(t0.frame + SLOW_DELAY_FRAMES, 48_000);
+    assert_eq!(t1.to_note, 53);
+    assert_eq!(t1.frame + 100 * SR as u64 / 1000, 60_000);
+
+    // Determinism holds for multi-line documents too.
+    let (rig2, _g2) = fixture_rig("divisi-b");
+    let res2 = rig2
+        .render_offline_document(
+            "fixture",
+            &doc,
+            &DocumentRenderOptions {
+                tail_sec: 0.5,
+                ..Default::default()
+            },
+        )
+        .expect("render 2");
+    assert_eq!(audio_bits(&res.audio), audio_bits(&res2.audio));
+    assert_eq!(res.transitions, res2.transitions);
 }
 
 #[test]
@@ -270,6 +345,114 @@ fn mid_piece_start_matches_full_render_and_rr_slots() {
             .collect()
     };
     assert_eq!(slots(&s1), slots(&s2));
+}
+
+// ── 1c. Articulation-class output buses (stems) ──────────────────────────────
+
+#[test]
+fn class_bus_split_sums_to_main_and_isolates_shorts() {
+    // Legato phrase (Longs), then — after a gap longer than any voice tail —
+    // a staccato-only region (CC58 → Staccato ⇒ Shorts). The temporal
+    // separation makes the bit-identity assertions exact: float summation is
+    // order-sensitive, so "split buses sum to main" holds bit-for-bit when
+    // (as here) the classes never sound in the same sample. The routing
+    // itself is per-voice and sample-accurate regardless.
+    let doc = TrackDocument {
+        seed: 0x57E4,
+        notes: vec![
+            // Longs: sustain → legato
+            note(0.0, 2.1, 60, 90),
+            note(2.0, 4.0, 62, 30),
+            // Shorts: staccato pair, 10 s later (120 BPM ⇒ QN 20 = 10 s)
+            note(20.0, 20.4, 64, 100),
+            note(21.0, 21.4, 66, 100),
+        ],
+        // CC58 = 23 (Staccato band) between the regions.
+        ccs: vec![signal_sampler::DocCc {
+            qn: 16.0,
+            chan: 0,
+            cc: 58,
+            val: 23,
+        }],
+        ..Default::default()
+    };
+    let opts = DocumentRenderOptions {
+        tail_sec: 1.0,
+        ..Default::default()
+    };
+
+    // Reference: the plain (phase-1) main-out document render.
+    let (rig_main, _gm) = fixture_rig("bus-main");
+    let main = rig_main
+        .render_offline_document("fixture", &doc, &opts)
+        .expect("main render");
+    assert_eq!(main.reactive_fallbacks, 0);
+    assert!(main.audio.iter().any(|s| *s != 0.0));
+
+    // Default routing (all → "main"): ONE bus, bit-identical to the plain
+    // render — routing must not perturb voice order, RR, or timing.
+    let (rig_def, _gd) = fixture_rig("bus-default");
+    let def = rig_def
+        .render_offline_document_buses("fixture", &doc, &opts)
+        .expect("default-routing render");
+    assert_eq!(def.buses.len(), 1);
+    let def_main = def.buses.get("main").expect("main bus");
+    assert_eq!(
+        audio_bits(def_main),
+        audio_bits(&main.audio),
+        "default all→main routing must be bit-identical to the plain document render"
+    );
+    assert_eq!(def.transitions, main.transitions);
+
+    // Split routing: Longs and Shorts land in their own stereo buses.
+    let (rig_split, _gs) = fixture_rig("bus-split");
+    rig_split.set_class_bus(ArticClass::Longs, "longs");
+    rig_split.set_class_bus(ArticClass::Shorts, "shorts");
+    let split = rig_split
+        .render_offline_document_buses("fixture", &doc, &opts)
+        .expect("split render");
+    assert_eq!(split.reactive_fallbacks, 0);
+    let longs = split.buses.get("longs").expect("longs bus");
+    let shorts = split.buses.get("shorts").expect("shorts bus");
+    assert_eq!(longs.len(), main.audio.len());
+    assert_eq!(shorts.len(), main.audio.len());
+
+    // Sum of the stems == the main render, bit for bit.
+    let sum: Vec<f32> = longs
+        .iter()
+        .zip(shorts.iter())
+        .map(|(l, s)| l + s)
+        .collect();
+    assert_eq!(
+        audio_bits(&sum),
+        audio_bits(&main.audio),
+        "Longs + Shorts must recombine to the main render bit-exactly"
+    );
+
+    // Shorts land ONLY in the Shorts bus: the staccato region (from the
+    // first pre-rolled note-on at 10 s − 60 ms) carries energy in `shorts`
+    // and none in `longs`; the legato region (first 4 s) is the reverse.
+    let stac_start = 2 * (10 * SR as usize - 60 * SR as usize / 1000); // interleaved index
+    let legato_end = 2 * 4 * SR as usize;
+    let energy = |buf: &[f32]| -> f64 { buf.iter().map(|s| (*s as f64) * (*s as f64)).sum() };
+    assert!(
+        energy(&shorts[stac_start..]) > 0.0,
+        "staccato energy in the Shorts bus"
+    );
+    assert_eq!(
+        energy(&longs[stac_start..]),
+        0.0,
+        "no Longs energy in the staccato-only region"
+    );
+    assert!(
+        energy(&longs[..legato_end]) > 0.0,
+        "legato energy in the Longs bus"
+    );
+    assert_eq!(
+        energy(&shorts[..legato_end]),
+        0.0,
+        "no Shorts energy in the legato region"
+    );
 }
 
 // ── 2. Timing inversion ──────────────────────────────────────────────────────

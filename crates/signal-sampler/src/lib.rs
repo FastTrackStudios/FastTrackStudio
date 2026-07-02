@@ -83,11 +83,11 @@ pub use bank::{PreloadProfile, SamplerBank};
 pub use block::{BlockParams, BlockSpec, SamplerBlock};
 pub use convolver::Convolver;
 pub use document::{
-    DocCc, DocEvent, DocNote, DocumentRenderOptions, DocumentRenderResult, Schedule,
-    ScheduledEvent, TempoPoint, TrackDocument, annotate,
+    DocCc, DocEvent, DocNote, DocumentBusRenderResult, DocumentRenderOptions, DocumentRenderResult,
+    Schedule, ScheduledEvent, TempoPoint, TrackDocument, annotate, line_for_chan,
 };
 pub use engine::cache::SignalPcmPack;
-pub use engine::{LegatoFireEvent, SampleEngine};
+pub use engine::{ArticClass, LegatoFireEvent, LineId, SampleEngine};
 pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
 pub use instrument::SamplerInstrument;
 pub use keys_rig::{KeysInstrument, KeysRig};

@@ -62,6 +62,11 @@ pub struct EngineInstance {
     /// One stereo scratch buffer per mic id in the block. Reused per
     /// audio block. Pre-allocated at construction.
     mic_scratches: Vec<Vec<f32>>,
+    /// Flat (bus × mic) scratch matrix for stem-split document rendering
+    /// ([`render_routed_buses`](Self::render_routed_buses)). Lazily sized —
+    /// this path is offline-only, so growth here never touches the audio
+    /// thread. Empty until first use.
+    routed_scratches: Vec<Vec<f32>>,
     /// Cached so we know if block_frames changed between renders.
     block_frames: usize,
     resize_events: u64,
@@ -154,6 +159,7 @@ impl EngineInstance {
             ports,
             muted: false,
             mic_scratches,
+            routed_scratches: Vec::new(),
             block_frames,
             resize_events: 0,
         }
@@ -219,6 +225,58 @@ impl EngineInstance {
                 .chunks_exact_mut(2)
                 .zip(src.chunks_exact(2))
             {
+                out_pair[0] += in_pair[0] * pl;
+                out_pair[1] += in_pair[1] * pr;
+            }
+        }
+    }
+
+    /// Render this engine into per-bus stereo buffers routed by articulation
+    /// class (stem-split document rendering; `route_longs`/`route_shorts`
+    /// index into `outputs`). Mirrors [`render`](Self::render)'s exact op
+    /// sequence — voices accumulate into per-(bus, mic) scratches in pool
+    /// order, then the first port's layer copies its mic scratch into each
+    /// bus with the same gain/pan weighting — so routing every class to one
+    /// bus is bit-identical to `render` + reading the first port, and split
+    /// buses carry each voice wholly. `outputs` must arrive zeroed.
+    /// Offline-only (allocates on first use / size change).
+    pub fn render_routed_buses(
+        &mut self,
+        outputs: &mut [Vec<f32>],
+        route_longs: usize,
+        route_shorts: usize,
+        block_frames: usize,
+    ) {
+        let nmics = self.mic_scratches.len().max(1);
+        let nbuses = outputs.len().max(1);
+        let want = nbuses * nmics;
+        if self.routed_scratches.len() != want {
+            self.routed_scratches = (0..want).map(|_| Vec::new()).collect();
+        }
+        for buf in &mut self.routed_scratches {
+            buf.clear();
+            buf.resize(block_frames * 2, 0.0);
+        }
+        if self.muted {
+            return;
+        }
+
+        self.block
+            .render_matrix(&mut self.routed_scratches, nmics, route_longs, route_shorts);
+
+        // Same fold as render() + bank::render's first-port read: one layer,
+        // gain/pan-weighted copy of its mic scratch — done once per bus.
+        let Some(port) = self.ports.first() else {
+            return;
+        };
+        let layer = &self.layers[port.layer_index];
+        if layer.spec.bypass {
+            return;
+        }
+        let (pl, pr) = (layer.pan_l, layer.pan_r);
+        for (bus, out) in outputs.iter_mut().enumerate() {
+            let src = &self.routed_scratches[bus * nmics + layer.mic_index];
+            for (out_pair, in_pair) in out.chunks_exact_mut(2).zip(src.chunks_exact(2)) {
                 out_pair[0] += in_pair[0] * pl;
                 out_pair[1] += in_pair[1] * pr;
             }

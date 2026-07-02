@@ -43,6 +43,7 @@ use crate::{PlayerPatch, VoiceConfig};
 use cache::{EvictStats, PreloadStats, SampleCache};
 use filter::BiquadFilter;
 use rr::RrCounters;
+pub use voice::ArticClass;
 use voice::{DynLayer, Voice, VoiceKind, VoicePool, VoiceStealPolicy};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -138,6 +139,55 @@ enum LegatoState {
     },
 }
 
+/// Identifies one monophonic legato line inside an engine. Lines are
+/// first-class engine entities — they are NOT MIDI channels. Allocators sit
+/// in front of the line pool and decide which line an incoming note belongs
+/// to (see `docs/plan/document-mode.md`, "Auto-divisi"):
+/// - the document scheduler currently maps channel N → line N (import path),
+/// - lookahead auto-divisi (annotate-time) and live greedy auto-divisi are
+///   future allocators over the same pool.
+///
+/// Live single-line play uses line 0 everywhere, which is bit-identical to
+/// the pre-line engine.
+pub type LineId = usize;
+
+/// Size of the per-engine mono-line pool. Matches the 16 MIDI channels the
+/// channel→line allocator can address; auto-divisi allocators never need
+/// more simultaneous lines than a section has players.
+pub const MAX_LINES: usize = 16;
+
+/// Per-line monophonic legato state: the sounding note, key press order for
+/// last-note-priority fallback, the pending reactive transition countdown,
+/// and the line's CC1/CC2 dynamics (CC1 is per-channel in MIDI; a divisi
+/// line's dynamics ride its own controller lane).
+struct LegatoLine {
+    /// The note currently sounding on this mono line (zoned legato mode).
+    /// `None` when the line is silent. A new note transitions FROM this
+    /// note; releasing it falls back to the most-recent still-held note.
+    note: Option<u8>,
+    /// Press order of held keys (most-recent last) for last-note-priority
+    /// mono legato fall-back when the sounding note is released.
+    order: Vec<u8>,
+    /// Legato pre-delay countdown (reactive path).
+    state: LegatoState,
+    /// This line's CC1 value [0–127] — dynamic layer crossfade.
+    cc1: u8,
+    /// This line's CC2 value [0–127] — vibrato / non-vibrato crossfade.
+    cc2: u8,
+}
+
+impl Default for LegatoLine {
+    fn default() -> Self {
+        Self {
+            note: None,
+            order: Vec::new(),
+            state: LegatoState::Idle,
+            cc1: 64,
+            cc2: 0,
+        }
+    }
+}
+
 /// One legato transition firing, recorded for tests / offline analysis when
 /// the fire log is enabled (see [`SampleEngine::set_legato_fire_log_enabled`]).
 /// `frame` is the engine's running render position ([`SampleEngine::frames_rendered`])
@@ -145,6 +195,8 @@ enum LegatoState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LegatoFireEvent {
     pub frame: u64,
+    /// Mono line the transition fired on ([`LineId`], truncated to u8).
+    pub line: u8,
     pub from_note: u8,
     pub to_note: u8,
     pub velocity: u8,
@@ -201,13 +253,22 @@ pub struct SampleEngine {
     /// directional legato zone (CSS records a separate sample per direction).
     /// Defaults to `"up"`; updated per note from the interval played.
     play_direction: String,
-    /// The note currently sounding on the monophonic legato line (zoned legato
-    /// mode). `None` when the line is silent. A new note transitions FROM this
-    /// note; releasing it falls back to the most-recent still-held note.
-    legato_note: Option<u8>,
-    /// Press order of held keys (most-recent last) for last-note-priority mono
-    /// legato fall-back when the sounding note is released.
-    legato_order: Vec<u8>,
+    /// Pool of monophonic legato lines (see [`LineId`]). Line 0 is the
+    /// default line used by the channel-less legacy API, so live single-line
+    /// behavior is unchanged. The document scheduler (or a future
+    /// auto-divisi allocator) addresses lines explicitly via the `_line`
+    /// method variants.
+    lines: Vec<LegatoLine>,
+    /// The line the current dispatch is acting on. Set by
+    /// [`set_active_line`](Self::set_active_line) at every public entry
+    /// point; internal trigger helpers read it for voice tagging and
+    /// line-state bookkeeping.
+    cur_line: LineId,
+    /// Count of REACTIVE legato-path triggers (countdown armed at note-on /
+    /// note-off fallback) since the counter was last reset. Document playback
+    /// must keep this at 0 — every transition arrives via
+    /// [`legato_prefire_line`](Self::legato_prefire_line) instead.
+    reactive_legato_fires: u64,
 
     /// True when the source pack is a percussion / drum-kit library
     /// (`category` ~ "drum-kit", or a percussion `instrument`). Percussion
@@ -238,9 +299,12 @@ pub struct SampleEngine {
     /// Lowercased for case-insensitive matching.
     engine_choke_on: Vec<String>,
 
-    /// Current CC1 value [0–127], drives dynamic layer crossfade.
+    /// The ACTIVE line's CC1 value [0–127] — a mirror of
+    /// `lines[cur_line].cc1`, refreshed by `set_active_line` so the many
+    /// internal readers stay line-correct without threading a line id
+    /// through every helper. Writes go through both (see `cc_line`).
     cc1: u8,
-    /// Current CC2 value [0–127], drives vibrato / non-vibrato crossfade.
+    /// The ACTIVE line's CC2 value — same mirror discipline as `cc1`.
     cc2: u8,
     /// Current CC58 value, selects articulation / legato mode.
     cc58: u8,
@@ -270,7 +334,8 @@ pub struct SampleEngine {
     /// True = expressive mode (3 zones, 333/250/100ms), false = low-latency (2 zones, 100/150ms).
     legato_expressive: bool,
 
-    /// Notes currently held down: MIDI note → velocity.
+    /// Notes currently held down: MIDI note → velocity. Shared across lines
+    /// (keys are physical); per-line press order lives in `LegatoLine::order`.
     held_notes: HashMap<u8, u8>,
     /// Notes for which `trigger_short`'s body voice actually spawned
     /// (i.e. the body sample was decoded and resolve succeeded). Used to
@@ -280,9 +345,6 @@ pub struct SampleEngine {
     body_voiced: std::collections::HashSet<u8>,
     /// Note-off velocities captured while the sustain pedal is held.
     deferred_note_off_velocities: HashMap<u8, u8>,
-
-    /// Legato pre-delay countdown.
-    legato_state: LegatoState,
 
     /// Running render position in frames since construction — advanced by
     /// every `render`/`render_multi` call. Document-mode schedulers and the
@@ -446,8 +508,9 @@ impl SampleEngine {
             solo_mic: None,
             keyswitch_notes,
             play_direction: "up".to_string(),
-            legato_note: None,
-            legato_order: Vec::new(),
+            lines: (0..MAX_LINES).map(|_| LegatoLine::default()).collect(),
+            cur_line: 0,
+            reactive_legato_fires: 0,
             percussion,
             single_attack_key,
             pinned_articulation: None,
@@ -474,7 +537,6 @@ impl SampleEngine {
             held_notes: HashMap::with_capacity(128),
             body_voiced: std::collections::HashSet::with_capacity(128),
             deferred_note_off_velocities: HashMap::with_capacity(128),
-            legato_state: LegatoState::Idle,
             frames_rendered: 0,
             legato_fire_log_enabled: false,
             legato_fire_log: Vec::new(),
@@ -690,11 +752,14 @@ impl SampleEngine {
     /// Enable/disable the legato transition fire log (tests / offline
     /// document renders). Enabling clears any previous entries and
     /// pre-allocates the capped log so the audio thread never allocates.
+    /// Enabling also resets [`reactive_legato_fires`](Self::reactive_legato_fires)
+    /// so a document render observes only its own playback.
     pub fn set_legato_fire_log_enabled(&mut self, enabled: bool) {
         self.legato_fire_log_enabled = enabled;
         self.legato_fire_log.clear();
         if enabled {
             self.legato_fire_log.reserve(LEGATO_FIRE_LOG_CAP);
+            self.reactive_legato_fires = 0;
         } else {
             self.legato_fire_log.shrink_to_fit();
         }
@@ -703,6 +768,35 @@ impl SampleEngine {
     /// Recorded legato transition firings since the log was enabled.
     pub fn legato_fire_log(&self) -> &[LegatoFireEvent] {
         &self.legato_fire_log
+    }
+
+    /// How many REACTIVE legato-path triggers (note-on countdown / note-off
+    /// fallback) occurred since the fire log was last enabled. Document
+    /// playback schedules every transition via prefire, so this must read 0
+    /// after a document render — any other value means the annotator missed
+    /// an edge and the engine degraded to live-mode timing for it.
+    pub fn reactive_legato_fires(&self) -> u64 {
+        self.reactive_legato_fires
+    }
+
+    // ── Mono legato lines ─────────────────────────────────────────────────────
+
+    /// Make `line` the active line for the current dispatch: line-scoped
+    /// state (mono note, press order, pending countdown) and the CC1/CC2
+    /// mirrors now refer to it. Out-of-range ids clamp into the pool.
+    fn set_active_line(&mut self, line: LineId) {
+        let l = line.min(MAX_LINES - 1);
+        self.cur_line = l;
+        self.cc1 = self.lines[l].cc1;
+        self.cc2 = self.lines[l].cc2;
+    }
+
+    fn line(&self) -> &LegatoLine {
+        &self.lines[self.cur_line]
+    }
+
+    fn line_mut(&mut self) -> &mut LegatoLine {
+        &mut self.lines[self.cur_line]
     }
 
     /// Running render position in frames since construction.
@@ -723,27 +817,37 @@ impl SampleEngine {
     /// non-zoned patches, legato-off, or an empty legato line fall back to
     /// the plain note-on behaviour.
     pub fn legato_prefire(&mut self, note: u8, velocity: u8) {
+        self.legato_prefire_line(0, note, velocity);
+    }
+
+    /// Line-addressed [`legato_prefire`](Self::legato_prefire) — the document
+    /// scheduler resolves each scheduled event to a [`LineId`] (currently the
+    /// channel→line allocator: chan N → line N) so every divisi line runs its
+    /// own prefired mono legato.
+    pub fn legato_prefire_line(&mut self, line: LineId, note: u8, velocity: u8) {
+        self.set_active_line(line);
         if velocity == 0 {
-            self.note_off(note);
+            self.note_off_line(line, note);
             return;
         }
         if self.try_keyswitch(note, velocity) {
             return;
         }
         if !self.patch.is_zoned() || !self.legato_enabled {
-            self.note_on(note, velocity);
+            self.note_on_line(line, note, velocity);
             return;
         }
         self.held_notes.insert(note, velocity);
-        self.legato_order.retain(|&n| n != note);
-        self.legato_order.push(note);
-        match self.legato_note {
+        let l = self.line_mut();
+        l.order.retain(|&n| n != note);
+        l.order.push(note);
+        match self.line().note {
             // No sounding line (document started mid-phrase, or annotation
             // was optimistic): start the note plainly.
             None => {
                 self.play_direction = "up".to_string();
                 self.trigger_zoned_sustain(note);
-                self.legato_note = Some(note);
+                self.line_mut().note = Some(note);
             }
             // Fire the transition immediately — no Pending countdown. The
             // caller already subtracted the velocity-mapped delay from the
@@ -1098,8 +1202,16 @@ impl SampleEngine {
     }
 
     pub fn note_on(&mut self, note: u8, velocity: u8) {
+        self.note_on_line(0, note, velocity);
+    }
+
+    /// Line-addressed note-on: mono-line legato bookkeeping happens on
+    /// `line`, and spawned voices are tagged with it. The channel-less
+    /// [`note_on`](Self::note_on) uses line 0 (live single-line play).
+    pub fn note_on_line(&mut self, line: LineId, note: u8, velocity: u8) {
+        self.set_active_line(line);
         if velocity == 0 {
-            self.note_off(note);
+            self.note_off_line(line, note);
             return;
         }
 
@@ -1140,14 +1252,15 @@ impl SampleEngine {
                 // the sustain body's transitions — so any long articulation, not
                 // just a Legato-kind one, takes this path when legato is enabled.
                 // Track press order for last-note-priority fall-back on release.
-                self.legato_order.retain(|&n| n != note);
-                self.legato_order.push(note);
-                match self.legato_note {
+                let l = self.line_mut();
+                l.order.retain(|&n| n != note);
+                l.order.push(note);
+                match self.line().note {
                     // First note of the phrase: sounds immediately, no transition.
                     None => {
                         self.play_direction = "up".to_string();
                         self.trigger_zoned_sustain(note);
-                        self.legato_note = Some(note);
+                        self.line_mut().note = Some(note);
                     }
                     // Transition from the currently-sounding note to this one,
                     // delayed by the velocity-mapped legato latency. A note that
@@ -1217,10 +1330,22 @@ impl SampleEngine {
 
     /// Process a MIDI note-off event.
     pub fn note_off(&mut self, note: u8) {
-        self.note_off_with_velocity(note, self.cc1);
+        self.note_off_line(0, note);
+    }
+
+    /// Line-addressed note-off (see [`note_on_line`](Self::note_on_line)).
+    pub fn note_off_line(&mut self, line: LineId, note: u8) {
+        self.set_active_line(line);
+        let release_velocity = self.cc1;
+        self.note_off_with_velocity_on_line(note, release_velocity);
     }
 
     pub fn note_off_with_velocity(&mut self, note: u8, release_velocity: u8) {
+        self.set_active_line(0);
+        self.note_off_with_velocity_on_line(note, release_velocity);
+    }
+
+    fn note_off_with_velocity_on_line(&mut self, note: u8, release_velocity: u8) {
         let release_frames = self.pedal_release_frames();
         if self.cc64_held {
             // Sustain pedal held — defer release.
@@ -1232,26 +1357,28 @@ impl SampleEngine {
         self.held_notes.remove(&note);
         self.deferred_note_off_velocities.remove(&note);
         if self.patch.is_zoned() {
-            self.legato_order.retain(|&n| n != note);
+            let cur_line = self.cur_line as u8;
+            self.line_mut().order.retain(|&n| n != note);
             // Monophonic legato: releasing the SOUNDING note falls back to the
             // most-recent still-held note via a legato transition; releasing the
             // line's last note ends it. Lifting a held-but-silent key is a no-op.
-            if self.legato_enabled && self.legato_note.is_some() {
-                if self.legato_note != Some(note) {
+            if self.legato_enabled && self.line().note.is_some() {
+                if self.line().note != Some(note) {
                     return;
                 }
-                if let Some(&prev) = self.legato_order.last() {
+                if let Some(&prev) = self.line().order.last() {
                     // Fall back at a medium transition speed.
                     self.start_legato_transition(note, prev, LEGATO_FALLBACK_VELOCITY);
                     return;
                 }
-                self.legato_note = None;
+                self.line_mut().note = None;
             }
             // Play the recorded release tail (CSS Vsusrel/NVrel) and fade the
-            // looping sustain underneath it.
+            // looping sustain underneath it — this line's voices only, so a
+            // unison note held by another divisi line keeps sounding.
             self.spawn_release(note);
             self.voices
-                .note_off_with_release_frames(note, Some(release_frames));
+                .note_off_line(cur_line, note, Some(release_frames));
             return;
         }
         self.do_note_off_with_release_frames(note, release_velocity, release_frames);
@@ -1266,10 +1393,18 @@ impl SampleEngine {
         if let Some(orig) = self.no_pedal_articulation.take() {
             self.articulation = orig;
         }
-        self.legato_state = LegatoState::Idle;
-        self.legato_note = None;
-        self.legato_order.clear();
+        self.reset_lines();
         self.voices.all_notes_off();
+    }
+
+    /// End every mono line: sounding note, press order, pending countdowns.
+    /// (CC1/CC2 values persist — controllers outlive notes.)
+    fn reset_lines(&mut self) {
+        for l in &mut self.lines {
+            l.state = LegatoState::Idle;
+            l.note = None;
+            l.order.clear();
+        }
     }
 
     pub fn panic(&mut self) {
@@ -1280,9 +1415,7 @@ impl SampleEngine {
         if let Some(orig) = self.no_pedal_articulation.take() {
             self.articulation = orig;
         }
-        self.legato_state = LegatoState::Idle;
-        self.legato_note = None;
-        self.legato_order.clear();
+        self.reset_lines();
         self.voices.panic();
     }
 
@@ -1464,19 +1597,42 @@ impl SampleEngine {
     /// which fades the old note and plays the directional transition zone. A
     /// zero delay (portamento) fires immediately.
     fn start_legato_transition(&mut self, from: u8, to: u8, velocity: u8) {
+        // Every entry here is the REACTIVE path (live note-on countdown or
+        // note-off fallback) — document playback must never reach it (it
+        // schedules `legato_prefire_line` instead), which tests assert via
+        // this counter.
+        self.reactive_legato_fires = self.reactive_legato_fires.saturating_add(1);
         let (delay_ms, portamento) = self.legato_timing(velocity);
         let frames = ms_to_frames(delay_ms, self.sample_rate);
         if frames == 0 {
             self.play_direction = if to >= from { "up" } else { "down" }.to_string();
             self.fire_legato(from, to, velocity, portamento);
         } else {
-            self.legato_state = LegatoState::Pending {
+            self.line_mut().state = LegatoState::Pending {
                 frames_remaining: frames,
                 from_note: from,
                 to_note: to,
                 to_note_velocity: velocity,
                 portamento,
             };
+        }
+    }
+
+    /// Stem class of an articulation id: Short/OneShot kinds are Shorts,
+    /// everything long (Sustain/Legato/Looped/Trill/Release/Special) is
+    /// Longs. Percussion engines class every unmatched tag as Shorts (a drum
+    /// hit is a short by nature).
+    fn artic_class_for(&self, artic_id: &str) -> ArticClass {
+        match self.patch.spec.articulation(artic_id).map(|a| &a.kind) {
+            Some(ArticulationKind::Short | ArticulationKind::OneShot) => ArticClass::Shorts,
+            Some(_) => ArticClass::Longs,
+            None => {
+                if self.percussion {
+                    ArticClass::Shorts
+                } else {
+                    ArticClass::Longs
+                }
+            }
         }
     }
 
@@ -1654,6 +1810,15 @@ impl SampleEngine {
         let playback_mode = z.playback_mode.clone();
         let (loop_start, loop_end) = (z.loop_start, z.loop_end);
         let alternating = zone_is_alternating_loop(z);
+        // Stem class: a Release voice follows its PARENT articulation (a
+        // short's release lands in the Shorts stem); everything else is
+        // classed by the zone's own articulation.
+        let artic_class = if matches!(kind, VoiceKind::Release) {
+            self.artic_class_for(&self.articulation)
+        } else {
+            self.artic_class_for(&z.articulation)
+        };
+        let line = self.cur_line as u8;
         let path = self.patch.zone_paths[idx].clone();
 
         let Some(data) = self.cache.get_loaded(&path) else {
@@ -1752,6 +1917,8 @@ impl SampleEngine {
                 self.release_frames,
             )
             .with_mic_index(mic_index)
+            .with_line(line)
+            .with_artic_class(artic_class)
             .with_pan(u_pan)
             .with_attack(attack)
             .with_sample_window(start_frame, (sample_end > 0).then_some(sample_end as usize));
@@ -1920,6 +2087,14 @@ impl SampleEngine {
             } else {
                 VoiceKind::Zoned
             };
+            // Stem class: releases follow the parent articulation; direct
+            // triggers are classed by their zone's articulation.
+            let artic_class = if matches!(voice_kind, VoiceKind::Release) {
+                self.artic_class_for(&self.articulation)
+            } else {
+                self.artic_class_for(&z.articulation)
+            };
+            let line = self.cur_line as u8;
             // Unison: spawn N detuned/panned copies (copies == 1 = normal).
             let (copies, det_cents, width) = self.unison;
             let copies = copies.max(1);
@@ -1941,6 +2116,8 @@ impl SampleEngine {
                     self.release_frames,
                 )
                 .with_mic_index(mic_index)
+                .with_line(line)
+                .with_artic_class(artic_class)
                 .with_choke_group(choke_group)
                 .with_pan(u_pan)
                 .with_attack(self.attack_frames)
@@ -1962,6 +2139,18 @@ impl SampleEngine {
 
     /// Process a MIDI CC event.
     pub fn cc(&mut self, controller: u8, value: u8) {
+        self.cc_line(0, controller, value);
+    }
+
+    /// Line-addressed CC. CC1 (dynamics) and CC2 (vibrato) are per-line
+    /// state — a divisi line's expression rides its own controller lane and
+    /// re-levels only that line's held voices. Every other controller
+    /// (CC58 articulation/mode, CC64 pedal, CC11 volume, …) is engine-global:
+    /// divisi desks of one section share articulation, pedal, and output
+    /// level. Document CCs carry their channel; the scheduler resolves it to
+    /// a line before calling this.
+    pub fn cc_line(&mut self, line: LineId, controller: u8, value: u8) {
+        self.set_active_line(line);
         let old_value = self
             .cc_values
             .get(controller as usize)
@@ -1976,6 +2165,7 @@ impl SampleEngine {
         match controller {
             1 => {
                 self.cc1 = value;
+                self.line_mut().cc1 = value;
                 // Short-note articulations use CC1 to select sub-type (spiccato/
                 // staccato/pizzicato/etc.); sustain articulations use it for dynamics.
                 let is_short = self
@@ -1992,6 +2182,7 @@ impl SampleEngine {
             }
             2 => {
                 self.cc2 = value;
+                self.line_mut().cc2 = value;
                 self.update_sustain_gains();
             }
             58 => {
@@ -2110,33 +2301,8 @@ impl SampleEngine {
     pub fn render(&mut self, output: &mut [f32]) {
         let block_frames = output.len() / 2;
 
-        // Advance legato countdown.
-        let fire = match &mut self.legato_state {
-            LegatoState::Pending {
-                frames_remaining, ..
-            } => {
-                if *frames_remaining <= block_frames {
-                    true
-                } else {
-                    *frames_remaining -= block_frames;
-                    false
-                }
-            }
-            LegatoState::Idle => false,
-        };
-
-        if fire {
-            if let LegatoState::Pending {
-                from_note,
-                to_note,
-                to_note_velocity,
-                portamento,
-                ..
-            } = std::mem::replace(&mut self.legato_state, LegatoState::Idle)
-            {
-                self.fire_legato(from_note, to_note, to_note_velocity, portamento);
-            }
-        }
+        // Advance every line's legato countdown.
+        self.advance_legato_countdowns(block_frames);
 
         self.voices.render(output);
         self.frames_rendered += block_frames as u64;
@@ -2162,33 +2328,8 @@ impl SampleEngine {
     pub fn render_multi(&mut self, outputs: &mut [Vec<f32>]) {
         let block_frames = outputs.first().map(|b| b.len() / 2).unwrap_or(0);
 
-        // Advance legato countdown — duplicates the logic in render() but
-        // avoids a borrow conflict with the per-mic split.
-        let fire = match &mut self.legato_state {
-            LegatoState::Pending {
-                frames_remaining, ..
-            } => {
-                if *frames_remaining <= block_frames {
-                    true
-                } else {
-                    *frames_remaining -= block_frames;
-                    false
-                }
-            }
-            LegatoState::Idle => false,
-        };
-        if fire {
-            if let LegatoState::Pending {
-                from_note,
-                to_note,
-                to_note_velocity,
-                portamento,
-                ..
-            } = std::mem::replace(&mut self.legato_state, LegatoState::Idle)
-            {
-                self.fire_legato(from_note, to_note, to_note_velocity, portamento);
-            }
-        }
+        // Advance every line's legato countdown.
+        self.advance_legato_countdowns(block_frames);
 
         self.voices.render_multi(outputs);
         self.frames_rendered += block_frames as u64;
@@ -2208,6 +2349,79 @@ impl SampleEngine {
         if self.con_sordino {
             if let Some(buf) = outputs.first_mut() {
                 self.sord_filter.process(buf);
+            }
+        }
+    }
+
+    /// [`render_multi`](Self::render_multi), split by articulation class into
+    /// a flat (bus × mic) matrix: `outputs[bus * nmics + mic]`
+    /// (`route_longs`/`route_shorts` are bus indices). Voice iteration order
+    /// is identical, so routing both classes to the SAME bus reproduces
+    /// `render_multi`'s buffers bit for bit — the default `all → main`
+    /// mapping is a no-op by construction.
+    ///
+    /// CC11 volume scales every buffer (as in `render_multi`). The Con
+    /// Sordino filter (stateful, bus-level) is applied to the Longs bus's
+    /// mic 0 — sordino shapes sustained string bodies; split rendering with
+    /// sordino engaged is therefore only sum-exact while shorts are silent.
+    pub fn render_matrix(
+        &mut self,
+        outputs: &mut [Vec<f32>],
+        nmics: usize,
+        route_longs: usize,
+        route_shorts: usize,
+    ) {
+        let block_frames = outputs.first().map(|b| b.len() / 2).unwrap_or(0);
+        self.advance_legato_countdowns(block_frames);
+        self.voices
+            .render_matrix(outputs, nmics, [route_longs, route_shorts]);
+        self.frames_rendered += block_frames as u64;
+
+        if self.cc11_volume != 1.0 {
+            for buf in outputs.iter_mut() {
+                for s in buf.iter_mut() {
+                    *s *= self.cc11_volume;
+                }
+            }
+        }
+        if self.con_sordino {
+            if let Some(buf) = outputs.get_mut(route_longs * nmics) {
+                self.sord_filter.process(buf);
+            }
+        }
+    }
+
+    /// Advance every line's reactive legato countdown by one block, firing
+    /// transitions that elapse (at the head of the block, matching the
+    /// pre-line engine's timing). Lines are visited in ascending [`LineId`]
+    /// order — deterministic when several fire in the same block.
+    fn advance_legato_countdowns(&mut self, block_frames: usize) {
+        for li in 0..self.lines.len() {
+            let fire = match &mut self.lines[li].state {
+                LegatoState::Pending {
+                    frames_remaining, ..
+                } => {
+                    if *frames_remaining <= block_frames {
+                        true
+                    } else {
+                        *frames_remaining -= block_frames;
+                        false
+                    }
+                }
+                LegatoState::Idle => false,
+            };
+            if fire {
+                if let LegatoState::Pending {
+                    from_note,
+                    to_note,
+                    to_note_velocity,
+                    portamento,
+                    ..
+                } = std::mem::replace(&mut self.lines[li].state, LegatoState::Idle)
+                {
+                    self.set_active_line(li);
+                    self.fire_legato(from_note, to_note, to_note_velocity, portamento);
+                }
             }
         }
     }
@@ -2452,7 +2666,9 @@ impl SampleEngine {
 
         let frames_remaining = ms_to_frames(delay_ms, self.sample_rate);
 
-        self.legato_state = LegatoState::Pending {
+        // Reactive path (see start_legato_transition) — count it.
+        self.reactive_legato_fires = self.reactive_legato_fires.saturating_add(1);
+        self.line_mut().state = LegatoState::Pending {
             frames_remaining,
             from_note,
             to_note,
@@ -2465,6 +2681,7 @@ impl SampleEngine {
         if self.legato_fire_log_enabled && self.legato_fire_log.len() < LEGATO_FIRE_LOG_CAP {
             self.legato_fire_log.push(LegatoFireEvent {
                 frame: self.frames_rendered,
+                line: self.cur_line as u8,
                 from_note,
                 to_note,
                 velocity,
@@ -2473,8 +2690,10 @@ impl SampleEngine {
         }
         let direction = if to_note > from_note { "up" } else { "down" };
 
-        // Fade out old sustain voice.
-        self.voices.silence_note(from_note, self.legato_fade_frames);
+        // Fade out old sustain voice — on THIS line only, so a unison note
+        // held by another divisi line keeps sounding.
+        self.voices
+            .silence_note_line(self.cur_line as u8, from_note, self.legato_fade_frames);
 
         // Zoned libraries (CSS): play the directional legato TRANSITION sample
         // (the recorded bow change into the target) as a one-shot, then start
@@ -2488,7 +2707,7 @@ impl SampleEngine {
             // legato). If no legato sample exists, fall back to the sustain body.
             let before = self.voices.active_count();
             self.spawn_legato_transition(to_note, direction, velocity, portamento);
-            self.legato_note = Some(to_note);
+            self.line_mut().note = Some(to_note);
             if self.voices.active_count() == before {
                 self.trigger_zoned_sustain(to_note);
             }
@@ -2714,8 +2933,12 @@ impl SampleEngine {
         )
     }
 
-    /// Recompute and ramp all 4 sustain voice gains when CC1 or CC2 changes.
+    /// Recompute and ramp sustain voice gains when the ACTIVE line's CC1 or
+    /// CC2 changes. Only voices belonging to the active line re-level — each
+    /// divisi line's dynamics ride its own controller lane. (Live play keeps
+    /// everything on line 0, so behavior is unchanged.)
     fn update_sustain_gains(&mut self) {
+        let cur_line = self.cur_line as u8;
         // CC2 → non-vib/vib balance (equal-power).
         let (nv, vb) = Self::equal_power(self.cc2_blend());
         let ramp = self.cc1_ramp_frames;
@@ -2739,6 +2962,9 @@ impl SampleEngine {
         // Continuous loudness sweep on top of the (short) timbre crossfade.
         let expr = Self::cc1_expression(self.cc1);
         for v in self.voices.voices_mut() {
+            if v.line != cur_line {
+                continue;
+            }
             if let Some(layer) = v.dyn_layer {
                 let i = layer.index as usize;
                 let g = if layer.vib {
@@ -2752,6 +2978,7 @@ impl SampleEngine {
 
         // Legacy 2-layer kinds (non-zoned trigger_sustain path) — unchanged.
         self.voices.update_sustain_blend(
+            cur_line,
             nv * nv_lo_g,
             nv * nv_hi_g,
             vb * vb_lo_g,
@@ -2876,6 +3103,7 @@ impl SampleEngine {
                 // Force full non-vibrato (the CSS Non-Vib keyswitch): CC2 → 0.
                 "@novib" => {
                     self.cc2 = 0;
+                    self.line_mut().cc2 = 0;
                     self.update_sustain_gains();
                 }
                 t if t.starts_with('@') => tracing::debug!("unknown keyswitch token {t:?}"),
@@ -3033,6 +3261,13 @@ impl SampleEngine {
         // click + decay tail.
         let release_lifetime_frames =
             (RELEASE_MAX_LIFETIME_MS as usize) * (self.sample_rate as usize) / 1000;
+        // Stem class: releases follow the parent articulation (see
+        // `artic_class_for`); direct triggers are classed by their own.
+        let artic_class = if matches!(kind, VoiceKind::Release) {
+            self.artic_class_for(&self.articulation)
+        } else {
+            self.artic_class_for(artic_id)
+        };
         let voice = Voice::new(
             data,
             note,
@@ -3041,7 +3276,9 @@ impl SampleEngine {
             gain,
             release_frames,
         )
-        .with_mic_index(mic_index);
+        .with_mic_index(mic_index)
+        .with_line(self.cur_line as u8)
+        .with_artic_class(artic_class);
         let voice = if matches!(kind, VoiceKind::Release) {
             let end = release_lifetime_frames.min(voice.data_num_frames());
             voice.with_sample_window(0, Some(end))
@@ -3332,6 +3569,7 @@ impl VoicePool {
     /// smoothly without zipper noise.
     pub fn update_sustain_blend(
         &mut self,
+        line: u8,
         nv_lo: f32,
         nv_hi: f32,
         vib_lo: f32,
@@ -3339,6 +3577,9 @@ impl VoicePool {
         ramp_frames: usize,
     ) {
         for v in self.voices_mut() {
+            if v.line != line {
+                continue;
+            }
             match v.kind {
                 VoiceKind::SustainNVLo => v.ramp_gain(nv_lo, ramp_frames),
                 VoiceKind::SustainNVHi => v.ramp_gain(nv_hi, ramp_frames),
@@ -4153,27 +4394,64 @@ mod tests {
 
         // First note sounds immediately and becomes the line head.
         eng.note_on(60, 100);
-        assert_eq!(eng.legato_note, Some(60));
+        assert_eq!(eng.lines[0].note, Some(60));
 
         // Second note transitions (delayed), then becomes the head.
         eng.note_on(62, 100);
-        assert!(matches!(eng.legato_state, LegatoState::Pending { .. }));
+        assert!(matches!(eng.lines[0].state, LegatoState::Pending { .. }));
         render_ms(&mut eng, 200);
-        assert_eq!(eng.legato_note, Some(62));
+        assert_eq!(eng.lines[0].note, Some(62));
 
         // Releasing the SOUNDING note (62) while 60 is still held falls back to
         // 60 via a legato transition — a true monophonic line.
         eng.note_off(62);
         assert!(matches!(
-            eng.legato_state,
+            eng.lines[0].state,
             LegatoState::Pending { to_note: 60, .. }
         ));
         render_ms(&mut eng, 200);
-        assert_eq!(eng.legato_note, Some(60));
+        assert_eq!(eng.lines[0].note, Some(60));
 
         // Releasing the last held note ends the line.
         eng.note_off(60);
-        assert_eq!(eng.legato_note, None);
+        assert_eq!(eng.lines[0].note, None);
+    }
+
+    #[test]
+    fn per_line_mono_legato_is_independent() {
+        // Two divisi lines on one engine: each keeps its own mono cursor,
+        // and a prefire on line 1 must not disturb line 0's sounding note.
+        let mut eng = mono_legato_engine(&[60, 62, 64, 67]);
+
+        eng.note_on_line(0, 60, 100);
+        eng.note_on_line(1, 64, 100);
+        assert_eq!(eng.lines[0].note, Some(60));
+        assert_eq!(eng.lines[1].note, Some(64));
+
+        // Reactive transition on line 0 only.
+        eng.note_on_line(0, 62, 100);
+        assert!(matches!(eng.lines[0].state, LegatoState::Pending { .. }));
+        assert!(matches!(eng.lines[1].state, LegatoState::Idle));
+
+        // Document prefire on line 1 fires immediately, line 0 unaffected.
+        eng.legato_prefire_line(1, 67, 100);
+        assert_eq!(eng.lines[1].note, Some(67));
+        assert!(matches!(eng.lines[0].state, LegatoState::Pending { .. }));
+
+        render_ms(&mut eng, 200);
+        assert_eq!(eng.lines[0].note, Some(62));
+        assert_eq!(eng.lines[1].note, Some(67));
+
+        // Note-offs on line 1 end only line 1 (release the silent key first
+        // so the mono line doesn't fall back to it).
+        eng.note_off_line(1, 64);
+        eng.note_off_line(1, 67);
+        assert_eq!(eng.lines[1].note, None);
+        assert_eq!(eng.lines[0].note, Some(62));
+
+        // Exactly one reactive trigger: line 0's overlapping note-on. The
+        // prefire and the plain note-offs are not reactive.
+        assert_eq!(eng.reactive_legato_fires(), 1);
     }
 
     #[test]
@@ -4214,13 +4492,13 @@ mod tests {
 
         // First note sounds immediately — no pending legato.
         eng.note_on(60, 100);
-        assert!(matches!(eng.legato_state, LegatoState::Idle));
+        assert!(matches!(eng.lines[0].state, LegatoState::Idle));
 
         // Second note while the first is held → delayed (the CSS latency):
         // pending, not yet fired.
         eng.note_on(62, 100);
         assert!(
-            matches!(eng.legato_state, LegatoState::Pending { .. }),
+            matches!(eng.lines[0].state, LegatoState::Pending { .. }),
             "overlapping legato note should delay (latency), not fire instantly"
         );
 
@@ -4229,7 +4507,7 @@ mod tests {
         let mut out = vec![0.0f32; frames * 2];
         eng.render(&mut out);
         assert!(
-            matches!(eng.legato_state, LegatoState::Idle),
+            matches!(eng.lines[0].state, LegatoState::Idle),
             "legato fired"
         );
         assert_eq!(eng.play_direction, "up");

@@ -597,10 +597,33 @@ impl SamplerBank {
         self.with_block(id, |b| b.legato_prefire(note, velocity));
     }
 
+    /// Line-addressed legato prefire — see
+    /// [`SampleEngine::legato_prefire_line`](crate::engine::SampleEngine::legato_prefire_line).
+    pub fn legato_prefire_line(
+        &mut self,
+        id: &str,
+        line: crate::engine::LineId,
+        note: u8,
+        velocity: u8,
+    ) {
+        self.with_block(id, |b| b.legato_prefire_line(line, note, velocity));
+    }
+
     /// Per-instrument note-on, addressed by id (bypasses MIDI-channel
     /// routing — used by the document scheduler).
     pub fn note_on_instrument(&mut self, id: &str, note: u8, velocity: u8) {
         self.with_block(id, |b| b.note_on(note, velocity));
+    }
+
+    /// Line-addressed per-instrument note-on (document scheduler).
+    pub fn note_on_instrument_line(
+        &mut self,
+        id: &str,
+        line: crate::engine::LineId,
+        note: u8,
+        velocity: u8,
+    ) {
+        self.with_block(id, |b| b.note_on_line(line, note, velocity));
     }
 
     /// Per-instrument note-off, addressed by id.
@@ -608,9 +631,71 @@ impl SamplerBank {
         self.with_block(id, |b| b.note_off(note));
     }
 
+    /// Line-addressed per-instrument note-off (document scheduler).
+    pub fn note_off_instrument_line(&mut self, id: &str, line: crate::engine::LineId, note: u8) {
+        self.with_block(id, |b| b.note_off_line(line, note));
+    }
+
     /// Per-instrument CC, addressed by id.
     pub fn cc_instrument(&mut self, id: &str, controller: u8, value: u8) {
         self.with_block(id, |b| b.cc(controller, value));
+    }
+
+    /// Line-addressed per-instrument CC (document scheduler — CC1/CC2 are
+    /// per-line dynamics, other controllers engine-global).
+    pub fn cc_instrument_line(
+        &mut self,
+        id: &str,
+        line: crate::engine::LineId,
+        controller: u8,
+        value: u8,
+    ) {
+        self.with_block(id, |b| b.cc_line(line, controller, value));
+    }
+
+    /// Reactive legato-path trigger count for an instrument — see
+    /// [`SampleEngine::reactive_legato_fires`](crate::engine::SampleEngine::reactive_legato_fires).
+    pub fn reactive_legato_fires(&self, id: &str) -> u64 {
+        self.read_block(id, |b| b.reactive_legato_fires())
+            .unwrap_or(0)
+    }
+
+    /// Render ONE instrument into per-bus buffers routed by articulation
+    /// class (stem-aware document rendering) — see
+    /// [`EngineInstance::render_routed_buses`](crate::runtime::EngineInstance::render_routed_buses).
+    /// Mirrors [`render`](Self::render)'s per-instrument math exactly, so
+    /// with a single loaded instrument and every class routed to one bus the
+    /// output is bit-identical to `render`. `outputs` must arrive zeroed.
+    /// Returns false if `id` isn't loaded.
+    pub fn render_instrument_routed_buses(
+        &mut self,
+        id: &str,
+        outputs: &mut [Vec<f32>],
+        route_longs: usize,
+        route_shorts: usize,
+    ) -> bool {
+        let block_frames = outputs.first().map(|b| b.len() / 2).unwrap_or(0);
+        if let Some(slot) = self.instruments.get_mut(id) {
+            if !slot.muted {
+                slot.engine
+                    .render_routed_buses(outputs, route_longs, route_shorts, block_frames);
+            }
+            return true;
+        }
+        if let Some((prefix, engine_id)) = self.instrument_to_preset.get(id).cloned() {
+            if let Some(preset) = self.presets.get_mut(&prefix) {
+                if let Some(&idx) = preset.engine_id_to_idx.get(&engine_id) {
+                    preset.engines[idx].render_routed_buses(
+                        outputs,
+                        route_longs,
+                        route_shorts,
+                        block_frames,
+                    );
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Explicitly set an instrument's legato mode (document mode forces

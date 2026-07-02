@@ -239,6 +239,52 @@ impl SamplerBlock {
         self.engine.legato_prefire(n, velocity);
     }
 
+    // ── Line-addressed dispatch (document scheduler / divisi allocators) ────
+
+    /// Line-addressed note-on — see [`SampleEngine::note_on_line`].
+    pub fn note_on_line(&mut self, line: crate::engine::LineId, note: u8, velocity: u8) {
+        let n = transposed(note, self.params.transpose);
+        self.engine.note_on_line(line, n, velocity);
+    }
+
+    /// Line-addressed note-off — see [`SampleEngine::note_off_line`].
+    pub fn note_off_line(&mut self, line: crate::engine::LineId, note: u8) {
+        let n = transposed(note, self.params.transpose);
+        self.engine.note_off_line(line, n);
+    }
+
+    /// Line-addressed CC — see [`SampleEngine::cc_line`].
+    pub fn cc_line(&mut self, line: crate::engine::LineId, controller: u8, value: u8) {
+        self.engine.cc_line(line, controller, value);
+    }
+
+    /// Line-addressed legato prefire — see [`SampleEngine::legato_prefire_line`].
+    pub fn legato_prefire_line(&mut self, line: crate::engine::LineId, note: u8, velocity: u8) {
+        let n = transposed(note, self.params.transpose);
+        self.engine.legato_prefire_line(line, n, velocity);
+    }
+
+    /// Reactive legato-path trigger count — see
+    /// [`SampleEngine::reactive_legato_fires`].
+    pub fn reactive_legato_fires(&self) -> u64 {
+        self.engine.reactive_legato_fires()
+    }
+
+    /// Render into a flat (bus × mic) scratch matrix routed by articulation
+    /// class — see [`SampleEngine::render_matrix`]. Like
+    /// [`render_multi`](Self::render_multi), block gain/pan are NOT applied
+    /// here (they live at the Layer level in the multi-mic runtime).
+    pub fn render_matrix(
+        &mut self,
+        outputs: &mut [Vec<f32>],
+        nmics: usize,
+        route_longs: usize,
+        route_shorts: usize,
+    ) {
+        self.engine
+            .render_matrix(outputs, nmics, route_longs, route_shorts);
+    }
+
     /// Explicitly set the legato mode — see [`SampleEngine::set_legato_mode`].
     pub fn set_legato_mode(&mut self, enabled: bool, expressive: bool) {
         self.engine.set_legato_mode(enabled, expressive);

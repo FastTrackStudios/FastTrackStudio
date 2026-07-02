@@ -103,6 +103,13 @@ fn main() -> eyre::Result<()> {
         po.ccs.len(),
         po.channels
     );
+    let mut notes_per_chan: std::collections::BTreeMap<u8, usize> = Default::default();
+    for n in &po.notes {
+        *notes_per_chan.entry(n.chan).or_default() += 1;
+    }
+    for (ch, n) in &notes_per_chan {
+        println!("  chan {ch}: {n} notes");
+    }
 
     // ── PartOutput → TrackDocument (QN domain; keyflow chans are 1-based) ────
     let doc = TrackDocument {
@@ -175,6 +182,23 @@ fn main() -> eyre::Result<()> {
         res.transitions.len(),
         res.seed
     );
+    // Per-line breakdown (divisi channels map to engine mono lines) + the
+    // reactive-fallback count: per-line prefire scheduling must leave the
+    // reactive path completely unused during document playback.
+    let mut per_line: std::collections::BTreeMap<u8, usize> = Default::default();
+    for t in &res.transitions {
+        *per_line.entry(t.line).or_default() += 1;
+    }
+    for (line, n) in &per_line {
+        println!("  line {line}: {n} prefired transitions");
+    }
+    println!("  reactive fallbacks: {}", res.reactive_fallbacks);
+    if res.reactive_fallbacks != 0 {
+        eyre::bail!(
+            "document playback hit the reactive legato path {} times — annotator missed edges",
+            res.reactive_fallbacks
+        );
+    }
     let h1 = audio_hash(&res.audio);
     println!("audio hash: {h1:#018x}");
 
