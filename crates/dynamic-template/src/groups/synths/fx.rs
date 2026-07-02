@@ -4,6 +4,7 @@
 //! NOT for generic "FX" tracks which should go to the top-level SFX group.
 
 use crate::item_metadata::ItemMetadata;
+use crate::item_metadata::prelude::ItemMetadataGroupExt;
 use monarchy::Group;
 
 /// FX group (for synthesizer effects/sound design)
@@ -23,6 +24,8 @@ impl From<Fx> for Group<ItemMetadata> {
                 "synth sweep",
                 "synth riser",
             ])
+            .layers(super::layers_dimension())
+            .channel(super::channel_dimension())
             .build()
     }
 }

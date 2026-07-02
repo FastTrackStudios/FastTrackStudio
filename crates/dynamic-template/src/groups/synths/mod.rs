@@ -1,7 +1,21 @@
 //! Synthesizer group definitions
 
-use crate::item_metadata::ItemMetadata;
+use crate::item_metadata::{ItemMetadata, ItemMetadataGroup};
 use monarchy::Group;
+
+/// Per-project layer stacking shared by all synth types (named per take).
+/// Synths are programmed, so there's no Performer level and the synth type
+/// itself is the arrangement — under it we deepen by layer then channel.
+pub(super) fn layers_dimension() -> ItemMetadataGroup {
+    ItemMetadataGroup::builder("Layers").build()
+}
+
+/// Channel dimension (L/C/R) shared by all synth types.
+pub(super) fn channel_dimension() -> ItemMetadataGroup {
+    ItemMetadataGroup::builder("Channel")
+        .patterns(["L", "C", "R", "Left", "Center", "Right"])
+        .build()
+}
 
 pub mod arp;
 pub mod chord;

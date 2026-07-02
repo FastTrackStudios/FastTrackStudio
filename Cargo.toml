@@ -40,6 +40,9 @@ daw-standalone = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch
 daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
 actions-proto = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
 
+# Testing
+reaper-test = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"

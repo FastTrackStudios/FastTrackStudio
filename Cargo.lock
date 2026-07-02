@@ -1006,7 +1006,6 @@ dependencies = [
  "actions-proto",
  "daw-proto",
  "facet 0.50.0-rc.5",
- "music-catalog",
  "thiserror 2.0.18",
  "vox",
 ]

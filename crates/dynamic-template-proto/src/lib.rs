@@ -49,8 +49,8 @@ pub mod visibility_manager;
 pub use error::*;
 pub use services::*;
 pub use session_template::{
-    GroupMembership, IdealFullSessionTemplate, MonitorMode, NodeRouting, TemplateBus, TemplateNode,
-    TrackDefaults, TrackInput,
+    GroupMembership, IdealFullSessionTemplate, MonitorMode, NodeKind, NodeRouting, TemplateBus,
+    TemplateNode, TrackDefaults, TrackInput,
 };
 pub use types::*;
 

@@ -17,6 +17,8 @@ impl From<SynthBass> for ItemMetadataGroup {
                 "sub bass",
             ])
             .exclude(["808"]) // Exclude 808 to avoid matching electronic kick drums
+            // Synth bass stacks into per-project layers (named per take).
+            .layers(ItemMetadataGroup::builder("Layers").build())
             .build()
     }
 }

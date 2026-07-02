@@ -1,6 +1,7 @@
 //! Synth chord group definition
 
 use crate::item_metadata::ItemMetadata;
+use crate::item_metadata::prelude::ItemMetadataGroupExt;
 use monarchy::Group;
 
 /// Chord group
@@ -10,6 +11,8 @@ impl From<Chord> for Group<ItemMetadata> {
     fn from(_val: Chord) -> Self {
         Group::builder("Chord")
             .patterns(vec!["chord", "stab"])
+            .layers(super::layers_dimension())
+            .channel(super::channel_dimension())
             .build()
     }
 }

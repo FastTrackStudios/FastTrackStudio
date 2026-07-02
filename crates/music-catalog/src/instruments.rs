@@ -26,6 +26,8 @@ pub mod groups {
     pub const SFX: Color = palette::teal::S500;
     pub const GUIDE: Color = palette::slate::S400;
     pub const REFERENCE: Color = palette::slate::S500;
+    /// Stem-separation outputs (Demucs, LALAL.ai, …) — a neutral utility color.
+    pub const STEM_SPLIT: Color = palette::zinc::S500;
 }
 
 /// Guitar sub-group colors

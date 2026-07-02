@@ -58,6 +58,16 @@ impl From<BassGuitar> for ItemMetadataGroup {
                 "mustang bass",
             ])
             .field_value_descriptors(ItemMetadataField::Variant, variant_descriptors)
+            // Bass guitar capture sources: DI box plus a mic'd amp.
+            .field_value_descriptors(
+                ItemMetadataField::MultiMic,
+                vec![
+                    FieldValueDescriptor::builder("DI").patterns(["di"]).build(),
+                    FieldValueDescriptor::builder("Amp")
+                        .patterns(["amp", "amplifier"])
+                        .build(),
+                ],
+            )
             .build()
     }
 }

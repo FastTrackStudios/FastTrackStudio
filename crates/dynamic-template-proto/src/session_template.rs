@@ -1,19 +1,23 @@
 //! The Ideal Full Session Template — the opinionated "golden session".
 //!
 //! This is the canonical full track/folder layout FastTrackStudio organizes
-//! every session toward: the complete instrument-band folder tree, each band's
-//! group-slot membership (the REAPER 128-slot partition), routing into buses,
-//! and per-track defaults.
+//! every session toward. It is a **schema**, not a flat track list: fixed
+//! structural folders (instrument groups and sub-groups) followed by a chain
+//! of *dimension* nodes — Performer, Arrangement, Layers, Channel, Multi-mic —
+//! each carrying the configured [`vocabulary`](TemplateNode::vocabulary) of
+//! descriptor names it may take. The engine expands and collapses that schema
+//! per project, so the same template renders a one-off DI as `GTR E / DI` and
+//! a fully tracked, multi-performer part as the full nested tree.
 //!
-//! It is **pure data**. Categories are expressed as string paths (top-level
-//! first, e.g. `["Guitars", "Electric"]`) sourced from the canonical taxonomy
-//! in [`music_catalog`] — there is no typed instrument enum here, so other
-//! repos can describe layouts without coupling to a closed category set. The
-//! scaffold / conform / audit *logic* that consumes this model lives in the
-//! `dynamic-template` engine crate, not here.
+//! These are **pure data** types. Categories are string paths (top-level
+//! first, e.g. `["Guitars", "Electric"]`) matching the canonical taxonomy in
+//! `music_catalog` — there is no typed instrument enum, so other repos can
+//! describe layouts without coupling to a closed category set. The builder
+//! that *derives* a golden template from the classification configuration
+//! lives in the `dynamic-template` engine crate (it needs the `Config`),
+//! not here.
 
 use facet::Facet;
-use music_catalog::groups::SLOT_BANDS;
 
 /// The opinionated full-session template: the ideal track/folder layout a
 /// session is organized toward.
@@ -29,16 +33,40 @@ pub struct IdealFullSessionTemplate {
     pub buses: Vec<TemplateBus>,
 }
 
-/// One node in the template tree: a folder (has `children`) or a leaf track.
+/// What a [`TemplateNode`] represents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Facet)]
+#[repr(u8)]
+pub enum NodeKind {
+    /// A structural folder: an instrument group or sub-group (Drums, Drum Kit,
+    /// Kick, Electric, …). Materializes whenever it has any content.
+    Folder,
+    /// A concrete leaf track.
+    Track,
+    /// A per-project deepening axis (Performer / Arrangement / Layers / Channel
+    /// / Multi-mic). The engine instantiates one instance per project value
+    /// drawn from [`vocabulary`](TemplateNode::vocabulary) and collapses the
+    /// level when it resolves to a single value.
+    Dimension,
+    /// A *conditional* tagged collection (e.g. drum `SUM`): a folder that only
+    /// materializes when a group has both items matching the collection's
+    /// [`vocabulary`](TemplateNode::vocabulary) patterns and items outside it —
+    /// the matching ones go inside, the rest sit alongside.
+    Collection,
+}
+
+/// One node in the template tree; see [`NodeKind`] for the variants.
 #[derive(Clone, Debug, Facet)]
 pub struct TemplateNode {
-    /// Display name, e.g. `"Drums"`, `"Electric Gtr"`, `"Kick In"`.
+    /// Display name, e.g. `"Drums"`, `"Kick"`, `"Arrangement"`, `"SUM"`.
     pub name: String,
+    /// What this node represents.
+    pub kind: NodeKind,
     /// Canonical group path this node belongs to (top-level first), matching
     /// the music-catalog taxonomy / classification-engine names. Empty for
-    /// purely structural folders. e.g. `["Guitars", "Electric"]`.
+    /// structural-only or dimension nodes that inherit. e.g. `["Drums", "Kick"]`.
     pub group_path: Vec<String>,
-    /// Folder children, in display order. Empty ⇒ leaf track.
+    /// Child nodes, in display order. For a dimension node these are the inner
+    /// dimensions / captures; for a structural folder, its sub-folders.
     pub children: Vec<TemplateNode>,
     /// Per-track defaults (ignored for pure folders).
     pub defaults: TrackDefaults,
@@ -46,24 +74,72 @@ pub struct TemplateNode {
     pub group_membership: Option<GroupMembership>,
     /// How this node routes its output.
     pub routing: NodeRouting,
+    /// For a [`Dimension`](NodeKind::Dimension) or [`Collection`](NodeKind::Collection)
+    /// node, the configured descriptor / pattern names it covers (e.g.
+    /// Arrangement `["Clean", "Crunch", …]`, Multi-mic `["In", "Out", …]`, SUM
+    /// `["In", "Out", "Trig"]`). Empty means free-form — named per take.
+    pub vocabulary: Vec<String>,
 }
 
 impl TemplateNode {
-    /// A folder node carrying a canonical group path. No defaults applied.
+    /// A structural folder carrying a canonical group path.
     pub fn folder(name: impl Into<String>, group_path: Vec<String>) -> Self {
         Self {
             name: name.into(),
+            kind: NodeKind::Folder,
             group_path,
             children: Vec::new(),
             defaults: TrackDefaults::default(),
             group_membership: None,
             routing: NodeRouting::default(),
+            vocabulary: Vec::new(),
+        }
+    }
+
+    /// A leaf track (inherits color / membership from its parent folder).
+    pub fn track(name: impl Into<String>) -> Self {
+        Self {
+            kind: NodeKind::Track,
+            ..Self::folder(name, Vec::new())
+        }
+    }
+
+    /// A per-project dimension node named `name` with the configured
+    /// `vocabulary` of descriptor names (empty = free-form, named per take).
+    pub fn dimension(name: impl Into<String>, vocabulary: Vec<String>) -> Self {
+        Self {
+            kind: NodeKind::Dimension,
+            vocabulary,
+            ..Self::folder(name, Vec::new())
+        }
+    }
+
+    /// A conditional tagged-collection node (e.g. drum `SUM`) named `name`,
+    /// covering the given `vocabulary` of pattern names. See
+    /// [`NodeKind::Collection`].
+    pub fn collection(name: impl Into<String>, vocabulary: Vec<String>) -> Self {
+        Self {
+            kind: NodeKind::Collection,
+            vocabulary,
+            ..Self::folder(name, Vec::new())
         }
     }
 
     /// Add a child node (builder-style).
     pub fn with_child(mut self, child: TemplateNode) -> Self {
         self.children.push(child);
+        self
+    }
+
+    /// Append several child nodes (builder-style).
+    pub fn with_children(mut self, children: impl IntoIterator<Item = TemplateNode>) -> Self {
+        self.children.extend(children);
+        self
+    }
+
+    /// Set the canonical group path from string slices (builder-style).
+    pub fn with_path(mut self, path: &[&str]) -> Self {
+        self.group_path = path.iter().map(|s| (*s).to_string()).collect();
         self
     }
 
@@ -162,67 +238,33 @@ pub struct TemplateBus {
     pub channels: u32,
 }
 
-impl IdealFullSessionTemplate {
-    /// The canonical FTS golden session: one top-level folder per
-    /// instrument-category band in [`music_catalog::groups::SLOT_BANDS`], each
-    /// carrying its canonical group path and group-slot membership. This is
-    /// the data-model seed; the engine fleshes out child tracks per project.
-    pub fn golden() -> Self {
-        let root = SLOT_BANDS
-            .iter()
-            .map(|band| {
-                let group_path: Vec<String> = band.path.iter().map(|p| (*p).to_string()).collect();
-                let category = band.path.join("/");
-                let mut node = TemplateNode::folder(band.label, group_path);
-                node.defaults.color_hex = band.color().map(|c| c.to_hex_string());
-                node.group_membership = Some(GroupMembership { category });
-                node
-            })
-            .collect();
-
-        Self {
-            name: "FTS Golden Session".to_string(),
-            version: 1,
-            root,
-            buses: vec![TemplateBus {
-                name: "Mix Bus".to_string(),
-                channels: 2,
-            }],
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn golden_has_one_folder_per_slot_band() {
-        let t = IdealFullSessionTemplate::golden();
-        assert_eq!(t.root.len(), SLOT_BANDS.len());
-        // Every top-level node carries a canonical group path + membership.
-        for node in &t.root {
-            assert!(
-                !node.group_path.is_empty(),
-                "{} has no group path",
-                node.name
-            );
-            assert!(
-                node.group_membership.is_some(),
-                "{} has no group membership",
-                node.name
-            );
-        }
-        // First band is Drums, last is Background Vox — order preserved.
-        assert_eq!(t.root.first().unwrap().name, "Drums");
-        assert_eq!(t.root.last().unwrap().name, "Background Vox");
-    }
+    fn builders_shape_nodes() {
+        let kick = TemplateNode::folder("Kick", vec!["Drums".into(), "Kick".into()])
+            .with_child(TemplateNode::dimension(
+                "MultiMic",
+                vec!["In".into(), "Out".into()],
+            ))
+            .in_group("Drums");
 
-    #[test]
-    fn golden_resolves_canonical_colors() {
-        let t = IdealFullSessionTemplate::golden();
-        // Electric Gtr should resolve a color via the Guitars/Electric path.
-        let electric = t.root.iter().find(|n| n.name == "Electric Gtr").unwrap();
-        assert!(electric.defaults.color_hex.is_some());
+        assert_eq!(kick.group_path, vec!["Drums", "Kick"]);
+        assert_eq!(kick.kind, NodeKind::Folder);
+        assert_eq!(
+            kick.group_membership.as_ref().map(|g| g.category.as_str()),
+            Some("Drums")
+        );
+
+        let mics = &kick.children[0];
+        assert_eq!(mics.name, "MultiMic");
+        assert_eq!(mics.kind, NodeKind::Dimension);
+        assert_eq!(mics.vocabulary, vec!["In", "Out"]);
+        assert!(mics.children.is_empty());
+
+        let sum = TemplateNode::collection("SUM", vec!["In".into(), "Out".into(), "Trig".into()]);
+        assert_eq!(sum.kind, NodeKind::Collection);
     }
 }
