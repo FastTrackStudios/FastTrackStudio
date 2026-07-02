@@ -556,3 +556,14 @@ Federated wiki resolution lands as part of Phase 3 (federation) — it depends o
 - **fts-ui** is orthogonal; UI changes (server picker, mount manager) come later.
 
 This is a path forward, not a rewrite. Phase 1 alone is a useful refactor even if phases 2–4 never land.
+
+## Cross-org duplicate guard (2026-07-02)
+
+Nothing prevents the same task uuid appearing in two orgs (seeded
+copies, future federation sync). The web store keys rows by task id,
+so a true same-id duplicate would shadow its sibling and route
+mutations to whichever org loaded last. Before federation ships:
+`task doctor` check for cross-org id collisions + a dedupe/merge
+story. (The 2026-07-02 "doubled tasks" turned out to be different
+uuids — seeded content copies, deleted from codywright — but the
+same-id case is still unguarded.)
