@@ -212,7 +212,9 @@ mod tests {
             .into_iter()
             .find(|b| b.display_name() == "LPF Test")
             .expect("filter 1");
-        assert_eq!(f1.param_f32("cutoff"), Some(0.5));
+        // Omnisphere freq 0.5 → 15·2^(9.55/2) ≈ 411 Hz (calibrated curve) →
+        // our normalized cutoff log10(411/20)/3 ≈ 0.4375.
+        assert!((f1.param_f32("cutoff").unwrap() - 0.4375).abs() < 1e-3);
         assert_eq!(f1.param_f32("resonance"), Some(0.25));
         // Renders (placeholder-safe).
         let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);

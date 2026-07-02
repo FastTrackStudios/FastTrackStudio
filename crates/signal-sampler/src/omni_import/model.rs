@@ -21,6 +21,8 @@ pub struct OmniLayer {
     pub filter_active: bool,
     /// Normalized filter cutoff / resonance (`freq` / `res`).
     pub filter_freq: f32,
+    /// Filter 1 algorithm selector (`type1`, a ~50-slot enum at 0.02 steps).
+    pub filter_type1: Option<f32>,
     pub filter_res: f32,
     /// `OSC level` (normalized).
     pub level: f32,
@@ -91,6 +93,80 @@ fn rack_types(rack: &XmlNode) -> Vec<String> {
     rack.children_tagged("EFFMODULE")
         .map(|m| m.attr("Type").unwrap_or("").to_string())
         .collect()
+}
+
+
+/// `type1` slot → `(mode, poles)` — every slot measured through real
+/// Omnisphere 3 (8-band Goertzel fingerprint per slot, sweep at freq=0.5,
+/// res=0, keytrack off). Slot = `round(type1 × 50)`, 1-based. Pole counts
+/// are lower bounds (the probe's noise floor flattens slopes far past the
+/// knee) — a low-cutoff refinement pass can sharpen them. "allpass" slots
+/// are the gain/color types that don't shape the spectrum.
+const TYPE1_TABLE: [(&str, u32); 50] = [
+    ("lowpass", 1),  // 0.02
+    ("bandpass", 2), // 0.04
+    ("lowpass", 2),  // 0.06
+    ("notch", 2),    // 0.08
+    ("highpass", 2), // 0.10
+    ("lowpass", 2),  // 0.12
+    ("highpass", 2), // 0.14
+    ("lowpass", 1),  // 0.16
+    ("lowpass", 1),  // 0.18
+    ("lowpass", 2),  // 0.20
+    ("lowpass", 2),  // 0.22 (Classic LPF 4-pole family)
+    ("lowpass", 2),  // 0.24
+    ("highpass", 2), // 0.26
+    ("lowpass", 1),  // 0.28
+    ("lowpass", 1),  // 0.30
+    ("lowpass", 1),  // 0.32
+    ("bandpass", 2), // 0.34
+    ("allpass", 0),  // 0.36
+    ("lowpass", 2),  // 0.38
+    ("allpass", 0),  // 0.40
+    ("allpass", 0),  // 0.42
+    ("allpass", 0),  // 0.44
+    ("lowpass", 2),  // 0.46
+    ("lowpass", 1),  // 0.48
+    ("lowpass", 1),  // 0.50
+    ("lowpass", 1),  // 0.52
+    ("highpass", 2), // 0.54
+    ("highpass", 3), // 0.56
+    ("bandpass", 2), // 0.58
+    ("bandpass", 2), // 0.60
+    ("lowpass", 1),  // 0.62
+    ("highpass", 1), // 0.64
+    ("highpass", 3), // 0.66
+    ("lowpass", 2),  // 0.68
+    ("bandpass", 2), // 0.70
+    ("allpass", 0),  // 0.72
+    ("allpass", 0),  // 0.74
+    ("notch", 2),    // 0.76
+    ("notch", 2),    // 0.78
+    ("lowpass", 2),  // 0.80
+    ("lowpass", 1),  // 0.82
+    ("lowpass", 1),  // 0.84
+    ("lowpass", 1),  // 0.86 (Basic 12db Lowpass family)
+    ("lowpass", 2),  // 0.88
+    ("highpass", 1), // 0.90
+    ("lowpass", 1),  // 0.92
+    ("highpass", 2), // 0.94
+    ("bandpass", 2), // 0.96
+    ("allpass", 0),  // 0.98
+    ("allpass", 0),  // 1.00
+];
+
+/// Look a `type1` value up in the measured table. `None` for "allpass"
+/// (gain/color) slots — callers leave the filter transparent.
+pub(crate) fn classify_type1(v: f32) -> Option<(&'static str, u32)> {
+    let slot = (v * 50.0).round() as usize;
+    let (mode, poles) = *TYPE1_TABLE.get(slot.checked_sub(1)?)?;
+    (mode != "allpass").then_some((mode, poles))
+}
+
+/// Filter cutoff: normalized → Hz, measured through the real engine
+/// (knee sweep with keytracking off): **cutoff ≈ 15 Hz × 2^(9.55·v)**.
+pub(crate) fn omni_cutoff_hz(v: f32) -> f32 {
+    15.0 * 2f32.powf(9.55 * v.clamp(0.0, 1.0))
 }
 
 /// Coarse filter classification from the factory preset name (`NameStr`) —
@@ -255,6 +331,7 @@ pub(crate) fn parse_patch_node(root: &XmlNode) -> Result<OmniPatch, String> {
             layer.filter_parallel = f.num("para").unwrap_or(0.0) != 0.0;
             layer.filter_active = f.num("act").unwrap_or(0.0) != 0.0;
             layer.filter_freq = f.num("freq").unwrap_or(0.5);
+            layer.filter_type1 = f.num("type1");
             layer.filter_res = f.num("res").unwrap_or(0.0);
             let depth = f.num("envdpth").unwrap_or(0.0).clamp(0.0, 1.0);
             let inv = f.num("envdpthinv").unwrap_or(0.0) != 0.0;

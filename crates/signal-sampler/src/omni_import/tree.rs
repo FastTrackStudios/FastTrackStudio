@@ -5,7 +5,13 @@ use std::path::Path;
 
 use signal_proto::block::BlockType;
 
-use super::model::{classify_filter_full, OmniModRoute, OmniPatch};
+use super::model::{classify_filter_full, classify_type1, omni_cutoff_hz, OmniModRoute, OmniPatch};
+
+/// Omnisphere's normalized cutoff → OUR normalized cutoff param, via the
+/// calibrated Hz curve.
+fn omni_cutoff_norm(v: f32) -> f32 {
+    crate::native::NativeFilter::norm_from_cutoff(omni_cutoff_hz(v))
+}
 use super::{parse_patch, SoundsourceIndex};
 use crate::rig::RigBlock;
 use crate::rig_node::Container;
@@ -232,13 +238,23 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                 .add(osc)
                 .add({
                     // Filter 1 carries the imported cutoff/resonance when the
-                    // section is engaged, plus a coarse mode/poles algorithm
-                    // classified from the factory preset name.
+                    // section is engaged. The algorithm comes from the
+                    // MEASURED type1 table (per-slot fingerprints through the
+                    // real engine); the factory name only decides the ladder
+                    // character. Cutoff goes through the calibrated
+                    // 15 Hz × 2^(9.55·v) curve into our normalized map.
                     let mut f1 = RigBlock::of_type(BlockType::Filter).named(filter_label.clone());
                     if layer.filter_active {
-                        let (mode, poles, character) = classify_filter_full(&layer.filter_name);
+                        let (_, _, character) = classify_filter_full(&layer.filter_name);
+                        let (mode, poles) = layer
+                            .filter_type1
+                            .and_then(classify_type1)
+                            .unwrap_or_else(|| {
+                                let (m, p, _) = classify_filter_full(&layer.filter_name);
+                                (m, p)
+                            });
                         f1 = f1
-                            .with_param("cutoff", format!("{:.4}", layer.filter_freq))
+                            .with_param("cutoff", format!("{:.4}", omni_cutoff_norm(layer.filter_freq)))
                             .with_param("resonance", format!("{:.4}", layer.filter_res))
                             .with_param("mode", mode)
                             .with_param("poles", poles.to_string())
@@ -248,7 +264,7 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                     if let Some((freq, res)) = layer.filter2 {
                         if layer.filter_active {
                             f2 = f2
-                                .with_param("cutoff", format!("{freq:.4}"))
+                                .with_param("cutoff", format!("{:.4}", omni_cutoff_norm(freq)))
                                 .with_param("resonance", format!("{res:.4}"));
                         }
                     }
