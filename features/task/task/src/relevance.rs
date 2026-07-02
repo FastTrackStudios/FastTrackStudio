@@ -98,9 +98,13 @@ fn gate_matches(name: &str, ctx: &RelevanceContext) -> bool {
 /// tasks are neither relevant nor irrelevant, just filtered upstream.
 #[must_use]
 pub fn is_relevant(task: &TaskInfo, ctx: &RelevanceContext) -> bool {
-    // Deadlines trump gates: due/scheduled today or overdue always shows.
+    // HARD deadlines trump gates: a `due` date today or overdue
+    // always shows. `scheduled` deliberately does NOT override —
+    // it's a soft plan, and recurring routines carry stale
+    // scheduled dates that would otherwise pin them visible
+    // around the clock (the exact noise gating exists to cut).
     if let Some(today) = ctx.local_date.as_deref() {
-        if is_due_on_or_before(task.due.as_deref(), task.scheduled.as_deref(), today) {
+        if is_due_on_or_before(task.due.as_deref(), None, today) {
             return true;
         }
     }
@@ -195,6 +199,16 @@ mod tests {
         let mut overdue = task(&["@morning"]);
         overdue.due = Some("2026-06-30".to_owned());
         assert!(is_relevant(&overdue, &at("14:00")));
+    }
+
+    #[test]
+    fn soft_scheduled_does_not_override_gates() {
+        // Recurring routines carry stale `scheduled` dates; the gate
+        // must still win outside its window.
+        let mut habit = task(&["@morning"]);
+        habit.scheduled = Some("2026-05-23".to_owned());
+        assert!(!is_relevant(&habit, &at("14:00")));
+        assert!(is_relevant(&habit, &at("07:30")));
     }
 
     #[test]

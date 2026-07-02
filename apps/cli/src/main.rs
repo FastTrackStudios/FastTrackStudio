@@ -3672,6 +3672,21 @@ enum TaskCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Replace the GTD context list (`@`-prefix optional; it's
+    /// added when missing). Relevancy gates ride on these — see
+    /// `list --relevant`.
+    SetContexts {
+        target: String,
+        #[arg(value_delimiter = ',')]
+        contexts: Vec<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the resulting task as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Move backing markdown file. `id` preserved.
     Rename {
         target: String,
@@ -13311,6 +13326,28 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
         } => {
             mutate_task(target, org, server, json, |t| {
                 t.tags = task::model::StringList(tags);
+            })
+            .await?;
+        }
+        TaskCmd::SetContexts {
+            target,
+            contexts,
+            org,
+            server,
+            json,
+        } => {
+            let contexts: Vec<String> = contexts
+                .into_iter()
+                .map(|c| {
+                    if c.starts_with('@') {
+                        c
+                    } else {
+                        format!("@{c}")
+                    }
+                })
+                .collect();
+            mutate_task(target, org, server, json, |t| {
+                t.contexts = task::model::StringList(contexts);
             })
             .await?;
         }
