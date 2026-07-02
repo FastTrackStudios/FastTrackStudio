@@ -150,6 +150,23 @@ impl AuthCtx {
         busy.set(false);
     }
 
+    /// Fire-and-forget [`Self::switch_account`], detached from the
+    /// caller's scope. THE entry point for UI: switcher rows live in
+    /// dropdowns/sheets that close (and unmount) on selection, and a
+    /// plain `spawn` dies with its component — the task must survive
+    /// on the app root. Mobile's bottom sheet hit exactly this
+    /// (switch silently cancelled mid-flight); desktop only worked
+    /// because its dropdown host stays mounted.
+    pub fn switch_account_detached(self, email: &'static str) {
+        dioxus::dioxus_core::spawn_forever(async move { self.switch_account(email).await });
+    }
+
+    /// Detached [`Self::sign_out`] — same unmount-safety contract as
+    /// [`Self::switch_account_detached`].
+    pub fn sign_out_detached(self) {
+        dioxus::dioxus_core::spawn_forever(async move { self.sign_out().await });
+    }
+
     /// Explicit sign-out: revoke the session server-side, drop the
     /// cached token + active marker, then fall back to Guest (the
     /// anonymous default — auto sign-in).
@@ -391,7 +408,7 @@ pub fn AccountSheetBody(on_done: EventHandler<()>) -> Element {
                             class: "flex min-h-[44px] w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-accent",
                             onclick: move |_| {
                                 on_done.call(());
-                                spawn(async move { ctx.switch_account(dev.email).await });
+                                ctx.switch_account_detached(dev.email);
                             },
                             Avatar { name: dev.name.to_string(), email: dev.email.to_string(), size: 28 }
                             span { class: "flex min-w-0 flex-col",
@@ -435,7 +452,7 @@ pub fn AccountSheetBody(on_done: EventHandler<()>) -> Element {
                 class: "flex min-h-[44px] w-full items-center justify-center rounded-lg border border-destructive/40 px-3 py-2 text-sm font-medium text-destructive active:bg-destructive/10",
                 onclick: move |_| {
                     on_done.call(());
-                    spawn(async move { ctx.sign_out().await });
+                    ctx.sign_out_detached();
                 },
                 "Sign out"
             }
@@ -505,7 +522,7 @@ pub fn AccountSwitcher() -> Element {
                             index: idx,
                             on_select: move |_| {
                                 open.set(false);
-                                spawn(async move { ctx.switch_account(dev.email).await });
+                                ctx.switch_account_detached(dev.email);
                             },
                             div { class: "flex w-full items-center justify-between gap-2",
                                 span { class: "flex min-w-0 items-center gap-2",
@@ -547,7 +564,7 @@ pub fn AccountSwitcher() -> Element {
                         destructive: true,
                         on_select: move |_| {
                             open.set(false);
-                            spawn(async move { ctx.sign_out().await });
+                            ctx.sign_out_detached();
                         },
                         "Sign out"
                     }
