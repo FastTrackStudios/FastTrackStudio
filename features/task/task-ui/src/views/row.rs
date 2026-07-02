@@ -134,7 +134,7 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
 }
 
 #[derive(Props, Clone, PartialEq)]
-struct CheckboxButtonProps {
+pub struct CheckboxButtonProps {
     status: Status,
     priority: Priority,
     on_click: EventHandler<()>,
@@ -144,7 +144,7 @@ struct CheckboxButtonProps {
 /// the timer is running) → filled check (done). Clicks walk the
 /// domain's `click_transition` cycle via `on_toggle`.
 #[component]
-fn CheckboxButton(props: CheckboxButtonProps) -> Element {
+pub fn CheckboxButton(props: CheckboxButtonProps) -> Element {
     let base =
         "flex h-6 w-6 sm:h-5 sm:w-5 items-center justify-center rounded-md border-2 shrink-0";
     let (cls, glyph) = match props.status {

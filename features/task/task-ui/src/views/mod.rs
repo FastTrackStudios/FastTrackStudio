@@ -8,6 +8,7 @@ mod list;
 mod palette;
 mod quick_add;
 mod row;
+pub use row::CheckboxButton;
 mod session_history;
 mod subtasks;
 mod tasks_app;

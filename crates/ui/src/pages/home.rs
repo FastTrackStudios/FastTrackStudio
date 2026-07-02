@@ -1,8 +1,16 @@
-//! `/` — the home dashboard.
+//! `/home` — the project dashboard.
 //!
-//! Currently-active projects, each with the single next task to do
-//! (soonest-due open task, priority as tiebreak). Honors the org
-//! switcher: `All` aggregates every hosted org, or scope to one.
+//! Situational awareness across every active project: a compact grid
+//! where each card carries the project's pulse (status, done/total
+//! progress) and its **first action** — the soonest-due open task,
+//! behind the same three-state checkbox as the board, so the next
+//! thing can be started (timer and all) or completed without leaving
+//! the dashboard. Honors the org switcher: `All` aggregates every
+//! hosted org, or scope to one.
+//!
+//! Store-backed like every route page (`plans/atom-store-migration.md`)
+//! — checkbox clicks are optimistic `TaskMutations` against the shared
+//! task store, so the board and the dashboard can't disagree.
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{CalendarDays, CircleCheck};
@@ -10,55 +18,43 @@ use fts_ui::prelude::*;
 use project::ProjectInfo;
 use task::TaskInfo as DbTask;
 
-use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
 use crate::routes::Route;
+use crate::stores;
 use crate::task_sort::{belongs, is_active, is_open_task, priority_rank};
 
 #[component]
 pub fn HomeView() -> Element {
-    let selection = use_context::<Signal<OrgSelection>>();
-    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let projects = stores::use_project_list();
+    let tasks = stores::use_task_list();
+    let muts = stores::use_task_mutations();
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
 
-    let data = use_resource(move || async move {
-        let slugs = selected_slugs(&selection.read(), &org_list.read());
-        let (pr, tr) = futures_util::future::join(
-            crate::feeds::fetch_projects(&slugs),
-            crate::feeds::fetch_tasks(&slugs),
-        )
-        .await;
-        Ok::<(Vec<ProjectInfo>, Vec<DbTask>), String>((pr?, tr?))
-    });
-
-    // Until the org list is discovered, the fetch resolves to an empty
-    // set — show the loading state rather than a misleading "nothing
-    // active".
-    let discovering = org_list.read().is_empty();
-    let view = if discovering {
-        render_loading()
-    } else {
-        match &*data.read() {
-            Some(Ok((projects, tasks))) => render_loaded(projects, tasks),
-            Some(Err(e)) => rsx! {
-                div { class: "rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm",
-                    "Couldn't load your workspace: {e}"
-                }
-            },
-            None => render_loading(),
+    let view = match (
+        projects.value().as_ref(),
+        tasks.value().as_ref(),
+        projects.error().or(tasks.error()),
+    ) {
+        (Some(pr), Some(tr), _) => {
+            let projects: Vec<&ProjectInfo> = pr.iter().map(|(_, r)| &r.project).collect();
+            let tasks: Vec<&DbTask> = tr.iter().map(|(_, r)| &r.task).collect();
+            render_loaded(&projects, &tasks, move |id, status| {
+                muts.apply(
+                    &crate::orgs::create_target(&selection.read(), &org_list.read()),
+                    task_ui::TaskMutation::SetStatus { id, status },
+                );
+            })
         }
+        (_, _, Some(e)) => rsx! {
+            div { class: "rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm",
+                "Couldn't load your workspace: {e}"
+            }
+        },
+        _ => render_loading(),
     };
 
     rsx! {
-        div { class: "mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6 lg:p-10",
-            header { class: "flex flex-col gap-1",
-                span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
-                    "Workspace"
-                }
-                Heading { level: HeadingLevel::H1, class: "tracking-tight", "Active work" }
-                Text {
-                    variant: TextVariant::Muted,
-                    "Your active projects and the next thing to do in each."
-                }
-            }
+        div { class: "mx-auto flex w-full max-w-6xl flex-col gap-4 p-3 sm:p-5 lg:px-8 lg:py-6",
             {view}
         }
     }
@@ -66,10 +62,11 @@ pub fn HomeView() -> Element {
 
 fn render_loading() -> Element {
     rsx! {
-        div { class: "flex flex-col gap-3",
-            for _ in 0..4 {
+        div { class: "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3",
+            for _ in 0..6 {
                 div { class: "flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-4",
                     div { class: "h-5 w-40 animate-pulse rounded-md bg-muted" }
+                    div { class: "h-1.5 w-full animate-pulse rounded-full bg-muted" }
                     div { class: "h-4 w-full animate-pulse rounded-md bg-muted" }
                 }
             }
@@ -77,26 +74,64 @@ fn render_loading() -> Element {
     }
 }
 
-fn render_loaded(projects: &[ProjectInfo], tasks: &[DbTask]) -> Element {
-    // Pair each active project with its single next task; drop projects
-    // that have nothing to do — the home page is only "what's next".
-    let mut active: Vec<(&ProjectInfo, DbTask)> = projects
+fn render_loaded(
+    projects: &[&ProjectInfo],
+    tasks: &[&DbTask],
+    on_status: impl Fn(uuid::Uuid, String) + Copy + 'static,
+) -> Element {
+    // Each active project with its task tally + single next action;
+    // projects with nothing open drop out — the dashboard is only
+    // "what's next".
+    struct Card {
+        project: ProjectInfo,
+        next: DbTask,
+        done: usize,
+        total: usize,
+    }
+    let mut cards: Vec<Card> = projects
         .iter()
         .filter(|p| !p.archived && is_active(&p.status))
-        .filter_map(|p| next_task(p, tasks).map(|t| (p, t.clone())))
+        .filter_map(|p| {
+            let mine: Vec<&&DbTask> = tasks.iter().filter(|t| belongs(t, p)).collect();
+            let total = mine.len();
+            let done = mine.iter().filter(|t| !is_open_task(t)).count();
+            next_task(p, tasks).map(|t| Card {
+                project: (*p).clone(),
+                next: t.clone(),
+                done,
+                total,
+            })
+        })
         .collect();
     // Soonest due first (undated last), then project title.
-    active.sort_by(|(pa, ta), (pb, tb)| {
-        match (ta.due.clone(), tb.due.clone()) {
+    cards.sort_by(|a, b| {
+        match (a.next.due.clone(), b.next.due.clone()) {
             (Some(x), Some(y)) => x.cmp(&y),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         }
-        .then_with(|| pa.title.to_lowercase().cmp(&pb.title.to_lowercase()))
+        .then_with(|| {
+            a.project
+                .title
+                .to_lowercase()
+                .cmp(&b.project.title.to_lowercase())
+        })
     });
 
-    if active.is_empty() {
+    let due_this_week = cards
+        .iter()
+        .filter(|c| {
+            c.next.due.as_deref().is_some_and(|d| {
+                chrono::NaiveDate::parse_from_str(d.trim(), "%Y-%m-%d").is_ok_and(|d| {
+                    let today = chrono::Local::now().date_naive();
+                    d <= today + chrono::Duration::days(7)
+                })
+            })
+        })
+        .count();
+
+    if cards.is_empty() {
         return rsx! {
             div { class: "flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border/70 bg-card/40 px-6 py-16 text-center",
                 div { class: "flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground",
@@ -109,52 +144,93 @@ fn render_loaded(projects: &[ProjectInfo], tasks: &[DbTask]) -> Element {
     }
 
     rsx! {
-        div { class: "flex flex-col gap-3",
-            for (p, t) in active.into_iter() {
-                {
-                    let pid = p.id.to_string();
-                    let title = p.title.clone();
-                    rsx! {
-                        div {
-                            key: "{p.id}",
-                            class: "group flex flex-col gap-3 rounded-xl border border-border/70 bg-card/70 p-4 transition-colors hover:border-border",
-                            div { class: "flex items-center justify-between gap-2",
-                                Link {
-                                    to: Route::ProjectDetailRoute { id: pid },
-                                    class: "min-w-0 text-sm font-semibold text-foreground hover:underline",
-                                    span { class: "truncate", "{title}" }
-                                }
-                                StatusBadge {
-                                    variant: status_variant(&p.status),
-                                    label: p.status.clone(),
-                                }
-                            }
-                            NextTask { task: t }
-                        }
-                    }
+        // One header line: what this page is + the week at a glance.
+        div { class: "flex flex-wrap items-baseline gap-x-3 gap-y-1",
+            Heading { level: HeadingLevel::H1, class: "tracking-tight", "Active work" }
+            span { class: "text-xs tabular-nums text-muted-foreground",
+                "{cards.len()} projects"
+                if due_this_week > 0 {
+                    " · {due_this_week} due within a week"
+                }
+            }
+        }
+        div { class: "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3",
+            for card in cards.into_iter() {
+                ProjectCard {
+                    key: "{card.project.id}",
+                    project: card.project,
+                    next: card.next,
+                    done: card.done,
+                    total: card.total,
+                    on_status: move |(id, status)| on_status(id, status),
                 }
             }
         }
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
-struct NextTaskProps {
-    task: DbTask,
-}
-
+/// One project's pulse: title + status, a thin done/total progress
+/// bar, and the first action behind a live checkbox.
 #[component]
-fn NextTask(props: NextTaskProps) -> Element {
-    let t = &props.task;
-    let due = t.due.as_deref().and_then(parse_due);
+fn ProjectCard(
+    project: ProjectInfo,
+    next: DbTask,
+    done: usize,
+    total: usize,
+    on_status: EventHandler<(uuid::Uuid, String)>,
+) -> Element {
+    let pid = project.id.to_string();
+    let pct = if total == 0 { 0 } else { done * 100 / total };
+    let due = next.due.as_deref().and_then(parse_due);
+    let next_id = next.id;
+    let next_status = next.status.clone();
+    let ui_status = task_ui::Status::from_str(&next.status).unwrap_or(task_ui::Status::Open);
+    let ui_priority =
+        task_ui::Priority::from_str(&next.priority).unwrap_or(task_ui::Priority::Normal);
+
     rsx! {
-        div { class: "flex items-center gap-2.5 rounded-lg bg-muted/30 px-3 py-2.5",
-            span { class: "size-4 shrink-0 rounded-md border-2 border-border" }
-            span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{t.title}" }
-            if let Some((label, cls)) = due {
-                span { class: "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] {cls}",
-                    CalendarDays { size: 11 }
-                    "{label}"
+        div { class: "group flex flex-col gap-2.5 rounded-xl border border-border/70 bg-card/70 p-3.5 transition-colors hover:border-border",
+            div { class: "flex items-center justify-between gap-2",
+                Link {
+                    to: Route::ProjectDetailRoute { id: pid },
+                    class: "min-w-0 text-sm font-semibold text-foreground hover:underline",
+                    span { class: "truncate", "{project.title}" }
+                }
+                StatusBadge {
+                    variant: status_variant(&project.status),
+                    label: project.status.clone(),
+                }
+            }
+            // Done/total as a hairline bar — the project's pulse in
+            // 6 vertical pixels.
+            div { class: "flex items-center gap-2",
+                div { class: "h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/50",
+                    div {
+                        class: "h-full rounded-full bg-primary/70 transition-[width]",
+                        style: "width: {pct}%",
+                    }
+                }
+                span { class: "shrink-0 text-[11px] tabular-nums text-muted-foreground",
+                    "{done}/{total}"
+                }
+            }
+            // The first action — live checkbox, same click cycle as
+            // the board (start the clock, complete, reopen).
+            div { class: "flex items-center gap-2.5 rounded-lg bg-muted/30 px-2.5 py-2",
+                task_ui::CheckboxButton {
+                    status: ui_status,
+                    priority: ui_priority,
+                    on_click: move |()| {
+                        let s = task::click_transition(&next_status, None);
+                        on_status.call((next_id, s.to_string()));
+                    },
+                }
+                span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{next.title}" }
+                if let Some((label, cls)) = due {
+                    span { class: "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] {cls}",
+                        CalendarDays { size: 11 }
+                        "{label}"
+                    }
                 }
             }
         }
@@ -165,10 +241,11 @@ fn NextTask(props: NextTaskProps) -> Element {
 
 /// The single next task for a project: open, soonest due (None last),
 /// then highest priority, then title.
-fn next_task<'a>(p: &ProjectInfo, tasks: &'a [DbTask]) -> Option<&'a DbTask> {
+fn next_task<'a>(p: &ProjectInfo, tasks: &[&'a DbTask]) -> Option<&'a DbTask> {
     let mut candidates: Vec<&DbTask> = tasks
         .iter()
         .filter(|t| is_open_task(t) && belongs(t, p))
+        .copied()
         .collect();
     candidates.sort_by(|a, b| {
         match (a.due.clone(), b.due.clone()) {
