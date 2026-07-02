@@ -439,8 +439,10 @@ pub fn poll() {
                 continue; // unchanged
             }
 
-            let mut cfg = Config::default();
-            cfg.profile = profile;
+            let cfg = Config {
+                profile,
+                ..Default::default()
+            };
             let tempos = tempo_points();
             let out = mirror_part(&src.notes, &src.ccs, None, &cfg, &tempos);
             write_mirror_item(mirror_track, &guid, &src, &out);
