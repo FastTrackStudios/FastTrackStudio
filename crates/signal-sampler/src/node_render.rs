@@ -3,11 +3,20 @@
 //! Compiles a [`Container`] into a [`RenderNode`] tree of boxed processors, then
 //! renders audio by walking it: a **Serial** container chains its children
 //! (output of N → input of N+1), a **Parallel** container sums them. A leaf
-//! **Block** becomes its audio backend — a NAM/IR/plugin, or a built-in `Native`
-//! DSP (currently just the [`NativeOscillator`]) — or, when the block is still a
-//! placeholder, a **pass-through** (audio flows through untouched). So the same
-//! routing renders correctly today (placeholders = silence/thru) and gains sound
-//! as each block type's DSP is implemented.
+//! **Block** becomes its audio backend — a NAM/IR/plugin/sample-library, or a
+//! built-in `Native` DSP — or, when the block is still a placeholder, a
+//! **pass-through** (audio flows through untouched). So the same routing
+//! renders correctly today (placeholders = silence/thru) and gains sound as
+//! each block type's DSP is implemented.
+//!
+//! **Control-rate modulation (the ModMatrix).** Containers carry
+//! [`ModRoute`]s (`source → "Block.param"` at a depth). At compile time each
+//! route is resolved: the source becomes a [`ModSource`] (a modulator block —
+//! LFO/Envelope — or a MIDI performance source), the target becomes a
+//! `(leaf, param id)` pair via the backend's reported parameter names. At
+//! render time the engine ticks every source once per block and applies
+//! `base + depth × value` to each target as a parameter write — block-rate
+//! control, the same rate FX plugins receive automation.
 //!
 //! Headless / offline: `process` allocates scratch, so it's for tests and bring-up
 //! rather than the realtime callback (which will pre-allocate). MIDI events are
@@ -16,10 +25,12 @@
 use signal_plugin_host::{PluginEvents, PluginInstance, PluginMidiEvent};
 use signal_proto::block::BlockType;
 
-use crate::native::{NativeAmp, NativeFilter};
+use crate::native::{
+    ControlEnv, ControlLfo, LfoWave, ModSource, NativeAmp, NativeFilter,
+};
 use crate::native_osc::NativeOscillator;
 use crate::rig::{build_block, RigBlock};
-use crate::rig_node::{Combine, Container, RigNode, Zone};
+use crate::rig_node::{Combine, Container, ModRoute, RigNode, Zone};
 
 /// Build the audio backend for one block at `sample_rate`, or `None` when the
 /// block is a placeholder or an unimplemented `Native` type (→ pass-through).
@@ -36,7 +47,7 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
             _ => None,
         }
     } else {
-        // NAM / IR / hosted plugin via the shared loader.
+        // NAM / IR / sample-library / hosted plugin via the shared loader.
         build_block(block, sample_rate)
             .map_err(|e| tracing::warn!(error = %e, "node_render: backend build failed"))
             .ok()
@@ -44,10 +55,165 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
     }
 }
 
+// ── The mod engine ───────────────────────────────────────────────────────────
+
+/// One resolved ModMatrix row.
+struct CompiledRoute {
+    source: usize,
+    leaf: usize,
+    param: u32,
+    /// Base (unmodulated) normalized value the depth adds onto.
+    base: f64,
+    depth: f32,
+}
+
+/// The compiled control-rate modulation engine for one tree.
+#[derive(Default)]
+pub struct ModEngine {
+    sources: Vec<ModSource>,
+    routes: Vec<CompiledRoute>,
+    /// Per-leaf pending parameter writes, rebuilt each block.
+    writes: Vec<Vec<(u32, f64)>>,
+}
+
+impl ModEngine {
+    fn prepare(&mut self, sample_rate: f64, leaf_count: usize) {
+        for s in &mut self.sources {
+            s.set_sample_rate(sample_rate as f32);
+        }
+        self.writes = vec![Vec::new(); leaf_count];
+    }
+
+    /// Tick all sources through one block and rebuild the per-leaf writes.
+    fn tick(&mut self, events: &PluginEvents<'_>, frames: usize) {
+        for w in &mut self.writes {
+            w.clear();
+        }
+        // Evaluate each source once, then apply every route.
+        let values: Vec<f32> = self
+            .sources
+            .iter_mut()
+            .map(|s| s.tick(events, frames))
+            .collect();
+        for r in &self.routes {
+            let v = (r.base + (r.depth * values[r.source]) as f64).clamp(0.0, 1.0);
+            if let Some(w) = self.writes.get_mut(r.leaf) {
+                w.push((r.param, v));
+            }
+        }
+    }
+
+    pub fn route_count(&self) -> usize {
+        self.routes.len()
+    }
+}
+
+/// Compile-time state: modulator scope stack + leaf registry + route table.
+struct ModCompiler {
+    sources: Vec<ModSource>,
+    /// (lower-cased modulator name, source index) — scoped stack.
+    scope: Vec<(String, usize)>,
+    /// Dedup for MIDI sources.
+    midi: Vec<(crate::native::MidiMod, usize)>,
+    routes: Vec<CompiledRoute>,
+    /// Per-leaf (lower-cased display name, params) for target resolution.
+    leaves: Vec<(String, Vec<signal_plugin_host::PluginParamInfo>)>,
+    sample_rate: u32,
+}
+
+impl ModCompiler {
+    fn new(sample_rate: u32) -> Self {
+        Self {
+            sources: Vec::new(),
+            scope: Vec::new(),
+            midi: Vec::new(),
+            routes: Vec::new(),
+            leaves: Vec::new(),
+            sample_rate,
+        }
+    }
+
+    /// Instantiate a modulator block as a control source (defaults for now —
+    /// imported envelope/LFO parameters land in a later slice).
+    fn instantiate(&mut self, block: &RigBlock) -> Option<usize> {
+        let sr = self.sample_rate as f32;
+        let src = match block.block_type {
+            BlockType::Lfo => ModSource::lfo(ControlLfo::new(LfoWave::Sine, 2.0), sr),
+            BlockType::Envelope | BlockType::MultisegEnvelope => {
+                ModSource::env(ControlEnv::new(sr, crate::native::AdsrParams::default()), sr)
+            }
+            _ => return None,
+        };
+        self.sources.push(src);
+        Some(self.sources.len() - 1)
+    }
+
+    fn resolve_source(&mut self, name: &str) -> Option<usize> {
+        let key = name.to_lowercase();
+        // Innermost modulator scope wins.
+        if let Some((_, idx)) = self.scope.iter().rev().find(|(n, _)| *n == key) {
+            return Some(*idx);
+        }
+        // MIDI performance source (deduped).
+        let m = ModSource::midi_by_name(name)?;
+        if let Some((_, idx)) = self.midi.iter().find(|(mm, _)| *mm == m) {
+            return Some(*idx);
+        }
+        self.sources.push(ModSource::midi(m));
+        let idx = self.sources.len() - 1;
+        self.midi.push((m, idx));
+        Some(idx)
+    }
+
+    /// Resolve this container's routes against its subtree's leaves
+    /// (`subtree` = leaf indices compiled beneath it).
+    fn resolve_routes(&mut self, routes: &[ModRoute], subtree: &[usize]) {
+        for route in routes {
+            let Some((block_name, param_name)) = route.target.rsplit_once('.') else {
+                tracing::warn!(target = %route.target, "mod route target missing .param");
+                continue;
+            };
+            let Some(source) = self.resolve_source(&route.source) else {
+                tracing::warn!(source = %route.source, "mod route source not found");
+                continue;
+            };
+            let bkey = block_name.to_lowercase();
+            let pkey = param_name.to_lowercase();
+            let mut hit = false;
+            for &leaf in subtree {
+                let (name, params) = &self.leaves[leaf];
+                if *name != bkey {
+                    continue;
+                }
+                if let Some(p) = params.iter().find(|p| p.name.to_lowercase() == pkey) {
+                    self.routes.push(CompiledRoute {
+                        source,
+                        leaf,
+                        param: p.id,
+                        base: p.default,
+                        depth: route.depth,
+                    });
+                    hit = true;
+                }
+            }
+            if !hit {
+                tracing::warn!(
+                    target = %route.target,
+                    "mod route target not resolved (placeholder block or unknown param)"
+                );
+            }
+        }
+    }
+}
+
 /// A compiled, renderable node mirroring the container tree.
 pub enum RenderNode {
-    /// A leaf processor, or `None` for a placeholder (pass-through).
-    Leaf(Option<Box<dyn PluginInstance>>),
+    /// A leaf processor (`inst = None` for a placeholder pass-through).
+    /// `id` indexes the mod engine's per-leaf write table.
+    Leaf {
+        id: usize,
+        inst: Option<Box<dyn PluginInstance>>,
+    },
     /// Children chained in order.
     Serial(Vec<RenderNode>),
     /// Children summed.
@@ -59,18 +225,63 @@ pub enum RenderNode {
         zone: Zone,
         inner: Box<RenderNode>,
     },
+    /// The tree root when any mod routes resolved: ticks the [`ModEngine`]
+    /// each block and threads its parameter writes down to the leaves.
+    Modulated {
+        engine: Box<ModEngine>,
+        inner: Box<RenderNode>,
+    },
 }
 
 impl RenderNode {
-    /// Compile a container subtree into a render tree at `sample_rate`. A
-    /// container with a non-full [`Zone`] is wrapped in [`RenderNode::Zoned`] so
-    /// only its in-window notes reach it.
+    /// Compile a container tree into a render tree at `sample_rate`,
+    /// resolving its ModMatrix routes. A container with a non-full [`Zone`]
+    /// is wrapped in [`RenderNode::Zoned`] so only its in-window notes reach it.
     pub fn compile(container: &Container, sample_rate: u32) -> RenderNode {
+        let mut mc = ModCompiler::new(sample_rate);
+        let root = Self::compile_container(container, sample_rate, &mut mc);
+        if mc.routes.is_empty() {
+            root
+        } else {
+            RenderNode::Modulated {
+                engine: Box::new(ModEngine {
+                    sources: mc.sources,
+                    routes: mc.routes,
+                    writes: Vec::new(),
+                }),
+                inner: Box::new(root),
+            }
+        }
+    }
+
+    /// Compile one container, returning its node; `mc` accumulates leaves,
+    /// modulator scope and resolved routes.
+    fn compile_container(
+        container: &Container,
+        sample_rate: u32,
+        mc: &mut ModCompiler,
+    ) -> RenderNode {
+        // Bring this container's modulators into scope.
+        let scope_mark = mc.scope.len();
+        for m in &container.modulators {
+            if let Some(idx) = mc.instantiate(m) {
+                mc.scope.push((m.display_name().to_lowercase(), idx));
+            }
+        }
+
+        let subtree_start = mc.leaves.len();
         let kids = container
             .children
             .iter()
-            .map(|n| Self::compile_node(n, sample_rate))
+            .map(|n| Self::compile_node(n, sample_rate, mc))
             .collect();
+        let subtree: Vec<usize> = (subtree_start..mc.leaves.len()).collect();
+
+        // Resolve this container's routes against its own subtree.
+        mc.resolve_routes(&container.mod_routes, &subtree);
+
+        mc.scope.truncate(scope_mark);
+
         let base = match container.combine {
             Combine::Serial => RenderNode::Serial(kids),
             Combine::Parallel => RenderNode::Parallel(kids),
@@ -85,35 +296,68 @@ impl RenderNode {
         }
     }
 
-    fn compile_node(node: &RigNode, sample_rate: u32) -> RenderNode {
+    fn compile_node(node: &RigNode, sample_rate: u32, mc: &mut ModCompiler) -> RenderNode {
         match node {
-            RigNode::Block { block: b } => RenderNode::Leaf(build_node_backend(b, sample_rate)),
-            RigNode::Container { container: c } => Self::compile(c, sample_rate),
+            RigNode::Block { block: b } => {
+                let mut inst = build_node_backend(b, sample_rate);
+                let params = inst.as_mut().map(|i| i.params()).unwrap_or_default();
+                let id = mc.leaves.len();
+                mc.leaves.push((b.display_name().to_lowercase(), params));
+                RenderNode::Leaf { id, inst }
+            }
+            RigNode::Container { container: c } => Self::compile_container(c, sample_rate, mc),
         }
     }
 
     /// Prepare every leaf processor for `sample_rate` / `block_size`.
     pub fn prepare(&mut self, sample_rate: f64, block_size: u32) {
         match self {
-            RenderNode::Leaf(Some(inst)) => {
+            RenderNode::Leaf { inst: Some(inst), .. } => {
                 let _ = inst.prepare(sample_rate, block_size);
             }
-            RenderNode::Leaf(None) => {}
+            RenderNode::Leaf { inst: None, .. } => {}
             RenderNode::Serial(v) | RenderNode::Parallel(v) => {
                 v.iter_mut().for_each(|n| n.prepare(sample_rate, block_size));
             }
             RenderNode::Zoned { inner, .. } => inner.prepare(sample_rate, block_size),
+            RenderNode::Modulated { engine, inner } => {
+                inner.prepare(sample_rate, block_size);
+                engine.prepare(sample_rate, inner.leaf_count());
+            }
+        }
+    }
+
+    /// Total leaves (placeholder or live) — sizes the mod write table.
+    fn leaf_count(&self) -> usize {
+        match self {
+            RenderNode::Leaf { .. } => 1,
+            RenderNode::Serial(v) | RenderNode::Parallel(v) => {
+                v.iter().map(|n| n.leaf_count()).sum()
+            }
+            RenderNode::Zoned { inner, .. } | RenderNode::Modulated { inner, .. } => {
+                inner.leaf_count()
+            }
         }
     }
 
     /// Count the leaf processors that actually have a backend (for tests/metering).
     pub fn live_leaves(&self) -> usize {
         match self {
-            RenderNode::Leaf(opt) => opt.is_some() as usize,
+            RenderNode::Leaf { inst, .. } => inst.is_some() as usize,
             RenderNode::Serial(v) | RenderNode::Parallel(v) => {
                 v.iter().map(|n| n.live_leaves()).sum()
             }
-            RenderNode::Zoned { inner, .. } => inner.live_leaves(),
+            RenderNode::Zoned { inner, .. } | RenderNode::Modulated { inner, .. } => {
+                inner.live_leaves()
+            }
+        }
+    }
+
+    /// The compiled ModMatrix, when any routes resolved (for tests/UI).
+    pub fn mod_engine(&self) -> Option<&ModEngine> {
+        match self {
+            RenderNode::Modulated { engine, .. } => Some(engine),
+            _ => None,
         }
     }
 
@@ -126,12 +370,48 @@ impl RenderNode {
         out_r: &mut [f32],
         events: &PluginEvents<'_>,
     ) {
+        // Root-level: tick the mod engine, then thread its writes down.
+        if let RenderNode::Modulated { engine, inner } = self {
+            let frames = out_l.len().min(out_r.len());
+            engine.tick(events, frames);
+            let writes = std::mem::take(&mut engine.writes);
+            inner.process_inner(in_l, in_r, out_l, out_r, events, &writes);
+            engine.writes = writes;
+            return;
+        }
+        self.process_inner(in_l, in_r, out_l, out_r, events, &[]);
+    }
+
+    fn process_inner(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        events: &PluginEvents<'_>,
+        writes: &[Vec<(u32, f64)>],
+    ) {
         let frames = out_l.len().min(out_r.len());
         match self {
-            RenderNode::Leaf(Some(inst)) => {
-                let _ = inst.process_block(in_l, in_r, out_l, out_r, events);
+            RenderNode::Leaf { id, inst: Some(inst) } => {
+                let mods = writes.get(*id).map(|w| w.as_slice()).unwrap_or(&[]);
+                if mods.is_empty() {
+                    let _ = inst.process_block(in_l, in_r, out_l, out_r, events);
+                } else {
+                    // Merge external param writes with this leaf's mod writes.
+                    let mut params: Vec<(u32, f64)> =
+                        Vec::with_capacity(events.params.len() + mods.len());
+                    params.extend_from_slice(events.params);
+                    params.extend_from_slice(mods);
+                    let ev = PluginEvents {
+                        params: &params,
+                        midi: events.midi,
+                        note_expressions: events.note_expressions,
+                    };
+                    let _ = inst.process_block(in_l, in_r, out_l, out_r, &ev);
+                }
             }
-            RenderNode::Leaf(None) => copy_in(in_l, in_r, out_l, out_r, frames),
+            RenderNode::Leaf { inst: None, .. } => copy_in(in_l, in_r, out_l, out_r, frames),
             RenderNode::Serial(nodes) => {
                 if nodes.is_empty() {
                     return copy_in(in_l, in_r, out_l, out_r, frames);
@@ -144,7 +424,7 @@ impl RenderNode {
                 for node in nodes.iter_mut() {
                     nxt_l.iter_mut().for_each(|x| *x = 0.0);
                     nxt_r.iter_mut().for_each(|x| *x = 0.0);
-                    node.process(&cur_l, &cur_r, &mut nxt_l, &mut nxt_r, events);
+                    node.process_inner(&cur_l, &cur_r, &mut nxt_l, &mut nxt_r, events, writes);
                     std::mem::swap(&mut cur_l, &mut nxt_l);
                     std::mem::swap(&mut cur_r, &mut nxt_r);
                 }
@@ -159,7 +439,7 @@ impl RenderNode {
                 for node in nodes.iter_mut() {
                     tl.iter_mut().for_each(|x| *x = 0.0);
                     tr.iter_mut().for_each(|x| *x = 0.0);
-                    node.process(in_l, in_r, &mut tl, &mut tr, events);
+                    node.process_inner(in_l, in_r, &mut tl, &mut tr, events, writes);
                     for f in 0..frames {
                         out_l[f] += tl[f];
                         out_r[f] += tr[f];
@@ -176,7 +456,11 @@ impl RenderNode {
                     midi: &filtered,
                     note_expressions: events.note_expressions,
                 };
-                inner.process(in_l, in_r, out_l, out_r, &fe);
+                inner.process_inner(in_l, in_r, out_l, out_r, &fe, writes);
+            }
+            RenderNode::Modulated { .. } => {
+                // Only ever the root; handled in `process`.
+                debug_assert!(false, "nested Modulated node");
             }
         }
     }
@@ -451,5 +735,111 @@ zones (
             rms(&l) > 1e-3,
             "the synth layers must be audible through the full Nord tree"
         );
+    }
+
+    // ── ModMatrix runtime ────────────────────────────────────────────────
+
+    /// An envelope route closes a filter: with a big negative depth from a
+    /// note-gated envelope, the held note is far darker than the same tree
+    /// without the route.
+    #[test]
+    fn envelope_route_modulates_filter_cutoff() {
+        fn sustain_level(with_route: bool) -> f32 {
+            let mut tree = Container::layer("L")
+                .block(BlockType::Oscillator, "Osc")
+                .block(BlockType::Filter, "Filter")
+                .modulator(BlockType::Envelope, "Filter Env");
+            if with_route {
+                tree = tree.route("Filter Env", "Filter.cutoff", -0.95);
+            }
+            let mut rn = RenderNode::compile(&tree, 48_000);
+            assert_eq!(
+                rn.mod_engine().map(|e| e.route_count()),
+                with_route.then_some(1),
+                "route resolution matches"
+            );
+            rn.prepare(48_000.0, 512);
+            let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+            let mut level = 0.0;
+            for b in 0..48 {
+                let midi = [note_on(60, 100)];
+                let ev = PluginEvents {
+                    params: &[],
+                    midi: if b == 0 { &midi } else { &[] },
+                    note_expressions: &[],
+                };
+                rn.render(&mut l, &mut r, &ev);
+                level = rms(&l);
+            }
+            level
+        }
+        let open = sustain_level(false);
+        let closed = sustain_level(true);
+        assert!(open > 1e-3, "unmodulated tree sounds, rms={open}");
+        assert!(
+            closed < open * 0.35,
+            "envelope route closes the filter: open={open} closed={closed}"
+        );
+    }
+
+    /// A mod-wheel route opens/closes the filter from CC1.
+    #[test]
+    fn wheel_route_drives_filter_cutoff() {
+        let tree = Container::layer("L")
+            .block(BlockType::Oscillator, "Osc")
+            .block(BlockType::Filter, "Filter")
+            .route("Wheel", "Filter.cutoff", -1.0);
+        let mut rn = RenderNode::compile(&tree, 48_000);
+        assert_eq!(rn.mod_engine().map(|e| e.route_count()), Some(1));
+        rn.prepare(48_000.0, 512);
+
+        let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+        // Note on, wheel at 0 → bright.
+        let start = [note_on(60, 100)];
+        let ev = PluginEvents {
+            params: &[],
+            midi: &start,
+            note_expressions: &[],
+        };
+        rn.render(&mut l, &mut r, &ev);
+        rn.render(&mut l, &mut r, &PluginEvents { params: &[], midi: &[], note_expressions: &[] });
+        let bright = rms(&l);
+
+        // Wheel to max → cutoff floor → dark.
+        let cc = [PluginMidiEvent {
+            offset: 0,
+            message: daw::service::MidiMessage::ControlChange {
+                channel: 0,
+                controller: 1,
+                value: 127,
+            },
+        }];
+        let ev = PluginEvents {
+            params: &[],
+            midi: &cc,
+            note_expressions: &[],
+        };
+        rn.render(&mut l, &mut r, &ev);
+        rn.render(&mut l, &mut r, &PluginEvents { params: &[], midi: &[], note_expressions: &[] });
+        let dark = rms(&l);
+        assert!(
+            dark < bright * 0.35,
+            "wheel closes the filter: bright={bright} dark={dark}"
+        );
+    }
+
+    /// Routes on placeholder blocks resolve to nothing (warn, not panic),
+    /// and the tree still renders.
+    #[test]
+    fn unresolved_routes_are_harmless() {
+        let tree = Container::layer("L")
+            .block(BlockType::Oscillator, "Osc")
+            .block(BlockType::Rotary, "Rotary") // placeholder — no params
+            .route("Wheel", "Rotary.speed", 1.0)
+            .route("Nonexistent Env", "Osc.pitch", 1.0);
+        let mut rn = RenderNode::compile(&tree, 48_000);
+        assert!(rn.mod_engine().is_none(), "no routes resolved");
+        rn.prepare(48_000.0, 256);
+        assert!(render_note(&mut rn, 60, 100) > 1e-3, "still renders");
     }
 }

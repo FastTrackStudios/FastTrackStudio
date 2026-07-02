@@ -185,6 +185,10 @@ fn synth_layer(name: &str) -> Container {
         .modulator(BlockType::Lfo, "LFO")
         .modulator(BlockType::Lfo, "Vibrato")
         .modulator(BlockType::Arpeggiator, "Arp")
+        // The classic NS4 voice routes (design doc §6/§7). Depths are
+        // placeholder-musical until per-block param import lands.
+        .route("Filter Env", "Filter.cutoff", -0.45)
+        .route("LFO", "Filter.cutoff", -0.2)
 }
 
 // ── The Program ──────────────────────────────────────────────────────────────

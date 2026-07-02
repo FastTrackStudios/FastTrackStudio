@@ -14,8 +14,10 @@
 
 mod adsr;
 mod amp;
+mod control;
 mod filter;
 
 pub use adsr::{Adsr, AdsrParams};
 pub use amp::NativeAmp;
+pub use control::{ControlEnv, ControlLfo, LfoWave, MidiMod, ModSource};
 pub use filter::{FilterMode, NativeFilter, Svf};

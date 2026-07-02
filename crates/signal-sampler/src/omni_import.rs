@@ -464,10 +464,71 @@ fn fx_rack_from(name: &str, types: &[String]) -> Container {
     rack
 }
 
+/// Translate one Omnisphere mod-matrix route into our route model, when the
+/// target is something the runtime drives today.
+///
+/// Returns `(layer_index, source, target, depth)` — `layer_index` scopes the
+/// route to a layer (`A freq` targets Layer A's filter); part-wide routes use
+/// the layer the target names.
+fn translate_route(
+    route: &OmniModRoute,
+    filter_labels: &[String],
+) -> Option<(usize, String, String, f32)> {
+    // Targets: "<L> freq" / "<L> res" where <L> is A..D → the layer's Filter 1.
+    let (layer_letter, param) = route.target.split_once(' ')?;
+    let layer_idx = match layer_letter {
+        "A" => 0,
+        "B" => 1,
+        "C" => 2,
+        "D" => 3,
+        _ => return None,
+    };
+    let param = match param {
+        "freq" => "cutoff",
+        "res" => "resonance",
+        _ => return None, // tune/atrm/… need osc/amp params — later slices
+    };
+    let filter = filter_labels.get(layer_idx)?;
+    // Sources: MIDI performance names map directly; Omnisphere modulator
+    // names map onto the modulator blocks our tree attaches.
+    let source = match route.source.as_str() {
+        "Wheel" => "Wheel".to_string(),
+        "Velo" => "Velocity".to_string(),
+        "After" => "Aftertouch".to_string(),
+        "Bender" => "Bender".to_string(),
+        s if s.starts_with("LFO") => format!("LFO {}", &s[3..]),
+        s if s.ends_with("FENV") => "Filter Env".to_string(),
+        s if s.starts_with("ModEnv") => "Mod Env".to_string(),
+        _ => return None, // Key/Alt/Bias/Random/… — later slices
+    };
+    Some((layer_idx, source, format!("{filter}.{param}"), route.depth))
+}
+
 /// Map a parsed patch onto the Omnisphere composition tree, realizing each
 /// layer's Soundsource block against `index` (unmatched names stay
 /// placeholders — the structure still routes).
 pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Container {
+    // Filter block labels per layer (route targets reference them by name).
+    let filter_labels: Vec<String> = patch
+        .layers
+        .iter()
+        .take(4)
+        .map(|l| {
+            if l.filter_name.is_empty() {
+                "Filter 1".to_string()
+            } else {
+                l.filter_name.clone()
+            }
+        })
+        .collect();
+    // Live routes bucketed per layer; the rest stay inspectable params.
+    let mut layer_routes: Vec<Vec<(String, String, f32)>> = vec![Vec::new(); 4];
+    for route in &patch.mod_routes {
+        if let Some((idx, source, target, depth)) = translate_route(route, &filter_labels) {
+            layer_routes[idx].push((source, target, depth));
+        }
+    }
+
     let mut quadzone = Container::parallel("Quadzone").param("mode", "Fader");
     for (i, layer) in patch.layers.iter().take(4).enumerate() {
         let name = LAYER_NAMES[i];
@@ -498,13 +559,8 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
             .block(BlockType::Waveshaper, "Waveshaper")
             .block(BlockType::Granular, "Granular");
 
-        let filter_label = if layer.filter_name.is_empty() {
-            "Filter 1".to_string()
-        } else {
-            layer.filter_name.clone()
-        };
-        quadzone = quadzone.add(
-            Container::layer(name)
+        let filter_label = filter_labels[i].clone();
+        let mut built = Container::layer(name)
                 .param("level", format!("{:.3}", layer.level))
                 .param(
                     "filter_routing",
@@ -523,8 +579,11 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                 .send("Aux Rack", "To Aux")
                 .modulator(BlockType::Envelope, "Amp Env")
                 .modulator(BlockType::Envelope, "Filter Env")
-                .modulator(BlockType::MultisegEnvelope, "Mod Env"),
-        );
+                .modulator(BlockType::MultisegEnvelope, "Mod Env");
+        for (source, target, depth) in layer_routes[i].drain(..) {
+            built = built.route(source, target, depth);
+        }
+        quadzone = quadzone.add(built);
     }
 
     let title = if patch.name.is_empty() {
@@ -663,6 +722,13 @@ mod tests {
         // Tags + mod routes survive as params.
         assert!(tree.params.iter().any(|p| p.name == "tag:Author"));
         assert!(tree.params.iter().any(|p| p.name == "mod0"));
+        // The matrix row translated into a live route on Layer A:
+        // "Layer A FENV" → the layer's filter cutoff at the imported depth.
+        assert_eq!(layer.mod_routes.len(), 1);
+        let r = &layer.mod_routes[0];
+        assert_eq!(r.source, "Filter Env");
+        assert_eq!(r.target, "LPF Test.cutoff");
+        assert!((r.depth - 0.5).abs() < 1e-6);
         // Renders (placeholder-safe).
         let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 256);

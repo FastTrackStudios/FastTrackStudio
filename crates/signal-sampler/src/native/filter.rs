@@ -111,6 +111,21 @@ impl NativeFilter {
         self.right.set(self.cutoff_hz, self.q, self.sample_rate);
     }
 
+    /// Normalized 0..1 → 20 Hz..20 kHz (exponential).
+    pub fn cutoff_from_norm(v: f32) -> f32 {
+        20.0 * 1000f32.powf(v.clamp(0.0, 1.0))
+    }
+
+    /// 20 Hz..20 kHz → normalized 0..1.
+    pub fn norm_from_cutoff(hz: f32) -> f32 {
+        ((hz / 20.0).max(1.0).log10() / 3.0).clamp(0.0, 1.0)
+    }
+
+    /// Normalized 0..1 → Q 0.5..12 (flat ≈ 0.018).
+    pub fn q_from_norm(v: f32) -> f32 {
+        0.5 + 11.5 * v.clamp(0.0, 1.0)
+    }
+
     #[inline]
     fn pick(mode: FilterMode, lp: f32, bp: f32, hp: f32) -> f32 {
         match mode {
@@ -133,10 +148,29 @@ impl PluginInstance for NativeFilter {
     }
 
     fn params(&mut self) -> Vec<PluginParamInfo> {
-        Vec::new()
+        vec![
+            PluginParamInfo {
+                id: 0,
+                name: "cutoff".into(),
+                min: 0.0,
+                max: 1.0,
+                default: Self::norm_from_cutoff(20_000.0) as f64,
+            },
+            PluginParamInfo {
+                id: 1,
+                name: "resonance".into(),
+                min: 0.0,
+                max: 1.0,
+                default: ((core::f32::consts::FRAC_1_SQRT_2 - 0.5) / 11.5) as f64,
+            },
+        ]
     }
-    fn param_value(&mut self, _id: u32) -> Option<f64> {
-        None
+    fn param_value(&mut self, id: u32) -> Option<f64> {
+        match id {
+            0 => Some(Self::norm_from_cutoff(self.cutoff_hz) as f64),
+            1 => Some(((self.q - 0.5) / 11.5) as f64),
+            _ => None,
+        }
     }
     fn value_to_text(&mut self, _id: u32, _value: f64) -> Option<String> {
         None
@@ -167,8 +201,26 @@ impl PluginInstance for NativeFilter {
         in_r: &[f32],
         out_l: &mut [f32],
         out_r: &mut [f32],
-        _events: &PluginEvents<'_>,
+        events: &PluginEvents<'_>,
     ) -> Result<(), PluginError> {
+        // Param writes (mod matrix / UI) applied at block start.
+        let mut dirty = false;
+        for &(id, value) in events.params {
+            match id {
+                0 => {
+                    self.cutoff_hz = Self::cutoff_from_norm(value as f32);
+                    dirty = true;
+                }
+                1 => {
+                    self.q = Self::q_from_norm(value as f32);
+                    dirty = true;
+                }
+                _ => {}
+            }
+        }
+        if dirty {
+            self.update_coeffs();
+        }
         let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
         for f in 0..frames {
             let (lp, bp, hp) = self.left.tick(in_l[f]);

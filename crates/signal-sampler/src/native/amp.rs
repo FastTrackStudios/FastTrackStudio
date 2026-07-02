@@ -38,10 +38,16 @@ impl PluginInstance for NativeAmp {
     }
 
     fn params(&mut self) -> Vec<PluginParamInfo> {
-        Vec::new()
+        vec![PluginParamInfo {
+            id: 0,
+            name: "gain".into(),
+            min: 0.0,
+            max: 1.0,
+            default: 0.5, // normalized: amplitude = 2v, unity at 0.5
+        }]
     }
-    fn param_value(&mut self, _id: u32) -> Option<f64> {
-        None
+    fn param_value(&mut self, id: u32) -> Option<f64> {
+        (id == 0).then_some((self.gain / 2.0) as f64)
     }
     fn value_to_text(&mut self, _id: u32, _value: f64) -> Option<String> {
         None
@@ -68,8 +74,14 @@ impl PluginInstance for NativeAmp {
         in_r: &[f32],
         out_l: &mut [f32],
         out_r: &mut [f32],
-        _events: &PluginEvents<'_>,
+        events: &PluginEvents<'_>,
     ) -> Result<(), PluginError> {
+        for &(id, value) in events.params {
+            if id == 0 {
+                // Normalized 0..1 → amplitude 0..2 (unity at 0.5).
+                self.gain = (value as f32).clamp(0.0, 1.0) * 2.0;
+            }
+        }
         let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
         for f in 0..frames {
             out_l[f] = in_l[f] * self.gain;

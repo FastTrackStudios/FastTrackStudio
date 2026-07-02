@@ -96,6 +96,24 @@ pub struct Send {
     pub label: String,
 }
 
+/// One **control-rate modulation route** (a ModMatrix row): a modulation
+/// source drives one parameter of one block, scaled by `depth`.
+///
+/// - `source` — the name of a modulator block attached to this container or
+///   an ancestor (`"Filter Env"`, `"LFO 1"`), or a MIDI performance source
+///   (`"Wheel"`, `"Velocity"`, `"Aftertouch"`, `"Bender"`, `"CC74"`).
+/// - `target` — `"Block Name.param"`; the block is found by display name in
+///   this container's subtree, the param by the backend's parameter name
+///   (e.g. `"Filter.cutoff"`, `"Amp.gain"`).
+/// - `depth` — −1..+1 scale of the source into the param's normalized range,
+///   added to the param's base value each block.
+#[derive(Debug, Clone, Facet)]
+pub struct ModRoute {
+    pub source: String,
+    pub target: String,
+    pub depth: f32,
+}
+
 /// A container-level setting that isn't a block (a `(name, value)` pair) —
 /// e.g. a Layer's `voice_mode` / `unison` / `octave`, an Engine's menu options.
 #[derive(Debug, Clone, Facet)]
@@ -217,6 +235,9 @@ pub struct Container {
     /// Cross-tree audio sends from this node's output.
     #[facet(default)]
     pub sends: Vec<Send>,
+    /// Control-rate modulation routes scoped to this subtree (the ModMatrix).
+    #[facet(default)]
+    pub mod_routes: Vec<ModRoute>,
     /// Container-level settings that aren't blocks — e.g. a Layer's `voice_mode`,
     /// `unison`, `octave`; an Engine's menu options.
     #[facet(default)]
@@ -270,6 +291,7 @@ impl Container {
             children: Vec::new(),
             modulators: Vec::new(),
             sends: Vec::new(),
+            mod_routes: Vec::new(),
             params: Vec::new(),
             zone: Zone::full(),
             bypassed: false,
@@ -345,6 +367,23 @@ impl Container {
         self.sends.push(Send {
             target: target.into(),
             label: label.into(),
+        });
+        self
+    }
+
+    /// Add a control-rate modulation route (a ModMatrix row) scoped to this
+    /// subtree. See [`ModRoute`].
+    #[must_use]
+    pub fn route(
+        mut self,
+        source: impl Into<String>,
+        target: impl Into<String>,
+        depth: f32,
+    ) -> Self {
+        self.mod_routes.push(ModRoute {
+            source: source.into(),
+            target: target.into(),
+            depth,
         });
         self
     }
