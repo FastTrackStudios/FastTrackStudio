@@ -196,10 +196,10 @@ daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-
 # already migrated to upstream facet 0.50 / vox 0.10; patch them in here so the
 # whole graph resolves against the migrated sources.
 [patch."https://codeberg.org/FastTrackStudios/architect.git"]
-architect = { path = "/run/media/Development/architect/macros/architect" }
+architect = { path = "../../architect/macros/architect" }
 
 [patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "/run/media/Development/FastTrackStudio/input_actions/crates/actions-proto" }
+actions-proto = { path = "../input_actions/crates/actions-proto" }
 
 # ── Split FTS plugin repo local overrides ───────────────────────────────
 [patch."https://git.starcommand.live/FastTrackStudios/FTS-Plugins.git"]

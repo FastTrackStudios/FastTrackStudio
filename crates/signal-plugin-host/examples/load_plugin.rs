@@ -36,8 +36,21 @@ fn main() {
     }
     let params = plugin.params();
     println!("params  : {}", params.len());
-    for p in params.iter().take(8) {
-        println!("  [{:>5}] {}", p.id, p.name);
+    // `--params` dumps the full parameter surface (id, range, default,
+    // current value, display text) as TSV — the Omnisphere calibration path.
+    if std::env::args().any(|a| a == "--params") {
+        for p in &params {
+            let value = plugin.param_value(p.id).unwrap_or(p.default);
+            let text = plugin.value_to_text(p.id, value).unwrap_or_default();
+            println!(
+                "PARAM\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                p.id, p.name, p.min, p.max, p.default, value, text
+            );
+        }
+    } else {
+        for p in params.iter().take(8) {
+            println!("  [{:>5}] {}", p.id, p.name);
+        }
     }
     println!("latency : {} frames", plugin.latency());
 
