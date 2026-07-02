@@ -3,15 +3,14 @@
 //! Discovers a running REAPER instance via its Unix socket, connects via vox,
 //! initializes the DAW singleton, and builds the setlist from open projects.
 
-use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use daw::rpc::{Caller, Daw};
 use daw_reaper::{LocalCaller, Reaper};
-use eyre::{bail, Result};
+use eyre::{Result, bail};
 use session::{
-    serve_setlist_service, setlist_service_service_descriptor, song_service_service_descriptor,
     SetlistServiceClient, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
+    serve_setlist_service, setlist_service_service_descriptor, song_service_service_descriptor,
 };
 use session_ui::Session;
 
@@ -74,7 +73,13 @@ pub async fn connect_to_reaper() -> Result<()> {
 
     let setlist = SetlistServiceImpl::with_daw(Reaper);
 
-    let local = LocalCaller::new(serve_setlist_service(setlist)).await?;
+    // vox 0.10 / architect::LocalServer: LocalCaller now serves a
+    // LayerRouter in-process instead of a bare service handler.
+    let router = daw::LayerRouter::new().with(
+        setlist_service_service_descriptor(),
+        serve_setlist_service(setlist),
+    );
+    let local = LocalCaller::new(router).await?;
     let client = SetlistServiceClient::new(local.caller());
 
     // Build setlist from whatever's open in REAPER
@@ -155,67 +160,45 @@ fn is_process_alive(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+/// Minimal `FromVoxLane` client that captures the DAW service lane's
+/// `Caller` (vox 0.10 replacement for the removed `NoopClient` +
+/// manual `open_connection` bootstrap).
+#[derive(Clone)]
+struct DesktopLaneClient {
+    caller: vox::Caller,
+}
+
+impl vox::FromVoxLane for DesktopLaneClient {
+    const SERVICE_NAME: &'static str = "session-desktop";
+
+    fn from_vox_lane(caller: vox::Caller, _connection: Option<vox::ConnectionHandle>) -> Self {
+        Self { caller }
+    }
+}
+
 /// Connect to a REAPER socket and establish a vox session.
 ///
-/// Opens a virtual connection on the session (matching what daw-bridge expects)
-/// so that the RoutedHandler can properly dispatch service calls.
+/// vox 0.10 lane model: establish the connection, then open the DAW
+/// service lane (carries `vox-service: session-desktop` automatically),
+/// yielding a ready-to-use `Caller`. The extension's LayerRouter
+/// dispatches by method id, so all DAW services are reachable.
 async fn connect_to_daw(path: &Path) -> eyre::Result<Caller> {
     let stream = tokio::net::UnixStream::connect(path).await?;
     let link = vox_stream::StreamLink::unix(stream);
-    let handshake_result = initiator_handshake_result(64);
-    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
-        .establish::<vox::NoopClient>()
-        .await?;
-    let session = root
-        .session
-        .clone()
-        .ok_or_else(|| eyre::eyre!("DAW root session missing handle"))?;
 
-    // Open a virtual connection for DAW services — the daw-bridge's RoutedHandler
-    // dispatches service calls on virtual connections, not the root session.
-    let conn = session
-        .open_connection(
-            vox::ConnectionSettings {
-                parity: vox::Parity::Odd,
-                max_concurrent_requests: 64,
-                initial_channel_credit: 16,
-            },
-            vec![vox::MetadataEntry {
-                key: Cow::Borrowed("role"),
-                value: vox::MetadataValue::String(Cow::Borrowed("session-desktop")),
-                flags: vox::MetadataFlags::NONE,
-            }],
-        )
-        .await?;
+    let connection = vox::initiator_on(link)
+        .establish_connection()
+        .await
+        .map_err(|e| eyre::eyre!("vox handshake failed: {e:?}"))?;
+    let client = connection
+        .open_lane::<DesktopLaneClient>()
+        .await
+        .map_err(|e| eyre::eyre!("open_lane failed: {e:?}"))?;
+    // The connection's run loop is spawned internally by
+    // `establish_connection`; the lane's `Caller` keeps it alive.
+    drop(connection);
 
-    let mut driver = vox::Driver::new(conn, ());
-    let caller = Caller::new(driver.caller());
-    moire::task::spawn(async move { driver.run().await });
-
-    Ok(caller)
-}
-
-/// Construct a synthetic `HandshakeResult` for initiator connections.
-fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeResult {
-    vox::HandshakeResult {
-        role: vox::SessionRole::Initiator,
-        our_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Odd,
-            max_concurrent_requests,
-            initial_channel_credit: 16,
-        },
-        peer_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Even,
-            max_concurrent_requests,
-            initial_channel_credit: 16,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-        peer_metadata: vec![],
-    }
+    Ok(client.caller)
 }
 
 /// Try to find the web app's `dx build` output directory.

@@ -13,11 +13,11 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 use session::{SetlistEvent, WebClientServiceClient};
 use std::sync::OnceLock;
 use tokio::net::TcpListener;
@@ -406,38 +406,46 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, gateway))
 }
 
+/// Minimal `FromVoxLane` client that captures an accepted lane's `Caller`
+/// so the desktop can push `SetlistEvent`s back to the web client
+/// (vox 0.10 replacement for the removed root-session `NoopClient` caller).
+#[derive(Clone)]
+struct GatewayLaneClient {
+    caller: vox::Caller,
+}
+
+impl vox::FromVoxLane for GatewayLaneClient {
+    const SERVICE_NAME: &'static str = "session-gateway";
+
+    fn from_vox_lane(caller: vox::Caller, _connection: Option<vox::ConnectionHandle>) -> Self {
+        Self { caller }
+    }
+}
+
 async fn handle_socket(socket: WebSocket, gateway: Arc<Gateway>) {
     let link = AxumWsLink::new(socket);
-    let handshake_result = vox::HandshakeResult {
-        role: vox::SessionRole::Acceptor,
-        our_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Even,
-            max_concurrent_requests: 64,
-            initial_channel_credit: 16,
-        },
-        peer_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Odd,
-            max_concurrent_requests: 64,
-            initial_channel_credit: 16,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-        peer_metadata: vec![],
-    };
 
-    match vox::acceptor_conduit(vox::BareConduit::new(link), handshake_result)
-        .on_connection(gateway.handler.clone())
-        .establish::<vox::NoopClient>()
+    // vox 0.10 lane model: accept every inbound lane with the shared
+    // RoutedHandler (it dispatches by method id) and capture the lane's
+    // caller so setlist events can be pushed back to this web client.
+    let handler = gateway.handler.clone();
+    let lane_acceptor = vox::lane_acceptor_fn(move |_req, lane: vox::PendingLane| {
+        let lane_client: GatewayLaneClient = lane.handle_with_client(handler.clone());
+        let client = WebClientServiceClient::new(lane_client.caller);
+        tokio::spawn(async move {
+            web_client_registry().register(client).await;
+        });
+        Ok(())
+    });
+
+    match vox::acceptor_on(link)
+        .on_lane(lane_acceptor)
+        .establish_connection()
         .await
     {
-        Ok(root) => {
+        Ok(_connection) => {
             debug!("WebSocket client connected");
-            let client = WebClientServiceClient::new(root.caller);
-            web_client_registry().register(client).await;
-            // Keep session alive until connection drops
+            // Keep the connection handle alive until the socket drops.
             std::future::pending::<()>().await;
         }
         Err(e) => warn!("WebSocket handshake failed: {:?}", e),

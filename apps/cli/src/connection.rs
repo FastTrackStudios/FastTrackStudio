@@ -10,10 +10,9 @@
 //! generated service client (`SessionModeServiceClient`,
 //! `TakeRankingServiceClient`, …) on top.
 
-use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 
 /// Pick a socket and open a Vox connection against it.
 ///
@@ -76,6 +75,25 @@ async fn discover_newest_socket() -> Result<PathBuf> {
     ))
 }
 
+/// Minimal `FromVoxLane` client that captures the extension service
+/// lane's `Caller` (vox 0.10 replacement for the removed `NoopClient`
+/// + manual `open_connection` bootstrap). The lane's service name is
+/// carried as metadata automatically; the extension's LayerRouter
+/// dispatches by method id, so any generated service client can be
+/// constructed on top of the returned `Caller`.
+#[derive(Clone)]
+struct SessionLaneClient {
+    caller: vox::Caller,
+}
+
+impl vox::FromVoxLane for SessionLaneClient {
+    const SERVICE_NAME: &'static str = "session-cli";
+
+    fn from_vox_lane(caller: vox::Caller, _connection: Option<vox::ConnectionHandle>) -> Self {
+        Self { caller }
+    }
+}
+
 async fn open_session(path: &Path) -> Result<vox::Caller> {
     let t0 = std::time::Instant::now();
     let stream = tokio::net::UnixStream::connect(path)
@@ -84,73 +102,25 @@ async fn open_session(path: &Path) -> Result<vox::Caller> {
     let t_socket = t0.elapsed();
     let link = vox_stream::StreamLink::unix(stream);
 
-    let handshake = vox::HandshakeResult {
-        role: vox::SessionRole::Initiator,
-        our_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Odd,
-            max_concurrent_requests: 64,
-            initial_channel_credit: 16,
-        },
-        peer_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Even,
-            max_concurrent_requests: 64,
-            initial_channel_credit: 16,
-        },
-        // Tradeoff: `true` enables vox's operation store cache for
-        // RPC resumability *and* triggers the "encode response for
-        // store" path which panics on the SetlistService payload
-        // shape ("JIT encode returned false (OOM)" in vox-core's
-        // send_reply). `false` skips the store but also breaks the
-        // schema-before-data ordering for complex responses (vox
-        // ~27eef57 sends Setlist schema only when retry=true).
-        // Until vox is patched upstream we live with the build-path
-        // panic; mode / transport / track-count etc still work.
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-        peer_metadata: vec![],
-    };
+    // vox 0.10 lane model: establish the connection, then open the
+    // session service lane, yielding a ready-to-use `Caller`. The
+    // connection's run loop is spawned internally by
+    // `establish_connection`, so dropping the handle here does not tear
+    // the session down — the lane's `Caller` keeps it alive.
     let t1 = std::time::Instant::now();
-    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
-        .establish::<vox::NoopClient>()
+    let connection = vox::initiator_on(link)
+        .establish_connection()
         .await
         .map_err(|e| eyre!("vox handshake failed: {e:?}"))?;
     let t_establish = t1.elapsed();
-    let session = root
-        .session
-        .clone()
-        .ok_or_else(|| eyre!("vox root session missing handle"))?;
 
     let t2 = std::time::Instant::now();
-    let conn = session
-        .open_connection(
-            vox::ConnectionSettings {
-                parity: vox::Parity::Odd,
-                max_concurrent_requests: 64,
-                initial_channel_credit: 16,
-            },
-            vec![
-                vox::MetadataEntry {
-                    key: Cow::Borrowed("vox-service"),
-                    value: vox::MetadataValue::String(Cow::Borrowed("session-cli")),
-                    flags: vox::MetadataFlags::NONE,
-                },
-                vox::MetadataEntry {
-                    key: Cow::Borrowed("role"),
-                    value: vox::MetadataValue::String(Cow::Borrowed("cli")),
-                    flags: vox::MetadataFlags::NONE,
-                },
-            ],
-        )
+    let client = connection
+        .open_lane::<SessionLaneClient>()
         .await
-        .map_err(|e| eyre!("open_connection failed: {e:?}"))?;
+        .map_err(|e| eyre!("open_lane failed: {e:?}"))?;
     let t_open = t2.elapsed();
-
-    let mut driver = vox::Driver::new(conn, ());
-    let caller = vox::Caller::new(driver.caller());
-    moire::task::spawn(async move { driver.run().await });
+    drop(connection);
 
     // Trace-level so it stays out of normal output; enable with
     // `RUST_LOG=session_cli::connection=debug` (or `=trace`).
@@ -161,5 +131,5 @@ async fn open_session(path: &Path) -> Result<vox::Caller> {
         total_us = t0.elapsed().as_micros() as u64,
         "vox open_session timing"
     );
-    Ok(caller)
+    Ok(client.caller)
 }

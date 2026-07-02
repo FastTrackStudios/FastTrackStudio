@@ -52,22 +52,25 @@ reaper-macros = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", b
 # now enable that feature on `daw` instead of depending on reaper-test.
 
 # ── Vox service framework ────────────────────────────────────────────
-# Aligned with daw + architect on the FastTrackStudios fork @ f31f1040 =
-# vox 0.8.2 (latest; carries the vox-jit-abi __rust_alloc-scan fix) so the FTS
-# workspace resolves a single vox copy across all sibling repos. URL is the
-# no-`.git` form architect uses (cargo treats `vox` and `vox.git` as distinct
-# sources, which would re-fragment the graph).
-vox = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-types = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-stream = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+# Consumed from crates.io (upstream facet/vox monorepo) — 0.10 line paired
+# with facet 0.50 across the FTS stack (see daw + keyflow migrations). The
+# old FastTrackStudios vox fork (0.8.x) is gone.
+# `transport-local` on top of the daw/keyflow baseline (["runtime"]): the
+# standalone setlist harness serves/connects over `local://` Unix sockets.
+vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime", "transport-local"] }
+vox-types = { version = "0.10.0-rc.1" }
+vox-stream = { version = "0.10.0-rc.1" }
+vox-websocket = { version = "0.10.0-rc.1" }
 
 # ── Architect service framework ─────────────────────────────────────
+# Codeberg main; path-patched to the local migrated checkout below.
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
+architect-rpc-derive = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
-# ── Facet reflection ────────────────────────────────────────────────
-facet = { version = "0.46" }
-facet-json = { version = "0.46" }
+# ── Facet reflection — 0.50 line (paired across the FTS stack) ──────
+facet = { version = "0.50.0-rc.1" }
+facet-json = { version = "0.50.0-rc.1" }
+facet-postcard = { version = "0.50.0-rc.1" }
 
 # ── Keyflow (sibling repo — facade pattern) ─────────────────────────
 keyflow = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
@@ -115,9 +118,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
 
 # ── Patches ──────────────────────────────────────────────────────────
-# Full git-dep policy: NO local-path [patch] blocks. All sibling crates
-# resolve from codeberg.org via [workspace.dependencies] above so
-# CI (which has no sibling checkouts) builds identically to local dev.
+# Git-dep policy: sibling crates resolve from codeberg.org via
+# [workspace.dependencies] above. EXCEPTION (temporary): the facet-0.50 /
+# vox-0.10 migration is only in local checkouts, so local-path [patch]
+# blocks below point at them until the migrations land on codeberg mains.
 
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid duplicate
@@ -167,23 +171,3 @@ map_clone = "allow"
 unnecessary_map_or = "allow"
 if_same_then_else = "allow"
 redundant_locals = "allow"
-
-# vox: FTS fork carries the vox-jit-abi __rust_alloc-scan fix — without it the
-# JIT encode worker OOMs/aborts on complex/allocating RPC return types
-# (complex_return_roundtrips). Redirect bearcove/vox → FTS fork.
-[patch."https://github.com/bearcove/vox"]
-facet-cbor = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-core = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-ffi = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit-abi = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-jit-cal = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-macros-core = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-macros-parse = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-postcard = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-schema = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-service-macros = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-stream = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-types = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
-vox-websocket = { git = "https://codeberg.org/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }

@@ -626,7 +626,7 @@ pub fn cmd_auto_organize(input: &str, output: Option<&str>) -> Result<()> {
     use daw::file::types::track::{FolderSettings, FolderState, Track};
     use daw::file::{parse_project_text, types::serialize::RppSerialize};
     use daw_proto::FolderDepthChange;
-    use dynamic_template::{default_config, OrganizeIntoTracks, OrganizeOptions};
+    use dynamic_template::{OrganizeIntoTracks, OrganizeOptions, default_config};
     use std::collections::{HashMap, VecDeque};
     use std::path::Path;
 
@@ -972,8 +972,8 @@ enum TransportOp {
 }
 
 async fn cmd_transport(socket: Option<&std::path::Path>, op: TransportOp) -> Result<()> {
-    use daw_proto::transport::TransportClient;
     use daw_proto::ProjectContext;
+    use daw_proto::transport::TransportClient;
 
     let caller = connection::connect(socket)
         .await
@@ -1262,7 +1262,8 @@ fn rpc_err(
 fn is_not_found(e: &vox::VoxError<session_proto::SessionServiceError>) -> bool {
     matches!(
         e,
-        vox::VoxError::User(session_proto::SessionServiceError::NotFound { .. })
+        vox::VoxError::User(inner)
+            if matches!(**inner, session_proto::SessionServiceError::NotFound { .. })
     )
 }
 
@@ -1277,8 +1278,8 @@ fn print_json<T: facet::Facet<'static>>(value: &T) -> Result<()> {
 // ============================================================================
 
 async fn cmd_action(socket: Option<&std::path::Path>, command_id: &str) -> Result<()> {
-    use daw_proto::project::ProjectsClient;
     use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
 
     // Normalise the command id: REAPER's named commands always start
     // with `_` (e.g. `_FTS_SESSION_BUILD_SETLIST`). Accept the bare
@@ -1320,8 +1321,8 @@ async fn cmd_action(socket: Option<&std::path::Path>, command_id: &str) -> Resul
 // ============================================================================
 
 async fn cmd_rename_lane(socket: Option<&std::path::Path>, index: u32, name: &str) -> Result<()> {
-    use daw_proto::project::ProjectsClient;
     use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
 
     let caller = connection::connect(socket)
         .await
@@ -1342,8 +1343,8 @@ async fn cmd_set_project_info(
     key: &str,
     value: f64,
 ) -> Result<()> {
-    use daw_proto::project::ProjectsClient;
     use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
 
     let caller = connection::connect(socket)
         .await

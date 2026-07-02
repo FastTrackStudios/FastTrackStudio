@@ -33,6 +33,8 @@ gloo-timers = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+# Wire-codec roundtrip tests (facet 0.50 successor to the old vox_postcard).
+facet-postcard.workspace = true
 
 [lints]
 workspace = true
