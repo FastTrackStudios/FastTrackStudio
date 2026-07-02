@@ -466,8 +466,10 @@ dependencies = [
  "facet 0.50.0-rc.1",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "uuid 1.23.1",
  "vox",
+ "vox-core",
 ]
 
 [[package]]
@@ -2546,6 +2548,7 @@ dependencies = [
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "daw-proto",
  "eyre",
  "facet-json 0.50.0-rc.1",
@@ -4337,7 +4340,6 @@ dependencies = [
 [[package]]
 name = "fts-devtools"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#78ffa9c66efe2cecba28b69ce0bc0903f88e7f4d"
 
 [[package]]
 name = "fts-plugin-core"
