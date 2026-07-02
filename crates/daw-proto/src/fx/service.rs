@@ -15,8 +15,8 @@ use super::{
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
-use crate::{DawResult, ProjectContext};
 use crate::batch::{FxChainArg, ProjectArg};
+use crate::{DawResult, ProjectContext};
 
 #[architect::rpc(ops(ProjectContext as ProjectArg, FxChainContext as FxChainArg))]
 pub trait Effects {
@@ -274,4 +274,3 @@ pub trait Effects {
         chunk_text: &str,
     ) -> DawResult<()>;
 }
-

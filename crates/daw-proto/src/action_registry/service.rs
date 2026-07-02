@@ -67,4 +67,3 @@ pub trait ActionRegistration {
     /// `None` if not registered or not toggleable.
     fn get_toggle_state(&self, command_name: &str) -> Option<bool>;
 }
-

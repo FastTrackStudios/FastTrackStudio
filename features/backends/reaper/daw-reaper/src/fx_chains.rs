@@ -11,8 +11,8 @@ use reaper_high::{FxChain, Reaper as ReaperHigh, Track};
 use reaper_medium::{TrackFxLocation, TransferBehavior};
 
 use crate::fx::build_fx_info;
-use crate::safe_wrappers::fx as fx_sw;
 use crate::project_context::find_track_by_guid;
+use crate::safe_wrappers::fx as fx_sw;
 
 fn resolve_chain(ctx: &FxChainContext) -> DawResult<(Track, FxChain)> {
     let project = ReaperHigh::get().current_project();

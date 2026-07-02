@@ -12,10 +12,10 @@
 
 use super::Region;
 use super::event::RegionStreamEvent;
+use crate::batch::ProjectArg;
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
 use vox::Tx;
-use crate::batch::ProjectArg;
 
 /// Lane placement request — kept here so retired batch ops can still
 /// name it without dragging in the full lane surface.

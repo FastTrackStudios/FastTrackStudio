@@ -133,4 +133,3 @@ pub trait Automation {
     /// Set global automation override (`None` to clear).
     fn set_global_automation_override(&self, project: ProjectContext, mode: Option<AutomationMode>);
 }
-

@@ -103,7 +103,10 @@ async fn every_op_payload_type_crosses_the_wire() -> eyre::Result<()> {
 
     macro_rules! check {
         ($name:literal, $fut:expr) => {
-            assert!($fut.await.is_ok(), concat!($name, " failed schema exchange"));
+            assert!(
+                $fut.await.is_ok(),
+                concat!($name, " failed schema exchange")
+            );
         };
     }
 

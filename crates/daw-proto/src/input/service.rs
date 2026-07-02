@@ -24,4 +24,3 @@ pub trait Input {
     /// with prefix (`"_SWS_ABOUT"`), numeric IDs (`"40044"`).
     fn execute_action(&self, action_id: &str);
 }
-

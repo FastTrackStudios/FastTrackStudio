@@ -26,4 +26,3 @@ pub trait FxChains {
     fn state_chunk(&self, ctx: FxChainContext, fx_idx: u32) -> Option<String>;
     fn set_state_chunk(&self, ctx: FxChainContext, fx_idx: u32, chunk: &str) -> DawResult<()>;
 }
-

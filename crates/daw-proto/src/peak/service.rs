@@ -22,4 +22,3 @@ pub trait Peaks {
         block_size: u32,
     ) -> TakePeakData;
 }
-

@@ -300,4 +300,3 @@ pub trait Midi {
     fn delete_note_expression(&self, location: MidiTakeLocation, index: u32);
     fn set_note_expression_value(&self, location: MidiTakeLocation, index: u32, value: f64);
 }
-

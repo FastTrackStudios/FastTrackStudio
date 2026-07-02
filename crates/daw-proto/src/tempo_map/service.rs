@@ -7,9 +7,9 @@
 
 use super::TempoPoint;
 use super::event::TempoMapStreamEvent;
+use crate::batch::ProjectArg;
 use crate::{DawResult, ProjectContext};
 use vox::Tx;
-use crate::batch::ProjectArg;
 
 #[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait TempoMap {

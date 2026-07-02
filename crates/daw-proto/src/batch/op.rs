@@ -207,7 +207,9 @@ impl StepOutputs {
             },
             _ => None,
         };
-        Ok(ProjectContext::Project(info.ok_or_else(wrong)?.guid.clone()))
+        Ok(ProjectContext::Project(
+            info.ok_or_else(wrong)?.guid.clone(),
+        ))
     }
 
     /// A track ref produced by step `step` (`index` picks from list
@@ -366,10 +368,9 @@ mod tests {
             T: for<'a> facet::Facet<'a> + core::fmt::Debug,
         {
             let name = core::any::type_name::<T>();
-            let bytes = vox_phon::to_vec(value)
-                .unwrap_or_else(|e| panic!("{name}: encode: {e:?}"));
-            let schema = vox_phon::schema_bytes::<T>()
-                .unwrap_or_else(|e| panic!("{name}: schema: {e:?}"));
+            let bytes = vox_phon::to_vec(value).unwrap_or_else(|e| panic!("{name}: encode: {e:?}"));
+            let schema =
+                vox_phon::schema_bytes::<T>().unwrap_or_else(|e| panic!("{name}: schema: {e:?}"));
             let bundle = vox_phon::parse_schema_bytes(&schema)
                 .unwrap_or_else(|e| panic!("{name}: parse: {e:?}"));
             let program = vox_phon::build_decode_program::<T>(&bundle)

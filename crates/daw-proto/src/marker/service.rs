@@ -11,10 +11,10 @@
 //! backend type per runtime (`Reaper`, `Standalone`, `RppFile`, …)
 //! and lets a single mount serve every project a binary touches.
 
+use crate::batch::ProjectArg;
 use crate::marker::event::MarkerStreamEvent;
 use crate::{DawResult, Marker, ProjectContext};
 use vox::Tx;
-use crate::batch::ProjectArg;
 
 /// Operations on the markers of a project. `ProjectContext` flows
 /// through each call so backends can serve any project.

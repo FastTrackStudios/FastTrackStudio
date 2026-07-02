@@ -20,4 +20,3 @@ pub trait AudioEngine {
     /// Close all audio + MIDI devices.
     fn quit(&self) -> DawResult<()>;
 }
-

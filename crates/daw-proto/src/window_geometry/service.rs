@@ -17,4 +17,3 @@ pub trait WindowGeometry {
     /// Move + resize to an explicit rect.
     fn set_rect(&self, target: WindowTarget, rect: ScreensetRect) -> DawResult<()>;
 }
-

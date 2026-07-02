@@ -34,4 +34,3 @@ pub trait WindowManager {
     /// for reuse.
     fn delete_layout(&self, name: String) -> WindowLayoutResult;
 }
-

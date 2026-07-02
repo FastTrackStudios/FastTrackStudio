@@ -10,4 +10,3 @@ pub trait Health {
     /// Show a message in the DAW's console/log window.
     fn show_console_msg(&self, msg: &str);
 }
-

@@ -2,13 +2,13 @@
 //! `TakeService`. Stateless singleton backends — `ProjectContext` and
 //! `ItemRef`/`TakeRef` flow through every call.
 
+use crate::batch::ProjectArg;
 use crate::item::{
     AddTakeMarkerAtPositionRequest, ItemRef, SourceType, Take, TakeMarker, TakeMarkerCreate,
     TakeMarkerUpdate, TakeRef,
 };
 use crate::primitives::Duration;
 use crate::{DawResult, ProjectContext};
-use crate::batch::ProjectArg;
 
 #[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait Takes {

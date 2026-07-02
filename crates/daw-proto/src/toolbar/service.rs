@@ -37,4 +37,3 @@ pub trait Toolbar {
     fn is_available(&self) -> bool;
     fn tracked_buttons(&self) -> Vec<TrackedButton>;
 }
-

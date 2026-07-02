@@ -41,4 +41,3 @@ pub trait LiveMidi {
     /// plugins that manage presets internally.
     fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage);
 }
-

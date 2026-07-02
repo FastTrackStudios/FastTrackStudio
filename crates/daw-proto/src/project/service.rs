@@ -2,8 +2,8 @@
 //! commands/ruler-lanes. Subscriber stream retires (sibling trait).
 
 use super::{ProjectContext, ProjectInfo};
-use crate::{DawResult, UndoScope};
 use crate::batch::ProjectArg;
+use crate::{DawResult, UndoScope};
 
 #[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait Projects {
@@ -75,4 +75,3 @@ pub trait Projects {
     fn get_ruler_lane_name(&self, project: ProjectContext, lane_index: u32) -> String;
     fn ruler_lane_count(&self, project: ProjectContext) -> u32;
 }
-

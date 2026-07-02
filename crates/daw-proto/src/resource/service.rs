@@ -14,4 +14,3 @@ pub trait ResourcePaths {
     /// default theme is active.
     fn color_theme_path(&self) -> Option<PathBuf>;
 }
-

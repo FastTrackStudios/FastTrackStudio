@@ -12,8 +12,8 @@
 //! not here — keeps the proto layer free of serde deps.
 
 use crate::DawResult;
-use crate::project::ProjectContext;
 use crate::batch::ProjectArg;
+use crate::project::ProjectContext;
 
 #[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait ExtState {
@@ -49,4 +49,3 @@ pub trait ExtState {
     /// Whether a project-scoped value is set.
     fn has_project(&self, project: ProjectContext, section: &str, key: &str) -> bool;
 }
-

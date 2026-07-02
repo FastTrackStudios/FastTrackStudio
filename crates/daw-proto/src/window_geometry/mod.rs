@@ -5,4 +5,3 @@ mod types;
 
 pub use service::*;
 pub use types::{WindowGeometryResult, WindowTarget};
-

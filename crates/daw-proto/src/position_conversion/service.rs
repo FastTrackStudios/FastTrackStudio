@@ -55,4 +55,3 @@ pub trait PositionConversion {
         position: PositionInQuarterNotes,
     ) -> PositionInBeats;
 }
-

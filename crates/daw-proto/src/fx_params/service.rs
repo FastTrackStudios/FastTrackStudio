@@ -18,4 +18,3 @@ pub trait FxParams {
     fn name(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32) -> Option<String>;
     fn info(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32) -> Option<FxParameter>;
 }
-

@@ -8,4 +8,3 @@ pub use types::{
     ToolbarButton, ToolbarIcon, ToolbarIconKind, ToolbarItemInfo, ToolbarPlacement, ToolbarResult,
     ToolbarSnapshot, ToolbarSnapshotSource, ToolbarTarget, TrackedButton,
 };
-

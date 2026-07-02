@@ -12,4 +12,3 @@ pub trait BatchExecution {
     /// Execute a batch program and return all results.
     fn execute(&self, request: BatchRequest) -> BatchResponse;
 }
-

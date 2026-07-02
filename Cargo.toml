@@ -85,6 +85,7 @@ architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branc
 # VOX service framework — consumed from crates.io (upstream facet/vox monorepo).
 vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
 vox-types = { version = "0.10.0-rc.1" }
+vox-phon = { version = "0.10.0-rc.1" }
 vox-stream = { version = "0.10.0-rc.1" }
 
 # CLI
@@ -194,12 +195,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # ── Local development overrides ──────────────────────────────────────
 # Path-patch the already-migrated sibling repos (facet 0.50 / vox 0.10).
-[patch."https://codeberg.org/FastTrackStudios/architect.git"]
-architect = { path = "/run/media/Development/architect/macros/architect" }
-
-[patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "/run/media/Development/FastTrackStudio/input_actions/crates/actions-proto" }
-
+# architect + input_actions resolve from codeberg main (both carry the
+# facet-0.50/vox-0.10 migration as of 2026-07-02); the dev-only local path
+# patches from the migration window are gone.
 # [patch."https://codeberg.org/FastTrackStudios/keyflow.git"]
 # keyflow = { path = "../keyflow/crates/keyflow" }
 

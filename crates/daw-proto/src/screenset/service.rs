@@ -17,4 +17,3 @@ pub trait Screensets {
     fn apply(&self, id: &str, options: ScreensetOptions) -> ScreensetResult;
     fn delete(&self, id: &str, options: ScreensetOptions) -> ScreensetResult;
 }
-

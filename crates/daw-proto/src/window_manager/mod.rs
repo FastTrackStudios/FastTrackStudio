@@ -8,4 +8,3 @@ pub use types::{
     LayoutPlacement, LayoutToolbar, ModeDockerLayout, MonitorRect, WindowLayout,
     WindowLayoutOptions, WindowLayoutResult, WindowLayoutSummary,
 };
-

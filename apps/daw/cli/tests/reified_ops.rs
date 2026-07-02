@@ -29,7 +29,9 @@ async fn op_and_call_round_trip_against_standalone() -> eyre::Result<()> {
     let outcome = run_call(
         daw,
         "marker.all",
-        Some(&format!(r#"{{"project":{{"Literal":{{"Project":"{project}"}}}}}}"#)),
+        Some(&format!(
+            r#"{{"project":{{"Literal":{{"Project":"{project}"}}}}}}"#
+        )),
     )
     .await?;
     let markers = outcome

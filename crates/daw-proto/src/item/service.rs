@@ -6,9 +6,9 @@
 //! the dropped surfaces (subscribe_items is sibling-trait territory).
 
 use super::{FadeShape, Item, ItemRef};
+use crate::batch::{ProjectArg, TrackArg};
 use crate::primitives::{BeatAttachMode, Duration, PositionInSeconds};
 use crate::{DawResult, ProjectContext, TrackRef};
-use crate::batch::{ProjectArg, TrackArg};
 
 #[architect::rpc(ops(ProjectContext as ProjectArg, TrackRef as TrackArg))]
 pub trait Items {
@@ -123,4 +123,3 @@ pub trait Items {
         group_id: Option<u32>,
     ) -> DawResult<()>;
 }
-

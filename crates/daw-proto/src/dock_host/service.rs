@@ -35,4 +35,3 @@ pub trait DockHosting {
     /// Inject a synthetic UI event into a panel.
     fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool;
 }
-

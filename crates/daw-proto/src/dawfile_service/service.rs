@@ -19,4 +19,3 @@ pub trait DawFileOps {
         options: CombineSetlistOptions,
     ) -> CombineSetlistResult;
 }
-

@@ -13,4 +13,3 @@ pub trait PluginLoading {
     /// Check if a plugin at the given path is already loaded.
     fn is_loaded(&self, path: &str) -> bool;
 }
-

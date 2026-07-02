@@ -28,4 +28,3 @@ pub trait AudioAccessors {
     /// Destroy an accessor and free its resources.
     fn destroy_accessor(&self, accessor_id: &str);
 }
-

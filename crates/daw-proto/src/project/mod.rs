@@ -13,4 +13,3 @@ mod types;
 pub use event::{ProjectEvent, ProjectStreamEvent};
 pub use service::*;
 pub use types::{ProjectContext, ProjectInfo};
-

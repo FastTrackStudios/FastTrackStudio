@@ -36,4 +36,3 @@ pub trait UiDialogs {
     /// Temporarily suspend UI refresh for batch operations.
     fn set_prevent_ui_refresh(&self, prevent: bool);
 }
-

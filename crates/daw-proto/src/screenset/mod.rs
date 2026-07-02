@@ -9,4 +9,3 @@ pub use types::{
     ScreensetRect, ScreensetResult, ScreensetScope, ScreensetSelection, ScreensetSummary,
     ScreensetTrackVisibility, ScreensetWindow,
 };
-
