@@ -117,6 +117,14 @@ pub enum MidiMod {
     Bender,
     /// Velocity of the most recent note-on, 0..1.
     Velocity,
+    /// Note number of the most recent note-on, 0..1 (keytracking).
+    Key,
+    /// Sample-and-hold random, redrawn per note-on, −1..+1.
+    Random,
+    /// Alternates 0 / 1 on each note-on.
+    Alt,
+    /// Always 1.0 (route depth = a constant offset).
+    Constant,
     /// An arbitrary CC, 0..1.
     Cc(u8),
 }
@@ -156,7 +164,7 @@ impl ModSource {
         Self {
             kind: SourceKind::Midi(m),
             sample_rate: 0.0,
-            value: 0.0,
+            value: if m == MidiMod::Constant { 1.0 } else { 0.0 },
         }
     }
 
@@ -167,6 +175,10 @@ impl ModSource {
             "after" | "aftertouch" | "pressure" => MidiMod::Aftertouch,
             "bender" | "bend" | "pitchbend" => MidiMod::Bender,
             "velo" | "velocity" => MidiMod::Velocity,
+            "key" | "keytrack" => MidiMod::Key,
+            "random" | "random2" | "random unipolar" => MidiMod::Random,
+            "alt" => MidiMod::Alt,
+            "constant" | "bias1" | "bias2" => MidiMod::Constant,
             other => {
                 let n = other.strip_prefix("cc")?.parse().ok()?;
                 MidiMod::Cc(n)
@@ -212,6 +224,23 @@ impl ModSource {
                             if *velocity > 0 =>
                         {
                             v = *velocity as f32 / 127.0;
+                        }
+                        (MidiMod::Key, MidiMessage::NoteOn { note, velocity, .. })
+                            if *velocity > 0 =>
+                        {
+                            v = *note as f32 / 127.0;
+                        }
+                        (MidiMod::Random, MidiMessage::NoteOn { velocity, .. })
+                            if *velocity > 0 =>
+                        {
+                            // Redraw from a running hash of the previous value.
+                            let bits = (v.to_bits() ^ 0x9E37_79B9).wrapping_mul(0xC2B2_AE35);
+                            v = ((bits >> 8) as f32 / (u32::MAX >> 8) as f32) * 2.0 - 1.0;
+                        }
+                        (MidiMod::Alt, MidiMessage::NoteOn { velocity, .. })
+                            if *velocity > 0 =>
+                        {
+                            v = if v > 0.5 { 0.0 } else { 1.0 };
                         }
                         _ => {}
                     }

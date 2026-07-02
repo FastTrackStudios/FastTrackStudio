@@ -136,6 +136,17 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
                 if let Some(v) = block.param_f32("resonance") {
                     f = f.with_q(NativeFilter::q_from_norm(v));
                 }
+                if let Some(m) = block
+                    .params
+                    .iter()
+                    .find(|p| p.name == "mode")
+                    .and_then(|p| crate::native::FilterMode::parse(&p.value))
+                {
+                    f = f.with_mode(m);
+                }
+                if let Some(v) = block.param_f32("poles") {
+                    f = f.with_poles(v.round() as u32);
+                }
                 Some(Box::new(f))
             }
             BlockType::Amp => {
@@ -269,7 +280,13 @@ impl ModCompiler {
         let src = match block.block_type {
             BlockType::Lfo => {
                 let rate = block.param_f32("rate").unwrap_or(2.0).clamp(0.01, 40.0);
-                ModSource::lfo(ControlLfo::new(LfoWave::Sine, rate), sr)
+                let wave = match block.param_f32("wave").unwrap_or(0.0).round() as u32 {
+                    1 => LfoWave::Triangle,
+                    2 => LfoWave::Saw,
+                    3 => LfoWave::Square,
+                    _ => LfoWave::Sine,
+                };
+                ModSource::lfo(ControlLfo::new(wave, rate), sr)
             }
             BlockType::Envelope | BlockType::MultisegEnvelope => {
                 let mut p = crate::native::AdsrParams::default();
@@ -370,6 +387,12 @@ pub enum RenderNode {
         zone: Zone,
         inner: Box<RenderNode>,
     },
+    /// Container volume: input trim applied before `inner`, output fader after.
+    Gain {
+        input: f32,
+        output: f32,
+        inner: Box<RenderNode>,
+    },
     /// A subtree whose output also feeds one or more send buses (unity gain).
     SendTap {
         buses: Vec<usize>,
@@ -432,6 +455,10 @@ impl RenderNode {
         sample_rate: u32,
         mc: &mut ModCompiler,
     ) -> RenderNode {
+        // A bypassed subtree renders as a pass-through (no leaves, no routes).
+        if container.bypassed {
+            return RenderNode::Serial(Vec::new());
+        }
         // Bring this container's modulators into scope.
         let scope_mark = mc.scope.len();
         for m in &container.modulators {
@@ -465,6 +492,14 @@ impl RenderNode {
                 inner: Box::new(base),
             }
         };
+        // Container volumes: input trim + output fader (dB → linear).
+        if container.input_db != 0.0 || container.output_db != 0.0 {
+            node = RenderNode::Gain {
+                input: 10f32.powf(container.input_db / 20.0),
+                output: 10f32.powf(container.output_db / 20.0),
+                inner: Box::new(node),
+            };
+        }
         // This container is a send target → it becomes a bus return.
         if let Some(bus) = mc.bus_id(&container.name) {
             node = RenderNode::BusInject {
@@ -532,6 +567,7 @@ impl RenderNode {
                 v.iter_mut().for_each(|n| n.prepare(sample_rate, block_size));
             }
             RenderNode::Zoned { inner, .. }
+            | RenderNode::Gain { inner, .. }
             | RenderNode::SendTap { inner, .. }
             | RenderNode::BusInject { inner, .. } => inner.prepare(sample_rate, block_size),
             RenderNode::Modulated { engine, inner } => {
@@ -550,6 +586,7 @@ impl RenderNode {
             }
             RenderNode::Zoned { inner, .. }
             | RenderNode::Modulated { inner, .. }
+            | RenderNode::Gain { inner, .. }
             | RenderNode::SendTap { inner, .. }
             | RenderNode::BusInject { inner, .. } => inner.leaf_count(),
         }
@@ -564,6 +601,7 @@ impl RenderNode {
             }
             RenderNode::Zoned { inner, .. }
             | RenderNode::Modulated { inner, .. }
+            | RenderNode::Gain { inner, .. }
             | RenderNode::SendTap { inner, .. }
             | RenderNode::BusInject { inner, .. } => inner.live_leaves(),
         }
@@ -685,6 +723,27 @@ impl RenderNode {
                     note_expressions: events.note_expressions,
                 };
                 inner.process_inner(in_l, in_r, out_l, out_r, &fe, ctx);
+            }
+            RenderNode::Gain { input, output, inner } => {
+                if *input == 1.0 {
+                    inner.process_inner(in_l, in_r, out_l, out_r, events, ctx);
+                } else {
+                    let gl: Vec<f32> = in_l[..frames.min(in_l.len())]
+                        .iter()
+                        .map(|s| s * *input)
+                        .collect();
+                    let gr: Vec<f32> = in_r[..frames.min(in_r.len())]
+                        .iter()
+                        .map(|s| s * *input)
+                        .collect();
+                    inner.process_inner(&gl, &gr, out_l, out_r, events, ctx);
+                }
+                if *output != 1.0 {
+                    for f in 0..frames {
+                        out_l[f] *= *output;
+                        out_r[f] *= *output;
+                    }
+                }
             }
             RenderNode::SendTap { buses, inner } => {
                 inner.process_inner(in_l, in_r, out_l, out_r, events, ctx);
@@ -1241,6 +1300,44 @@ zones (
         }
         assert!(level(false) < 1e-6, "muted main path is silent without a send");
         assert!(level(true) > 1e-3, "audio reaches the output via the return bus");
+    }
+
+    /// Container volumes and bypass render: output_db scales the subtree,
+    /// bypassed subtrees pass audio through untouched.
+    #[test]
+    fn container_volume_and_bypass_apply() {
+        // Volume: a −12 dB layer is quieter than a 0 dB one.
+        fn level(db: f32) -> f32 {
+            let tree = Container::preset("P")
+                .add(Container::layer("L").volume(db).block(BlockType::Oscillator, "Osc"));
+            let mut rn = RenderNode::compile(&tree, 48_000);
+            rn.prepare(48_000.0, 256);
+            render_note(&mut rn, 60, 100)
+        }
+        let full = level(0.0);
+        let quiet = level(-12.0);
+        assert!(full > 1e-3);
+        let ratio = quiet / full;
+        assert!(
+            (ratio - 0.251).abs() < 0.02,
+            "−12 dB ≈ ×0.25, got ratio {ratio}"
+        );
+
+        // Bypass: a bypassed muting-amp module passes audio through.
+        use crate::rig::RigBlock;
+        fn with_mute(bypassed: bool) -> f32 {
+            let mut mute = Container::module("Mute")
+                .add(RigBlock::of_type(BlockType::Amp).named("Kill").with_param("gain", "0"));
+            mute.bypassed = bypassed;
+            let tree = Container::preset("P")
+                .add(Container::layer("L").block(BlockType::Oscillator, "Osc"))
+                .add(mute);
+            let mut rn = RenderNode::compile(&tree, 48_000);
+            rn.prepare(48_000.0, 256);
+            render_note(&mut rn, 60, 100)
+        }
+        assert!(with_mute(false) < 1e-6, "active mute silences");
+        assert!(with_mute(true) > 1e-3, "bypassed mute passes through");
     }
 
     /// Routes on placeholder blocks resolve to nothing (warn, not panic),

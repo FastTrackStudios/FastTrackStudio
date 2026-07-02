@@ -280,6 +280,8 @@ pub struct OmniLayer {
     /// Filter-envelope → cutoff depth (signed; `FILTER envdpth`, inverted by
     /// `envdpthinv`).
     pub filter_env_depth: f32,
+    /// Filter 2, when engaged (`act2`): `(freq, res)` normalized.
+    pub filter2: Option<(f32, f32)>,
     /// FM depth 0..1 (`OSC fm`).
     pub fm_depth: f32,
     /// Ring/AM mix 0..1 (`OSC am`).
@@ -313,6 +315,8 @@ pub struct OmniPatch {
     /// Aux FX rack module names.
     pub aux_fx: Vec<String>,
     pub mod_routes: Vec<OmniModRoute>,
+    /// Part LFOs from `LFO_SET`: `(rate 0..1, type 0..1)` per LFO.
+    pub lfos: Vec<(f32, f32)>,
     pub arp_on: bool,
 }
 
@@ -320,6 +324,44 @@ fn rack_types(rack: &XmlNode) -> Vec<String> {
     rack.children_tagged("EFFMODULE")
         .map(|m| m.attr("Type").unwrap_or("").to_string())
         .collect()
+}
+
+/// Coarse filter classification from the factory preset name (`NameStr`) —
+/// mode + pole count. The real algorithm enum (`type1`) is undecoded; the
+/// names cover the dominant families ("Classic LPF 4-pole", "HPF Juicy
+/// 12db", "Bandpass", "Notch", …). Defaults: LP 12 dB.
+fn classify_filter(name: &str) -> (&'static str, u32) {
+    let k = name.to_ascii_lowercase();
+    let mode = if k.contains("hpf") || k.contains("hipass") || k.contains("high") {
+        "highpass"
+    } else if k.contains("bpf") || k.contains("bandpass") {
+        "bandpass"
+    } else if k.contains("notch") {
+        "notch"
+    } else {
+        "lowpass"
+    };
+    // "<N>-pole" wins; else "<N>db" → N/6 poles.
+    let mut poles = 2u32;
+    for (pat, scale) in [("-pole", 1u32), ("db", 6u32)] {
+        if let Some(pos) = k.find(pat) {
+            let digits: String = k[..pos]
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            if let Ok(n) = digits.parse::<u32>() {
+                if n >= scale {
+                    poles = (n / scale).clamp(1, 8);
+                    break;
+                }
+            }
+        }
+    }
+    (mode, poles)
 }
 
 /// Normalized envelope time → seconds. CALIBRATE: the exact Omnisphere
@@ -383,6 +425,12 @@ pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
             let depth = f.num("envdpth").unwrap_or(0.0).clamp(0.0, 1.0);
             let inv = f.num("envdpthinv").unwrap_or(0.0) != 0.0;
             layer.filter_env_depth = if inv { -depth } else { depth };
+            if f.num("act2").unwrap_or(0.0) != 0.0 {
+                layer.filter2 = Some((
+                    f.num("freq2").unwrap_or(0.5).clamp(0.0, 1.0),
+                    f.num("res2").unwrap_or(0.0).clamp(0.0, 1.0),
+                ));
+            }
         }
         layer.amp_env = voice.child("AENVPARAMS").and_then(parse_env);
         layer.filter_env = voice.child("FENVPARAMS").and_then(parse_env);
@@ -482,6 +530,15 @@ pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
                 target: target.to_string(),
                 depth: matrix.num(&format!("hi{n}")).unwrap_or(0.0),
             });
+        }
+    }
+
+    if let Some(set) = engine.child("LFO_SET") {
+        for lfo in set.children_tagged("LFO") {
+            patch.lfos.push((
+                lfo.num("rate").unwrap_or(0.25).clamp(0.0, 1.0),
+                lfo.num("type").unwrap_or(0.0).clamp(0.0, 1.0),
+            ));
         }
     }
 
@@ -599,12 +656,16 @@ fn translate_route(
         "D" => 3,
         _ => return None,
     };
-    let param = match param {
-        "freq" => "cutoff",
-        "res" => "resonance",
-        _ => return None, // tune/atrm/… need osc/amp params — later slices
+    // Pitch targets ride the synth oscillator's tune param; freq/res ride
+    // the layer's Filter 1.
+    let (block, param, scale): (&str, &str, f32) = match param {
+        "freq" => (filter_labels.get(layer_idx)?.as_str(), "cutoff", 1.0),
+        "res" => (filter_labels.get(layer_idx)?.as_str(), "resonance", 1.0),
+        "tune" => ("Synth Osc", "tune", 1.0),
+        // tuneFine is ±1 semitone on a ±24 semitone param.
+        "tuneFine" => ("Synth Osc", "tune", 1.0 / 24.0),
+        _ => return None, // atrm/pdepth/Harmmix/… — later slices
     };
-    let filter = filter_labels.get(layer_idx)?;
     // Sources: MIDI performance names map directly; Omnisphere modulator
     // names map onto the modulator blocks our tree attaches.
     let source = match route.source.as_str() {
@@ -617,7 +678,12 @@ fn translate_route(
         s if s.starts_with("ModEnv") => "Mod Env".to_string(),
         _ => return None, // Key/Alt/Bias/Random/… — later slices
     };
-    Some((layer_idx, source, format!("{filter}.{param}"), route.depth))
+    Some((
+        layer_idx,
+        source,
+        format!("{block}.{param}"),
+        route.depth * scale,
+    ))
 }
 
 /// Map a parsed patch onto the Omnisphere composition tree, realizing each
@@ -752,16 +818,32 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                 .add(osc)
                 .add({
                     // Filter 1 carries the imported cutoff/resonance when the
-                    // section is engaged; disengaged filters stay wide open.
-                    let mut f1 = RigBlock::of_type(BlockType::Filter).named(filter_label);
+                    // section is engaged, plus a coarse mode/poles algorithm
+                    // classified from the factory preset name.
+                    let mut f1 = RigBlock::of_type(BlockType::Filter).named(filter_label.clone());
                     if layer.filter_active {
+                        let (mode, poles) = classify_filter(&layer.filter_name);
                         f1 = f1
                             .with_param("cutoff", format!("{:.4}", layer.filter_freq))
-                            .with_param("resonance", format!("{:.4}", layer.filter_res));
+                            .with_param("resonance", format!("{:.4}", layer.filter_res))
+                            .with_param("mode", mode)
+                            .with_param("poles", poles.to_string());
                     }
-                    Container::module("Filters")
-                        .add(f1)
-                        .block(BlockType::Filter, "Filter 2")
+                    let mut f2 = RigBlock::of_type(BlockType::Filter).named("Filter 2");
+                    if let Some((freq, res)) = layer.filter2 {
+                        if layer.filter_active {
+                            f2 = f2
+                                .with_param("cutoff", format!("{freq:.4}"))
+                                .with_param("resonance", format!("{res:.4}"));
+                        }
+                    }
+                    // SERIES chains the filters; PARALLEL sums them.
+                    let filters = if layer.filter_parallel {
+                        Container::parallel("Filters")
+                    } else {
+                        Container::module("Filters")
+                    };
+                    filters.add(f1).add(f2)
                 })
                 .add(Container::module("Amp").block(BlockType::Amp, "Amp"))
                 .add(fx_rack_from("Layer FX", &layer.fx))
@@ -805,8 +887,16 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
         .add(fx_rack_from("Common FX", &patch.common_fx))
         .add(fx_rack_from("Aux Rack", &patch.aux_fx))
         .modulator(BlockType::ModMatrix, "Mod Matrix");
-    for n in 1..=8 {
-        preset = preset.modulator(BlockType::Lfo, format!("LFO {n}"));
+    for n in 1..=8usize {
+        let mut lfo = RigBlock::of_type(BlockType::Lfo).named(format!("LFO {n}"));
+        if let Some((rate, ty)) = patch.lfos.get(n - 1) {
+            // Normalized rate → Hz (exp sweep 0.05..20; CALIBRATE) and
+            // normalized type → wave index 0..3.
+            lfo = lfo
+                .with_param("rate", format!("{:.4}", 0.05 * 400f32.powf(*rate)))
+                .with_param("wave", format!("{}", (ty * 3.0).round() as u32));
+        }
+        preset = preset.modulator_block(lfo);
     }
     if patch.arp_on {
         preset = preset.modulator(BlockType::Arpeggiator, "Arp");
@@ -882,6 +972,17 @@ mod tests {
 </SynthEngine>
 </AmberPart>
 "#;
+
+    #[test]
+    fn filter_names_classify() {
+        assert_eq!(classify_filter("Classic LPF 4-pole"), ("lowpass", 4));
+        assert_eq!(classify_filter("Basic 12db Lowpass"), ("lowpass", 2));
+        assert_eq!(classify_filter("HPF Juicy 24db"), ("highpass", 4));
+        assert_eq!(classify_filter("Bandpass Juicy 12db"), ("bandpass", 2));
+        assert_eq!(classify_filter("Notch Filter"), ("notch", 2));
+        assert_eq!(classify_filter("Classic LPF 8-pole"), ("lowpass", 8));
+        assert_eq!(classify_filter("untitled"), ("lowpass", 2));
+    }
 
     #[test]
     fn hex_floats_decode() {

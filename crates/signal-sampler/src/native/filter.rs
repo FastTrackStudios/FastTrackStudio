@@ -14,6 +14,21 @@ pub enum FilterMode {
     Lowpass,
     Highpass,
     Bandpass,
+    Notch,
+}
+
+impl FilterMode {
+    /// Parse a mode name (`"lp"`, `"highpass"`, `"bp"`, `"notch"`, …).
+    pub fn parse(s: &str) -> Option<Self> {
+        let k = s.to_ascii_lowercase();
+        Some(match () {
+            _ if k.starts_with("lp") || k.starts_with("low") => FilterMode::Lowpass,
+            _ if k.starts_with("hp") || k.starts_with("high") => FilterMode::Highpass,
+            _ if k.starts_with("bp") || k.starts_with("band") => FilterMode::Bandpass,
+            _ if k.starts_with("notch") => FilterMode::Notch,
+            _ => return None,
+        })
+    }
 }
 
 /// One TPT state-variable filter section (mono).
@@ -60,14 +75,17 @@ impl Svf {
     }
 }
 
-/// The `Filter` block: stereo SVF processor.
+/// The `Filter` block: stereo multi-pole SVF processor. `sections` cascades
+/// 12 dB TPT sections (1..=4 → 12/24/36/48 dB); resonance lives on the first
+/// section, the rest stay flat so the cascade doesn't compound Q.
 pub struct NativeFilter {
     sample_rate: f32,
     mode: FilterMode,
     cutoff_hz: f32,
     q: f32,
-    left: Svf,
-    right: Svf,
+    sections: usize,
+    left: [Svf; 4],
+    right: [Svf; 4],
     prepared: bool,
 }
 
@@ -78,12 +96,21 @@ impl NativeFilter {
             mode: FilterMode::Lowpass,
             cutoff_hz: 20_000.0,
             q: core::f32::consts::FRAC_1_SQRT_2,
-            left: Svf::default(),
-            right: Svf::default(),
+            sections: 1,
+            left: [Svf::default(); 4],
+            right: [Svf::default(); 4],
             prepared: false,
         };
         f.update_coeffs();
         f
+    }
+
+    /// Pole count 1..=8 → cascade sections (12 dB per section, rounded up).
+    #[must_use]
+    pub fn with_poles(mut self, poles: u32) -> Self {
+        self.sections = ((poles.clamp(1, 8) + 1) / 2) as usize;
+        self.update_coeffs();
+        self
     }
 
     #[must_use]
@@ -107,8 +134,23 @@ impl NativeFilter {
     }
 
     fn update_coeffs(&mut self) {
-        self.left.set(self.cutoff_hz, self.q, self.sample_rate);
-        self.right.set(self.cutoff_hz, self.q, self.sample_rate);
+        for i in 0..self.sections {
+            // Resonance on the first section only; the cascade stays flat.
+            let q = if i == 0 { self.q } else { core::f32::consts::FRAC_1_SQRT_2 };
+            self.left[i].set(self.cutoff_hz, q, self.sample_rate);
+            self.right[i].set(self.cutoff_hz, q, self.sample_rate);
+        }
+    }
+
+    /// Run one sample through the cascade of one channel.
+    #[inline]
+    fn tick_chain(chain: &mut [Svf], sections: usize, mode: FilterMode, x: f32) -> f32 {
+        let mut y = x;
+        for svf in chain.iter_mut().take(sections) {
+            let (lp, bp, hp) = svf.tick(y);
+            y = Self::pick(mode, lp, bp, hp);
+        }
+        y
     }
 
     /// Normalized 0..1 → 20 Hz..20 kHz (exponential).
@@ -132,6 +174,7 @@ impl NativeFilter {
             FilterMode::Lowpass => lp,
             FilterMode::Highpass => hp,
             FilterMode::Bandpass => bp,
+            FilterMode::Notch => lp + hp,
         }
     }
 }
@@ -185,8 +228,9 @@ impl PluginInstance for NativeFilter {
     fn prepare(&mut self, sample_rate: f64, _block_size: u32) -> Result<(), PluginError> {
         self.sample_rate = sample_rate.max(1.0) as f32;
         self.update_coeffs();
-        self.left.reset();
-        self.right.reset();
+        for svf in self.left.iter_mut().chain(self.right.iter_mut()) {
+            svf.reset();
+        }
         self.prepared = true;
         Ok(())
     }
@@ -222,19 +266,19 @@ impl PluginInstance for NativeFilter {
             self.update_coeffs();
         }
         let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
+        let (mode, sections) = (self.mode, self.sections);
         for f in 0..frames {
-            let (lp, bp, hp) = self.left.tick(in_l[f]);
-            out_l[f] = Self::pick(self.mode, lp, bp, hp);
-            let (lp, bp, hp) = self.right.tick(in_r[f]);
-            out_r[f] = Self::pick(self.mode, lp, bp, hp);
+            out_l[f] = Self::tick_chain(&mut self.left, sections, mode, in_l[f]);
+            out_r[f] = Self::tick_chain(&mut self.right, sections, mode, in_r[f]);
         }
         Ok(())
     }
 
     fn deactivate(&mut self) {
         self.prepared = false;
-        self.left.reset();
-        self.right.reset();
+        for svf in self.left.iter_mut().chain(self.right.iter_mut()) {
+            svf.reset();
+        }
     }
 }
 
@@ -289,6 +333,40 @@ mod tests {
         let high = sine_response(&mut f, 10_000.0, sr);
         assert!(high > 0.6, "highs pass, rms={high}");
         assert!(low < 0.1, "lows cut, rms={low}");
+    }
+
+    #[test]
+    fn more_poles_roll_off_steeper() {
+        let sr = 48_000.0;
+        // 10 kHz through a 1 kHz LP: 24 dB/oct attenuates far more than 12.
+        let mut f12 = NativeFilter::new(48_000).with_cutoff(1_000.0).with_poles(2);
+        f12.prepare(48_000.0, 4_096).unwrap();
+        let two_pole = sine_response(&mut f12, 10_000.0, sr);
+        let mut f48 = NativeFilter::new(48_000).with_cutoff(1_000.0).with_poles(8);
+        f48.prepare(48_000.0, 4_096).unwrap();
+        let eight_pole = sine_response(&mut f48, 10_000.0, sr);
+        assert!(
+            eight_pole < two_pole * 0.05,
+            "8-pole ≫ steeper than 2-pole: 2p={two_pole} 8p={eight_pole}"
+        );
+    }
+
+    #[test]
+    fn notch_cuts_the_center() {
+        let sr = 48_000.0;
+        let mut f = NativeFilter::new(48_000)
+            .with_mode(FilterMode::Notch)
+            .with_cutoff(1_000.0)
+            .with_q(4.0);
+        f.prepare(48_000.0, 4_096).unwrap();
+        let at_center = sine_response(&mut f, 1_000.0, sr);
+        f.prepare(48_000.0, 4_096).unwrap();
+        let far_away = sine_response(&mut f, 100.0, sr);
+        assert!(far_away > 0.6, "off-notch passes, rms={far_away}");
+        assert!(
+            at_center < far_away * 0.35,
+            "notch cuts its center: center={at_center} off={far_away}"
+        );
     }
 
     #[test]

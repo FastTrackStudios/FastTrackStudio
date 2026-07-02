@@ -169,6 +169,8 @@ struct Voice {
 pub struct NativeWavetable {
     sample_rate: f32,
     cfg: SynthConfig,
+    /// Runtime pitch multiplier (param 4 "tune": 0.5 center, ±24 semitones).
+    pitch_mult: f32,
     voices: Vec<Voice>,
     prepared: bool,
 }
@@ -178,6 +180,7 @@ impl NativeWavetable {
         Self {
             sample_rate: sample_rate.max(1) as f32,
             cfg: SynthConfig::default(),
+            pitch_mult: 1.0,
             voices: Vec::new(),
             prepared: false,
         }
@@ -336,6 +339,8 @@ impl PluginInstance for NativeWavetable {
             mk(1, "unison_detune", (self.cfg.unison_detune_cents / 100.0) as f64),
             mk(2, "fm_depth", self.cfg.fm_depth as f64),
             mk(3, "ring_mix", self.cfg.ring_mix as f64),
+            // 0.5 center → ±24 semitones.
+            mk(4, "tune", 0.5),
         ]
     }
     fn param_value(&mut self, id: u32) -> Option<f64> {
@@ -344,6 +349,7 @@ impl PluginInstance for NativeWavetable {
             1 => Some((self.cfg.unison_detune_cents / 100.0) as f64),
             2 => Some(self.cfg.fm_depth as f64),
             3 => Some(self.cfg.ring_mix as f64),
+            4 => Some((self.pitch_mult.log2() * 12.0 / 48.0 + 0.5) as f64),
             _ => None,
         }
     }
@@ -406,6 +412,7 @@ impl PluginInstance for NativeWavetable {
                 1 => self.cfg.unison_detune_cents = v * 100.0,
                 2 => self.cfg.fm_depth = v,
                 3 => self.cfg.ring_mix = v,
+                4 => self.pitch_mult = 2f32.powf((v - 0.5) * 48.0 / 12.0),
                 _ => {}
             }
         }
@@ -444,11 +451,12 @@ impl PluginInstance for NativeWavetable {
                 };
                 let (mut vl, mut vr) = (0.0f32, 0.0f32);
                 for s in &mut v.subs {
+                    let inc = s.inc * self.pitch_mult;
                     let ph = (s.phase + pm).rem_euclid(1.0);
-                    let smp = morph(ph, s.inc, s.shape) * s.level;
+                    let smp = morph(ph, inc, s.shape) * s.level;
                     vl += smp * s.gain_l;
                     vr += smp * s.gain_r;
-                    s.phase += s.inc;
+                    s.phase += inc;
                     if s.phase >= 1.0 {
                         s.phase -= 1.0;
                     }
