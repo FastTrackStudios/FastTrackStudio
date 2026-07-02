@@ -45,9 +45,61 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
         match block.block_type {
             BlockType::Oscillator => Some(Box::new(NativeOscillator::new(sample_rate))),
             BlockType::Wavetable => {
-                let mut w = NativeWavetable::new(sample_rate);
-                if let Some(v) = block.param_f32("shape") {
-                    w = w.with_shape(v);
+                use crate::native::{HarmVoice, SynthConfig};
+                let mut cfg = SynthConfig::default();
+                let p = |name: &str| block.param_f32(name);
+                if let Some(v) = p("shape") {
+                    cfg.shape = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = p("unison_voices") {
+                    cfg.unison_voices = (v.round() as u32).clamp(1, 8);
+                }
+                if let Some(v) = p("unison_detune") {
+                    cfg.unison_detune_cents = v.clamp(0.0, 1.0) * 100.0;
+                }
+                if let Some(v) = p("unison_width") {
+                    cfg.unison_width = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = p("fm_depth") {
+                    cfg.fm_depth = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = p("fm_ratio") {
+                    cfg.fm_ratio = v.max(0.01);
+                }
+                if let Some(v) = p("ring_mix") {
+                    cfg.ring_mix = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = p("ring_ratio") {
+                    cfg.ring_ratio = v.max(0.01);
+                }
+                for i in 0..4 {
+                    let n = i + 1;
+                    let level = p(&format!("harm{n}_level")).unwrap_or(0.0);
+                    if level > 0.0 {
+                        cfg.harmonia[i] = HarmVoice {
+                            on: true,
+                            level: level.clamp(0.0, 1.0),
+                            interval_semi: p(&format!("harm{n}_interval")).unwrap_or(0.0),
+                            pan: p(&format!("harm{n}_pan")).unwrap_or(0.0),
+                            shape: p(&format!("harm{n}_shape")).unwrap_or(cfg.shape),
+                        };
+                    }
+                }
+                Some(Box::new(NativeWavetable::new(sample_rate).with_config(cfg)))
+            }
+            BlockType::Waveshaper => {
+                let mut w = crate::native::NativeWaveshaper::new(sample_rate);
+                if let Some(v) = block.param_f32("drive") {
+                    w = w.with_drive(v);
+                }
+                if let Some(v) = block.param_f32("crush") {
+                    w = w.with_crush(v);
+                }
+                if let Some(v) = block.param_f32("reduce") {
+                    w = w.with_reduce(v);
+                }
+                if let Some(v) = block.param_f32("mix") {
+                    w = w.with_mix(v);
                 }
                 Some(Box::new(w))
             }

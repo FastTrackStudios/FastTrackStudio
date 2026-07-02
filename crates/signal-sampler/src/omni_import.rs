@@ -263,6 +263,18 @@ pub struct OmniLayer {
     pub filter_res: f32,
     /// `OSC level` (normalized).
     pub level: f32,
+    /// Unison: voice count (1..8), detune 0..1, width 0..1.
+    pub unison_count: u32,
+    pub unison_detune: f32,
+    pub unison_width: f32,
+    /// FM depth 0..1 (`OSC fm`).
+    pub fm_depth: f32,
+    /// Ring/AM mix 0..1 (`OSC am`).
+    pub ring_mix: f32,
+    /// Active Harmonia voices: (level, interval semitones, pan −1..1, shape).
+    pub harmonia: Vec<(f32, f32, f32, f32)>,
+    /// Waveshaper when engaged: (drive, crush, reduce, mix).
+    pub shaper: Option<(f32, f32, f32, f32)>,
     /// Layer FX rack: the four `EFFMODULE Type=` names ("No Effect" ⇒ empty).
     pub fx: Vec<String>,
 }
@@ -338,6 +350,60 @@ pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
         }
         if let Some(osc) = voice.child("OSC") {
             layer.level = osc.num("level").unwrap_or(0.5);
+            layer.fm_depth = osc.num("fm").unwrap_or(0.0).clamp(0.0, 1.0);
+            layer.ring_mix = osc.num("am").unwrap_or(0.0).clamp(0.0, 1.0);
+            // Unison: the newer UNI element wins; older patches carry the
+            // uns*/u* attrs directly on OSC.
+            let (on, cnt, dpth, wdth) = match osc.find("UNI") {
+                Some(uni) => (
+                    uni.num("umix").unwrap_or(1.0) > 0.0,
+                    uni.num("ucnt").unwrap_or(0.0),
+                    uni.num("udpth").unwrap_or(0.1),
+                    uni.num("uwdth").unwrap_or(0.7),
+                ),
+                None => (
+                    osc.num("unsOn").unwrap_or(0.0) > 0.0,
+                    osc.num("ucnt").unwrap_or(0.0),
+                    osc.num("udpth").unwrap_or(0.1),
+                    osc.num("uwdth").unwrap_or(0.7),
+                ),
+            };
+            if on {
+                layer.unison_count = 1 + (cnt.clamp(0.0, 1.0) * 7.0).round() as u32;
+                layer.unison_detune = dpth.clamp(0.0, 1.0);
+                layer.unison_width = wdth.clamp(0.0, 1.0);
+            } else {
+                layer.unison_count = 1;
+            }
+            // Harmonia: gated by OSC hrmOn, scaled by hrmLv.
+            let hrm_on = osc.num("hrmOn").unwrap_or(1.0) > 0.0;
+            let hrm_lv = osc.num("hrmLv").unwrap_or(1.0).clamp(0.0, 1.0);
+            if hrm_on {
+                if let Some(h) = osc.find("HARM") {
+                    for i in 1..=4 {
+                        let act = h.num(&format!("Act{i}")).unwrap_or(0.0) > 0.0;
+                        let level = h.num(&format!("lvl{i}")).unwrap_or(0.0) * hrm_lv;
+                        if act && level > 0.0 {
+                            // smi normalized 0..1 → ±24 semitones; pan 0..1 → ±1.
+                            let smi = (h.num(&format!("smi{i}")).unwrap_or(0.5) - 0.5) * 48.0;
+                            let pan = h.num(&format!("pan{i}")).unwrap_or(0.5) * 2.0 - 1.0;
+                            let shape = h.num(&format!("wfm{i}")).unwrap_or(0.0).clamp(0.0, 1.0);
+                            layer.harmonia.push((level.clamp(0.0, 1.0), smi.round(), pan, shape));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(ws) = voice.child("WAVESHAPER") {
+            if ws.num("act").unwrap_or(0.0) > 0.0 {
+                let drive = ws.num("dpth").unwrap_or(0.0).clamp(0.0, 1.0);
+                let crush = ws.num("bc").unwrap_or(0.0).clamp(0.0, 1.0);
+                let reduce = ws.num("srrdc").unwrap_or(0.0).clamp(0.0, 1.0);
+                let mix = ws.num("mix").unwrap_or(1.0).clamp(0.0, 1.0);
+                if drive > 0.0 || crush > 0.0 || reduce > 0.0 {
+                    layer.shaper = Some((drive, crush, reduce, mix));
+                }
+            }
         }
         if let Some(rack) = voice.child("EFFRACK") {
             layer.fx = rack_types(rack);
@@ -539,7 +605,30 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
 
         let mut osc = Container::module("Oscillator");
         osc = if layer.soundsource.is_empty() {
-            osc.block(BlockType::Wavetable, "Synth Osc")
+            // Synth mode: the wavetable voice carries the whole oscillator
+            // stack (unison / harmonia / FM / ring) as build params.
+            let mut wt = RigBlock::of_type(BlockType::Wavetable).named("Synth Osc");
+            if layer.unison_count > 1 {
+                wt = wt
+                    .with_param("unison_voices", layer.unison_count.to_string())
+                    .with_param("unison_detune", format!("{:.4}", layer.unison_detune))
+                    .with_param("unison_width", format!("{:.4}", layer.unison_width));
+            }
+            if layer.fm_depth > 0.0 {
+                wt = wt.with_param("fm_depth", format!("{:.4}", layer.fm_depth));
+            }
+            if layer.ring_mix > 0.0 {
+                wt = wt.with_param("ring_mix", format!("{:.4}", layer.ring_mix));
+            }
+            for (i, (level, smi, pan, shape)) in layer.harmonia.iter().take(4).enumerate() {
+                let n = i + 1;
+                wt = wt
+                    .with_param(format!("harm{n}_level"), format!("{level:.4}"))
+                    .with_param(format!("harm{n}_interval"), format!("{smi:.1}"))
+                    .with_param(format!("harm{n}_pan"), format!("{pan:.4}"))
+                    .with_param(format!("harm{n}_shape"), format!("{shape:.4}"));
+            }
+            osc.add(wt)
         } else {
             match index.find(&layer.soundsource) {
                 Some(spec) => {
@@ -555,12 +644,20 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                 }
             }
         };
+        let mut shaper_block = RigBlock::of_type(BlockType::Waveshaper).named("Waveshaper");
+        if let Some((drive, crush, reduce, mix)) = layer.shaper {
+            shaper_block = shaper_block
+                .with_param("drive", format!("{drive:.4}"))
+                .with_param("crush", format!("{crush:.4}"))
+                .with_param("reduce", format!("{reduce:.4}"))
+                .with_param("mix", format!("{mix:.4}"));
+        }
         let osc = osc
             .block(BlockType::Unison, "Unison")
             .block(BlockType::Harmonic, "Harmonia")
             .block(BlockType::FmOperator, "FM")
             .block(BlockType::RingModulator, "Ring Mod")
-            .block(BlockType::Waveshaper, "Waveshaper")
+            .add(shaper_block)
             .block(BlockType::Granular, "Granular");
 
         let filter_label = filter_labels[i].clone();
@@ -652,8 +749,14 @@ mod tests {
 <VOICE >
 <FILTER NameStr="LPF Test" act="3f800000" para="0" freq="3f000000" res="3e800000" >
 </FILTER>
-<OSC level="3f400000" >
+<OSC level="3f400000" fm="3e800000" am="0" hrmOn="3f800000" hrmLv="3f800000" >
+<UNI umix="3f800000" ucnt="3f800000" udpth="3e4ccccd" uwdth="3f800000" >
+</UNI>
+<HARM Act1="3f800000" lvl1="3f000000" smi1="3f4aaaab" pan1="3f000000" wfm1="0" >
+</HARM>
 </OSC>
+<WAVESHAPER act="3f800000" dpth="3f000000" bc="0" srrdc="0" mix="3f800000" >
+</WAVESHAPER>
 <EFFRACK >
 <EFFMODULE Type="Chorus Echo" Active="3f800000" >
 </EFFMODULE>
@@ -702,6 +805,17 @@ mod tests {
         assert_eq!(l.level, 0.75);
         assert_eq!(l.fx[0], "Chorus Echo");
         assert_eq!(p.common_fx[0], "PRO-Verb");
+        // Oscillator stack: 8-voice unison at 20 cents, FM 0.25, one
+        // harmonia voice +14 semitones at half level, drive-0.5 waveshaper.
+        assert_eq!(l.unison_count, 8);
+        assert!((l.unison_detune - 0.2).abs() < 1e-3);
+        assert!((l.fm_depth - 0.25).abs() < 1e-6);
+        assert_eq!(l.harmonia.len(), 1);
+        let (level, smi, pan, _shape) = l.harmonia[0];
+        assert!((level - 0.5).abs() < 1e-3);
+        assert_eq!(smi, 14.0);
+        assert!(pan.abs() < 1e-3);
+        assert_eq!(l.shaper, Some((0.5, 0.0, 0.0, 1.0)));
         assert_eq!(p.mod_routes.len(), 1);
         assert_eq!(p.mod_routes[0].source, "Layer A FENV");
         assert_eq!(p.mod_routes[0].target, "A freq");
