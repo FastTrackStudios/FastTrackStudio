@@ -379,18 +379,18 @@ pub fn ProjectDetailView(id: String) -> Element {
                                     }
                                 }
                             }
-                    if total == 0 {
-                        Text { variant: TextVariant::Muted, "No tasks linked to this project yet." }
-                    } else {
-                        TasksApp {
-                            tasks: mine,
-                            on_event: {
-                                let create_slug = forge_slug.clone();
-                                move |mu: TaskMutation| {
-                                    task_muts.apply(&create_slug, mu);
-                                }
-                            },
-                        }
+                    // Always rendered — a fresh project's first task is
+                    // one quick-add away, and creates here file under
+                    // THIS project (scoped mutations).
+                    TasksApp {
+                        tasks: mine,
+                        on_event: {
+                            let create_slug = forge_slug.clone();
+                            let scoped = task_muts.scoped_to(p.id);
+                            move |mu: TaskMutation| {
+                                scoped.apply(&create_slug, mu);
+                            }
+                        },
                     }
                 }
                 ActiveNowSection { snapshot: active_snapshot, you }

@@ -224,12 +224,28 @@ fn apply_ui_edits(t: &mut DbTask, ui: &UiTask) {
 pub struct TaskMutations {
     store: TaskStore,
     write: Mutation<String>,
+    /// When set, quick-added tasks are filed under this project —
+    /// the project detail page scopes its board so "add a task here"
+    /// means *here*.
+    create_project_scope: Option<Uuid>,
 }
 
 pub fn use_task_mutations() -> TaskMutations {
     TaskMutations {
         store: use_task_store(),
         write: use_mutation(),
+        create_project_scope: None,
+    }
+}
+
+impl TaskMutations {
+    /// Scope quick-add creates to a project (see
+    /// [`Self::create_project_scope`]). Builder-style so the project
+    /// page writes `use_task_mutations().scoped_to(project_id)`.
+    #[must_use]
+    pub fn scoped_to(mut self, project_id: Uuid) -> Self {
+        self.create_project_scope = Some(project_id);
+        self
     }
 }
 
@@ -238,10 +254,14 @@ impl TaskMutations {
     /// write-through to the owning org (`create_slug` for new rows).
     pub fn apply(&self, create_slug: &str, mu: TaskMutation) {
         match mu {
-            TaskMutation::Create { task } => self.create(OrgTask {
-                slug: create_slug.to_owned(),
-                task: task::capture(&task.title),
-            }),
+            TaskMutation::Create { task } => {
+                let mut draft = task::capture(&task.title);
+                draft.project_id = self.create_project_scope;
+                self.create(OrgTask {
+                    slug: create_slug.to_owned(),
+                    task: draft,
+                });
+            }
             TaskMutation::Update { task } => {
                 let id = task.id;
                 self.edit(id, move |t| apply_ui_edits(t, &task));

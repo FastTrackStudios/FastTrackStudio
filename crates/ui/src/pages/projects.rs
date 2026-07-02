@@ -69,10 +69,16 @@ pub fn ProjectsView() -> Element {
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
     let view_mode = use_signal(initial_view_mode);
 
+    let org_choices: Vec<(String, String)> = org_list
+        .read()
+        .iter()
+        .map(|o| (o.slug.clone(), o.name.clone()))
+        .collect();
     let quick_add = rsx! {
         ProjectQuickAdd {
-            on_create: move |title: String| {
-                let slug = crate::orgs::create_target(&selection.read(), &org_list.read());
+            orgs: org_choices,
+            default_slug: crate::orgs::create_target(&selection.read(), &org_list.read()),
+            on_create: move |(slug, title): (String, String)| {
                 muts.create(slug, crate::stores::draft_project(title));
             },
         }
@@ -270,20 +276,36 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>, quick_add: E
 
 /// Slim project quick-create: type a name, hit enter, the project
 /// exists (optimistically — the store insert lands instantly, the
-/// backend scaffolds `Projects/<slug>.md` with active status). The
+/// backend scaffolds `Projects/<slug>.md` with active status). When
+/// more than one org is hosted, an inline select chooses where it
+/// lands (defaulting to the org-switcher's create target). The
 /// dashboard reuses it in `compact` form.
 #[component]
 pub(crate) fn ProjectQuickAdd(
-    on_create: EventHandler<String>,
+    /// `(slug, display name)` of every org the project could land in.
+    orgs: Vec<(String, String)>,
+    /// Pre-selected slug (the org-switcher's create target).
+    default_slug: String,
+    on_create: EventHandler<(String, String)>,
     #[props(default)] compact: bool,
 ) -> Element {
     let mut value = use_signal(String::new);
+    let mut chosen = use_signal(|| default_slug.clone());
+    let orgs_for_submit = orgs.clone();
     let mut submit = move || {
         let title = value.read().trim().to_string();
         if title.is_empty() {
             return;
         }
-        on_create.call(title);
+        let slug = {
+            let c = chosen.read().clone();
+            if orgs_for_submit.iter().any(|(s, _)| *s == c) {
+                c
+            } else {
+                orgs_for_submit.first().map(|(s, _)| s.clone()).unwrap_or(c)
+            }
+        };
+        on_create.call((slug, title));
         value.set(String::new());
     };
     let (form_cls, placeholder) = if compact {
@@ -313,6 +335,17 @@ pub(crate) fn ProjectQuickAdd(
                 placeholder,
                 class: "min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none",
                 oninput: move |e| value.set(e.value()),
+            }
+            // Which org gets it — only a question when several could.
+            if orgs.len() > 1 {
+                select {
+                    class: "shrink-0 rounded-md border border-border/60 bg-transparent px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-border",
+                    value: "{chosen}",
+                    onchange: move |e| chosen.set(e.value()),
+                    for (slug, name) in orgs.iter() {
+                        option { key: "{slug}", value: "{slug}", selected: *slug == chosen(), "{name}" }
+                    }
+                }
             }
         }
     }

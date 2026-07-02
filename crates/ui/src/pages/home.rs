@@ -39,11 +39,17 @@ pub fn HomeView() -> Element {
         (Some(pr), Some(tr), _) => {
             let projects: Vec<&ProjectInfo> = pr.iter().map(|(_, r)| &r.project).collect();
             let tasks: Vec<&DbTask> = tr.iter().map(|(_, r)| &r.task).collect();
+            let org_choices: Vec<(String, String)> = org_list
+                .read()
+                .iter()
+                .map(|o| (o.slug.clone(), o.name.clone()))
+                .collect();
             let quick_add = rsx! {
                 super::projects::ProjectQuickAdd {
                     compact: true,
-                    on_create: move |title: String| {
-                        let slug = crate::orgs::create_target(&selection.read(), &org_list.read());
+                    orgs: org_choices,
+                    default_slug: crate::orgs::create_target(&selection.read(), &org_list.read()),
+                    on_create: move |(slug, title): (String, String)| {
                         project_muts.create(slug, stores::draft_project(title));
                     },
                 }
