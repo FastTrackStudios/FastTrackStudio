@@ -23,6 +23,7 @@ pub use xml::{omni_num, parse_xml, XmlNode};
 mod index;
 mod model;
 mod multi;
+pub mod state;
 mod tree;
 
 pub use index::SoundsourceIndex;
