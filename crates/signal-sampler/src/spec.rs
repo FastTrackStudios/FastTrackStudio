@@ -55,6 +55,22 @@ pub struct LibrarySpec {
     /// Keyswitch and CC58 articulation switching.
     pub keyswitch: Option<KeyswitchSpec>,
 
+    /// Live auto-divisi legato interval gate (semitones): in strict live
+    /// mode a note continues an existing mono line as a legato transition
+    /// only if it is within this interval of the line's sounding (or
+    /// just-released) note — anything wider is a fresh attack on its own
+    /// line. Small by default (2 = major 2nd) because low-latency sampled
+    /// transitions only sound right on small intervals; the document path
+    /// has no such gate. See `docs/plan/document-mode.md`, "Auto-divisi".
+    #[facet(default = 2)]
+    pub live_legato_interval_max: u8,
+
+    /// Live auto-divisi chord window (ms): notes arriving within this of
+    /// each other are a chord — they fan out to separate lines as fresh
+    /// sustain attacks, never legato.
+    #[facet(default = 30.0f32)]
+    pub live_chord_window_ms: f32,
+
     /// Explicit zone map — sample-per-(key range × velocity range × RR slot).
     ///
     /// When non-empty, the engine plays in **zone mode**: every note-on looks
@@ -145,6 +161,8 @@ impl LibrarySpec {
             legato_engine: None,
             short_note_timing: None,
             keyswitch: None,
+            live_legato_interval_max: 2,
+            live_chord_window_ms: 30.0,
             zones,
             wavetables: Vec::new(),
             grooves: Vec::new(),

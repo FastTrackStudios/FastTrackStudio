@@ -202,6 +202,14 @@ struct LegatoLine {
     cc1: u8,
     /// This line's CC2 value [0–127] — vibrato / non-vibrato crossfade.
     cc2: u8,
+    /// The note that last ENDED this line (line went silent), for the live
+    /// allocator's "just released" abutment gate.
+    released_note: Option<u8>,
+    /// Engine frame at which the line last went silent.
+    last_release_frame: u64,
+    /// Engine frame of the line's last allocation/trigger — LRU key for the
+    /// live allocator's free-line search.
+    last_activity: u64,
 }
 
 impl Default for LegatoLine {
@@ -212,6 +220,9 @@ impl Default for LegatoLine {
             state: LegatoState::Idle,
             cc1: 64,
             cc2: 0,
+            released_note: None,
+            last_release_frame: 0,
+            last_activity: 0,
         }
     }
 }
@@ -297,6 +308,9 @@ pub struct SampleEngine {
     /// must keep this at 0 — every transition arrives via
     /// [`legato_prefire_line`](Self::legato_prefire_line) instead.
     reactive_legato_fires: u64,
+    /// Engine frame of the most recent LIVE note-on — the live allocator's
+    /// chord-window ("simultaneity") gate clock.
+    live_last_onset: Option<u64>,
 
     /// True when the source pack is a percussion / drum-kit library
     /// (`category` ~ "drum-kit", or a percussion `instrument`). Percussion
@@ -543,6 +557,7 @@ impl SampleEngine {
             lines: (0..MAX_LINES).map(|_| LegatoLine::default()).collect(),
             cur_line: 0,
             reactive_legato_fires: 0,
+            live_last_onset: None,
             percussion,
             single_attack_key,
             pinned_articulation: None,
@@ -1265,7 +1280,165 @@ impl SampleEngine {
     }
 
     pub fn note_on(&mut self, note: u8, velocity: u8) {
+        // Live auto-divisi (StrictLive + mono-legato patch): the greedy line
+        // allocator decides which mono line the note belongs to and whether
+        // it may legato — see `live_divisi_note_on`. Lookahead mode has no
+        // such gates (the document knows the actual voice-leading), and
+        // non-legato material (shorts, percussion, pianos) is line-agnostic.
+        if velocity > 0
+            && self.play_mode == PlayMode::StrictLive
+            && self.live_divisi_applicable()
+            && !self.keyswitch_notes.contains_key(&note)
+        {
+            self.live_divisi_note_on(note, velocity);
+            return;
+        }
         self.note_on_line(0, note, velocity);
+    }
+
+    /// Whether the live auto-divisi allocator governs note-ons right now:
+    /// zoned patch, legato enabled, and a sustain-family articulation
+    /// selected (the mono-legato branch of `note_on_line`).
+    fn live_divisi_applicable(&self) -> bool {
+        if !self.patch.is_zoned() || !self.legato_enabled {
+            return false;
+        }
+        matches!(
+            self.patch
+                .spec
+                .articulation(&self.articulation)
+                .map(|a| &a.kind),
+            Some(
+                ArticulationKind::Legato
+                    | ArticulationKind::Sustain
+                    | ArticulationKind::Looped
+                    | ArticulationKind::Trill
+            )
+        )
+    }
+
+    /// Live auto-divisi with legato gating (see `docs/plan/document-mode.md`,
+    /// "Auto-divisi" → live gating). Greedy, reactive, deterministic given
+    /// the same input event stream:
+    ///
+    /// - **Simultaneity gate**: notes within `live_chord_window_ms` of the
+    ///   previous onset are a chord — fresh sustain attacks on separate
+    ///   lines (allocated in arrival order; a zero-latency engine cannot
+    ///   buffer to rank a chord it hasn't finished hearing), never legato.
+    /// - **Interval gate**: a note continues an existing line as LEGATO only
+    ///   if within `live_legato_interval_max` semitones of that line's
+    ///   sounding note (nearest line wins; ties → lowest line id), or of a
+    ///   line's just-released note (abutment within the chord window).
+    ///   Transitions run through the reactive countdown, which StrictLive
+    ///   times from the `low_latency` tables.
+    /// - Otherwise: fresh attack on a free line (LRU-silent first; if every
+    ///   line is sounding, the least-recently-active line is retagged).
+    fn live_divisi_note_on(&mut self, note: u8, velocity: u8) {
+        let now = self.frames_rendered;
+        let window = ms_to_frames(
+            self.patch.spec.live_chord_window_ms.max(0.0).round() as u32,
+            self.sample_rate,
+        ) as u64;
+        let interval_max = self.patch.spec.live_legato_interval_max as i16;
+        let chord = self
+            .live_last_onset
+            .is_some_and(|f| now.saturating_sub(f) <= window);
+        self.live_last_onset = Some(now);
+
+        // Legato continuation target: nearest sounding line within the
+        // interval gate, else a just-released line whose note abuts.
+        // `(interval, line, released-from)`; ascending line order breaks ties.
+        let mut target: Option<(i16, LineId, Option<u8>)> = None;
+        if !chord {
+            for (li, l) in self.lines.iter().enumerate() {
+                if let Some(cur) = l.note {
+                    let iv = (cur as i16 - note as i16).abs();
+                    if iv <= interval_max && target.is_none_or(|(best, _, _)| iv < best) {
+                        target = Some((iv, li, None));
+                    }
+                }
+            }
+            if target.is_none() {
+                for (li, l) in self.lines.iter().enumerate() {
+                    if l.note.is_some() || now.saturating_sub(l.last_release_frame) > window {
+                        continue;
+                    }
+                    if let Some(rel) = l.released_note {
+                        let iv = (rel as i16 - note as i16).abs();
+                        if iv <= interval_max && target.is_none_or(|(best, _, _)| iv < best) {
+                            target = Some((iv, li, Some(rel)));
+                        }
+                    }
+                }
+            }
+        }
+
+        let li = match target {
+            Some((_, li, _)) => li,
+            None => self.alloc_free_line(),
+        };
+        self.set_active_line(li);
+        self.held_notes.insert(note, velocity);
+        let l = self.line_mut();
+        l.order.retain(|&n| n != note);
+        l.order.push(note);
+        l.last_activity = now;
+        l.released_note = None;
+
+        match target {
+            // Continue the line: reactive transition (low_latency-timed).
+            Some((_, _, None)) => {
+                let cur = self.line().note.expect("sounding target line");
+                self.start_legato_transition(cur, note, velocity);
+            }
+            // Abutting re-entry on a just-released line: transition from the
+            // released note (the recorded slur carries the connection).
+            Some((_, _, Some(rel))) => {
+                self.start_legato_transition(rel, note, velocity);
+            }
+            // Fresh sustain attack on its own line.
+            None => {
+                self.play_direction = "up".to_string();
+                self.trigger_zoned_sustain(note);
+                self.line_mut().note = Some(note);
+            }
+        }
+    }
+
+    /// Pick a line for a fresh live attack: the least-recently-active SILENT
+    /// line (fresh lines have activity 0, so from silence a chord fans out
+    /// as line 0, 1, 2, …). If every line is sounding, retag the
+    /// least-recently-active one (its old voices ring on until their own
+    /// note-offs; the global fallback in `note_off` still finds them).
+    fn alloc_free_line(&mut self) -> LineId {
+        let mut best_free: Option<(u64, LineId)> = None;
+        let mut best_any: Option<(u64, LineId)> = None;
+        for (li, l) in self.lines.iter().enumerate() {
+            let free = l.note.is_none() && matches!(l.state, LegatoState::Idle);
+            if free && best_free.is_none_or(|(k, _)| l.last_activity < k) {
+                best_free = Some((l.last_activity, li));
+            }
+            if best_any.is_none_or(|(k, _)| l.last_activity < k) {
+                best_any = Some((l.last_activity, li));
+            }
+        }
+        let li = best_free.or(best_any).map(|(_, li)| li).unwrap_or(0);
+        // Stealing a sounding line: clear its bookkeeping so the new note
+        // owns it (the old note's voices release via the global fallback).
+        let l = &mut self.lines[li];
+        l.note = None;
+        l.order.clear();
+        l.state = LegatoState::Idle;
+        li
+    }
+
+    /// The line that currently owns `note` (sounding on it, or held in its
+    /// press order — which includes pending transition targets).
+    fn line_owning(&self, note: u8) -> Option<LineId> {
+        self.lines
+            .iter()
+            .position(|l| l.note == Some(note))
+            .or_else(|| self.lines.iter().position(|l| l.order.contains(&note)))
     }
 
     /// Line-addressed note-on: mono-line legato bookkeeping happens on
@@ -1391,9 +1564,12 @@ impl SampleEngine {
         }
     }
 
-    /// Process a MIDI note-off event.
+    /// Process a MIDI note-off event. Channel-less (live) note-offs route to
+    /// the line that owns the note — the live allocator may have placed it
+    /// anywhere; single-line play always resolves to line 0.
     pub fn note_off(&mut self, note: u8) {
-        self.note_off_line(0, note);
+        let line = self.line_owning(note).unwrap_or(0);
+        self.note_off_line(line, note);
     }
 
     /// Line-addressed note-off (see [`note_on_line`](Self::note_on_line)).
@@ -1404,7 +1580,8 @@ impl SampleEngine {
     }
 
     pub fn note_off_with_velocity(&mut self, note: u8, release_velocity: u8) {
-        self.set_active_line(0);
+        let line = self.line_owning(note).unwrap_or(0);
+        self.set_active_line(line);
         self.note_off_with_velocity_on_line(note, release_velocity);
     }
 
@@ -1434,7 +1611,13 @@ impl SampleEngine {
                     self.start_legato_transition(note, prev, LEGATO_FALLBACK_VELOCITY);
                     return;
                 }
-                self.line_mut().note = None;
+                // Line ends — remember what/when for the live allocator's
+                // "just released" abutment gate.
+                let now = self.frames_rendered;
+                let l = self.line_mut();
+                l.note = None;
+                l.released_note = Some(note);
+                l.last_release_frame = now;
             }
             // Play the recorded release tail (CSS Vsusrel/NVrel) and fade the
             // looping sustain underneath it — this line's voices only, so a
@@ -1467,7 +1650,11 @@ impl SampleEngine {
             l.state = LegatoState::Idle;
             l.note = None;
             l.order.clear();
+            l.released_note = None;
+            l.last_release_frame = 0;
+            l.last_activity = 0;
         }
+        self.live_last_onset = None;
     }
 
     pub fn panic(&mut self) {
@@ -4463,7 +4650,9 @@ mod tests {
         eng.note_on(60, 100);
         assert_eq!(eng.lines[0].note, Some(60));
 
-        // Second note transitions (delayed), then becomes the head.
+        // Second note transitions (delayed), then becomes the head. Played
+        // past the live chord window so it reads as a line, not a chord.
+        render_ms(&mut eng, 50);
         eng.note_on(62, 100);
         assert!(matches!(eng.lines[0].state, LegatoState::Pending { .. }));
         render_ms(&mut eng, 200);
@@ -4521,6 +4710,89 @@ mod tests {
         assert_eq!(eng.reactive_legato_fires(), 1);
     }
 
+    // ── Live auto-divisi gating (StrictLive) ─────────────────────────────────
+
+    #[test]
+    fn live_chord_within_window_fans_out_as_fresh_attacks() {
+        let mut eng = mono_legato_engine(&[60, 64, 67]);
+        eng.set_legato_fire_log_enabled(true);
+
+        // A triad struck at once: three fresh attacks on three lines, in
+        // arrival order — never legato.
+        eng.note_on(60, 100);
+        eng.note_on(64, 100);
+        eng.note_on(67, 100);
+        assert_eq!(eng.lines[0].note, Some(60));
+        assert_eq!(eng.lines[1].note, Some(64));
+        assert_eq!(eng.lines[2].note, Some(67));
+
+        render_ms(&mut eng, 200);
+        assert!(
+            eng.legato_fire_log().is_empty(),
+            "a chord must not fire legato transitions"
+        );
+        assert_eq!(eng.reactive_legato_fires(), 0);
+    }
+
+    #[test]
+    fn live_stepwise_line_stays_legato_on_one_line() {
+        let mut eng = mono_legato_engine(&[60, 62, 64]);
+        eng.set_legato_fire_log_enabled(true);
+
+        eng.note_on(60, 100);
+        render_ms(&mut eng, 50);
+        eng.note_on(62, 100); // whole step ≤ live_legato_interval_max (2)
+        render_ms(&mut eng, 200); // countdown elapses (low_latency)
+        eng.note_off(60);
+        eng.note_on(64, 100);
+        render_ms(&mut eng, 200);
+
+        let log = eng.legato_fire_log();
+        assert_eq!(log.len(), 2, "both steps transitioned");
+        assert!(log.iter().all(|e| e.line == 0), "one mono line throughout");
+        assert_eq!(eng.lines[0].note, Some(64));
+        assert!(eng.lines[1].note.is_none(), "no divisi for a mono line");
+    }
+
+    #[test]
+    fn live_wide_leap_takes_a_fresh_line_not_legato() {
+        let mut eng = mono_legato_engine(&[60, 69]);
+        eng.set_legato_fire_log_enabled(true);
+
+        eng.note_on(60, 100);
+        render_ms(&mut eng, 50);
+        eng.note_on(69, 100); // major 6th > interval gate
+        render_ms(&mut eng, 200);
+
+        assert_eq!(eng.lines[0].note, Some(60), "held note keeps its line");
+        assert_eq!(eng.lines[1].note, Some(69), "leap starts a fresh line");
+        assert!(
+            eng.legato_fire_log().is_empty(),
+            "wide leaps must not legato in strict live mode"
+        );
+    }
+
+    #[test]
+    fn live_held_top_with_moving_bass_keeps_lines_apart() {
+        let mut eng = mono_legato_engine(&[72, 50, 52]);
+        eng.set_legato_fire_log_enabled(true);
+
+        eng.note_on(72, 100); // held top → line 0
+        render_ms(&mut eng, 50);
+        eng.note_on(50, 100); // far below → its own line
+        render_ms(&mut eng, 50);
+        eng.note_on(52, 100); // whole step from the bass → bass line legato
+        render_ms(&mut eng, 200);
+
+        assert_eq!(eng.lines[0].note, Some(72), "top never stolen");
+        assert_eq!(eng.lines[1].note, Some(52), "bass moved on its own line");
+        let log = eng.legato_fire_log();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].line, 1);
+        assert_eq!(log[0].from_note, 50);
+        assert_eq!(log[0].to_note, 52);
+    }
+
     #[test]
     fn zoned_legato_delays_then_fires_directional() {
         // Legato articulation with directional zones (up/down) for two notes.
@@ -4562,7 +4834,9 @@ mod tests {
         assert!(matches!(eng.lines[0].state, LegatoState::Idle));
 
         // Second note while the first is held → delayed (the CSS latency):
-        // pending, not yet fired.
+        // pending, not yet fired. (Past the live chord window: overlapping
+        // successive notes legato; simultaneous ones are a chord.)
+        render_ms(&mut eng, 50);
         eng.note_on(62, 100);
         assert!(
             matches!(eng.lines[0].state, LegatoState::Pending { .. }),
