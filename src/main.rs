@@ -4,7 +4,6 @@
 #[cfg(feature = "standalone")]
 fn main() {
     use dioxus_native::prelude::*;
-    use fts_launcher::LauncherEngine;
     use fts_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
     use launcher_ui::components::Launcher;
 
@@ -15,7 +14,12 @@ fn main() {
     fn app() -> Element {
         let state = use_signal(|| fts_launcher::LauncherEngine::new().into_state());
         let theme_state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
-        let on_close = |_: ()| std::process::exit(0);
+        // dioxus 0.7.9 handlers must return `()` (or async) — the diverging
+        // `!` from process::exit no longer satisfies SpawnIfAsync, so pin the
+        // closure's return type to `()` explicitly.
+        let on_close = |_: ()| -> () {
+            std::process::exit(0);
+        };
 
         rsx! {
             Stylesheet { href: asset!("/assets/tailwind.css") }
