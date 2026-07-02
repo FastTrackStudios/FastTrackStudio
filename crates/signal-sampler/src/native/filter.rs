@@ -75,6 +75,50 @@ impl Svf {
     }
 }
 
+/// A saturating 4-stage ladder (Moog-style): four one-pole lowpasses with
+/// global resonance feedback and a tanh nonlinearity at the input — the
+/// "character" engine behind the Juicy/Moogie/OB/Jupiter/FATBOY families.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Ladder {
+    a: f32,
+    k: f32,
+    y: [f32; 4],
+}
+
+impl Ladder {
+    pub fn set(&mut self, cutoff_hz: f32, resonance: f32, sample_rate: f32) {
+        let sr = sample_rate.max(1.0);
+        let fc = cutoff_hz.clamp(10.0, sr * 0.45);
+        self.a = 1.0 - (-core::f32::consts::TAU * fc / sr).exp();
+        // 0..1 resonance → 0..4 feedback (self-oscillation at ~4).
+        self.k = resonance.clamp(0.0, 1.0) * 3.8;
+    }
+
+    pub fn reset(&mut self) {
+        self.y = [0.0; 4];
+    }
+
+    #[inline]
+    pub fn tick(&mut self, x: f32) -> f32 {
+        let t = (x - self.k * self.y[3]).tanh();
+        self.y[0] += self.a * (t - self.y[0]);
+        self.y[1] += self.a * (self.y[0] - self.y[1]);
+        self.y[2] += self.a * (self.y[1] - self.y[2]);
+        self.y[3] += self.a * (self.y[2] - self.y[3]);
+        // Makeup for the passband loss the feedback causes.
+        self.y[3] * (1.0 + self.k * 0.5)
+    }
+}
+
+/// Which engine realizes the filter: the clean SVF cascade or the
+/// saturating ladder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum FilterCharacter {
+    #[default]
+    Clean,
+    Ladder,
+}
+
 /// The `Filter` block: stereo multi-pole SVF processor. `sections` cascades
 /// 12 dB TPT sections (1..=4 → 12/24/36/48 dB); resonance lives on the first
 /// section, the rest stay flat so the cascade doesn't compound Q.
@@ -84,8 +128,11 @@ pub struct NativeFilter {
     cutoff_hz: f32,
     q: f32,
     sections: usize,
+    character: FilterCharacter,
     left: [Svf; 4],
     right: [Svf; 4],
+    ladder_l: Ladder,
+    ladder_r: Ladder,
     prepared: bool,
 }
 
@@ -97,12 +144,24 @@ impl NativeFilter {
             cutoff_hz: 20_000.0,
             q: core::f32::consts::FRAC_1_SQRT_2,
             sections: 1,
+            character: FilterCharacter::Clean,
             left: [Svf::default(); 4],
             right: [Svf::default(); 4],
+            ladder_l: Ladder::default(),
+            ladder_r: Ladder::default(),
             prepared: false,
         };
         f.update_coeffs();
         f
+    }
+
+    /// Select the saturating ladder engine (lowpass only; other modes fall
+    /// back to the clean cascade).
+    #[must_use]
+    pub fn with_character(mut self, character: FilterCharacter) -> Self {
+        self.character = character;
+        self.update_coeffs();
+        self
     }
 
     /// Pole count 1..=8 → cascade sections (12 dB per section, rounded up).
@@ -140,6 +199,9 @@ impl NativeFilter {
             self.left[i].set(self.cutoff_hz, q, self.sample_rate);
             self.right[i].set(self.cutoff_hz, q, self.sample_rate);
         }
+        let res_norm = ((self.q - 0.5) / 11.5).clamp(0.0, 1.0);
+        self.ladder_l.set(self.cutoff_hz, res_norm, self.sample_rate);
+        self.ladder_r.set(self.cutoff_hz, res_norm, self.sample_rate);
     }
 
     /// Run one sample through the cascade of one channel.
@@ -231,6 +293,8 @@ impl PluginInstance for NativeFilter {
         for svf in self.left.iter_mut().chain(self.right.iter_mut()) {
             svf.reset();
         }
+        self.ladder_l.reset();
+        self.ladder_r.reset();
         self.prepared = true;
         Ok(())
     }
@@ -266,6 +330,13 @@ impl PluginInstance for NativeFilter {
             self.update_coeffs();
         }
         let frames = out_l.len().min(out_r.len()).min(in_l.len()).min(in_r.len());
+        if self.character == FilterCharacter::Ladder && self.mode == FilterMode::Lowpass {
+            for f in 0..frames {
+                out_l[f] = self.ladder_l.tick(in_l[f]);
+                out_r[f] = self.ladder_r.tick(in_r[f]);
+            }
+            return Ok(());
+        }
         let (mode, sections) = (self.mode, self.sections);
         for f in 0..frames {
             out_l[f] = Self::tick_chain(&mut self.left, sections, mode, in_l[f]);
@@ -367,6 +438,38 @@ mod tests {
             at_center < far_away * 0.35,
             "notch cuts its center: center={at_center} off={far_away}"
         );
+    }
+
+    #[test]
+    fn ladder_lowpasses_and_resonates() {
+        let sr = 48_000.0;
+        // Lowpass behavior: highs cut.
+        let mut f = NativeFilter::new(48_000)
+            .with_character(FilterCharacter::Ladder)
+            .with_cutoff(1_000.0);
+        f.prepare(48_000.0, 4_096).unwrap();
+        let low = sine_response(&mut f, 100.0, sr);
+        f.prepare(48_000.0, 4_096).unwrap();
+        let high = sine_response(&mut f, 10_000.0, sr);
+        assert!(low > 0.4, "ladder passband, rms={low}");
+        assert!(high < low * 0.1, "ladder cuts highs: low={low} high={high}");
+
+        // Resonance: a driven ladder boosts near the cutoff (full resonance
+        // — the feedback peak grows sharply toward self-oscillation).
+        let mut res = NativeFilter::new(48_000)
+            .with_character(FilterCharacter::Ladder)
+            .with_cutoff(1_000.0)
+            .with_q(12.0);
+        res.prepare(48_000.0, 4_096).unwrap();
+        let at_cutoff = sine_response(&mut res, 1_000.0, sr);
+        res.prepare(48_000.0, 4_096).unwrap();
+        let below = sine_response(&mut res, 200.0, sr);
+        assert!(
+            at_cutoff > below * 1.3,
+            "resonant peak at cutoff: peak={at_cutoff} passband={below}"
+        );
+        // Saturation keeps it bounded even when resonating.
+        assert!(at_cutoff < 3.0, "tanh bounds the resonance, rms={at_cutoff}");
     }
 
     #[test]

@@ -17,6 +17,7 @@ mod amp;
 mod arp;
 mod control;
 mod filter;
+mod freq_shifter;
 mod waveshaper;
 mod wavetable;
 
@@ -24,6 +25,7 @@ pub use adsr::{Adsr, AdsrParams};
 pub use arp::{ArpEngine, ArpStep};
 pub use amp::NativeAmp;
 pub use control::{ControlEnv, ControlLfo, LfoWave, MidiMod, ModSource};
-pub use filter::{FilterMode, NativeFilter, Svf};
+pub use filter::{FilterCharacter, FilterMode, Ladder, NativeFilter, Svf};
+pub use freq_shifter::NativeDfs;
 pub use waveshaper::NativeWaveshaper;
 pub use wavetable::{HarmVoice, NativeWavetable, SynthConfig};

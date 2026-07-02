@@ -112,6 +112,21 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
                 }
                 Some(Box::new(NativeWavetable::new(sample_rate).with_config(cfg)))
             }
+            BlockType::Dfs => {
+                let mut d = crate::native::NativeDfs::new(sample_rate);
+                // Shifts stored in Hz (±); mixes 0..1; serial default.
+                d = d
+                    .with_shifter_a(
+                        block.param_f32("shift_a_hz").unwrap_or(0.0),
+                        block.param_f32("mix_a").unwrap_or(0.0),
+                    )
+                    .with_shifter_b(
+                        block.param_f32("shift_b_hz").unwrap_or(0.0),
+                        block.param_f32("mix_b").unwrap_or(0.0),
+                    )
+                    .with_parallel(block.param_f32("parallel").unwrap_or(0.0) > 0.0);
+                Some(Box::new(d))
+            }
             BlockType::Waveshaper => {
                 let mut w = crate::native::NativeWaveshaper::new(sample_rate);
                 if let Some(v) = block.param_f32("drive") {
@@ -146,6 +161,13 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
                 }
                 if let Some(v) = block.param_f32("poles") {
                     f = f.with_poles(v.round() as u32);
+                }
+                if block
+                    .params
+                    .iter()
+                    .any(|p| p.name == "character" && p.value.eq_ignore_ascii_case("ladder"))
+                {
+                    f = f.with_character(crate::native::FilterCharacter::Ladder);
                 }
                 Some(Box::new(f))
             }

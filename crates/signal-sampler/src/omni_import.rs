@@ -290,6 +290,8 @@ pub struct OmniLayer {
     pub harmonia: Vec<(f32, f32, f32, f32)>,
     /// Waveshaper when engaged: (drive, crush, reduce, mix).
     pub shaper: Option<(f32, f32, f32, f32)>,
+    /// Dual Frequency Shifter when engaged: (hz_a, mix_a, hz_b, mix_b, parallel).
+    pub dfs: Option<(f32, f32, f32, f32, bool)>,
     /// Layer FX rack: the four `EFFMODULE Type=` names ("No Effect" ⇒ empty).
     pub fx: Vec<String>,
 }
@@ -334,7 +336,27 @@ fn rack_types(rack: &XmlNode) -> Vec<String> {
 /// mode + pole count. The real algorithm enum (`type1`) is undecoded; the
 /// names cover the dominant families ("Classic LPF 4-pole", "HPF Juicy
 /// 12db", "Bandpass", "Notch", …). Defaults: LP 12 dB.
-fn classify_filter(name: &str) -> (&'static str, u32) {
+/// Classification including the engine character: the saturating families
+/// (Juicy / Moogie / OB / Jupiter / FATBOY / Sauce / Beefy / Warm / Power /
+/// French / Brit) map onto the ladder engine.
+fn classify_filter_full(name: &str) -> (&'static str, u32, &'static str) {
+    let (mode, poles) = classify_filter_inner(name);
+    let k = name.to_ascii_lowercase();
+    let saturating = [
+        "juicy", "moogie", "fatboy", "ob ", "jupiter", "sauce", "beefy", "warm", "power",
+        "french", "brit",
+    ]
+    .iter()
+    .any(|f| k.contains(f));
+    let character = if saturating && mode == "lowpass" {
+        "ladder"
+    } else {
+        "clean"
+    };
+    (mode, poles, character)
+}
+
+fn classify_filter_inner(name: &str) -> (&'static str, u32) {
     let k = name.to_ascii_lowercase();
     let mode = if k.contains("hpf") || k.contains("hipass") || k.contains("high") {
         "highpass"
@@ -496,6 +518,27 @@ fn parse_patch_node(root: &XmlNode) -> Result<OmniPatch, String> {
                         }
                     }
                 }
+            }
+        }
+        if let Some(dfs) = voice.find("DFS") {
+            if dfs.num("on").unwrap_or(0.0) != 0.0 {
+                // freq normalized 0.5 = no shift → ±2 kHz (CALIBRATE);
+                // inv flips the direction.
+                let hz = |f: Option<f32>, inv: bool| {
+                    let v = (f.unwrap_or(0.5) - 0.5) * 4000.0;
+                    if inv {
+                        -v
+                    } else {
+                        v
+                    }
+                };
+                layer.dfs = Some((
+                    hz(dfs.num("freqA"), dfs.num("invA").unwrap_or(0.0) != 0.0),
+                    dfs.num("mixA").unwrap_or(0.5).clamp(0.0, 1.0),
+                    hz(dfs.num("freqB"), dfs.num("invB").unwrap_or(0.0) != 0.0),
+                    dfs.num("mixB").unwrap_or(0.5).clamp(0.0, 1.0),
+                    dfs.num("parl").unwrap_or(0.0) != 0.0,
+                ));
             }
         }
         if let Some(ws) = voice.child("WAVESHAPER") {
@@ -928,11 +971,21 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                 .with_param("reduce", format!("{reduce:.4}"))
                 .with_param("mix", format!("{mix:.4}"));
         }
+        let mut dfs_block = RigBlock::of_type(BlockType::Dfs).named("Dual Freq Shifter");
+        if let Some((hz_a, mix_a, hz_b, mix_b, parallel)) = layer.dfs {
+            dfs_block = dfs_block
+                .with_param("shift_a_hz", format!("{hz_a:.2}"))
+                .with_param("mix_a", format!("{mix_a:.4}"))
+                .with_param("shift_b_hz", format!("{hz_b:.2}"))
+                .with_param("mix_b", format!("{mix_b:.4}"))
+                .with_param("parallel", if parallel { "1" } else { "0" });
+        }
         let osc = osc
             .block(BlockType::Unison, "Unison")
             .block(BlockType::Harmonic, "Harmonia")
             .block(BlockType::FmOperator, "FM")
             .block(BlockType::RingModulator, "Ring Mod")
+            .add(dfs_block)
             .add(shaper_block)
             .block(BlockType::Granular, "Granular");
 
@@ -952,12 +1005,13 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                     // classified from the factory preset name.
                     let mut f1 = RigBlock::of_type(BlockType::Filter).named(filter_label.clone());
                     if layer.filter_active {
-                        let (mode, poles) = classify_filter(&layer.filter_name);
+                        let (mode, poles, character) = classify_filter_full(&layer.filter_name);
                         f1 = f1
                             .with_param("cutoff", format!("{:.4}", layer.filter_freq))
                             .with_param("resonance", format!("{:.4}", layer.filter_res))
                             .with_param("mode", mode)
-                            .with_param("poles", poles.to_string());
+                            .with_param("poles", poles.to_string())
+                            .with_param("character", character);
                     }
                     let mut f2 = RigBlock::of_type(BlockType::Filter).named("Filter 2");
                     if let Some((freq, res)) = layer.filter2 {
@@ -1127,13 +1181,16 @@ mod tests {
 
     #[test]
     fn filter_names_classify() {
-        assert_eq!(classify_filter("Classic LPF 4-pole"), ("lowpass", 4));
-        assert_eq!(classify_filter("Basic 12db Lowpass"), ("lowpass", 2));
-        assert_eq!(classify_filter("HPF Juicy 24db"), ("highpass", 4));
-        assert_eq!(classify_filter("Bandpass Juicy 12db"), ("bandpass", 2));
-        assert_eq!(classify_filter("Notch Filter"), ("notch", 2));
-        assert_eq!(classify_filter("Classic LPF 8-pole"), ("lowpass", 8));
-        assert_eq!(classify_filter("untitled"), ("lowpass", 2));
+        assert_eq!(classify_filter_full("Classic LPF 4-pole"), ("lowpass", 4, "clean"));
+        assert_eq!(classify_filter_full("Basic 12db Lowpass"), ("lowpass", 2, "clean"));
+        assert_eq!(classify_filter_full("HPF Juicy 24db"), ("highpass", 4, "clean"));
+        assert_eq!(classify_filter_full("Bandpass Juicy 12db"), ("bandpass", 2, "clean"));
+        assert_eq!(classify_filter_full("Notch Filter"), ("notch", 2, "clean"));
+        assert_eq!(classify_filter_full("Classic LPF 8-pole"), ("lowpass", 8, "clean"));
+        assert_eq!(classify_filter_full("LPF Juicy 24db"), ("lowpass", 4, "ladder"));
+        assert_eq!(classify_filter_full("Rich and Moogie2"), ("lowpass", 2, "ladder"));
+        assert_eq!(classify_filter_full("Jupiter LPF 4-pole"), ("lowpass", 4, "ladder"));
+        assert_eq!(classify_filter_full("untitled"), ("lowpass", 2, "clean"));
     }
 
     #[test]

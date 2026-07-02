@@ -709,6 +709,7 @@ pub fn native_dsp_available(block_type: BlockType) -> bool {
             | BlockType::Amp
             | BlockType::Wavetable
             | BlockType::Waveshaper
+            | BlockType::Dfs
     )
 }
 

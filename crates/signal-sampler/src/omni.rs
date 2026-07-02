@@ -58,7 +58,7 @@ fn layer(name: &str, soundsource: Option<String>) -> Container {
         .block(BlockType::Harmonic, "Harmonia") // 4 extra oscillators
         .block(BlockType::FmOperator, "FM")
         .block(BlockType::RingModulator, "Ring Mod")
-        .block(BlockType::Custom, "Dual Freq Shifter") // NEW v3 (serial/parallel pair)
+        .block(BlockType::Dfs, "Dual Freq Shifter") // NEW v3 (serial/parallel pair)
         .block(BlockType::Waveshaper, "Waveshaper")
         .block(BlockType::Granular, "Granular"); // ≤8 grain voices, WILD mode
 
@@ -237,8 +237,8 @@ mod tests {
         let p = omnisphere_preset();
         let mut rn = crate::node_render::RenderNode::compile(&p, 48_000);
         rn.prepare(48_000.0, 256);
-        // 4 layers × (2 filters + amp + wavetable + waveshaper) = 20.
-        assert_eq!(rn.live_leaves(), 20);
+        // 4 layers × (2 filters + amp + wavetable + waveshaper + dfs) = 24.
+        assert_eq!(rn.live_leaves(), 24);
     }
 
     /// Machine-local: the realized Part plays a real Omnisphere soundsource.
