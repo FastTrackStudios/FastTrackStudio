@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 # Test-runner orchestration now lives at `daw::test::runner` behind the
 # `test-harness` feature (former `reaper-test` crate with its `runner` feature).
-# Path points at the pinned daw clone so it shares one source with the
-# [patch] section in the workspace root (mixing the local checkout and the
-# pin makes the lockfile collide on `daw`).
-daw = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw", features = ["test-harness"] }
+# Same Codeberg git dep as the rest of the workspace — the .pinned clones
+# are retired.
+daw = { workspace = true, features = ["test-harness"] }

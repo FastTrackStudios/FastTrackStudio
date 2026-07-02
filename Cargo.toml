@@ -13,29 +13,28 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # FTS side repos are declared as pinned git dependencies for reproducible
-# manifests. The local-development patch sections below redirect these packages
-# back to sibling checkouts while iterating across repos.
-fts-launcher = { git = "https://git.starcommand.live/FastTrackStudios/fts-launcher.git", branch = "main", features = ["native"] }
-session = { git = "https://git.starcommand.live/FastTrackStudios/session.git", branch = "dev" }
-reaper-input = { git = "https://git.starcommand.live/FastTrackStudios/input.git", branch = "main" }
+# manifests. All of them live on Codeberg and consume facet 0.50 / vox 0.10
+# from crates.io — no local-clone patch redirects remain.
+fts-launcher = { git = "https://codeberg.org/FastTrackStudios/fts-launcher.git", branch = "main", features = ["native"] }
+session = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "dev" }
+reaper-input = { git = "https://codeberg.org/FastTrackStudios/input.git", branch = "main" }
 crossbeam-channel = "0.5"
 once_cell = "1"
 eyre = "0.6"
 fragile = "2"
-reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-extension-runtime = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-synchronization = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-keyflow-daw-analysis = { git = "https://git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
+reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-synchronization = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+keyflow-daw-analysis = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
 # Direct dep so the extension can register the visibility-manager actions and
 # call the per-mode visibility entry point straight from the mode bridge.
-# Redirected to the local pinned clone by the [patch] below.
-dynamic-template = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
-fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", branch = "main" }
+dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -46,119 +45,57 @@ tracing-appender = "0.2"
 # `reaper-config` from reaper-file gives us the typed parser/serializer
 # for `reaper-menu.ini` so we can rename floating toolbars per session
 # mode at extension startup.
-reaper-config = { git = "https://git.starcommand.live/FastTrackStudios/reaper-file.git", branch = "main" }
+reaper-config = { git = "https://codeberg.org/FastTrackStudios/reaper-file.git", branch = "main" }
 
 # ── Version-unification patches (git only; no local sibling paths) ─────────
 # Everything is a git dep now; these patches just pin shared revs across the
 # whole graph. See FastTrackStudios/fts-extensions#2.
 
-# dynamic-template: TEMPORARY local clone at the pinned main rev
-# (bfd7a151) carrying the rule-based per-mode visibility manager (visibility_rules
-# + FTS_VISIBILITY_MANAGER_MODE_* actions). Same rev as the git dep, additive
-# changes only. Revert to the git dep once these land upstream (Codeberg).
-[patch."https://git.starcommand.live/FastTrackStudios/dynamic-template.git"]
-dynamic-template = { path = "/home/cody/Development/FastTrackStudio/.pinned/dynamic-template/crates/dynamic-template" }
-dynamic-template-proto = { path = "/home/cody/Development/FastTrackStudio/.pinned/dynamic-template/crates/dynamic-template-proto" }
-music-catalog = { path = "/home/cody/Development/FastTrackStudio/.pinned/dynamic-template/crates/music-catalog" }
-color-palette = { path = "/home/cody/Development/FastTrackStudio/.pinned/dynamic-template/crates/color-palette" }
-
-# session: TEMPORARY local clone at the pinned dev rev (98139cb) carrying the
-# auto-color fix: ensure_reactive_updates spawned its recv-loop via
-# daw::block_on, which panics (and silently kills the subscribe task) when
-# called from inside the DAW runtime — auto-color never applied on startup or
-# track-add. Now spawns on the ambient handle when already in the runtime.
-# Revert to the git dep once this lands upstream.
-[patch."https://git.starcommand.live/FastTrackStudios/session.git"]
-session = { path = "/home/cody/Development/FastTrackStudio/.pinned/session/crates/session" }
-session-proto = { path = "/home/cody/Development/FastTrackStudio/.pinned/session/crates/session-proto" }
-
-# daw: TEMPORARY local clone at the pinned main rev (a2c9e763) carrying the
-# folder-compact track primitives (set_folder_compact_on_main_thread's BUSCOMP
-# chunk edit + set_track_info_value_on_main_thread). The whole workspace is
-# path-patched because daw-reaper's siblings are path deps — mixing sources
-# would duplicate daw-proto. Additive changes only; upstream later.
-[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
-daw = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw" }
-daw-audio-sync = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-audio-sync" }
-daw-control = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-control" }
-daw-extension-runtime = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-extension-runtime" }
-dawfile-aaf = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-aaf" }
-dawfile-ableton = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-ableton" }
-dawfile-dawproject = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-dawproject" }
-dawfile-protools = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-protools" }
-dawfile-reaper = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/dawfile-reaper" }
-daw-module = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-module" }
-daw-proto = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-proto" }
-daw-reaper = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-reaper" }
-daw-reaper-dioxus = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-reaper-dioxus" }
-daw-reaper-embed = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-reaper-embed" }
-daw-synchronization = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-synchronization" }
-daw-test-macro = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/daw-test-macro" }
-reaper-launcher = { path = "/home/cody/Development/FastTrackStudio/.pinned/daw/crates/reaper-launcher" }
-
-# moire: FTS fork (NixOS frame-pointer tolerance + facet 0.46 alignment).
+# moire: FTS fork (NixOS frame-pointer tolerance + facet 0.50 alignment).
 [patch."https://github.com/bearcove/moire"]
-moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-
-# vox: FTS fork carrying the vox-jit-abi __rust_alloc-scan fix (without it the
-# encode worker OOMs on complex/allocating RPC returns).
-[patch."https://github.com/bearcove/vox"]
-facet-cbor = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-ffi = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-jit = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-jit-abi = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-jit-cal = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-macros-core = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-macros-parse = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-postcard = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-schema = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-service-macros = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-stream = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-types = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
-vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
-# Patched Dioxus (FTS embedded-desktop-webview-host commits) from git.
-dioxus = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus" }
-dioxus-asset-resolver = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-asset-resolver" }
-dioxus-cli-config = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-cli-config" }
-dioxus-config-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-config-macro" }
-dioxus-config-macros = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-config-macros" }
-dioxus-core = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core" }
-dioxus-core-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core-macro" }
-dioxus-core-types = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core-types" }
-dioxus-devtools = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-devtools" }
-dioxus-devtools-types = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-devtools-types" }
-dioxus-document = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-document" }
-dioxus-history = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-history" }
-dioxus-hooks = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-hooks" }
-dioxus-html = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-html" }
-dioxus-html-internal-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-html-internal-macro" }
-dioxus-rsx = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-rsx" }
-dioxus-signals = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-signals" }
-dioxus-stores = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-stores" }
-dioxus-stores-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-stores-macro" }
-generational-box = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "generational-box" }
-manganis = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis" }
-manganis-core = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis-core" }
-manganis-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis-macro" }
+# Dioxus pinned to upstream DioxusLabs/dioxus v0.7.9 (rev 3e43ffa6) to match the
+# `dx` CLI version — same pin as the daw repo. The old FastTrackStudios fork
+# (32d9f51, embedded-desktop-webview-host) is retired.
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus" }
+dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-asset-resolver" }
+dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-cli-config" }
+dioxus-config-macros = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-config-macros" }
+dioxus-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-core" }
+dioxus-core-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-core-macro" }
+dioxus-core-types = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-core-types" }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-devtools" }
+dioxus-devtools-types = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-devtools-types" }
+dioxus-document = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-document" }
+dioxus-history = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-history" }
+dioxus-hooks = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-hooks" }
+dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-html" }
+dioxus-html-internal-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-html-internal-macro" }
+dioxus-rsx = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-rsx" }
+dioxus-signals = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-signals" }
+dioxus-stores = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-stores" }
+dioxus-stores-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-stores-macro" }
+generational-box = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "generational-box" }
+manganis = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "manganis" }
+manganis-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "manganis-core" }
+manganis-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "manganis-macro" }
 # moire (crates.io refs) → same FTS fork.
-moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }

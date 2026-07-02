@@ -279,7 +279,7 @@ extern "C" fn timer_callback() {
             std::panic::AssertUnwindSafe(|| process_pending_actions(app)),
         );
         #[cfg(feature = "ui-dock")]
-        catch_panic("update_panels", daw::ui::dock::update_panels);
+        catch_panic("update_panels", daw::reaper_ui::dock::update_panels);
     }
 }
 
@@ -394,9 +394,9 @@ fn register_actions_sync(
     if let Err(err) = task_support.do_later_in_main_thread_asap(move || {
         info!(panels = panels.len(), "Panel definitions collected");
         for panel in &panels {
-            daw::ui::dock::register_panel_from_service(panel);
+            daw::reaper_ui::dock::register_panel_from_service(panel);
         }
-        daw::ui::dock::restore_dock_state();
+        daw::reaper_ui::dock::restore_dock_state();
         info!(panels = panels.len(), "Panel registration completed");
     }) {
         warn!("Failed to schedule panel registration: {err}");
@@ -683,8 +683,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     #[cfg(feature = "ui-dock")]
     {
-        daw::ui::dock::init_service();
-        daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
+        daw::reaper_ui::dock::init_service();
+        daw::reaper_ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
     }
 
     register_actions_sync(&all_defs, modules, panels);

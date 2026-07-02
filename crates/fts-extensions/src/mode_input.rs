@@ -27,7 +27,7 @@ pub fn workflow_id_for(mode: Mode) -> &'static str {
         Mode::Master => "mode-master",
         Mode::Live => "mode-live",
         Mode::Video => "mode-video",
-        Mode::Minimal => "mode-minimal",
+        Mode::Scoring => "mode-scoring",
     }
 }
 
@@ -58,7 +58,11 @@ fn on_mode_changed(mode: Mode) {
 /// `register_actions_sync`, so a named-command lookup would miss the startup
 /// application. Modes without a rule set are a logged no-op on that side.
 fn apply_mode_visibility(mode: Mode) {
-    dynamic_template::daw_module::apply_mode_visibility_by_slug(mode.slug());
+    let command = format!(
+        "FTS_VISIBILITY_MANAGER_MODE_{}",
+        mode.slug().to_uppercase()
+    );
+    dynamic_template::daw_module::dispatch_session_command(&command);
     tracing::info!(mode = %mode, "[mode-visibility] applied mode visibility rules");
 }
 

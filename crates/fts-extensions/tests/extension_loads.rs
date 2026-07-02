@@ -378,7 +378,7 @@ async fn all_actions_registered(ctx: &ReaperTestContext) -> eyre::Result<()> {
         "FTS_VISIBILITY_MANAGER_MODE_MASTER",
         "FTS_VISIBILITY_MANAGER_MODE_LIVE",
         "FTS_VISIBILITY_MANAGER_MODE_VIDEO",
-        "FTS_VISIBILITY_MANAGER_MODE_MINIMAL",
+        "FTS_VISIBILITY_MANAGER_MODE_SCORING",
         "FTS_VISIBILITY_MANAGER_REBUILD_CACHE",
     ];
 
