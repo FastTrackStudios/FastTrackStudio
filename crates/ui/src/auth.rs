@@ -94,6 +94,16 @@ pub struct ActiveAccount {
     pub token: String,
 }
 
+/// Messages for the root auth service coroutine — the ONLY way auth
+/// state changes. Every surface (desktop dropdown, mobile sheet, boot
+/// restore) sends these; the single sequential consumer makes
+/// concurrent-switch races and unmount-cancelled tasks structurally
+/// impossible.
+pub enum AuthAction {
+    Switch(String),
+    SignOut,
+}
+
 /// Copyable auth handle — provided at the app root next to the plain
 /// `Signal<Option<ActiveAccount>>` context (consumers that only read
 /// identity take the signal; the switcher takes this).
@@ -105,105 +115,120 @@ pub struct AuthCtx {
     pub error: Signal<Option<String>>,
     /// True while a switch/sign-in is in flight.
     pub busy: Signal<bool>,
-    /// Hosted org list — auth always talks to the home org's endpoint.
-    orgs: Signal<Vec<OrgMeta>>,
-    /// Monotonic switch generation. A finishing switch commits only
-    /// if it's still the latest — otherwise a user's click during the
-    /// boot-time Guest auto-sign-in loses to whichever resolution
-    /// lands last (the "switching accounts does nothing" race).
-    seq: Signal<u64>,
+    /// The root auth service (see [`provide_auth`]).
+    actions: Coroutine<AuthAction>,
 }
 
 impl AuthCtx {
-    /// Switch to `email`: cached token → `whoami` validates; on miss
-    /// or invalid → real `sign_in_email_password` → cache the fresh
-    /// token. Sets the context + persists `task.auth.active`. The
-    /// previous account is NOT signed out — its token stays cached.
-    pub async fn switch_account(self, email: &str) {
-        let mut active = self.active;
-        let mut error = self.error;
-        let mut busy = self.busy;
-        let mut seq = self.seq;
-        let slug = home_slug(&self.orgs.peek());
-        if slug.is_empty() {
-            error.set(Some("org discovery hasn't resolved yet".to_owned()));
-            return;
-        }
-        // Claim the latest generation; concurrent switches (the boot
-        // auto-sign-in vs a user click) each resolve, but only the
-        // newest one may commit.
-        let my_seq = seq.peek().wrapping_add(1);
-        seq.set(my_seq);
-        busy.set(true);
-        error.set(None);
-        let resolved = resolve_session(&slug, email).await;
-        if *seq.peek() != my_seq {
-            return; // superseded by a newer switch — drop silently
-        }
-        match resolved {
-            Ok(account) => {
-                save_active_email(&account.email);
-                active.set(Some(account));
-            }
-            Err(e) => error.set(Some(e)),
-        }
-        busy.set(false);
+    /// Request a switch to `email`. Sync fire-and-forget — safe from
+    /// UI that closes/unmounts on selection (sheets, dropdowns): the
+    /// work runs in the root coroutine, not the caller's scope.
+    pub fn switch_account(self, email: impl Into<String>) {
+        self.actions.send(AuthAction::Switch(email.into()));
     }
 
-    /// Fire-and-forget [`Self::switch_account`], detached from the
-    /// caller's scope. THE entry point for UI: switcher rows live in
-    /// dropdowns/sheets that close (and unmount) on selection, and a
-    /// plain `spawn` dies with its component — the task must survive
-    /// on the app root. Mobile's bottom sheet hit exactly this
-    /// (switch silently cancelled mid-flight); desktop only worked
-    /// because its dropdown host stays mounted.
-    pub fn switch_account_detached(self, email: &'static str) {
-        dioxus::dioxus_core::spawn_forever(async move { self.switch_account(email).await });
+    /// Request sign-out (revoke server-side, drop cached token, fall
+    /// back to Guest). Same fire-and-forget contract as
+    /// [`Self::switch_account`].
+    pub fn sign_out(self) {
+        self.actions.send(AuthAction::SignOut);
     }
+}
 
-    /// Detached [`Self::sign_out`] — same unmount-safety contract as
-    /// [`Self::switch_account_detached`].
-    pub fn sign_out_detached(self) {
-        dioxus::dioxus_core::spawn_forever(async move { self.sign_out().await });
+/// The signals the auth service mutates — plumbed as one bundle so
+/// the coroutine closure and the async workers stay readable.
+#[derive(Clone, Copy)]
+struct AuthState {
+    active: Signal<Option<ActiveAccount>>,
+    error: Signal<Option<String>>,
+    busy: Signal<bool>,
+    orgs: Signal<Vec<OrgMeta>>,
+}
+
+/// Switch to `email`: cached token → `whoami` validates; on miss or
+/// invalid → real `sign_in_email_password` → cache the fresh token.
+/// Sets the context + persists `task.auth.active`. The previous
+/// account is NOT signed out — its token stays cached so switching
+/// back is instant.
+async fn run_switch(mut st: AuthState, email: &str) {
+    let slug = home_slug(&st.orgs.peek());
+    if slug.is_empty() {
+        st.error
+            .set(Some("org discovery hasn't resolved yet".to_owned()));
+        return;
     }
-
-    /// Explicit sign-out: revoke the session server-side, drop the
-    /// cached token + active marker, then fall back to Guest (the
-    /// anonymous default — auto sign-in).
-    pub async fn sign_out(self) {
-        let mut active = self.active;
-        let Some(account) = active.peek().clone() else {
-            return;
-        };
-        clear_cached_token(&account.email);
-        clear_active_email();
-        active.set(None);
-        let slug = home_slug(&self.orgs.peek());
-        if !slug.is_empty() {
-            if let Ok(client) = establish_for::<AuthServiceClient>(&slug).await {
-                // Best-effort revocation — sign_out is idempotent.
-                let _ = client.sign_out(account.token.clone()).await;
-            }
+    st.busy.set(true);
+    st.error.set(None);
+    match resolve_session(&slug, email).await {
+        Ok(account) => {
+            save_active_email(&account.email);
+            st.active.set(Some(account));
         }
-        self.switch_account(GUEST_EMAIL).await;
+        Err(e) => st.error.set(Some(e)),
     }
+    st.busy.set(false);
+}
+
+/// Explicit sign-out: revoke the session server-side, drop the cached
+/// token + active marker, then fall back to Guest (the anonymous
+/// default — auto sign-in).
+async fn run_sign_out(mut st: AuthState) {
+    let Some(account) = st.active.peek().clone() else {
+        return;
+    };
+    clear_cached_token(&account.email);
+    clear_active_email();
+    st.active.set(None);
+    let slug = home_slug(&st.orgs.peek());
+    if !slug.is_empty() {
+        if let Ok(client) = establish_for::<AuthServiceClient>(&slug).await {
+            // Best-effort revocation — sign_out is idempotent.
+            let _ = client.sign_out(account.token.clone()).await;
+        }
+    }
+    run_switch(st, GUEST_EMAIL).await;
 }
 
 /// Provide the auth contexts and kick off boot restore. Call once at
 /// the app root, after the org-list provider (`fetch_orgs` discovery)
 /// and before the router.
 pub fn provide_auth() -> AuthCtx {
+    use futures_util::StreamExt as _;
+
     let orgs = use_context::<Signal<Vec<OrgMeta>>>();
     let active = use_signal(|| None::<ActiveAccount>);
     let error = use_signal(|| None::<String>);
     let busy = use_signal(|| false);
-    let seq = use_signal(|| 0u64);
-    let ctx = AuthCtx {
+    let st = AuthState {
         active,
         error,
         busy,
         orgs,
-        seq,
+    };
+
+    // The auth service: one sequential consumer for every auth action
+    // in the app. Root-owned (unmount-safe — a sheet closing can't
+    // cancel it) and ordered (no concurrent switches to race). A
+    // queued burst coalesces to the newest action, so clicking an
+    // account while the boot auto-sign-in is still resolving skips
+    // straight to the click — no Guest flash, no generation counter.
+    let actions = use_coroutine(move |mut rx: UnboundedReceiver<AuthAction>| async move {
+        while let Some(mut msg) = rx.next().await {
+            while let Ok(newer) = rx.try_recv() {
+                msg = newer;
+            }
+            match msg {
+                AuthAction::Switch(email) => run_switch(st, &email).await,
+                AuthAction::SignOut => run_sign_out(st).await,
+            }
+        }
+    });
+
+    let ctx = AuthCtx {
+        active,
+        error,
+        busy,
+        actions,
     };
     use_context_provider(|| active);
     use_context_provider(|| ctx);
@@ -218,10 +243,7 @@ pub fn provide_auth() -> AuthCtx {
             return;
         }
         booted.set(true);
-        spawn(async move {
-            let email = load_active_email().unwrap_or_else(|| GUEST_EMAIL.to_owned());
-            ctx.switch_account(&email).await;
-        });
+        ctx.switch_account(load_active_email().unwrap_or_else(|| GUEST_EMAIL.to_owned()));
     });
     ctx
 }
@@ -408,7 +430,7 @@ pub fn AccountSheetBody(on_done: EventHandler<()>) -> Element {
                             class: "flex min-h-[44px] w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-accent",
                             onclick: move |_| {
                                 on_done.call(());
-                                ctx.switch_account_detached(dev.email);
+                                ctx.switch_account(dev.email);
                             },
                             Avatar { name: dev.name.to_string(), email: dev.email.to_string(), size: 28 }
                             span { class: "flex min-w-0 flex-col",
@@ -452,7 +474,7 @@ pub fn AccountSheetBody(on_done: EventHandler<()>) -> Element {
                 class: "flex min-h-[44px] w-full items-center justify-center rounded-lg border border-destructive/40 px-3 py-2 text-sm font-medium text-destructive active:bg-destructive/10",
                 onclick: move |_| {
                     on_done.call(());
-                    ctx.sign_out_detached();
+                    ctx.sign_out();
                 },
                 "Sign out"
             }
@@ -522,7 +544,7 @@ pub fn AccountSwitcher() -> Element {
                             index: idx,
                             on_select: move |_| {
                                 open.set(false);
-                                ctx.switch_account_detached(dev.email);
+                                ctx.switch_account(dev.email);
                             },
                             div { class: "flex w-full items-center justify-between gap-2",
                                 span { class: "flex min-w-0 items-center gap-2",
@@ -564,7 +586,7 @@ pub fn AccountSwitcher() -> Element {
                         destructive: true,
                         on_select: move |_| {
                             open.set(false);
-                            ctx.sign_out_detached();
+                            ctx.sign_out();
                         },
                         "Sign out"
                     }
