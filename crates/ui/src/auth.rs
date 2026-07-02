@@ -107,6 +107,11 @@ pub struct AuthCtx {
     pub busy: Signal<bool>,
     /// Hosted org list — auth always talks to the home org's endpoint.
     orgs: Signal<Vec<OrgMeta>>,
+    /// Monotonic switch generation. A finishing switch commits only
+    /// if it's still the latest — otherwise a user's click during the
+    /// boot-time Guest auto-sign-in loses to whichever resolution
+    /// lands last (the "switching accounts does nothing" race).
+    seq: Signal<u64>,
 }
 
 impl AuthCtx {
@@ -118,14 +123,24 @@ impl AuthCtx {
         let mut active = self.active;
         let mut error = self.error;
         let mut busy = self.busy;
+        let mut seq = self.seq;
         let slug = home_slug(&self.orgs.peek());
         if slug.is_empty() {
             error.set(Some("org discovery hasn't resolved yet".to_owned()));
             return;
         }
+        // Claim the latest generation; concurrent switches (the boot
+        // auto-sign-in vs a user click) each resolve, but only the
+        // newest one may commit.
+        let my_seq = seq.peek().wrapping_add(1);
+        seq.set(my_seq);
         busy.set(true);
         error.set(None);
-        match resolve_session(&slug, email).await {
+        let resolved = resolve_session(&slug, email).await;
+        if *seq.peek() != my_seq {
+            return; // superseded by a newer switch — drop silently
+        }
+        match resolved {
             Ok(account) => {
                 save_active_email(&account.email);
                 active.set(Some(account));
@@ -165,11 +180,13 @@ pub fn provide_auth() -> AuthCtx {
     let active = use_signal(|| None::<ActiveAccount>);
     let error = use_signal(|| None::<String>);
     let busy = use_signal(|| false);
+    let seq = use_signal(|| 0u64);
     let ctx = AuthCtx {
         active,
         error,
         busy,
         orgs,
+        seq,
     };
     use_context_provider(|| active);
     use_context_provider(|| ctx);
