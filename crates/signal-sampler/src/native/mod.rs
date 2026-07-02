@@ -14,12 +14,14 @@
 
 mod adsr;
 mod amp;
+mod arp;
 mod control;
 mod filter;
 mod waveshaper;
 mod wavetable;
 
 pub use adsr::{Adsr, AdsrParams};
+pub use arp::{ArpEngine, ArpStep};
 pub use amp::NativeAmp;
 pub use control::{ControlEnv, ControlLfo, LfoWave, MidiMod, ModSource};
 pub use filter::{FilterMode, NativeFilter, Svf};

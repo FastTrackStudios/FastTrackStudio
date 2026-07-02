@@ -169,6 +169,29 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
 
 // ── The mod engine ───────────────────────────────────────────────────────────
 
+/// Build the preset's arpeggiator from an active Arp modulator on the root
+/// container (`on` ≠ 0). Steps come from `step{i}_on/vel/gate` params.
+fn build_arp(container: &Container) -> Option<crate::native::ArpEngine> {
+    use crate::native::{ArpEngine, ArpStep};
+    let arp = container.modulators.iter().find(|m| {
+        m.block_type == BlockType::Arpeggiator && m.param_f32("on").unwrap_or(0.0) > 0.0
+    })?;
+    let step_beats = arp.param_f32("step_beats").unwrap_or(0.25);
+    let count = arp.param_f32("steps").unwrap_or(0.0).max(0.0) as usize;
+    let mut steps = Vec::with_capacity(count);
+    for i in 0..count.min(64) {
+        steps.push(ArpStep {
+            on: arp.param_f32(&format!("step{i}_on")).unwrap_or(1.0) > 0.0,
+            velocity: (arp.param_f32(&format!("step{i}_vel")).unwrap_or(100.0) as u8).clamp(1, 127),
+            gate: arp
+                .param_f32(&format!("step{i}_gate"))
+                .unwrap_or(0.8)
+                .clamp(0.05, 1.0),
+        });
+    }
+    Some(ArpEngine::new(steps, step_beats))
+}
+
 /// One resolved ModMatrix row.
 struct CompiledRoute {
     source: usize,
@@ -191,10 +214,15 @@ pub struct ModEngine {
     bus_r: Vec<Vec<f32>>,
     /// Tempo for synced LFOs (set by the host via [`RenderNode::set_tempo`]).
     tempo_bpm: f32,
+    /// Sample rate captured at prepare (drives the arp clock).
+    sample_rate: f32,
+    /// MIDI-domain arpeggiator, when the preset carries an active Arp.
+    arp: Option<crate::native::ArpEngine>,
 }
 
 impl ModEngine {
     fn prepare(&mut self, sample_rate: f64, leaf_count: usize) {
+        self.sample_rate = sample_rate as f32;
         for s in &mut self.sources {
             s.set_sample_rate(sample_rate as f32);
         }
@@ -442,7 +470,7 @@ impl RenderNode {
         let mut mc = ModCompiler::new(sample_rate);
         mc.collect_buses(container);
         let root = Self::compile_container(container, sample_rate, &mut mc);
-        if mc.routes.is_empty() && mc.buses.is_empty() {
+        if mc.routes.is_empty() && mc.buses.is_empty() && build_arp(container).is_none() {
             root
         } else {
             let bus_count = mc.buses.len();
@@ -454,6 +482,8 @@ impl RenderNode {
                     bus_l: vec![Vec::new(); bus_count],
                     bus_r: vec![Vec::new(); bus_count],
                     tempo_bpm: 120.0,
+                    sample_rate: sample_rate as f32,
+                    arp: build_arp(container),
                 }),
                 inner: Box::new(root),
             }
@@ -647,6 +677,21 @@ impl RenderNode {
         // buffers down the tree.
         if let RenderNode::Modulated { engine, inner } = self {
             let frames = out_l.len().min(out_r.len());
+            // The arpeggiator rewrites the MIDI stream before anything else
+            // (steps replace held notes; CC/bend pass through).
+            let arp_midi;
+            let arp_events;
+            let events = if let Some(arp) = engine.arp.as_mut() {
+                arp_midi = arp.process(events.midi, frames, engine.sample_rate, engine.tempo_bpm);
+                arp_events = PluginEvents {
+                    params: events.params,
+                    midi: &arp_midi,
+                    note_expressions: events.note_expressions,
+                };
+                &arp_events
+            } else {
+                events
+            };
             engine.tick(events, frames);
             let mut ctx = RenderCtx {
                 writes: std::mem::take(&mut engine.writes),

@@ -318,6 +318,10 @@ pub struct OmniPatch {
     /// Part LFOs from `LFO_SET`: `(rate 0..1, type 0..1, synced, retrigger)`.
     pub lfos: Vec<(f32, f32, bool, bool)>,
     pub arp_on: bool,
+    /// Arp pattern from `ARPSEQ2`: `(on, velocity, gate 0..1)` per step.
+    pub arp_steps: Vec<(bool, u8, f32)>,
+    /// Step length in beats (from tick spacing vs `TICKSPERQUARTER`).
+    pub arp_step_beats: f32,
 }
 
 fn rack_types(rack: &XmlNode) -> Vec<String> {
@@ -387,6 +391,12 @@ fn parse_env(e: &XmlNode) -> Option<(f32, f32, f32, f32)> {
 /// Parse a `.prt_omn` document into an [`OmniPatch`].
 pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
     let root = parse_xml(xml)?;
+    parse_patch_node(&root)
+}
+
+/// Parse one part from any node containing a `SYNTHENG` (a patch document
+/// root, or one `SynthEngine` inside a Multi).
+fn parse_patch_node(root: &XmlNode) -> Result<OmniPatch, String> {
     let engine = root
         .find("SYNTHENG")
         .ok_or("no SYNTHENG element (not an Omnisphere patch?)")?;
@@ -546,9 +556,115 @@ pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
 
     if let Some(arp) = root.find("ARP") {
         patch.arp_on = arp.num("ArpOnOff").unwrap_or(0.0) != 0.0;
+        if let Some(seq) = arp.find("ARPSEQ2") {
+            let tpq = seq.num("TICKSPERQUARTER").unwrap_or(1200.0).max(1.0);
+            let mut raw: Vec<(f32, f32, u8)> = seq
+                .children_tagged("SLICESEQSTEP")
+                .map(|s| {
+                    (
+                        s.num("BEGIN").unwrap_or(0.0),
+                        s.num("END").unwrap_or(0.0),
+                        s.num("VEL").unwrap_or(0.0) as u8,
+                    )
+                })
+                .collect();
+            raw.sort_by(|a, b| a.0.total_cmp(&b.0));
+            // Step length = the spacing between step starts (1/16 = TPQ/4).
+            let step_ticks = raw
+                .windows(2)
+                .map(|w| w[1].0 - w[0].0)
+                .find(|d| *d > 0.0)
+                .unwrap_or(tpq / 4.0);
+            patch.arp_step_beats = step_ticks / tpq;
+            patch.arp_steps = raw
+                .iter()
+                .map(|(b, e, v)| {
+                    let gate = ((e - b) / step_ticks).clamp(0.05, 1.0);
+                    (*v > 0, (*v).max(1), gate)
+                })
+                .collect();
+        }
     }
 
     Ok(patch)
+}
+
+// ── Multis ───────────────────────────────────────────────────────────────────
+
+/// A parsed `.mlt_omn` Multi: up to 8 Parts + their mixer strip.
+#[derive(Debug, Clone, Default)]
+pub struct OmniMulti {
+    pub name: String,
+    /// `(patch, level 0..1, muted)` per part.
+    pub parts: Vec<(OmniPatch, f32, bool)>,
+}
+
+/// Parse a `.mlt_omn` document: `SynthMaster` wraps 8 `SynthEngine` parts
+/// plus `MasterEngineBaseParamBlock` mixer attrs (`pLevel0..7`, `pMute0..7`).
+pub fn parse_multi(xml: &str) -> Result<OmniMulti, String> {
+    let root = parse_xml(xml)?;
+    let mut multi = OmniMulti::default();
+    if let Some(descr) = root.child("ENTRYDESCR") {
+        multi.name = descr.attr("name").unwrap_or("").to_string();
+    }
+    let mixer = root.find("MasterEngineBaseParamBlock");
+    for (i, engine) in root.children_tagged("SynthSubEngine").enumerate() {
+        let patch = parse_patch_node(engine)?;
+        let level = mixer
+            .and_then(|m| m.num(&format!("pLevel{i}")))
+            .unwrap_or(0.75)
+            .clamp(0.0, 1.0);
+        let muted = mixer
+            .and_then(|m| m.num(&format!("pMute{i}")))
+            .unwrap_or(0.0)
+            != 0.0;
+        multi.parts.push((patch, level, muted));
+    }
+    if multi.parts.is_empty() {
+        return Err("no SynthEngine parts (not an Omnisphere multi?)".into());
+    }
+    Ok(multi)
+}
+
+/// Map a Multi onto one composition tree: Parts sum in parallel, each with
+/// its mixer level (0.75 ≈ unity — CALIBRATE) and mute (bypass).
+pub fn multi_to_container(multi: &OmniMulti, index: &SoundsourceIndex) -> Container {
+    let title = if multi.name.is_empty() {
+        "Omnisphere Multi".to_string()
+    } else {
+        multi.name.clone()
+    };
+    let mut parts = Container::parallel("Parts");
+    for (i, (patch, level, muted)) in multi.parts.iter().enumerate() {
+        // Skip empty default parts (no soundsource, no layers of note).
+        let named = !patch.name.is_empty();
+        let has_content = named
+            || patch
+                .layers
+                .iter()
+                .any(|l| !l.soundsource.is_empty());
+        if !has_content {
+            continue;
+        }
+        let mut part = patch_to_container(patch, index);
+        part.role = crate::rig_node::Role::Engine;
+        part.name = format!("Part {}: {}", i + 1, patch.name);
+        part.output_db = if *level <= 0.0 {
+            -60.0
+        } else {
+            (20.0 * (level / 0.75).log10()).max(-60.0)
+        };
+        part.bypassed = *muted;
+        parts = parts.add(part);
+    }
+    Container::preset(title).add(parts)
+}
+
+/// Convenience: read + parse + map a `.mlt_omn` file.
+pub fn load_multi_file(path: &Path, index: &SoundsourceIndex) -> Result<Container, String> {
+    let xml = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let multi = parse_multi(&xml)?;
+    Ok(multi_to_container(&multi, index))
 }
 
 // ── Soundsource index ────────────────────────────────────────────────────────
@@ -921,7 +1037,18 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
         preset = preset.modulator_block(lfo);
     }
     if patch.arp_on {
-        preset = preset.modulator(BlockType::Arpeggiator, "Arp");
+        let mut arp = RigBlock::of_type(BlockType::Arpeggiator)
+            .named("Arp")
+            .with_param("on", "1")
+            .with_param("step_beats", format!("{:.5}", patch.arp_step_beats.max(0.03125)))
+            .with_param("steps", patch.arp_steps.len().to_string());
+        for (i, (on, vel, gate)) in patch.arp_steps.iter().enumerate() {
+            arp = arp
+                .with_param(format!("step{i}_on"), if *on { "1" } else { "0" })
+                .with_param(format!("step{i}_vel"), vel.to_string())
+                .with_param(format!("step{i}_gate"), format!("{gate:.3}"));
+        }
+        preset = preset.modulator_block(arp);
     }
     // Carry the browser tags + mod routes as preset params (inspectable in
     // dumps and the TUI; the mod routes become live once the ModMatrix
@@ -938,8 +1065,11 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
     preset
 }
 
-/// Convenience: read + parse + map a `.prt_omn` file.
+/// Convenience: read + parse + map a `.prt_omn` patch or `.mlt_omn` Multi.
 pub fn load_patch_file(path: &Path, index: &SoundsourceIndex) -> Result<Container, String> {
+    if path.extension().is_some_and(|e| e == "mlt_omn") {
+        return load_multi_file(path, index);
+    }
     let xml = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
     let patch = parse_patch(&xml)?;
     Ok(patch_to_container(&patch, index))
@@ -1221,6 +1351,47 @@ mod tests {
             heard = heard.max((l.iter().map(|s| s * s).sum::<f32>() / 512.0).sqrt());
         }
         assert!(heard > 1e-3, "synth-mode patch audible, rms={heard}");
+    }
+
+    /// Machine-local: a user Multi from the voyager sync imports (8 parts +
+    /// mixer) and renders audibly.
+    /// `cargo test -p signal-sampler --lib multi_imports -- --ignored`
+    #[test]
+    #[ignore = "requires the voyager patch sync + soundsource extraction"]
+    fn multi_imports_and_sounds() {
+        use signal_plugin_host::{PluginEvents, PluginMidiEvent};
+        let path = Path::new(
+            "/run/media/AudioHaven/Sampled/Synth/Spectrasonics-Patches/Omnisphere-Voyager/Settings Library/Multis/User/Custom Sounds/1975 Fast Arp.mlt_omn",
+        );
+        if !path.exists() {
+            eprintln!("skipping: {path:?} not present");
+            return;
+        }
+        let index = SoundsourceIndex::scan_default();
+        let tree = load_patch_file(path, &index).expect("multi import");
+        eprintln!("imported multi as {:?}", tree.name);
+        let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
+        rn.prepare(48_000.0, 512);
+        let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+        let midi = [PluginMidiEvent {
+            offset: 0,
+            message: daw::service::MidiMessage::note_on(0, 60, 100),
+        }];
+        let mut heard = 0.0f32;
+        for _ in 0..600 {
+            let ev = PluginEvents {
+                params: &[],
+                midi: &midi,
+                note_expressions: &[],
+            };
+            rn.render(&mut l, &mut r, &ev);
+            heard = heard.max((l.iter().map(|s| s * s).sum::<f32>() / 512.0).sqrt());
+            if heard > 1e-3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(heard > 1e-3, "multi should be audible, rms={heard}");
     }
 
     /// Machine-local: parse every factory patch in the on-disk Settings
