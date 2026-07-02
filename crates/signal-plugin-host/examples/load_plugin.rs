@@ -54,6 +54,29 @@ fn main() {
     }
     println!("latency : {} frames", plugin.latency());
 
+    // `--save-state <file>` dumps the plugin's state chunk after load —
+    // for state-format reverse engineering (e.g. Omnisphere embeds XML).
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--save-state") {
+        let path = args.get(i + 1).expect("--save-state <file>");
+        match plugin.save_state() {
+            Ok(state) => {
+                std::fs::write(path, &state).expect("write state");
+                println!("state   : {} bytes -> {path}", state.len());
+            }
+            Err(e) => println!("state   : save failed: {e}"),
+        }
+    }
+    // `--load-state <file>` restores a chunk before rendering (A/B path).
+    if let Some(i) = args.iter().position(|a| a == "--load-state") {
+        let path = args.get(i + 1).expect("--load-state <file>");
+        let bytes = std::fs::read(path).expect("read state");
+        match plugin.load_state(&bytes) {
+            Ok(()) => println!("state   : loaded {} bytes from {path}", bytes.len()),
+            Err(e) => println!("state   : load failed: {e}"),
+        }
+    }
+
     // Render half a second of C4 and report the output level — proves the
     // instrument actually makes sound under our host.
     let note_on = [PluginMidiEvent {
