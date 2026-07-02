@@ -737,6 +737,21 @@ impl SamplerRig {
         }
     }
 
+    /// Explicitly set an instrument's play-mode policy — see
+    /// [`PlayMode`](crate::engine::PlayMode). Mode selection is normally
+    /// automatic (StrictLive everywhere; the document renderer forces
+    /// Lookahead for its duration); this is the explicit override.
+    pub fn set_play_mode(&self, id: &str, mode: crate::engine::PlayMode) {
+        if let Ok(mut bank) = self.bank().lock() {
+            bank.set_play_mode(id, mode);
+        }
+    }
+
+    /// An instrument's current play-mode policy.
+    pub fn play_mode(&self, id: &str) -> Option<crate::engine::PlayMode> {
+        self.bank().lock().ok().and_then(|b| b.play_mode(id))
+    }
+
     /// Enable/disable an instrument's legato transition fire log (tests /
     /// offline analysis).
     pub fn set_legato_fire_log_enabled(&self, id: &str, enabled: bool) {

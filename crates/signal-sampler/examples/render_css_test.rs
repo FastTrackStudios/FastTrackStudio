@@ -149,6 +149,10 @@ fn main() -> eyre::Result<()> {
         "Mix",
     )?;
     rig.set_solo_mic(ID, Some("Mix".into()));
+    // CSS-parity harness: reproduce Kontakt's expressive reactive latency.
+    // The strict live policy (PlayMode::StrictLive) would otherwise force the
+    // low_latency tables regardless of the MIDI's CC58 "expressive" request.
+    rig.set_legato_mode(ID, true, true);
     rig.set_articulation(ID, "Nonvib");
     // CSS-default envelope: fast attack (sustains start at the steady region) and
     // a ~0.4s release under the recorded NVrel/Vsusrel tail.

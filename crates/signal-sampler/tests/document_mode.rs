@@ -455,6 +455,90 @@ fn class_bus_split_sums_to_main_and_isolates_shorts() {
     );
 }
 
+// ── 1d. Play-mode policy: strict live low-latency by default ─────────────────
+
+#[test]
+fn strict_live_uses_low_latency_tables_and_lookahead_uses_expressive() {
+    // vel 30: expressive table ⇒ 333 ms, low_latency table ⇒ 100 ms.
+    // Live default (PlayMode::StrictLive) must take the low_latency value —
+    // no exceptions — while the document path keeps the expressive lead.
+    let block: usize = 64;
+    let fast_frames: u64 = 100 * SR as u64 / 1000;
+    let tick: u64 = 48_000;
+
+    let (live, _g) = fixture_rig("strict-live");
+    live.set_legato_fire_log_enabled("fixture", true);
+    let mut cur: u64 = 0;
+    let render_until = |target: u64, cur: &mut u64| {
+        while *cur < target {
+            let frames = ((target - *cur) as usize).min(block);
+            let mut buf = vec![0.0f32; frames * 2];
+            live.render_offline(&mut buf).expect("render");
+            *cur += frames as u64;
+        }
+    };
+    live.note_on("fixture", 60, 90);
+    render_until(tick, &mut cur);
+    live.note_on("fixture", 62, 30); // slow-zone velocity
+    render_until(tick + 2 * SLOW_DELAY_FRAMES, &mut cur);
+
+    let log = live.legato_fire_log("fixture");
+    assert_eq!(log.len(), 1);
+    let fire = log[0].frame;
+    assert!(
+        fire >= tick + fast_frames - block as u64 && fire <= tick + fast_frames,
+        "StrictLive must fire on the low_latency table (~100 ms), got +{} frames",
+        fire - tick
+    );
+
+    // The document path (Lookahead) keeps the expressive 333 ms lead.
+    let doc = TrackDocument {
+        seed: 1,
+        notes: vec![note(0.0, 2.1, 60, 90), note(2.0, 4.0, 62, 30)],
+        ..Default::default()
+    };
+    let spec = live.instrument_spec("fixture").expect("spec");
+    let sched = annotate(&doc, &spec, SR);
+    let prefire = sched
+        .events
+        .iter()
+        .find(|e| matches!(e.kind, DocEvent::LegatoPrefire { .. }))
+        .expect("prefire");
+    assert_eq!(prefire.frame, tick - SLOW_DELAY_FRAMES);
+
+    // And a document render leaves the engine back in StrictLive.
+    let (rig, _g2) = fixture_rig("strict-restore");
+    rig.render_offline_document(
+        "fixture",
+        &doc,
+        &DocumentRenderOptions {
+            tail_sec: 0.1,
+            ..Default::default()
+        },
+    )
+    .expect("render");
+    assert_eq!(
+        rig.play_mode("fixture"),
+        Some(signal_sampler::PlayMode::StrictLive),
+        "document render must restore the strict live policy when done"
+    );
+}
+
+#[test]
+fn strict_live_shorts_have_zero_preroll() {
+    // Live shorts fire AT note-on — the 60 ms pre-delay is a schedule-only
+    // concept (it means "start EARLY", which live playing cannot do).
+    let (rig, _g) = fixture_rig("strict-shorts");
+    rig.cc("fixture", 58, 23); // Staccato band
+    rig.note_on("fixture", 64, 100);
+    let mut buf = vec![0.0f32; 64 * 2];
+    rig.render_offline(&mut buf).expect("render");
+    assert!(
+        buf.iter().any(|s| *s != 0.0),
+        "a StrictLive short must sound within the first block after note-on"
+    );
+}
+
 // ── 2. Timing inversion ──────────────────────────────────────────────────────
 
 #[test]

@@ -87,7 +87,7 @@ pub use document::{
     Schedule, ScheduledEvent, TempoPoint, TrackDocument, annotate, line_for_chan,
 };
 pub use engine::cache::SignalPcmPack;
-pub use engine::{ArticClass, LegatoFireEvent, LineId, SampleEngine};
+pub use engine::{ArticClass, LegatoFireEvent, LineId, PlayMode, SampleEngine};
 pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
 pub use instrument::SamplerInstrument;
 pub use keys_rig::{KeysInstrument, KeysRig};

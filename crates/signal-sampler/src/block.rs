@@ -290,6 +290,16 @@ impl SamplerBlock {
         self.engine.set_legato_mode(enabled, expressive);
     }
 
+    /// Explicitly set the play-mode policy — see [`SampleEngine::set_play_mode`].
+    pub fn set_play_mode(&mut self, mode: crate::engine::PlayMode) {
+        self.engine.set_play_mode(mode);
+    }
+
+    /// Current play-mode policy — see [`SampleEngine::play_mode`].
+    pub fn play_mode(&self) -> crate::engine::PlayMode {
+        self.engine.play_mode()
+    }
+
     /// Enable/disable the legato transition fire log —
     /// see [`SampleEngine::set_legato_fire_log_enabled`].
     pub fn set_legato_fire_log_enabled(&mut self, enabled: bool) {

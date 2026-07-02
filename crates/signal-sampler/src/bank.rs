@@ -704,6 +704,17 @@ impl SamplerBank {
         self.with_block(id, |b| b.set_legato_mode(enabled, expressive));
     }
 
+    /// Explicitly set an instrument's play-mode policy — see
+    /// [`PlayMode`](crate::engine::PlayMode).
+    pub fn set_play_mode(&mut self, id: &str, mode: crate::engine::PlayMode) {
+        self.with_block(id, |b| b.set_play_mode(mode));
+    }
+
+    /// An instrument's current play-mode policy.
+    pub fn play_mode(&self, id: &str) -> Option<crate::engine::PlayMode> {
+        self.read_block(id, |b| b.play_mode())
+    }
+
     /// Enable/disable an instrument's legato transition fire log.
     pub fn set_legato_fire_log_enabled(&mut self, id: &str, enabled: bool) {
         self.with_block(id, |b| b.set_legato_fire_log_enabled(enabled));

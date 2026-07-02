@@ -139,6 +139,34 @@ enum LegatoState {
     },
 }
 
+/// Automatic play-mode policy (see `docs/plan/document-mode.md`, "Mode
+/// policy: strict live low-latency by default"): if the engine can see the
+/// future it plays beautifully; if it can't, it plays NOW.
+///
+/// - [`StrictLive`](PlayMode::StrictLive) (default) — zero added latency, no
+///   exceptions: reactive legato uses the `low_latency` velocity→delay
+///   tables regardless of what CC58 requested, shorts fire immediately
+///   (there is no pre-delay concept outside a schedule), and
+///   [`latency_frames`](SampleEngine::latency_frames) reports 0.
+/// - [`Lookahead`](PlayMode::Lookahead) — the MIDI is known ahead of time
+///   (document playback / offline render): full `expressive` legato,
+///   transitions prefired by the scheduler. Also reports 0 latency — the
+///   engine anticipates rather than delays.
+///
+/// Selection is automatic: the document scheduler forces `Lookahead` for the
+/// duration of a render and restores `StrictLive` after; live dispatch never
+/// leaves `StrictLive` unless explicitly overridden
+/// ([`set_legato_mode`](SampleEngine::set_legato_mode) with
+/// `expressive = true`, or [`set_play_mode`](SampleEngine::set_play_mode) —
+/// the CSS-parity harnesses use this to reproduce Kontakt's expressive
+/// latency reactively).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlayMode {
+    #[default]
+    StrictLive,
+    Lookahead,
+}
+
 /// Identifies one monophonic legato line inside an engine. Lines are
 /// first-class engine entities — they are NOT MIDI channels. Allocators sit
 /// in front of the line pool and decide which line an incoming note belongs
@@ -332,7 +360,11 @@ pub struct SampleEngine {
     /// a fresh sustain even if notes are held (equivalent to "Legato Off" in CSS).
     legato_enabled: bool,
     /// True = expressive mode (3 zones, 333/250/100ms), false = low-latency (2 zones, 100/150ms).
+    /// What CC58 / keyswitches REQUESTED; [`PlayMode`] decides whether the
+    /// request is honored — StrictLive plays low-latency no matter what.
     legato_expressive: bool,
+    /// Automatic mode policy — see [`PlayMode`]. Default: StrictLive.
+    play_mode: PlayMode,
 
     /// Notes currently held down: MIDI note → velocity. Shared across lines
     /// (keys are physical); per-line press order lives in `LegatoLine::order`.
@@ -531,6 +563,7 @@ impl SampleEngine {
             con_sordino: false,
             legato_enabled: true,
             legato_expressive: false, // default: low-latency mode
+            play_mode: PlayMode::StrictLive,
             sord_filter: BiquadFilter::lowpass(filter::SORD_FC, filter::SORD_Q, sample_rate),
             // Pre-size note-keyed maps to the full MIDI range so note-on never
             // reallocates them on the audio thread.
@@ -744,9 +777,39 @@ impl SampleEngine {
     /// Explicitly set the legato mode (document mode forces
     /// `enabled = true, expressive = true` — the full-authenticity mode —
     /// regardless of the CC58 stream, per the document-mode design).
+    ///
+    /// As the explicit HOST-level override, this also sets the [`PlayMode`]
+    /// policy: `expressive = true` ⇒ Lookahead (the caller vouches that
+    /// latency is acceptable — document renders and the CSS-parity
+    /// harnesses), `false` ⇒ StrictLive. CC58 / keyswitch "expressive"
+    /// requests do NOT reach here — they only set the preference flag, which
+    /// StrictLive ignores.
     pub fn set_legato_mode(&mut self, enabled: bool, expressive: bool) {
         self.legato_enabled = enabled;
         self.legato_expressive = expressive;
+        self.play_mode = if expressive {
+            PlayMode::Lookahead
+        } else {
+            PlayMode::StrictLive
+        };
+    }
+
+    /// Explicitly set the play-mode policy — see [`PlayMode`].
+    pub fn set_play_mode(&mut self, mode: PlayMode) {
+        self.play_mode = mode;
+    }
+
+    /// Current play-mode policy.
+    pub fn play_mode(&self) -> PlayMode {
+        self.play_mode
+    }
+
+    /// Added latency this engine imposes, in frames: 0 in BOTH modes.
+    /// StrictLive plays now; Lookahead anticipates (transitions are prefired
+    /// from the schedule) rather than delaying — the tradeoff moves from
+    /// latency to transition authenticity, per the design doc.
+    pub fn latency_frames(&self) -> usize {
+        0
     }
 
     /// Enable/disable the legato transition fire log (tests / offline
@@ -1638,7 +1701,10 @@ impl SampleEngine {
 
     /// The legato transition delay (ms) + portamento flag for a target
     /// velocity: portamento below the threshold, else the expressive or
-    /// low-latency velocity→delay curve from the spec.
+    /// low-latency velocity→delay curve from the spec — chosen by the
+    /// [`PlayMode`] policy: Lookahead → expressive (full authenticity),
+    /// StrictLive → low_latency, NO exceptions (a CC58 "expressive" request
+    /// only takes effect once the mode is Lookahead).
     fn legato_timing(&self, velocity: u8) -> (u32, bool) {
         let port_thresh = self
             .patch
@@ -1651,7 +1717,7 @@ impl SampleEngine {
         let portamento = port_thresh > 0 && velocity <= port_thresh;
         let delay_ms = if portamento {
             0
-        } else if self.legato_expressive {
+        } else if self.play_mode == PlayMode::Lookahead {
             self.patch.legato_delay_expressive(velocity).unwrap_or(100)
         } else {
             self.patch.legato_delay_low_latency(velocity).unwrap_or(100)
@@ -2658,9 +2724,10 @@ impl SampleEngine {
 
         let delay_ms = if portamento {
             0 // portamento fires immediately — the glide pitch ramp is the "delay"
-        } else if self.legato_expressive {
+        } else if self.play_mode == PlayMode::Lookahead {
             self.patch.legato_delay_expressive(velocity).unwrap_or(100)
         } else {
+            // StrictLive: low-latency tables, no exceptions (see PlayMode).
             self.patch.legato_delay_low_latency(velocity).unwrap_or(100)
         };
 

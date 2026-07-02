@@ -661,6 +661,9 @@ fn walk_schedule(
 ) -> (Vec<crate::engine::LegatoFireEvent>, u64) {
     // Reset playback state; document mode always plays the full expressive
     // legato (the whole point is that latency no longer costs anything).
+    // set_legato_mode(.., expressive: true) also flips the engine into
+    // PlayMode::Lookahead — the automatic mode policy: Lookahead ONLY while
+    // the MIDI is known ahead of time, i.e. for the duration of this walk.
     bank.panic(id);
     bank.set_legato_mode(id, true, true);
     bank.set_legato_fire_log_enabled(id, true);
@@ -722,6 +725,9 @@ fn walk_schedule(
         })
         .collect();
     bank.set_legato_fire_log_enabled(id, false);
+    // The document has been played out — live dispatch resumes under the
+    // strict zero-latency policy (see PlayMode).
+    bank.set_play_mode(id, crate::engine::PlayMode::StrictLive);
     (transitions, reactive_fallbacks)
 }
 
