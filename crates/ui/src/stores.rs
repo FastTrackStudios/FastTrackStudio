@@ -246,7 +246,30 @@ impl TaskMutations {
                 let id = task.id;
                 self.edit(id, move |t| apply_ui_edits(t, &task));
             }
-            TaskMutation::SetStatus { id, status } => self.edit(id, move |t| t.status = status),
+            TaskMutation::SetStatus { id, status } => {
+                // Optimistic family cascade — the same domain rule the
+                // server applies (task::cascade_status), computed from
+                // the pre-edit store + the incoming status so parent and
+                // subtask checkboxes flip together instantly. The
+                // server's own cascade reconciles to the identical state
+                // (re-running the rule on an already-cascaded family is
+                // a no-op).
+                let follow_ups = self
+                    .store
+                    .get_real(id)
+                    .map(|row| {
+                        let mut changed = row.task.clone();
+                        changed.status.clone_from(&status);
+                        let all: Vec<DbTask> =
+                            self.store.list().into_iter().map(|r| r.task).collect();
+                        task::cascade_status(&all, &changed)
+                    })
+                    .unwrap_or_default();
+                self.edit(id, move |t| t.status = status);
+                for (fid, fstatus) in follow_ups {
+                    self.edit(fid, move |t| t.status = fstatus);
+                }
+            }
             TaskMutation::SetPriority { id, priority } => {
                 self.edit(id, move |t| t.priority = priority);
             }

@@ -150,6 +150,20 @@ impl TaskService for TaskBackend {
         write_task(&self.vault_root, &mut next, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
         self.publish(TaskEvent::Upserted(next.clone()));
+        // Family cascade (see relations::cascade_status): completing a
+        // parent completes its subtasks, the last-done subtask completes
+        // its parent, a reopened subtask reopens a done parent. Applied
+        // through this same method so each hop writes + publishes; the
+        // rule only ever flips terminal-ness, so recursion converges.
+        let all = self.list_inner()?;
+        for (id, status) in crate::relations::cascade_status(&all, &next) {
+            if let Some(mut follow) = all.iter().find(|t| t.id == id).cloned() {
+                follow.status = status;
+                // Best-effort: a failed cascade write must not fail the
+                // primary update the caller asked for.
+                let _ = self.update(follow);
+            }
+        }
         Ok(next)
     }
 
@@ -347,6 +361,51 @@ mod tests {
             });
         }
         be.create(t).expect("create")
+    }
+
+    #[test]
+    fn update_cascades_across_the_family() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let be = TaskBackend::new(tmp.path());
+
+        let parent = make(&be, "wind down", "open", None, None);
+        let child = |title: &str| {
+            let mut t = crate::capture(title);
+            t.workflow = Some(WorkflowAttrs {
+                parent: Some(parent.id),
+                ..Default::default()
+            });
+            be.create(t).expect("create child")
+        };
+        let a = child("floss");
+        let b = child("shower");
+
+        let status_of = |id| be.get(id).expect("get").status;
+
+        // First child done → parent stays open.
+        let mut a_done = a.clone();
+        a_done.status = "done".into();
+        be.update(a_done).expect("update a");
+        assert_eq!(status_of(parent.id), "open");
+
+        // Last child done → parent completes.
+        let mut b_done = b.clone();
+        b_done.status = "done".into();
+        be.update(b_done).expect("update b");
+        assert_eq!(status_of(parent.id), "done");
+
+        // Reopen a child → parent reopens (other child untouched).
+        let mut a_open = be.get(a.id).expect("get a");
+        a_open.status = "open".into();
+        be.update(a_open).expect("reopen a");
+        assert_eq!(status_of(parent.id), "open");
+        assert_eq!(status_of(b.id), "done");
+
+        // Complete the parent → the open child completes with it.
+        let mut p_done = be.get(parent.id).expect("get parent");
+        p_done.status = "done".into();
+        be.update(p_done).expect("update parent");
+        assert_eq!(status_of(a.id), "done");
     }
 
     #[test]

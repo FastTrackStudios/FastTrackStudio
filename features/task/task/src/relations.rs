@@ -340,3 +340,127 @@ mod family_tests {
         );
     }
 }
+
+/// Status cascade across a parent/subtask family after `changed` was
+/// saved (its new status not yet necessarily in `all`). Returns
+/// follow-up `(task id, new status)` writes:
+///
+/// - **parent completed** → its still-open subtasks complete with it
+///   (same status string, so `cancelled` propagates as cancelled);
+/// - **last open subtask completed** → the parent completes (`done`);
+/// - **subtask reopened under a completed parent** → the parent
+///   reopens (a done parent with an open child is a lie).
+///
+/// Unchecking a parent deliberately does NOT reopen children — which
+/// child was "not actually done" is the user's call. Writes only ever
+/// flip terminal-ness, so applying follow-ups recursively converges
+/// (multi-level chains cascade one hop per application; re-running on
+/// an already-cascaded family yields nothing).
+pub fn cascade_status(all: &[TaskInfo], changed: &TaskInfo) -> Vec<(Uuid, String)> {
+    use crate::model::status_is_terminal;
+    let parent_of = |t: &TaskInfo| t.workflow.as_ref().and_then(|w| w.parent);
+    // `all` may hold a stale copy of `changed` — always answer status
+    // questions about `changed.id` from the argument.
+    let terminal_of = |t: &TaskInfo| {
+        if t.id == changed.id {
+            status_is_terminal(&changed.status)
+        } else {
+            status_is_terminal(&t.status)
+        }
+    };
+    let changed_terminal = status_is_terminal(&changed.status);
+    let mut out = Vec::new();
+
+    // Down: completing a parent completes its open subtasks.
+    if changed_terminal {
+        for c in all
+            .iter()
+            .filter(|t| t.id != changed.id && parent_of(t) == Some(changed.id))
+            .filter(|t| !terminal_of(t))
+        {
+            out.push((c.id, changed.status.clone()));
+        }
+    }
+
+    // Up: the parent follows its children.
+    if let Some(pid) = parent_of(changed).filter(|p| *p != changed.id) {
+        if let Some(parent) = all.iter().find(|t| t.id == pid) {
+            let parent_terminal = terminal_of(parent);
+            let all_children_terminal = all
+                .iter()
+                .filter(|t| parent_of(t) == Some(pid))
+                .all(terminal_of);
+            if changed_terminal && all_children_terminal && !parent_terminal {
+                out.push((pid, "done".to_owned()));
+            } else if !changed_terminal && parent_terminal {
+                out.push((pid, changed.status.clone()));
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod cascade_tests {
+    use super::cascade_status;
+    use crate::model::WorkflowAttrs;
+    use uuid::Uuid;
+
+    fn task(id: Uuid, status: &str, parent: Option<Uuid>) -> crate::TaskInfo {
+        let mut t = crate::capture("t");
+        t.id = id;
+        t.status = status.into();
+        if let Some(p) = parent {
+            t.workflow = Some(WorkflowAttrs {
+                parent: Some(p),
+                ..Default::default()
+            });
+        }
+        t
+    }
+
+    #[test]
+    fn last_child_done_completes_parent() {
+        let p = Uuid::new_v4();
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let all = vec![
+            task(p, "open", None),
+            task(a, "done", Some(p)),
+            task(b, "open", Some(p)),
+        ];
+        // b flips to done → parent follows.
+        let changed = task(b, "done", Some(p));
+        assert_eq!(cascade_status(&all, &changed), vec![(p, "done".into())]);
+        // a alone done (b still open) → nothing.
+        let changed = task(a, "done", Some(p));
+        assert!(cascade_status(&all, &changed).is_empty());
+    }
+
+    #[test]
+    fn parent_done_completes_open_children_only() {
+        let p = Uuid::new_v4();
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let all = vec![
+            task(p, "open", None),
+            task(a, "done", Some(p)),
+            task(b, "open", Some(p)),
+        ];
+        let changed = task(p, "cancelled", None);
+        assert_eq!(
+            cascade_status(&all, &changed),
+            vec![(b, "cancelled".into())]
+        );
+    }
+
+    #[test]
+    fn reopening_child_reopens_done_parent_but_not_vice_versa() {
+        let p = Uuid::new_v4();
+        let a = Uuid::new_v4();
+        let all = vec![task(p, "done", None), task(a, "done", Some(p))];
+        let changed = task(a, "open", Some(p));
+        assert_eq!(cascade_status(&all, &changed), vec![(p, "open".into())]);
+        // Reopening the parent leaves children alone.
+        let changed = task(p, "open", None);
+        assert!(cascade_status(&all, &changed).is_empty());
+    }
+}
