@@ -115,6 +115,8 @@ fn main() -> eyre::Result<()> {
     let doc = TrackDocument {
         version: 1,
         seed: SEED,
+        // keyflow already assigned divisi channels — respect them as-is.
+        auto_divisi: false,
         notes: po
             .notes
             .iter()

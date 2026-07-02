@@ -455,6 +455,142 @@ fn class_bus_split_sums_to_main_and_isolates_shorts() {
     );
 }
 
+// ── 1c². Lookahead auto-divisi (annotate-side allocator) ─────────────────────
+
+#[test]
+fn auto_divisi_held_top_note_keeps_its_line_over_moving_lower_voice() {
+    // One channel, two voices: a held top note over a moving lower voice.
+    // The ranking is by what is SOUNDING at each onset (keyflow
+    // assign_channels parity), so the top note owns line 0 for its whole
+    // duration and every lower re-articulation lands on line 1.
+    let doc = TrackDocument {
+        seed: 0xD1,
+        auto_divisi: true,
+        notes: vec![
+            note(0.0, 8.0, 76, 90), // held top
+            // moving lower voice, legato-connected (overlapping)
+            note(0.0, 2.1, 60, 90),
+            note(2.0, 4.1, 62, 30),
+            note(4.0, 6.0, 64, 80),
+        ],
+        ..Default::default()
+    };
+    let (rig, _g) = fixture_rig("autodiv-held");
+    let spec = rig.instrument_spec("fixture").expect("spec");
+    let sched = annotate(&doc, &spec, SR);
+
+    // Top note: one plain NoteOn + NoteOff on line 0, never displaced.
+    let top_events: Vec<_> = sched
+        .events
+        .iter()
+        .filter(|e| {
+            matches!(e.kind,
+                DocEvent::NoteOn { note, .. } | DocEvent::NoteOff { note, .. }
+                    if note == 76)
+        })
+        .collect();
+    assert_eq!(top_events.len(), 2);
+    assert!(
+        top_events.iter().all(|e| e.line == 0),
+        "held top note keeps line 0 throughout"
+    );
+
+    // Lower voice: line 1 for every event, with its own legato edges.
+    assert_eq!(sched.legato_count, 2, "62 and 64 arrive via prefire");
+    let lower_prefires: Vec<_> = sched
+        .events
+        .iter()
+        .filter(|e| matches!(e.kind, DocEvent::LegatoPrefire { .. }))
+        .collect();
+    assert_eq!(lower_prefires.len(), 2);
+    assert!(lower_prefires.iter().all(|e| e.line == 1));
+
+    // Playback: both lines prefired, zero reactive fallbacks.
+    let res = rig
+        .render_offline_document(
+            "fixture",
+            &doc,
+            &DocumentRenderOptions {
+                tail_sec: 0.5,
+                ..Default::default()
+            },
+        )
+        .expect("render");
+    assert_eq!(res.reactive_fallbacks, 0);
+    assert_eq!(res.transitions.len(), 2);
+    assert!(res.transitions.iter().all(|t| t.line == 1));
+}
+
+#[test]
+fn auto_divisi_counterpoint_is_deterministic_from_mid_piece() {
+    // Two-voice counterpoint on ONE channel, two phrases separated by
+    // silence longer than any tail: auto-divisi must assign 2 stable lines,
+    // and a mid-piece start must reproduce the full render's tail exactly
+    // (the assignment is a pure function of the document — no counters).
+    let phrase = |ofs: f64, up: u8| -> Vec<DocNote> {
+        vec![
+            note(ofs, ofs + 2.1, up, 90),
+            note(ofs + 2.0, ofs + 4.0, up + 2, 30),
+            note(ofs, ofs + 2.6, 55, 90),
+            note(ofs + 2.5, ofs + 4.5, 53, 80),
+        ]
+    };
+    let mut notes = phrase(0.0, 72);
+    notes.extend(phrase(16.0, 74)); // QN 16 = 8 s at 120 BPM
+    let doc = TrackDocument {
+        seed: 0xC0DA,
+        auto_divisi: true,
+        notes,
+        ..Default::default()
+    };
+    let phrase2_frame: u64 = 16 * SR as u64 / 2; // QN 16 at 120 BPM
+
+    let (rig_full, _gf) = fixture_rig("autodiv-full");
+    let sched = annotate(&doc, &rig_full.instrument_spec("fixture").unwrap(), SR);
+    assert_eq!(sched.legato_count, 4, "two legato edges per phrase");
+    let mut lines: Vec<u8> = sched.events.iter().map(|e| e.line).collect();
+    lines.sort_unstable();
+    lines.dedup();
+    assert_eq!(
+        lines,
+        vec![0, 1],
+        "counterpoint splits into exactly 2 lines"
+    );
+
+    let full = rig_full
+        .render_offline_document(
+            "fixture",
+            &doc,
+            &DocumentRenderOptions {
+                tail_sec: 1.0,
+                ..Default::default()
+            },
+        )
+        .expect("full render");
+    assert_eq!(full.reactive_fallbacks, 0);
+    assert_eq!(full.transitions.len(), 4);
+
+    let (rig_mid, _gm) = fixture_rig("autodiv-mid");
+    let mid = rig_mid
+        .render_offline_document(
+            "fixture",
+            &doc,
+            &DocumentRenderOptions {
+                tail_sec: 1.0,
+                start_frame: phrase2_frame,
+                ..Default::default()
+            },
+        )
+        .expect("mid render");
+    assert_eq!(mid.reactive_fallbacks, 0);
+    let offset = (phrase2_frame * 2) as usize;
+    assert_eq!(
+        audio_bits(&full.audio[offset..]),
+        audio_bits(&mid.audio),
+        "auto-divisi render must be position-independent"
+    );
+}
+
 // ── 1d. Play-mode policy: strict live low-latency by default ─────────────────
 
 #[test]

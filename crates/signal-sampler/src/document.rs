@@ -40,6 +40,13 @@ const BREAK_GAP_QN: f64 = 1.0 / 64.0;
 /// `SampleEngine::legato_timing`).
 const LEGATO_DELAY_FALLBACK_MS: u32 = 100;
 
+/// Auto-divisi hand-off window (QN): a same-channel note ending within this
+/// of another note's onset reads as a legato hand-off (the line's previous
+/// note letting go), not as a note held above it. ¼ QN comfortably covers
+/// performed / generated legato overlaps while staying far below any real
+/// held-note duration.
+const DIVISI_HANDOFF_QN: f64 = 0.25;
+
 // ── Document types ────────────────────────────────────────────────────────────
 
 /// One tempo point: piecewise-constant BPM from `qn` onward.
@@ -81,6 +88,14 @@ pub struct TrackDocument {
     pub ccs: Vec<DocCc>,
     /// Tempo map (piecewise-constant BPM). Empty ⇒ 120 BPM.
     pub tempo: Vec<TempoPoint>,
+    /// Lookahead auto-divisi (see `docs/plan/document-mode.md`,
+    /// "Auto-divisi"): when true, `annotate` ranks simultaneous same-channel
+    /// notes top→bottom into monophonic engine lines BEFORE legato/re-bow
+    /// inference — for documents whose channels don't already encode voice
+    /// separation (e.g. a chordal part on one channel). Pure function of the
+    /// document: deterministic and seed-independent. When false (default),
+    /// channels are respected as-is: channel N → line N.
+    pub auto_divisi: bool,
 }
 
 impl Default for TempoPoint {
@@ -194,7 +209,11 @@ pub enum DocEvent {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScheduledEvent {
     pub frame: u64,
-    pub chan: u8,
+    /// Engine mono line ([`LineId`], truncated) this event dispatches to.
+    /// The line allocator runs at annotation time: channel→line identity by
+    /// default, or the auto-divisi ranking when
+    /// [`TrackDocument::auto_divisi`] is set.
+    pub line: u8,
     pub kind: DocEvent,
 }
 
@@ -364,7 +383,11 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
         .unwrap_or(0);
     let legato_capable = spec.legato_engine.is_some();
 
-    // Working notes grouped per channel, sorted by source start.
+    // Line allocation FIRST (channel→line identity, or the auto-divisi
+    // ranking), so all inference below runs per assigned mono line.
+    let (line_of, chan_blocks) = assign_lines(doc);
+
+    // Working notes grouped per LINE, sorted by source start.
     let mut notes: Vec<ANote> = doc
         .notes
         .iter()
@@ -376,16 +399,19 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
             re_bow_to: false,
         })
         .collect();
-    let mut by_ch: std::collections::BTreeMap<u8, Vec<usize>> = std::collections::BTreeMap::new();
-    for (i, n) in notes.iter().enumerate() {
-        by_ch.entry(n.src.chan).or_default().push(i);
+    let mut by_line: std::collections::BTreeMap<u8, Vec<usize>> = std::collections::BTreeMap::new();
+    for i in 0..notes.len() {
+        by_line.entry(line_of[i]).or_default().push(i);
     }
-    for list in by_ch.values_mut() {
+    for list in by_line.values_mut() {
         list.sort_by(|&a, &b| notes[a].src.start_qn.total_cmp(&notes[b].src.start_qn));
     }
 
-    // Stage 1 — articulation state + legato/re-bow edges (mirror.rs parity).
-    for (&ch, list) in &by_ch {
+    // Stage 1 — articulation state + legato/re-bow edges (mirror.rs parity),
+    // per line. Keyswitch state comes from the line's SOURCE channel (every
+    // note in a line shares one source channel under both allocators).
+    for list in by_line.values() {
+        let ch = notes[list[0]].src.chan;
         let ks = CcState::new(&doc.ccs, ch, 58);
         for &ni in list {
             notes[ni].ks_val = ks.at(notes[ni].src.start_qn).filter(|v| {
@@ -421,7 +447,7 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
     }
 
     // Stage 2 — schedule emission with the timing inversion.
-    let mut events: Vec<(u64, u8, u8, DocEvent)> = Vec::new(); // (frame, prio, chan, ev)
+    let mut events: Vec<(u64, u8, u8, DocEvent)> = Vec::new(); // (frame, prio, line, ev)
     let mut legato_count = 0usize;
     let mut short_count = 0usize;
 
@@ -436,19 +462,29 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
             continue;
         }
         let frame = qn_to_frame(&doc.tempo, e.qn, sample_rate).max(0) as u64;
-        events.push((
-            frame,
-            0,
-            e.chan,
-            DocEvent::Cc {
-                cc: e.cc,
-                val: e.val,
-            },
-        ));
+        // A CC event addresses its source channel's whole line block: under
+        // auto-divisi one channel fans out into several lines, and its CC1
+        // expression lane must drive ALL of them (CC58/mode CCs are
+        // engine-global at dispatch, so replication is harmless there).
+        let (base, width) = chan_blocks
+            .get(&e.chan)
+            .copied()
+            .unwrap_or((line_capped(e.chan), 1));
+        for line in base..base.saturating_add(width.max(1)) {
+            events.push((
+                frame,
+                0,
+                line,
+                DocEvent::Cc {
+                    cc: e.cc,
+                    val: e.val,
+                },
+            ));
+        }
     }
 
-    for list in by_ch.values() {
-        // Previous trigger frame on this channel — keeps the mono line's
+    for (&line, list) in &by_line {
+        // Previous trigger frame on this line — keeps the mono line's
         // trigger order strict even when a pre-roll would cross it.
         let mut prev_trigger: i64 = -1;
         for &ni in list {
@@ -523,7 +559,7 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
                 DocEvent::LegatoPrefire { .. } => 2,
                 _ => 3,
             };
-            events.push((trigger_frame as u64, prio, n.src.chan, kind));
+            events.push((trigger_frame as u64, prio, line, kind));
 
             // Note-off: dropped for re-bow sources — the transition into the
             // next same-pitch note replaces the release (fading this note is
@@ -539,7 +575,7 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
                 events.push((
                     end.max(trigger_frame + 1).max(0) as u64,
                     1,
-                    n.src.chan,
+                    line,
                     DocEvent::NoteOff {
                         note: n.src.pitch,
                         rr,
@@ -559,7 +595,7 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
         sample_rate,
         events: events
             .into_iter()
-            .map(|(frame, _prio, chan, kind)| ScheduledEvent { frame, chan, kind })
+            .map(|(frame, _prio, line, kind)| ScheduledEvent { frame, line, kind })
             .collect(),
         end_frame,
         seed: doc.seed,
@@ -580,6 +616,101 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
 /// "Auto-divisi").
 pub fn line_for_chan(chan: u8) -> LineId {
     chan as LineId
+}
+
+/// `line_for_chan`, clamped into the engine's line pool as a u8.
+fn line_capped(chan: u8) -> u8 {
+    line_for_chan(chan).min(crate::engine::MAX_LINES - 1) as u8
+}
+
+/// Per-note engine-line assignment, plus each source channel's line block
+/// `(base, width)` — CC events replicate across their channel's block so a
+/// channel's expression lane drives every line allocated from it.
+///
+/// Without `auto_divisi`: channel N → line N (blocks of width 1).
+///
+/// With `auto_divisi`: the lookahead allocator — a port of
+/// keyflow-orchestra's `assign_channels`
+/// (`crates/keyflow-orchestra/src/engine/mod.rs`, parity-tested there
+/// against the CSS reference engine). Each note's rank = 1 + how many
+/// same-channel notes are actually SOUNDING at its onset with a higher
+/// pitch (ties: earlier onset wins) — a held top note never loses its line
+/// to a re-articulated lower note. Rank 1 = top → first line of the
+/// channel's block; channels get disjoint blocks in ascending order. Pure
+/// function of the document: deterministic and seed-independent.
+fn assign_lines(doc: &TrackDocument) -> (Vec<u8>, std::collections::BTreeMap<u8, (u8, u8)>) {
+    use std::collections::BTreeMap;
+    let notes = &doc.notes;
+    let max_line = (crate::engine::MAX_LINES - 1) as u32;
+
+    if !doc.auto_divisi {
+        let mut blocks: BTreeMap<u8, (u8, u8)> = BTreeMap::new();
+        for n in notes {
+            blocks.insert(n.chan, (line_capped(n.chan), 1));
+        }
+        for e in &doc.ccs {
+            blocks.entry(e.chan).or_insert((line_capped(e.chan), 1));
+        }
+        return (notes.iter().map(|n| line_capped(n.chan)).collect(), blocks);
+    }
+
+    let mut chans: Vec<u8> = notes.iter().map(|n| n.chan).collect();
+    chans.extend(doc.ccs.iter().map(|e| e.chan));
+    chans.sort_unstable();
+    chans.dedup();
+
+    let ranks: Vec<u32> = (0..notes.len())
+        .map(|i| {
+            let n = &notes[i];
+            let mut rank = 1u32;
+            for (j, m) in notes.iter().enumerate() {
+                if j != i
+                    && m.chan == n.chan
+                    && m.start_qn <= n.start_qn + EPS
+                    // "Sounding at n's onset". One deviation from the
+                    // notation-domain original (which sees abutting notes):
+                    // documents are performance-domain, so legato pairs
+                    // OVERLAP — a note that ends within the hand-off window
+                    // after n starts is n's line-predecessor letting go, not
+                    // a held note above it, and must not displace n's rank
+                    // (otherwise every descending legato step would hop
+                    // lines).
+                    && m.end_qn > n.start_qn + DIVISI_HANDOFF_QN
+                    && (m.pitch > n.pitch
+                        || (m.pitch == n.pitch && m.start_qn < n.start_qn - EPS))
+                {
+                    rank += 1;
+                }
+            }
+            rank
+        })
+        .collect();
+
+    let mut width: BTreeMap<u8, u32> = chans.iter().map(|&c| (c, 1)).collect();
+    for (i, n) in notes.iter().enumerate() {
+        let w = width.get_mut(&n.chan).expect("chan registered");
+        *w = (*w).max(ranks[i]);
+    }
+
+    let mut blocks: BTreeMap<u8, (u8, u8)> = BTreeMap::new();
+    let mut base = 0u32;
+    for &c in &chans {
+        let w = width[&c];
+        let b = base.min(max_line);
+        let w_capped = w.min(max_line + 1 - b).max(1);
+        blocks.insert(c, (b as u8, w_capped as u8));
+        base += w;
+    }
+
+    let line_of = notes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            let (b, _) = blocks[&n.chan];
+            (b as u32 + ranks[i] - 1).min(max_line) as u8
+        })
+        .collect();
+    (line_of, blocks)
 }
 
 // ── Offline schedule playback ─────────────────────────────────────────────────
@@ -649,9 +780,9 @@ pub struct DocumentBusRenderResult {
 /// via the forced-RR path, and harvests the fire log + reactive counter.
 /// `render_chunk(bank, frames)` renders exactly `frames` frames.
 ///
-/// Events are dispatched to engine mono lines through the channel→line
-/// allocator [`line_for_chan`] — each divisi channel runs its own prefired
-/// legato line.
+/// Events carry their engine mono line from annotation time (the allocator
+/// — channel→line identity or auto-divisi ranking — ran in [`annotate`]);
+/// each divisi line runs its own prefired legato.
 fn walk_schedule(
     bank: &mut crate::bank::SamplerBank,
     id: &str,
@@ -686,7 +817,7 @@ fn walk_schedule(
             continue; // v1 seek: skip material before the cursor
         }
         render_until(bank, &mut cursor, ev.frame);
-        let line = line_for_chan(ev.chan);
+        let line = ev.line as LineId;
         match ev.kind {
             DocEvent::Cc { cc, val } => {
                 bank.cc_instrument_line(id, line, cc, val);
