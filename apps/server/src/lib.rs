@@ -1167,6 +1167,11 @@ async fn well_known_handler(State(state): State<AppState>) -> axum::Json<serde_j
         .collect();
     axum::Json(serde_json::json!({
         "version": 1,
+        // Git rev this binary was built from (baked into the container
+        // image env by the flake; "unknown" outside that path). CI's
+        // verify-live step polls this until it matches the pushed sha —
+        // a green run means the deployment is actually serving it.
+        "build": std::env::var("TASK_BUILD_REV").unwrap_or_else(|_| "unknown".to_owned()),
         "orgs": orgs,
         "schema_stamps": stamps,
     }))

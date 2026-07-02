@@ -153,3 +153,32 @@ jobs:
             --src-tls-verify=false --src-no-creds --dest-tls-verify=false --dest-no-creds \
             "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.channel }}" \
             "docker://${REGISTRY}/task-ui-lab:${{ steps.tags.outputs.sha }}"
+
+      # Green run == the deployment is SERVING this commit, not just
+      # "images pushed". Both images bake the git rev (web:
+      # /version.json, server: .well-known `build`); poll the branch's
+      # environment until both match, or fail the run. Budget: the
+      # image-updater polls every ~2min + rollout; 15min is generous —
+      # a timeout here means the delivery pipeline is broken (stuck
+      # updater, failed rollout) and SHOULD read as a red run.
+      - name: Verify live
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            url="https://task.starcommand.live"
+          else
+            url="https://tasks-dev.starcommand.live"
+          fi
+          want="${GITHUB_SHA}"
+          echo "waiting for $url to serve $want"
+          for i in $(seq 1 60); do
+            web="$(curl -sf --max-time 10 "$url/version.json" | sed -n 's/.*"rev":"\([^"]*\)".*/\1/p' || true)"
+            srv="$(curl -sf --max-time 10 "$url/.well-known/task-server.json" | sed -n 's/.*"build":"\([^"]*\)".*/\1/p' || true)"
+            echo "  poll $i: web=${web:-?} server=${srv:-?}"
+            if [ "$web" = "$want" ] && [ "$srv" = "$want" ]; then
+              echo "LIVE: $url serves $want (web + server)"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "TIMED OUT: $url never served $want — check argocd-image-updater / rollouts"
+          exit 1
