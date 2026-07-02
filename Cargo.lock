@@ -10001,6 +10001,7 @@ name = "signal-plugin-host"
 version = "0.1.0"
 dependencies = [
  "daw",
+ "hound",
 ]
 
 [[package]]

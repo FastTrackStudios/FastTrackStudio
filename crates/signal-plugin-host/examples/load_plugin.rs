@@ -65,6 +65,15 @@ fn main() {
             Ok(()) => println!("state   : loaded {} bytes from {path}", bytes.len()),
             Err(e) => println!("state   : load failed: {e}"),
         }
+        // Some engines (Omnisphere) rebuild parts of their mod graph only on
+        // activation — cycle it so loaded state fully takes effect.
+        if std::env::args().any(|a| a == "--reactivate") {
+            plugin.deactivate();
+            plugin
+                .prepare(48_000.0, 512)
+                .expect("re-prepare after load-state");
+            println!("state   : reactivated");
+        }
     }
     // `--save-state <file>` dumps the plugin's state chunk.
     if let Some(i) = args.iter().position(|a| a == "--save-state") {
