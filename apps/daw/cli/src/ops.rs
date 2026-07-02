@@ -468,38 +468,6 @@ async fn transport_state_for_project(project: &daw::rpc::Project) -> Result<Valu
     }))
 }
 
-pub async fn transport_set_position(daw: &Daw, seconds: f64) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.transport().set_position(seconds).await?;
-    transport_state_for_project(&project).await
-}
-
-pub async fn transport_set_tempo(daw: &Daw, bpm: f64) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.transport().set_tempo(bpm).await?;
-    transport_state_for_project(&project).await
-}
-
-pub async fn transport_set_loop(daw: &Daw, enabled: bool) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.transport().set_loop(enabled).await?;
-    transport_state_for_project(&project).await
-}
-
-pub async fn transport_set_playrate(daw: &Daw, rate: f64) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.transport().set_playrate(rate).await?;
-    transport_state_for_project(&project).await
-}
-
-pub async fn transport_goto_measure(_daw: &Daw, _measure: i32) -> Result<Value> {
-    // Musical-position navigation retired with the architect::rpc port —
-    // sibling-trait territory if revived.
-    Err(eyre::eyre!(
-        "transport goto-measure retired with the architect::rpc port"
-    ))
-}
-
 pub async fn markers(daw: &Daw) -> Result<Value> {
     let project = daw.current_project().await?;
     let markers = project.markers().all().await?;
@@ -537,74 +505,6 @@ pub async fn regions(daw: &Daw) -> Result<Value> {
             })
             .collect(),
     ))
-}
-
-pub async fn marker_add(daw: &Daw, position: f64, name: &str, lane: Option<u32>) -> Result<Value> {
-    let project = daw.current_project().await?;
-    // Ruler-lane placement retired with the architect::rpc port — the
-    // sync `Markers` trait carries only the canonical CRUD verbs. The
-    // CLI continues to accept `--lane` for forward compat; we log and
-    // fall through to plain `add` until a lane-aware sibling trait
-    // lands.
-    if lane.is_some() {
-        tracing::debug!("marker_add: --lane ignored (no longer supported on the sync trait)");
-    }
-    let id = project.markers().add(position, name).await?;
-    Ok(json!({ "id": id, "position_seconds": position, "name": name }))
-}
-
-pub async fn marker_remove(daw: &Daw, id: u32) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.markers().remove(id).await?;
-    Ok(json!({ "removed": true, "id": id }))
-}
-
-pub async fn marker_move(daw: &Daw, id: u32, position: f64) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.markers().move_to(id, position).await?;
-    Ok(json!({ "id": id, "position_seconds": position }))
-}
-
-pub async fn marker_rename(daw: &Daw, id: u32, name: &str) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.markers().rename(id, name).await?;
-    Ok(json!({ "id": id, "name": name }))
-}
-
-pub async fn region_add(
-    daw: &Daw,
-    start: f64,
-    end: f64,
-    name: &str,
-    lane: Option<u32>,
-) -> Result<Value> {
-    // Lane placement retired with the architect::rpc port — the CLI
-    // continues to accept `--lane` for forward compat; log and fall
-    // through to plain `add` until a lane-aware sibling trait lands.
-    if lane.is_some() {
-        tracing::debug!("region_add: --lane ignored (no longer supported on the sync trait)");
-    }
-    let project = daw.current_project().await?;
-    let id = project.regions().add(start, end, name).await?;
-    Ok(json!({ "id": id, "start_seconds": start, "end_seconds": end, "name": name }))
-}
-
-pub async fn region_remove(daw: &Daw, id: u32) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.regions().remove(id).await?;
-    Ok(json!({ "removed": true, "id": id }))
-}
-
-pub async fn region_set_bounds(daw: &Daw, id: u32, start: f64, end: f64) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.regions().set_bounds(id, start, end).await?;
-    Ok(json!({ "id": id, "start_seconds": start, "end_seconds": end }))
-}
-
-pub async fn region_rename(daw: &Daw, id: u32, name: &str) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.regions().rename(id, name).await?;
-    Ok(json!({ "id": id, "name": name }))
 }
 
 pub async fn projects(daw: &Daw) -> Result<Value> {
@@ -678,22 +578,6 @@ pub async fn project_redo(daw: &Daw) -> Result<Value> {
 pub async fn project_run_command(daw: &Daw, command: &str) -> Result<Value> {
     let project = daw.current_project().await?;
     Ok(json!({ "command": command, "executed": project.run_command(command).await? }))
-}
-
-pub async fn project_info_string(daw: &Daw, key: &str, value: Option<&str>) -> Result<Value> {
-    let project = daw.current_project().await?;
-    if let Some(value) = value {
-        project.set_info_string(key, value).await?;
-    }
-    Ok(json!({ "key": key, "value": project.get_info_string(key).await? }))
-}
-
-pub async fn project_info_number(daw: &Daw, key: &str, value: Option<f64>) -> Result<Value> {
-    let project = daw.current_project().await?;
-    if let Some(value) = value {
-        project.set_info(key, value).await?;
-    }
-    Ok(json!({ "key": key, "value": project.get_info(key).await? }))
 }
 
 pub async fn add_track(daw: &Daw, name: Option<&str>, at_index: Option<u32>) -> Result<Value> {
@@ -897,29 +781,6 @@ pub async fn remove_track(daw: &Daw, track_arg: &str) -> Result<Value> {
         "name": name,
         "guid": guid,
     }))
-}
-
-pub async fn ext_state_get(daw: &Daw, section: &str, key: &str) -> Result<Value> {
-    let ext = daw.ext_state();
-    Ok(json!({ "section": section, "key": key, "value": ext.get(section, key).await? }))
-}
-
-pub async fn ext_state_set(
-    daw: &Daw,
-    section: &str,
-    key: &str,
-    value: &str,
-    persist: bool,
-) -> Result<Value> {
-    let ext = daw.ext_state();
-    ext.set(section, key, value, persist).await?;
-    Ok(json!({ "section": section, "key": key, "value": value, "persist": persist }))
-}
-
-pub async fn ext_state_delete(daw: &Daw, section: &str, key: &str, persist: bool) -> Result<Value> {
-    let ext = daw.ext_state();
-    ext.delete(section, key, persist).await?;
-    Ok(json!({ "deleted": true, "section": section, "key": key, "persist": persist }))
 }
 
 pub async fn audio_engine(daw: &Daw) -> Result<Value> {
@@ -1618,5 +1479,27 @@ pub async fn run_call(daw: &Daw, target: &str, args_json: Option<&str>) -> Resul
         .collect();
     let args = args_json.unwrap_or("{}");
     let op_json = format!("{{\"{key}\":{{\"{variant}\":{args}}}}}");
-    run_op(daw, &op_json).await
+    match run_op(daw, &op_json).await {
+        Ok(v) => Ok(v),
+        // Ergonomic default: most methods take a `project` argument; if
+        // the call failed and the caller didn't pass one, retry with the
+        // current project injected. On a second failure report the
+        // original error (the injected field may itself be the excess).
+        Err(original) => match args_json.map(str::trim) {
+            None | Some("{}") | Some("") => {
+                let with_project = format!(
+                    "{{\"{key}\":{{\"{variant}\":{{\"project\":{{\"Literal\":\"Current\"}}}}}}}}"
+                );
+                run_op(daw, &with_project).await.map_err(|_| original)
+            }
+            Some(args) if !args.contains("\"project\"") => {
+                let inner = args.trim_start_matches('{');
+                let with_project = format!(
+                    "{{\"{key}\":{{\"{variant}\":{{\"project\":{{\"Literal\":\"Current\"}},{inner}}}}}}}"
+                );
+                run_op(daw, &with_project).await.map_err(|_| original)
+            }
+            _ => Err(original),
+        },
+    }
 }

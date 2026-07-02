@@ -43,6 +43,15 @@ async fn op_and_call_round_trip_against_standalone() -> eyre::Result<()> {
     let err = run_call(daw, "nope.thing", None).await.unwrap_err();
     assert!(err.to_string().contains("unknown service"));
 
+    // No-args ergonomics: the current project is injected when a call
+    // without a `project` argument fails to parse.
+    let outcome = run_call(daw, "transport.is_playing", None).await?;
+    assert_eq!(
+        outcome.pointer("/Ok/Transport/IsPlaying"),
+        Some(&serde_json::Value::Bool(false)),
+        "no-args call should default to the current project: {outcome}"
+    );
+
     Ok(())
 }
 

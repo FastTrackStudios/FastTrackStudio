@@ -172,102 +172,10 @@ enum Command {
     PlayPause,
     /// Toggle loop mode
     Loop,
-    /// Run a transport action
-    TransportDo {
-        /// Action: play, pause, stop, play_pause, play_stop, record, stop_recording, toggle_recording, goto_start, goto_end, toggle_loop
-        action: String,
-    },
-    /// Set playhead position in seconds
-    SetPosition {
-        /// Position in seconds
-        seconds: f64,
-    },
-    /// Set project tempo in BPM
-    SetTempo {
-        /// Tempo in BPM
-        bpm: f64,
-    },
-    /// Set transport loop state
-    SetLoop {
-        /// Loop enabled: on/off, true/false, yes/no, or 1/0
-        enabled: OnOff,
-    },
-    /// Set transport playrate
-    SetPlayrate {
-        /// Playback rate multiplier
-        rate: f64,
-    },
-    /// Move playhead to a measure
-    GotoMeasure {
-        /// Measure number
-        measure: i32,
-    },
     /// List markers
     Markers,
-    /// Add a project marker
-    MarkerAdd {
-        /// Position in seconds
-        position: f64,
-        /// Marker name
-        name: String,
-        /// Marker lane
-        #[arg(long)]
-        lane: Option<u32>,
-    },
-    /// Remove a project marker
-    MarkerRemove {
-        /// Marker ID
-        id: u32,
-    },
-    /// Move a project marker
-    MarkerMove {
-        /// Marker ID
-        id: u32,
-        /// New position in seconds
-        position: f64,
-    },
-    /// Rename a project marker
-    MarkerRename {
-        /// Marker ID
-        id: u32,
-        /// New marker name
-        name: String,
-    },
     /// List regions
     Regions,
-    /// Add a project region
-    RegionAdd {
-        /// Start position in seconds
-        start: f64,
-        /// End position in seconds
-        end: f64,
-        /// Region name
-        name: String,
-        /// Region lane
-        #[arg(long)]
-        lane: Option<u32>,
-    },
-    /// Remove a project region
-    RegionRemove {
-        /// Region ID
-        id: u32,
-    },
-    /// Set project region bounds
-    RegionBounds {
-        /// Region ID
-        id: u32,
-        /// Start position in seconds
-        start: f64,
-        /// End position in seconds
-        end: f64,
-    },
-    /// Rename a project region
-    RegionRename {
-        /// Region ID
-        id: u32,
-        /// New region name
-        name: String,
-    },
     /// List all installed plugins
     Plugins,
     /// Return loaded plugin binaries
@@ -281,7 +189,9 @@ enum Command {
     Ping,
     /// Return generated DAW service and method catalog
     ServiceCatalog,
-    /// Call any ops-covered service method: `daw call transport.play --args '{"project":{"Literal":"Current"}}'`
+    /// Call any ops-covered service method: `daw call transport.play`
+    /// (current project is injected when a `project` arg is omitted);
+    /// `daw call marker.add --args '{"position":2.5,"name":"verse"}'`
     Call {
         /// Target as <service>.<method> (see `daw service-catalog`)
         target: String,
@@ -359,20 +269,6 @@ enum Command {
     RunCommand {
         /// Numeric command ID or named command
         command: String,
-    },
-    /// Get or set a project info string key
-    ProjectInfoString {
-        /// Project info key
-        key: String,
-        /// Optional value to set
-        value: Option<String>,
-    },
-    /// Get or set a project info numeric key
-    ProjectInfoNumber {
-        /// Project info key
-        key: String,
-        /// Optional value to set
-        value: Option<f64>,
     },
     /// Add a new track
     AddTrack {
@@ -484,35 +380,6 @@ enum Command {
         section: String,
         /// ExtState key
         key: String,
-    },
-    /// Get global REAPER ExtState
-    ExtStateGet {
-        /// ExtState section
-        section: String,
-        /// ExtState key
-        key: String,
-    },
-    /// Set global REAPER ExtState
-    ExtStateSet {
-        /// ExtState section
-        section: String,
-        /// ExtState key
-        key: String,
-        /// ExtState value
-        value: String,
-        /// Persist across REAPER restarts
-        #[arg(long)]
-        persist: bool,
-    },
-    /// Delete global REAPER ExtState
-    ExtStateDelete {
-        /// ExtState section
-        section: String,
-        /// ExtState key
-        key: String,
-        /// Persist deletion across REAPER restarts
-        #[arg(long)]
-        persist: bool,
     },
     /// Return audio engine state and latency
     AudioEngine,
@@ -1171,65 +1038,11 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             daw_cli::ops::transport_control(daw, "toggle_loop").await?,
             json,
         )?,
-        Command::TransportDo { ref action } => {
-            print_value(daw_cli::ops::transport_control(daw, action).await?, json)?
-        }
-        Command::SetPosition { seconds } => print_value(
-            daw_cli::ops::transport_set_position(daw, seconds).await?,
-            json,
-        )?,
-        Command::SetTempo { bpm } => {
-            print_value(daw_cli::ops::transport_set_tempo(daw, bpm).await?, json)?
-        }
-        Command::SetLoop { enabled } => print_value(
-            daw_cli::ops::transport_set_loop(daw, enabled.0).await?,
-            json,
-        )?,
-        Command::SetPlayrate { rate } => {
-            print_value(daw_cli::ops::transport_set_playrate(daw, rate).await?, json)?
-        }
-        Command::GotoMeasure { measure } => print_value(
-            daw_cli::ops::transport_goto_measure(daw, measure).await?,
-            json,
-        )?,
+
         Command::Markers => daw_cli::cmd_markers(daw, json).await?,
-        Command::MarkerAdd {
-            position,
-            ref name,
-            lane,
-        } => print_value(
-            daw_cli::ops::marker_add(daw, position, name, lane).await?,
-            json,
-        )?,
-        Command::MarkerRemove { id } => {
-            print_value(daw_cli::ops::marker_remove(daw, id).await?, json)?
-        }
-        Command::MarkerMove { id, position } => {
-            print_value(daw_cli::ops::marker_move(daw, id, position).await?, json)?
-        }
-        Command::MarkerRename { id, ref name } => {
-            print_value(daw_cli::ops::marker_rename(daw, id, name).await?, json)?
-        }
+
         Command::Regions => daw_cli::cmd_regions(daw, json).await?,
-        Command::RegionAdd {
-            start,
-            end,
-            ref name,
-            lane,
-        } => print_value(
-            daw_cli::ops::region_add(daw, start, end, name, lane).await?,
-            json,
-        )?,
-        Command::RegionRemove { id } => {
-            print_value(daw_cli::ops::region_remove(daw, id).await?, json)?
-        }
-        Command::RegionBounds { id, start, end } => print_value(
-            daw_cli::ops::region_set_bounds(daw, id, start, end).await?,
-            json,
-        )?,
-        Command::RegionRename { id, ref name } => {
-            print_value(daw_cli::ops::region_rename(daw, id, name).await?, json)?
-        }
+
         Command::Plugins => daw_cli::cmd_plugins(daw, json).await?,
         Command::LoadedPlugins => print_value(daw_cli::ops::plugin_loader_list(daw).await?, json)?,
         Command::LoadPlugin { ref path } => {
@@ -1250,14 +1063,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
         Command::RunCommand { ref command } => {
             print_value(daw_cli::ops::project_run_command(daw, command).await?, json)?
         }
-        Command::ProjectInfoString { ref key, ref value } => print_value(
-            daw_cli::ops::project_info_string(daw, key, value.as_deref()).await?,
-            json,
-        )?,
-        Command::ProjectInfoNumber { ref key, value } => print_value(
-            daw_cli::ops::project_info_number(daw, key, value).await?,
-            json,
-        )?,
+
         Command::AddTrack { ref name, at } => {
             daw_cli::cmd_add_track(daw, name.as_deref(), at, json).await?
         }
@@ -1334,27 +1140,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             daw_cli::ops::track_delete_ext_state(daw, track, section, key).await?,
             json,
         )?,
-        Command::ExtStateGet {
-            ref section,
-            ref key,
-        } => print_value(daw_cli::ops::ext_state_get(daw, section, key).await?, json)?,
-        Command::ExtStateSet {
-            ref section,
-            ref key,
-            ref value,
-            persist,
-        } => print_value(
-            daw_cli::ops::ext_state_set(daw, section, key, value, persist).await?,
-            json,
-        )?,
-        Command::ExtStateDelete {
-            ref section,
-            ref key,
-            persist,
-        } => print_value(
-            daw_cli::ops::ext_state_delete(daw, section, key, persist).await?,
-            json,
-        )?,
+
         Command::AudioEngine => print_value(daw_cli::ops::audio_engine(daw).await?, json)?,
         Command::AudioEngineDo { ref action } => {
             print_value(daw_cli::ops::audio_engine_control(daw, action).await?, json)?
