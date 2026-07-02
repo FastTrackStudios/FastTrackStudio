@@ -279,6 +279,10 @@ pub struct SampleEngine {
     /// Attack envelope (frames) ramped in on sustain onset. 0 = the sample's
     /// natural attack (CSS attack parameter; user-adjustable).
     attack_frames: usize,
+    /// Unison playback: `(voices, detune cents, stereo width)`. Every zone
+    /// trigger spawns `voices` copies spread symmetrically across ±detune/2
+    /// cents and panned by `width`, level-compensated 1/√n. `(1, _, _)` = off.
+    unison: (u8, f32, f32),
 
     /// Round-robin counter for zone mode. Increments on every zoned note-on
     /// regardless of (note, velocity) so RR cycling within a matching zone set
@@ -445,6 +449,7 @@ impl SampleEngine {
             cc1_ramp_frames,
             release_frames,
             attack_frames: 0,
+            unison: (1, 0.0, 0.0),
             zone_rr_counter: 0,
             zone_rr_random_state: 0x9e37_79b9_7f4a_7c15,
             zone_rr_last_slots: HashMap::with_capacity(128),
@@ -620,6 +625,13 @@ impl SampleEngine {
     /// recorded release sample plays underneath.
     pub fn set_release_frames(&mut self, frames: usize) {
         self.release_frames = frames;
+    }
+
+    /// Unison playback for zone triggers: `voices` copies per note, spread
+    /// symmetrically across ±`detune_cents`/2 and panned by `width` (0..1),
+    /// level-compensated 1/√n. `voices <= 1` disables.
+    pub fn set_unison(&mut self, voices: u8, detune_cents: f32, width: f32) {
+        self.unison = (voices.clamp(1, 8), detune_cents.max(0.0), width.clamp(0.0, 1.0));
     }
 
     /// Test/render override: pin every RR-bearing trigger (shorts, legato,
@@ -1579,36 +1591,51 @@ impl SampleEngine {
         // shorts keep their natural recorded attack).
         let _ = SUSTAIN_DECLICK_MS;
         let attack = if is_sustain_layer { self.attack_frames } else { 0 };
-        let mut voice = Voice::with_rate(data, note, kind, rate, gain, self.release_frames)
-            .with_mic_index(mic_index)
-            .with_pan(pan)
-            .with_attack(attack)
-            .with_sample_window(
-                start_frame,
-                (sample_end > 0).then_some(sample_end as usize),
-            );
-        if let Some(layer) = dyn_layer {
-            voice = voice.with_dyn_layer(layer);
+        // Unison: spawn N copies spread across ±detune/2 cents + a pan spread,
+        // level-compensated. copies == 1 is the normal single-voice path.
+        let (copies, det_cents, width) = self.unison;
+        let copies = copies.max(1);
+        let comp = 1.0 / (copies as f32).sqrt();
+        for k in 0..copies {
+            let off = if copies == 1 {
+                0.0
+            } else {
+                (k as f32 / (copies - 1) as f32) * 2.0 - 1.0
+            };
+            let u_rate = rate * 2f64.powf((off * det_cents * 0.5) as f64 / 1200.0);
+            let u_pan = (pan + off * width).clamp(-1.0, 1.0);
+            let mut voice =
+                Voice::with_rate(data.clone(), note, kind.clone(), u_rate, gain * comp, self.release_frames)
+                    .with_mic_index(mic_index)
+                    .with_pan(u_pan)
+                    .with_attack(attack)
+                    .with_sample_window(
+                        start_frame,
+                        (sample_end > 0).then_some(sample_end as usize),
+                    );
+            if let Some(layer) = dyn_layer {
+                voice = voice.with_dyn_layer(layer);
+            }
+            if playback_mode.eq_ignore_ascii_case("reverse") {
+                voice = voice.reversed();
+            } else if alternating {
+                voice = voice.with_alternating_loop(loop_start as usize, loop_end as usize);
+            } else if loop_end > loop_start {
+                voice = voice.with_forward_loop(loop_start as usize, loop_end as usize);
+            } else if synth_loop {
+                // CSS sustain samples ship no loop points but must hold indefinitely.
+                // Loop the loud steady region just past the attack — NOT the back half,
+                // which dilutes into the sample's natural end-decay and made held notes
+                // a few dB too quiet over time. Playback also STARTS at sus_lo (above),
+                // skipping the slow natural attack for a CSS-fast onset.
+                voice = voice.with_forward_loop(sus_lo, sus_hi);
+            } else if legato_hold {
+                // Legato transition: keep the slur at the front, loop the sustained
+                // tail so the note holds without a doubling sustain body.
+                voice = voice.with_forward_loop(leg_lo, leg_hi);
+            }
+            self.voices.spawn(voice);
         }
-        if playback_mode.eq_ignore_ascii_case("reverse") {
-            voice = voice.reversed();
-        } else if alternating {
-            voice = voice.with_alternating_loop(loop_start as usize, loop_end as usize);
-        } else if loop_end > loop_start {
-            voice = voice.with_forward_loop(loop_start as usize, loop_end as usize);
-        } else if synth_loop {
-            // CSS sustain samples ship no loop points but must hold indefinitely.
-            // Loop the loud steady region just past the attack — NOT the back half,
-            // which dilutes into the sample's natural end-decay and made held notes
-            // a few dB too quiet over time. Playback also STARTS at sus_lo (above),
-            // skipping the slow natural attack for a CSS-fast onset.
-            voice = voice.with_forward_loop(sus_lo, sus_hi);
-        } else if legato_hold {
-            // Legato transition: keep the slur at the front, loop the sustained
-            // tail so the note holds without a doubling sustain body.
-            voice = voice.with_forward_loop(leg_lo, leg_hi);
-        }
-        self.voices.spawn(voice);
         true
     }
 
@@ -1751,23 +1778,43 @@ impl SampleEngine {
             } else {
                 VoiceKind::Zoned
             };
-            let mut voice =
-                Voice::with_rate(data, note, voice_kind, rate, gain, self.release_frames)
-                    .with_mic_index(mic_index)
-                    .with_choke_group(choke_group)
-                    .with_pan(z.pan)
-                    .with_sample_window(
-                        z.sample_start as usize,
-                        (z.sample_end > 0).then_some(z.sample_end as usize),
-                    );
-            if z.playback_mode.eq_ignore_ascii_case("reverse") {
-                voice = voice.reversed();
-            } else if zone_is_alternating_loop(z) {
-                voice = voice.with_alternating_loop(z.loop_start as usize, z.loop_end as usize);
-            } else {
-                voice = voice.with_forward_loop(z.loop_start as usize, z.loop_end as usize);
+            // Unison: spawn N detuned/panned copies (copies == 1 = normal).
+            let (copies, det_cents, width) = self.unison;
+            let copies = copies.max(1);
+            let comp = 1.0 / (copies as f32).sqrt();
+            for k in 0..copies {
+                let off = if copies == 1 {
+                    0.0
+                } else {
+                    (k as f32 / (copies - 1) as f32) * 2.0 - 1.0
+                };
+                let u_rate = rate * 2f64.powf((off * det_cents * 0.5) as f64 / 1200.0);
+                let u_pan = (z.pan + off * width).clamp(-1.0, 1.0);
+                let mut voice = Voice::with_rate(
+                    data.clone(),
+                    note,
+                    voice_kind.clone(),
+                    u_rate,
+                    gain * comp,
+                    self.release_frames,
+                )
+                .with_mic_index(mic_index)
+                .with_choke_group(choke_group)
+                .with_pan(u_pan)
+                .with_attack(self.attack_frames)
+                .with_sample_window(
+                    z.sample_start as usize,
+                    (z.sample_end > 0).then_some(z.sample_end as usize),
+                );
+                if z.playback_mode.eq_ignore_ascii_case("reverse") {
+                    voice = voice.reversed();
+                } else if zone_is_alternating_loop(z) {
+                    voice = voice.with_alternating_loop(z.loop_start as usize, z.loop_end as usize);
+                } else {
+                    voice = voice.with_forward_loop(z.loop_start as usize, z.loop_end as usize);
+                }
+                self.voices.spawn(voice);
             }
-            self.voices.spawn(voice);
         }
     }
 

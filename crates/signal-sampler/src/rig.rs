@@ -801,7 +801,21 @@ pub(crate) fn build_block(
             block.sample_mic.clone()
         };
         let name = patch.spec.name.clone();
-        let engine = crate::SampleEngine::new(patch, sample_rate, section, mic);
+        let mut engine = crate::SampleEngine::new(patch, sample_rate, section, mic);
+        // Imported per-block settings: unison + amplitude attack/release.
+        if let Some(v) = block.param_f32("unison_voices") {
+            engine.set_unison(
+                v.round() as u8,
+                block.param_f32("unison_detune").unwrap_or(0.1) * 100.0,
+                block.param_f32("unison_width").unwrap_or(0.7),
+            );
+        }
+        if let Some(v) = block.param_f32("amp_attack") {
+            engine.set_attack_frames((v.max(0.0) * sample_rate as f32) as usize);
+        }
+        if let Some(v) = block.param_f32("amp_release") {
+            engine.set_release_frames((v.max(0.0) * sample_rate as f32) as usize);
+        }
         // Decode in the background, middle-out from middle C, so the block is
         // playable almost immediately and never blocks the caller (same
         // pattern as `SamplerBank::load_block`).

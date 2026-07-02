@@ -361,6 +361,14 @@ impl Container {
         self
     }
 
+    /// Attach a fully-configured modulator block (params set — e.g. an
+    /// imported envelope's ADSR times).
+    #[must_use]
+    pub fn modulator_block(mut self, block: RigBlock) -> Self {
+        self.modulators.push(block);
+        self
+    }
+
     /// Add a cross-tree send from this node's output to `target`.
     #[must_use]
     pub fn send(mut self, target: impl Into<String>, label: impl Into<String>) -> Self {

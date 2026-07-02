@@ -263,10 +263,23 @@ pub struct OmniLayer {
     pub filter_res: f32,
     /// `OSC level` (normalized).
     pub level: f32,
-    /// Unison: voice count (1..8), detune 0..1, width 0..1.
+    /// Unison: voice count (1..8), detune 0..1, width 0..1, plus the
+    /// octave / analog / drift mode amounts (0..1).
     pub unison_count: u32,
     pub unison_detune: f32,
     pub unison_width: f32,
+    pub unison_octave: f32,
+    pub unison_analog: f32,
+    pub unison_drift: f32,
+    /// FM modulator waveform morph 0..1 (`OSC fmwf`).
+    pub fm_shape: f32,
+    /// Amplitude AHDSR `(attack_s, decay_s, sustain, release_s)`.
+    pub amp_env: Option<(f32, f32, f32, f32)>,
+    /// Filter AHDSR `(attack_s, decay_s, sustain, release_s)`.
+    pub filter_env: Option<(f32, f32, f32, f32)>,
+    /// Filter-envelope → cutoff depth (signed; `FILTER envdpth`, inverted by
+    /// `envdpthinv`).
+    pub filter_env_depth: f32,
     /// FM depth 0..1 (`OSC fm`).
     pub fm_depth: f32,
     /// Ring/AM mix 0..1 (`OSC am`).
@@ -309,6 +322,26 @@ fn rack_types(rack: &XmlNode) -> Vec<String> {
         .collect()
 }
 
+/// Normalized envelope time → seconds. CALIBRATE: the exact Omnisphere
+/// mapping is unverified; a cubic curve into a 10 s range is perceptually
+/// plausible (0.5 → 1.25 s) until the A/B harness measures it.
+fn env_seconds(v: f32) -> f32 {
+    v.clamp(0.0, 1.0).powi(3) * 10.0
+}
+
+/// Parse an `AENVPARAMS`/`FENVPARAMS` element into `(a, d, s, r)`.
+fn parse_env(e: &XmlNode) -> Option<(f32, f32, f32, f32)> {
+    if e.num("onOff").unwrap_or(1.0) == 0.0 {
+        return None;
+    }
+    Some((
+        env_seconds(e.num("attk").unwrap_or(0.0)),
+        env_seconds(e.num("decy").unwrap_or(0.0)),
+        e.num("sust").unwrap_or(1.0).clamp(0.0, 1.0),
+        env_seconds(e.num("rels").unwrap_or(0.0)),
+    ))
+}
+
 /// Parse a `.prt_omn` document into an [`OmniPatch`].
 pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
     let root = parse_xml(xml)?;
@@ -347,10 +380,16 @@ pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
             layer.filter_active = f.num("act").unwrap_or(0.0) != 0.0;
             layer.filter_freq = f.num("freq").unwrap_or(0.5);
             layer.filter_res = f.num("res").unwrap_or(0.0);
+            let depth = f.num("envdpth").unwrap_or(0.0).clamp(0.0, 1.0);
+            let inv = f.num("envdpthinv").unwrap_or(0.0) != 0.0;
+            layer.filter_env_depth = if inv { -depth } else { depth };
         }
+        layer.amp_env = voice.child("AENVPARAMS").and_then(parse_env);
+        layer.filter_env = voice.child("FENVPARAMS").and_then(parse_env);
         if let Some(osc) = voice.child("OSC") {
             layer.level = osc.num("level").unwrap_or(0.5);
             layer.fm_depth = osc.num("fm").unwrap_or(0.0).clamp(0.0, 1.0);
+            layer.fm_shape = osc.num("fmwf").unwrap_or(0.0).clamp(0.0, 1.0);
             layer.ring_mix = osc.num("am").unwrap_or(0.0).clamp(0.0, 1.0);
             // Unison: the newer UNI element wins; older patches carry the
             // uns*/u* attrs directly on OSC.
@@ -372,6 +411,13 @@ pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
                 layer.unison_count = 1 + (cnt.clamp(0.0, 1.0) * 7.0).round() as u32;
                 layer.unison_detune = dpth.clamp(0.0, 1.0);
                 layer.unison_width = wdth.clamp(0.0, 1.0);
+                let (src_oct, src_analg, src_drft) = match osc.find("UNI") {
+                    Some(uni) => (uni.num("uoct"), uni.num("uanalg"), uni.num("udrft")),
+                    None => (osc.num("uoct"), osc.num("uanalg"), osc.num("udrft")),
+                };
+                layer.unison_octave = src_oct.unwrap_or(0.0).clamp(0.0, 1.0);
+                layer.unison_analog = src_analg.unwrap_or(0.0).clamp(0.0, 1.0);
+                layer.unison_drift = src_drft.unwrap_or(0.0).clamp(0.0, 1.0);
             } else {
                 layer.unison_count = 1;
             }
@@ -613,9 +659,27 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                     .with_param("unison_voices", layer.unison_count.to_string())
                     .with_param("unison_detune", format!("{:.4}", layer.unison_detune))
                     .with_param("unison_width", format!("{:.4}", layer.unison_width));
+                if layer.unison_octave > 0.0 {
+                    wt = wt.with_param("unison_octave", format!("{:.4}", layer.unison_octave));
+                }
+                if layer.unison_analog > 0.0 {
+                    wt = wt.with_param("unison_analog", format!("{:.4}", layer.unison_analog));
+                }
+                if layer.unison_drift > 0.0 {
+                    wt = wt.with_param("unison_drift", format!("{:.4}", layer.unison_drift));
+                }
+            }
+            if let Some((a, d, s, r)) = layer.amp_env {
+                wt = wt
+                    .with_param("amp_attack", format!("{a:.4}"))
+                    .with_param("amp_decay", format!("{d:.4}"))
+                    .with_param("amp_sustain", format!("{s:.4}"))
+                    .with_param("amp_release", format!("{r:.4}"));
             }
             if layer.fm_depth > 0.0 {
-                wt = wt.with_param("fm_depth", format!("{:.4}", layer.fm_depth));
+                wt = wt
+                    .with_param("fm_depth", format!("{:.4}", layer.fm_depth))
+                    .with_param("fm_shape", format!("{:.4}", layer.fm_shape));
             }
             if layer.ring_mix > 0.0 {
                 wt = wt.with_param("ring_mix", format!("{:.4}", layer.ring_mix));
@@ -632,7 +696,23 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
         } else {
             match index.find(&layer.soundsource) {
                 Some(spec) => {
-                    osc.sample_block(&layer.soundsource, spec.to_string_lossy().to_string())
+                    // Sample mode: unison + amp attack/release ride the
+                    // Sampler block (the engine handles them at trigger time;
+                    // decay/sustain need a full per-voice ADSR — pending).
+                    let mut sb = RigBlock::sample_lib(spec.to_string_lossy().to_string())
+                        .named(&layer.soundsource);
+                    if layer.unison_count > 1 {
+                        sb = sb
+                            .with_param("unison_voices", layer.unison_count.to_string())
+                            .with_param("unison_detune", format!("{:.4}", layer.unison_detune))
+                            .with_param("unison_width", format!("{:.4}", layer.unison_width));
+                    }
+                    if let Some((a, _d, _s, r)) = layer.amp_env {
+                        sb = sb
+                            .with_param("amp_attack", format!("{a:.4}"))
+                            .with_param("amp_release", format!("{r:.4}"));
+                    }
+                    osc.add(sb)
                 }
                 None => {
                     tracing::warn!(
@@ -687,8 +767,28 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
                 .add(fx_rack_from("Layer FX", &layer.fx))
                 .send("Aux Rack", "To Aux")
                 .modulator(BlockType::Envelope, "Amp Env")
-                .modulator(BlockType::Envelope, "Filter Env")
+                .modulator_block({
+                    // The filter envelope carries its imported ADSR so the
+                    // mod engine gates/sweeps with the patch's own shape.
+                    let mut fe = RigBlock::of_type(BlockType::Envelope).named("Filter Env");
+                    if let Some((a, d, s, r)) = layer.filter_env {
+                        fe = fe
+                            .with_param("attack", format!("{a:.4}"))
+                            .with_param("decay", format!("{d:.4}"))
+                            .with_param("sustain", format!("{s:.4}"))
+                            .with_param("release", format!("{r:.4}"));
+                    }
+                    fe
+                })
                 .modulator(BlockType::MultisegEnvelope, "Mod Env");
+        // The filter section's own envelope depth (independent of matrix rows).
+        if layer.filter_active && layer.filter_env_depth != 0.0 {
+            built = built.route(
+                "Filter Env",
+                format!("{}.cutoff", filter_labels[i]),
+                layer.filter_env_depth,
+            );
+        }
         for (source, target, depth) in layer_routes[i].drain(..) {
             built = built.route(source, target, depth);
         }
@@ -747,8 +847,12 @@ mod tests {
 <MOD_MATRIX source0="Layer A FENV" target0="A freq" hi0="3f000000" >
 </MOD_MATRIX>
 <VOICE >
-<FILTER NameStr="LPF Test" act="3f800000" para="0" freq="3f000000" res="3e800000" >
+<FILTER NameStr="LPF Test" act="3f800000" para="0" freq="3f000000" res="3e800000" envdpth="3f000000" envdpthinv="0" >
 </FILTER>
+<AENVPARAMS onOff="3f800000" attk="0" decy="0" sust="3f800000" rels="3f000000" >
+</AENVPARAMS>
+<FENVPARAMS onOff="3f800000" attk="3e4ccccd" decy="3f000000" sust="3f000000" rels="3f000000" >
+</FENVPARAMS>
 <OSC level="3f400000" fm="3e800000" am="0" hrmOn="3f800000" hrmLv="3f800000" >
 <UNI umix="3f800000" ucnt="3f800000" udpth="3e4ccccd" uwdth="3f800000" >
 </UNI>
@@ -816,6 +920,14 @@ mod tests {
         assert_eq!(smi, 14.0);
         assert!(pan.abs() < 1e-3);
         assert_eq!(l.shaper, Some((0.5, 0.0, 0.0, 1.0)));
+        // Envelopes: amp release 0.5³·10 = 1.25 s; filter env present with
+        // its own cutoff depth of +0.5.
+        let (aa, _ad, asus, ar) = l.amp_env.expect("amp env");
+        assert_eq!(aa, 0.0);
+        assert!((asus - 1.0).abs() < 1e-6);
+        assert!((ar - 1.25).abs() < 1e-3);
+        assert!(l.filter_env.is_some());
+        assert!((l.filter_env_depth - 0.5).abs() < 1e-6);
         assert_eq!(p.mod_routes.len(), 1);
         assert_eq!(p.mod_routes[0].source, "Layer A FENV");
         assert_eq!(p.mod_routes[0].target, "A freq");
@@ -848,13 +960,22 @@ mod tests {
         // Tags + mod routes survive as params.
         assert!(tree.params.iter().any(|p| p.name == "tag:Author"));
         assert!(tree.params.iter().any(|p| p.name == "mod0"));
-        // The matrix row translated into a live route on Layer A:
-        // "Layer A FENV" → the layer's filter cutoff at the imported depth.
-        assert_eq!(layer.mod_routes.len(), 1);
-        let r = &layer.mod_routes[0];
-        assert_eq!(r.source, "Filter Env");
-        assert_eq!(r.target, "LPF Test.cutoff");
-        assert!((r.depth - 0.5).abs() < 1e-6);
+        // Two live routes on Layer A: the filter section's own envdpth route
+        // plus the matrix row — both "Filter Env" → cutoff at 0.5.
+        assert_eq!(layer.mod_routes.len(), 2);
+        for r in &layer.mod_routes {
+            assert_eq!(r.source, "Filter Env");
+            assert_eq!(r.target, "LPF Test.cutoff");
+            assert!((r.depth - 0.5).abs() < 1e-6);
+        }
+        // The filter envelope modulator carries its imported ADSR.
+        let fe = layer
+            .modulators
+            .iter()
+            .find(|m| m.display_name() == "Filter Env")
+            .expect("filter env modulator");
+        assert!((fe.param_f32("sustain").unwrap() - 0.5).abs() < 1e-6);
+        assert!(fe.param_f32("attack").unwrap() > 0.0);
         // The engaged filter carries the imported cutoff/res as build params.
         let f1 = layer
             .find("Filters")

@@ -60,11 +60,36 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
                 if let Some(v) = p("unison_width") {
                     cfg.unison_width = v.clamp(0.0, 1.0);
                 }
+                if let Some(v) = p("unison_octave") {
+                    cfg.unison_octave = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = p("unison_analog") {
+                    cfg.unison_analog = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = p("unison_drift") {
+                    cfg.unison_drift = v.clamp(0.0, 1.0);
+                }
                 if let Some(v) = p("fm_depth") {
                     cfg.fm_depth = v.clamp(0.0, 1.0);
                 }
                 if let Some(v) = p("fm_ratio") {
                     cfg.fm_ratio = v.max(0.01);
+                }
+                if let Some(v) = p("fm_shape") {
+                    cfg.fm_shape = v.clamp(0.0, 1.0);
+                }
+                // Amplitude AHDSR (seconds / level).
+                if let Some(v) = p("amp_attack") {
+                    cfg.env.attack_s = v.max(0.0);
+                }
+                if let Some(v) = p("amp_decay") {
+                    cfg.env.decay_s = v.max(0.0);
+                }
+                if let Some(v) = p("amp_sustain") {
+                    cfg.env.sustain = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = p("amp_release") {
+                    cfg.env.release_s = v.max(0.0);
                 }
                 if let Some(v) = p("ring_mix") {
                     cfg.ring_mix = v.clamp(0.0, 1.0);
@@ -236,14 +261,31 @@ impl ModCompiler {
         self.buses.iter().position(|b| *b == key)
     }
 
-    /// Instantiate a modulator block as a control source (defaults for now —
-    /// imported envelope/LFO parameters land in a later slice).
+    /// Instantiate a modulator block as a control source, honoring its
+    /// build-time params (LFO `rate` Hz; envelope `attack`/`decay`/
+    /// `sustain`/`release` seconds).
     fn instantiate(&mut self, block: &RigBlock) -> Option<usize> {
         let sr = self.sample_rate as f32;
         let src = match block.block_type {
-            BlockType::Lfo => ModSource::lfo(ControlLfo::new(LfoWave::Sine, 2.0), sr),
+            BlockType::Lfo => {
+                let rate = block.param_f32("rate").unwrap_or(2.0).clamp(0.01, 40.0);
+                ModSource::lfo(ControlLfo::new(LfoWave::Sine, rate), sr)
+            }
             BlockType::Envelope | BlockType::MultisegEnvelope => {
-                ModSource::env(ControlEnv::new(sr, crate::native::AdsrParams::default()), sr)
+                let mut p = crate::native::AdsrParams::default();
+                if let Some(v) = block.param_f32("attack") {
+                    p.attack_s = v.max(0.0);
+                }
+                if let Some(v) = block.param_f32("decay") {
+                    p.decay_s = v.max(0.0);
+                }
+                if let Some(v) = block.param_f32("sustain") {
+                    p.sustain = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = block.param_f32("release") {
+                    p.release_s = v.max(0.0);
+                }
+                ModSource::env(ControlEnv::new(sr, p), sr)
             }
             _ => return None,
         };
@@ -893,6 +935,81 @@ zones (
         }
         std::fs::remove_dir_all(&dir).ok();
         assert!(heard > 1e-3, "sampler block should be audible, rms={heard}");
+    }
+
+    /// Sample-mode unison: a Sampler block with unison params spawns detuned,
+    /// panned voice copies — audible as stereo side energy on a mono sample.
+    #[test]
+    fn sampler_unison_spreads_the_image() {
+        use crate::rig::RigBlock;
+        fn render(unison: bool) -> (Vec<f32>, Vec<f32>) {
+            let dir = std::env::temp_dir().join(format!(
+                "signal-sampler-unison-test-{}-{}",
+                std::process::id(),
+                unison
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let wav = dir.join("note.wav");
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: 48_000,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            };
+            let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+            for i in 0..48_000 {
+                let t = i as f32 / 48_000.0;
+                w.write_sample((core::f32::consts::TAU * 220.0 * t).sin() * 0.8)
+                    .unwrap();
+            }
+            w.finalize().unwrap();
+            std::fs::write(
+                dir.join("lib.styx"),
+                "name U\nzones (\n    { file note.wav, key_min 0, key_max 127, root_key 60, vel_min 0, vel_max 127 }\n)\n",
+            )
+            .unwrap();
+            let mut sb = RigBlock::sample_lib(dir.join("lib.styx").to_string_lossy().to_string())
+                .named("S");
+            if unison {
+                sb = sb
+                    .with_param("unison_voices", "6")
+                    .with_param("unison_detune", "0.3")
+                    .with_param("unison_width", "1.0");
+            }
+            let tree = Container::layer("L").add(sb);
+            let mut rn = RenderNode::compile(&tree, 48_000);
+            rn.prepare(48_000.0, 512);
+            let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
+            let midi = [note_on(60, 100)];
+            let mut got = (vec![], vec![]);
+            for _ in 0..200 {
+                let ev = PluginEvents {
+                    params: &[],
+                    midi: &midi,
+                    note_expressions: &[],
+                };
+                rn.render(&mut l, &mut r, &ev);
+                if rms(&l) > 1e-3 {
+                    got = (l.clone(), r.clone());
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            std::fs::remove_dir_all(&dir).ok();
+            got
+        }
+        let (ml, mr) = render(false);
+        let (wl, wr) = render(true);
+        assert!(rms(&ml) > 1e-3 && rms(&wl) > 1e-3, "both audible");
+        let side_mono: Vec<f32> = ml.iter().zip(&mr).map(|(a, b)| a - b).collect();
+        let side_wide: Vec<f32> = wl.iter().zip(&wr).map(|(a, b)| a - b).collect();
+        assert!(rms(&side_mono) < 1e-5, "single voice centered");
+        assert!(
+            rms(&side_wide) > rms(&wl) * 0.05,
+            "unison copies spread the image: side={} mid={}",
+            rms(&side_wide),
+            rms(&wl)
+        );
     }
 
     /// Machine-local: the real Keyscape LA Custom C7 Grand extraction loads

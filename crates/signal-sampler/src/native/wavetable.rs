@@ -78,15 +78,25 @@ pub struct SynthConfig {
     pub unison_detune_cents: f32,
     /// Stereo pan spread 0..1.
     pub unison_width: f32,
+    /// Octave mode 0..1: alternate unison voices shift toward +12 semitones.
+    pub unison_octave: f32,
+    /// Analog mode 0..1: static per-voice random detune jitter (±15 cents).
+    pub unison_analog: f32,
+    /// Drift 0..1: slow per-voice pitch wander (±8 cents, sub-Hz rates).
+    pub unison_drift: f32,
     /// FM depth 0..1 (phase-modulation index, scaled internally).
     pub fm_depth: f32,
     /// FM modulator ratio (modulator freq = note freq × ratio).
     pub fm_ratio: f32,
+    /// FM modulator waveform morph 0..1 (same axis as `shape`; 0 = sine).
+    pub fm_shape: f32,
     /// Ring-mod wet mix 0..1.
     pub ring_mix: f32,
     /// Ring carrier ratio (key-tracked).
     pub ring_ratio: f32,
     pub harmonia: [HarmVoice; 4],
+    /// Per-note amplitude envelope.
+    pub env: AdsrParams,
 }
 
 impl Default for SynthConfig {
@@ -96,19 +106,39 @@ impl Default for SynthConfig {
             unison_voices: 1,
             unison_detune_cents: 12.0,
             unison_width: 0.7,
+            unison_octave: 0.0,
+            unison_analog: 0.0,
+            unison_drift: 0.0,
             fm_depth: 0.0,
             fm_ratio: 1.0,
+            fm_shape: 0.0,
             ring_mix: 0.0,
             ring_ratio: 1.0,
             harmonia: [HarmVoice::default(); 4],
+            env: AdsrParams::default(),
         }
     }
+}
+
+/// Cheap deterministic per-voice random in −1..+1 (seeded by index).
+fn jitter(seed: u32) -> f32 {
+    let mut x = seed.wrapping_mul(0x9E37_79B9).wrapping_add(0x85EB_CA6B);
+    x ^= x >> 13;
+    x = x.wrapping_mul(0xC2B2_AE35);
+    x ^= x >> 16;
+    (x as f32 / u32::MAX as f32) * 2.0 - 1.0
 }
 
 /// One rendered oscillator line (a unison voice or a Harmonia voice).
 struct Sub {
     phase: f32,
     inc: f32,
+    /// Unmodulated increment (drift wobbles around it).
+    base_inc: f32,
+    /// Drift LFO state: phase + per-block increment (0 = no drift).
+    drift_phase: f32,
+    drift_inc: f32,
+    drift_cents: f32,
     /// Equal-power pan gains.
     gain_l: f32,
     gain_r: f32,
@@ -175,7 +205,7 @@ impl NativeWavetable {
     }
 
     /// Build the sub-oscillator set for one note at `freq`.
-    fn build_subs(&self, freq: f32) -> Vec<Sub> {
+    fn build_subs(&self, freq: f32, note: u8) -> Vec<Sub> {
         let mut subs = Vec::new();
         let n = self.cfg.unison_voices.clamp(1, 8);
         let comp = 1.0 / (n as f32).sqrt();
@@ -186,12 +216,32 @@ impl NativeWavetable {
             } else {
                 (i as f32 / (n - 1) as f32) * 2.0 - 1.0
             };
-            let cents = off * self.cfg.unison_detune_cents * 0.5;
+            let mut cents = off * self.cfg.unison_detune_cents * 0.5;
+            // Octave mode: odd voices pull toward +1200 cents.
+            if self.cfg.unison_octave > 0.0 && i % 2 == 1 {
+                cents += 1200.0 * self.cfg.unison_octave;
+            }
+            // Analog mode: static per-voice random jitter (±15 cents max).
+            if self.cfg.unison_analog > 0.0 {
+                cents += jitter(i.wrapping_add(note as u32 * 31)) * self.cfg.unison_analog * 15.0;
+            }
             let f = freq * 2f32.powf(cents / 1200.0);
             let (gain_l, gain_r) = pan_gains(off * self.cfg.unison_width);
+            let inc = f / self.sample_rate;
+            // Drift: each voice wanders at its own sub-Hz rate.
+            let (drift_inc, drift_cents) = if self.cfg.unison_drift > 0.0 {
+                let rate = 0.1 + (jitter(i.wrapping_mul(7).wrapping_add(3)) * 0.5 + 0.5) * 0.6;
+                (rate / self.sample_rate, self.cfg.unison_drift * 8.0)
+            } else {
+                (0.0, 0.0)
+            };
             subs.push(Sub {
                 phase: (i as f32) * 0.37 % 1.0, // decorrelate phases
-                inc: f / self.sample_rate,
+                inc,
+                base_inc: inc,
+                drift_phase: jitter(i.wrapping_add(11)) * 0.5 + 0.5,
+                drift_inc,
+                drift_cents,
                 gain_l,
                 gain_r,
                 level: comp,
@@ -201,9 +251,14 @@ impl NativeWavetable {
         for h in self.cfg.harmonia.iter().filter(|h| h.on && h.level > 0.0) {
             let f = freq * 2f32.powf(h.interval_semi / 12.0);
             let (gain_l, gain_r) = pan_gains(h.pan);
+            let inc = f / self.sample_rate;
             subs.push(Sub {
                 phase: 0.0,
-                inc: f / self.sample_rate,
+                inc,
+                base_inc: inc,
+                drift_phase: 0.0,
+                drift_inc: 0.0,
+                drift_cents: 0.0,
                 gain_l,
                 gain_r,
                 level: h.level,
@@ -224,13 +279,13 @@ impl NativeWavetable {
             v.amp = amp;
             v.env.note_on();
         } else {
-            let mut env = Adsr::new(self.sample_rate, AdsrParams::default());
+            let mut env = Adsr::new(self.sample_rate, self.cfg.env);
             env.note_on();
             self.voices.push(Voice {
                 note,
                 amp,
                 env,
-                subs: self.build_subs(freq),
+                subs: self.build_subs(freq, note),
                 fm_phase: 0.0,
                 fm_inc: base_inc * self.cfg.fm_ratio,
                 ring_phase: 0.0,
@@ -312,6 +367,8 @@ impl PluginInstance for NativeWavetable {
                 v.ring_inc *= ratio;
                 for s in &mut v.subs {
                     s.inc *= ratio;
+                    s.base_inc *= ratio;
+                    s.drift_inc *= ratio;
                 }
                 v.env.set_sample_rate(new_sr);
             }
@@ -357,7 +414,18 @@ impl PluginInstance for NativeWavetable {
         }
         let frames = out_l.len().min(out_r.len());
         let fm_index = self.cfg.fm_depth * 4.0; // phase-mod index scale
+        let fm_shape = self.cfg.fm_shape;
         let ring_mix = self.cfg.ring_mix;
+        // Drift: block-rate pitch wander per sub (slow, so block-rate is fine).
+        for v in &mut self.voices {
+            for s in &mut v.subs {
+                if s.drift_inc > 0.0 {
+                    s.drift_phase = (s.drift_phase + s.drift_inc * frames as f32).fract();
+                    let cents = (core::f32::consts::TAU * s.drift_phase).sin() * s.drift_cents;
+                    s.inc = s.base_inc * 2f32.powf(cents / 1200.0);
+                }
+            }
+        }
         for f in 0..frames {
             let (mut sl, mut sr) = (0.0f32, 0.0f32);
             for v in &mut self.voices {
@@ -365,9 +433,10 @@ impl PluginInstance for NativeWavetable {
                 if e == 0.0 {
                     continue;
                 }
-                // FM: one modulator per note phase-offsets every sub.
+                // FM: one modulator per note phase-offsets every sub. The
+                // modulator is itself a morphing wave (fm_shape; 0 = sine).
                 let pm = if fm_index > 0.0 {
-                    let m = (core::f32::consts::TAU * v.fm_phase).sin();
+                    let m = morph(v.fm_phase, v.fm_inc, fm_shape);
                     v.fm_phase = (v.fm_phase + v.fm_inc).fract();
                     m * fm_index * 0.15
                 } else {
