@@ -84,13 +84,16 @@ struct CompiledRoute {
     depth: f32,
 }
 
-/// The compiled control-rate modulation engine for one tree.
+/// The compiled control-rate modulation engine + send-bus state for one tree.
 #[derive(Default)]
 pub struct ModEngine {
     sources: Vec<ModSource>,
     routes: Vec<CompiledRoute>,
     /// Per-leaf pending parameter writes, rebuilt each block.
     writes: Vec<Vec<(u32, f64)>>,
+    /// Send buses (indexed by compile-time bus id), zeroed each block.
+    bus_l: Vec<Vec<f32>>,
+    bus_r: Vec<Vec<f32>>,
 }
 
 impl ModEngine {
@@ -125,7 +128,8 @@ impl ModEngine {
     }
 }
 
-/// Compile-time state: modulator scope stack + leaf registry + route table.
+/// Compile-time state: modulator scope stack + leaf registry + route table
+/// + send-bus registry.
 struct ModCompiler {
     sources: Vec<ModSource>,
     /// (lower-cased modulator name, source index) — scoped stack.
@@ -135,6 +139,8 @@ struct ModCompiler {
     routes: Vec<CompiledRoute>,
     /// Per-leaf (lower-cased display name, params) for target resolution.
     leaves: Vec<(String, Vec<signal_plugin_host::PluginParamInfo>)>,
+    /// Send-bus names (lower-cased), collected in a pre-pass; index = bus id.
+    buses: Vec<String>,
     sample_rate: u32,
 }
 
@@ -146,8 +152,29 @@ impl ModCompiler {
             midi: Vec::new(),
             routes: Vec::new(),
             leaves: Vec::new(),
+            buses: Vec::new(),
             sample_rate,
         }
+    }
+
+    /// Pre-pass: register every send target in the tree as a bus.
+    fn collect_buses(&mut self, container: &Container) {
+        for s in &container.sends {
+            let key = s.target.to_lowercase();
+            if !self.buses.contains(&key) {
+                self.buses.push(key);
+            }
+        }
+        for child in &container.children {
+            if let RigNode::Container { container: c } = child {
+                self.collect_buses(c);
+            }
+        }
+    }
+
+    fn bus_id(&self, name: &str) -> Option<usize> {
+        let key = name.to_lowercase();
+        self.buses.iter().position(|b| *b == key)
     }
 
     /// Instantiate a modulator block as a control source (defaults for now —
@@ -242,12 +269,34 @@ pub enum RenderNode {
         zone: Zone,
         inner: Box<RenderNode>,
     },
-    /// The tree root when any mod routes resolved: ticks the [`ModEngine`]
-    /// each block and threads its parameter writes down to the leaves.
+    /// A subtree whose output also feeds one or more send buses (unity gain).
+    SendTap {
+        buses: Vec<usize>,
+        inner: Box<RenderNode>,
+    },
+    /// A send-bus **return**: `inner` processes the bus content and its
+    /// output is summed with the pass-through main signal (send/return
+    /// semantics — the main chain is not re-processed by the return).
+    BusInject {
+        bus: usize,
+        inner: Box<RenderNode>,
+    },
+    /// The tree root when any mod routes or send buses resolved: ticks the
+    /// [`ModEngine`] each block and threads its parameter writes + bus
+    /// buffers down the tree.
     Modulated {
         engine: Box<ModEngine>,
         inner: Box<RenderNode>,
     },
+}
+
+/// Per-block render context threaded down the tree: mod-engine parameter
+/// writes (per leaf) + send-bus buffers.
+#[derive(Default)]
+struct RenderCtx {
+    writes: Vec<Vec<(u32, f64)>>,
+    bus_l: Vec<Vec<f32>>,
+    bus_r: Vec<Vec<f32>>,
 }
 
 impl RenderNode {
@@ -256,15 +305,19 @@ impl RenderNode {
     /// is wrapped in [`RenderNode::Zoned`] so only its in-window notes reach it.
     pub fn compile(container: &Container, sample_rate: u32) -> RenderNode {
         let mut mc = ModCompiler::new(sample_rate);
+        mc.collect_buses(container);
         let root = Self::compile_container(container, sample_rate, &mut mc);
-        if mc.routes.is_empty() {
+        if mc.routes.is_empty() && mc.buses.is_empty() {
             root
         } else {
+            let bus_count = mc.buses.len();
             RenderNode::Modulated {
                 engine: Box::new(ModEngine {
                     sources: mc.sources,
                     routes: mc.routes,
                     writes: Vec::new(),
+                    bus_l: vec![Vec::new(); bus_count],
+                    bus_r: vec![Vec::new(); bus_count],
                 }),
                 inner: Box::new(root),
             }
@@ -303,14 +356,34 @@ impl RenderNode {
             Combine::Serial => RenderNode::Serial(kids),
             Combine::Parallel => RenderNode::Parallel(kids),
         };
-        if container.zone.is_full() {
+        let mut node = if container.zone.is_full() {
             base
         } else {
             RenderNode::Zoned {
                 zone: container.zone,
                 inner: Box::new(base),
             }
+        };
+        // This container is a send target → it becomes a bus return.
+        if let Some(bus) = mc.bus_id(&container.name) {
+            node = RenderNode::BusInject {
+                bus,
+                inner: Box::new(node),
+            };
         }
+        // This container sends its output to buses.
+        let taps: Vec<usize> = container
+            .sends
+            .iter()
+            .filter_map(|s| mc.bus_id(&s.target))
+            .collect();
+        if !taps.is_empty() {
+            node = RenderNode::SendTap {
+                buses: taps,
+                inner: Box::new(node),
+            };
+        }
+        node
     }
 
     fn compile_node(node: &RigNode, sample_rate: u32, mc: &mut ModCompiler) -> RenderNode {
@@ -333,7 +406,15 @@ impl RenderNode {
                     .unwrap_or_default();
                 let id = mc.leaves.len();
                 mc.leaves.push((b.display_name().to_lowercase(), params));
-                RenderNode::Leaf { id, inst }
+                let leaf = RenderNode::Leaf { id, inst };
+                // A block can also be a send target (e.g. the global Rotary).
+                match mc.bus_id(&b.display_name()) {
+                    Some(bus) => RenderNode::BusInject {
+                        bus,
+                        inner: Box::new(leaf),
+                    },
+                    None => leaf,
+                }
             }
             RigNode::Container { container: c } => Self::compile_container(c, sample_rate, mc),
         }
@@ -349,7 +430,9 @@ impl RenderNode {
             RenderNode::Serial(v) | RenderNode::Parallel(v) => {
                 v.iter_mut().for_each(|n| n.prepare(sample_rate, block_size));
             }
-            RenderNode::Zoned { inner, .. } => inner.prepare(sample_rate, block_size),
+            RenderNode::Zoned { inner, .. }
+            | RenderNode::SendTap { inner, .. }
+            | RenderNode::BusInject { inner, .. } => inner.prepare(sample_rate, block_size),
             RenderNode::Modulated { engine, inner } => {
                 inner.prepare(sample_rate, block_size);
                 engine.prepare(sample_rate, inner.leaf_count());
@@ -364,9 +447,10 @@ impl RenderNode {
             RenderNode::Serial(v) | RenderNode::Parallel(v) => {
                 v.iter().map(|n| n.leaf_count()).sum()
             }
-            RenderNode::Zoned { inner, .. } | RenderNode::Modulated { inner, .. } => {
-                inner.leaf_count()
-            }
+            RenderNode::Zoned { inner, .. }
+            | RenderNode::Modulated { inner, .. }
+            | RenderNode::SendTap { inner, .. }
+            | RenderNode::BusInject { inner, .. } => inner.leaf_count(),
         }
     }
 
@@ -377,9 +461,10 @@ impl RenderNode {
             RenderNode::Serial(v) | RenderNode::Parallel(v) => {
                 v.iter().map(|n| n.live_leaves()).sum()
             }
-            RenderNode::Zoned { inner, .. } | RenderNode::Modulated { inner, .. } => {
-                inner.live_leaves()
-            }
+            RenderNode::Zoned { inner, .. }
+            | RenderNode::Modulated { inner, .. }
+            | RenderNode::SendTap { inner, .. }
+            | RenderNode::BusInject { inner, .. } => inner.live_leaves(),
         }
     }
 
@@ -400,16 +485,28 @@ impl RenderNode {
         out_r: &mut [f32],
         events: &PluginEvents<'_>,
     ) {
-        // Root-level: tick the mod engine, then thread its writes down.
+        // Root-level: tick the mod engine, then thread its writes + bus
+        // buffers down the tree.
         if let RenderNode::Modulated { engine, inner } = self {
             let frames = out_l.len().min(out_r.len());
             engine.tick(events, frames);
-            let writes = std::mem::take(&mut engine.writes);
-            inner.process_inner(in_l, in_r, out_l, out_r, events, &writes);
-            engine.writes = writes;
+            let mut ctx = RenderCtx {
+                writes: std::mem::take(&mut engine.writes),
+                bus_l: std::mem::take(&mut engine.bus_l),
+                bus_r: std::mem::take(&mut engine.bus_r),
+            };
+            for b in ctx.bus_l.iter_mut().chain(ctx.bus_r.iter_mut()) {
+                b.clear();
+                b.resize(frames, 0.0);
+            }
+            inner.process_inner(in_l, in_r, out_l, out_r, events, &mut ctx);
+            engine.writes = ctx.writes;
+            engine.bus_l = ctx.bus_l;
+            engine.bus_r = ctx.bus_r;
             return;
         }
-        self.process_inner(in_l, in_r, out_l, out_r, events, &[]);
+        let mut ctx = RenderCtx::default();
+        self.process_inner(in_l, in_r, out_l, out_r, events, &mut ctx);
     }
 
     fn process_inner(
@@ -419,12 +516,12 @@ impl RenderNode {
         out_l: &mut [f32],
         out_r: &mut [f32],
         events: &PluginEvents<'_>,
-        writes: &[Vec<(u32, f64)>],
+        ctx: &mut RenderCtx,
     ) {
         let frames = out_l.len().min(out_r.len());
         match self {
             RenderNode::Leaf { id, inst: Some(inst) } => {
-                let mods = writes.get(*id).map(|w| w.as_slice()).unwrap_or(&[]);
+                let mods = ctx.writes.get(*id).map(|w| w.as_slice()).unwrap_or(&[]);
                 if mods.is_empty() {
                     let _ = inst.process_block(in_l, in_r, out_l, out_r, events);
                 } else {
@@ -454,7 +551,7 @@ impl RenderNode {
                 for node in nodes.iter_mut() {
                     nxt_l.iter_mut().for_each(|x| *x = 0.0);
                     nxt_r.iter_mut().for_each(|x| *x = 0.0);
-                    node.process_inner(&cur_l, &cur_r, &mut nxt_l, &mut nxt_r, events, writes);
+                    node.process_inner(&cur_l, &cur_r, &mut nxt_l, &mut nxt_r, events, ctx);
                     std::mem::swap(&mut cur_l, &mut nxt_l);
                     std::mem::swap(&mut cur_r, &mut nxt_r);
                 }
@@ -469,7 +566,7 @@ impl RenderNode {
                 for node in nodes.iter_mut() {
                     tl.iter_mut().for_each(|x| *x = 0.0);
                     tr.iter_mut().for_each(|x| *x = 0.0);
-                    node.process_inner(in_l, in_r, &mut tl, &mut tr, events, writes);
+                    node.process_inner(in_l, in_r, &mut tl, &mut tr, events, ctx);
                     for f in 0..frames {
                         out_l[f] += tl[f];
                         out_r[f] += tr[f];
@@ -486,7 +583,44 @@ impl RenderNode {
                     midi: &filtered,
                     note_expressions: events.note_expressions,
                 };
-                inner.process_inner(in_l, in_r, out_l, out_r, &fe, writes);
+                inner.process_inner(in_l, in_r, out_l, out_r, &fe, ctx);
+            }
+            RenderNode::SendTap { buses, inner } => {
+                inner.process_inner(in_l, in_r, out_l, out_r, events, ctx);
+                // Feed this node's output into each bus (unity gain).
+                for &bus in buses.iter() {
+                    if let Some(bl) = ctx.bus_l.get_mut(bus) {
+                        for f in 0..frames.min(bl.len()) {
+                            bl[f] += out_l[f];
+                        }
+                    }
+                    if let Some(br) = ctx.bus_r.get_mut(bus) {
+                        for f in 0..frames.min(br.len()) {
+                            br[f] += out_r[f];
+                        }
+                    }
+                }
+            }
+            RenderNode::BusInject { bus, inner } => {
+                // Send/return: `inner` processes the BUS content only; its
+                // output sums onto the pass-through main signal.
+                let bl: Vec<f32> = ctx
+                    .bus_l
+                    .get(*bus)
+                    .map(|b| b[..frames.min(b.len())].to_vec())
+                    .unwrap_or_else(|| vec![0.0; frames]);
+                let br: Vec<f32> = ctx
+                    .bus_r
+                    .get(*bus)
+                    .map(|b| b[..frames.min(b.len())].to_vec())
+                    .unwrap_or_else(|| vec![0.0; frames]);
+                let mut tl = vec![0.0f32; frames];
+                let mut tr = vec![0.0f32; frames];
+                inner.process_inner(&bl, &br, &mut tl, &mut tr, events, ctx);
+                for f in 0..frames {
+                    out_l[f] = in_l.get(f).copied().unwrap_or(0.0) + tl[f];
+                    out_r[f] = in_r.get(f).copied().unwrap_or(0.0) + tr[f];
+                }
             }
             RenderNode::Modulated { .. } => {
                 // Only ever the root; handled in `process`.
@@ -892,6 +1026,45 @@ zones (
             dark < open * 0.35,
             "imported cutoff darkens the block: open={open} dark={dark}"
         );
+    }
+
+    /// Send/return buses: a layer taps its output to a named return; with
+    /// the main path muted after the tap, audio reaches the output ONLY via
+    /// the bus (and doesn't without the send).
+    #[test]
+    fn sends_sum_into_their_return_bus() {
+        use crate::rig::RigBlock;
+        fn level(with_send: bool) -> f32 {
+            let mut src = Container::layer("Src").block(BlockType::Oscillator, "Osc");
+            if with_send {
+                src = src.send("Return", "To Return");
+            }
+            let tree = Container::preset("P")
+                .add(src)
+                // Mute the main path after the tap (amp gain 0).
+                .add(Container::module("Mute").add(
+                    RigBlock::of_type(BlockType::Amp).named("Kill").with_param("gain", "0"),
+                ))
+                // The return: placeholder inside = bus passes straight through.
+                .add(Container::module("Return"));
+            let mut rn = RenderNode::compile(&tree, 48_000);
+            rn.prepare(48_000.0, 256);
+            let (mut l, mut r) = (vec![0.0; 256], vec![0.0; 256]);
+            let midi = [note_on(60, 100)];
+            let mut level = 0.0;
+            for b in 0..4 {
+                let ev = PluginEvents {
+                    params: &[],
+                    midi: if b == 0 { &midi } else { &[] },
+                    note_expressions: &[],
+                };
+                rn.render(&mut l, &mut r, &ev);
+                level = rms(&l);
+            }
+            level
+        }
+        assert!(level(false) < 1e-6, "muted main path is silent without a send");
+        assert!(level(true) > 1e-3, "audio reaches the output via the return bus");
     }
 
     /// Routes on placeholder blocks resolve to nothing (warn, not panic),
