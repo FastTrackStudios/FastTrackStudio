@@ -189,6 +189,8 @@ pub struct ModEngine {
     /// Send buses (indexed by compile-time bus id), zeroed each block.
     bus_l: Vec<Vec<f32>>,
     bus_r: Vec<Vec<f32>>,
+    /// Tempo for synced LFOs (set by the host via [`RenderNode::set_tempo`]).
+    tempo_bpm: f32,
 }
 
 impl ModEngine {
@@ -205,10 +207,11 @@ impl ModEngine {
             w.clear();
         }
         // Evaluate each source once, then apply every route.
+        let tempo = self.tempo_bpm;
         let values: Vec<f32> = self
             .sources
             .iter_mut()
-            .map(|s| s.tick(events, frames))
+            .map(|s| s.tick_at(events, frames, tempo))
             .collect();
         for r in &self.routes {
             let v = (r.base + (r.depth * values[r.source]) as f64).clamp(0.0, 1.0);
@@ -284,9 +287,17 @@ impl ModCompiler {
                     1 => LfoWave::Triangle,
                     2 => LfoWave::Saw,
                     3 => LfoWave::Square,
+                    4 => LfoWave::SampleHold,
                     _ => LfoWave::Sine,
                 };
-                ModSource::lfo(ControlLfo::new(wave, rate), sr)
+                let mut lfo = ControlLfo::new(wave, rate);
+                if let Some(beats) = block.param_f32("sync_beats") {
+                    lfo = lfo.with_sync_beats(beats);
+                }
+                if block.param_f32("retrigger").unwrap_or(0.0) > 0.0 {
+                    lfo = lfo.with_retrigger(true);
+                }
+                ModSource::lfo(lfo, sr)
             }
             BlockType::Envelope | BlockType::MultisegEnvelope => {
                 let mut p = crate::native::AdsrParams::default();
@@ -442,6 +453,7 @@ impl RenderNode {
                     writes: Vec::new(),
                     bus_l: vec![Vec::new(); bus_count],
                     bus_r: vec![Vec::new(); bus_count],
+                    tempo_bpm: 120.0,
                 }),
                 inner: Box::new(root),
             }
@@ -612,6 +624,13 @@ impl RenderNode {
         match self {
             RenderNode::Modulated { engine, .. } => Some(engine),
             _ => None,
+        }
+    }
+
+    /// Set the tempo used by synced LFOs (no-op on trees without a mod engine).
+    pub fn set_tempo(&mut self, bpm: f32) {
+        if let RenderNode::Modulated { engine, .. } = self {
+            engine.tempo_bpm = bpm.max(1.0);
         }
     }
 

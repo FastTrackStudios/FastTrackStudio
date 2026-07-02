@@ -24,14 +24,23 @@ pub enum LfoWave {
     Triangle,
     Saw,
     Square,
+    /// Sample & hold: a new random value each cycle.
+    SampleHold,
 }
 
-/// A free-running control LFO. Bipolar output −1..+1.
+/// A control LFO. Bipolar output −1..+1. Free-rate or tempo-synced, with
+/// optional note-on retrigger.
 #[derive(Clone, Copy, Debug)]
 pub struct ControlLfo {
     pub wave: LfoWave,
     pub rate_hz: f32,
+    /// When set, the rate follows tempo: one cycle per `sync_beats` beats.
+    pub sync_beats: Option<f32>,
+    /// Reset phase (and redraw S&H) on every note-on.
+    pub retrigger: bool,
     phase: f32,
+    held: f32,
+    rng: u32,
 }
 
 impl ControlLfo {
@@ -39,13 +48,40 @@ impl ControlLfo {
         Self {
             wave,
             rate_hz,
+            sync_beats: None,
+            retrigger: false,
             phase: 0.0,
+            held: 0.0,
+            rng: 0x2F6E_2B1,
         }
     }
 
-    /// Advance by `frames` at `sample_rate`; returns the value at the block
-    /// start (one value per block — block-rate control).
-    fn tick(&mut self, frames: usize, sample_rate: f32) -> f32 {
+    #[must_use]
+    pub fn with_sync_beats(mut self, beats: f32) -> Self {
+        self.sync_beats = (beats > 0.0).then_some(beats);
+        self
+    }
+
+    #[must_use]
+    pub fn with_retrigger(mut self, on: bool) -> Self {
+        self.retrigger = on;
+        self
+    }
+
+    fn draw(&mut self) -> f32 {
+        self.rng = self.rng.wrapping_mul(0x9E37_79B9).wrapping_add(0x85EB_CA6B);
+        let x = self.rng ^ (self.rng >> 15);
+        (x as f32 / u32::MAX as f32) * 2.0 - 1.0
+    }
+
+    fn reset(&mut self) {
+        self.phase = 0.0;
+        self.held = self.draw();
+    }
+
+    /// Advance by `frames` at `sample_rate` and `tempo_bpm`; returns the
+    /// value at the block start (one value per block — block-rate control).
+    fn tick(&mut self, frames: usize, sample_rate: f32, tempo_bpm: f32) -> f32 {
         let v = match self.wave {
             LfoWave::Sine => (core::f32::consts::TAU * self.phase).sin(),
             LfoWave::Triangle => 4.0 * (self.phase - 0.5).abs() - 1.0,
@@ -57,9 +93,17 @@ impl ControlLfo {
                     -1.0
                 }
             }
+            LfoWave::SampleHold => self.held,
         };
-        self.phase += self.rate_hz * frames as f32 / sample_rate.max(1.0);
-        self.phase -= self.phase.floor();
+        let hz = match self.sync_beats {
+            Some(beats) => (tempo_bpm.max(1.0) / 60.0) / beats.max(1e-3),
+            None => self.rate_hz,
+        };
+        let next = self.phase + hz * frames as f32 / sample_rate.max(1.0);
+        if next >= 1.0 {
+            self.held = self.draw();
+        }
+        self.phase = next - next.floor();
         v
     }
 }
@@ -125,6 +169,10 @@ pub enum MidiMod {
     Alt,
     /// Always 1.0 (route depth = a constant offset).
     Constant,
+    /// MPE per-note pressure (latest across voices), 0..1.
+    MpePressure,
+    /// MPE per-note timbre / brightness (latest across voices), 0..1.
+    MpeTimbre,
     /// An arbitrary CC, 0..1.
     Cc(u8),
 }
@@ -179,6 +227,8 @@ impl ModSource {
             "random" | "random2" | "random unipolar" => MidiMod::Random,
             "alt" => MidiMod::Alt,
             "constant" | "bias1" | "bias2" => MidiMod::Constant,
+            "mpev" | "mpepressure" | "mpe pressure" => MidiMod::MpePressure,
+            "mpe3" | "mpetimbre" | "mpe timbre" => MidiMod::MpeTimbre,
             other => {
                 let n = other.strip_prefix("cc")?.parse().ok()?;
                 MidiMod::Cc(n)
@@ -195,8 +245,25 @@ impl ModSource {
 
     /// Advance through one block; returns the source's current value.
     pub fn tick(&mut self, events: &PluginEvents<'_>, frames: usize) -> f32 {
+        self.tick_at(events, frames, 120.0)
+    }
+
+    /// [`tick`](Self::tick) with an explicit tempo (for synced LFOs).
+    pub fn tick_at(&mut self, events: &PluginEvents<'_>, frames: usize, tempo_bpm: f32) -> f32 {
         self.value = match &mut self.kind {
-            SourceKind::Lfo(l) => l.tick(frames, self.sample_rate),
+            SourceKind::Lfo(l) => {
+                if l.retrigger
+                    && events.midi.iter().any(|ev| {
+                        matches!(
+                            ev.message,
+                            daw::service::MidiMessage::NoteOn { velocity, .. } if velocity > 0
+                        )
+                    })
+                {
+                    l.reset();
+                }
+                l.tick(frames, self.sample_rate, tempo_bpm)
+            }
             SourceKind::Env(e) => e.tick(events, frames),
             SourceKind::Midi(m) => {
                 use daw::service::MidiMessage;
@@ -241,6 +308,17 @@ impl ModSource {
                             if *velocity > 0 =>
                         {
                             v = if v > 0.5 { 0.0 } else { 1.0 };
+                        }
+                        _ => {}
+                    }
+                }
+                // MPE dimensions ride the note-expression stream.
+                for ex in events.note_expressions {
+                    use daw::service::midi::NoteExpressionDim as Dim;
+                    match (*m, ex.dimension) {
+                        (MidiMod::MpePressure, Dim::Pressure)
+                        | (MidiMod::MpeTimbre, Dim::Brightness) => {
+                            v = (ex.value as f32).clamp(0.0, 1.0);
                         }
                         _ => {}
                     }
@@ -313,6 +391,64 @@ mod tests {
             }
         }
         assert!(v < 0.01, "released envelope decays, v={v}");
+    }
+
+    #[test]
+    fn synced_lfo_follows_tempo() {
+        // 1 cycle per beat at 120 BPM = 2 Hz. One second → 2 full cycles.
+        let mut src = ModSource::lfo(
+            ControlLfo::new(LfoWave::Saw, 0.0).with_sync_beats(1.0),
+            48_000.0,
+        );
+        let mut wraps = 0;
+        let mut last = -1.0f32;
+        // 1.1 s of 10 ms blocks — catches both wraps of a 2 Hz saw.
+        for _ in 0..110 {
+            let v = src.tick_at(&no_events(), 480, 120.0);
+            if v < last - 1.0 {
+                wraps += 1; // saw reset
+            }
+            last = v;
+        }
+        assert_eq!(wraps, 2, "2 Hz at 120 BPM 1-beat sync, got {wraps} wraps");
+    }
+
+    #[test]
+    fn sample_hold_steps_per_cycle() {
+        let mut src = ModSource::lfo(
+            ControlLfo::new(LfoWave::SampleHold, 4.0),
+            48_000.0,
+        );
+        // 4 Hz over 1 s in 100 ms blocks → value changes several times but
+        // holds within a cycle.
+        let mut values = Vec::new();
+        for _ in 0..10 {
+            values.push(src.tick_at(&no_events(), 4_800, 120.0));
+        }
+        values.dedup();
+        assert!(values.len() >= 3, "S&H redraws per cycle, got {values:?}");
+        assert!(values.iter().all(|v| (-1.0..=1.0).contains(v)));
+    }
+
+    #[test]
+    fn retriggered_lfo_resets_on_note_on() {
+        let mut src = ModSource::lfo(
+            ControlLfo::new(LfoWave::Saw, 1.0).with_retrigger(true),
+            48_000.0,
+        );
+        // Run a quarter cycle, then hit a note: phase resets to 0 → value −1.
+        src.tick_at(&no_events(), 12_000, 120.0);
+        let on = [PluginMidiEvent {
+            offset: 0,
+            message: daw::service::MidiMessage::note_on(0, 60, 100),
+        }];
+        let ev = PluginEvents {
+            params: &[],
+            midi: &on,
+            note_expressions: &[],
+        };
+        let v = src.tick_at(&ev, 64, 120.0);
+        assert!(v < -0.98, "saw restarts at −1 after retrigger, got {v}");
     }
 
     #[test]

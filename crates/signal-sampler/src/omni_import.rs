@@ -315,8 +315,8 @@ pub struct OmniPatch {
     /// Aux FX rack module names.
     pub aux_fx: Vec<String>,
     pub mod_routes: Vec<OmniModRoute>,
-    /// Part LFOs from `LFO_SET`: `(rate 0..1, type 0..1)` per LFO.
-    pub lfos: Vec<(f32, f32)>,
+    /// Part LFOs from `LFO_SET`: `(rate 0..1, type 0..1, synced, retrigger)`.
+    pub lfos: Vec<(f32, f32, bool, bool)>,
     pub arp_on: bool,
 }
 
@@ -538,6 +538,8 @@ pub fn parse_patch(xml: &str) -> Result<OmniPatch, String> {
             patch.lfos.push((
                 lfo.num("rate").unwrap_or(0.25).clamp(0.0, 1.0),
                 lfo.num("type").unwrap_or(0.0).clamp(0.0, 1.0),
+                lfo.num("sync").unwrap_or(0.0) != 0.0,
+                lfo.num("resettr").unwrap_or(0.0) != 0.0,
             ));
         }
     }
@@ -664,7 +666,13 @@ fn translate_route(
         "tune" => ("Synth Osc", "tune", 1.0),
         // tuneFine is ±1 semitone on a ±24 semitone param.
         "tuneFine" => ("Synth Osc", "tune", 1.0 / 24.0),
-        _ => return None, // atrm/pdepth/Harmmix/… — later slices
+        // Osc amp tremolo → the layer's Amp gain.
+        "atrm" => ("Amp", "gain", 1.0),
+        // PWM depth → the square's pulse width (Symmetry axis).
+        "pdepth" => ("Synth Osc", "symmetry", 1.0),
+        // Harmonia mix.
+        "Harmmix" => ("Synth Osc", "harm_mix", 1.0),
+        _ => return None, // hrdsnc/mogrify/timbre/LFO-param/E1P0/… — later
     };
     // Sources: MIDI performance names map directly; Omnisphere modulator
     // names map onto the modulator blocks our tree attaches.
@@ -673,10 +681,16 @@ fn translate_route(
         "Velo" => "Velocity".to_string(),
         "After" => "Aftertouch".to_string(),
         "Bender" => "Bender".to_string(),
+        "Key" => "Key".to_string(),
+        "Alt" => "Alt".to_string(),
+        "Constant" | "Bias1" | "Bias2" => "Constant".to_string(),
+        "Random" | "Random2" | "Random Unipolar" => "Random".to_string(),
+        "MPEv" => "MPEPressure".to_string(),
+        "MPE3" => "MPETimbre".to_string(),
         s if s.starts_with("LFO") => format!("LFO {}", &s[3..]),
         s if s.ends_with("FENV") => "Filter Env".to_string(),
         s if s.starts_with("ModEnv") => "Mod Env".to_string(),
-        _ => return None, // Key/Alt/Bias/Random/… — later slices
+        _ => return None,
     };
     Some((
         layer_idx,
@@ -889,12 +903,20 @@ pub fn patch_to_container(patch: &OmniPatch, index: &SoundsourceIndex) -> Contai
         .modulator(BlockType::ModMatrix, "Mod Matrix");
     for n in 1..=8usize {
         let mut lfo = RigBlock::of_type(BlockType::Lfo).named(format!("LFO {n}"));
-        if let Some((rate, ty)) = patch.lfos.get(n - 1) {
+        if let Some((rate, ty, sync, retrig)) = patch.lfos.get(n - 1) {
             // Normalized rate → Hz (exp sweep 0.05..20; CALIBRATE) and
-            // normalized type → wave index 0..3.
+            // normalized type → wave index 0..4 (4 = S&H).
             lfo = lfo
                 .with_param("rate", format!("{:.4}", 0.05 * 400f32.powf(*rate)))
-                .with_param("wave", format!("{}", (ty * 3.0).round() as u32));
+                .with_param("wave", format!("{}", (ty * 4.0).round() as u32));
+            if *sync {
+                // Tempo-synced: rate index → beats/cycle (CALIBRATE).
+                let beats = [4.0, 2.0, 1.0, 0.5, 0.25, 0.125][(rate * 5.0).round() as usize];
+                lfo = lfo.with_param("sync_beats", format!("{beats}"));
+            }
+            if *retrig {
+                lfo = lfo.with_param("retrigger", "1");
+            }
         }
         preset = preset.modulator_block(lfo);
     }

@@ -38,14 +38,16 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
 }
 
 /// Morph 0..1 across sine → triangle → saw → square, band-limited.
+/// `duty` is the square's pulse width (0.5 = symmetric; the Symmetry/PWM axis).
 #[inline]
-fn morph(phase: f32, dt: f32, shape: f32) -> f32 {
+fn morph(phase: f32, dt: f32, shape: f32, duty: f32) -> f32 {
     let sine = (core::f32::consts::TAU * phase).sin();
     let tri = 4.0 * (phase - 0.5).abs() - 1.0;
     let saw = 2.0 * phase - 1.0 - poly_blep(phase, dt);
-    let mut sq = if phase < 0.5 { 1.0 } else { -1.0 };
+    let duty = duty.clamp(0.05, 0.95);
+    let mut sq = if phase < duty { 1.0 } else { -1.0 };
     sq += poly_blep(phase, dt);
-    sq -= poly_blep((phase + 0.5).fract(), dt);
+    sq -= poly_blep((phase + (1.0 - duty)).fract(), dt);
     let w = [sine, tri, saw, sq];
     let x = shape.clamp(0.0, 1.0) * 3.0;
     let i = (x as usize).min(2);
@@ -171,6 +173,10 @@ pub struct NativeWavetable {
     cfg: SynthConfig,
     /// Runtime pitch multiplier (param 4 "tune": 0.5 center, ±24 semitones).
     pitch_mult: f32,
+    /// Square pulse width (param 5 "symmetry": 0.5 = symmetric).
+    duty: f32,
+    /// Harmonia level scale (param 6 "harm_mix").
+    harm_mix: f32,
     voices: Vec<Voice>,
     prepared: bool,
 }
@@ -181,6 +187,8 @@ impl NativeWavetable {
             sample_rate: sample_rate.max(1) as f32,
             cfg: SynthConfig::default(),
             pitch_mult: 1.0,
+            duty: 0.5,
+            harm_mix: 1.0,
             voices: Vec::new(),
             prepared: false,
         }
@@ -341,6 +349,10 @@ impl PluginInstance for NativeWavetable {
             mk(3, "ring_mix", self.cfg.ring_mix as f64),
             // 0.5 center → ±24 semitones.
             mk(4, "tune", 0.5),
+            // Square pulse width (0.5 symmetric).
+            mk(5, "symmetry", 0.5),
+            // Harmonia level scale.
+            mk(6, "harm_mix", 1.0),
         ]
     }
     fn param_value(&mut self, id: u32) -> Option<f64> {
@@ -350,6 +362,8 @@ impl PluginInstance for NativeWavetable {
             2 => Some(self.cfg.fm_depth as f64),
             3 => Some(self.cfg.ring_mix as f64),
             4 => Some((self.pitch_mult.log2() * 12.0 / 48.0 + 0.5) as f64),
+            5 => Some(self.duty as f64),
+            6 => Some(self.harm_mix as f64),
             _ => None,
         }
     }
@@ -413,6 +427,8 @@ impl PluginInstance for NativeWavetable {
                 2 => self.cfg.fm_depth = v,
                 3 => self.cfg.ring_mix = v,
                 4 => self.pitch_mult = 2f32.powf((v - 0.5) * 48.0 / 12.0),
+                5 => self.duty = v,
+                6 => self.harm_mix = v,
                 _ => {}
             }
         }
@@ -443,17 +459,20 @@ impl PluginInstance for NativeWavetable {
                 // FM: one modulator per note phase-offsets every sub. The
                 // modulator is itself a morphing wave (fm_shape; 0 = sine).
                 let pm = if fm_index > 0.0 {
-                    let m = morph(v.fm_phase, v.fm_inc, fm_shape);
+                    let m = morph(v.fm_phase, v.fm_inc, fm_shape, 0.5);
                     v.fm_phase = (v.fm_phase + v.fm_inc).fract();
                     m * fm_index * 0.15
                 } else {
                     0.0
                 };
                 let (mut vl, mut vr) = (0.0f32, 0.0f32);
-                for s in &mut v.subs {
+                let n_unison = self.cfg.unison_voices.clamp(1, 8) as usize;
+                for (si, s) in v.subs.iter_mut().enumerate() {
                     let inc = s.inc * self.pitch_mult;
                     let ph = (s.phase + pm).rem_euclid(1.0);
-                    let smp = morph(ph, inc, s.shape) * s.level;
+                    // Harmonia subs (past the unison set) scale by harm_mix.
+                    let lvl = if si >= n_unison { s.level * self.harm_mix } else { s.level };
+                    let smp = morph(ph, inc, s.shape, self.duty) * lvl;
                     vl += smp * s.gain_l;
                     vr += smp * s.gain_r;
                     s.phase += inc;
