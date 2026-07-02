@@ -11,6 +11,10 @@ license.workspace = true
 # passthroughs to daw — consumers pick the ones they need.
 daw = { workspace = true, features = ["standalone", "standalone-audio"] }
 
+[dev-dependencies]
+# WAV capture for the load_plugin example (A/B render harness).
+hound = "3.5"
+
 [features]
 default = ["clap-host"]
 clap-host = ["daw/clap-host"]

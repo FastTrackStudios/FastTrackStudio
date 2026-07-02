@@ -77,22 +77,65 @@ fn main() {
         }
     }
 
-    // Render half a second of C4 and report the output level — proves the
-    // instrument actually makes sound under our host.
+    // Render MIDI through the plugin — proves the instrument makes sound and,
+    // with `--render <wav>`, captures the audio (the A/B harness path).
+    //   --note <n>   MIDI note (default 60)
+    //   --secs <s>   total render length (default ~0.53 s), note held for half
+    //   --render <f> write stereo f32 WAV at 48 kHz
+    let flag = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1).cloned())
+    };
+    let note: u8 = flag("--note").and_then(|s| s.parse().ok()).unwrap_or(60);
+    let secs: f32 = flag("--secs").and_then(|s| s.parse().ok()).unwrap_or(0.53);
+    let render_path = flag("--render");
+
+    let block = 512usize;
+    let total_blocks = ((secs * 48_000.0) as usize / block).max(2);
+    let off_block = total_blocks / 2;
     let note_on = [PluginMidiEvent {
         offset: 0,
-        message: daw::service::MidiMessage::note_on(0, 60, 100),
+        message: daw::service::MidiMessage::note_on(0, note, 100),
     }];
-    let mut inter = vec![0.0f32; 512 * 2];
+    let note_off = [PluginMidiEvent {
+        offset: 0,
+        message: daw::service::MidiMessage::note_off(0, note, 0),
+    }];
+    let mut inter = vec![0.0f32; block * 2];
     let mut peak = 0.0f32;
-    for block in 0..50 {
-        let midi: &[PluginMidiEvent] = if block == 0 { &note_on } else { &[] };
+    let mut captured: Vec<f32> = Vec::new();
+    for b in 0..total_blocks {
+        let midi: &[PluginMidiEvent] = if b == 0 {
+            &note_on
+        } else if b == off_block {
+            &note_off
+        } else {
+            &[]
+        };
         inter.iter_mut().for_each(|s| *s = 0.0);
         if let Err(e) = plugin.process_interleaved(&mut inter, midi, &[]) {
             eprintln!("process failed: {e}");
             std::process::exit(1);
         }
         peak = peak.max(inter.iter().fold(0.0f32, |m, s| m.max(s.abs())));
+        if render_path.is_some() {
+            captured.extend_from_slice(&inter);
+        }
     }
     println!("peak    : {peak:.4} ({})", if peak > 1e-4 { "AUDIBLE" } else { "silent" });
+    if let Some(path) = render_path {
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut w = hound::WavWriter::create(&path, spec).expect("create wav");
+        for s in &captured {
+            w.write_sample(*s).expect("write sample");
+        }
+        w.finalize().expect("finalize wav");
+        println!("render  : {} frames -> {path}", captured.len() / 2);
+    }
 }
