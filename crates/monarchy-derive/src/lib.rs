@@ -356,7 +356,7 @@ struct FieldInfo {
 /// the GroupBuilder extension methods. This derive macro is kept for backwards
 /// compatibility but is no longer necessary.
 ///
-/// This macro generates an extension trait that adds methods to GroupBuilder<M>
+/// This macro generates an extension trait that adds methods to `GroupBuilder<M>`
 /// for each metadata field, allowing you to call `.multi_mic()`, `.layers()`, etc.
 ///
 /// # Example
@@ -371,7 +371,7 @@ struct FieldInfo {
 /// }
 /// ```
 ///
-/// This generates methods on GroupBuilder<AudioMetadata>:
+/// This generates methods on `GroupBuilder<AudioMetadata>`:
 /// - `multi_mic<F: IntoField<AudioMetadata>>(field: F) -> Self`
 /// - `layers<F: IntoField<AudioMetadata>>(field: F) -> Self`
 #[proc_macro_derive(MetadataBuilder, attributes(metadata, monarchy))]
