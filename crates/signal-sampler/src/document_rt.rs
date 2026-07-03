@@ -7,10 +7,35 @@
 //! `[playhead, playhead + block_frames)` in **absolute frames from the
 //! document epoch** (= project time zero), and every scheduled event whose
 //! frame falls inside the window is dispatched at its exact in-block offset —
-//! including [`LegatoPrefire`](DocEvent::LegatoPrefire)s ahead of their
-//! destination ticks. Given the same sample rate, the realtime walk produces
-//! the SAME engine call sequence as the offline walker, so the audio is
-//! byte-identical (asserted by `signal-sampler-clap/tests/host_sim.rs`).
+//! including `LegatoPrefire`s ahead of their destination ticks.
+//!
+//! ## Playback-start invariance (the determinism contract)
+//!
+//! Starting playback at ANY position `P` — first play, seek, loop wrap —
+//! produces the offline full render sliced at `P`, **bit-exactly** (asserted
+//! by `signal-sampler-clap/tests/host_sim.rs` for adversarial `P`s: inside a
+//! legato transition window, mid-sustain, inside a release tail, exactly on
+//! prefire/arrival frames). WHERE you press play never changes WHAT you
+//! hear.
+//!
+//! This is achieved by **voice reconstruction via bounded deterministic
+//! replay** ([`Schedule::reconstruction_start`]): on any discontinuity the
+//! scheduler kills all voices, pre-rolls controller state (CC events from
+//! the provably-quiescent past), then replays the schedule from the start of
+//! the continuous activity span containing `P` — through the real render
+//! path, audio discarded — and resumes audibly at `P`. Replay is the only
+//! mechanism that can be bit-exact: voice state (fractional playback
+//! position, recursive gain ramps, loop wraps) is accumulated per rendered
+//! frame; a closed-form "spawn at offset n with envelope advanced" would
+//! round differently. Replayed trigger events are counted in
+//! [`RealtimeScheduler::reconstructed_voices`].
+//!
+//! **Cost**: the replay renders (and discards) up to one activity span on
+//! the audio thread at the seek block — bounded by the longest continuous
+//! (non-quiescent) stretch of the piece, worst case the piece itself for
+//! unbroken material. This is the deliberate v2 trade: exactness first;
+//! moving reconstruction off-thread behind a short crossfade is a future
+//! optimization if seek stalls matter in practice.
 //!
 //! ## Transport / tempo mapping policy
 //!
@@ -24,55 +49,31 @@
 //! document from the host's tempo map (the phase-3 self-sourced document
 //! does this automatically).
 //!
-//! ## Discontinuities (seek / loop / stop / late start)
-//!
-//! A block whose playhead is not contiguous with the previous block is a
-//! discontinuity. The scheduler then:
-//! 1. kills all pending voice/transition state (`panic`, like any sampler on
-//!    seek) and re-asserts the document legato mode,
-//! 2. re-locates the schedule cursor by binary search,
-//! 3. v1 seek semantics: notes SOUNDING across the seek point restart at
-//!    their next scheduled boundary (their trigger events are in the past
-//!    and are skipped) — same rule as the offline walker's `start_frame`,
-//! 4. **late start**: a [`LegatoPrefire`] whose trigger frame is already in
-//!    the past but whose destination tick is still ahead (the transport
-//!    started closer than `delay_ms` to a legato note) degrades gracefully
-//!    to a plain note-on **at the destination tick** — on a silent line
-//!    that's a fresh attack on the grid; on a sounding line it goes down the
-//!    engine's reactive path (StrictLive-style late transition). These are
-//!    counted in [`RealtimeScheduler::late_prefires`]; unlike the offline
-//!    determinism suite (which requires exactly 0 reactive fallbacks), they
-//!    are allowed in realtime — a human pressing play mid-phrase prefers a
-//!    late transition over a missing note. Note this is the one place the
-//!    realtime walk intentionally diverges from the offline `start_frame`
-//!    render, which drops such notes entirely.
-//!
 //! ## Mode arbitration (block boundaries only)
 //!
 //! `transport playing && schedule present` ⇒ document mode owns the engine
 //! (Lookahead + expressive legato). Anything else ⇒ StrictLive: the caller
 //! (the CLAP plugin) dispatches incoming live MIDI through the normal bank
 //! path. Transitions happen exclusively at block boundaries: entering kills
-//! live voices (`panic`) and relocates; leaving releases scheduled notes
-//! (`all_notes_off`) and restores [`PlayMode::StrictLive`]. While a document
-//! is playing, incoming live MIDI is IGNORED by the plugin for phase 2
-//! (overdub arbitration is phase 3+).
+//! live voices and reconstructs at the playhead; leaving releases scheduled
+//! notes (`all_notes_off`) and restores [`PlayMode::StrictLive`]. While a
+//! document is playing, incoming live MIDI is IGNORED by the plugin for
+//! phase 2 (overdub arbitration is phase 3+).
 //!
 //! ## Threading
 //!
 //! Everything here runs on the audio thread and only WALKS: schedule
 //! building (`annotate`) happens off-thread and arrives as a pre-built
 //! `Arc<Schedule>` via [`RealtimeScheduler::set_schedule`] (the plugin swaps
-//! it in at a block boundary). The scheduler pre-allocates its small
-//! late-prefire queue; the steady walk path performs no allocation. (Known
-//! engine-side exception, pre-existing: some engine dispatch paths build
-//! short strings — e.g. `play_direction` — on trigger.)
+//! it in at a block boundary). The steady walk path performs no allocation
+//! (the reconstruction scratch is pre-allocated in `new`; known engine-side
+//! exception, pre-existing: some trigger paths build short strings).
 
 use std::sync::Arc;
 
 use crate::bank::SamplerBank;
-use crate::document::{DocEvent, Schedule, TempoPoint};
-use crate::engine::LineId;
+use crate::document::{DocEvent, Schedule, TempoPoint, dispatch_event, is_trigger};
+use crate::engine::PlayMode;
 
 /// One block's host-transport snapshot (from the CLAP process context, or a
 /// fake host in tests).
@@ -88,16 +89,10 @@ pub struct BlockTransport {
     pub tempo_bpm: Option<f64>,
 }
 
-/// A prefire missed by a seek/late start, degraded to a note-on at its
-/// destination tick.
-#[derive(Debug, Clone, Copy)]
-struct LateNote {
-    tick: u64,
-    line: u8,
-    note: u8,
-    vel: u8,
-    rr: u32,
-}
+/// Reconstruction replay chunk size (frames). Chunking is deterministic
+/// (engine output is chunk-size invariant), so this is purely a scratch
+/// sizing choice.
+const WARM_CHUNK: usize = 512;
 
 /// Realtime schedule walker for ONE bank instrument. See the module docs.
 pub struct RealtimeScheduler {
@@ -111,17 +106,12 @@ pub struct RealtimeScheduler {
     expect_frame: Option<i64>,
     /// Document mode currently owns the engine.
     active: bool,
-    /// Missed prefires pending as late note-ons (sorted by tick).
-    late: Vec<LateNote>,
-    late_head: usize,
-    late_prefires: u64,
+    /// Trigger events replayed (audio discarded) by reconstruction.
+    reconstructed_voices: u64,
+    /// Pre-allocated discard buffer for reconstruction replay.
+    warm: Vec<f32>,
     tempo_warned: bool,
 }
-
-/// Bound on the late-prefire queue: one straddling prefire per engine line
-/// is the structural maximum (a mono line has at most one pending
-/// transition), padded generously.
-const LATE_CAP: usize = crate::engine::MAX_LINES * 2;
 
 impl RealtimeScheduler {
     pub fn new(id: impl Into<String>) -> Self {
@@ -131,17 +121,15 @@ impl RealtimeScheduler {
             cursor: 0,
             expect_frame: None,
             active: false,
-            late: Vec::with_capacity(LATE_CAP),
-            late_head: 0,
-            late_prefires: 0,
+            reconstructed_voices: 0,
+            warm: vec![0.0; WARM_CHUNK * 2],
             tempo_warned: false,
         }
     }
 
     /// Swap the schedule (block boundary; `None` clears document mode).
     /// A changed schedule mid-playback is treated as a discontinuity: the
-    /// next block relocates into the new schedule (v1: sounding notes
-    /// restart at their next boundary, same as a seek).
+    /// next block reconstructs at the playhead inside the new schedule.
     pub fn set_schedule(&mut self, schedule: Option<Arc<Schedule>>) {
         let same = match (&self.schedule, &schedule) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -161,11 +149,10 @@ impl RealtimeScheduler {
         self.active
     }
 
-    /// Prefires that were missed by a seek/late start and degraded to
-    /// reactive-style note-ons at their tick (allowed in realtime; the
-    /// offline determinism suite requires 0).
-    pub fn late_prefires(&self) -> u64 {
-        self.late_prefires
+    /// Trigger events replayed (audio discarded) so far to reconstruct the
+    /// voices alive across playback starts/seeks.
+    pub fn reconstructed_voices(&self) -> u64 {
+        self.reconstructed_voices
     }
 
     /// Process one audio block. `out` is interleaved stereo (len =
@@ -175,8 +162,8 @@ impl RealtimeScheduler {
     /// was walked and `out` rendered). Returns `false` when the engine is in
     /// StrictLive for this block — `out` is left CLEARED and untouched; the
     /// caller dispatches live MIDI and renders. Mode transitions (including
-    /// the release/panic bookkeeping) happen inside this call, at the block
-    /// boundary only.
+    /// the release/reconstruction bookkeeping) happen inside this call, at
+    /// the block boundary only.
     pub fn process_block(
         &mut self,
         bank: &mut SamplerBank,
@@ -189,8 +176,7 @@ impl RealtimeScheduler {
         let want = t.playing && self.schedule.is_some();
         if want != self.active {
             if want {
-                // Enter document mode: relocate() below does the panic +
-                // legato-mode assertion.
+                // Enter document mode: relocate() below reconstructs.
                 self.active = true;
                 self.expect_frame = None;
             } else {
@@ -211,39 +197,21 @@ impl RealtimeScheduler {
         let end = start + frames as i64;
         let mut off = 0usize; // frames of this block already rendered
 
-        loop {
-            let ev_frame = sched.events.get(self.cursor).map(|e| e.frame as i64);
-            let late_frame = self.late.get(self.late_head).map(|l| l.tick as i64);
-            let next = match (ev_frame, late_frame) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
-            };
-            let Some(nf) = next else { break };
+        while let Some(ev) = sched.events.get(self.cursor) {
+            let nf = ev.frame as i64;
             if nf >= end {
                 break;
             }
             // Render up to the event's exact in-block offset. (Events whose
-            // frame precedes the block — count-in, clamp artifacts — fire at
-            // offset 0.)
+            // frame precedes the block — count-in — fire at offset 0.)
             let target = (nf.max(start) - start) as usize;
             if target > off {
                 bank.render(&mut out[off * 2..target * 2]);
                 off = target;
             }
-            // Dispatch everything at this frame; scheduled events first so
-            // schedule order (Cc < NoteOff < Prefire < NoteOn) is preserved,
-            // late note-ons (priority-3-equivalent) last.
-            if ev_frame == Some(nf) {
-                let ev = sched.events[self.cursor];
-                self.cursor += 1;
-                self.dispatch(bank, ev.line as LineId, ev.kind);
-            } else {
-                let l = self.late[self.late_head];
-                self.late_head += 1;
-                self.late_prefires += 1;
-                bank.set_forced_rr(&self.id, Some(l.rr));
-                bank.note_on_instrument_line(&self.id, l.line as LineId, l.note, l.vel);
-            }
+            let ev = *ev;
+            self.cursor += 1;
+            dispatch_event(bank, &self.id, &ev);
         }
         if frames > off {
             bank.render(&mut out[off * 2..frames * 2]);
@@ -252,37 +220,11 @@ impl RealtimeScheduler {
         true
     }
 
-    fn dispatch(&mut self, bank: &mut SamplerBank, line: LineId, kind: DocEvent) {
-        // Keep in parity with the offline walker (`document::walk_schedule`)
-        // — the determinism guarantee is exactly this parity.
-        match kind {
-            DocEvent::Cc { cc, val } => {
-                bank.cc_instrument_line(&self.id, line, cc, val);
-                // Document mode owns the legato mode: a low-latency CC58
-                // press must not demote the expressive curve the schedule's
-                // prefire leads were computed from.
-                if cc == 58 && val <= 5 {
-                    bank.set_legato_mode(&self.id, true, true);
-                }
-            }
-            DocEvent::NoteOn { note, vel, rr } => {
-                bank.set_forced_rr(&self.id, Some(rr));
-                bank.note_on_instrument_line(&self.id, line, note, vel);
-            }
-            DocEvent::NoteOff { note, rr } => {
-                bank.set_forced_rr(&self.id, Some(rr));
-                bank.note_off_instrument_line(&self.id, line, note);
-            }
-            DocEvent::LegatoPrefire { note, vel, rr, .. } => {
-                bank.set_forced_rr(&self.id, Some(rr));
-                bank.legato_prefire_line(&self.id, line, note, vel);
-            }
-        }
-    }
-
-    /// Discontinuity handling: kill pending state, binary-search the cursor,
-    /// and queue missed prefires whose destination tick is still ahead as
-    /// late note-ons (see module docs, "Discontinuities").
+    /// Discontinuity handling — see the module docs' "Playback-start
+    /// invariance": kill everything, pre-roll controller state, then
+    /// deterministically replay the activity span containing `pos_frame`
+    /// (audio discarded) so every voice the full render would have alive
+    /// here exists with bit-exact state.
     fn relocate(&mut self, bank: &mut SamplerBank, sched: &Schedule, pos_frame: i64) {
         bank.panic(&self.id);
         // Document playback always runs the full expressive legato — that is
@@ -291,40 +233,41 @@ impl RealtimeScheduler {
         bank.set_legato_mode(&self.id, true, true);
 
         let pos = pos_frame.max(0) as u64;
-        self.cursor = sched.events.partition_point(|e| e.frame < pos);
-        self.late.clear();
-        self.late_head = 0;
-
-        // Back-scan (bounded by the schedule's largest prefire lead) for
-        // prefires straddling the seek point.
-        let horizon = pos.saturating_sub(sched.max_prefire_lead);
-        let mut i = self.cursor;
-        while i > 0 {
-            i -= 1;
-            let e = &sched.events[i];
-            if e.frame < horizon {
+        let recon_from = sched.reconstruction_start(pos);
+        let mut warm_cursor = recon_from;
+        self.cursor = sched.events.len();
+        for (i, ev) in sched.events.iter().enumerate() {
+            if ev.frame >= pos {
+                self.cursor = i;
                 break;
             }
-            if let DocEvent::LegatoPrefire {
-                note,
-                vel,
-                rr,
-                lead,
-            } = e.kind
-            {
-                let tick = e.frame + lead as u64;
-                if tick >= pos && self.late.len() < LATE_CAP {
-                    self.late.push(LateNote {
-                        tick,
-                        line: e.line,
-                        note,
-                        vel,
-                        rr,
-                    });
+            if ev.frame < recon_from {
+                // Provably-quiescent past: controller state only (voices
+                // from before the span are dead by construction).
+                if matches!(ev.kind, DocEvent::Cc { .. }) {
+                    dispatch_event(bank, &self.id, ev);
                 }
+                continue;
             }
+            // Reconstruction replay — identical walk to the offline warm-up.
+            while warm_cursor < ev.frame {
+                let n = ((ev.frame - warm_cursor) as usize).min(WARM_CHUNK);
+                self.warm[..n * 2].fill(0.0);
+                bank.render(&mut self.warm[..n * 2]);
+                warm_cursor += n as u64;
+            }
+            if is_trigger(ev) {
+                self.reconstructed_voices += 1;
+            }
+            dispatch_event(bank, &self.id, ev);
         }
-        self.late.sort_by_key(|l| l.tick);
+        // Advance the remainder of the span up to the playhead itself.
+        while warm_cursor < pos {
+            let n = ((pos - warm_cursor) as usize).min(WARM_CHUNK);
+            self.warm[..n * 2].fill(0.0);
+            bank.render(&mut self.warm[..n * 2]);
+            warm_cursor += n as u64;
+        }
     }
 
     /// Leave document mode: release scheduled notes and hand the engine back
@@ -332,11 +275,9 @@ impl RealtimeScheduler {
     fn exit(&mut self, bank: &mut SamplerBank) {
         bank.set_forced_rr(&self.id, None);
         bank.all_notes_off(&self.id);
-        bank.set_play_mode(&self.id, crate::engine::PlayMode::StrictLive);
+        bank.set_play_mode(&self.id, PlayMode::StrictLive);
         self.active = false;
         self.expect_frame = None;
-        self.late.clear();
-        self.late_head = 0;
     }
 
     /// Stale-document diagnostic: compare the host tempo against the

@@ -226,7 +226,11 @@ fn realtime_walk_matches_offline_render_bit_exactly() {
         bits(&offline.audio),
         "realtime transport walk must be byte-identical to the offline walker"
     );
-    assert_eq!(scheduler.late_prefires(), 0);
+    assert_eq!(
+        scheduler.reconstructed_voices(),
+        0,
+        "a from-the-top playback reconstructs nothing"
+    );
     assert_eq!(
         bank_rt.reactive_legato_fires(ID),
         0,
@@ -253,12 +257,114 @@ fn realtime_walk_matches_offline_render_bit_exactly() {
     );
 }
 
-// ── 2. Seek mid-piece == offline start_frame render ──────────────────────────
+// ── 2. Playback-start invariance: ANY start P == the full render sliced at P ─
+
+/// The adversarial-P suite (the design doc's "Playback-start invariance"):
+/// render the full piece once offline; then, for start positions landing
+/// inside a 333 ms legato transition window, mid-sustain, inside a release
+/// tail, exactly on a prefire frame, and exactly on an arrival tick, BOTH
+/// the realtime host-sim from P and the offline `start_frame = P` render
+/// must equal the full render's samples from P — bit-exactly. Voices alive
+/// across P are reconstructed by deterministic replay, so WHERE you press
+/// play never changes WHAT you hear.
+#[test]
+fn any_start_position_is_the_full_render_sliced_at_p() {
+    let doc = test_doc();
+
+    // Full offline render (the reference bounce).
+    let (mut bank_full, _gf) = fixture_bank("inv-full");
+    let spec = bank_full.instrument_spec(ID).expect("spec");
+    let sched = Arc::new(annotate(&doc, &spec, SR));
+    let opts = DocumentRenderOptions {
+        tail_sec: 1.0,
+        ..Default::default()
+    };
+    let full = render_schedule(&mut bank_full, ID, &sched, &opts);
+    assert_eq!(full.reactive_fallbacks, 0);
+    let total_frames = full.audio.len() / 2;
+
+    // Schedule geometry (120 BPM, 48 kHz): note 2 tick = 48000 with a
+    // 333 ms prefire at 32016; note 3 tick = 96000 (100 ms prefire); last
+    // note-off at QN 6 = 144000.
+    let tick2: i64 = 48_000;
+    let prefire2: i64 = tick2 - SLOW_DELAY_FRAMES as i64;
+    let cases: &[(i64, &str, bool)] = &[
+        (20_000, "mid-sustain of the first note", true),
+        (
+            prefire2 + SLOW_DELAY_FRAMES as i64 / 2,
+            "inside the 333 ms transition window",
+            true,
+        ),
+        (prefire2, "exactly on the prefire frame", true),
+        (tick2, "exactly on the arrival tick", true),
+        (
+            146_000,
+            "inside the release tail after the last note-off",
+            true,
+        ),
+    ];
+
+    for &(p, what, expect_reconstruction) in cases {
+        let slice = &full.audio[(p as usize) * 2..];
+        let frames = slice.len() / 2;
+
+        // Offline start_frame render — same reconstruction semantics.
+        let (mut bank_off, _go) = fixture_bank("inv-off");
+        let mid = render_schedule(
+            &mut bank_off,
+            ID,
+            &sched,
+            &DocumentRenderOptions {
+                tail_sec: 1.0,
+                start_frame: p as u64,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            bits(&mid.audio),
+            bits(slice),
+            "offline start_frame={p} ({what}) must be the full render's slice"
+        );
+        assert_eq!(
+            mid.reconstructed_events > 0,
+            expect_reconstruction,
+            "reconstruction accounting at {what}"
+        );
+
+        // Realtime host-sim from P.
+        let (mut bank_rt, _gr) = fixture_bank("inv-rt");
+        let mut scheduler = RealtimeScheduler::new(ID);
+        let rt = drive_playback(
+            &mut bank_rt,
+            &mut scheduler,
+            sched.clone(),
+            p,
+            frames,
+            512,
+            120.0,
+        );
+        assert_eq!(
+            bits(&rt),
+            bits(slice),
+            "realtime start at {p} ({what}) must be the full render's slice"
+        );
+        assert_eq!(
+            scheduler.reconstructed_voices() > 0,
+            expect_reconstruction,
+            "realtime reconstruction accounting at {what}"
+        );
+        let _ = total_frames;
+    }
+}
+
+// ── 3. Seek far into the piece — same invariant across a quiescent gap ───────
 
 #[test]
-fn seek_mid_piece_matches_offline_mid_render() {
-    // Two phrases separated by silence longer than any tail (same shape as
-    // the offline mid-piece invariant test).
+fn seek_mid_piece_is_the_full_render_slice() {
+    // Two phrases; the reconstruction map decides how far back the replay
+    // has to go (here the gap is shorter than RECONSTRUCT_TAIL_SEC, so the
+    // spans merge and the seek replays from the top — the invariant is what
+    // matters, the cost model is the span map's business).
     let doc = TrackDocument {
         seed: 0xBEEF,
         notes: vec![
@@ -271,9 +377,18 @@ fn seek_mid_piece_matches_offline_mid_render() {
     };
     let phrase2_frame: i64 = 264_000; // QN 11 at 120 BPM, 48 kHz
 
-    let (mut bank_off, _g1) = fixture_bank("seek-off");
-    let spec = bank_off.instrument_spec(ID).expect("spec");
+    let (mut bank_full, _gf) = fixture_bank("seek-full");
+    let spec = bank_full.instrument_spec(ID).expect("spec");
     let sched = Arc::new(annotate(&doc, &spec, SR));
+    let opts = DocumentRenderOptions {
+        tail_sec: 1.0,
+        ..Default::default()
+    };
+    let full = render_schedule(&mut bank_full, ID, &sched, &opts);
+    let slice = &full.audio[(phrase2_frame as usize) * 2..];
+
+    // Offline start_frame render == slice.
+    let (mut bank_off, _g1) = fixture_bank("seek-off");
     let offline = render_schedule(
         &mut bank_off,
         ID,
@@ -284,10 +399,14 @@ fn seek_mid_piece_matches_offline_mid_render() {
             ..Default::default()
         },
     );
-    let total_frames = offline.audio.len() / 2;
+    assert_eq!(
+        bits(&offline.audio),
+        bits(slice),
+        "offline mid render must be the full render's slice"
+    );
 
     // Realtime: the transport simply STARTS at phrase 2 (a discontinuity —
-    // the scheduler panics, binary-searches the cursor, resumes).
+    // the scheduler reconstructs, relocates the cursor, resumes).
     let (mut bank_rt, _g2) = fixture_bank("seek-rt");
     let mut scheduler = RealtimeScheduler::new(ID);
     let rt = drive_playback(
@@ -295,54 +414,14 @@ fn seek_mid_piece_matches_offline_mid_render() {
         &mut scheduler,
         sched,
         phrase2_frame,
-        total_frames,
+        slice.len() / 2,
         512,
         120.0,
     );
     assert_eq!(
         bits(&rt),
-        bits(&offline.audio),
-        "a transport seek must reproduce the offline start_frame render"
-    );
-    assert_eq!(scheduler.late_prefires(), 0, "quiescent seek point");
-}
-
-// ── 3. Late start inside a prefire lead degrades gracefully ──────────────────
-
-#[test]
-fn late_start_inside_prefire_lead_fires_reactive_fallback_on_the_tick() {
-    let doc = test_doc();
-    let (mut bank, _g) = fixture_bank("late");
-    let spec = bank.instrument_spec(ID).expect("spec");
-    let sched = Arc::new(annotate(&doc, &spec, SR));
-
-    // Note 2's tick is QN 2 = frame 48000; its prefire sits 333 ms earlier
-    // (frame 32016). Start playback INSIDE that lead window.
-    let tick: i64 = 48_000;
-    let start = tick - (SLOW_DELAY_FRAMES as i64 / 2);
-    let total = (SR as usize) * 2; // play 2 s
-
-    let mut scheduler = RealtimeScheduler::new(ID);
-    let audio = drive_playback(&mut bank, &mut scheduler, sched, start, total, 512, 120.0);
-
-    assert_eq!(
-        scheduler.late_prefires(),
-        1,
-        "the straddled prefire degrades to exactly one late note-on"
-    );
-    // The note still sounds, from its destination tick (not from the seek
-    // point): the pre-tick region is silent (the first note's trigger is in
-    // the past — v1 seek semantics), sound starts at the tick.
-    let pre_tick = &audio[..((tick - start) as usize) * 2];
-    let post_tick = &audio[((tick - start) as usize) * 2..];
-    assert!(
-        pre_tick.iter().all(|s| *s == 0.0),
-        "before the missed note's tick: silence (mid-note sustains restart \
-         at the next boundary)"
-    );
-    assert!(
-        post_tick.iter().any(|s| *s != 0.0),
-        "the legato note the transport started into must still sound at its tick"
+        bits(slice),
+        "a transport seek must reproduce the full render's slice"
     );
 }
 
@@ -390,26 +469,31 @@ fn stop_relocates_cleanly_and_restores_strict_live() {
         "leaving document mode must restore the strict zero-latency policy"
     );
 
-    // Loop back: resume at 0.25 s (backwards jump = discontinuity). Note
-    // 1's trigger (frame 0) is in the past — v1 semantics restart the line
-    // at the NEXT boundary, note 2's prefire at frame 32016 — so playback
-    // must go audible again once the walk crosses it.
+    // Loop back: resume at 0.25 s (backwards jump = discontinuity). The
+    // first note is ALIVE at that position, so reconstruction makes the
+    // very first resumed block audible — mid-sample, exactly as the bounce.
     let mut pos: i64 = SR as i64 / 4;
-    let mut heard = false;
-    while pos < 60_000 {
+    let t = BlockTransport {
+        playing: true,
+        pos_frame: pos,
+        tempo_bpm: Some(120.0),
+    };
+    assert!(scheduler.process_block(&mut bank, &t, &mut buf));
+    assert!(
+        buf.iter().any(|s| *s != 0.0),
+        "the first block after a loop-back is already audible (the sustain          sounding at the loop point is reconstructed mid-sample)"
+    );
+    assert!(scheduler.reconstructed_voices() > 0);
+    pos += block as i64;
+    for _ in 0..10 {
         let t = BlockTransport {
             playing: true,
             pos_frame: pos,
             tempo_bpm: Some(120.0),
         };
         assert!(scheduler.process_block(&mut bank, &t, &mut buf));
-        heard |= buf.iter().any(|s| *s != 0.0);
         pos += block as i64;
     }
     assert!(scheduler.document_active());
     assert_eq!(bank.play_mode(ID), Some(PlayMode::Lookahead));
-    assert!(
-        heard,
-        "playback resumed after the loop-back (next boundary re-sounds)"
-    );
 }
