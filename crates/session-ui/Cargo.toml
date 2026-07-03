@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Dioxus UI components for session management"
 
+[lib]
+test = false
+
 [dependencies]
 # Session types and service clients
 session-proto = { workspace = true }

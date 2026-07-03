@@ -65,7 +65,6 @@ vox-websocket = { version = "0.10.0-rc.1" }
 # ── Architect service framework ─────────────────────────────────────
 # Codeberg main; path-patched to the local migrated checkout below.
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
-architect-rpc-derive = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
 # ── Facet reflection — 0.50 line (paired across the FTS stack) ──────
 facet = { version = "0.50.0-rc.1" }
@@ -103,7 +102,6 @@ dioxus = "0.7.2"
 
 # ── Async runtime ───────────────────────────────────────────────────
 tokio = { version = "1.48", features = ["full"] }
-futures = "0.3"
 
 # ── Serialization ───────────────────────────────────────────────────
 serde = { version = "1.0", features = ["derive"] }

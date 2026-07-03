@@ -6,6 +6,8 @@ edition.workspace = true
 [lib]
 name = "session_cli"
 path = "src/lib.rs"
+test = false
+doctest = false
 
 [[bin]]
 name = "session"
@@ -18,7 +20,6 @@ dynamic-template.workspace = true
 session-proto.workspace = true
 vox.workspace = true
 vox-stream.workspace = true
-moire.workspace = true
 tokio = { workspace = true, features = ["net", "macros", "rt-multi-thread"] }
 eyre.workspace = true
 tracing.workspace = true

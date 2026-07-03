@@ -8,13 +8,13 @@ description = "Test-only REAPER extension that hosts the session DawModule"
 crate-type = ["cdylib"]
 name = "reaper_session_extension"
 path = "src/lib.rs"
+test = false
 
 [dependencies]
 daw = { workspace = true, features = ["reaper"] }
 daw-reaper.workspace = true
 daw-extension-runtime.workspace = true
 session.workspace = true
-tokio = { workspace = true, features = ["time", "net", "rt"] }
 eyre.workspace = true
 fragile = "2"
 crossbeam-channel = "0.5"
