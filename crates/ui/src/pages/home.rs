@@ -22,6 +22,18 @@ use crate::routes::Route;
 use crate::stores;
 use crate::task_sort::{belongs, is_active, is_open_task, priority_rank};
 
+/// One dashboard card's data: an active project with its task tally
+/// and single next action. Derived in a memo so the
+/// filter/sort/next-task walk over every project × task re-runs on
+/// data changes only, not every render.
+#[derive(Clone, PartialEq)]
+struct Card {
+    project: ProjectInfo,
+    next: DbTask,
+    done: usize,
+    total: usize,
+}
+
 #[component]
 pub fn HomeView() -> Element {
     let projects = stores::use_project_list();
@@ -30,15 +42,23 @@ pub fn HomeView() -> Element {
     let project_muts = stores::use_project_mutations();
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let project_store = stores::use_project_store();
+    let task_store = stores::use_task_store();
+
+    let cards = use_memo(move || {
+        let projects = project_store.list();
+        let tasks = task_store.list();
+        let project_refs: Vec<&ProjectInfo> = projects.iter().map(|r| &r.project).collect();
+        let task_refs: Vec<&DbTask> = tasks.iter().map(|r| &r.task).collect();
+        build_cards(&project_refs, &task_refs)
+    });
 
     let view = match (
         projects.value().as_ref(),
         tasks.value().as_ref(),
         projects.error().or(tasks.error()),
     ) {
-        (Some(pr), Some(tr), _) => {
-            let projects: Vec<&ProjectInfo> = pr.iter().map(|(_, r)| &r.project).collect();
-            let tasks: Vec<&DbTask> = tr.iter().map(|(_, r)| &r.task).collect();
+        (Some(_), Some(_), _) => {
             let org_choices: Vec<(String, String)> = org_list
                 .read()
                 .iter()
@@ -54,7 +74,7 @@ pub fn HomeView() -> Element {
                     },
                 }
             };
-            render_loaded(&projects, &tasks, quick_add, move |id, status| {
+            render_loaded(cards(), quick_add, move |id, status| {
                 muts.apply(
                     &crate::orgs::create_target(&selection.read(), &org_list.read()),
                     task_ui::TaskMutation::SetStatus { id, status },
@@ -90,21 +110,10 @@ fn render_loading() -> Element {
     }
 }
 
-fn render_loaded(
-    projects: &[&ProjectInfo],
-    tasks: &[&DbTask],
-    quick_add: Element,
-    on_status: impl Fn(uuid::Uuid, String) + Copy + 'static,
-) -> Element {
-    // Each active project with its task tally + single next action;
-    // projects with nothing open drop out — the dashboard is only
-    // "what's next".
-    struct Card {
-        project: ProjectInfo,
-        next: DbTask,
-        done: usize,
-        total: usize,
-    }
+/// Each active project with its task tally + single next action;
+/// projects with nothing open drop out — the dashboard is only
+/// "what's next".
+fn build_cards(projects: &[&ProjectInfo], tasks: &[&DbTask]) -> Vec<Card> {
     let mut cards: Vec<Card> = projects
         .iter()
         .filter(|p| !p.archived && is_active(&p.status))
@@ -122,8 +131,8 @@ fn render_loaded(
         .collect();
     // Soonest due first (undated last), then project title.
     cards.sort_by(|a, b| {
-        match (a.next.due.clone(), b.next.due.clone()) {
-            (Some(x), Some(y)) => x.cmp(&y),
+        match (a.next.due.as_deref(), b.next.due.as_deref()) {
+            (Some(x), Some(y)) => x.cmp(y),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
@@ -135,7 +144,14 @@ fn render_loaded(
                 .cmp(&b.project.title.to_lowercase())
         })
     });
+    cards
+}
 
+fn render_loaded(
+    cards: Vec<Card>,
+    quick_add: Element,
+    on_status: impl Fn(uuid::Uuid, String) + Copy + 'static,
+) -> Element {
     let due_this_week = cards
         .iter()
         .filter(|c| {
@@ -270,8 +286,8 @@ fn next_task<'a>(p: &ProjectInfo, tasks: &[&'a DbTask]) -> Option<&'a DbTask> {
         .copied()
         .collect();
     candidates.sort_by(|a, b| {
-        match (a.due.clone(), b.due.clone()) {
-            (Some(x), Some(y)) => x.cmp(&y),
+        match (a.due.as_deref(), b.due.as_deref()) {
+            (Some(x), Some(y)) => x.cmp(y),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,

@@ -258,8 +258,9 @@ pub fn WatchView(v: String, node: String) -> Element {
     let moment_list = match &*moments.read() {
         Some(Some(ms)) if !ms.is_empty() => rsx! {
             div { class: "flex flex-col divide-y divide-border/40",
-                for m in ms.clone() {
-                    div { key: "{m.start}", class: "group flex items-start gap-2 py-2",
+                // Index-qualified key: two notes can anchor the same second.
+                for (i, m) in ms.clone().into_iter().enumerate() {
+                    div { key: "{i}-{m.start}", class: "group flex items-start gap-2 py-2",
                         button {
                             r#type: "button",
                             class: "mt-0.5 shrink-0 rounded-md border border-border/70 bg-card/60 px-1.5 py-0.5 font-mono text-[0.7rem] text-muted-foreground hover:border-primary/60 hover:text-foreground",
@@ -297,11 +298,11 @@ pub fn WatchView(v: String, node: String) -> Element {
                         "Transcript · {segs.len()} lines"
                     }
                     div { class: "max-h-96 overflow-y-auto rounded-xl border border-border/70 bg-card/20 p-2",
-                        for (i, seg) in segs.iter().enumerate() {
+                        for (i, seg) in segs.into_iter().enumerate() {
                             {
                                 let start = seg.start as u32;
                                 let stamp = format_timecode(start);
-                                let text = seg.text.clone();
+                                let text = seg.text;
                                 let shown = text.clone();
                                 rsx! {
                                     div {

@@ -33,6 +33,22 @@ use crate::stores;
 /// locations on the prefs entity.
 const LOCATIONS: &[&str] = &["home", "studio", "out"];
 
+/// Everything the loaded board renders, derived once per **data**
+/// change (tasks / projects / sessions / prefs) instead of on every
+/// render of [`TasksView`] — the filter → condense → sort → convert
+/// pipeline walks and clones the whole task list.
+#[derive(Clone, PartialEq)]
+struct BoardData {
+    ui_tasks: Vec<UiTask>,
+    /// `(id, title)` of every known project — chip resolution + the
+    /// quick-add `[[Project]]` picker.
+    projects: Vec<(uuid::Uuid, String)>,
+    /// Rows the Active/Relevant chips filtered out.
+    hidden: usize,
+    /// The in-progress task with a live time entry, if any.
+    running: Option<UiTask>,
+}
+
 #[component]
 pub fn TasksView() -> Element {
     let nav = use_navigator();
@@ -40,11 +56,16 @@ pub fn TasksView() -> Element {
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let prefs_ctx = use_context::<PrefsCtx>();
 
+    // The list hooks drive the fetches; the derivation below reads the
+    // backing stores directly (inside the memo) so it re-runs on data
+    // changes only.
     let result = stores::use_task_list();
     let muts = stores::use_task_mutations();
     let store = stores::use_task_store();
-    let sessions = stores::use_session_list();
-    let projects = stores::use_project_list();
+    let _sessions = stores::use_session_list();
+    let _projects = stores::use_project_list();
+    let session_store = stores::use_session_store();
+    let project_store = stores::use_project_store();
 
     // Server-backed per-user prefs — reading the signal makes the
     // chips follow the account (switch users, keep your setup).
@@ -53,77 +74,98 @@ pub fn TasksView() -> Element {
     let relevant_only = user_prefs.tasks_relevant;
     let at_location = user_prefs.location.clone();
 
-    // The running timer session's project — relevance boosts its
-    // sibling tasks to the top ("if my timer is on a project,
-    // prioritize that project's items").
-    let active_project = sessions.value().as_ref().and_then(|rows| {
-        rows.iter()
-            .find(|(_, r)| r.session.end_time.is_none())
-            .and_then(|(_, r)| r.session.project_id)
+    let prefs_signal = prefs_ctx.prefs;
+    let board = use_memo(move || -> Option<BoardData> {
+        let result = store.entries_result();
+        let rows = result.value()?;
+
+        let prefs = prefs_signal.read();
+        let active_only = prefs.tasks_active;
+        let relevant_only = prefs.tasks_relevant;
+        let at_location = prefs.location.clone();
+        drop(prefs);
+
+        // The running timer session's project — relevance boosts its
+        // sibling tasks to the top ("if my timer is on a project,
+        // prioritize that project's items").
+        let active_project = session_store
+            .list()
+            .iter()
+            .find(|r| r.session.end_time.is_none())
+            .and_then(|r| r.session.project_id);
+
+        let now = chrono::Local::now();
+        let ctx = task::RelevanceContext {
+            local_hhmm: Some(now.format("%H:%M").to_string()),
+            local_date: Some(now.format("%Y-%m-%d").to_string()),
+            // FUTURE(plans/relevancy-and-inbox.md): device from
+            // user-agent.
+            location: (!at_location.is_empty()).then(|| at_location.clone()),
+            device: None,
+            active_project,
+        };
+        let mut domain: Vec<&task::TaskInfo> = rows.iter().map(|(_, r)| &r.task).collect();
+        let total = domain.len();
+        if active_only {
+            domain.retain(|t| task::status_is_open(&t.status));
+        }
+        if relevant_only {
+            domain.retain(|t| task::is_relevant(t, &ctx));
+            // One next action per project — the Relevant view is
+            // "what would I do right now", not the project backlog.
+            task::condense_next_per_project(&mut domain);
+            domain.sort_by_key(|t| task::relevance_rank(t, &ctx));
+        }
+        let hidden = total - domain.len();
+        // Project indication: resolve the authoritative project_id
+        // to its title when the frontmatter wikilink array is empty,
+        // so every project task carries its #project chip.
+        let project_names: std::collections::HashMap<uuid::Uuid, String> = project_store
+            .list()
+            .iter()
+            .map(|r| (r.project.id, r.project.title.clone()))
+            .collect();
+        let ui_tasks: Vec<UiTask> = domain
+            .iter()
+            .map(|t| {
+                let mut ui = stores::to_ui(t);
+                if ui.projects.is_empty() {
+                    if let Some(name) = t.project_id.and_then(|id| project_names.get(&id)) {
+                        ui.projects.push(name.clone());
+                    }
+                }
+                ui
+            })
+            .collect();
+
+        // The running task (in-progress with a live entry) — the
+        // whole board's rows are candidates, filters or not: a
+        // running clock is never invisible.
+        let running: Option<UiTask> = rows
+            .iter()
+            .map(|(_, r)| &r.task)
+            .find(|t| {
+                task::Status::from_str(&t.status) == Some(task::Status::InProgress)
+                    && t.time_entries.0.iter().any(|e| e.end_time.is_none())
+            })
+            .map(|t| stores::to_ui(t));
+
+        Some(BoardData {
+            ui_tasks,
+            projects: project_names.into_iter().collect(),
+            hidden,
+            running,
+        })
     });
 
-    let body = match (&result.value(), result.error()) {
-        (Some(rows), _) => {
-            let now = chrono::Local::now();
-            let ctx = task::RelevanceContext {
-                local_hhmm: Some(now.format("%H:%M").to_string()),
-                local_date: Some(now.format("%Y-%m-%d").to_string()),
-                // FUTURE(plans/relevancy-and-inbox.md): device from
-                // user-agent.
-                location: (!at_location.is_empty()).then(|| at_location.clone()),
-                device: None,
-                active_project,
-            };
-            let mut domain: Vec<&task::TaskInfo> = rows.iter().map(|(_, r)| &r.task).collect();
-            let total = domain.len();
-            if active_only {
-                domain.retain(|t| task::status_is_open(&t.status));
-            }
-            if relevant_only {
-                domain.retain(|t| task::is_relevant(t, &ctx));
-                // One next action per project — the Relevant view is
-                // "what would I do right now", not the project backlog.
-                task::condense_next_per_project(&mut domain);
-                domain.sort_by_key(|t| task::relevance_rank(t, &ctx));
-            }
-            let hidden = total - domain.len();
-            // Project indication: resolve the authoritative project_id
-            // to its title when the frontmatter wikilink array is empty,
-            // so every project task carries its #project chip.
-            let project_names: std::collections::HashMap<uuid::Uuid, String> = projects
-                .value()
-                .as_ref()
-                .map(|rows| {
-                    rows.iter()
-                        .map(|(_, r)| (r.project.id, r.project.title.clone()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let ui_tasks: Vec<UiTask> = domain
-                .iter()
-                .map(|t| {
-                    let mut ui = stores::to_ui(t);
-                    if ui.projects.is_empty() {
-                        if let Some(name) = t.project_id.and_then(|id| project_names.get(&id)) {
-                            ui.projects.push(name.clone());
-                        }
-                    }
-                    ui
-                })
-                .collect();
-
-            // The running task (in-progress with a live entry) — the
-            // whole board's rows are candidates, filters or not: a
-            // running clock is never invisible.
-            let running: Option<UiTask> = rows
-                .iter()
-                .map(|(_, r)| &r.task)
-                .find(|t| {
-                    task::Status::from_str(&t.status) == Some(task::Status::InProgress)
-                        && t.time_entries.0.iter().any(|e| e.end_time.is_none())
-                })
-                .map(|t| stores::to_ui(t));
-
+    let body = match (board(), result.error()) {
+        (Some(data), _) => {
+            let BoardData {
+                ui_tasks,
+                projects: project_choices,
+                hidden,
+                running,
+            } = data;
             let location_value = at_location.clone();
             let chips = rsx! {
                 div { class: "flex items-center gap-1.5",
@@ -173,10 +215,7 @@ pub fn TasksView() -> Element {
                         TasksApp {
                             tasks: ui_tasks,
                             header_extra: chips,
-                            projects: project_names
-                                .iter()
-                                .map(|(id, name)| (*id, name.clone()))
-                                .collect::<Vec<_>>(),
+                            projects: project_choices,
                             on_event: move |mu: TaskMutation| {
                                 let create_slug =
                                     crate::orgs::create_target(&selection.read(), &org_list.read());

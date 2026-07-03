@@ -50,7 +50,11 @@ pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
     use_effect(move || {
         let name = switcher_state.read().preset.clone();
         let slug = active_slug();
-        let prev = org_overrides.map.read().get(&slug).cloned();
+        // Guard only — peek, so this effect doesn't subscribe to the
+        // map it writes (the `prev != name` check keeps it stable, but
+        // a subscription would still re-run it on every other slug's
+        // theme change).
+        let prev = org_overrides.map.peek().get(&slug).cloned();
         if prev.as_deref() != Some(name.as_str()) {
             let mut m = org_overrides.map.write();
             m.insert(slug, name);

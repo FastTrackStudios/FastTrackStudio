@@ -305,8 +305,10 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                                     "Have {f.have.len()} ingredient(s)"
                                 }
                                 ul { class: "mt-1 flex flex-col gap-0.5",
-                                    for h in f.have.iter() {
-                                        li { key: "{h.name}", class: "flex items-baseline justify-between gap-3",
+                                    // Index-qualified key: an ingredient can
+                                    // appear twice in a recipe.
+                                    for (i, h) in f.have.iter().enumerate() {
+                                        li { key: "{i}-{h.name}", class: "flex items-baseline justify-between gap-3",
                                             span { class: "text-foreground", "{h.name}" }
                                             if let Some(need) = h.need {
                                                 span { class: "shrink-0 font-mono tabular-nums text-muted-foreground",
@@ -357,8 +359,10 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                                     "Not deducted — top up by hand"
                                 }
                                 ul { class: "flex flex-col gap-0.5",
-                                    for skip in r.skipped.iter() {
-                                        li { key: "{skip.ingredient}", class: "flex items-baseline justify-between gap-3 text-sm",
+                                    // Index-qualified key: an ingredient can
+                                    // appear twice in a recipe.
+                                    for (i, skip) in r.skipped.iter().enumerate() {
+                                        li { key: "{i}-{skip.ingredient}", class: "flex items-baseline justify-between gap-3 text-sm",
                                             span { class: "text-foreground", "{skip.ingredient}" }
                                             span { class: "shrink-0 text-xs text-muted-foreground", "{skip_reason_label(skip.reason)}" }
                                         }

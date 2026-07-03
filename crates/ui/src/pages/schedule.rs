@@ -341,26 +341,31 @@ pub fn ScheduleView() -> Element {
 /// values so typing doesn't churn the page; commits on Save.
 #[component]
 fn BlockEditor(
-    label: String,
+    label: ReadSignal<String>,
     start_min: u16,
     end_min: u16,
-    assignment: Option<Assign>,
-    tasks: PickList,
-    projects: PickList,
+    assignment: ReadSignal<Option<Assign>>,
+    tasks: ReadSignal<PickList>,
+    projects: ReadSignal<PickList>,
     on_save: EventHandler<(String, u16, u16, Option<Assign>)>,
     on_reset: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let mut lbl = use_signal(|| label.clone());
+    // Working copies seeded once per mount (the parent keys this
+    // modal per block) — peek, so upstream writes don't churn the
+    // user's draft mid-edit.
+    let mut lbl = use_signal(move || label.peek().clone());
     let mut start = use_signal(|| start_min);
     let mut end = use_signal(|| end_min);
-    let mut assign = use_signal(|| assignment.clone());
+    let mut assign = use_signal(move || assignment.peek().clone());
 
     let assign_title = assign().map(|a| a.1).unwrap_or_default();
-    // Clones for the picker's change handler (the lists are also
-    // borrowed by the `for` loops below).
-    let pick_tasks = tasks.clone();
-    let pick_projects = projects.clone();
+    // Copy signal handles for the picker's change handler — no list
+    // clones; the `for` loops below read the same signals.
+    let pick_tasks = tasks;
+    let pick_projects = projects;
+    let tasks = tasks.read();
+    let projects = projects.read();
 
     let input_cls = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40";
 
@@ -429,11 +434,11 @@ fn BlockEditor(
                         onchange: move |e| {
                             let v = e.value();
                             if let Some(id) = v.strip_prefix("task:") {
-                                if let Some((_, t)) = pick_tasks.iter().find(|(i, _)| i == id) {
+                                if let Some((_, t)) = pick_tasks.read().iter().find(|(i, _)| i == id) {
                                     assign.set(Some(("task".into(), t.clone(), Some(id.to_string()))));
                                 }
                             } else if let Some(id) = v.strip_prefix("project:") {
-                                if let Some((_, t)) = pick_projects.iter().find(|(i, _)| i == id) {
+                                if let Some((_, t)) = pick_projects.read().iter().find(|(i, _)| i == id) {
                                     assign.set(Some(("project".into(), t.clone(), Some(id.to_string()))));
                                 }
                             } else if v == "__clear" {

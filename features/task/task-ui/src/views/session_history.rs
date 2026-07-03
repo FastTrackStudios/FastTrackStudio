@@ -124,15 +124,15 @@ pub fn SessionHistory(props: SessionHistoryProps) -> Element {
         section { class: "flex flex-col gap-2",
             SectionLabel { label: "Session history" }
             ol { class: "flex flex-col gap-0 border-l border-border pl-3 ml-1",
-                for ev in events.iter() {
+                for ev in events.into_iter() {
                     li { key: "{ev.id()}", class: "relative py-1.5",
                         span { class: "absolute -left-[17px] top-[13px] h-1.5 w-1.5 rounded-full bg-border" }
                         match ev {
                             SessionEvent::Transition(t) => rsx! {
-                                TransitionRow { record: t.clone() }
+                                TransitionRow { record: t }
                             },
                             SessionEvent::Activity(a) => rsx! {
-                                ActivityRow { record: a.clone() }
+                                ActivityRow { record: a }
                             },
                         }
                     }

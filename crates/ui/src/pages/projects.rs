@@ -57,6 +57,19 @@ fn is_mobile_viewport() -> bool {
     false
 }
 
+/// The loaded page's shape, derived once per project-data change
+/// (filter → sort → group → stats all walk the whole list).
+#[derive(Clone, PartialEq)]
+struct ProjectsData {
+    /// Each top-level project with its (non-archived) subprojects,
+    /// active-first / priority / title order.
+    groups: Vec<(ProjectInfo, Vec<ProjectInfo>)>,
+    total: usize,
+    active: usize,
+    on_hold: usize,
+    avg: Option<i32>,
+}
+
 #[component]
 pub fn ProjectsView() -> Element {
     // The shared optimistic project store: one AtomResult for the list
@@ -68,6 +81,11 @@ pub fn ProjectsView() -> Element {
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
     let view_mode = use_signal(initial_view_mode);
+
+    let derived = use_memo(move || {
+        let rows: Vec<ProjectInfo> = store.list().into_iter().map(|r| r.project).collect();
+        shape_projects(&rows)
+    });
 
     let org_choices: Vec<(String, String)> = org_list
         .read()
@@ -85,10 +103,7 @@ pub fn ProjectsView() -> Element {
     };
 
     let view = match (projects.value(), projects.error()) {
-        (Some(rows), _) => {
-            let rows: Vec<ProjectInfo> = rows.iter().map(|(_, r)| r.project.clone()).collect();
-            render_loaded(&rows, view_mode, quick_add)
-        }
+        (Some(_), _) => render_loaded(&derived.read(), view_mode, quick_add),
         (None, Some(e)) => rsx! {
             page_header { count_line: None }
             crate::states::ErrorState {
@@ -149,27 +164,11 @@ fn render_loading() -> Element {
     }
 }
 
-fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>, quick_add: Element) -> Element {
+/// Filter/sort/group the raw rows into [`ProjectsData`]. Pure — called
+/// from the page's `use_memo`.
+fn shape_projects(rows: &[ProjectInfo]) -> ProjectsData {
     // Archived projects stay out of the main grid.
     let live: Vec<&ProjectInfo> = rows.iter().filter(|p| !p.archived).collect();
-
-    if live.is_empty() {
-        return rsx! {
-            page_header { count_line: None, view_mode: None, quick_add: Some(quick_add.clone()) }
-            div { class: "flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border/70 bg-card/40 px-6 py-16 text-center",
-                div { class: "flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground",
-                    FolderKanban { size: 26 }
-                }
-                div { class: "flex flex-col gap-1",
-                    Heading { level: HeadingLevel::H3, "No projects yet" }
-                    Text {
-                        variant: TextVariant::Muted,
-                        "Seed a `type: project` page under `vault/Projects/` and it'll appear here."
-                    }
-                }
-            }
-        };
-    }
 
     let mut top: Vec<&ProjectInfo> = live
         .iter()
@@ -202,7 +201,6 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>, quick_add: E
     } else {
         Some(tracked.iter().map(|v| i32::from(*v)).sum::<i32>() / tracked.len() as i32)
     };
-    let count_line = format!("{} top-level · {total} total", top.len());
 
     // Materialize each top-level project with its subprojects once, so
     // both layouts share the same data shaping.
@@ -217,6 +215,43 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>, quick_add: E
             ((*parent).clone(), kids)
         })
         .collect();
+
+    ProjectsData {
+        groups,
+        total,
+        active,
+        on_hold,
+        avg,
+    }
+}
+
+fn render_loaded(data: &ProjectsData, view_mode: Signal<ViewMode>, quick_add: Element) -> Element {
+    if data.total == 0 {
+        return rsx! {
+            page_header { count_line: None, view_mode: None, quick_add: Some(quick_add.clone()) }
+            div { class: "flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border/70 bg-card/40 px-6 py-16 text-center",
+                div { class: "flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground",
+                    FolderKanban { size: 26 }
+                }
+                div { class: "flex flex-col gap-1",
+                    Heading { level: HeadingLevel::H3, "No projects yet" }
+                    Text {
+                        variant: TextVariant::Muted,
+                        "Seed a `type: project` page under `vault/Projects/` and it'll appear here."
+                    }
+                }
+            }
+        };
+    }
+
+    let ProjectsData {
+        groups,
+        total,
+        active,
+        on_hold,
+        avg,
+    } = data;
+    let count_line = format!("{} top-level · {total} total", groups.len());
 
     rsx! {
         page_header {
@@ -601,8 +636,9 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
                         // line their footers up.
                         if !shown_tags.is_empty() {
                             div { class: "mt-auto flex flex-wrap items-center gap-1.5 pt-1",
-                                for tag in shown_tags.iter() {
-                                    Badge { key: "{tag}", variant: BadgeVariant::Secondary, "{tag}" }
+                                // Index-qualified key: frontmatter tags can repeat.
+                                for (i, tag) in shown_tags.iter().enumerate() {
+                                    Badge { key: "{i}-{tag}", variant: BadgeVariant::Secondary, "{tag}" }
                                 }
                                 if extra_tags > 0 {
                                     span { class: "text-xs text-muted-foreground", "+{extra_tags}" }
@@ -654,8 +690,9 @@ fn ProjectRow(props: ProjectRowProps) -> Element {
                     if props.sub_count > 0 {
                         span { "· {props.sub_count} sub" }
                     }
-                    for tag in shown_tags.iter() {
-                        span { key: "{tag}", class: "hidden sm:inline", "· {tag}" }
+                    // Index-qualified key: frontmatter tags can repeat.
+                    for (i, tag) in shown_tags.iter().enumerate() {
+                        span { key: "{i}-{tag}", class: "hidden sm:inline", "· {tag}" }
                     }
                 }
             }
