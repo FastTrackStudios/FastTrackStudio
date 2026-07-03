@@ -21,6 +21,8 @@ pub enum Route {
     #[layout(Layout)]
     #[route("/")]
     Home {},
+    #[route("/editor")]
+    KeyflowEditorPage {},
     #[route("/test/render")]
     TestRender {},
 }
@@ -150,6 +152,17 @@ fn Layout() -> Element {
                     // Right side actions
                     div {
                         class: "flex items-center gap-2",
+
+                        // Keyflow Editor tab
+                        Link {
+                            to: Route::KeyflowEditorPage {},
+                            class: if matches!(route, Route::KeyflowEditorPage {}) {
+                                "px-3 py-1.5 rounded-lg text-sm font-medium text-foreground bg-accent/60 transition-colors"
+                            } else {
+                                "px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+                            },
+                            "Keyflow Editor"
+                        }
 
                         // GitHub link
                         a {
@@ -340,27 +353,40 @@ fn Home() -> Element {
                 }
             }
 
-            section {
-                class: "relative z-10 py-16",
-                div {
-                    class: "mx-auto max-w-5xl px-6",
-                    div {
-                        class: "mb-8 text-center",
-                        p {
-                            class: "font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground/70 mb-3",
-                            "Keyflow, live"
-                        }
-                        h2 {
-                            class: "text-3xl md:text-4xl lg:text-5xl font-semibold text-foreground tracking-tight",
-                            "Charts as Code, Rendered in Real Time"
-                        }
-                    }
-                    components::LiveEditor {}
-                }
-            }
-
             ProjectTilesGrid {}
 
+        }
+    }
+}
+
+/// Dedicated page for the live Keyflow editor demo.
+#[component]
+fn KeyflowEditorPage() -> Element {
+    rsx! {
+        document::Title { "Keyflow Editor — FastTrackStudio" }
+        document::Meta { name: "description", content: "Try Keyflow live — an open, plain-text chart format that compiles into real lead sheets, with real-time engraving." }
+
+        div {
+            class: "relative pt-24 pb-16",
+            div {
+                class: "mx-auto max-w-6xl px-6",
+                div {
+                    class: "mb-8 text-center",
+                    p {
+                        class: "font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground/70 mb-3",
+                        "Keyflow, live"
+                    }
+                    h1 {
+                        class: "text-3xl md:text-4xl lg:text-5xl font-semibold text-foreground tracking-tight",
+                        "Charts as Code, Rendered in Real Time"
+                    }
+                    p {
+                        class: "mt-4 text-muted-foreground max-w-2xl mx-auto",
+                        "Keyflow is a plain-text music chart format. Edit the source on the left — colors, resolved-chord overlays, and hover info — and watch the engraved lead sheet update as you type."
+                    }
+                }
+                components::LiveEditor {}
+            }
         }
     }
 }
