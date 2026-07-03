@@ -101,10 +101,11 @@ optimistic store keeps working offline; the CLI gets them via
   [inbox-agent-ingestion.md](inbox-agent-ingestion.md) — daily
   processing pass proposes task/note promotions; user approves in
   ProcessReview.
-- **Timer-page task picker**: fuzzy-search tasks to start a tracked
-  `WorkSession` (`task_note_path` already links sessions to notes) —
-  the second entry point besides the checkbox; would also feed the
-  topbar timer widget from task work.
+- **Timer-page task picker** — done: the start form's input
+  fuzzy-searches open tasks (`crates/ui/src/fuzzy.rs`); picking one
+  links the session via `task_note_path` + the task's
+  `project_id`/`project_path`. Remaining: feed the topbar timer
+  widget from task work too.
 - Account switcher: switching accounts applies that user's prefs
   (today it only changes identity/presence — reads as "nothing
   happens").

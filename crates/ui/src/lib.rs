@@ -12,6 +12,7 @@ pub mod collab;
 pub mod document_session;
 pub mod feeds;
 pub mod forge_views;
+pub mod fuzzy;
 pub mod gantt_adapt;
 pub mod nav;
 pub mod orgs;
