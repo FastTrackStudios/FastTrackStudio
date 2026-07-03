@@ -6,6 +6,7 @@
 //! product surface.
 
 pub mod app;
+pub mod app_views;
 pub mod auth;
 pub mod chrome;
 pub mod collab;

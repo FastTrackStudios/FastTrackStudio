@@ -311,13 +311,29 @@ pub fn BaseDoc(base_path: String, on_open: EventHandler<String>) -> Element {
     });
     let snapshot = views.read().clone();
     match snapshot {
-        Some(Some(vs)) if !vs.is_empty() => rsx! {
-            div { class: "flex flex-col gap-6 p-4 sm:p-6",
-                for view in vs {
-                    BaseViewRender { key: "{view.name}", view, on_open }
+        Some(Some(vs)) if !vs.is_empty() => {
+            // App-view dispatch (plans/vault-views.md): a view kind
+            // registered in `crate::app_views` renders the full custom
+            // page in place of a generic table — the base entry is the
+            // page's vault identity. First registered kind wins (an app
+            // view owns the whole pane); generic views render stacked.
+            if let Some(el) = vs
+                .iter()
+                .find_map(|v| crate::app_views::render(&v.view_type))
+            {
+                rsx! {
+                    div { class: "flex min-h-0 flex-1 flex-col", {el} }
+                }
+            } else {
+                rsx! {
+                    div { class: "flex flex-col gap-6 p-4 sm:p-6",
+                        for view in vs {
+                            BaseViewRender { key: "{view.name}", view, on_open }
+                        }
+                    }
                 }
             }
-        },
+        }
         Some(Some(_)) => rsx! {
             div { class: "p-6",
                 Text { variant: TextVariant::Muted, "This base matched no notes." }

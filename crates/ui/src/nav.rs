@@ -127,10 +127,15 @@ pub fn nav_tabs() -> Vec<NavTab> {
             icon: icon_goals,
             route: Route::GoalsRoute {},
         },
+        // Vault-views shortcut (plans/vault-views.md): the sidebar
+        // item points at the board's VAULT ENTRY, not a bespoke
+        // route — [[Views/Tasks]] and this tab open the same thing.
         NavTab {
             label: "Tasks",
             icon: icon_tasks,
-            route: Route::TasksRoute {},
+            route: Route::VaultRoute {
+                path: "Views/Tasks.base".into(),
+            },
         },
         NavTab {
             label: "Vault",
@@ -270,6 +275,24 @@ pub fn primary_mobile_tabs() -> Vec<NavTab> {
 }
 
 pub fn tabs_match(current: &Route, tab: &NavTab) -> bool {
+    // Vault shortcuts must match by PATH — two tabs can both be
+    // VaultRoutes (the Tasks view entry vs the vault tree itself).
+    if let (Route::VaultRoute { path: cur }, Route::VaultRoute { path: tab_path }) =
+        (current, &tab.route)
+    {
+        return if tab_path.is_empty() {
+            // The bare Vault tab: match any vault path that isn't
+            // claimed by a more specific shortcut. Keep it simple —
+            // it matches everything; the shortcut match below also
+            // firing is fine (exact wins visually is a later polish).
+            !std::path::Path::new(cur)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("base"))
+                || cur == tab_path
+        } else {
+            cur == tab_path
+        };
+    }
     std::mem::discriminant(current) == std::mem::discriminant(&tab.route)
 }
 
