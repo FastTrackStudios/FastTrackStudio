@@ -2,12 +2,10 @@
 //! Wraps the active route via `Outlet`.
 
 use dioxus::prelude::*;
-use fts_ui::prelude::*;
 
 use crate::chrome::{FleetingFab, FleetingModal, TopBar, provide_chrome_contexts};
 use crate::routes::Route;
 use crate::shell::mobile::{BottomTabBar, MobileHeader};
-use crate::shell::sidebar::DesktopSidebar;
 
 #[component]
 pub fn AppShell() -> Element {
@@ -23,14 +21,16 @@ pub fn AppShell() -> Element {
         crate::presence::PresencePublisher {}
         // One-shot start-page redirect from the user's prefs entity.
         StartPageRedirect {}
-        // Mobile is the primary platform: below `md` the sidebar is
-        // gone in favor of the top app bar + bottom tab bar; at `md`
-        // and up the desktop two-column layout takes over unchanged.
-        div { class: "min-h-screen bg-background text-foreground md:grid md:h-screen md:grid-cols-[18rem_1fr] md:overflow-hidden",
-            div { class: "hidden md:flex md:h-screen md:flex-col md:overflow-hidden",
-                SidebarProvider {
-                    DesktopSidebar { current: current.clone() }
-                }
+        // Mobile is the primary platform: below `md` the chrome is the
+        // top app bar + bottom tab bar. At `md`+ the desktop shell is
+        // Obsidian-shaped (plans/vault-views.md): icon rail (shortcut
+        // ribbon) → vault explorer (the main sidebar) → the open view.
+        div { class: "min-h-screen bg-background text-foreground md:grid md:h-screen md:grid-cols-[3rem_17rem_1fr] md:overflow-hidden",
+            div { class: "hidden md:block",
+                crate::shell::rail::IconRail { current: current.clone() }
+            }
+            div { class: "hidden border-r border-border/60 md:flex md:h-screen md:flex-col md:overflow-hidden",
+                crate::shell::explorer::VaultExplorer {}
             }
 
             div { class: "flex min-h-screen flex-col md:h-screen md:min-h-0 md:overflow-y-auto",

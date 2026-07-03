@@ -62,10 +62,10 @@ struct FileMeta {
 
 /// One node of the virtual-folder tree.
 #[derive(Clone, PartialEq)]
-struct TreeNode {
-    meta: PageMeta,
-    children: Vec<usize>,
-    is_folder: bool,
+pub(crate) struct TreeNode {
+    pub(crate) meta: PageMeta,
+    pub(crate) children: Vec<usize>,
+    pub(crate) is_folder: bool,
 }
 
 #[component]
@@ -508,7 +508,10 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
     rsx! {
         div { class: "flex h-full min-h-[80vh]",
             // ── Virtual-folder tree ───────────────────────
-            aside { class: "flex w-72 shrink-0 flex-col overflow-y-auto border-r border-border bg-muted/30",
+            // Mobile-only: the shell's persistent VaultExplorer owns
+            // the tree at md+ (Obsidian shell); this inline pane keeps
+            // phone browsing working.
+            aside { class: "flex w-72 shrink-0 flex-col overflow-y-auto border-r border-border bg-muted/30 md:hidden",
                 div { class: "flex flex-col gap-2 px-3 py-3",
                     Heading { level: HeadingLevel::H3, "Vault" }
                     if let Some(parent) = create_under.clone() {
@@ -886,7 +889,7 @@ fn render_node(
 /// pages with no/unresolved parent. Cycles are broken (the node
 /// falls back to a root). Children sort folders-first, then by
 /// title.
-fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
+pub(crate) fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
     let mut nodes: Vec<TreeNode> = pages
         .iter()
         .map(|m| TreeNode {
@@ -978,7 +981,7 @@ fn osis_to_ref(osis: &str) -> String {
 }
 
 /// Frontmatter-derived page index for the folder tree.
-async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, String> {
+pub(crate) async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, String> {
     let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
