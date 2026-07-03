@@ -63,61 +63,63 @@ fn install() -> Result<(), Box<dyn std::error::Error>> {
     fts_devtools::install_extension(&binary, "signal")?;
     println!("  Installed signal-extension");
 
-    // ── 2. Bundle and install fts-signal-controller CLAP plugin ──────
-    println!("\n── Bundling fts-signal-controller ──");
-    let status = Command::new("cargo")
-        .args([
-            "run",
-            "--package",
-            "xtask",
-            "--",
-            "bundle",
-            "fts-signal-controller",
-        ])
-        .current_dir(&root)
-        .status()?;
-    if !status.success() {
-        return Err("Failed to bundle fts-signal-controller".into());
-    }
-
-    let clap_file = "FTS Signal Controller.clap";
-    let bundled = root.join("target/bundled").join(clap_file);
-
-    // Symlink the .clap into REAPER's UserPlugins/FX/FTS/ for each REAPER install.
-    if !bundled.exists() {
-        return Err(format!("{clap_file} not found at {}", bundled.display()).into());
-    }
-
-    for reaper_dir in fts_devtools::reaper_dirs() {
-        let fx_dir = reaper_dir.join("UserPlugins/FX/FTS");
-        std::fs::create_dir_all(&fx_dir)?;
-
-        let dest = fx_dir.join(clap_file);
-        if dest.exists() || dest.is_symlink() {
-            let _ = std::fs::remove_file(&dest).or_else(|_| std::fs::remove_dir_all(&dest));
+    // ── 2. Bundle and install the CLAP plugins ────────────────────────
+    for (package, clap_file) in CLAP_PLUGINS {
+        println!("\n── Bundling {package} ──");
+        let status = Command::new("cargo")
+            .args(["run", "--package", "xtask", "--", "bundle", package])
+            .current_dir(&root)
+            .status()?;
+        if !status.success() {
+            return Err(format!("Failed to bundle {package}").into());
         }
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&bundled, &dest)?;
-        #[cfg(not(unix))]
-        std::fs::copy(&bundled, &dest)?;
-        println!("  Installed {clap_file} -> {}", dest.display());
+
+        let bundled = root.join("target/bundled").join(clap_file);
+
+        // Symlink the .clap into REAPER's UserPlugins/FX/FTS/ for each REAPER install.
+        if !bundled.exists() {
+            return Err(format!("{clap_file} not found at {}", bundled.display()).into());
+        }
+
+        for reaper_dir in fts_devtools::reaper_dirs() {
+            let fx_dir = reaper_dir.join("UserPlugins/FX/FTS");
+            std::fs::create_dir_all(&fx_dir)?;
+
+            let dest = fx_dir.join(clap_file);
+            if dest.exists() || dest.is_symlink() {
+                let _ = std::fs::remove_file(&dest).or_else(|_| std::fs::remove_dir_all(&dest));
+            }
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&bundled, &dest)?;
+            #[cfg(not(unix))]
+            std::fs::copy(&bundled, &dest)?;
+            println!("  Installed {clap_file} -> {}", dest.display());
+        }
     }
 
     println!("\n✓ All components installed");
     Ok(())
 }
 
+/// CLAP plugin crates bundled + installed into REAPER by `cargo xtask
+/// install` (package name, bundled artifact name — must match bundler.toml).
+const CLAP_PLUGINS: &[(&str, &str)] = &[
+    ("fts-signal-controller", "FTS Signal Controller.clap"),
+    ("signal-sampler-clap", "Signal Sampler.clap"),
+];
+
 fn uninstall() -> Result<(), Box<dyn std::error::Error>> {
     // Remove signal-extension
     fts_devtools::uninstall_extension("signal");
 
-    // Remove fts-signal-controller CLAP from all REAPER installs
-    let clap_file = "FTS Signal Controller.clap";
-    for reaper_dir in fts_devtools::reaper_dirs() {
-        let dest = reaper_dir.join("UserPlugins/FX/FTS").join(clap_file);
-        if dest.exists() || dest.is_symlink() {
-            let _ = std::fs::remove_file(&dest).or_else(|_| std::fs::remove_dir_all(&dest));
-            println!("Removed {}", dest.display());
+    // Remove the CLAP plugins from all REAPER installs
+    for (_, clap_file) in CLAP_PLUGINS {
+        for reaper_dir in fts_devtools::reaper_dirs() {
+            let dest = reaper_dir.join("UserPlugins/FX/FTS").join(clap_file);
+            if dest.exists() || dest.is_symlink() {
+                let _ = std::fs::remove_file(&dest).or_else(|_| std::fs::remove_dir_all(&dest));
+                println!("Removed {}", dest.display());
+            }
         }
     }
 

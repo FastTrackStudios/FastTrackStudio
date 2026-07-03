@@ -22,6 +22,7 @@ members = [
     "crates/signal-plugin-host",
     "crates/signal-proto",
     "crates/signal-sampler",
+    "crates/signal-sampler-clap",
     "crates/signal-storage",
     "crates/signal-ui",
     "xtask",

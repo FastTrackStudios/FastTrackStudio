@@ -10096,6 +10096,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-sampler-clap"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "eyre",
+ "facet 0.50.0-rc.1",
+ "facet-styx",
+ "fts-plugin-core",
+ "hound",
+ "nice-plug",
+ "serde",
+ "serde_json",
+ "signal-sampler",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "signal-storage"
 version = "0.1.0"
 dependencies = [
