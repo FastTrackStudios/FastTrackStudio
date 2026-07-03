@@ -8,10 +8,15 @@ resolver = "2"
 
 [workspace.dependencies]
 # Keyflow/Engraver
-keyflow = { git = "https://git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
+keyflow = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
 
-# DAW / audio-controls
-audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+# The standalone Editor (contenteditable widget), shared with Task and
+# keyflow's examples/web-editor. `editor-keyflow-lang` supplies keyflow syntax
+# highlighting + IDE diagnostics decorations; `editor-keyflow` renders `.kf`
+# source to a live SVG preview. Web/wasm only.
+editor = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
+editor-keyflow = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
+editor-keyflow-lang = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
 
 # FTS design system
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
@@ -39,11 +44,13 @@ lucide-dioxus = { workspace = true }
 # Chart parsing and layout
 keyflow = { workspace = true, features = ["engraver", "text", "highlighting"] }
 
+# Live contenteditable editor + keyflow language bindings (homepage demo)
+editor = { workspace = true }
+editor-keyflow = { workspace = true }
+editor-keyflow-lang = { workspace = true }
+
 # FTS design system (components, layout, typography, theme tokens)
 fts-ui = { workspace = true }
-
-# Audio FX controls
-audio-controls = { workspace = true }
 
 # Color type used by the engraver's SVG export config
 peniko = { workspace = true }
@@ -77,8 +84,9 @@ console_error_panic_hook = "0.1"
 tracing-wasm = "0.2"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "registry"] }
 
-# Async timers for WASM
-gloo-timers = "0.3"
+# Async timers for WASM — "futures" feature backs the debounced live-preview
+# render task in LiveEditor.
+gloo-timers = { version = "0.3", features = ["futures"] }
 
 # Web APIs
 web-sys = { version = "0.3", features = [
@@ -135,7 +143,7 @@ desktop = ["dioxus/desktop"]
 [lints]
 workspace = true
 
-[patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
+[patch."https://codeberg.org/FastTrackStudios/keyflow.git"]
 keyflow = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow" }
 engraver = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/engraver" }
 engraver-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/engraver-proto" }
@@ -143,6 +151,12 @@ keyflow-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/
 keyflow-text = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-text" }
 keyflow-ui = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-ui" }
 
-[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
-daw-proto = { path = "vendor/daw-proto" }
-daw-module = { path = "vendor/daw-module" }
+[patch."https://codeberg.org/FastTrackStudios/daw.git"]
+# TEMPORARY: daw-module's own tokio dep inherits the daw workspace's
+# full-featured tokio, which pulls mio and breaks wasm32 builds (this repo's
+# only wasm consumer of daw-module, via keyflow's unconditional dependency
+# on it). Fixed locally (scoped, non-workspace tokio dep, "rt" only) but not
+# yet pushed to daw.git@main — that repo currently has unrelated local WIP
+# blocking its pre-commit gate. Drop this patch once the fix lands upstream.
+daw-module = { path = "/run/media/Development/FastTrackStudio/daw/crates/daw-module" }
+

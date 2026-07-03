@@ -1,0 +1,66 @@
+/* Layout chrome for the homepage LiveEditor demo card. Token colors and
+   diagnostic squiggles are injected at runtime by
+   `editor_keyflow_lang::highlight_css`; the editor's own structural styles
+   come from `editor::EDITOR_STYLE`. Sized to sit inside a rounded card in
+   the site's tailwind layout rather than take the full viewport. */
+
+.kf-live-demo {
+  --kf-border: rgba(255, 255, 255, 0.08);
+}
+
+.kf-live-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 26rem;
+}
+
+@media (max-width: 768px) {
+  .kf-live-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kf-live-editor-pane,
+.kf-live-preview-pane {
+  min-height: 0;
+  overflow: auto;
+}
+
+.kf-live-editor-pane {
+  border-right: 1px solid var(--kf-border);
+}
+
+@media (max-width: 768px) {
+  .kf-live-editor-pane {
+    border-right: none;
+    border-bottom: 1px solid var(--kf-border);
+  }
+}
+
+/* The editor view fills the pane; monospace so highlight cells line up. */
+.kf-live-editor-frame {
+  position: relative;
+  height: 100%;
+  min-height: 26rem;
+  padding: 16px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.kf-live-preview-pane {
+  background: #ffffff;
+  padding: 20px;
+}
+
+.kf-render svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.kf-render-error {
+  color: #e5484d;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}

@@ -182,9 +182,7 @@ impl fmt::Display for MusicalPosition {
     }
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Facet, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Facet, Serialize, Deserialize)]
 pub struct MidiPosition {
     ppq: i64,
 }

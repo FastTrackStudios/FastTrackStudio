@@ -34,9 +34,13 @@ pub fn StaticChartRenderer(
         let source_text = source.peek().clone();
         let is_snippet = *mode.peek() == PreviewMode::Snippet;
         let layout_width = fixed_layout_width.unwrap_or(800.0);
+        #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
         let mut url_out = svg_url;
 
         spawn(async move {
+            #[cfg(not(target_arch = "wasm32"))]
+            let _ = &url_out;
+
             let svg = (|| -> Result<String, String> {
                 use crate::renderer::ChartLayoutManager;
                 let mut manager = ChartLayoutManager::new()?;
@@ -54,6 +58,9 @@ pub fn StaticChartRenderer(
                     Ok(r#"<svg xmlns="http://www.w3.org/2000/svg" width="595" height="50"><rect width="100%" height="100%" fill="white"/></svg>"#.to_string())
                 }
             })();
+
+            #[cfg(not(target_arch = "wasm32"))]
+            let _ = &svg;
 
             #[cfg(target_arch = "wasm32")]
             if let Ok(svg_str) = svg {
@@ -100,8 +107,11 @@ pub fn HighlightedEditor(
     /// Optional unique ID for the textarea element. Defaults to "keyflow-editor-textarea".
     textarea_id: Option<String>,
 ) -> Element {
-    // Track scroll position to sync layers
+    // Track scroll position to sync layers. `mut` only needed on wasm32 (the
+    // .set() calls live inside wasm-gated event handlers).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
     let mut scroll_top = use_signal(|| 0.0_f64);
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
     let mut scroll_left = use_signal(|| 0.0_f64);
 
     // Unique ID for the textarea to query scroll position
@@ -141,6 +151,8 @@ pub fn HighlightedEditor(
                     let textarea_id = textarea_id.clone();
                     move |evt| {
                         on_change.call(evt.value());
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let _ = &textarea_id;
                         // Update scroll position after input
                         #[cfg(target_arch = "wasm32")]
                         {
@@ -161,6 +173,8 @@ pub fn HighlightedEditor(
                 onscroll: {
                     let textarea_id = textarea_id.clone();
                     move |_evt| {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let _ = &textarea_id;
                         // Sync scroll with highlighted layer
                         #[cfg(target_arch = "wasm32")]
                         {
@@ -265,9 +279,14 @@ fn HighlightedLine(line: String) -> Element {
 /// Export button component for downloading chart as SVG or PDF.
 #[component]
 pub fn ExportButton(source: Signal<String>) -> Element {
+    // `mut` on `is_exporting`/`do_export` is only required on the wasm32
+    // target (the export body is cfg'd to wasm32 only; on other targets
+    // it's an empty no-op closure that never mutates anything).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
     let mut is_exporting = use_signal(|| false);
     let mut show_dropdown = use_signal(|| false);
 
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
     let mut do_export = move |format: &'static str| {
         #[cfg(target_arch = "wasm32")]
         {

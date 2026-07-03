@@ -10,11 +10,6 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{FileCode, Github, Music};
 use fts_ui::prelude::*;
 
-use audio_controls::widgets::{
-    CompressorMetering, CompressorParams, CompressorWidget, DbRange, EqBand, EqBandShape, EqGraph,
-    GateDbRange, GateGraph, GateMetering, GateParams,
-};
-
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
@@ -28,8 +23,6 @@ pub enum Route {
     Home {},
     #[route("/test/render")]
     TestRender {},
-    #[route("/test/fx-ui")]
-    TestFxUi {},
 }
 
 fn main() {
@@ -176,7 +169,7 @@ fn Layout() -> Element {
 
             // Main content area
             main {
-                class: if is_home { "flex-1" } else { "flex-1" },
+                class: "flex-1",
                 Outlet::<Route> {}
             }
         }
@@ -344,6 +337,25 @@ fn Home() -> Element {
                             }
                         }
                     }
+                }
+            }
+
+            section {
+                class: "relative z-10 py-16",
+                div {
+                    class: "mx-auto max-w-5xl px-6",
+                    div {
+                        class: "mb-8 text-center",
+                        p {
+                            class: "font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground/70 mb-3",
+                            "Keyflow, live"
+                        }
+                        h2 {
+                            class: "text-3xl md:text-4xl lg:text-5xl font-semibold text-foreground tracking-tight",
+                            "Charts as Code, Rendered in Real Time"
+                        }
+                    }
+                    components::LiveEditor {}
                 }
             }
 
@@ -1041,294 +1053,5 @@ fn TestRender() -> Element {
                 }
             }
         }
-    }
-}
-
-/// Combined test page for EQ and Compressor graph components
-#[component]
-fn TestFxUi() -> Element {
-    // === EQ State ===
-    let mut bands = use_signal(|| {
-        vec![
-            EqBand {
-                index: 0,
-                used: true,
-                enabled: true,
-                frequency: 80.0,
-                gain: 3.0,
-                q: 0.7,
-                shape: EqBandShape::LowShelf,
-                ..Default::default()
-            },
-            EqBand {
-                index: 1,
-                used: true,
-                enabled: true,
-                frequency: 250.0,
-                gain: -2.5,
-                q: 1.5,
-                shape: EqBandShape::Bell,
-                ..Default::default()
-            },
-            EqBand {
-                index: 2,
-                used: true,
-                enabled: true,
-                frequency: 1000.0,
-                gain: 1.5,
-                q: 2.0,
-                shape: EqBandShape::Bell,
-                ..Default::default()
-            },
-            EqBand {
-                index: 3,
-                used: true,
-                enabled: true,
-                frequency: 4000.0,
-                gain: 2.0,
-                q: 1.0,
-                shape: EqBandShape::Bell,
-                ..Default::default()
-            },
-            EqBand {
-                index: 4,
-                used: true,
-                enabled: true,
-                frequency: 12000.0,
-                gain: 4.0,
-                q: 0.8,
-                shape: EqBandShape::HighShelf,
-                ..Default::default()
-            },
-        ]
-    });
-    let mut selected_band = use_signal(|| 0_usize);
-    let mut eq_db_range = use_signal(|| 24.0_f64);
-
-    // === Compressor State ===
-    let params = use_signal(CompressorParams::default);
-    let mut metering = use_signal(CompressorMetering::default);
-    let mut sim_time = use_signal(|| 0.0_f64);
-    let comp_db_range = use_signal(|| DbRange::Range48);
-
-    // Animation effect for simulated compressor levels
-    use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
-        {
-            use wasm_bindgen::prelude::*;
-
-            let closure = Closure::wrap(Box::new(move || {
-                let t = *sim_time.peek();
-                sim_time.set(t + 0.05);
-
-                let input = -24.0 + 18.0 * (t * 0.7).sin() as f32 + 6.0 * (t * 2.3).sin() as f32;
-                let input_clamped = input.clamp(-60.0, 0.0);
-
-                let p = params.peek();
-                let threshold = p.threshold;
-                let ratio = p.ratio;
-                let knee_w = p.knee / 2.0;
-
-                let output = if input_clamped <= threshold - knee_w {
-                    input_clamped
-                } else if input_clamped < threshold + knee_w {
-                    let a0 = (1.0 / ratio - 1.0) / (4.0 * knee_w);
-                    let x_offset = input_clamped - (threshold - knee_w);
-                    input_clamped + a0 * x_offset * x_offset
-                } else {
-                    threshold + (input_clamped - threshold) / ratio
-                };
-
-                let gr = output - input_clamped;
-
-                let prev = metering.peek();
-                let input_peak = input_clamped.max(prev.input_peak * 0.99);
-                let output_peak = output.max(prev.output_peak * 0.99);
-                let gr_peak = gr.min(prev.gr_peak * 0.99);
-                let mut gr_history = prev.gr_history.clone();
-                let mut input_history = prev.input_history.clone();
-                drop(prev);
-
-                gr_history.push(gr);
-                input_history.push(input_clamped);
-
-                const MAX_HISTORY: usize = 128;
-                if gr_history.len() > MAX_HISTORY {
-                    gr_history.drain(0..gr_history.len() - MAX_HISTORY);
-                }
-                if input_history.len() > MAX_HISTORY {
-                    input_history.drain(0..input_history.len() - MAX_HISTORY);
-                }
-
-                metering.set(CompressorMetering {
-                    input_level: input_clamped,
-                    output_level: output,
-                    gain_reduction: gr,
-                    input_peak,
-                    output_peak,
-                    gr_peak,
-                    gr_history,
-                    input_history,
-                });
-            }) as Box<dyn FnMut()>);
-
-            let window = web_sys::window().unwrap();
-            let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
-                closure.as_ref().unchecked_ref(),
-                50,
-            );
-            closure.forget();
-        }
-    });
-
-    rsx! {
-        document::Title { "Audio FX Controls — FastTrackStudio" }
-        div {
-            class: "min-h-screen bg-background p-6",
-            div { class: "max-w-7xl mx-auto mb-6",
-                h1 { class: "text-2xl font-bold text-foreground mb-2", "Audio FX Controls" }
-                p { class: "text-muted-foreground text-sm", "Interactive EQ and Compressor widgets for audio production interfaces." }
-            }
-            div {
-                class: "max-w-7xl mx-auto grid grid-cols-1 xl:grid-cols-2 gap-6",
-
-                // EQ Section
-                div { class: "bg-card rounded-xl border border-border p-4",
-                    div { class: "flex items-center justify-between mb-4",
-                        h2 { class: "text-lg font-semibold text-foreground", "Parametric EQ" }
-                        div { class: "flex items-center gap-2",
-                            label { class: "text-xs text-muted-foreground", "Range:" }
-                            select {
-                                class: "px-2 py-1 rounded bg-muted border border-border text-foreground text-xs",
-                                value: "{*eq_db_range.read()}",
-                                onchange: move |evt: Event<FormData>| { if let Ok(v) = evt.value().parse::<f64>() { eq_db_range.set(v); } },
-                                option { value: "6", "±6 dB" }
-                                option { value: "12", "±12 dB" }
-                                option { value: "18", "±18 dB" }
-                                option { value: "24", "±24 dB" }
-                                option { value: "30", "±30 dB" }
-                            }
-                        }
-                    }
-                    div { class: "w-full mb-4", style: "aspect-ratio: 800 / 350;",
-                        EqGraph {
-                            bands: bands,
-                            db_range: *eq_db_range.read(),
-                            show_grid: true,
-                            fill_curve: true,
-                            on_band_change: move |(idx, band): (usize, EqBand)| { let mut b = bands.write(); if idx < b.len() { b[idx] = band; } },
-                            on_band_add: move |band: EqBand| { bands.write().push(band); },
-                            on_band_remove: move |idx: usize| { let mut b = bands.write(); if idx < b.len() { b.remove(idx); let sel_idx = *selected_band.peek(); if sel_idx >= b.len() && !b.is_empty() { selected_band.set(b.len() - 1); } } },
-                            on_begin: move |idx: usize| { selected_band.set(idx); },
-                        }
-                    }
-                    div { class: "flex flex-wrap gap-2 text-xs",
-                        for (i, band) in bands.read().iter().enumerate() {
-                            div {
-                                class: if i == *selected_band.read() { "px-2 py-1 rounded bg-primary/20 border border-primary/40 text-foreground" } else { "px-2 py-1 rounded bg-muted border border-border text-muted-foreground" },
-                                onclick: move |_| selected_band.set(i),
-                                "{format_frequency(band.frequency)} • {band.gain:+.1}dB"
-                            }
-                        }
-                    }
-                }
-
-                // Compressor Section
-                div { class: "bg-card rounded-xl border border-border p-4",
-                    div { class: "flex items-center justify-between mb-4",
-                        h2 { class: "text-lg font-semibold text-foreground", "Compressor" }
-                        span { class: "text-xs text-muted-foreground", "Pro-C Style" }
-                    }
-                    div { class: "flex justify-center",
-                        CompressorWidget {
-                            params: params,
-                            metering: metering.read().clone(),
-                            db_range: *comp_db_range.read(),
-                            graph_size: 200,
-                            show_grid: true,
-                            show_gr_meter: true,
-                            show_levels: true,
-                            show_gr_trace: true,
-                            show_controls: true,
-                            interactive: true,
-                        }
-                    }
-                }
-            }
-
-            // Gate Section
-            GateSection {}
-
-            // Instructions
-            div {
-                class: "max-w-7xl mx-auto mt-6 p-4 bg-muted/50 rounded-lg border border-border",
-                h3 { class: "text-sm font-semibold text-foreground mb-2", "Interaction Guide" }
-                div { class: "grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-muted-foreground",
-                    div {
-                        h4 { class: "font-medium text-foreground mb-1", "EQ" }
-                        ul { class: "space-y-0.5 list-disc list-inside",
-                            li { "Drag bands to adjust frequency/gain" }
-                            li { "Mouse wheel to adjust Q" }
-                            li { "Double-click to add new band" }
-                            li { "Drag outside to remove band" }
-                            li { "Shift+drag for fine control" }
-                        }
-                    }
-                    div {
-                        h4 { class: "font-medium text-foreground mb-1", "Compressor" }
-                        ul { class: "space-y-0.5 list-disc list-inside",
-                            li { "Drag threshold point to adjust threshold" }
-                            li { "Drag above threshold to adjust ratio" }
-                            li { "Mouse wheel to adjust knee width" }
-                            li { "Shift+drag for fine control" }
-                        }
-                    }
-                    div {
-                        h4 { class: "font-medium text-foreground mb-1", "Gate" }
-                        ul { class: "space-y-0.5 list-disc list-inside",
-                            li { "Use knobs to adjust parameters" }
-                            li { "Large knob controls threshold" }
-                            li { "Small knobs for ratio/range" }
-                            li { "Right panel for envelope controls" }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn GateSection() -> Element {
-    let gate_params = use_signal(GateParams::default);
-    rsx! {
-        div { class: "max-w-7xl mx-auto mt-6 bg-card rounded-xl border border-border p-4",
-            div { class: "flex items-center justify-between mb-4",
-                h2 { class: "text-lg font-semibold text-foreground", "Noise Gate" }
-                span { class: "text-xs text-muted-foreground", "Pro-G Style" }
-            }
-            div { class: "flex justify-center",
-                GateGraph {
-                    params: gate_params,
-                    metering: GateMetering::default(),
-                    db_range: GateDbRange::Range60,
-                    graph_size: 200,
-                    show_grid: true,
-                    show_gr_meter: true,
-                    show_levels: false,
-                    show_gr_trace: false,
-                    show_controls: true,
-                    interactive: true,
-                }
-            }
-        }
-    }
-}
-
-fn format_frequency(freq: f32) -> String {
-    if freq >= 1000.0 {
-        format!("{:.1}k", freq / 1000.0)
-    } else {
-        format!("{:.0}", freq)
     }
 }

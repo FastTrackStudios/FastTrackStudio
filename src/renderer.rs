@@ -239,6 +239,7 @@ impl ChartLayoutManager {
     ///
     /// This is the recommended export format for high-quality vector output
     /// that can be edited in vector graphics software or converted to PDF.
+    #[allow(dead_code)]
     pub fn export_pages_to_svg(&self) -> Result<Vec<String>, String> {
         use keyflow::engraver::export::{SvgExportConfig, SvgSerializer};
 
@@ -305,6 +306,7 @@ impl ChartLayoutManager {
     /// Returns a vector of (page_number, x_offset, y_offset, width, height) for each page.
     /// Uses the offsets stored in each PageLayout, which were calculated during layout
     /// using the correct page gap and offset values.
+    #[allow(dead_code)]
     fn get_page_info(&self) -> Vec<(u32, f64, f64, f64, f64)> {
         self.layout_result
             .as_ref()
@@ -334,6 +336,7 @@ impl ChartLayoutManager {
     ///
     /// # Returns
     /// PDF bytes ready to be downloaded.
+    #[allow(dead_code)]
     fn export_to_pdf_via_svg(&self) -> Result<Vec<u8>, String> {
         use keyflow::engraver::export::{PdfSerializer, SvgExportConfig, SvgSerializer};
 
@@ -420,6 +423,7 @@ impl ChartLayoutManager {
     ///
     /// # Returns
     /// PDF bytes ready to be downloaded.
+    #[allow(dead_code)]
     pub fn export_multi_page_pdf_via_svg(&self) -> Result<Vec<u8>, String> {
         use keyflow::engraver::export::{PdfSerializer, SvgExportConfig, SvgSerializer};
 
