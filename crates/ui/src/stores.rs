@@ -201,6 +201,7 @@ pub fn to_ui(t: &DbTask) -> UiTask {
         date_modified: t.date_modified,
         details: t.details.clone(),
         parent: t.workflow.as_ref().and_then(|w| w.parent),
+        project_id: t.project_id,
     }
 }
 
@@ -228,6 +229,10 @@ pub struct TaskMutations {
     /// the project detail page scopes its board so "add a task here"
     /// means *here*.
     create_project_scope: Option<Uuid>,
+    /// Project store handle (Copy — it's a signal), for resolving
+    /// `[[Project]]` wikilinks typed into quick-add
+    /// (task::infer_project_id) at create time.
+    projects: ProjectStore,
 }
 
 pub fn use_task_mutations() -> TaskMutations {
@@ -235,6 +240,7 @@ pub fn use_task_mutations() -> TaskMutations {
         store: use_task_store(),
         write: use_mutation(),
         create_project_scope: None,
+        projects: use_context(),
     }
 }
 
@@ -256,7 +262,18 @@ impl TaskMutations {
         match mu {
             TaskMutation::Create { task } => {
                 let mut draft = task::capture(&task.title);
-                draft.project_id = self.create_project_scope;
+                // Filing priority: explicit picker > page scope
+                // (project detail board) > [[wikilink]] inference.
+                let known: Vec<(Uuid, String)> = self
+                    .projects
+                    .list()
+                    .into_iter()
+                    .map(|r| (r.project.id, r.project.title))
+                    .collect();
+                draft.project_id = task
+                    .project_id
+                    .or(self.create_project_scope)
+                    .or_else(|| task::infer_project_id(&draft.projects.0, &known));
                 self.create(OrgTask {
                     slug: create_slug.to_owned(),
                     task: draft,

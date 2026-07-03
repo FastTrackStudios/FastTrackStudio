@@ -43,6 +43,10 @@ pub struct TasksAppProps {
     /// header row — one row of chrome, not two.
     #[props(default)]
     pub header_extra: Option<Element>,
+    /// `(id, title)` project choices forwarded to the quick-add's
+    /// picker (empty = no picker).
+    #[props(default)]
+    pub projects: Vec<(uuid::Uuid, String)>,
 }
 
 #[component]
@@ -110,6 +114,7 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                 }
             }
             QuickAdd {
+                projects: props.projects.clone(),
                 on_create: move |task: TaskInfo| props.on_event.call(TaskMutation::Create { task }),
             }
             div { class: "flex-1 min-h-0 overflow-y-auto",

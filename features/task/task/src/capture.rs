@@ -261,3 +261,46 @@ mod tests {
         assert_eq!(t.title, "Untitled task");
     }
 }
+
+/// Resolve a captured `[[Project]]` reference to the project's stable
+/// id: first wikilink whose bare name matches a known project title
+/// (case-insensitive, brackets stripped). The inference half of
+/// project filing — the UI's explicit picker and the quick-add's
+/// `[[...]]` syntax both end at `project_id`.
+#[must_use]
+pub fn infer_project_id(
+    project_refs: &[String],
+    known: &[(uuid::Uuid, String)],
+) -> Option<uuid::Uuid> {
+    project_refs.iter().find_map(|raw| {
+        let name = raw
+            .trim()
+            .trim_start_matches("[[")
+            .trim_end_matches("]]")
+            .trim();
+        known
+            .iter()
+            .find(|(_, title)| title.eq_ignore_ascii_case(name))
+            .map(|(id, _)| *id)
+    })
+}
+
+#[cfg(test)]
+mod infer_tests {
+    use super::{capture, infer_project_id};
+    use uuid::Uuid;
+
+    #[test]
+    fn wikilink_capture_resolves_to_project_id() {
+        let going_home = Uuid::new_v4();
+        let known = vec![
+            (Uuid::new_v4(), "Task".to_owned()),
+            (going_home, "Going Home - Justin Hayward".to_owned()),
+        ];
+        let t = capture("Mix vocals [[going home - justin hayward]] tomorrow");
+        assert_eq!(infer_project_id(&t.projects.0, &known), Some(going_home));
+        // No wikilink → no inference.
+        let t = capture("Mix vocals tomorrow");
+        assert_eq!(infer_project_id(&t.projects.0, &known), None);
+    }
+}

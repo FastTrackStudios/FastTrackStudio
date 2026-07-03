@@ -34,6 +34,9 @@ pub struct TaskInfo {
     /// Read-only in the views: lists nest it under its parent;
     /// parentage edits go through the domain, not the board.
     pub parent: Option<Uuid>,
+    /// Owning project (authoritative pointer). Set by the quick-add
+    /// picker or inferred from a `[[Project]]` wikilink at capture.
+    pub project_id: Option<Uuid>,
 }
 
 impl TaskInfo {
@@ -57,6 +60,7 @@ impl TaskInfo {
             date_modified: Some(chrono::Utc::now()),
             details: String::new(),
             parent: None,
+            project_id: None,
         }
     }
 

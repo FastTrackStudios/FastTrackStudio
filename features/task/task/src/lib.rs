@@ -56,7 +56,7 @@ pub mod write;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod backend;
 
-pub use capture::capture;
+pub use capture::{capture, infer_project_id};
 pub use model::{
     Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry, close_open_time_entries,
     is_due_on_or_before, status_is_open, status_is_terminal, track_status_transition,

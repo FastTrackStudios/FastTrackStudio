@@ -385,6 +385,8 @@ pub fn ProjectDetailView(id: String) -> Element {
                     // one quick-add away, and creates here file under
                     // THIS project (scoped mutations).
                     TasksApp {
+                        // No picker on a project board — creates here
+                        // are scoped to THIS project already.
                         tasks: mine,
                         on_event: {
                             let create_slug = forge_slug.clone();

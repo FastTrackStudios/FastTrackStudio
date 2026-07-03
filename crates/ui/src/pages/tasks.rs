@@ -173,6 +173,10 @@ pub fn TasksView() -> Element {
                         TasksApp {
                             tasks: ui_tasks,
                             header_extra: chips,
+                            projects: project_names
+                                .iter()
+                                .map(|(id, name)| (*id, name.clone()))
+                                .collect::<Vec<_>>(),
                             on_event: move |mu: TaskMutation| {
                                 let create_slug =
                                     crate::orgs::create_target(&selection.read(), &org_list.read());
