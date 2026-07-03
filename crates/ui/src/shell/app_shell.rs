@@ -21,6 +21,8 @@ pub fn AppShell() -> Element {
         // manual status) on the org channel joined at the app root.
         // Renders nothing; lives here because it needs `use_route`.
         crate::presence::PresencePublisher {}
+        // One-shot start-page redirect from the user's prefs entity.
+        StartPageRedirect {}
         // Mobile is the primary platform: below `md` the sidebar is
         // gone in favor of the top app bar + bottom tab bar; at `md`
         // and up the desktop two-column layout takes over unchanged.
@@ -96,4 +98,30 @@ fn RouteFallback() -> Element {
             "Loading…"
         }
     }
+}
+
+/// Redirect `/` to the user's preferred start page, once per session,
+/// when their prefs load (renders nothing). Deep links and manual
+/// navigation are never hijacked: the redirect only fires while the
+/// current route is still the root and no redirect has happened yet.
+#[component]
+fn StartPageRedirect() -> Element {
+    let prefs = use_context::<crate::prefs::PrefsCtx>().prefs;
+    let nav = use_navigator();
+    let route = use_route::<Route>();
+    let mut done = use_signal(|| false);
+
+    use_effect(move || {
+        let target = prefs.read().default_page.clone();
+        if *done.peek() || target.is_empty() {
+            return;
+        }
+        // `use_route` in an effect: read once via the captured value —
+        // only fire from the root route.
+        if matches!(route, Route::HomeRoute {}) {
+            done.set(true);
+            nav.replace(target.as_str());
+        }
+    });
+    rsx! {}
 }

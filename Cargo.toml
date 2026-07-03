@@ -240,6 +240,7 @@ wiki-archive = { path = "features/wiki/wiki-archive" }
 # See `plans/agent-feature.md`.
 agent-proto = { path = "features/agent/agent-proto" }
 agent-wiki = { path = "features/agent/agent-wiki" }
+agent-inbox = { path = "features/agent/agent-inbox" }
 agent-codex = { path = "features/agent/agent-codex" }
 # Server-side SQLite-backed impl of `agent-proto::service::tasks::AgentTaskQueue`.
 # Owns the queue DB files + `Running`-status claim semantics. The

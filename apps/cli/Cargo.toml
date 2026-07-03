@@ -93,6 +93,9 @@ agent-proto.workspace = true
 # `task-cli wiki ingest` — agent-driven two-step CoT ingest
 # of source files into `<vault>/Wiki/`.
 agent-wiki.workspace = true
+# `task-cli inbox process` — agent-driven daily processing pass
+# (open inbox items → task/note/skip proposals for review).
+agent-inbox.workspace = true
 wiki-live.workspace = true
 # `task-cli wiki graph|gaps` — pure-computation graph layer
 # (no LLM).
