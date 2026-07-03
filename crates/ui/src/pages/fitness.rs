@@ -173,7 +173,7 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
                     value: "{kind}",
                     onchange: move |e| kind.set(e.value()),
                     for k in BODY_KINDS {
-                        option { value: "{k}", "{k}" }
+                        option { key: "{k}", value: "{k}", "{k}" }
                     }
                 }
                 input {
@@ -295,7 +295,7 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
                     value: "{category}",
                     onchange: move |e| category.set(e.value()),
                     for c in EXERCISE_CATEGORIES {
-                        option { value: "{c}", "{c}" }
+                        option { key: "{c}", value: "{c}", "{c}" }
                     }
                 }
                 Button { variant: ButtonVariant::Primary, on_click: move |_| create(), "Add" }

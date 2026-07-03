@@ -317,7 +317,9 @@ pub fn ProjectDetailView(id: String) -> Element {
                     if !p.tags.0.is_empty() {
                         div { class: "flex flex-wrap gap-1.5",
                             for tag in p.tags.0.iter() {
-                                span { class: "rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground",
+                                span {
+                                    key: "{tag}",
+                                    class: "rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground",
                                     "{tag}"
                                 }
                             }

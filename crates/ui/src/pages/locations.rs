@@ -100,7 +100,7 @@ pub fn LocationsView() -> Element {
                     value: "{kind}",
                     onchange: move |e| kind.set(e.value()),
                     for k in KINDS {
-                        option { value: "{k}", "{k}" }
+                        option { key: "{k}", value: "{k}", "{k}" }
                     }
                 }
                 input {

@@ -259,7 +259,7 @@ pub fn WatchView(v: String, node: String) -> Element {
         Some(Some(ms)) if !ms.is_empty() => rsx! {
             div { class: "flex flex-col divide-y divide-border/40",
                 for m in ms.clone() {
-                    div { class: "group flex items-start gap-2 py-2",
+                    div { key: "{m.start}", class: "group flex items-start gap-2 py-2",
                         button {
                             r#type: "button",
                             class: "mt-0.5 shrink-0 rounded-md border border-border/70 bg-card/60 px-1.5 py-0.5 font-mono text-[0.7rem] text-muted-foreground hover:border-primary/60 hover:text-foreground",

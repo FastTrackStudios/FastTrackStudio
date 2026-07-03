@@ -830,7 +830,7 @@ fn render_node(
     };
 
     rsx! {
-        div {
+        div { key: "{node.meta.path}",
             div { class: row_cls, style: "padding-left: {indent}px",
                 if node.is_folder {
                     button {

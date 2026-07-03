@@ -145,6 +145,7 @@ pub fn FinancesView() -> Element {
                 div { class: "flex gap-1",
                     for p in [Period::Week, Period::Month, Period::All] {
                         Button {
+                            key: "{p.label()}",
                             variant: if period() == p { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
                             size: ButtonSize::Small,
                             on_click: move |_| period.set(p),

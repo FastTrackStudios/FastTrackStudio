@@ -107,7 +107,7 @@ pub fn BookingsView() -> Element {
                         }
                     },
                     for d in DURATIONS {
-                        option { value: "{d}", "{d} min" }
+                        option { key: "{d}", value: "{d}", "{d} min" }
                     }
                 }
                 Button {

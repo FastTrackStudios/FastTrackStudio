@@ -294,6 +294,7 @@ pub fn WikiSourcesView() -> Element {
             div { class: "flex flex-col divide-y divide-border/60 rounded-xl border border-border/70 bg-card/30",
                 for r in rows.clone() {
                     Link {
+                        key: "{r.filename}",
                         to: crate::routes::Route::WikiSourceRoute { name: r.filename.clone() },
                         class: "flex items-baseline justify-between gap-3 px-4 py-2.5 text-sm hover:bg-accent/40",
                         span { class: "truncate font-medium", "{r.filename}" }

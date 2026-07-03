@@ -17,8 +17,8 @@ use fts_ui::prelude::*;
 pub fn LoadingState(#[props(default = 4)] rows: usize) -> Element {
     rsx! {
         div { class: "flex flex-col gap-3",
-            for _ in 0..rows {
-                div { class: "flex flex-col gap-2 rounded-xl border border-border/70 bg-card p-4",
+            for i in 0..rows {
+                div { key: "{i}", class: "flex flex-col gap-2 rounded-xl border border-border/70 bg-card p-4",
                     Skeleton { class: "h-5 w-40" }
                     Skeleton { class: "h-4 w-full" }
                 }

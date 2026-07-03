@@ -120,7 +120,7 @@ pub fn MilestonesView() -> Element {
                     onchange: move |e| project.set(e.value()),
                     option { value: "", "Project…" }
                     for p in project_options.iter() {
-                        option { value: "{p.id}", "{p.title}" }
+                        option { key: "{p.id}", value: "{p.id}", "{p.title}" }
                     }
                 }
                 input {

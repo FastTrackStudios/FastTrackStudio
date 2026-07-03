@@ -89,7 +89,7 @@ pub fn BasesView() -> Element {
             rsx! {
                 div { class: "flex flex-col gap-6",
                     for view in views.clone() {
-                        BaseViewRender { view, on_open: move |path: String| {
+                        BaseViewRender { key: "{view.name}", view, on_open: move |path: String| {
                             nav.push(crate::routes::Route::VaultRoute { path });
                         } }
                     }
@@ -230,7 +230,7 @@ fn BaseCardsBody(view: BaseView, on_open: EventHandler<String>) -> Element {
                                     div { class: "font-medium text-foreground", "{row.title}" }
                                     for (i, cell) in row.cells.iter().enumerate() {
                                         if i > 0 && !cell.is_empty() {
-                                            div { class: "text-xs text-muted-foreground",
+                                            div { key: "{i}", class: "text-xs text-muted-foreground",
                                                 span { class: "text-muted-foreground/60",
                                                     "{cols.get(i).cloned().unwrap_or_default()}: "
                                                 }
@@ -314,7 +314,7 @@ pub fn BaseDoc(base_path: String, on_open: EventHandler<String>) -> Element {
         Some(Some(vs)) if !vs.is_empty() => rsx! {
             div { class: "flex flex-col gap-6 p-4 sm:p-6",
                 for view in vs {
-                    BaseViewRender { view, on_open }
+                    BaseViewRender { key: "{view.name}", view, on_open }
                 }
             }
         },

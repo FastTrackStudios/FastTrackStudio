@@ -124,16 +124,16 @@ fn render_loading() -> Element {
             div { class: "h-9 w-56 animate-pulse rounded-lg bg-muted" }
         }
         div { class: "grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border/70 bg-border/70 sm:grid-cols-4",
-            for _ in 0..4 {
-                div { class: "flex flex-col gap-2 bg-card p-5",
+            for i in 0..4 {
+                div { key: "{i}", class: "flex flex-col gap-2 bg-card p-5",
                     div { class: "h-8 w-14 animate-pulse rounded-md bg-muted" }
                     div { class: "h-3 w-20 animate-pulse rounded-full bg-muted" }
                 }
             }
         }
         div { class: "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3",
-            for _ in 0..6 {
-                div { class: "flex flex-col gap-4 rounded-xl border border-border/70 bg-card p-6",
+            for i in 0..6 {
+                div { key: "{i}", class: "flex flex-col gap-4 rounded-xl border border-border/70 bg-card p-6",
                     div { class: "flex items-start justify-between gap-3",
                         div { class: "h-5 w-32 animate-pulse rounded-md bg-muted" }
                         div { class: "h-6 w-16 animate-pulse rounded-full bg-muted" }
@@ -602,7 +602,7 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
                         if !shown_tags.is_empty() {
                             div { class: "mt-auto flex flex-wrap items-center gap-1.5 pt-1",
                                 for tag in shown_tags.iter() {
-                                    Badge { variant: BadgeVariant::Secondary, "{tag}" }
+                                    Badge { key: "{tag}", variant: BadgeVariant::Secondary, "{tag}" }
                                 }
                                 if extra_tags > 0 {
                                     span { class: "text-xs text-muted-foreground", "+{extra_tags}" }

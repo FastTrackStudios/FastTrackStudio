@@ -247,8 +247,8 @@ fn IssueRow(
             }
             if !comment_rows.is_empty() {
                 div { class: "ml-3 flex flex-col gap-1 border-l border-border pl-3",
-                    for (author , body) in comment_rows {
-                        div { class: "flex flex-col",
+                    for (i , (author , body)) in comment_rows.into_iter().enumerate() {
+                        div { key: "{i}", class: "flex flex-col",
                             Text { variant: TextVariant::Muted, class: "text-[11px] font-medium", "{author}" }
                             Text { class: "text-xs", "{body}" }
                         }

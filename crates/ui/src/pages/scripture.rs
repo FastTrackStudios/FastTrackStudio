@@ -106,7 +106,7 @@ pub fn ScriptureView() -> Element {
                     value: "{translation}",
                     onchange: move |e| translation.set(e.value()),
                     for t in tx_list.iter() {
-                        option { value: "{t.id}", "{t.id}" }
+                        option { key: "{t.id}", value: "{t.id}", "{t.id}" }
                     }
                 }
                 select {
@@ -117,7 +117,7 @@ pub fn ScriptureView() -> Element {
                         chapter.set(1);
                     },
                     for b in books.iter() {
-                        option { value: "{b}", "{b}" }
+                        option { key: "{b}", value: "{b}", "{b}" }
                     }
                 }
                 div { class: "flex items-center gap-2",
@@ -153,7 +153,7 @@ pub fn ScriptureView() -> Element {
                     }
                     div { class: "mt-3 flex flex-col gap-2 leading-relaxed",
                         for v in c.verses.iter() {
-                            div { class: "flex flex-col",
+                            div { key: "{v.osis}", class: "flex flex-col",
                                 p { id: "{v.osis}", class: "scroll-mt-20",
                                     span {
                                         class: "mr-2 select-none align-super text-xs font-semibold text-muted-foreground",
@@ -173,6 +173,7 @@ pub fn ScriptureView() -> Element {
                                     div { class: "ml-6 mt-1 flex flex-col gap-0.5 border-l border-border pl-3",
                                         for n in bl.notes.iter() {
                                             Link {
+                                                key: "{n.note_path}",
                                                 to: Route::VaultRoute { path: n.note_path.clone() },
                                                 class: "text-xs text-muted-foreground hover:text-foreground",
                                                 title: "{n.excerpt}",
@@ -235,7 +236,9 @@ pub fn ScriptureView() -> Element {
                                         "{cv.reference}"
                                     }
                                     for t in cv.translations.iter() {
-                                        th { class: "border-b border-border px-2 py-1 text-left align-bottom text-xs font-semibold",
+                                        th {
+                                            key: "{t}",
+                                            class: "border-b border-border px-2 py-1 text-left align-bottom text-xs font-semibold",
                                             "{t}"
                                         }
                                     }
@@ -243,12 +246,14 @@ pub fn ScriptureView() -> Element {
                             }
                             tbody {
                                 for row in cv.rows.iter() {
-                                    tr {
+                                    tr { key: "{row.reference}",
                                         td { class: "whitespace-nowrap border-b border-border/40 px-2 py-1 align-top text-xs text-muted-foreground",
                                             "{row.reference}"
                                         }
-                                        for cell in row.cells.iter() {
-                                            td { class: "border-b border-border/40 px-2 py-1 align-top leading-relaxed",
+                                        for (ci, cell) in row.cells.iter().enumerate() {
+                                            td {
+                                                key: "{ci}",
+                                                class: "border-b border-border/40 px-2 py-1 align-top leading-relaxed",
                                                 "{cell}"
                                             }
                                         }

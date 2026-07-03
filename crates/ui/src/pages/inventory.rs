@@ -107,7 +107,7 @@ pub fn InventoryView() -> Element {
                     value: "{category}",
                     onchange: move |e| category.set(e.value()),
                     for c in CATEGORIES {
-                        option { value: "{c}", "{c}" }
+                        option { key: "{c}", value: "{c}", "{c}" }
                     }
                 }
                 Button {

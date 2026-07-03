@@ -79,8 +79,8 @@ pub fn HomeView() -> Element {
 fn render_loading() -> Element {
     rsx! {
         div { class: "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3",
-            for _ in 0..6 {
-                div { class: "flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-4",
+            for i in 0..6 {
+                div { key: "{i}", class: "flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-4",
                     div { class: "h-5 w-40 animate-pulse rounded-md bg-muted" }
                     div { class: "h-1.5 w-full animate-pulse rounded-full bg-muted" }
                     div { class: "h-4 w-full animate-pulse rounded-md bg-muted" }
