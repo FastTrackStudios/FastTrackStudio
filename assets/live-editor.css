@@ -1,37 +1,55 @@
-/* Layout chrome for the homepage LiveEditor demo card. Token colors and
-   diagnostic squiggles are injected at runtime by
-   `editor_keyflow_lang::highlight_css`; the editor's own structural styles
-   come from `editor::EDITOR_STYLE`. Sized to sit inside a rounded card in
-   the site's tailwind layout rather than take the full viewport. */
+/* Full-screen Keyflow Editor studio layout. Token colors and diagnostic
+   squiggles are injected at runtime by `editor_keyflow_lang::highlight_css`;
+   the editor's own structural styles come from `editor::EDITOR_STYLE`.
+   This fills whatever height its parent gives it (see main.rs's Layout,
+   which sizes `main` to the viewport minus the nav on the /editor route). */
 
-.kf-live-demo {
+.kf-studio {
   --kf-border: rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
-.kf-live-split {
+.kf-studio-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--kf-border);
+  background: color-mix(in srgb, var(--color-card, #18181b) 60%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.kf-studio-split {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  min-height: 26rem;
 }
 
 @media (max-width: 768px) {
-  .kf-live-split {
+  .kf-studio-split {
     grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
   }
 }
 
-.kf-live-editor-pane,
-.kf-live-preview-pane {
+.kf-studio-editor-pane,
+.kf-studio-preview-pane {
   min-height: 0;
   overflow: auto;
 }
 
-.kf-live-editor-pane {
+.kf-studio-editor-pane {
   border-right: 1px solid var(--kf-border);
 }
 
 @media (max-width: 768px) {
-  .kf-live-editor-pane {
+  .kf-studio-editor-pane {
     border-right: none;
     border-bottom: 1px solid var(--kf-border);
   }
@@ -41,20 +59,37 @@
 .kf-live-editor-frame {
   position: relative;
   height: 100%;
-  min-height: 26rem;
-  padding: 16px;
+  min-height: 100%;
+  padding: 20px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 14px;
   line-height: 21px;
 }
 
-.kf-live-preview-pane {
+/* Print-preview-style backdrop, centering a fixed-aspect "page". */
+.kf-studio-preview-pane {
+  background: #26262b;
+  padding: 24px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+/* A4 aspect ratio (210mm x 297mm). Scales to fit the available height,
+   capped so it never grows wider than the pane. */
+.kf-studio-page {
+  aspect-ratio: 210 / 297;
+  height: 100%;
+  max-width: 100%;
   background: #ffffff;
-  padding: 20px;
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .kf-render svg {
-  max-width: 100%;
+  display: block;
+  width: 100%;
   height: auto;
 }
 
@@ -63,4 +98,5 @@
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12px;
   white-space: pre-wrap;
+  padding: 16px;
 }

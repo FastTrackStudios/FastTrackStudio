@@ -103,10 +103,18 @@ const SITE_DESCRIPTION: &str = "Open-source, cross-platform, cross-DAW music pro
 fn Layout() -> Element {
     let route = use_route::<Route>();
     let is_home = matches!(route, Route::Home {});
+    // The editor is a full-screen app: fix the shell to the viewport height
+    // (instead of growing with content) so the studio's own toolbar/split
+    // layout can fill exactly the space below the nav, no page scroll.
+    let is_editor = matches!(route, Route::KeyflowEditorPage {});
 
     rsx! {
         div {
-            class: "min-h-screen flex flex-col text-foreground",
+            class: if is_editor {
+                "h-screen flex flex-col text-foreground overflow-hidden"
+            } else {
+                "min-h-screen flex flex-col text-foreground"
+            },
 
             // Floating glass navbar
             nav {
@@ -182,7 +190,7 @@ fn Layout() -> Element {
 
             // Main content area
             main {
-                class: "flex-1",
+                class: if is_editor { "flex-1 min-h-0 overflow-hidden" } else { "flex-1" },
                 Outlet::<Route> {}
             }
         }
@@ -364,30 +372,9 @@ fn Home() -> Element {
 fn KeyflowEditorPage() -> Element {
     rsx! {
         document::Title { "Keyflow Editor — FastTrackStudio" }
-        document::Meta { name: "description", content: "Try Keyflow live — an open, plain-text chart format that compiles into real lead sheets, with real-time engraving." }
+        document::Meta { name: "description", content: "Keyflow Editor — an open, plain-text chart format that compiles into real lead sheets, with real-time engraving and PDF export." }
 
-        div {
-            class: "relative pt-24 pb-16",
-            div {
-                class: "mx-auto max-w-6xl px-6",
-                div {
-                    class: "mb-8 text-center",
-                    p {
-                        class: "font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground/70 mb-3",
-                        "Keyflow, live"
-                    }
-                    h1 {
-                        class: "text-3xl md:text-4xl lg:text-5xl font-semibold text-foreground tracking-tight",
-                        "Charts as Code, Rendered in Real Time"
-                    }
-                    p {
-                        class: "mt-4 text-muted-foreground max-w-2xl mx-auto",
-                        "Keyflow is a plain-text music chart format. Edit the source on the left — colors, resolved-chord overlays, and hover info — and watch the engraved lead sheet update as you type."
-                    }
-                }
-                components::LiveEditor {}
-            }
-        }
+        components::LiveEditor {}
     }
 }
 

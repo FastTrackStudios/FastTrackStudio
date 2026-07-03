@@ -1,10 +1,11 @@
-//! Live Keyflow Editor — homepage demo.
+//! Keyflow Editor — standalone full-screen studio page.
 //!
 //! Mounts the shared `Editor` component (from the standalone Editor repo) with
 //! keyflow syntax highlighting + IDE diagnostics, beside an engraved SVG
-//! preview that re-renders on a debounce as you type. This is the same
-//! wiring as keyflow's `examples/web-editor`, restyled to sit inside the
-//! site's card/tailwind design language instead of its own full-page chrome.
+//! preview (rendered in a real paper aspect ratio) that re-renders on a
+//! debounce as you type. Wiring matches keyflow's `examples/web-editor`;
+//! export (PDF/SVG) reuses `components::ExportButton` from the site's older
+//! chart_editor, fed by a signal kept in sync with the live editor text.
 //!
 //! Web/wasm only — the contenteditable view doesn't run outside the browser.
 
@@ -15,6 +16,8 @@ use editor_keyflow_lang::{
     HighlightTheme, highlight_css, keyflow_decorations, keyflow_hover, overlays_enabled,
     toggle_overlays,
 };
+
+use crate::components::ExportButton;
 
 /// Idle delay before re-engraving the preview — see keyflow's web-editor for
 /// the full rationale (avoids blocking the main thread on every keystroke).
@@ -38,7 +41,8 @@ const SEED: &str = "FastTrackStudio Demo\n\
                     4 | 5 | 1 | 6m\n\
                     4 | 5 | 1 | 1\n";
 
-/// Live split-pane keyflow editor with a real-time engraved preview.
+/// Full-screen Keyflow editor studio: toolbar (export, overlay toggle) above
+/// a half/half editor + paper-aspect preview split.
 #[component]
 pub fn LiveEditor() -> Element {
     let mut state = use_signal(|| EditorState::new(SEED.to_string()));
@@ -53,12 +57,18 @@ pub fn LiveEditor() -> Element {
     let vim = use_signal(editor::editor_vim::VimState::new);
     let slash = use_signal(|| None::<editor_view::slash::SlashState>);
 
+    // Plain text mirror of the editor content — `ExportButton` needs an
+    // owned `Signal<String>` (it re-parses/re-lays-out the chart itself for
+    // export, independent of the live preview's font-less SVG).
+    let mut source_text = use_signal(|| SEED.to_string());
+
     // Debounced live preview — see keyflow's web-editor for the generation-
     // counter rationale (a newer edit supersedes a pending render).
     let mut preview = use_signal(String::new);
     let mut preview_gen = use_signal(|| 0u64);
     use_effect(move || {
         let src = state.read().doc.to_string();
+        source_text.set(src.clone());
         let my_gen = preview_gen.peek().wrapping_add(1);
         preview_gen.set(my_gen);
         spawn(async move {
@@ -83,25 +93,32 @@ pub fn LiveEditor() -> Element {
         style { dangerous_inner_html: "{font_css}" }
 
         div {
-            class: "kf-live-demo rounded-xl border border-border/40 bg-gradient-to-br from-card/50 to-card/10 overflow-hidden shadow-lg shadow-black/10",
+            class: "kf-studio",
 
+            // Toolbar
             div {
-                class: "flex items-center justify-between gap-3 px-5 py-3 border-b border-border/40 bg-card/40",
+                class: "kf-studio-toolbar",
                 div {
-                    span { class: "text-sm font-semibold text-foreground", "Try Keyflow live" }
-                    p { class: "text-xs text-muted-foreground mt-0.5", "Edit the chart on the left — colors, resolved-chord overlays, and hover info. The engraved preview updates as you type." }
+                    class: "flex items-center gap-2",
+                    span { class: "text-sm font-semibold text-foreground", "Keyflow Editor" }
+                    span { class: "text-xs text-muted-foreground hidden md:inline", "Charts as code — edit on the left, engraved live on the right." }
                 }
-                button {
-                    class: "shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-border/50 hover:text-foreground hover:bg-accent/50 transition-colors",
-                    onclick: flip_overlays,
-                    if overlays_on() { "Resolved overlays: on" } else { "Resolved overlays: off" }
+                div {
+                    class: "flex items-center gap-2",
+                    button {
+                        class: "px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-border/50 hover:text-foreground hover:bg-accent/50 transition-colors",
+                        onclick: flip_overlays,
+                        if overlays_on() { "Resolved overlays: on" } else { "Resolved overlays: off" }
+                    }
+                    ExportButton { source: source_text }
                 }
             }
 
+            // Editor / preview split
             div {
-                class: "kf-live-split",
+                class: "kf-studio-split",
                 section {
-                    class: "kf-live-editor-pane",
+                    class: "kf-studio-editor-pane",
                     div {
                         class: "kf-live-editor-frame",
                         Editor {
@@ -116,8 +133,11 @@ pub fn LiveEditor() -> Element {
                     }
                 }
                 section {
-                    class: "kf-live-preview-pane",
-                    div { class: "kf-render", dangerous_inner_html: "{preview}" }
+                    class: "kf-studio-preview-pane",
+                    div {
+                        class: "kf-studio-page",
+                        div { class: "kf-render", dangerous_inner_html: "{preview}" }
+                    }
                 }
             }
         }
