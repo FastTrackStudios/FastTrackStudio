@@ -66,31 +66,45 @@
   line-height: 21px;
 }
 
-/* Print-preview-style backdrop, centering a fixed-aspect "page". */
+/* Print-preview-style backdrop — a pannable/zoomable viewport (not a
+   scrolling container: pan/zoom is driven by a CSS transform on
+   `.kf-studio-pages`, set from Rust in live_editor.rs, matching the
+   drag-to-pan + wheel-to-zoom interaction keyflow-ui's native chart panels
+   use). `overflow: hidden` because the transform, not native scroll, moves
+   content around. */
 .kf-studio-preview-pane {
+  position: relative;
+  overflow: hidden;
   background: #26262b;
-  padding: 24px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  cursor: grab;
 }
 
-/* A4 aspect ratio (210mm x 297mm). Scales to fit the available height,
-   capped so it never grows wider than the pane. */
+.kf-studio-preview-pane:active {
+  cursor: grabbing;
+}
+
+/* Absolutely-positioned so it doesn't participate in normal flow — its
+   position comes entirely from the transform (translate + scale) applied
+   inline. Pages stack vertically inside at their true point-derived size
+   (see RenderedPage::width_px/height_px in live_editor.rs) — "actual size",
+   not stretched to fit the pane. */
+.kf-studio-pages {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
 .kf-studio-page {
-  aspect-ratio: 210 / 297;
-  height: 100%;
-  max-width: 100%;
   background: #ffffff;
   box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5);
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 .kf-render svg {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
 }
 
 .kf-render-error {

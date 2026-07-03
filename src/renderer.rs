@@ -16,8 +16,10 @@ use keyflow::engraver::style::MStyle;
 const SCREEN_DPI: f64 = 96.0;
 /// Points per inch (typographical standard)
 const POINTS_PER_INCH: f64 = 72.0;
-/// DPI scaling factor: converts points to screen pixels
-const DPI_SCALE: f64 = SCREEN_DPI / POINTS_PER_INCH;
+/// DPI scaling factor: converts points to screen pixels. Public so callers
+/// rendering pages at "true size" (e.g. the live studio preview) can convert
+/// a page's point dimensions to CSS pixels the same way export does.
+pub const DPI_SCALE: f64 = SCREEN_DPI / POINTS_PER_INCH;
 
 /// Chart layout and SVG/PDF export engine for the web.
 ///
@@ -301,12 +303,55 @@ impl ChartLayoutManager {
         Ok(svg_pages)
     }
 
+    /// Export each page as a font-less SVG, for a live/continuously-re-rendering
+    /// preview (e.g. on every debounced editor keystroke).
+    ///
+    /// Unlike [`export_pages_to_svg`](Self::export_pages_to_svg), this does NOT
+    /// embed font glyph data — it references the same family names
+    /// `editor_keyflow::font_face_css()` injects into the page once via
+    /// `@font-face`, so each render serializes ~KBs of paths instead of ~4MB of
+    /// re-embedded font data. Caller must inject that CSS itself.
+    ///
+    /// Returns `(width_pt, height_pt, svg)` per page — real A4/Letter point
+    /// dimensions, for rendering the preview at true paper size rather than
+    /// stretched to fit a container.
+    pub fn export_pages_to_svg_live(&self) -> Result<Vec<(f64, f64, String)>, String> {
+        use keyflow::engraver::export::{SvgExportConfig, SvgSerializer};
+
+        let layout = self
+            .layout_result
+            .as_ref()
+            .ok_or_else(|| "No layout available for export".to_string())?;
+
+        let page_info = self.get_page_info();
+
+        if page_info.is_empty() {
+            let bounds = layout.scene.compute_bounds();
+            let (width, height) = if bounds.width() > 0.0 && bounds.height() > 0.0 {
+                (bounds.x1 + 20.0, bounds.y1 + 20.0)
+            } else {
+                (595.0, 842.0)
+            };
+            let config = SvgExportConfig::for_page(0.0, 0.0, width, height);
+            let mut serializer = SvgSerializer::new(config);
+            return Ok(vec![(width, height, serializer.serialize(&layout.scene))]);
+        }
+
+        let mut pages = Vec::with_capacity(page_info.len());
+        for (_page_num, page_x, page_y, page_width, page_height) in page_info {
+            let config = SvgExportConfig::for_page(page_x, page_y, page_width, page_height);
+            let mut serializer = SvgSerializer::new(config);
+            let svg = serializer.serialize(&layout.scene);
+            pages.push((page_width, page_height, svg));
+        }
+        Ok(pages)
+    }
+
     /// Get page information for multi-page PDF export.
     ///
     /// Returns a vector of (page_number, x_offset, y_offset, width, height) for each page.
     /// Uses the offsets stored in each PageLayout, which were calculated during layout
     /// using the correct page gap and offset values.
-    #[allow(dead_code)]
     fn get_page_info(&self) -> Vec<(u32, f64, f64, f64, f64)> {
         self.layout_result
             .as_ref()
