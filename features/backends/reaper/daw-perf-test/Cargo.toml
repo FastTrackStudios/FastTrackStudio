@@ -33,7 +33,6 @@ fragile.workspace = true
 
 # VOX stream transport (for socket connection)
 vox-stream.workspace = true
-moire.workspace = true
 
 # Observability
 tracing.workspace = true
