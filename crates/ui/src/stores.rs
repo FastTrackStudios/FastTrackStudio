@@ -25,11 +25,13 @@
 //! (`src/optimistic.rs`), the task wiring shim, and the
 //! refresh-counter pages — see `plans/atom-store-migration.md`.
 
+use std::collections::HashSet;
+
 use architect::{
     AtomResult, Id, Mutation, Store, StoreEntity, use_mutation, use_store, use_store_entry,
     use_store_list,
 };
-use chrono::Utc;
+use chrono::{Datelike, NaiveDate, Utc, Weekday};
 use dioxus::prelude::*;
 use project::ProjectInfo;
 use task::TaskInfo as DbTask;
@@ -55,6 +57,7 @@ pub fn provide_stores() {
     provide_inbox_store();
     provide_booking_store();
     provide_event_type_store();
+    provide_dayplan_store();
     provide_session_store();
     provide_invoice_store();
     provide_thread_store();
@@ -1242,6 +1245,277 @@ impl EventTypeMutations {
         run_create(self.write, self.store, draft, move |et| async move {
             crate::feeds::create_event_type(&slug, et).await
         });
+    }
+}
+
+// ── day plans (the /schedule calendar's per-date plans) ─────────────
+
+/// One date's resolved plan as `/schedule` renders it: the saved
+/// [`DayPlan`](scheduling_proto::DayPlan) merged with the date's
+/// weekday/weekend template, plus which block ids are *soft* —
+/// template fallback rather than explicitly saved (rendered
+/// dashed/faded). A save persists the whole merged day and clears the
+/// soft set: every block is explicit from there on.
+#[derive(Clone, PartialEq)]
+pub struct DayPlanRow {
+    pub date: NaiveDate,
+    pub plan: scheduling_proto::DayPlan,
+    pub soft_ids: HashSet<String>,
+}
+
+impl StoreEntity for DayPlanRow {
+    type Key = NaiveDate;
+    fn key(&self) -> NaiveDate {
+        self.date
+    }
+}
+
+pub type DayPlanStore = Store<DayPlanRow, String>;
+
+pub fn provide_dayplan_store() -> DayPlanStore {
+    let store = use_store();
+    use_context_provider(move || store)
+}
+
+pub fn use_dayplan_store() -> DayPlanStore {
+    use_context()
+}
+
+/// The template a date defaults to: `weekend` for Sat/Sun, else
+/// `weekday`; falls back to the first template if those ids are absent.
+fn template_for(
+    date: NaiveDate,
+    templates: &[scheduling_proto::DayTemplate],
+) -> Option<&scheduling_proto::DayTemplate> {
+    let weekend = matches!(date.weekday(), Weekday::Sat | Weekday::Sun);
+    let want = if weekend { "weekend" } else { "weekday" };
+    templates
+        .iter()
+        .find(|t| t.id.0 == want)
+        .or_else(|| templates.first())
+}
+
+/// Resolve a date to the row the page renders: the saved plan's blocks
+/// verbatim (explicit) plus the matching template's blocks reflowed
+/// into the remaining free time as *soft* fallback (see
+/// `scheduling_proto::resolve::merge_template`). A date with no saved
+/// plan is the all-soft template; a *sparse* saved plan (e.g. only a
+/// scheduled meal block) still shows the rest of its day.
+fn resolve_day(
+    date: NaiveDate,
+    saved: Option<scheduling_proto::DayPlan>,
+    templates: &[scheduling_proto::DayTemplate],
+) -> DayPlanRow {
+    let tpl = template_for(date, templates);
+    let saved_blocks: &[scheduling_proto::PlannedBlock] =
+        saved.as_ref().map_or(&[], |p| &p.blocks.0);
+    let tpl_blocks: &[scheduling_proto::TimeBlock] = tpl.map_or(&[], |t| &t.blocks.0);
+    let merged = scheduling_proto::resolve::merge_template(saved_blocks, tpl_blocks);
+    let soft_ids: HashSet<String> = merged
+        .iter()
+        .filter(|rb| rb.soft)
+        .map(|rb| rb.block.id.0.clone())
+        .collect();
+    let plan = scheduling_proto::DayPlan {
+        date: date.to_string(),
+        from_template: saved
+            .and_then(|p| p.from_template)
+            .or_else(|| tpl.map(|t| t.id.clone())),
+        blocks: merged.into_iter().map(|rb| rb.block).collect(),
+    };
+    DayPlanRow {
+        date,
+        plan,
+        soft_ids,
+    }
+}
+
+/// Resolved plans for every date in the visible calendar `range`,
+/// materialized against the org's day `templates` (both owned by the
+/// page — `None` while either is still resolving keeps the phase at
+/// `Loading`). Scoped to the first selected org; navigating the
+/// calendar or switching orgs refetches the range while the last rows
+/// stay rendered (`Reloading`), never a blank calendar.
+#[allow(clippy::type_complexity)] // `AtomResult<Vec<(Id, T)>, _>` reads fine.
+pub fn use_dayplan_list(
+    range: Option<(NaiveDate, NaiveDate)>,
+    templates: Option<Vec<scheduling_proto::DayTemplate>>,
+) -> AtomResult<Vec<(Id<NaiveDate>, DayPlanRow)>, String> {
+    let (selection, orgs) = use_org_scope();
+    let store = use_dayplan_store();
+    let key = use_memo(use_reactive!(|(range, templates)| (range, templates)));
+    use_store_list(store, move || {
+        let slug = crate::orgs::selected_slugs(&selection.read(), &orgs.read())
+            .into_iter()
+            .next();
+        let (range, templates) = key();
+        let pending = match (slug, range, templates) {
+            (Some(slug), Some((start, end)), Some(tpls)) => Some((slug, start, end, tpls)),
+            _ => None,
+        };
+        async move {
+            let (slug, start, end, tpls) = pending?;
+            let mut rows = Vec::new();
+            let mut d = start;
+            while d <= end {
+                let saved = match crate::feeds::fetch_day_plan(&slug, &d.to_string()).await {
+                    Ok(saved) => saved,
+                    Err(e) => return Some(Err(e)),
+                };
+                rows.push(resolve_day(d, saved, &tpls));
+                let Some(next) = d.succ_opt() else { break };
+                d = next;
+            }
+            Some(Ok(rows))
+        }
+    })
+}
+
+fn clamp_time(min: u16) -> scheduling_proto::TimeOfDay {
+    scheduling_proto::TimeOfDay {
+        minutes_since_midnight: min.min(1440),
+    }
+}
+
+/// Optimistic writes for the schedule's per-day plans: every edit
+/// patches the date's store row synchronously, then persists the whole
+/// merged day (`save_day_plan`); a rejected write rolls the day back
+/// and reports to the Notifications tray.
+#[derive(Clone, Copy)]
+pub struct DayPlanMutations {
+    store: DayPlanStore,
+    write: Mutation<String>,
+}
+
+pub fn use_dayplan_mutations() -> DayPlanMutations {
+    DayPlanMutations {
+        store: use_dayplan_store(),
+        write: use_mutation(),
+    }
+}
+
+impl DayPlanMutations {
+    /// The shared save lifecycle: patch one date's plan, mark every
+    /// block explicit (clear the soft set — the save persists the whole
+    /// merged day), write it through.
+    fn save_day(
+        &self,
+        slug: String,
+        date: NaiveDate,
+        patch: impl FnOnce(&mut scheduling_proto::DayPlan),
+    ) {
+        let Some(mut row) = self.store.get_real(date) else {
+            return;
+        };
+        patch(&mut row.plan);
+        row.soft_ids.clear();
+        let plan = row.plan.clone();
+        self.write.run(
+            self.store,
+            move |s| s.update_optimistic(Id::Real(date), move |r| *r = row),
+            move || async move {
+                crate::feeds::save_day_plan(&slug, plan)
+                    .await
+                    .map(|()| None)
+            },
+        );
+    }
+
+    /// Relabel / retime / reassign one block (the block editor's Save).
+    pub fn save_block(
+        &self,
+        slug: String,
+        date: NaiveDate,
+        id: String,
+        label: String,
+        minutes: (u16, u16),
+        assignment: Option<scheduling_proto::BlockAssignment>,
+    ) {
+        self.save_day(slug, date, move |plan| {
+            if let Some(b) = plan.blocks.0.iter_mut().find(|b| b.id.0 == id) {
+                b.label = label;
+                b.start = clamp_time(minutes.0);
+                b.end = clamp_time(minutes.1);
+                b.assignment = assignment;
+            }
+        });
+    }
+
+    /// Set just a block's assignment (drag-a-task-onto-a-block).
+    pub fn assign_block(
+        &self,
+        slug: String,
+        date: NaiveDate,
+        id: String,
+        assignment: Option<scheduling_proto::BlockAssignment>,
+    ) {
+        self.save_day(slug, date, move |plan| {
+            if let Some(b) = plan.blocks.0.iter_mut().find(|b| b.id.0 == id) {
+                b.assignment = assignment;
+            }
+        });
+    }
+
+    /// Move/retime a block from a grid drag, possibly across days;
+    /// each affected day persists (and rolls back) independently.
+    pub fn move_block(
+        &self,
+        slug: String,
+        orig: NaiveDate,
+        target: NaiveDate,
+        id: String,
+        minutes: (u16, u16),
+    ) {
+        let (start, end) = (clamp_time(minutes.0), clamp_time(minutes.1));
+        if orig == target {
+            self.save_day(slug, orig, move |plan| {
+                if let Some(b) = plan.blocks.0.iter_mut().find(|b| b.id.0 == id) {
+                    b.start = start;
+                    b.end = end;
+                }
+            });
+            return;
+        }
+        // Cross-day: pull the block out of its origin day and drop it
+        // onto the target (both rows must be loaded).
+        let Some(src) = self.store.get_real(orig) else {
+            return;
+        };
+        if self.store.get_real(target).is_none() {
+            return;
+        }
+        let Some(mut blk) = src.plan.blocks.0.iter().find(|b| b.id.0 == id).cloned() else {
+            return;
+        };
+        blk.start = start;
+        blk.end = end;
+        {
+            let id = id.clone();
+            self.save_day(slug.clone(), orig, move |plan| {
+                plan.blocks.0.retain(|b| b.id.0 != id);
+            });
+        }
+        self.save_day(slug, target, move |plan| plan.blocks.0.push(blk));
+    }
+
+    /// Revert a date to its template: the all-soft day re-materializes
+    /// instantly, the saved plan behind it is deleted.
+    pub fn reset_day(
+        &self,
+        slug: String,
+        date: NaiveDate,
+        templates: &[scheduling_proto::DayTemplate],
+    ) {
+        let row = resolve_day(date, None, templates);
+        self.write.run(
+            self.store,
+            move |s| s.update_optimistic(Id::Real(date), move |r| *r = row),
+            move || async move {
+                crate::feeds::delete_day_plan(&slug, &date.to_string())
+                    .await
+                    .map(|()| None)
+            },
+        );
     }
 }
 
