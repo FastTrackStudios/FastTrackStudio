@@ -94,11 +94,11 @@ pub enum SessionCommand {
     /// Reads existing track names, classifies them via dynamic-template's
     /// monarchy sort + group rules (Drums / Guitars / Keys / Synths / Vocals / …),
     /// and writes a new RPP with tracks regrouped into folders. The source file
-    /// is never overwritten — output defaults to "<name> [FTS].rpp" next to it.
+    /// is never overwritten — output defaults to `"<name> [FTS].rpp"` next to it.
     AutoOrganize {
         /// Path to .RPP file to organize
         input: String,
-        /// Output path (default: "<input_stem> [FTS].rpp" next to input)
+        /// Output path (default: `"<input_stem> [FTS].rpp"` next to input)
         #[arg(short, long)]
         output: Option<String>,
     },
