@@ -61,6 +61,19 @@ struct RenderedPage {
     svg: String,
 }
 
+/// A blank A4 sheet (no SVG content — `.kf-studio-page`'s white background
+/// alone reads as an empty page). Used both as the initial state (before the
+/// first debounced render lands) and whenever the source doesn't yet produce
+/// any laid-out page (still writing the title/tempo/key, no section started
+/// yet, or a parse error) — the page should never simply disappear.
+fn blank_page() -> RenderedPage {
+    RenderedPage {
+        width_px: 595.0 * DPI_SCALE,
+        height_px: 842.0 * DPI_SCALE,
+        svg: String::new(),
+    }
+}
+
 /// Full-screen Keyflow editor studio: toolbar (export, overlay toggle) above
 /// a half/half editor + true-size, pannable/zoomable A4 preview split.
 #[component]
@@ -89,7 +102,7 @@ pub fn LiveEditor() -> Element {
     // (`export_pages_to_svg_live`), same performance reasoning as
     // `render_svg_live`: fonts are injected once below, so each pass
     // serializes glyph-less paths, not several MB of embedded font data.
-    let mut pages = use_signal(Vec::<RenderedPage>::new);
+    let mut pages = use_signal(|| vec![blank_page()]);
     let mut preview_gen = use_signal(|| 0u64);
     use_effect(move || {
         let src = state.read().doc.to_string();
@@ -104,16 +117,18 @@ pub fn LiveEditor() -> Element {
             }
 
             let rendered = (|| -> Result<Vec<RenderedPage>, String> {
-                let chart = keyflow::parse(&src).ok().filter(|c| !c.sections.is_empty());
-                let Some(chart) = chart else {
-                    return Ok(Vec::new());
+                // No `sections.is_empty()` filter — a metadata-only chart
+                // (title/tempo/key, no section yet) still lays out and
+                // engraves its header, it just has no staff systems yet.
+                let Some(chart) = keyflow::parse(&src).ok() else {
+                    return Ok(vec![blank_page()]);
                 };
                 let mut manager = ChartLayoutManager::new()?;
                 // `snippet_mode: false` -> full A4 paginated layout; the
                 // viewport-width arg is ignored in that mode (Page layout is
                 // always paginated_a4 regardless), so any value works here.
                 manager.layout_chart_for_export(&chart, 800.0, false);
-                let pages = manager
+                let pages: Vec<RenderedPage> = manager
                     .export_pages_to_svg_live()?
                     .into_iter()
                     .map(|(w_pt, h_pt, svg)| RenderedPage {
@@ -122,13 +137,17 @@ pub fn LiveEditor() -> Element {
                         svg,
                     })
                     .collect();
-                Ok(pages)
+                Ok(if pages.is_empty() {
+                    vec![blank_page()]
+                } else {
+                    pages
+                })
             })();
-
-            match rendered {
-                Ok(p) => pages.set(p),
-                Err(e) => tracing::warn!("keyflow live preview render failed: {e}"),
-            }
+            let rendered = rendered.unwrap_or_else(|e| {
+                tracing::warn!("keyflow live preview render failed: {e}");
+                vec![blank_page()]
+            });
+            pages.set(rendered);
         });
     });
 
