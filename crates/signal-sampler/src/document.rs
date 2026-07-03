@@ -201,8 +201,18 @@ pub enum DocEvent {
     Cc { cc: u8, val: u8 },
     /// Fire the legato transition into `note` NOW — scheduled `delay_ms`
     /// before the note's tick so the arrival lands on the grid. Emitted
-    /// INSTEAD of a `NoteOn` for legato-followed notes.
-    LegatoPrefire { note: u8, vel: u8, rr: u32 },
+    /// INSTEAD of a `NoteOn` for legato-followed notes. `lead` is the frame
+    /// distance to the destination tick (`tick = frame + lead`); the offline
+    /// walker ignores it, the realtime scheduler uses it to degrade a MISSED
+    /// prefire (transport started/seeked inside the lead window) into a
+    /// reactive note-on at the destination tick (see
+    /// [`document_rt`](crate::document_rt)).
+    LegatoPrefire {
+        note: u8,
+        vel: u8,
+        rr: u32,
+        lead: u32,
+    },
 }
 
 /// One scheduled event at an absolute frame from the document epoch.
@@ -232,6 +242,12 @@ pub struct Schedule {
     pub legato_count: usize,
     /// Notes pre-rolled as shorts.
     pub short_count: usize,
+    /// Largest [`DocEvent::LegatoPrefire::lead`] in the schedule (frames) —
+    /// bounds the realtime scheduler's missed-prefire back-scan on seek.
+    pub max_prefire_lead: u64,
+    /// The document's tempo map (copied through) so the realtime scheduler
+    /// can compare it against the host-reported tempo. Empty ⇒ 120 BPM.
+    pub tempo: Vec<TempoPoint>,
 }
 
 // ── Annotation (ported from keyflow-orchestra mirror.rs — keep in parity) ─────
@@ -540,6 +556,7 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
                         note: n.src.pitch,
                         vel,
                         rr,
+                        lead: 0, // filled in below, after the mono-order clamp
                     },
                 )
             } else {
@@ -555,6 +572,18 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
 
             let trigger_frame = trigger_frame.max(prev_trigger + 1).max(0);
             prev_trigger = trigger_frame;
+            // The prefire's lead is measured from its FINAL (clamped) trigger
+            // frame, so `frame + lead == destination tick` holds exactly.
+            let kind = if let DocEvent::LegatoPrefire { note, vel, rr, .. } = kind {
+                DocEvent::LegatoPrefire {
+                    note,
+                    vel,
+                    rr,
+                    lead: (start - trigger_frame).max(0) as u32,
+                }
+            } else {
+                kind
+            };
             let prio = match kind {
                 DocEvent::LegatoPrefire { .. } => 2,
                 _ => 3,
@@ -591,6 +620,14 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
     events.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
     let end_frame = events.last().map(|e| e.0).unwrap_or(0);
+    let max_prefire_lead = events
+        .iter()
+        .filter_map(|(_, _, _, kind)| match kind {
+            DocEvent::LegatoPrefire { lead, .. } => Some(*lead as u64),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
     Schedule {
         sample_rate,
         events: events
@@ -602,6 +639,8 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
         note_count: doc.notes.len(),
         legato_count,
         short_count,
+        max_prefire_lead,
+        tempo: doc.tempo.clone(),
     }
 }
 
@@ -836,7 +875,7 @@ fn walk_schedule(
                 bank.set_forced_rr(id, Some(rr));
                 bank.note_off_instrument_line(id, line, note);
             }
-            DocEvent::LegatoPrefire { note, vel, rr } => {
+            DocEvent::LegatoPrefire { note, vel, rr, .. } => {
                 bank.set_forced_rr(id, Some(rr));
                 bank.legato_prefire_line(id, line, note, vel);
             }

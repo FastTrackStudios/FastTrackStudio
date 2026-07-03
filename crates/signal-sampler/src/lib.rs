@@ -49,6 +49,7 @@ pub mod bank;
 pub mod block;
 pub mod convolver;
 pub mod document;
+pub mod document_rt;
 pub mod engine;
 pub mod engine_spec;
 pub mod instrument;
@@ -86,6 +87,7 @@ pub use document::{
     DocCc, DocEvent, DocNote, DocumentBusRenderResult, DocumentRenderOptions, DocumentRenderResult,
     Schedule, ScheduledEvent, TempoPoint, TrackDocument, annotate, line_for_chan,
 };
+pub use document_rt::{BlockTransport, RealtimeScheduler};
 pub use engine::cache::SignalPcmPack;
 pub use engine::{ArticClass, LegatoFireEvent, LineId, PlayMode, SampleEngine};
 pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
