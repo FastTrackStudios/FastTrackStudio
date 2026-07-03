@@ -12,7 +12,10 @@ description = "Module-system primitives — DawModule trait, ActionDef, PanelDef
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
-tokio = { workspace = true, features = ["rt"] }
+# Direct (not the workspace `full`-featured tokio) so wasm consumers of
+# this leaf crate (e.g. keyflow, which depends on it unconditionally) don't
+# drag in mio/net — same reasoning architect's own tokio dep documents.
+tokio = { version = "1", default-features = false, features = ["rt"] }
 tracing.workspace = true
 
 [lints]

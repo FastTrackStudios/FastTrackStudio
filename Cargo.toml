@@ -85,6 +85,7 @@ architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branc
 # VOX service framework — consumed from crates.io (upstream facet/vox monorepo).
 vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
 vox-types = { version = "0.10.0-rc.1" }
+vox-phon = { version = "0.10.0-rc.1" }
 vox-stream = { version = "0.10.0-rc.1" }
 
 # CLI

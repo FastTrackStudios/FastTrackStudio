@@ -60,8 +60,7 @@ fn mismatch<T>(step: u32, expected: &'static str) -> Result<T, BatchExtractError
 /// Flatten an application-level `DawResult` into the extraction
 /// error channel.
 fn flatten<T: Clone>(r: &DawResult<T>) -> Result<T, BatchExtractError> {
-    r.as_ref()
-        .map(T::clone)
+    r.clone()
         .map_err(|e| BatchExtractError::StepFailed(e.to_string()))
 }
 
