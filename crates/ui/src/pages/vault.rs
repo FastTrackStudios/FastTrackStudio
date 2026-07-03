@@ -990,9 +990,14 @@ async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, String> {
             .pages
             .into_iter()
             .filter(|p| {
+                // Notes AND base views — a `.base` is a first-class
+                // vault citizen (plans/vault-views.md): it appears in
+                // the tree, deep-links, and renders its view in place.
                 std::path::Path::new(&p.path)
                     .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                    .is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("base")
+                    })
             })
             .collect();
         pages.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
