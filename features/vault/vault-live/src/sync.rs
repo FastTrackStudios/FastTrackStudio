@@ -414,7 +414,23 @@ impl VaultSync for Backend {
                     aliases: fm.as_ref().map(fm_aliases).unwrap_or_default(),
                 }
             })
-            .collect();
+            .collect::<Vec<PageMeta>>();
+        let mut pages = pages;
+        // `.base` view files are first-class vault citizens
+        // (plans/vault-views.md): they appear in the folder index so
+        // the tree shows them and deep links resolve. Title = the
+        // basename; `page_type: "base"` lets clients badge them.
+        for b in &vault.bases {
+            pages.push(PageMeta {
+                path: b.rel_path.clone(),
+                basename: b.basename.clone(),
+                title: b.basename.clone(),
+                page_type: "base".to_string(),
+                folder: String::new(),
+                sha256: sha256_hex(b.raw.as_bytes()),
+                aliases: Vec::new(),
+            });
+        }
         Ok(FolderIndex {
             vault_id: vault_id.to_string(),
             pages,
