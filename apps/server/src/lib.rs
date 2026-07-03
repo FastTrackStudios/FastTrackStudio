@@ -164,6 +164,10 @@ pub struct OrgAppState {
     /// (`(entity_type, entity_id)`); SeaORM-backed. Mounted for the
     /// `ThreadsService` RPC surface.
     pub threads: threads::Store,
+    /// Per-user preferences — default page, task-board filter
+    /// defaults, last "I'm at" location; SeaORM-backed. Mounted for
+    /// the `PrefsService` RPC surface.
+    pub prefs: prefs::Store,
     /// Scheduling backend — day templates / availability under
     /// `vault/Projects/Scheduling/`. Mounted for `DayTemplates` so
     /// the app can overlay the daily plan on the calendar.
@@ -645,6 +649,17 @@ pub(crate) async fn build_org_state(
         .await?;
         let threads = threads::Store::new(threads_conn);
 
+        // Per-user preferences. SQLite at
+        // `<data_root>/orgs/<slug>/prefs.sqlite` (override via
+        // `TASK_SERVER_PREFS_URL`); migrations run on open.
+        let prefs_url = std::env::var("TASK_SERVER_PREFS_URL")
+            .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.prefs_db().display()));
+        let prefs_conn = open_sqlite_pool(scope, prefs_url, "prefs", |db| {
+            Box::pin(async move { prefs::Migrator::up(&db, None).await.map(|()| db) })
+        })
+        .await?;
+        let prefs = prefs::Store::new(prefs_conn);
+
         // Scheduling backend rooted at the same vault. Day templates
         // live under `Projects/Scheduling/templates/`; the kv/log
         // stores back bookings + slot caches we don't surface yet, so
@@ -923,6 +938,7 @@ pub(crate) async fn build_org_state(
             agent_tasks.conn().clone(),
             timer.conn().clone(),
             threads.conn().clone(),
+            prefs.conn().clone(),
             finance_conn.clone(),
         ];
 
@@ -958,6 +974,7 @@ pub(crate) async fn build_org_state(
             agent_dispatch_vault_root: vault_root,
             timer,
             threads,
+            prefs,
             scheduling,
             inbox,
             tags,
@@ -1306,6 +1323,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         agent_proto::service::threads::threads_rpc_service_descriptor(),
         timer_proto::service::timer_service_rpc_service_descriptor(),
         threads::service::threads_service_rpc_service_descriptor(),
+        prefs_proto::service::prefs_service_rpc_service_descriptor(),
         scheduling_proto::service::day_templates::day_templates_rpc_service_descriptor(),
         scheduling_proto::service::day_plans::day_plans_rpc_service_descriptor(),
         scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
@@ -1412,6 +1430,11 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             threads::service::threads_service_rpc_service_descriptor(),
             threads::service::serve(org.threads.clone()),
+        )
+        // Per-user preferences — get-with-defaults / upsert set.
+        .with(
+            prefs_proto::service::prefs_service_rpc_service_descriptor(),
+            prefs_proto::service::serve(org.prefs.clone()),
         )
         // Scheduling — day templates (drives the calendar overlay)
         // + per-date day plans (the day-by-day editor).

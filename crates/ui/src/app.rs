@@ -143,6 +143,8 @@ pub fn App() -> Element {
     // org-list signal above (auth talks to the home org's endpoint);
     // must precede the router so pages/presence can read the account.
     crate::auth::provide_auth();
+    // Per-user prefs (server-backed) — after auth, which it watches.
+    crate::prefs::provide_prefs();
 
     // Org-wide presence: join the active org's `DocPresence` channel
     // over the shared connection above (the hook reads the

@@ -276,6 +276,11 @@ impl OrgRoot {
     }
 
     #[must_use]
+    pub fn prefs_db(&self) -> PathBuf {
+        self.path.join("prefs.sqlite")
+    }
+
+    #[must_use]
     pub fn vault_dir(&self) -> PathBuf {
         self.path.join("vault")
     }
@@ -483,6 +488,7 @@ mod tests {
         let org = root.init_org("cody", "Cody", false).unwrap();
         assert_eq!(org.auth_db().file_name().unwrap(), "auth.sqlite");
         assert_eq!(org.timer_db().file_name().unwrap(), "timer.sqlite");
+        assert_eq!(org.prefs_db().file_name().unwrap(), "prefs.sqlite");
         assert!(org.vault_dir().exists());
         assert!(org.attachments_dir().exists());
     }

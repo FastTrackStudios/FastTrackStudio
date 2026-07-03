@@ -106,6 +106,7 @@ git-proto = { workspace = true, features = ["vox"] }
 # (`src/auth.rs`). `vox` feature only (no `server`), wasm-clean
 # like the other proto clients above.
 auth-proto = { workspace = true, features = ["vox"] }
+prefs-proto = { workspace = true, features = ["vox"] }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

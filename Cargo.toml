@@ -311,6 +311,13 @@ threads-proto = { path = "features/threads/threads-proto" }
 threads-db = { path = "features/threads/threads-db" }
 threads = { path = "features/threads/threads" }
 threads-ui = { path = "features/threads/threads-ui" }
+# Prefs feature — per-user app preferences (default landing page,
+# task-board filter defaults, last "I'm at" location). `prefs-proto`
+# is the wire contract (`UserPrefs` entity + slim `PrefsService`
+# get/set); `prefs` is the server-side SeaORM-backed impl. One row
+# per user; org scoping is the per-org `prefs.sqlite`.
+prefs-proto = { path = "features/prefs/prefs-proto" }
+prefs = { path = "features/prefs/prefs" }
 # Finance feature — double-entry ledger + invoicing + expenses.
 # `finance-proto` is the wire contract (Book/Account/Transaction/
 # Split/Party/Invoice/Payment/Expense entities, plus the

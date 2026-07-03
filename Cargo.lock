@@ -12463,6 +12463,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
+name = "prefs"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "prefs-proto",
+ "sea-orm",
+ "sea-orm-migration",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "prefs-proto"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?rev=6610c53bf8f99cf6c7c967fce80ed0378a58d5bf)",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "pretty_assertions"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15783,6 +15812,8 @@ dependencies = [
  "org-proto",
  "org-snapshot",
  "pantry",
+ "prefs",
+ "prefs-proto",
  "project",
  "rand 0.8.6",
  "regex",
@@ -17015,6 +17046,7 @@ dependencies = [
  "mealplan-proto",
  "milestone-proto",
  "pantry-proto",
+ "prefs-proto",
  "project",
  "resources-proto",
  "scheduling-proto",

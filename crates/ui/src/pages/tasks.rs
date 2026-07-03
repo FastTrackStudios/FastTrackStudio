@@ -23,30 +23,22 @@
 use dioxus::prelude::*;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
 
-use crate::auth::AuthCtx;
 use crate::chrome::use_second_tick;
 use crate::orgs::{OrgMeta, OrgSelection};
-use crate::{prefs, stores};
+use crate::prefs::PrefsCtx;
+use crate::stores;
 
-const PREF_ACTIVE: &str = "tasks.active";
-const PREF_RELEVANT: &str = "tasks.relevant";
-
-/// The signed-in account's email, for pref scoping ("" until auth
-/// resolves — reads fall back to the defaults).
-fn account_email(ctx: &AuthCtx) -> String {
-    ctx.active
-        .read()
-        .as_ref()
-        .map(|a| a.email.clone())
-        .unwrap_or_default()
-}
+/// The "I'm at:" choices — matched against `@<location>` gate
+/// contexts by the relevance rules. FUTURE: personal named
+/// locations on the prefs entity.
+const LOCATIONS: &[&str] = &["home", "studio", "out"];
 
 #[component]
 pub fn TasksView() -> Element {
     let nav = use_navigator();
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let auth = use_context::<AuthCtx>();
+    let prefs_ctx = use_context::<PrefsCtx>();
 
     let result = stores::use_task_list();
     let muts = stores::use_task_mutations();
@@ -54,9 +46,12 @@ pub fn TasksView() -> Element {
     let sessions = stores::use_session_list();
     let projects = stores::use_project_list();
 
-    let email = account_email(&auth);
-    let mut active_only = use_signal(|| prefs::load_bool(&email, PREF_ACTIVE, true));
-    let mut relevant_only = use_signal(|| prefs::load_bool(&email, PREF_RELEVANT, true));
+    // Server-backed per-user prefs — reading the signal makes the
+    // chips follow the account (switch users, keep your setup).
+    let user_prefs = prefs_ctx.prefs.read().clone();
+    let active_only = user_prefs.tasks_active;
+    let relevant_only = user_prefs.tasks_relevant;
+    let at_location = user_prefs.location.clone();
 
     // The running timer session's project — relevance boosts its
     // sibling tasks to the top ("if my timer is on a project,
@@ -73,18 +68,18 @@ pub fn TasksView() -> Element {
             let ctx = task::RelevanceContext {
                 local_hhmm: Some(now.format("%H:%M").to_string()),
                 local_date: Some(now.format("%Y-%m-%d").to_string()),
-                // FUTURE(plans/relevancy-and-inbox.md): location +
-                // device from an "I'm at:" switcher / user-agent.
-                location: None,
+                // FUTURE(plans/relevancy-and-inbox.md): device from
+                // user-agent.
+                location: (!at_location.is_empty()).then(|| at_location.clone()),
                 device: None,
                 active_project,
             };
             let mut domain: Vec<&task::TaskInfo> = rows.iter().map(|(_, r)| &r.task).collect();
             let total = domain.len();
-            if active_only() {
+            if active_only {
                 domain.retain(|t| task::status_is_open(&t.status));
             }
-            if relevant_only() {
+            if relevant_only {
                 domain.retain(|t| task::is_relevant(t, &ctx));
                 // One next action per project — the Relevant view is
                 // "what would I do right now", not the project backlog.
@@ -129,27 +124,32 @@ pub fn TasksView() -> Element {
                 })
                 .map(|t| stores::to_ui(t));
 
-            let email_a = email.clone();
-            let email_r = email.clone();
+            let location_value = at_location.clone();
             let chips = rsx! {
                 div { class: "flex items-center gap-1.5",
                     FilterChip {
                         label: "Active",
                         title: "Hide done/cancelled tasks",
-                        on: active_only(),
-                        on_toggle: move |on| {
-                            active_only.set(on);
-                            prefs::save_bool(&email_a, PREF_ACTIVE, on);
-                        },
+                        on: active_only,
+                        on_toggle: move |on| prefs_ctx.update(|p| p.tasks_active = on),
                     }
                     FilterChip {
                         label: "Relevant",
                         title: "Only what matters right now — routines in their time windows, deadlines always, timer project first",
-                        on: relevant_only(),
-                        on_toggle: move |on| {
-                            relevant_only.set(on);
-                            prefs::save_bool(&email_r, PREF_RELEVANT, on);
-                        },
+                        on: relevant_only,
+                        on_toggle: move |on| prefs_ctx.update(|p| p.tasks_relevant = on),
+                    }
+                    // "I'm at:" — feeds the @location relevance gates
+                    // and persists per user.
+                    select {
+                        class: "rounded-full border border-border bg-transparent px-2 py-0.5 text-xs text-muted-foreground outline-none focus:border-primary/50",
+                        title: "Where you are — @home/@studio/@out tasks gate on this",
+                        value: "{location_value}",
+                        onchange: move |e| prefs_ctx.update(|p| p.location = e.value()),
+                        option { value: "", selected: location_value.is_empty(), "anywhere" }
+                        for loc in LOCATIONS {
+                            option { key: "{loc}", value: "{loc}", selected: location_value == *loc, "@{loc}" }
+                        }
                     }
                     if hidden > 0 {
                         span { class: "text-xs tabular-nums text-muted-foreground", "{hidden} hidden" }
