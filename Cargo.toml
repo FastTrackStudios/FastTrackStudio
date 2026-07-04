@@ -1,0 +1,54 @@
+[package]
+name = "midicore"
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+description = "Ergonomic, backend-agnostic MIDI — facet-typed events with a byte codec plus #[architect::rpc] source/sink/backend services that concrete I/O adapters plug into (in-process or over vox RPC)."
+repository = "https://codeberg.org/FastTrackStudios/midicore"
+
+[features]
+# `vox` turns on the #[architect::rpc] service surface (client + dispatcher +
+# streaming). The architect-rpc-derive macro checks this consumer-crate flag
+# via `#[cfg_attr(feature = "vox", ::architect::vox::service)]`. Drop it to use
+# the plain event types + codec without pulling the RPC stack.
+default = ["vox"]
+vox = []
+
+[dependencies]
+# facet is the wire-reflection layer every payload type derives.
+facet = { version = "0.50.0-rc.1" }
+# vox — the RPC transport; `Tx<T>`/`Rx<T>` back the streaming input service.
+vox = { version = "0.10.0-rc.1" }
+vox-types = { version = "0.10.0-rc.1" }
+# architect — provides `#[architect::rpc]`. `vox` feature emits the async
+# client + dispatcher from the sync-looking trait.
+architect = { path = "../../architect/macros/architect", features = ["vox"] }
+
+[dev-dependencies]
+
+# ── Vendored patches (mirrors architect/signal) ──────────────────────
+# architect's graph reaches moire (via vox); pin every moire crate to the FTS
+# fork at one rev so there's a single runtime graph (avoids the duplicate
+# `#[ctor]` runtime crash).
+[patch."https://github.com/bearcove/moire"]
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+[patch.crates-io]
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
