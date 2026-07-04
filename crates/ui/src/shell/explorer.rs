@@ -143,15 +143,15 @@ pub fn VaultExplorer() -> Element {
         _ => None,
     });
 
-    // Collapsed folder basenames / tag paths. Starts empty (all
-    // expanded) — the vault is the home screen now; hiding it by
-    // default hides the system.
-    // "untagged" starts collapsed — the section exists to be
-    // ignorable.
-    let collapsed =
-        use_signal(|| std::collections::HashSet::<String>::from(["untagged".to_string()]));
-    // Virtual-folder organization: tags by default, folder notes on
-    // toggle. FUTURE: persist on the prefs entity.
+    // Collapsed folder basenames / tag paths. Only the leftover
+    // sections (Untagged / Unfiled) start collapsed — they exist to
+    // be ignorable; everything else starts expanded because hiding
+    // the vault by default hides the system.
+    let collapsed = use_signal(|| {
+        std::collections::HashSet::<String>::from(["untagged".to_string(), "unfiled".to_string()])
+    });
+    // Virtual-folder organization: folder/up properties by default,
+    // tags on toggle. FUTURE: persist on the prefs entity.
     let mut mode = use_signal(|| ExplorerMode::Folders);
 
     // Selection = the current route's vault path.
