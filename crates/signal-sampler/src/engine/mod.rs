@@ -96,10 +96,6 @@ const OUTPUT_MAKEUP: f32 = 1.995_262; // +6 dB = 10^(6/20)
 /// at full level — just enough to avoid an onset click without slowing the attack.
 const SUSTAIN_DECLICK_MS: u32 = 12;
 
-/// CSS legato is recorded on the whole-tone grid: each directional transition
-/// spans one whole step (2 semitones) from its source-labelled note.
-const LEGATO_GRID_SEMITONES: u8 = 2;
-
 /// Gain scale for recorded release-tail samples (NVrel/Vsusrel). They're
 /// normalised loud; played at unity they spike louder than the note. CSS's
 /// release is a subtle tail under the decay — keep it well below the note.
@@ -903,6 +899,23 @@ impl SampleEngine {
     /// channel→line allocator: chan N → line N) so every divisi line runs its
     /// own prefired mono legato.
     pub fn legato_prefire_line(&mut self, line: LineId, note: u8, velocity: u8) {
+        self.legato_prefire_line_lead(line, note, velocity, None);
+    }
+
+    /// [`legato_prefire_line`](Self::legato_prefire_line) carrying the
+    /// schedule's prefire lead (frames from this call to the destination
+    /// tick). The engine aligns the transition sample's MEASURED lead-in to
+    /// it: a sample with a longer lead-in starts partway in, a shorter one
+    /// is held back on a countdown — either way the pitch change lands
+    /// exactly on the tick. `None` = fire now, arrival lands wherever the
+    /// sample's own lead-in puts it (live/back-compat behaviour).
+    pub fn legato_prefire_line_lead(
+        &mut self,
+        line: LineId,
+        note: u8,
+        velocity: u8,
+        sched_lead: Option<u64>,
+    ) {
         self.set_active_line(line);
         if velocity == 0 {
             self.note_off_line(line, note);
@@ -927,13 +940,39 @@ impl SampleEngine {
                 self.trigger_zoned_sustain(note);
                 self.line_mut().note = Some(note);
             }
-            // Fire the transition immediately — no Pending countdown. The
-            // caller already subtracted the velocity-mapped delay from the
-            // trigger time, so the arrival lands on the destination tick.
+            // Fire the transition — no reactive countdown. The scheduler
+            // subtracted the measured lead-in from the trigger time; if the
+            // zone that will actually play has a SHORTER lead-in (e.g. a
+            // different CC1 layer than the schedule's estimate), hold the
+            // fire back by the difference so the arrival still lands on the
+            // destination tick. (NOT counted as a reactive fire.)
             Some(cur) => {
                 let (_delay_ms, portamento) = self.legato_timing(velocity);
                 self.play_direction = if note >= cur { "up" } else { "down" }.to_string();
-                self.fire_legato(cur, note, velocity, portamento);
+                if let Some(lead) = sched_lead {
+                    if let Some(zone_lead) = self.transition_lead_frames(cur, note, portamento) {
+                        if zone_lead < lead {
+                            // Hold the fire back so the arrival lands ON the
+                            // tick (fires via the render countdown; NOT a
+                            // reactive fire — the counter is untouched).
+                            self.line_mut().state = LegatoState::Pending {
+                                frames_remaining: (lead - zone_lead) as usize,
+                                from_note: cur,
+                                to_note: note,
+                                to_note_velocity: velocity,
+                                portamento,
+                            };
+                            return;
+                        }
+                        // Longer lead-in than scheduled: fire now, skipping
+                        // the surplus off the sample's front.
+                        self.fire_legato_with_lead(cur, note, velocity, portamento, Some(lead));
+                        return;
+                    }
+                }
+                // No measurement (legacy library) or live prefire: fire now,
+                // the sample's own lead-in lands wherever it lands.
+                self.fire_legato_with_lead(cur, note, velocity, portamento, None);
             }
         }
     }
@@ -970,19 +1009,28 @@ impl SampleEngine {
                 .articulation(a)
                 .and_then(|art| art.release_artic.clone())
         };
-        // And the legato + portamento TRANSITION articulations (Leg/NVLeg/port),
-        // which `spawn_legato_transition` fires on overlapping notes — same
-        // cache-miss-→-silent trap as releases. warm_note ignores direction, so
-        // both up/down transitions warm. find_legato_artic_id(false) keys off the
-        // current articulation; warm it plus its release for the tail.
-        let leg = self.find_legato_artic_id(false);
-        let leg_rel = leg.as_deref().and_then(rel);
+        // And the legato + portamento TRANSITION articulations (Leg/NVLeg/
+        // Legzero/NVLegzero/Port), which `spawn_legato_transition` fires on
+        // overlapping notes — same cache-miss-→-silent trap as releases.
+        // warm_note ignores direction, so both up/down transitions warm.
+        // BOTH sides of each CC2 pair warm (the vibrato crossfade can call
+        // either at any time — a CC2-low prefire plays NVLeg even when the
+        // pinned articulation is the vibrato sustain).
+        let (leg_nv, leg_vib) = self.legato_pair_ids(false);
+        let (zero_nv, zero_vib) = self.legato_pair_ids(true);
+        let leg_rel = leg_nv
+            .as_deref()
+            .and_then(rel)
+            .or_else(|| leg_vib.as_deref().and_then(rel));
         let warm_ids: Vec<String> = [
             artic.clone(),
             vib_pair.clone(),
             artic.as_deref().and_then(rel),
             vib_pair.as_deref().and_then(rel),
-            leg,
+            leg_nv,
+            leg_vib,
+            zero_nv,
+            zero_vib,
             leg_rel,
             self.find_port_artic_id(),
         ]
@@ -1912,51 +1960,273 @@ impl SampleEngine {
         (delay_ms, portamento)
     }
 
-    /// Spawn the directional legato TRANSITION sample into `to` (a one-shot
-    /// `Leg`/`NVLeg`/`Port` recording carrying the bow change). The sustained
-    /// body is started separately by the caller.
-    fn spawn_legato_transition(&mut self, to: u8, direction: &str, velocity: u8, portamento: bool) {
+    /// Spawn the legato TRANSITION sample(s) for the move `from → to` (the
+    /// one-shot `Leg`/`NVLeg`/`Port` recordings carrying the bow change; the
+    /// long-form sample also holds the arrived note by looping its tail).
+    ///
+    /// CSS transition naming (verified empirically — see the generator in
+    /// sample-collector's `sc-import css-legato-fix`): the sample's
+    /// `root_key` is the LOWER pitch of the pair, `direction` says which end
+    /// is the source (`up` = root→root+interval, `down` = the reverse), and
+    /// `interval` is the semitone distance (1..=12, whole-tone root grid).
+    /// So the zone for `from → to` is: direction `sign(to-from)`, named note
+    /// `min(from,to)`, interval `|to-from|` clamped to an octave. The chosen
+    /// zone is pitch-shifted so the DESTINATION lands exactly on `to` —
+    /// guaranteed by construction even when the interval or root had to be
+    /// approximated (only the lead-in's source end is then off, and the real
+    /// source voice is still sounding over it).
+    ///
+    /// Same-pitch re-bows (`from == to`) use the `Legzero` re-trigger
+    /// samples (destination note only, no lead-in, 3 RRs).
+    ///
+    /// Vibrato: like the sustains, the Leg/NVLeg transition sets are a CC2
+    /// crossfade pair — both sides spawn at equal-power gains.
+    ///
+    /// `sched_lead` is the document scheduler's prefire lead in frames (the
+    /// transition fires that early so the pitch change lands on the
+    /// destination tick). When the chosen zone's measured lead-in is LONGER
+    /// than the scheduled lead, the surplus is skipped off the front of the
+    /// sample so the arrival still lands on the tick.
+    fn spawn_legato_transition(
+        &mut self,
+        from: u8,
+        to: u8,
+        velocity: u8,
+        portamento: bool,
+        sched_lead: Option<u64>,
+    ) {
         let _ = velocity;
-        let leg_id = if portamento {
+        if portamento {
+            // Portamento glides: single `Port` articulation (one `f` dynamic,
+            // no vibrato pair), volume from CC5 "Portamento Volume".
+            let id = self
+                .find_port_artic_id()
+                .or_else(|| self.find_legato_artic_id(false));
+            if let Some(id) = id {
+                self.spawn_transition_voice(&id, from, to, self.cc5_porta_volume, sched_lead);
+            }
+            return;
+        }
+        let (nv_id, vib_id) = self.legato_pair_ids(from == to);
+        let (nv_scale, vb_scale) = Self::equal_power(self.cc2_blend());
+        let mut spawned = false;
+        for (id, scale) in [(nv_id, nv_scale), (vib_id, vb_scale)] {
+            let Some(id) = id else { continue };
+            // A fully-crossfaded-out side is skipped — unless it is the only
+            // side present (mono-set libraries keep sounding regardless of CC2).
+            if scale <= 0.001 && spawned {
+                continue;
+            }
+            self.spawn_transition_voice(&id, from, to, scale.max(0.001), sched_lead);
+            spawned = true;
+        }
+    }
+
+    /// The non-vibrato / vibrato legato articulation pair for the CC2
+    /// crossfade — (`NVLeg`, `Leg`), or the `*zero` re-trigger pair when
+    /// `retrigger`. Either side may be absent.
+    fn legato_pair_ids(&self, retrigger: bool) -> (Option<String>, Option<String>) {
+        let want_sord = self.articulation.starts_with("Sord");
+        let mut nv = None;
+        let mut vib = None;
+        for a in &self.patch.spec.articulations {
+            if a.kind != ArticulationKind::Legato {
+                continue;
+            }
+            if a.id.starts_with("Sord") != want_sord {
+                continue;
+            }
+            let id_lower = a.id.to_lowercase();
+            if id_lower.contains("port") || id_lower.contains("zero") != retrigger {
+                continue;
+            }
+            let is_nv = id_lower.contains("nv") || id_lower.contains("nonvib");
+            let slot = if is_nv { &mut nv } else { &mut vib };
+            if slot.is_none() {
+                *slot = Some(a.id.clone());
+            }
+        }
+        (nv, vib)
+    }
+
+    /// Spawn one transition voice from articulation `leg_id` for `from → to`
+    /// (see [`spawn_legato_transition`](Self::spawn_legato_transition) for
+    /// the selection rules).
+    fn spawn_transition_voice(
+        &mut self,
+        leg_id: &str,
+        from: u8,
+        to: u8,
+        gain: f32,
+        sched_lead: Option<u64>,
+    ) {
+        // Dynamic layer for the transition from CC1 (single dominant layer).
+        let (lo, hi, blend) = self.layers_for_artic(leg_id);
+        let dynamic = if blend >= 0.5 { hi } else { lo };
+        if from == to {
+            // Re-bow: `Legzero` destination-note re-trigger (3 RRs, no lead-in).
+            let rr = self
+                .forced_rr
+                .map(|f| f as usize)
+                .unwrap_or(self.zone_rr_counter);
+            if let Some(idx) = self.find_layer_zone(leg_id, "", &dynamic, to, rr) {
+                self.spawn_zone_voice(idx, to, VoiceKind::Legato, gain, None, 0.0);
+            }
+            return;
+        }
+        let direction = if to > from { "up" } else { "down" };
+        let named = from.min(to);
+        // CSS samples nothing beyond an octave: clamp and pitch-shift so the
+        // destination stays exact (the lead-in's source end lands an octave
+        // off, under the still-sounding real source voice).
+        let interval = u32::from(from.abs_diff(to)).min(12);
+        let Some(idx) = self.find_transition_zone(leg_id, direction, &dynamic, named, interval)
+        else {
+            return;
+        };
+        let z = &self.patch.spec.zones[idx];
+        // The sample's destination pitch is root (down) or root+interval
+        // (up); the voice plays at `to - root + pitch_offset` semitones, so
+        // this offset makes the destination land exactly on `to` no matter
+        // which zone was chosen.
+        let pitch_offset = if z.direction.eq_ignore_ascii_case("up") {
+            -f64::from(z.interval)
+        } else {
+            0.0
+        };
+        // The measured lead-in is in SAMPLE time; playback runs at `rate`,
+        // so the surplus skipped off the front must be `sched_lead` WALL
+        // frames short of the lead-in in sample frames.
+        let rate = 2.0f64.powf((f64::from(to) - f64::from(z.root_key) + pitch_offset) / 12.0);
+        let lead_sample_frames =
+            ms_to_frames(z.lead_in_ms.max(0.0).round() as u32, self.sample_rate) as u64;
+        // Prefired short? Skip the surplus lead-in so the arrival lands on
+        // the destination tick anyway.
+        let start_offset = match sched_lead {
+            Some(lead) => {
+                let lead_in_sample = (lead as f64 * rate) as u64;
+                lead_sample_frames.saturating_sub(lead_in_sample) as usize
+            }
+            None => 0,
+        };
+        let ok = self.spawn_zone_voice_at(
+            idx,
+            to,
+            VoiceKind::Legato,
+            gain,
+            None,
+            pitch_offset,
+            start_offset,
+        );
+        if std::env::var_os("SIGNAL_LEGATO_DEBUG").is_some() {
+            eprintln!(
+                "LEGATO {}→{} zone={} root={} int={} dir={} lead_ms={} sched={:?} offset={} pitch_off={} spawned={}",
+                from,
+                to,
+                self.patch.spec.zones[idx].file,
+                self.patch.spec.zones[idx].root_key,
+                self.patch.spec.zones[idx].interval,
+                self.patch.spec.zones[idx].direction,
+                self.patch.spec.zones[idx].lead_in_ms,
+                sched_lead,
+                start_offset,
+                pitch_offset,
+                ok,
+            );
+        }
+    }
+
+    /// Measured lead-in (frames) of the transition zone that WOULD be picked
+    /// for `from → to` right now (dominant CC2 side, current CC1 layer) —
+    /// the document prefire path uses this to decide whether to hold the
+    /// fire back so the pitch change lands exactly on the destination tick.
+    ///
+    /// `None` = no measurement available (legacy library without per-zone
+    /// `lead_in_ms`): callers keep the legacy fire-at-prefire behaviour.
+    fn transition_lead_frames(&self, from: u8, to: u8, portamento: bool) -> Option<u64> {
+        if from == to {
+            // Legzero re-triggers genuinely have no lead-in — but only for
+            // libraries that carry measurements at all.
+            return self.patch.spec.has_measured_legato().then_some(0);
+        }
+        let id = if portamento {
             self.find_port_artic_id()
                 .or_else(|| self.find_legato_artic_id(false))
         } else {
-            self.find_legato_artic_id(false)
+            let (nv, vib) = self.legato_pair_ids(false);
+            let (nv_scale, vb_scale) = Self::equal_power(self.cc2_blend());
+            if vb_scale >= nv_scale {
+                vib.or(nv)
+            } else {
+                nv.or(vib)
+            }
         };
-        let Some(leg_id) = leg_id else {
-            return;
-        };
-        // Dynamic layer for the transition from CC1 (single dominant layer).
-        let (lo, hi, blend) = self.layers_for_artic(&leg_id);
+        let id = id?;
+        let (lo, hi, blend) = self.layers_for_artic(&id);
         let dynamic = if blend >= 0.5 { hi } else { lo };
-        // Portamento glides use CC5 "Portamento Volume"; normal transitions full.
-        let gain = if portamento {
-            self.cc5_porta_volume
-        } else {
-            1.0
-        };
-        let rr = self
-            .forced_rr
-            .map(|f| f as usize)
-            .unwrap_or(self.zone_rr_counter);
-        // CSS legato samples are SOURCE-labelled whole-tone transitions: "up_C#"
-        // is C#→D# (a whole step UP from the labelled note), "down_X" is X→X-2.
-        // Looking one up by `to` and playing it as-is landed a whole step too
-        // high (C→D came out as D→E). Tag/select by `to` (so note-off + silence
-        // find this voice), but pitch DOWN a grid step (up) / up (down) so the
-        // transition's END lands on `to`. The looped tail holds the arrived note.
-        let src = if direction.eq_ignore_ascii_case("down") {
-            to.saturating_add(LEGATO_GRID_SEMITONES)
-        } else {
-            to.saturating_sub(LEGATO_GRID_SEMITONES)
-        };
-        // Select the transition by its SOURCE-labelled note, but tag the voice
-        // with `to` (so note-off/silence find it) and offset the pitch so the
-        // arrived note still lands on `to`.
-        let pitch_offset = src as f64 - to as f64;
-        if let Some(idx) = self.find_layer_zone(&leg_id, direction, &dynamic, src, rr) {
-            self.spawn_zone_voice(idx, to, VoiceKind::Legato, gain, None, pitch_offset);
+        let direction = if to > from { "up" } else { "down" };
+        let named = from.min(to);
+        let interval = u32::from(from.abs_diff(to)).min(12);
+        let idx = self.find_transition_zone(&id, direction, &dynamic, named, interval)?;
+        let z = &self.patch.spec.zones[idx];
+        if z.lead_in_ms <= 0.0 {
+            return None;
         }
+        // Convert the sample-time lead-in to WALL frames at the playback
+        // rate this zone will actually get (destination pinned to `to`).
+        let pitch_offset = if z.direction.eq_ignore_ascii_case("up") {
+            -f64::from(z.interval)
+        } else {
+            0.0
+        };
+        let rate = 2.0f64.powf((f64::from(to) - f64::from(z.root_key) + pitch_offset) / 12.0);
+        let sample_frames = ms_to_frames(z.lead_in_ms.round() as u32, self.sample_rate) as f64;
+        Some((sample_frames / rate) as u64)
+    }
+
+    /// Pick the transition zone for (articulation, direction, dynamic,
+    /// named lower note, interval): exact interval at the nearest recorded
+    /// root wins; otherwise nearest interval, nearest root. Honours the solo
+    /// mic. Destination-pitch correctness never depends on this choice (the
+    /// caller re-tunes), only lead-in realism does.
+    fn find_transition_zone(
+        &self,
+        artic: &str,
+        direction: &str,
+        dynamic: &str,
+        named: u8,
+        interval: u32,
+    ) -> Option<usize> {
+        let mut best: Option<(u32, usize)> = None;
+        for (i, z) in self.patch.spec.zones.iter().enumerate() {
+            if !zone_trigger_matches(z, ZoneTrigger::Attack) {
+                continue;
+            }
+            if z.interval == 0 || !z.articulation.eq_ignore_ascii_case(artic) {
+                continue;
+            }
+            if !z.direction.eq_ignore_ascii_case(direction) {
+                continue;
+            }
+            if !dynamic.is_empty()
+                && !z.dynamic.is_empty()
+                && !z.dynamic.eq_ignore_ascii_case(dynamic)
+            {
+                continue;
+            }
+            if let Some(solo) = &self.solo_mic {
+                if !z.mic.eq_ignore_ascii_case(solo) {
+                    continue;
+                }
+            }
+            let d_int = z.interval.abs_diff(interval);
+            let d_root = u32::from(z.root_key.abs_diff(named));
+            let score = d_int * 100 + d_root;
+            if best.is_none_or(|(s, _)| score < s) {
+                best = Some((score, i));
+            }
+        }
+        best.map(|(_, i)| i)
     }
 
     /// Spawn the recorded RELEASE sample (e.g. `NVrel`/`Vsusrel`) for the
@@ -2054,6 +2324,24 @@ impl SampleEngine {
         dyn_layer: Option<DynLayer>,
         pitch_offset: f64,
     ) -> bool {
+        self.spawn_zone_voice_at(idx, note, kind, gain_scale, dyn_layer, pitch_offset, 0)
+    }
+
+    /// [`spawn_zone_voice`](Self::spawn_zone_voice) starting `start_offset`
+    /// frames INTO the zone's window — the legato prefire path skips the
+    /// surplus of a transition sample's measured lead-in so the pitch change
+    /// lands exactly on the destination tick.
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_zone_voice_at(
+        &mut self,
+        idx: usize,
+        note: u8,
+        kind: VoiceKind,
+        gain_scale: f32,
+        dyn_layer: Option<DynLayer>,
+        pitch_offset: f64,
+        start_offset: usize,
+    ) -> bool {
         // Copy out the zone fields up front so no borrow of `self.patch`
         // outlives the `&mut self` cache-miss bookkeeping below.
         let z = &self.patch.spec.zones[idx];
@@ -2138,7 +2426,9 @@ impl SampleEngine {
         // Play from the sample's actual start so the recorded attack (the bow
         // onset) is heard — we want the start of the sample, not a mid-sample
         // jump. The loop below still holds the body for indefinite sustain.
-        let start_frame = sample_start as usize;
+        // (`start_offset` shifts into the window for prefired legato
+        // transitions whose measured lead-in exceeds the scheduled lead.)
+        let start_frame = sample_start as usize + start_offset;
 
         // Attack envelope on the sustained body only (the legato transition and
         // shorts keep their natural recorded attack).
@@ -2932,6 +3222,22 @@ impl SampleEngine {
     }
 
     fn fire_legato(&mut self, from_note: u8, to_note: u8, velocity: u8, portamento: bool) {
+        self.fire_legato_with_lead(from_note, to_note, velocity, portamento, None);
+    }
+
+    /// [`fire_legato`](Self::fire_legato) with the document scheduler's
+    /// prefire lead (frames until the destination tick) — the transition
+    /// sample's surplus lead-in is skipped so the pitch change lands exactly
+    /// on the tick, and the old note crossfades out across the audible
+    /// lead-in.
+    fn fire_legato_with_lead(
+        &mut self,
+        from_note: u8,
+        to_note: u8,
+        velocity: u8,
+        portamento: bool,
+        sched_lead: Option<u64>,
+    ) {
         if self.legato_fire_log_enabled && self.legato_fire_log.len() < LEGATO_FIRE_LOG_CAP {
             self.legato_fire_log.push(LegatoFireEvent {
                 frame: self.frames_rendered,
@@ -2945,9 +3251,17 @@ impl SampleEngine {
         let direction = if to_note > from_note { "up" } else { "down" };
 
         // Fade out old sustain voice — on THIS line only, so a unison note
-        // held by another divisi line keeps sounding.
+        // held by another divisi line keeps sounding. The fade spans the
+        // transition sample's audible lead-in (during which the transition
+        // itself sounds the source note), i.e. a true crossfade: old voice
+        // out, recorded bow-change in, pitch change on the tick.
+        let zone_lead = self.transition_lead_frames(from_note, to_note, portamento);
+        let audible_lead = zone_lead
+            .map(|zl| sched_lead.map_or(zl, |l| l.min(zl)) as usize)
+            .unwrap_or(0);
+        let fade = self.legato_fade_frames.max(audible_lead);
         self.voices
-            .silence_note_line(self.cur_line as u8, from_note, self.legato_fade_frames);
+            .silence_note_line(self.cur_line as u8, from_note, fade);
 
         // Zoned libraries (CSS): play the directional legato TRANSITION sample
         // (the recorded bow change into the target) as a one-shot, then start
@@ -2960,7 +3274,7 @@ impl SampleEngine {
             // a sustain body — that doubles the note into a chorus ("weird"
             // legato). If no legato sample exists, fall back to the sustain body.
             let before = self.voices.active_count();
-            self.spawn_legato_transition(to_note, direction, velocity, portamento);
+            self.spawn_legato_transition(from_note, to_note, velocity, portamento, sched_lead);
             self.line_mut().note = Some(to_note);
             if self.voices.active_count() == before {
                 self.trigger_zoned_sustain(to_note);
@@ -4246,6 +4560,8 @@ mod tests {
             articulation: String::new(),
             dynamic: String::new(),
             direction: String::new(),
+            interval: 0,
+            lead_in_ms: 0.0,
             group: String::new(),
             group_polyphony: 0,
             choke_group: String::new(),

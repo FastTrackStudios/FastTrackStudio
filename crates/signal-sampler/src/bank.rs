@@ -609,6 +609,22 @@ impl SamplerBank {
         self.with_block(id, |b| b.legato_prefire_line(line, note, velocity));
     }
 
+    /// Line-addressed legato prefire carrying the schedule's lead (frames to
+    /// the destination tick) — see
+    /// [`SampleEngine::legato_prefire_line_lead`](crate::engine::SampleEngine::legato_prefire_line_lead).
+    pub fn legato_prefire_line_lead(
+        &mut self,
+        id: &str,
+        line: crate::engine::LineId,
+        note: u8,
+        velocity: u8,
+        lead: u64,
+    ) {
+        self.with_block(id, |b| {
+            b.legato_prefire_line_lead(line, note, velocity, lead)
+        });
+    }
+
     /// Per-instrument note-on, addressed by id (bypasses MIDI-channel
     /// routing — used by the document scheduler).
     pub fn note_on_instrument(&mut self, id: &str, note: u8, velocity: u8) {

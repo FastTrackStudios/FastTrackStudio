@@ -264,6 +264,20 @@ impl SamplerBlock {
         self.engine.legato_prefire_line(line, n, velocity);
     }
 
+    /// Line-addressed legato prefire with the schedule's lead — see
+    /// [`SampleEngine::legato_prefire_line_lead`].
+    pub fn legato_prefire_line_lead(
+        &mut self,
+        line: crate::engine::LineId,
+        note: u8,
+        velocity: u8,
+        lead: u64,
+    ) {
+        let n = transposed(note, self.params.transpose);
+        self.engine
+            .legato_prefire_line_lead(line, n, velocity, Some(lead));
+    }
+
     /// Reactive legato-path trigger count — see
     /// [`SampleEngine::reactive_legato_fires`].
     pub fn reactive_legato_fires(&self) -> u64 {

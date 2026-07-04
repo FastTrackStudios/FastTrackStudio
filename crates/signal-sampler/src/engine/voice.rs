@@ -652,6 +652,11 @@ impl VoicePool {
                         | VoiceKind::SustainLo
                         | VoiceKind::SustainHi
                         | VoiceKind::SustainLayer
+                        // A held legato TRANSITION voice loops its tail to
+                        // carry the arrived note — it is the sounding note on
+                        // its line and must crossfade out on the next legato
+                        // move exactly like a sustain body would.
+                        | VoiceKind::Legato
                 )
             {
                 v.ramp_gain(0.0, fade_frames);

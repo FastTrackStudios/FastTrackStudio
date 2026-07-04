@@ -549,6 +549,10 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
         // Previous trigger frame on this line — keeps the mono line's
         // trigger order strict even when a pre-roll would cross it.
         let mut prev_trigger: i64 = -1;
+        // Previous pitch on this line — a legato-followed note's prefire
+        // lead is the MEASURED lead-in of the transition sample for the
+        // actual `from → to` move (stored per zone by the CSS generator).
+        let mut prev_pitch: Option<u8> = None;
         for &ni in list {
             let n = &notes[ni];
             let start = qn_to_frame(&doc.tempo, n.src.start_qn, sample_rate);
@@ -573,9 +577,13 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
                     },
                 )
             } else if n.legato_from && n.is_sustain_like() && legato_capable {
-                // THE INVERSION: fire the transition `delay_ms` early so the
-                // arrival lands on the tick. Document mode always uses the
-                // full expressive curve; portamento (vel ≤ threshold) and
+                // THE INVERSION: fire the transition early so the arrival
+                // lands on the tick. The lead is the MEASURED lead-in of the
+                // transition sample for this `from → to` move (per-zone
+                // `lead_in_ms`, written by the CSS generator; 0 for a
+                // same-pitch re-bow — Legzero has no lead-in), falling back
+                // to the spec's expressive velocity curve for libraries
+                // without measured zones. Portamento (vel ≤ threshold) and
                 // marcato (no sampled pre-delay — mirror parity: "no pull")
                 // prefire with ZERO lead: the transition fires exactly on
                 // the tick, never through the reactive countdown.
@@ -584,9 +592,9 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
                 let lead_ms = if n.is_marcato() || (porta_vel_max > 0 && vel <= porta_vel_max) {
                     0
                 } else {
-                    expressive
-                        .as_ref()
-                        .and_then(|m| m.delay_for_velocity(vel))
+                    prev_pitch
+                        .and_then(|from| spec.legato_lead_ms(from, n.src.pitch))
+                        .or_else(|| expressive.as_ref().and_then(|m| m.delay_for_velocity(vel)))
                         .unwrap_or(LEGATO_DELAY_FALLBACK_MS)
                 };
                 let rr = stable_rr_slot(
@@ -618,6 +626,7 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
 
             let trigger_frame = trigger_frame.max(prev_trigger + 1).max(0);
             prev_trigger = trigger_frame;
+            prev_pitch = Some(n.src.pitch);
             // The prefire's lead is measured from its FINAL (clamped) trigger
             // frame, so `frame + lead == destination tick` holds exactly.
             let kind = if let DocEvent::LegatoPrefire { note, vel, rr, .. } = kind {
@@ -909,9 +918,16 @@ pub(crate) fn dispatch_event(bank: &mut crate::bank::SamplerBank, id: &str, ev: 
             bank.set_forced_rr(id, Some(rr));
             bank.note_off_instrument_line(id, line, note);
         }
-        DocEvent::LegatoPrefire { note, vel, rr, .. } => {
+        DocEvent::LegatoPrefire {
+            note,
+            vel,
+            rr,
+            lead,
+        } => {
             bank.set_forced_rr(id, Some(rr));
-            bank.legato_prefire_line(id, line, note, vel);
+            // The lead (frames to the destination tick) rides along so the
+            // engine can align the sample's measured lead-in to it exactly.
+            bank.legato_prefire_line_lead(id, line, note, vel, u64::from(lead));
         }
     }
 }

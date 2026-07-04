@@ -380,6 +380,8 @@ impl PlayerPatch {
                     articulation: String::new(),
                     dynamic: String::new(),
                     direction: String::new(),
+                    interval: 0,
+                    lead_in_ms: 0.0,
                     group: String::new(),
                     group_polyphony: 0,
                     choke_group: String::new(),

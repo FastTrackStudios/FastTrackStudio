@@ -188,6 +188,63 @@ impl LibrarySpec {
         self.mics.iter().find(|m| m.id == id)
     }
 
+    /// Median measured lead-in (ms) across the legato transition zones that
+    /// match a `from → to` move — the document scheduler prefires the
+    /// transition by exactly this so the pitch change lands on the
+    /// destination tick.
+    ///
+    /// Matching mirrors the engine's transition selection: direction from
+    /// `sign(to - from)`, named note `min(from, to)`, interval
+    /// `|to - from|` clamped to an octave (CSS samples nothing wider; the
+    /// engine octave-clamps and pitch-shifts so the destination stays
+    /// exact). Zones are matched at the nearest recorded root (whole-tone
+    /// grid). `Some(0)` for a same-pitch re-bow — the `Legzero` re-trigger
+    /// samples have no lead-in. `None` when the library has no measured
+    /// transition zones (caller falls back to the velocity curve).
+    pub fn legato_lead_ms(&self, from: u8, to: u8) -> Option<u32> {
+        if from == to {
+            // Same-pitch re-bow: the Legzero re-trigger samples have no
+            // lead-in — but only claim that for libraries that actually
+            // carry measured transitions; legacy libraries keep the
+            // velocity-curve behaviour.
+            return self.has_measured_legato().then_some(0);
+        }
+        let direction = if to > from { "up" } else { "down" };
+        let named = from.min(to);
+        let interval = u32::from(from.abs_diff(to)).min(12);
+        let is_legato_artic = |id: &str| {
+            self.articulations
+                .iter()
+                .any(|a| a.kind == ArticulationKind::Legato && a.id.eq_ignore_ascii_case(id))
+        };
+        let candidates = || {
+            self.zones.iter().filter(|z| {
+                z.interval == interval
+                    && z.direction.eq_ignore_ascii_case(direction)
+                    && z.lead_in_ms > 0.0
+                    && is_legato_artic(&z.articulation)
+            })
+        };
+        // Nearest recorded root first, then the median lead of that group.
+        let best_dist = candidates().map(|z| z.root_key.abs_diff(named)).min()?;
+        let mut leads: Vec<f32> = candidates()
+            .filter(|z| z.root_key.abs_diff(named) == best_dist)
+            .map(|z| z.lead_in_ms)
+            .collect();
+        leads.sort_by(|a, b| a.total_cmp(b));
+        Some(leads[leads.len() / 2].round() as u32)
+    }
+
+    /// Whether any zone carries a measured legato transition (interval +
+    /// lead-in written by the sample-collector generator). Gates the
+    /// measured-lead prefire alignment; without it the engine and scheduler
+    /// keep the legacy velocity-curve behaviour.
+    pub fn has_measured_legato(&self) -> bool {
+        self.zones
+            .iter()
+            .any(|z| z.interval > 0 && z.lead_in_ms > 0.0)
+    }
+
     /// Materialize a [`TagSet`] from the flat `tags` vector.
     ///
     /// The collection browser consumes `TagSet`; the spec stores tags as a
@@ -349,6 +406,8 @@ fn zone_from_sfz(
         articulation: String::new(),
         dynamic: String::new(),
         direction: String::new(),
+        interval: 0,
+        lead_in_ms: 0.0,
         group: group_id.clone(),
         group_polyphony: 0,
         choke_group: group_id,
@@ -798,6 +857,21 @@ pub struct ZoneSpec {
     /// existing filename-based scanner already uses.
     #[facet(default)]
     pub direction: String,
+    /// Legato transition interval in semitones (1..=12). CSS names its
+    /// transition samples `<dyn>_<dir>_<NOTE>_<N>`: `NOTE` is the LOWER pitch
+    /// of the pair (stored in `root_key` as sounding MIDI), `dir` says which
+    /// end is the source (`up` = named→named+N, `down` = named+N→named), and
+    /// `N` is this interval. 0 = not a transition (or a `Legzero` re-trigger).
+    #[facet(default)]
+    pub interval: u32,
+    /// Measured lead-in of a legato transition sample (ms): time from sample
+    /// start until the pitch leaves the source note. The document scheduler
+    /// prefires the transition by this much so the pitch change lands on the
+    /// destination tick; the old sounding note crossfades out underneath it.
+    /// Measured per sample by the generator (median ~330 ms, spread wide) —
+    /// never assumed. 0 for non-transition zones.
+    #[facet(default)]
+    pub lead_in_ms: f32,
     /// Logical zone group id. Used for group-level editing and for choke
     /// relationships when `off_by` references another group.
     #[facet(default)]
