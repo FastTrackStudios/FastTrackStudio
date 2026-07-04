@@ -7,4 +7,4 @@ edition.workspace = true
 description = "Theme engine + FastTrack branded themes for all plugin profiles"
 
 [dependencies]
-fts-plugin-core = { workspace = true }
+audiocore-core = { workspace = true }

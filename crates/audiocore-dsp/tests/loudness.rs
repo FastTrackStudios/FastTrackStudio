@@ -1,6 +1,6 @@
 //! Loudness metering and autogain tests.
 
-use fts_dsp::loudness::{AutoGain, KWeightingFilter, LoudnessMeter};
+use audiocore_dsp::loudness::{AutoGain, KWeightingFilter, LoudnessMeter};
 use std::f64::consts::PI;
 
 const SAMPLE_RATE: f64 = 48000.0;

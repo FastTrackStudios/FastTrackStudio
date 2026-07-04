@@ -1,5 +1,5 @@
 [package]
-name = "fts-dsp"
+name = "audiocore-dsp"
 version.workspace = true
 authors.workspace = true
 license.workspace = true

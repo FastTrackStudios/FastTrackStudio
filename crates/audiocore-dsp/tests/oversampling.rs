@@ -1,6 +1,6 @@
 //! Oversampling tests — verify transparent resampling, alias reduction, and latency.
 
-use fts_dsp::oversampling::{OversampleQuality, OversampleRate, Oversampler};
+use audiocore_dsp::oversampling::{OversampleQuality, OversampleRate, Oversampler};
 use std::f64::consts::PI;
 
 const SAMPLE_RATE: f64 = 48000.0;

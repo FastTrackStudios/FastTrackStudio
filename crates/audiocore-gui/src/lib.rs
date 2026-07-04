@@ -1,10 +1,10 @@
-//! `audio-gui` — Shared Dioxus audio GUI components for FTS plugins.
+//! `audiocore-gui` — Shared Dioxus audio GUI components for FTS plugins.
 //!
 //! All components use inline styles for reliable rendering in the
 //! nice_plug_dioxus Blitz renderer. Import everything via the prelude:
 //!
 //! ```ignore
-//! use audio_gui::prelude::*;
+//! use audiocore_gui::prelude::*;
 //! ```
 //!
 //! # Modules

@@ -5,7 +5,7 @@
 //! # Usage
 //!
 //! ```
-//! use fts_dsp::note_sync::NoteValue;
+//! use audiocore_dsp::note_sync::NoteValue;
 //!
 //! let bpm = 120.0;
 //! let eighth = NoteValue::Eighth;

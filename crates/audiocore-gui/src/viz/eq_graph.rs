@@ -69,7 +69,7 @@ impl StereoMode {
 /// EQ graph band data for rendering.
 ///
 /// A simplified band representation for the EQ graph when
-/// the full fts-dsp types aren't needed.
+/// the full audiocore-dsp types aren't needed.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EqBand {
     /// Band index (0-23).
@@ -238,7 +238,7 @@ pub fn get_band_fill_color(index: usize) -> String {
 /// # Example
 ///
 /// ```ignore
-/// use audio_gui::viz::{EqGraph, EqBand, EqBandShape};
+/// use audiocore_gui::viz::{EqGraph, EqBand, EqBandShape};
 ///
 /// #[component]
 /// fn MyEQ() -> Element {

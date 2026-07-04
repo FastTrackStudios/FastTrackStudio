@@ -1,16 +1,16 @@
-//! Legacy UI components — most have moved to the `audio-gui` crate.
+//! Legacy UI components — most have moved to the `audiocore-gui` crate.
 //!
 //! This module retains `CompSlider` as a deprecated alias for
-//! `audio_gui::controls::ParamSlider`. All other components
-//! (Toggle, Section, SegmentButton, etc.) are now in `audio-gui`.
+//! `audiocore_gui::controls::ParamSlider`. All other components
+//! (Toggle, Section, SegmentButton, etc.) are now in `audiocore-gui`.
 
-use audio_gui::theme::use_theme;
+use audiocore_gui::theme::use_theme;
 use nice_plug::prelude::ParamPtr;
 use nice_plug_dioxus::prelude::*;
 
 /// Inline-styled parameter slider for Blitz compatibility.
 ///
-/// **Deprecated**: use `audio_gui::controls::ParamSlider` instead.
+/// **Deprecated**: use `audiocore_gui::controls::ParamSlider` instead.
 /// This is kept for backward compatibility with existing `comp-ui` code.
 #[component]
 pub fn CompSlider(param_ptr: ParamPtr, #[props(default = "")] label: &'static str) -> Element {

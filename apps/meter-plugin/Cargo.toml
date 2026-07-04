@@ -12,8 +12,8 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 meter-dsp = { workspace = true }
 meter-ui = { workspace = true }
-audio-gui = { workspace = true }
-fts-plugin-core = { workspace = true }
+audiocore-gui = { workspace = true }
+audiocore-core = { workspace = true }
 nice-plug = { workspace = true }
 nice-plug-dioxus = { workspace = true }
 atomic_float = { workspace = true }

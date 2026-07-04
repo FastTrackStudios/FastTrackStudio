@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use fts_plugin_core::prelude::*;
+use audiocore_core::prelude::*;
 
 use meter_dsp::bit_depth::BitDepthAnalyzer;
 use meter_dsp::k_meter::{KMeter, KMode};

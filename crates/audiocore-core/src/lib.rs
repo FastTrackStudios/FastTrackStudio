@@ -6,8 +6,8 @@
 //! # Usage
 //!
 //! ```ignore
-//! use fts_plugin_core::prelude::*;  // nice_plug + nice_plug_dioxus re-exports
-//! use fts_plugin_core::ui::prelude::*;  // FTS UI components (Toggle, Section, etc.)
+//! use audiocore_core::prelude::*;  // nice_plug + nice_plug_dioxus re-exports
+//! use audiocore_core::ui::prelude::*;  // FTS UI components (Toggle, Section, etc.)
 //! ```
 
 // Re-export core dependencies
@@ -22,9 +22,9 @@ pub use nice_plug_dioxus::prelude::*;
 #[cfg(feature = "gui")]
 pub mod ui;
 
-/// Re-export audio-gui crate for shared audio UI components.
+/// Re-export audiocore-gui crate for shared audio UI components.
 #[cfg(feature = "gui")]
-pub use audio_gui;
+pub use audiocore_gui;
 
 /// Prelude for convenient imports.
 pub mod prelude {

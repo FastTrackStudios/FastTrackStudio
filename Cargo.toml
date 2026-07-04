@@ -2,10 +2,10 @@
 resolver = "2"
 members = [
     "apps/meter-plugin",
-    "crates/audio-gui",
-    "crates/fts-dsp",
+    "crates/audiocore-gui",
+    "crates/audiocore-dsp",
     "crates/fts-modulation",
-    "crates/fts-plugin-core",
+    "crates/audiocore-core",
     "crates/fts-sample",
     "crates/fts-themes",
     "crates/meter-dsp",
@@ -20,9 +20,9 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 # Internal crates (local paths)
-audio-gui = { path = "crates/audio-gui" }
-fts-plugin-core = { path = "crates/fts-plugin-core" }
-fts-dsp = { path = "crates/fts-dsp" }
+audiocore-gui = { path = "crates/audiocore-gui" }
+audiocore-core = { path = "crates/audiocore-core" }
+audiocore-dsp = { path = "crates/audiocore-dsp" }
 fts-themes = { path = "crates/fts-themes" }
 fts-modulation = { path = "crates/fts-modulation" }
 fts-sample = { path = "crates/fts-sample" }

@@ -12,10 +12,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use audio_gui::controls::dropdown::Dropdown;
-use audio_gui::controls::segment::SegmentButton;
-use audio_gui::prelude::{CanvasPainter, DragProvider, VelloCanvas, use_init_theme};
-use fts_plugin_core::prelude::*;
+use audiocore_gui::controls::dropdown::Dropdown;
+use audiocore_gui::controls::segment::SegmentButton;
+use audiocore_gui::prelude::{CanvasPainter, DragProvider, VelloCanvas, use_init_theme};
+use audiocore_core::prelude::*;
 use nice_plug_dioxus::prelude::vello::Scene;
 use nice_plug_dioxus::prelude::vello::kurbo::Affine;
 use parking_lot::RwLock;

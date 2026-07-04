@@ -6,7 +6,7 @@
 //!
 //! Based on tiagolr's Transient detector (gate12, filtr, time12, reevr).
 
-use fts_dsp::biquad::{Biquad, FilterType};
+use audiocore_dsp::biquad::{Biquad, FilterType};
 
 /// Detection algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
