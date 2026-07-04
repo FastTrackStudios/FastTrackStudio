@@ -95,8 +95,10 @@ pub fn App() -> Element {
             .get(&slug)
             .cloned()
             .unwrap_or_default();
-        let preset = theme_preset(&resolved_name).unwrap_or_else(default_theme_preset);
-        theme_state.write().set_preset(preset);
+        // Rebuild through state_from_preset_name so the Obsidian
+        // token overlay survives (set_preset would discard it).
+        let mode = theme_state.peek().mode;
+        theme_state.set(state_from_preset_name(&resolved_name, mode));
     });
 
     use_effect(move || {
