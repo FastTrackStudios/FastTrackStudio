@@ -12,7 +12,11 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{ChevronRight, FileText, SquareKanban};
+use fts_ui::lucide_dioxus::{
+    BookOpen, Brain, Briefcase, Calendar, ChevronRight, Church, DollarSign, Dumbbell, FileText,
+    Flame, Globe, GraduationCap, Hash, Heart, HeartPulse, House, Leaf, ListTodo, Moon, Music,
+    PenLine, Repeat, Sparkles, SquareKanban, Star, Sun, Utensils, Wrench,
+};
 use fts_ui::prelude::*;
 
 use crate::pages::vault::{TreeNode, build_tree, fetch_folder_index};
@@ -33,6 +37,61 @@ enum ExplorerMode {
 struct TagNode {
     children: std::collections::BTreeMap<String, TagNode>,
     pages: Vec<vault_proto::PageMeta>,
+}
+
+/// Render the curated icon for a tag's frontmatter `icon:` name.
+/// A plain match over compiled components — dynamic name lookup
+/// isn't possible with compiled icons, and a curated set keeps the
+/// sidebar coherent. Unknown/unset names get the `#` glyph.
+fn tag_icon(name: &str) -> Element {
+    match name {
+        "flame" => rsx! { Flame { size: 13 } },
+        "heart" => rsx! { Heart { size: 13 } },
+        "heart-pulse" => rsx! { HeartPulse { size: 13 } },
+        "sparkles" => rsx! { Sparkles { size: 13 } },
+        "calendar" => rsx! { Calendar { size: 13 } },
+        "pen-line" => rsx! { PenLine { size: 13 } },
+        "dollar-sign" => rsx! { DollarSign { size: 13 } },
+        "repeat" => rsx! { Repeat { size: 13 } },
+        "sun" => rsx! { Sun { size: 13 } },
+        "moon" => rsx! { Moon { size: 13 } },
+        "book-open" => rsx! { BookOpen { size: 13 } },
+        "dumbbell" => rsx! { Dumbbell { size: 13 } },
+        "brain" => rsx! { Brain { size: 13 } },
+        "music" => rsx! { Music { size: 13 } },
+        "church" => rsx! { Church { size: 13 } },
+        "graduation-cap" => rsx! { GraduationCap { size: 13 } },
+        "utensils" => rsx! { Utensils { size: 13 } },
+        "briefcase" => rsx! { Briefcase { size: 13 } },
+        "leaf" => rsx! { Leaf { size: 13 } },
+        "star" => rsx! { Star { size: 13 } },
+        "list-todo" => rsx! { ListTodo { size: 13 } },
+        "house" => rsx! { House { size: 13 } },
+        "wrench" => rsx! { Wrench { size: 13 } },
+        "globe" => rsx! { Globe { size: 13 } },
+        _ => rsx! { Hash { size: 13 } },
+    }
+}
+
+/// Display form of a tag segment: first letter capitalized.
+fn capitalize(seg: &str) -> String {
+    let mut chars = seg.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Icon names declared by tag notes: any page with `type: tag` maps
+/// its basename (lowercased — matches tag segments) to its `icon:`.
+/// Stored in the vault, not in tagged documents — edit the tag note
+/// (e.g. `Tags/Finance.md`) to change the icon everywhere.
+fn tag_icon_map(pages: &[vault_proto::PageMeta]) -> std::collections::HashMap<String, String> {
+    pages
+        .iter()
+        .filter(|p| p.page_type == "tag" && !p.icon.is_empty())
+        .map(|p| (p.basename.to_lowercase(), p.icon.clone()))
+        .collect()
 }
 
 /// Build the tag tree: every page lands under each of its tags
@@ -81,7 +140,10 @@ pub fn VaultExplorer() -> Element {
     // Collapsed folder basenames / tag paths. Starts empty (all
     // expanded) — the vault is the home screen now; hiding it by
     // default hides the system.
-    let collapsed = use_signal(std::collections::HashSet::<String>::new);
+    // "untagged" starts collapsed — the section exists to be
+    // ignorable.
+    let collapsed =
+        use_signal(|| std::collections::HashSet::<String>::from(["untagged".to_string()]));
     // Virtual-folder organization: tags by default, folder notes on
     // toggle. FUTURE: persist on the prefs entity.
     let mut mode = use_signal(|| ExplorerMode::Tags);
@@ -119,18 +181,14 @@ pub fn VaultExplorer() -> Element {
                 match &*files.read_unchecked() {
                     Some(Ok(pages)) if mode() == ExplorerMode::Tags => {
                         let (root, untagged) = build_tag_tree(pages);
+                        let icons = tag_icon_map(pages);
                         rsx! {
                             nav { class: "flex flex-col gap-px px-1.5",
                                 for (seg, node) in &root.children {
-                                    {tag_node(seg, node, String::new(), 0, collapsed, selected.clone())}
+                                    {tag_node(seg, node, String::new(), 0, collapsed, selected.clone(), &icons)}
                                 }
                                 if !untagged.is_empty() {
-                                    div { class: "px-2 pb-0.5 pt-2 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground/70",
-                                        "Untagged"
-                                    }
-                                    for page in &untagged {
-                                        {page_row(page, 0, selected.clone())}
-                                    }
+                                    {untagged_section(&untagged, collapsed, selected.clone())}
                                 }
                             }
                         }
@@ -251,6 +309,7 @@ fn tag_node(
     depth: usize,
     mut collapsed: Signal<std::collections::HashSet<String>>,
     selected: String,
+    icons: &std::collections::HashMap<String, String>,
 ) -> Element {
     let tag_path = if prefix.is_empty() {
         seg.to_string()
@@ -263,6 +322,8 @@ fn tag_node(
     let count = node.pages.len();
     let chevron = if is_collapsed { "" } else { "rotate-90" };
     let toggle_key = key.clone();
+    let icon_name = icons.get(&seg.to_lowercase()).cloned().unwrap_or_default();
+    let label = capitalize(seg);
 
     rsx! {
         div { key: "{tag_path}",
@@ -276,10 +337,13 @@ fn tag_node(
                         set.insert(toggle_key.clone());
                     }
                 },
-                span { class: "flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-transform {chevron}",
-                    ChevronRight { size: 12 }
+                span { class: "flex h-3 w-3 shrink-0 items-center justify-center transition-transform {chevron}",
+                    ChevronRight { size: 11 }
                 }
-                span { class: "truncate", "{seg}" }
+                span { class: "flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground/80",
+                    {tag_icon(&icon_name)}
+                }
+                span { class: "truncate", "{label}" }
                 if count > 0 {
                     span { class: "ml-auto text-[0.65rem] tabular-nums text-muted-foreground/60", "{count}" }
                 }
@@ -289,7 +353,7 @@ fn tag_node(
                     {page_row(page, depth + 1, selected.clone())}
                 }
                 for (child_seg, child) in &node.children {
-                    {tag_node(child_seg, child, tag_path.clone(), depth + 1, collapsed, selected.clone())}
+                    {tag_node(child_seg, child, tag_path.clone(), depth + 1, collapsed, selected.clone(), icons)}
                 }
             }
         }
@@ -332,6 +396,43 @@ fn page_row(page: &vault_proto::PageMeta, depth: usize, selected: String) -> Ele
                 }
             }
             span { class: "truncate", "{title}" }
+        }
+    }
+}
+
+/// The Untagged dropdown — a collapsible folder like any tag, but
+/// collapsed by default: it exists to be ignorable.
+fn untagged_section(
+    pages: &[vault_proto::PageMeta],
+    mut collapsed: Signal<std::collections::HashSet<String>>,
+    selected: String,
+) -> Element {
+    let is_collapsed = collapsed.read().contains("untagged");
+    let chevron = if is_collapsed { "" } else { "rotate-90" };
+    let count = pages.len();
+
+    rsx! {
+        div { class: "mt-1 border-t border-border/40 pt-1",
+            button {
+                r#type: "button",
+                class: "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[13px] text-muted-foreground/70 hover:bg-accent/40 hover:text-foreground",
+                onclick: move |_| {
+                    let mut set = collapsed.write();
+                    if !set.remove("untagged") {
+                        set.insert("untagged".to_string());
+                    }
+                },
+                span { class: "flex h-3 w-3 shrink-0 items-center justify-center transition-transform {chevron}",
+                    ChevronRight { size: 11 }
+                }
+                span { class: "truncate", "Untagged" }
+                span { class: "ml-auto text-[0.65rem] tabular-nums text-muted-foreground/60", "{count}" }
+            }
+            if !is_collapsed {
+                for page in pages {
+                    {page_row(page, 1, selected.clone())}
+                }
+            }
         }
     }
 }

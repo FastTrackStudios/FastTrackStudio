@@ -516,6 +516,7 @@ mod tests {
             folder: String::new(),
             sha256: String::new(),
             tags: Vec::new(),
+            icon: String::new(),
             aliases: aliases.iter().map(|s| (*s).to_owned()).collect(),
         }
     }

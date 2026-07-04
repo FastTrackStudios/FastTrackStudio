@@ -412,6 +412,7 @@ impl VaultSync for Backend {
                     // matches the manifest's per-file hash.
                     sha256: sha256_hex(p.raw.as_bytes()),
                     tags: fm.as_ref().map(fm_tags).unwrap_or_default(),
+                    icon: get("icon").unwrap_or_default(),
                     aliases: fm.as_ref().map(fm_aliases).unwrap_or_default(),
                 }
             })
@@ -429,6 +430,7 @@ impl VaultSync for Backend {
                 page_type: "base".to_string(),
                 folder: String::new(),
                 tags: Vec::new(),
+                icon: String::new(),
                 sha256: sha256_hex(b.raw.as_bytes()),
                 aliases: Vec::new(),
             });

@@ -41,6 +41,10 @@ pub struct PageMeta {
     /// order. Hierarchical tags keep their `/` (e.g. `ops/inventory`)
     /// — the client's tag-folder explorer splits on it.
     pub tags: Vec<String>,
+    /// Frontmatter `icon` — a curated lucide icon name (kebab-case,
+    /// e.g. `heart-pulse`). Tag notes (`type: tag`) use it to give a
+    /// tag a sidebar icon; empty when unset.
+    pub icon: String,
     /// Content hash (lowercase hex sha256), matching the
     /// manifest's hashing — lets the client issue a conditional
     /// `set_folder` / open without a separate round-trip.
