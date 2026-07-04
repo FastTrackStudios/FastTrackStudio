@@ -39,6 +39,15 @@ pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
 }
 
+/// Shell panel state: the vault explorer (left) — toggled from the
+/// top bar, Obsidian-style.
+#[derive(Clone, Copy, PartialEq)]
+pub struct ExplorerOpen(pub bool);
+
+/// Shell panel state: the right (backlinks/context) panel.
+#[derive(Clone, Copy, PartialEq)]
+pub struct RightPanelOpen(pub bool);
+
 pub(crate) fn use_fleeting_open() -> Signal<bool> {
     use_context::<FleetingOpen>().0
 }
@@ -99,11 +108,34 @@ pub fn TopBar() -> Element {
         _ => 0,
     };
 
+    // Obsidian-shaped window bar: sidebar toggle at the far left,
+    // the tab strip in the middle (one live "tab" today — the open
+    // view; a real tab system arrives with vault-views slice 4),
+    // actions + the right-panel toggle at the far right.
+    let mut explorer = use_context::<Signal<ExplorerOpen>>();
+    let mut right_panel = use_context::<Signal<RightPanelOpen>>();
+    let route = use_route::<Route>();
+    let title = crate::nav::route_title(&route);
+
     rsx! {
         div {
-            class: "sticky top-0 z-20 hidden items-center gap-3 border-b border-border bg-background/80 px-6 py-2 backdrop-blur md:flex",
-            // Push everything to the right.
-            div { class: "flex-1" }
+            class: "z-20 hidden h-10 shrink-0 items-center gap-2 border-b border-border bg-card/60 px-2 md:flex",
+            button {
+                r#type: "button",
+                class: "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                title: "Toggle vault sidebar",
+                onclick: move |_| {
+                    let cur = explorer.peek().0;
+                    explorer.set(ExplorerOpen(!cur));
+                },
+                fts_ui::lucide_dioxus::PanelLeft { size: 15 }
+            }
+            // The tab strip region — today the single open view.
+            div { class: "flex min-w-0 flex-1 items-center gap-1 px-1",
+                div { class: "flex max-w-56 items-center gap-2 rounded-md bg-accent/60 px-3 py-1 text-xs text-foreground",
+                    span { class: "truncate", "{title}" }
+                }
+            }
 
             StatChip {
                 icon: rsx! { InboxIcon { size: 14 } },
@@ -120,6 +152,17 @@ pub fn TopBar() -> Element {
 
             FleetingButton { compact: true }
             TimerWidget {}
+
+            button {
+                r#type: "button",
+                class: "ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                title: "Toggle right panel",
+                onclick: move |_| {
+                    let cur = right_panel.peek().0;
+                    right_panel.set(RightPanelOpen(!cur));
+                },
+                fts_ui::lucide_dioxus::PanelRight { size: 15 }
+            }
         }
     }
 }

@@ -17,4 +17,19 @@
 
 @layer base {
     html { color-scheme: dark; }
+
+    /* Thin, theme-tinted scrollbars everywhere — the default fat
+     * gutters fight the shell. Track is invisible; the thumb is the
+     * border token, brightening on hover. */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in oklch, var(--border) 85%, transparent) transparent;
+    }
+    *::-webkit-scrollbar { width: 7px; height: 7px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb {
+        background: color-mix(in oklch, var(--border) 85%, transparent);
+        border-radius: 9999px;
+    }
+    *::-webkit-scrollbar-thumb:hover { background: var(--border); }
 }

@@ -394,7 +394,10 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
 
     // Backlinks for the open note, re-pulled when the selection
     // changes and after every committed save.
-    let backlinks_open = use_signal(|| true);
+    // Right-panel state is shell-owned (top-bar toggle); the page's
+    // own Backlinks button flips the same signal.
+    let shell_right = use_context::<Signal<crate::chrome::RightPanelOpen>>();
+    let backlinks_open = use_memo(move || shell_right.read().0);
     let backlinks = use_resource(move || {
         let slug = home();
         let path = selected();
@@ -632,9 +635,9 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                             size: ButtonSize::Small,
                             disabled: !has_file,
                             on_click: move |_| {
-                                let mut o = backlinks_open;
-                                let cur = *o.peek();
-                                o.set(!cur);
+                                let mut o = shell_right;
+                                let cur = o.peek().0;
+                                o.set(crate::chrome::RightPanelOpen(!cur));
                             },
                             if panel_open { "Hide backlinks" } else { "Backlinks" }
                         }
@@ -733,8 +736,8 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                                 button {
                                     class: "text-xs text-muted-foreground hover:text-foreground",
                                     onclick: move |_| {
-                                        let mut o = backlinks_open;
-                                        o.set(false);
+                                        let mut o = shell_right;
+                                        o.set(crate::chrome::RightPanelOpen(false));
                                     },
                                     "Hide"
                                 }

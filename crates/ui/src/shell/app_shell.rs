@@ -13,6 +13,10 @@ pub fn AppShell() -> Element {
 
     // Quick-capture + data-refresh signals for the persistent chrome.
     provide_chrome_contexts();
+    // Shell panel state: the vault explorer + the right (backlinks)
+    // panel, toggled from the top bar (Obsidian-style).
+    let explorer = use_context_provider(|| Signal::new(crate::chrome::ExplorerOpen(true)));
+    let _ = use_context_provider(|| Signal::new(crate::chrome::RightPanelOpen(true)));
 
     rsx! {
         // Publishes this client's presence entry (route activity, idle,
@@ -23,19 +27,24 @@ pub fn AppShell() -> Element {
         StartPageRedirect {}
         // Mobile is the primary platform: below `md` the chrome is the
         // top app bar + bottom tab bar. At `md`+ the desktop shell is
-        // Obsidian-shaped (plans/vault-views.md): icon rail (shortcut
-        // ribbon) → vault explorer (the main sidebar) → the open view.
-        div { class: "min-h-screen bg-background text-foreground md:grid md:h-screen md:grid-cols-[3rem_17rem_1fr] md:overflow-hidden",
+        // Obsidian-shaped (plans/vault-views.md): one full-width top
+        // bar over everything (sidebar toggles, timer, capture — and
+        // where tabs will live), then icon rail → vault explorer →
+        // the open view.
+        div { class: "min-h-screen bg-background text-foreground md:flex md:h-screen md:flex-col md:overflow-hidden",
+            TopBar {}
+            div { class: "md:flex md:min-h-0 md:flex-1",
             div { class: "hidden md:block",
                 crate::shell::rail::IconRail { current: current.clone() }
             }
-            div { class: "hidden border-r border-border/60 md:flex md:h-screen md:flex-col md:overflow-hidden",
-                crate::shell::explorer::VaultExplorer {}
+            if explorer.read().0 {
+                div { class: "hidden w-[17rem] shrink-0 border-r border-border/60 md:flex md:min-h-0 md:flex-col md:overflow-hidden",
+                    crate::shell::explorer::VaultExplorer {}
+                }
             }
 
-            div { class: "flex min-h-screen flex-col md:h-screen md:min-h-0 md:overflow-y-auto",
+            div { class: "flex min-h-screen flex-col md:min-h-0 md:flex-1 md:overflow-y-auto",
                 MobileHeader {}
-                TopBar {}
                 // Bottom padding keeps content clear of the fixed tab
                 // bar (56px + safe area) plus breathing room.
                 main { class: "flex-1 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] md:pb-0",
@@ -46,6 +55,7 @@ pub fn AppShell() -> Element {
                 }
                 BottomTabBar { current }
                 FleetingFab {}
+            }
             }
         }
         // Single global capture modal, toggled from any fleeting button.
