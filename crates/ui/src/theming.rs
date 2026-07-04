@@ -69,16 +69,18 @@ pub fn use_org_theme_overrides() -> OrgThemeOverrides {
 /// `ThemeProvider` writes tokens onto `.fts-theme-root`, which beats
 /// the stylesheet's `:root` block for everything inside the app — so
 /// the palette must be applied HERE, not only in the CSS file.
+/// NOTE: bare token keys — `ThemeStyle::css_variables` prepends the
+/// `--` itself.
 const OBSIDIAN_DARK: &[(&str, &str)] = &[
-    ("--background", "#1e1e1e"),
-    ("--foreground", "#dadada"),
-    ("--card", "#161616"),
-    ("--card-foreground", "#dadada"),
-    ("--popover", "#1e1e1e"),
-    ("--popover-foreground", "#dadada"),
-    ("--primary", "#7f6df2"),
-    ("--primary-foreground", "#fbfbfb"),
-    ("--sidebar", "#161616"),
+    ("background", "#1e1e1e"),
+    ("foreground", "#dadada"),
+    ("card", "#161616"),
+    ("card-foreground", "#dadada"),
+    ("popover", "#1e1e1e"),
+    ("popover-foreground", "#dadada"),
+    ("primary", "#7f6df2"),
+    ("primary-foreground", "#fbfbfb"),
+    ("sidebar", "#161616"),
 ];
 
 pub fn state_from_preset_name(name: &str, mode: ThemeMode) -> ThemeState {
