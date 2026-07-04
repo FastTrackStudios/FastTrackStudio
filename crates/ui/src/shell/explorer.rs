@@ -13,19 +13,20 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    BookOpen, Brain, Briefcase, Calendar, ChevronRight, Church, DollarSign, Dumbbell, FileText,
-    Flame, Globe, GraduationCap, Hash, Heart, HeartPulse, House, Leaf, ListTodo, Moon, Music,
-    PenLine, Repeat, Sparkles, SquareKanban, Star, Sun, Utensils, Wrench,
+    BookOpen, Brain, Briefcase, Calendar, ChefHat, ChevronRight, Church, DollarSign, Dumbbell,
+    FileText, Flame, Globe, GraduationCap, Hash, Heart, HeartPulse, House, Leaf, ListTodo, MapPin,
+    Moon, Music, NotebookPen, Package, PenLine, Repeat, Sparkles, SquareKanban, Star, Sun, Users,
+    Utensils, Wrench,
 };
 use fts_ui::prelude::*;
 
 use crate::pages::vault::{TreeNode, build_tree, fetch_folder_index};
 use crate::routes::Route;
 
-/// How the explorer organizes the vault. `Tags` is the default —
-/// hierarchical tags as virtual folders (`ops/inventory` nests), the
-/// TagFolder model; `Folders` is the folder-note tree the vault page
-/// also builds.
+/// How the explorer organizes the vault. `Folders` is the default —
+/// the virt-folder model (obsidian-virt-folder): hierarchy from each
+/// note's `folder:`/`up:` wikilink property, folder notes carrying
+/// their own `icon:`. `Tags` groups by hierarchical tags instead.
 #[derive(Clone, Copy, PartialEq)]
 enum ExplorerMode {
     Tags,
@@ -69,6 +70,11 @@ fn tag_icon(name: &str) -> Element {
         "house" => rsx! { House { size: 13 } },
         "wrench" => rsx! { Wrench { size: 13 } },
         "globe" => rsx! { Globe { size: 13 } },
+        "users" => rsx! { Users { size: 13 } },
+        "package" => rsx! { Package { size: 13 } },
+        "map-pin" => rsx! { MapPin { size: 13 } },
+        "notebook-pen" => rsx! { NotebookPen { size: 13 } },
+        "chef-hat" => rsx! { ChefHat { size: 13 } },
         _ => rsx! { Hash { size: 13 } },
     }
 }
@@ -146,7 +152,7 @@ pub fn VaultExplorer() -> Element {
         use_signal(|| std::collections::HashSet::<String>::from(["untagged".to_string()]));
     // Virtual-folder organization: tags by default, folder notes on
     // toggle. FUTURE: persist on the prefs entity.
-    let mut mode = use_signal(|| ExplorerMode::Tags);
+    let mut mode = use_signal(|| ExplorerMode::Folders);
 
     // Selection = the current route's vault path.
     let route = use_route::<Route>();
@@ -162,7 +168,7 @@ pub fn VaultExplorer() -> Element {
                     "Vault"
                 }
                 div { class: "flex items-center gap-0.5 rounded-md bg-muted/40 p-0.5",
-                    for (m, label) in [(ExplorerMode::Tags, "Tags"), (ExplorerMode::Folders, "Folders")] {
+                    for (m, label) in [(ExplorerMode::Folders, "Folders"), (ExplorerMode::Tags, "Tags")] {
                         button {
                             key: "{label}",
                             r#type: "button",
@@ -188,7 +194,7 @@ pub fn VaultExplorer() -> Element {
                                     {tag_node(seg, node, String::new(), 0, collapsed, selected.clone(), &icons)}
                                 }
                                 if !untagged.is_empty() {
-                                    {untagged_section(&untagged, collapsed, selected.clone())}
+                                    {loose_section("untagged", "Untagged", &untagged, collapsed, selected.clone())}
                                 }
                             }
                         }
@@ -196,11 +202,22 @@ pub fn VaultExplorer() -> Element {
                     Some(Ok(_)) => {
                         let t = tree().expect("tree follows files");
                         let nodes = Rc::new(t.0.clone());
-                        let roots = t.1.clone();
+                        // Folder notes first; parentless plain notes go
+                        // to a collapsed Unfiled dropdown (same idea as
+                        // Untagged — ignorable by default).
+                        let (folder_roots, loose): (Vec<usize>, Vec<usize>) = t
+                            .1
+                            .iter()
+                            .partition(|&&i| nodes[i].is_folder);
+                        let loose_pages: Vec<vault_proto::PageMeta> =
+                            loose.iter().map(|&i| nodes[i].meta.clone()).collect();
                         rsx! {
                             nav { class: "flex flex-col gap-px px-1.5",
-                                for &root in roots.iter() {
+                                for &root in folder_roots.iter() {
                                     {explorer_node(nodes.clone(), root, 0, collapsed, selected.clone())}
+                                }
+                                if !loose_pages.is_empty() {
+                                    {loose_section("unfiled", "Unfiled", &loose_pages, collapsed, selected.clone())}
                                 }
                             }
                         }
@@ -276,8 +293,11 @@ fn explorer_node(
                     }
                 },
                 if is_folder {
-                    span { class: "flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-transform {chevron}",
-                        ChevronRight { size: 12 }
+                    span { class: "flex h-3 w-3 shrink-0 items-center justify-center transition-transform {chevron}",
+                        ChevronRight { size: 11 }
+                    }
+                    span { class: "flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground/80",
+                        {tag_icon(&node.meta.icon)}
                     }
                 } else if is_base {
                     // Base views get a board glyph — they open as live
@@ -400,14 +420,16 @@ fn page_row(page: &vault_proto::PageMeta, depth: usize, selected: String) -> Ele
     }
 }
 
-/// The Untagged dropdown — a collapsible folder like any tag, but
-/// collapsed by default: it exists to be ignorable.
-fn untagged_section(
+/// A collapsed-by-default dropdown for the leftovers (Untagged in
+/// tag mode, Unfiled in folder mode) — it exists to be ignorable.
+fn loose_section(
+    key: &'static str,
+    label: &'static str,
     pages: &[vault_proto::PageMeta],
     mut collapsed: Signal<std::collections::HashSet<String>>,
     selected: String,
 ) -> Element {
-    let is_collapsed = collapsed.read().contains("untagged");
+    let is_collapsed = collapsed.read().contains(key);
     let chevron = if is_collapsed { "" } else { "rotate-90" };
     let count = pages.len();
 
@@ -418,14 +440,14 @@ fn untagged_section(
                 class: "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[13px] text-muted-foreground/70 hover:bg-accent/40 hover:text-foreground",
                 onclick: move |_| {
                     let mut set = collapsed.write();
-                    if !set.remove("untagged") {
-                        set.insert("untagged".to_string());
+                    if !set.remove(key) {
+                        set.insert(key.to_string());
                     }
                 },
                 span { class: "flex h-3 w-3 shrink-0 items-center justify-center transition-transform {chevron}",
                     ChevronRight { size: 11 }
                 }
-                span { class: "truncate", "Untagged" }
+                span { class: "truncate", "{label}" }
                 span { class: "ml-auto text-[0.65rem] tabular-nums text-muted-foreground/60", "{count}" }
             }
             if !is_collapsed {

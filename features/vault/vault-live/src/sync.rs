@@ -405,7 +405,10 @@ impl VaultSync for Backend {
                     basename: p.basename.clone(),
                     title: get("title").unwrap_or_else(|| p.basename.clone()),
                     page_type: get("type").unwrap_or_default(),
+                    // `folder` or `up` — both wikilink-to-parent
+                    // properties (the obsidian-virt-folder model).
                     folder: get("folder")
+                        .or_else(|| get("up"))
                         .map(|s| strip_wikilink(&s))
                         .unwrap_or_default(),
                     // `raw` is the file's verbatim UTF-8 bytes, so this
