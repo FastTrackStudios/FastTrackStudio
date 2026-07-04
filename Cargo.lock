@@ -7239,51 +7239,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "moire"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
-name = "moire-macros-noop"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
-name = "moire-runtime"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
-name = "moire-tokio"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
-name = "moire-trace-capture"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
-name = "moire-trace-types"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
-name = "moire-types"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
-name = "moire-wasm"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
-name = "moire-wire"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-
-[[patch.unused]]
 name = "anyrender"
 version = "0.6.2"
 source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
@@ -7367,3 +7322,48 @@ source = "git+https://github.com/FastTrackStudios/stylo.git?rev=8bb8c3b#8bb8c3b4
 name = "wgpu_context"
 version = "0.1.2"
 source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "moire"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
+
+[[patch.unused]]
+name = "moire-macros-noop"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
+
+[[patch.unused]]
+name = "moire-runtime"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
+
+[[patch.unused]]
+name = "moire-tokio"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
+
+[[patch.unused]]
+name = "moire-trace-capture"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
+
+[[patch.unused]]
+name = "moire-trace-types"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
+
+[[patch.unused]]
+name = "moire-types"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
+
+[[patch.unused]]
+name = "moire-wasm"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
+
+[[patch.unused]]
+name = "moire-wire"
+version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
