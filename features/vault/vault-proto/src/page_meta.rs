@@ -37,6 +37,10 @@ pub struct PageMeta {
     /// frontmatter wikilink (`[[X]]` → `X`). Empty string means
     /// "no parent" → a tree root.
     pub folder: String,
+    /// Frontmatter tags (`tags:` / `tag:`), `#` stripped, document
+    /// order. Hierarchical tags keep their `/` (e.g. `ops/inventory`)
+    /// — the client's tag-folder explorer splits on it.
+    pub tags: Vec<String>,
     /// Content hash (lowercase hex sha256), matching the
     /// manifest's hashing — lets the client issue a conditional
     /// `set_folder` / open without a separate round-trip.

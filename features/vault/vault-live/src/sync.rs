@@ -411,6 +411,7 @@ impl VaultSync for Backend {
                     // `raw` is the file's verbatim UTF-8 bytes, so this
                     // matches the manifest's per-file hash.
                     sha256: sha256_hex(p.raw.as_bytes()),
+                    tags: fm.as_ref().map(fm_tags).unwrap_or_default(),
                     aliases: fm.as_ref().map(fm_aliases).unwrap_or_default(),
                 }
             })
@@ -427,6 +428,7 @@ impl VaultSync for Backend {
                 title: b.basename.clone(),
                 page_type: "base".to_string(),
                 folder: String::new(),
+                tags: Vec::new(),
                 sha256: sha256_hex(b.raw.as_bytes()),
                 aliases: Vec::new(),
             });
@@ -720,6 +722,30 @@ fn fm_aliases(fm: &FrontMatter) -> Vec<String> {
                     .filter(|s| !s.is_empty())
                     .map(str::to_owned),
             ),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Frontmatter `tags` / `tag` values, `#` stripped, in document
+/// order. Same forms as [`fm_aliases`] (YAML list or the legacy
+/// comma-separated string).
+fn fm_tags(fm: &FrontMatter) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |raw: &str| {
+        let t = raw.trim().trim_start_matches('#');
+        if !t.is_empty() && !out.iter().any(|x| x == t) {
+            out.push(t.to_owned());
+        }
+    };
+    for p in &fm.props {
+        if !(p.key.eq_ignore_ascii_case("tags") || p.key.eq_ignore_ascii_case("tag")) {
+            continue;
+        }
+        match &p.value {
+            PropValue::List(items) => items.iter().for_each(|s| push(s)),
+            PropValue::Text(s) => s.split([',', ' ']).for_each(|piece| push(piece)),
             _ => {}
         }
     }
