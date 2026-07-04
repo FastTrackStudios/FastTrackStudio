@@ -4,6 +4,7 @@
 //! subtle filled pill.
 
 use dioxus::prelude::*;
+use fts_ui::lucide_dioxus::Feather;
 
 use crate::nav::{nav_tabs, tabs_match};
 use crate::routes::Route;
@@ -49,10 +50,18 @@ pub fn IconRail(current: Route) -> Element {
                     }
                 }
             }
-            // Quick capture lives at the rail's foot — one tap from
-            // anywhere, like the fleeting FAB on mobile.
-            div { class: "pt-1",
-                crate::chrome::FleetingButton {}
+            // Quick capture at the rail's foot — icon-only, rail-sized.
+            {
+                let mut open = crate::chrome::use_fleeting_open();
+                rsx! {
+                    button {
+                        r#type: "button",
+                        class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary transition-colors hover:bg-primary/25",
+                        title: "Capture a fleeting note",
+                        onclick: move |_| open.set(true),
+                        Feather { size: 15 }
+                    }
+                }
             }
         }
     }

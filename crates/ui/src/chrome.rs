@@ -39,7 +39,7 @@ pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
 }
 
-fn use_fleeting_open() -> Signal<bool> {
+pub(crate) fn use_fleeting_open() -> Signal<bool> {
     use_context::<FleetingOpen>().0
 }
 
