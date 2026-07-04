@@ -1,7 +1,8 @@
 //! Declarative event matching — the ergonomic way to say "notes on channel 1"
 //! or "any CC" without hand-writing `match` arms at every call site.
 
-use crate::event::{Channel, MidiEvent, U7};
+use crate::event::MidiEvent;
+use crate::number::{Channel, ControllerNumber};
 
 /// A predicate over [`MidiEvent`]s. Compose with [`Filter::and`] / [`Filter::or`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,7 +16,7 @@ pub enum Filter {
     /// Note-on / note-off (either).
     Notes,
     /// Control-change messages, optionally for one controller number.
-    ControlChange(Option<U7>),
+    ControlChange(Option<ControllerNumber>),
     /// System-realtime (clock/start/continue/stop/sensing/reset).
     Realtime,
     /// Logical AND.
@@ -66,16 +67,17 @@ mod tests {
 
     #[test]
     fn notes_on_channel_one() {
+        use crate::number::{ControllerValue, KeyNumber, Velocity};
         let f = Filter::Notes.and(Filter::OnChannel(Channel::new(0)));
         let note = MidiEvent::NoteOn {
             channel: Channel::new(0),
-            note: U7::new(64),
-            velocity: U7::new(90),
+            key: KeyNumber::new(64),
+            velocity: Velocity::new(90),
         };
         let cc = MidiEvent::ControlChange {
             channel: Channel::new(0),
-            controller: U7::new(1),
-            value: U7::new(0),
+            controller: ControllerNumber::new(1),
+            value: ControllerValue::new(0),
         };
         assert!(f.matches(&note));
         assert!(!f.matches(&cc));

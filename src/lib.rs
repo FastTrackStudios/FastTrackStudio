@@ -22,10 +22,17 @@
 
 pub mod event;
 pub mod filter;
+pub mod number;
 pub mod port;
+pub mod raw;
 #[cfg(feature = "vox")]
 pub mod service;
 
-pub use event::{Channel, DecodeError, MidiEvent, PitchBend, U7};
+pub use event::{DecodeError, MidiEvent};
 pub use filter::Filter;
+pub use number::{
+    Channel, ControllerNumber, ControllerValue, KeyNumber, PitchBend, Pressure, ProgramNumber, U14,
+    U4, U7, Velocity,
+};
 pub use port::{Direction, MidiIoError, PortId, PortInfo, PortSelector, TimedEvent};
+pub use raw::{RawShortMessage, ShortMessage};
