@@ -64,9 +64,35 @@ pub fn use_org_theme_overrides() -> OrgThemeOverrides {
 
 /// Build a `ThemeState` for a preset name + mode. Falls back to the
 /// fts-ui default preset if the name doesn't match anything.
+/// The Obsidian dark palette (Cody, 2026-07-03) — kept in lockstep
+/// with the static sheet in `apps/web/fts-theme.css`. The runtime
+/// `ThemeProvider` writes tokens onto `.fts-theme-root`, which beats
+/// the stylesheet's `:root` block for everything inside the app — so
+/// the palette must be applied HERE, not only in the CSS file.
+const OBSIDIAN_DARK: &[(&str, &str)] = &[
+    ("--background", "#1e1e1e"),
+    ("--foreground", "#dadada"),
+    ("--card", "#161616"),
+    ("--card-foreground", "#dadada"),
+    ("--popover", "#1e1e1e"),
+    ("--popover-foreground", "#dadada"),
+    ("--primary", "#7f6df2"),
+    ("--primary-foreground", "#fbfbfb"),
+    ("--sidebar", "#161616"),
+];
+
 pub fn state_from_preset_name(name: &str, mode: ThemeMode) -> ThemeState {
     let preset = theme_preset(name).unwrap_or_else(default_theme_preset);
-    ThemeState::new(preset, mode)
+    // Org/project presets keep their own colors; only the default
+    // preset gets the Obsidian skin.
+    let is_default = preset.name == "default";
+    let mut state = ThemeState::new(preset, mode);
+    if is_default {
+        for (key, value) in OBSIDIAN_DARK {
+            state.set_token(ThemeMode::Dark, *key, *value);
+        }
+    }
+    state
 }
 
 /// Wraps `children` in a `ThemeScope` when the project has an override,
