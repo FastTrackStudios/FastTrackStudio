@@ -78,6 +78,7 @@ fn apply_transport(te: &TransportEvent) {
 fn variant_label(event: &DawEvent) -> &'static str {
     match event {
         DawEvent::Track(_) => "track",
+        DawEvent::Fx(_) => "fx",
         DawEvent::Marker(_) => "marker",
         DawEvent::Region(_) => "region",
         DawEvent::TempoMap(_) => "tempo",

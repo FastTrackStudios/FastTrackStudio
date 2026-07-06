@@ -367,6 +367,7 @@ fn apply_daw_event(snap: &mut Snapshot, event: &DawEvent, now: Instant) {
         DawEvent::TransportPosition(tick) => apply_position_tick(snap, tick),
         DawEvent::TransportState(ev) => apply_transport_state(snap, ev, now),
         DawEvent::Track(env) => apply_track_event(snap, &env.event, now),
+        DawEvent::Fx(_) => {}
         DawEvent::Marker(env) => apply_marker_event(snap, &env.event, now),
         DawEvent::Region(env) => apply_region_event(snap, &env.event, now),
         DawEvent::Project(env) => apply_project_event(snap, &env.event, now),
@@ -423,6 +424,7 @@ fn apply_transport_state(snap: &mut Snapshot, ev: &TransportEvent, now: Instant)
         TransportEvent::LoopRegionChanged { .. } => "loop region".to_string(),
         TransportEvent::TimeSelectionChanged { .. } => "time selection".to_string(),
         TransportEvent::PlayrateChanged { playrate, .. } => format!("playrate = {:.3}", playrate),
+        TransportEvent::MetronomeChanged { enabled, .. } => format!("metronome = {}", enabled),
     };
     push_log(snap, now, EventDomain::Transport, summary);
 }
