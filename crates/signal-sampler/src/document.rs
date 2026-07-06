@@ -600,6 +600,9 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
         // Previous note-on frame on this line — the IOI clock for the
         // Overlap-Delay (spec §2.1: legato delay is IOI-driven, not velocity).
         let mut prev_start: Option<i64> = None;
+        // Previous note PITCH on this line — the legato `from` for the per-move
+        // measured-arrival lookup that sets the `$1fvjk` pre-bow lead.
+        let mut prev_pitch: Option<u8> = None;
         for &ni in list {
             let n = &notes[ni];
             let start = qn_to_frame(&doc.tempo, n.src.start_qn, sample_rate);
@@ -656,7 +659,25 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
                 } else {
                     let ioi_frames = prev_start.map(|p| (start - p).max(0)).unwrap_or(0);
                     let ioi_ms = crate::engine::frames_to_ms(ioi_frames as u64, sample_rate);
-                    crate::engine::ioi_legato_delay_ms(ioi_ms, vel, n.legato_expressive)
+                    // CSS `$1fvjk`: the transition sample starts `lt_start_offset_ms`
+                    // in (IOI-interpolated 177 → 117 ms). To land the destination
+                    // pitch on the tick with that offset applied, prefire by the
+                    // AUDIBLE pre-bow that still plays before the arrival =
+                    // (per-move measured arrival − $1fvjk). Fast lines → ~0 ms (fire
+                    // on the tick); slow lines → ~60 ms of bow-change lead-in. The
+                    // engine's `start_offset = arrival − lead·rate` then resolves to
+                    // exactly $1fvjk (see `spawn_transition_voice`). Libraries
+                    // without measured transitions keep the legacy Overlap-Delay
+                    // curve (`ioi_legato_delay_ms`).
+                    match prev_pitch.and_then(|from| spec.legato_lead_ms(from, n.src.pitch)) {
+                        Some(arrival_ms) => (arrival_ms as f32
+                            - crate::engine::lt_start_offset_ms(ioi_ms))
+                        .max(0.0)
+                        .round() as u32,
+                        None => {
+                            crate::engine::ioi_legato_delay_ms(ioi_ms, vel, n.legato_expressive)
+                        }
+                    }
                 };
                 let rr = stable_rr_slot(
                     doc.seed,
@@ -734,6 +755,7 @@ pub fn annotate(doc: &TrackDocument, spec: &LibrarySpec, sample_rate: u32) -> Sc
             // IOI clock: the next note on this line measures its Overlap-Delay
             // from this note's (source) start.
             prev_start = Some(start);
+            prev_pitch = Some(n.src.pitch);
         }
     }
 

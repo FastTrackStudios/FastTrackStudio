@@ -515,14 +515,24 @@ pub struct DynamicsSpec {
     /// Release-time multiplier at CC64=63. 0 means the engine default.
     #[facet(default)]
     pub half_pedal_max_release_multiplier: f32,
-    /// Enable the decoded short-note `%g1qri`/`$arhiq` velocity-layer model
-    /// (threshold-based dynamic selection + intra-layer velocity→volume). OFF by
-    /// default: the decoded values are staged per articulation (`vel_thresholds`
-    /// / `vel_layer_db`) but applying them naively regresses the A/B until each
-    /// articulation's recorded per-band level is calibrated to the KSP's band-top
-    /// reference. See `SampleEngine::short_layer_and_velvol`.
+    /// Enable the KSP-confirmed short-note VELOCITY → dynamic-LAYER selection
+    /// (the per-articulation `%g1qri` thresholds in `vel_thresholds`) instead of
+    /// an even velocity split. This is the `VeloIDX` band selection from
+    /// `script_1.ksp`; the short TYPE stays on CC1/CC58. ON for CSS (validated
+    /// against the reference render — timbre holds, the collapsed Staccato ladder
+    /// lands on the same recorded dynamics). See `SampleEngine::short_band`.
     #[facet(default)]
     pub enable_velocity_layers: bool,
+    /// Apply the decoded intra-band velocity→volume trim (`$arhiq`, the KSP
+    /// `%bcez1` per-band deltas in `vel_layer_db`) ON TOP of the layer selection.
+    /// OFF by default and OFF for CSS: the layer-selection math is validated, but
+    /// the currently-decoded `%bcez1` values over-attenuate vs the reference
+    /// render (they regress mean|level| ~0.6 dB / MATCH 38→31 on the A/B while
+    /// timbre holds), so `$arhiq` awaits re-derivation of the true `%bcez1`
+    /// magnitudes from the KSP persistent. `short_velocity_volume_db` still
+    /// computes the curve; this flag only gates whether it is applied.
+    #[facet(default)]
+    pub apply_short_velvol: bool,
 }
 
 /// One CC1 dynamic layer with its crossfade range.

@@ -237,6 +237,10 @@ enum LegatoState {
         to_note_velocity: u8,
         /// Use Port samples (portamento glide) instead of Leg samples.
         portamento: bool,
+        /// Inter-onset interval (ms) at the moment the transition was armed —
+        /// carried through the countdown so the reactive fire can apply the
+        /// CSS `$1fvjk` sample-start offset ([`lt_start_offset_ms`]).
+        ioi_ms: f32,
     },
 }
 
@@ -1148,25 +1152,41 @@ impl SampleEngine {
                         if zone_lead < lead {
                             // Hold the fire back so the arrival lands ON the
                             // tick (fires via the render countdown; NOT a
-                            // reactive fire — the counter is untouched).
+                            // reactive fire — the counter is untouched). With
+                            // the `$1fvjk` pre-bow lead this branch is
+                            // essentially unreachable for CSS (the scheduled
+                            // lead ≤ ~60 ms is always < the measured arrival),
+                            // so it resolves through the reactive path with the
+                            // armed IOI = 0 → deepest-offset fallback.
                             self.line_mut().state = LegatoState::Pending {
                                 frames_remaining: (lead - zone_lead) as usize,
                                 from_note: cur,
                                 to_note: note,
                                 to_note_velocity: velocity,
                                 portamento,
+                                ioi_ms: 0.0,
                             };
                             return;
                         }
-                        // Longer lead-in than scheduled: fire now, skipping
-                        // the surplus off the sample's front.
-                        self.fire_legato_with_lead(cur, note, velocity, portamento, Some(lead));
+                        // Longer lead-in than scheduled: fire now, skipping the
+                        // surplus off the sample's front. `arrival − lead·rate`
+                        // resolves the offset to the CSS `$1fvjk` value the
+                        // scheduler encoded in `lead`; the reactive `ioi_ms` is
+                        // unused on this (document) path.
+                        self.fire_legato_with_lead(
+                            cur,
+                            note,
+                            velocity,
+                            portamento,
+                            Some(lead),
+                            0.0,
+                        );
                         return;
                     }
                 }
                 // No measurement (legacy library) or live prefire: fire now,
                 // the sample's own lead-in lands wherever it lands.
-                self.fire_legato_with_lead(cur, note, velocity, portamento, None);
+                self.fire_legato_with_lead(cur, note, velocity, portamento, None, 0.0);
             }
         }
     }
@@ -2108,9 +2128,17 @@ impl SampleEngine {
         }
     }
 
-    /// Trigger a one-shot short note (spiccato / staccato / sfz / pizz / …):
-    /// velocity picks the dynamic layer, nearest recorded key is pitch-shifted,
-    /// and it plays to completion (no CC1 crossfade, no loop).
+    /// Trigger a one-shot short note (spiccato / staccato / sfz / pizz / …). The
+    /// nearest recorded key is pitch-shifted and it plays to completion (no loop).
+    ///
+    /// KSP-confirmed CSS model (`script_1.ksp` ~10775–11135, verified against the
+    /// reference render): the short TYPE is selected upstream by CC1
+    /// (`short_note_cc1_map`) / CC58 keyswitch; **VELOCITY** then does BOTH —
+    /// it selects the recorded DYNAMIC layer via that type's `%g1qri` thresholds
+    /// AND scales volume continuously within the band via `$arhiq`
+    /// ([`short_layer_and_velvol`]). CC1 is NOT in the short-dynamic path. When
+    /// the flag is off or the artic carries no thresholds this falls back to the
+    /// even-split dynamic with the velocity² loudness curve (non-CSS libraries).
     fn trigger_zoned_short(&mut self, note: u8, velocity: u8) {
         let rr = self
             .forced_rr
@@ -2118,23 +2146,17 @@ impl SampleEngine {
             .unwrap_or(self.zone_rr_counter);
         self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
         let artic = self.articulation.clone();
-        // Layer selection + intra-layer velocity→volume from the decoded CSS KSP
-        // (`%g1qri` thresholds + `$arhiq`). `enable_velocity_layers` gates it so
-        // the naive band mapping (which regresses count-mismatched articulations
-        // whose recorded sample levels don't sit at the KSP's band-top reference)
-        // stays OFF until per-articulation recorded-level calibration is added —
-        // see `short_layer_and_velvol`.
+
+        // VELOCITY → dynamic layer (`%g1qri` band) + intra-band volume (`$arhiq`).
         let (dynamic, velvol_db) = self.short_layer_and_velvol(&artic, velocity);
-        // Multi-dynamic shorts (CSS: pp/p/mf/ff) have the loudness baked into the
-        // velocity-selected sample — applying a velocity² gain on top would
-        // double-attenuate (mirrors the non-zoned path's n_dyn unity rule). Only
-        // articulations with a single recorded dynamic get a velocity curve.
         let n_dyn = self
             .patch
             .spec
             .articulation(&artic)
             .map(|a| a.dynamics.len())
             .unwrap_or(0);
+        // With ≥2 recorded dynamics the loudness IS the sampled layer plus the
+        // `$arhiq` intra-band trim; only single-layer artics use velocity².
         let gain = if n_dyn > 1 {
             1.0
         } else {
@@ -2142,6 +2164,75 @@ impl SampleEngine {
         } * db_to_gain(css_short_makeup_db(&artic) + velvol_db);
         if let Some(idx) = self.find_layer_zone(&artic, "", &dynamic, note, rr) {
             self.spawn_zone_voice(idx, note, VoiceKind::Short, gain, None, 0.0);
+        }
+    }
+
+    /// VELOCITY → dynamic band + `$arhiq` volume for a SHORT note, per the
+    /// KSP `%g1qri` model. Returns `(band_index, n_bands, band_top_velocity,
+    /// band_span)` or `None` when the articulation carries no usable thresholds.
+    ///
+    /// The interior boundaries are the `vel_thresholds` (the `%g1qri` values after
+    /// the implicit floor of 1) with a **trailing terminal `127` removed** — a
+    /// `127` threshold is the open-top edge of the highest band, not a new band.
+    /// So `n_bands = interior_boundaries + 1`:
+    /// - Spiccato `(25 55 108)` → 4 bands `[1,24][25,54][55,107][108,127]`.
+    /// - Staccato `(51 83 127)` → 3 bands `[1,50][51,82][83,127]` (the `127` is
+    ///   the top edge, not a degenerate `[127,127]` band).
+    /// The last band's top is 127 with span `128 − lo` (KSP open top edge).
+    ///
+    /// Band → recorded-dynamic mapping is done by the caller: 1:1 when the counts
+    /// match, else TOP-aligned (the extra softest recorded dynamics sit below the
+    /// short's `%g1qri` floor — verified against the reference render, where the
+    /// CC1=90-collapsed Staccato's vel 40/80/120 land on mp/f/fff, not pp/mp/f).
+    fn short_band(&self, artic: &crate::spec::ArticulationSpec, velocity: u8) -> Option<(usize, usize, i32, i32)> {
+        if artic.dynamics.is_empty() {
+            return None;
+        }
+        // Interior boundaries = thresholds, minus a trailing terminal 127.
+        let mut bounds: Vec<i32> = artic.vel_thresholds.iter().map(|&t| t as i32).collect();
+        if bounds.last() == Some(&127) {
+            bounds.pop();
+        }
+        if bounds.is_empty() {
+            return None;
+        }
+        let n_bands = bounds.len() + 1;
+        let v = velocity as i32;
+        let band = bounds.iter().position(|&t| v < t).unwrap_or(n_bands - 1);
+        let lo = if band == 0 { 1 } else { bounds[band - 1] };
+        let (num_top, span) = if band == n_bands - 1 {
+            (127, 128 - lo)
+        } else {
+            let t = bounds[band];
+            (t, t - lo)
+        };
+        Some((band, n_bands, num_top, span))
+    }
+
+    /// Velocity → VOLUME (dB) for a SHORT note: the decoded CSS `$arhiq` intra-band
+    /// law applied ON TOP of the `%g1qri` layer selection. Ramps 0 dB at the
+    /// band's top velocity down to ~`%bcez1` dB at its bottom, making velocity a
+    /// continuous loudness ramp within each recorded layer. Returns 0 when the
+    /// flag is off or the artic carries no thresholds. KSP law:
+    /// `dB = (band_top − vel)·%bcez1 / (span − 1)`.
+    fn short_velocity_volume_db(&self, artic_id: &str, velocity: u8) -> f32 {
+        // `$arhiq` is gated separately from the layer selection: the decoded
+        // `%bcez1` (`vel_layer_db`) currently over-attenuates vs the reference,
+        // so it is staged but not applied for CSS. See `apply_short_velvol`.
+        if !self.patch.spec.dynamics.apply_short_velvol {
+            return 0.0;
+        }
+        let Some(artic) = self.patch.spec.articulation(artic_id) else {
+            return 0.0;
+        };
+        let Some((band, _n_bands, num_top, span)) = self.short_band(artic, velocity) else {
+            return 0.0;
+        };
+        let delta = artic.vel_layer_db.get(band).copied().unwrap_or(0.0);
+        if span > 1 {
+            (num_top - velocity as i32) as f32 * delta / (span as f32 - 1.0)
+        } else {
+            0.0
         }
     }
 
@@ -2233,11 +2324,12 @@ impl SampleEngine {
         let now = self.frames_rendered;
         let ioi_frames = now.saturating_sub(self.line().last_onset_frame);
         self.line_mut().last_onset_frame = now;
+        let ioi_ms = frames_to_ms(ioi_frames, self.sample_rate);
         let (delay_ms, portamento) = self.legato_timing(velocity, ioi_frames);
         let frames = ms_to_frames(delay_ms, self.sample_rate);
         if frames == 0 {
             self.play_direction = if to >= from { "up" } else { "down" }.to_string();
-            self.fire_legato(from, to, velocity, portamento);
+            self.fire_legato(from, to, velocity, portamento, ioi_ms);
         } else {
             self.line_mut().state = LegatoState::Pending {
                 frames_remaining: frames,
@@ -2245,6 +2337,7 @@ impl SampleEngine {
                 to_note: to,
                 to_note_velocity: velocity,
                 portamento,
+                ioi_ms,
             };
         }
     }
@@ -2335,6 +2428,7 @@ impl SampleEngine {
         velocity: u8,
         portamento: bool,
         sched_lead: Option<u64>,
+        ioi_ms: f32,
     ) {
         let _ = velocity;
         if portamento {
@@ -2344,7 +2438,14 @@ impl SampleEngine {
                 .find_port_artic_id()
                 .or_else(|| self.find_legato_artic_id(false));
             if let Some(id) = id {
-                self.spawn_transition_voice(&id, from, to, self.cc5_porta_volume, sched_lead);
+                self.spawn_transition_voice(
+                    &id,
+                    from,
+                    to,
+                    self.cc5_porta_volume,
+                    sched_lead,
+                    ioi_ms,
+                );
             }
             return;
         }
@@ -2371,7 +2472,7 @@ impl SampleEngine {
             if scale <= 0.001 && spawned {
                 continue;
             }
-            self.spawn_transition_voice(&id, from, to, scale.max(0.001) * expr, sched_lead);
+            self.spawn_transition_voice(&id, from, to, scale.max(0.001) * expr, sched_lead, ioi_ms);
             spawned = true;
         }
     }
@@ -2413,6 +2514,7 @@ impl SampleEngine {
         to: u8,
         gain: f32,
         sched_lead: Option<u64>,
+        ioi_ms: f32,
     ) {
         // Dynamic layer for the transition from CC1 (single dominant layer).
         let (lo, hi, blend) = self.layers_for_artic(leg_id);
@@ -2454,14 +2556,29 @@ impl SampleEngine {
         let rate = 2.0f64.powf((f64::from(to) - f64::from(z.root_key) + pitch_offset) / 12.0);
         let lead_sample_frames =
             ms_to_frames(z.lead_in_ms.max(0.0).round() as u32, self.sample_rate) as u64;
-        // Prefired short? Skip the surplus lead-in so the arrival lands on
-        // the destination tick anyway.
+        // Sample-start offset = the CSS `$1fvjk` curve, IOI-driven (177 → 117 ms):
+        //
+        //  * Document (lookahead) path — `sched_lead` is set: the scheduler
+        //    prefired the transition by the audible pre-bow (measured arrival −
+        //    $1fvjk; see `document::annotate` / `LibrarySpec::legato_lead_ms`),
+        //    so `arrival − sched_lead·rate` resolves to exactly `$1fvjk` while
+        //    keeping the arrival ON the destination tick (the audible pre-bow in
+        //    wall frames equals `sched_lead`, independent of `rate`).
+        //  * Reactive (live) path — `sched_lead` is None: no lookahead, so start
+        //    directly at `$1fvjk` (from the armed IOI), clamped to the measured
+        //    arrival so we never begin past the destination pitch. Legacy
+        //    libraries have no measured lead-in (`lead_sample_frames == 0`) →
+        //    offset 0, the pre-`$1fvjk` behaviour.
         let start_offset = match sched_lead {
             Some(lead) => {
                 let lead_in_sample = (lead as f64 * rate) as u64;
                 lead_sample_frames.saturating_sub(lead_in_sample) as usize
             }
-            None => 0,
+            None => {
+                let off = ms_to_frames(lt_start_offset_ms(ioi_ms).round() as u32, self.sample_rate)
+                    as u64;
+                off.min(lead_sample_frames) as usize
+            }
         };
         let ok = self.spawn_zone_voice_at(
             idx,
@@ -3211,6 +3328,10 @@ impl SampleEngine {
                     .map(|a| a.kind == ArticulationKind::Short)
                     .unwrap_or(false);
                 if is_short {
+                    // KSP-confirmed model: CC1 selects the short TYPE via
+                    // `short_note_cc1_map` (the reference collapses every short to
+                    // the CC1=90 type); VELOCITY selects the dynamic layer at
+                    // trigger time. CC1 is never the short DYNAMIC axis.
                     self.apply_cc1_short_select();
                 } else {
                     self.update_sustain_gains();
@@ -3452,11 +3573,12 @@ impl SampleEngine {
                     to_note,
                     to_note_velocity,
                     portamento,
+                    ioi_ms,
                     ..
                 } = std::mem::replace(&mut self.lines[li].state, LegatoState::Idle)
                 {
                     self.set_active_line(li);
-                    self.fire_legato(from_note, to_note, to_note_velocity, portamento);
+                    self.fire_legato(from_note, to_note, to_note_velocity, portamento, ioi_ms);
                 }
             }
         }
@@ -3697,14 +3819,11 @@ impl SampleEngine {
         let now = self.frames_rendered;
         let ioi_frames = now.saturating_sub(self.line().last_onset_frame);
         self.line_mut().last_onset_frame = now;
+        let ioi_ms = frames_to_ms(ioi_frames, self.sample_rate);
         let delay_ms = if portamento {
             0 // portamento fires immediately — the glide pitch ramp is the "delay"
         } else {
-            ioi_legato_delay_ms(
-                frames_to_ms(ioi_frames, self.sample_rate),
-                velocity,
-                self.legato_expressive,
-            )
+            ioi_legato_delay_ms(ioi_ms, velocity, self.legato_expressive)
         };
 
         let frames_remaining = ms_to_frames(delay_ms, self.sample_rate);
@@ -3717,11 +3836,19 @@ impl SampleEngine {
             to_note,
             to_note_velocity: velocity,
             portamento,
+            ioi_ms,
         };
     }
 
-    fn fire_legato(&mut self, from_note: u8, to_note: u8, velocity: u8, portamento: bool) {
-        self.fire_legato_with_lead(from_note, to_note, velocity, portamento, None);
+    fn fire_legato(
+        &mut self,
+        from_note: u8,
+        to_note: u8,
+        velocity: u8,
+        portamento: bool,
+        ioi_ms: f32,
+    ) {
+        self.fire_legato_with_lead(from_note, to_note, velocity, portamento, None, ioi_ms);
     }
 
     /// [`fire_legato`](Self::fire_legato) with the document scheduler's
@@ -3736,6 +3863,7 @@ impl SampleEngine {
         velocity: u8,
         portamento: bool,
         sched_lead: Option<u64>,
+        ioi_ms: f32,
     ) {
         if self.legato_fire_log_enabled && self.legato_fire_log.len() < LEGATO_FIRE_LOG_CAP {
             self.legato_fire_log.push(LegatoFireEvent {
@@ -3783,7 +3911,9 @@ impl SampleEngine {
         if self.patch.is_zoned() {
             self.play_direction = direction.to_string();
             // 1. One-shot bow-change transition (`%ftriy`).
-            self.spawn_legato_transition(from_note, to_note, velocity, portamento, sched_lead);
+            self.spawn_legato_transition(
+                from_note, to_note, velocity, portamento, sched_lead, ioi_ms,
+            );
             // 2. Main held sustain (`%grhcg`) — immediate, full level, declick
             //    only, carrying the −6 dB `$3tsb0` legato makeup.
             let declick = ms_to_frames(SUSTAIN_DECLICK_MS, self.sample_rate);
@@ -4549,74 +4679,32 @@ impl SampleEngine {
     /// Decoded CSS short-note velocity model (KSP `%g1qri` + `$arhiq`).
     ///
     /// Returns `(dynamic_label, velvol_db)`:
-    /// - the recorded dynamic is picked by the `vel_thresholds` bands (the real
-    ///   `%g1qri` velocity boundaries) rather than an even split, and
-    /// - `velvol_db` is the intra-layer velocity→volume `$arhiq`, which ramps
-    ///   level continuously across each band by the decoded `%bcez1` recorded
-    ///   adjacent-layer dB delta, so a note tracks velocity within its layer.
+    /// - the recorded dynamic is picked by the `%g1qri` velocity bands
+    ///   ([`short_band`], mapped 1:1 onto the recorded dynamics) rather than an
+    ///   even split, and
+    /// - `velvol_db` is the intra-layer velocity→volume `$arhiq`
+    ///   ([`short_velocity_volume_db`]), which ramps level continuously across
+    ///   each band by the decoded `%bcez1` adjacent-layer dB delta, so a note
+    ///   tracks velocity within its layer.
     ///
-    /// KSP law per band `j` (top of band `top`, span `w`, delta `d`):
-    /// `dB = (top − vel)·d / (w − 1)` — 0 at the band's top velocity, `≈d` dB at
-    /// its bottom. Bands: `[1,t0) [t0,t1) …`, top band above the last boundary
-    /// `< 127`. When the articulation carries no thresholds, falls back to the
-    /// even-split dynamic with 0 dB (non-CSS libraries are unchanged).
+    /// When the flag is off or the articulation carries no thresholds, falls back
+    /// to the even-split dynamic with 0 dB (non-CSS libraries are unchanged).
     fn short_layer_and_velvol(&self, artic_id: &str, velocity: u8) -> (String, f32) {
-        // Gate: the decoded `%g1qri`/`$arhiq` model is wired and unit-tested, but
-        // applying it live regresses the A/B — the naive band→dynamic mapping and
-        // the `$arhiq` band-top reference assumption fight our pipeline's recorded
-        // sample levels (e.g. Staccato vel40 selects `pp` where the even split and
-        // the CSS render sit at `mp`, an ~20 dB drop; and `$arhiq` attenuates the
-        // top band where the reference is already too quiet). Until each
-        // articulation's recorded per-band levels are measured and the KSP
-        // reference points reconciled, keep the well-matched even split.
         if !self.patch.spec.dynamics.enable_velocity_layers {
             return (self.dynamic_for_artic(artic_id, velocity), 0.0);
         }
         let Some(artic) = self.patch.spec.articulation(artic_id) else {
             return (self.dynamic_for_artic(artic_id, velocity), 0.0);
         };
-        // Boundaries actually used by the KSP selection = thresholds below 127
-        // (a 127 threshold is the terminal top, its band is empty/degenerate).
-        let bounds: Vec<u8> = artic
-            .vel_thresholds
-            .iter()
-            .copied()
-            .filter(|&t| t < 127)
-            .collect();
-        if bounds.is_empty() || artic.dynamics.is_empty() {
+        let Some((band, n_bands, _num_top, _span)) = self.short_band(artic, velocity) else {
             return (self.dynamic_for_artic(artic_id, velocity), 0.0);
-        }
-        let n_bands = bounds.len() + 1;
+        };
+        // Band → recorded dynamic: 1:1 when counts match, else TOP-align (the
+        // extra softest recorded dynamics sit below the short's %g1qri floor).
         let n_dyn = artic.dynamics.len();
-        let v = velocity as i32;
-        // Which band does this velocity fall in?
-        let band = bounds.iter().position(|&t| v < t as i32).unwrap_or(n_bands - 1);
-        // Band edges: lo = previous boundary (or 1). The KSP `$arhiq` ramps to a
-        // reference velocity `num_top` over a span `%bcnzg`. Middle band `j`:
-        // num_top = g1qri[j], span = g1qri[j]-g1qri[j-1]. Top band: num_top = 127
-        // but span = 128-g1qri[last] (the KSP uses 128 for the open top edge).
-        let lo = if band == 0 { 1 } else { bounds[band - 1] as i32 };
-        let (num_top, span) = if band == n_bands - 1 {
-            (127, 128 - lo)
-        } else {
-            let t = bounds[band] as i32;
-            (t, t - lo)
-        };
-        let delta = artic.vel_layer_db.get(band).copied().unwrap_or(0.0);
-        // KSP: $arhiq = (num_top − vel)·%lwgt4/100, %lwgt4 = %bcez1·100000/(span−1).
-        let velvol = if span > 1 {
-            (num_top - v) as f32 * delta / (span as f32 - 1.0)
-        } else {
-            0.0
-        };
-        // Map the band onto a recorded dynamic. Equal counts → 1:1; otherwise
-        // spread the bands proportionally across the recorded dynamics.
-        let dyn_idx = if n_bands == n_dyn {
-            band
-        } else {
-            ((band * (n_dyn - 1)) as f32 / (n_bands - 1).max(1) as f32).round() as usize
-        }
-        .min(n_dyn - 1);
+        let offset = n_dyn.saturating_sub(n_bands);
+        let dyn_idx = (band + offset).min(n_dyn - 1);
+        let velvol = self.short_velocity_volume_db(artic_id, velocity);
         (artic.dynamics[dyn_idx].clone(), velvol)
     }
 
@@ -4974,6 +5062,61 @@ pub fn ioi_legato_delay_ms(ioi_ms: f32, velocity: u8, expressive: bool) -> u32 {
         )
     };
     interp_od(ioi_ms, thr, anc).round().max(0.0) as u32
+}
+
+// ── CSS legato transition sample-start offset `$1fvjk` (real persistent values) ──
+//
+// The main-path (`$ocjln=6`) legato transition is spawned
+// `play_note(note, RR, $1fvjk*1000, 0)` — `play_note`'s 3rd arg is the sample-start
+// offset in µs, so `$1fvjk` (ms) is how far INTO the transition recording playback
+// begins. It is IOI-interpolated: FAST lines start DEEPER in (skip more of the
+// recorded bow-change swell → less audible pre-bow), SLOW lines start SHALLOWER
+// (more pre-bow lead-in). Read from `CSS 1st Violins.nki`'s persistent snapshot
+// (BParScript store, not the compiled `:=` defaults):
+//   thresholds  $yam53 = 100, $nzsuf = 150, $5c2um = 500  (ms)
+//   anchors     $ggt00 = 177, $v0rbb = 177, $5exar = 117  (ms)
+// i.e. flat 177 ms up to a 150 ms IOI, then a linear ramp 177 → 117 ms across
+// 150…500 ms, then flat 117 ms. (The `$yam53 = 100` breakpoint sits inside the
+// flat 177 ms region, so it is a no-op for the curve shape but kept for parity.)
+//
+// A per-velocity-range `$ocjln = 4` variant exists — base offsets 0/83/177 ms +
+// the Overlap-Delay `$b0n3s` — but `$ocjln = 6` (this IOI curve) is CSS's primary
+// legato path and the one modeled here.
+const LT_OFF_THR: [f32; 3] = [100.0, 150.0, 500.0]; // $yam53 / $nzsuf / $5c2um
+const LT_OFF_ANC: [f32; 3] = [177.0, 177.0, 117.0]; // $ggt00 / $v0rbb / $5exar
+
+/// Reference transition-arrival point (ms) = the deepest `$1fvjk` (`$ggt00`): at a
+/// fast line the sample starts essentially AT the destination-pitch arrival, so
+/// the audible pre-bow is ~0. Documentary constant only; the document scheduler
+/// derives the actual pre-bow from the per-move MEASURED arrival minus `$1fvjk`.
+const LT_ARRIVAL_REF_MS: f32 = 177.0; // $ggt00
+
+/// CSS legato transition sample-start offset (ms) — the decoded `$1fvjk` IOI curve
+/// (`$ocjln = 6`). Below `$yam53` → `$ggt00` (177); above `$5c2um` → `$5exar`
+/// (117); piecewise-linear between. `ioi_ms` is the inter-onset interval on the
+/// line (frames since the previous onset), the same IOI clock as
+/// [`ioi_legato_delay_ms`].
+pub fn lt_start_offset_ms(ioi_ms: f32) -> f32 {
+    if ioi_ms <= LT_OFF_THR[0] {
+        return LT_OFF_ANC[0];
+    }
+    for k in 0..2 {
+        if ioi_ms < LT_OFF_THR[k + 1] {
+            let span = (LT_OFF_THR[k + 1] - LT_OFF_THR[k]).max(1e-6);
+            let t = (ioi_ms - LT_OFF_THR[k]) / span;
+            return LT_OFF_ANC[k] + (LT_OFF_ANC[k + 1] - LT_OFF_ANC[k]) * t;
+        }
+    }
+    LT_OFF_ANC[2]
+}
+
+/// Documentary reference pre-bow (ms) for the `$1fvjk` offset, assuming the
+/// reference arrival [`LT_ARRIVAL_REF_MS`]: `max(0, LT_ARRIVAL_REF_MS − $1fvjk)`.
+/// The document scheduler prefers the per-move MEASURED arrival (see
+/// [`crate::spec::LibrarySpec::legato_lead_ms`]); this is the zone-agnostic
+/// fallback shape. Fast lines → ~0 ms; slow lines → ~60 ms.
+pub fn lt_prebow_ms(ioi_ms: f32) -> f32 {
+    (LT_ARRIVAL_REF_MS - lt_start_offset_ms(ioi_ms)).max(0.0)
 }
 
 /// Locate the steady-state sustain **plateau** of a decoded sample so a hold
@@ -6065,9 +6208,11 @@ mod tests {
         // Decoded CSS Spiccato (KSP g25wo=0): %g1qri=[1,25,55,108],
         // %bcez1=[-9,-10,-12,-6], ktuur=1 (4 bands). Verifies band selection and
         // the $arhiq intra-layer velocity→volume law against hand-computed values.
+        // `apply_short_velvol` gates the $arhiq trim (off for CSS; on here to test
+        // the curve).
         let eng = engine_from_styx(
             "name \"s\"\n\
-             dynamics { enable_velocity_layers true }\n\
+             dynamics { enable_velocity_layers true\n apply_short_velvol true }\n\
              articulations (\n\
                {id Spiccato, label Spicc, kind @Short, dynamics (pp p mf ff),\n\
                 vel_thresholds (25 55 108), vel_layer_db (-9 -10 -12 -6)}\n\
@@ -6103,6 +6248,71 @@ mod tests {
         );
         let (_, db) = plain.short_layer_and_velvol("Spiccato", 40);
         assert_eq!(db, 0.0, "gated off → no velocity-volume trim");
+    }
+
+    #[test]
+    fn short_velocity_selects_layer_and_cc1_selects_type() {
+        // KSP-confirmed CSS short model: VELOCITY selects the recorded dynamic
+        // LAYER (via the type's `%g1qri` thresholds, mapped 1:1 onto the recorded
+        // dynamics) AND scales volume within the band (`$arhiq`); CC1 selects the
+        // short TYPE via `short_note_cc1_map`, never the dynamic.
+        let styx = "name \"s\"\n\
+             dynamics {\n\
+               enable_velocity_layers true\n\
+               short_note_cc1_map {\n\
+                 0-63   Spiccato\n\
+                 64-127 Staccato\n\
+               }\n\
+             }\n\
+             articulations (\n\
+               {id Spiccato, label Spicc, kind @Short, dyn_ctrl velocity, dynamics (pp p mf ff),\n\
+                vel_thresholds (25 55 108), vel_layer_db (-9 -10 -12 -6)}\n\
+               {id Staccato, label Stacc, kind @Short, dyn_ctrl velocity, dynamics (pp mp f fff),\n\
+                vel_thresholds (51 83 127), vel_layer_db (-17 -8 -13 0)}\n\
+             )\n\
+             zones (\n\
+               {file \"a.wav\", key_min 60, key_max 60, root_key 60, vel_min 0, vel_max 127, articulation \"Spiccato\"}\n\
+             )\n";
+        let eng = engine_from_styx(styx);
+
+        // VELOCITY → LAYER via %g1qri. Staccato (pp mp f fff) thresholds
+        // (51 83 127): trailing 127 is the open-top marker → 3 bands
+        // [1,50][51,82][83,127]; 4 dynamics > 3 bands → TOP-align (drop the
+        // unreachable pp) → mp/f/fff. Matches the reference render's collapsed
+        // Staccato ladder (vel 40/80/120 → mp/f/fff, not pp/mp/f).
+        for (vel, want) in [(40u8, "mp"), (80, "f"), (120, "fff"), (127, "fff")] {
+            let (dynamic, _) = eng.short_layer_and_velvol("Staccato", vel);
+            assert_eq!(dynamic, want, "Staccato vel {vel} → layer");
+        }
+
+        // A trailing terminal 127 is the open-top marker, NOT an extra band:
+        // Sfz (mf f fff) thresholds (45 65 127) → 3 bands [1,44]mf [45,64]f
+        // [65,127]fff, counts match → 1:1.
+        let sfz = engine_from_styx(
+            "name \"s\"\n\
+             dynamics { enable_velocity_layers true }\n\
+             articulations (\n\
+               {id Sfz, label Sfz, kind @Short, dyn_ctrl velocity, dynamics (mf f fff),\n\
+                vel_thresholds (45 65 127), vel_layer_db (-17 -6 -9 0)}\n\
+             )\n\
+             zones (\n\
+               {file \"a.wav\", key_min 60, key_max 60, root_key 60, vel_min 0, vel_max 127, articulation \"Sfz\"}\n\
+             )\n",
+        );
+        for (vel, want) in [(40u8, "mf"), (60, "f"), (80, "fff"), (120, "fff")] {
+            let (dynamic, _) = sfz.short_layer_and_velvol("Sfz", vel);
+            assert_eq!(dynamic, want, "Sfz vel {vel} → layer");
+        }
+
+        // CC1 selects the short TYPE (collapse to the CC1=90 type), never dynamic.
+        let mut eng = engine_from_styx(styx);
+        eng.set_articulation("Spiccato");
+        eng.cc(1, 90); // 90 → Staccato via short_note_cc1_map
+        assert_eq!(
+            eng.articulation(),
+            "Staccato",
+            "CC1 selects the short TYPE via short_note_cc1_map"
+        );
     }
 
     #[test]

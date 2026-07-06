@@ -460,6 +460,7 @@ dependencies = [
 name = "architect"
 version = "0.1.0"
 dependencies = [
+ "architect-action-derive",
  "architect-derive",
  "architect-rpc-derive",
  "eyre",
@@ -470,6 +471,15 @@ dependencies = [
  "uuid 1.23.1",
  "vox",
  "vox-core",
+]
+
+[[package]]
+name = "architect-action-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
