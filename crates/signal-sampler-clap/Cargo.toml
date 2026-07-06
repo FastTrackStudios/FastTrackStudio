@@ -14,7 +14,7 @@ crate-type = ["cdylib", "lib"]
 # `fts_plugin_core::prelude`) because `#[derive(Params)]` and `nice_export_clap!`
 # expand to absolute `::nice_plug::…` paths, so the crate has to be nameable here.
 nice-plug.workspace = true
-fts-plugin-core.workspace = true
+audiocore-core.workspace = true
 
 # The sampler engine + document scheduler
 signal-sampler.workspace = true

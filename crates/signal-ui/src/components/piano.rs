@@ -42,7 +42,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
-use audio_gui::viz::{CanvasPainter, VelloCanvas};
+use audiocore_gui::viz::{CanvasPainter, VelloCanvas};
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use nice_plug_dioxus::prelude::vello::kurbo::{Affine, Rect, RoundedRect};

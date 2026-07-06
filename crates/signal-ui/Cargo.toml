@@ -20,7 +20,7 @@ tracing.workspace = true
 audio-controls.workspace = true
 dock-dioxus = { workspace = true, default-features = false }
 dock-proto.workspace = true
-audio-gui.workspace = true
+audiocore-gui.workspace = true
 nice-plug-dioxus.workspace = true
 
 [features]

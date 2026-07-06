@@ -61,7 +61,7 @@ signal-sampler      = { path = "crates/signal-sampler" }
 # Using local paths directly (same as [patch] overrides) to avoid
 # git submodule fetch issues with stale nih-plug submodule rev.
 eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
-fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
+audiocore-dsp = { path = "../Plugins/FTS-Audiocore/crates/audiocore-dsp" }
 # Neural Amp Modeler — safe Rust bindings to NeuralAmpModelerCore. Drives
 # the built-in `FxBackend::Nam` slot in signal-sampler's FX chain so any
 # block (Amp / Drive / Cabinet) can opt into a NAM kind by loading a
@@ -119,7 +119,7 @@ utils = { git = "https://codeberg.org/FastTrackStudios/FastTrackStudio.git", bra
 
 # ── Plugin framework ───────────────────────────────────────────────────
 # Migrated off nih-plug onto fts-plug = the `nice-plug` fork (matches what the
-# FTS-Audiocore plugin crates — fts-plugin-core / audio-gui — link against).
+# FTS-Audiocore plugin crates — audiocore-core / audiocore-gui — link against).
 nice-plug = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug" }
 # Blitz-based Dioxus renderer — used by ALL GUI contexts (desktop standalone,
 # REAPER embedded, VST3/CLAP plugin). Guarantees the same rendering pipeline
@@ -127,8 +127,8 @@ nice-plug = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug" }
 # create_dioxus_editor_with_state() in fts-signal-plugin. Brings its own blitz
 # (DioxusLabs/blitz @ 9ebd23a) + anyrender/stylo stack transitively.
 nice-plug-dioxus = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug-dioxus" }
-fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core", default-features = false }
-audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
+audiocore-core = { path = "../Plugins/FTS-Audiocore/crates/audiocore-core", default-features = false }
+audiocore-gui = { path = "../Plugins/FTS-Audiocore/crates/audiocore-gui" }
 atomic_float = "1"
 crossbeam-channel = "0.5"
 midir = "0.11"
@@ -205,15 +205,15 @@ actions-proto = { path = "../input_actions/crates/actions-proto" }
 # ── Split FTS plugin repo local overrides ───────────────────────────────
 [patch."https://git.starcommand.live/FastTrackStudios/FTS-Plugins.git"]
 eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
-fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
-audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
-fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }
+audiocore-dsp = { path = "../Plugins/FTS-Audiocore/crates/audiocore-dsp" }
+audiocore-gui = { path = "../Plugins/FTS-Audiocore/crates/audiocore-gui" }
+audiocore-core = { path = "../Plugins/FTS-Audiocore/crates/audiocore-core" }
 
 # ── nih-plug → nice-plug migration ──────────────────────────────────────
 # The nih-plug `[patch]` blocks were removed: signal now depends on the
 # `nice-plug` fork (fts-plug) via path deps (see [workspace.dependencies]),
 # matching the FTS-Audiocore plugin crates. The FTS-Audiocore plugin crates
-# (fts-plugin-core, audio-gui — path deps) link `nice-plug` from the same
+# (audiocore-core, audiocore-gui — path deps) link `nice-plug` from the same
 # local checkout, so the whole graph shares one plugin framework + one blitz.
 
 # NOTE: the bearcove/vox → Codys-Wright-fork [patch] block was removed.

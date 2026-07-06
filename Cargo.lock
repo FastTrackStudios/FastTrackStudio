@@ -794,7 +794,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "audio-gui"
+name = "audiocore-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "atomic_float",
+ "nice-plug",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "audiocore-gui"
 version = "0.1.0"
 dependencies = [
  "nice-plug",
@@ -2535,10 +2546,8 @@ dependencies = [
  "facet 0.50.0-rc.1",
  "facet-json 0.50.0-rc.1",
  "libc",
- "moire",
  "serde_json",
  "tokio",
- "tracing",
  "tracing-subscriber",
  "vox",
  "vox-stream",
@@ -4342,26 +4351,15 @@ name = "fts-devtools"
 version = "0.1.0"
 
 [[package]]
-name = "fts-plugin-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "atomic_float",
- "nice-plug",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
 name = "fts-signal-controller"
 version = "0.1.0"
 dependencies = [
  "atomic_float",
+ "audiocore-core",
  "crossbeam-channel",
  "daw",
  "daw-extension-runtime",
  "eyre",
- "fts-plugin-core",
  "nice-plug",
  "serde",
  "serde_json",
@@ -10100,10 +10098,10 @@ name = "signal-sampler-clap"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "audiocore-core",
  "eyre",
  "facet 0.50.0-rc.1",
  "facet-styx",
- "fts-plugin-core",
  "hound",
  "nice-plug",
  "serde",
@@ -10154,7 +10152,7 @@ name = "signal-ui"
 version = "0.1.0"
 dependencies = [
  "audio-controls",
- "audio-gui",
+ "audiocore-gui",
  "daw-midi-io",
  "dioxus",
  "dock-dioxus",
@@ -14527,9 +14525,9 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "eq-dsp"
+name = "audiocore-dsp"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "fts-dsp"
+name = "eq-dsp"
 version = "0.1.0"
