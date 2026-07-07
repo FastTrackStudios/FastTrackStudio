@@ -1163,14 +1163,17 @@ pub fn module() -> Box<dyn DawModule> {
 // through the new architect primitive, forwarding to the exact same handler
 // functions.
 //
-// NOT covered here: the 16 per-group `TOGGLE_*` and 34 `CREATE_NEW_*` actions
-// — both are genuinely data-driven (`toggle_group_visibility(state, group)` /
-// `create_template_group(suffix)` dispatch on a runtime string), and
-// `#[architect::actions]` v1 only supports static `fn name(&self)` methods,
-// no per-action parameters or a "family" concept for a table-driven action
-// set. Hand-enumerating 50 near-identical methods was judged not worth it
-// ahead of that framework support landing (or a deliberate decision to do it
-// anyway) — left for a follow-up.
+// The 16 per-group `TOGGLE_*` and 34 `CREATE_NEW_*` actions (below, after
+// VisibilityManagerActions) looked data-driven at a glance (their handlers,
+// `toggle_group_visibility(state, group)` / `create_template_group(suffix)`,
+// take a runtime string) but turned out to be a fixed, fully enumerable set —
+// each already has its own static name/description/category/group declared
+// in the `actions_proto::define_actions!` blocks above. That's a better fit
+// for plain `#[architect::actions]` methods (matching every other action in
+// this file) than architect's newer `DynamicActionMeta` (for genuinely
+// unbounded-at-compile-time families) — so they're declared as
+// CreateGroupActions / ToggleGroupActions below, each method forwarding its
+// own fixed suffix/group string to the shared handler.
 
 struct DynamicTemplateActionsImpl;
 
@@ -1443,9 +1446,537 @@ impl VisibilityManagerActions for VisibilityManagerActionsImpl {
     }
 }
 
+struct CreateGroupActionsImpl;
+
+#[architect::actions(namespace = "FTS_DYNAMIC_TEMPLATE")]
+trait CreateGroupActions {
+    #[action(
+        description = "Create a new drums template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_drums(&self);
+
+    #[action(
+        description = "Create a new drum kit template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_drum_kit(&self);
+
+    #[action(
+        description = "Create a new electronic kit template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_electronic_kit(&self);
+
+    #[action(
+        description = "Create a new percussion template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_percussion(&self);
+
+    #[action(
+        description = "Create a new bass template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_bass(&self);
+
+    #[action(
+        description = "Create a new bass guitar template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_bass_guitar(&self);
+
+    #[action(
+        description = "Create a new bass synth template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_bass_synth(&self);
+
+    #[action(
+        description = "Create a new upright bass template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_upright_bass(&self);
+
+    #[action(
+        description = "Create a new guitars template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_guitars(&self);
+
+    #[action(
+        description = "Create a new electric guitar template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_electric_guitar(&self);
+
+    #[action(
+        description = "Create a new acoustic guitar template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_acoustic_guitar(&self);
+
+    #[action(
+        description = "Create a new keys template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_keys(&self);
+
+    #[action(
+        description = "Create a new piano template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_piano(&self);
+
+    #[action(
+        description = "Create a new organ template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_organ(&self);
+
+    #[action(
+        description = "Create a new electric keys template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_electric_keys(&self);
+
+    #[action(
+        description = "Create a new synths template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_synths(&self);
+
+    #[action(
+        description = "Create a new synth lead template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_synth_lead(&self);
+
+    #[action(
+        description = "Create a new synth pad template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_synth_pad(&self);
+
+    #[action(
+        description = "Create a new synth arp template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_synth_arp(&self);
+
+    #[action(
+        description = "Create a new horns template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_horns(&self);
+
+    #[action(
+        description = "Create a new trumpet template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_trumpet(&self);
+
+    #[action(
+        description = "Create a new trombone template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_trombone(&self);
+
+    #[action(
+        description = "Create a new saxophone template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_saxophone(&self);
+
+    #[action(
+        description = "Create a new harmonica template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_harmonica(&self);
+
+    #[action(
+        description = "Create a new strings template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_strings(&self);
+
+    #[action(
+        description = "Create a new vocals template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_vocals(&self);
+
+    #[action(
+        description = "Create a new lead vocals template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_lead_vocals(&self);
+
+    #[action(
+        description = "Create a new background vocals template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_background_vocals(&self);
+
+    #[action(
+        description = "Create a new choir template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_choir(&self);
+
+    #[action(
+        description = "Create a new orchestra template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_orchestra(&self);
+
+    #[action(
+        description = "Create a new SFX template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_sfx(&self);
+
+    #[action(
+        description = "Create a new guide template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_guide(&self);
+
+    #[action(
+        description = "Create a new reference template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_reference(&self);
+
+    #[action(
+        description = "Create a new stem split template group",
+        category = "General",
+        group = "Create"
+    )]
+    fn create_new_stem_split(&self);
+}
+
+impl CreateGroupActions for CreateGroupActionsImpl {
+    fn create_new_drums(&self) {
+        create_template_group("DRUMS").ok();
+    }
+    fn create_new_drum_kit(&self) {
+        create_template_group("DRUM_KIT").ok();
+    }
+    fn create_new_electronic_kit(&self) {
+        create_template_group("ELECTRONIC_KIT").ok();
+    }
+    fn create_new_percussion(&self) {
+        create_template_group("PERCUSSION").ok();
+    }
+    fn create_new_bass(&self) {
+        create_template_group("BASS").ok();
+    }
+    fn create_new_bass_guitar(&self) {
+        create_template_group("BASS_GUITAR").ok();
+    }
+    fn create_new_bass_synth(&self) {
+        create_template_group("BASS_SYNTH").ok();
+    }
+    fn create_new_upright_bass(&self) {
+        create_template_group("UPRIGHT_BASS").ok();
+    }
+    fn create_new_guitars(&self) {
+        create_template_group("GUITARS").ok();
+    }
+    fn create_new_electric_guitar(&self) {
+        create_template_group("ELECTRIC_GUITAR").ok();
+    }
+    fn create_new_acoustic_guitar(&self) {
+        create_template_group("ACOUSTIC_GUITAR").ok();
+    }
+    fn create_new_keys(&self) {
+        create_template_group("KEYS").ok();
+    }
+    fn create_new_piano(&self) {
+        create_template_group("PIANO").ok();
+    }
+    fn create_new_organ(&self) {
+        create_template_group("ORGAN").ok();
+    }
+    fn create_new_electric_keys(&self) {
+        create_template_group("ELECTRIC_KEYS").ok();
+    }
+    fn create_new_synths(&self) {
+        create_template_group("SYNTHS").ok();
+    }
+    fn create_new_synth_lead(&self) {
+        create_template_group("SYNTH_LEAD").ok();
+    }
+    fn create_new_synth_pad(&self) {
+        create_template_group("SYNTH_PAD").ok();
+    }
+    fn create_new_synth_arp(&self) {
+        create_template_group("SYNTH_ARP").ok();
+    }
+    fn create_new_horns(&self) {
+        create_template_group("HORNS").ok();
+    }
+    fn create_new_trumpet(&self) {
+        create_template_group("TRUMPET").ok();
+    }
+    fn create_new_trombone(&self) {
+        create_template_group("TROMBONE").ok();
+    }
+    fn create_new_saxophone(&self) {
+        create_template_group("SAXOPHONE").ok();
+    }
+    fn create_new_harmonica(&self) {
+        create_template_group("HARMONICA").ok();
+    }
+    fn create_new_strings(&self) {
+        create_template_group("STRINGS").ok();
+    }
+    fn create_new_vocals(&self) {
+        create_template_group("VOCALS").ok();
+    }
+    fn create_new_lead_vocals(&self) {
+        create_template_group("LEAD_VOCALS").ok();
+    }
+    fn create_new_background_vocals(&self) {
+        create_template_group("BACKGROUND_VOCALS").ok();
+    }
+    fn create_new_choir(&self) {
+        create_template_group("CHOIR").ok();
+    }
+    fn create_new_orchestra(&self) {
+        create_template_group("ORCHESTRA").ok();
+    }
+    fn create_new_sfx(&self) {
+        create_template_group("SFX").ok();
+    }
+    fn create_new_guide(&self) {
+        create_template_group("GUIDE").ok();
+    }
+    fn create_new_reference(&self) {
+        create_template_group("REFERENCE").ok();
+    }
+    fn create_new_stem_split(&self) {
+        create_template_group("STEM_SPLIT").ok();
+    }
+}
+
+struct ToggleGroupActionsImpl;
+
+#[architect::actions(namespace = "FTS_VISIBILITY_MANAGER")]
+trait ToggleGroupActions {
+    #[action(
+        description = "Toggle visibility of all Drums tracks",
+        category = "View"
+    )]
+    fn toggle_drums(&self);
+
+    #[action(
+        description = "Toggle visibility of all Percussion tracks",
+        category = "View"
+    )]
+    fn toggle_percussion(&self);
+
+    #[action(
+        description = "Toggle visibility of all Bass tracks",
+        category = "View"
+    )]
+    fn toggle_bass(&self);
+
+    #[action(
+        description = "Toggle visibility of all Guitars tracks",
+        category = "View"
+    )]
+    fn toggle_guitars(&self);
+
+    #[action(
+        description = "Toggle visibility of all Keys tracks",
+        category = "View"
+    )]
+    fn toggle_keys(&self);
+
+    #[action(
+        description = "Toggle visibility of all Synths tracks",
+        category = "View"
+    )]
+    fn toggle_synths(&self);
+
+    #[action(
+        description = "Toggle visibility of all Horns tracks",
+        category = "View"
+    )]
+    fn toggle_horns(&self);
+
+    #[action(
+        description = "Toggle visibility of all Harmonica tracks",
+        category = "View"
+    )]
+    fn toggle_harmonica(&self);
+
+    #[action(
+        description = "Toggle visibility of all Strings tracks",
+        category = "View"
+    )]
+    fn toggle_strings(&self);
+
+    #[action(
+        description = "Toggle visibility of all Vocals tracks",
+        category = "View"
+    )]
+    fn toggle_vocals(&self);
+
+    #[action(
+        description = "Toggle visibility of all Choir tracks",
+        category = "View"
+    )]
+    fn toggle_choir(&self);
+
+    #[action(
+        description = "Toggle visibility of all Orchestra tracks",
+        category = "View"
+    )]
+    fn toggle_orchestra(&self);
+
+    #[action(description = "Toggle visibility of all SFX tracks", category = "View")]
+    fn toggle_sfx(&self);
+
+    #[action(
+        description = "Toggle visibility of all Guide tracks",
+        category = "View"
+    )]
+    fn toggle_guide(&self);
+
+    #[action(
+        description = "Toggle visibility of all Reference tracks",
+        category = "View"
+    )]
+    fn toggle_reference(&self);
+
+    #[action(
+        description = "Toggle visibility of all Stem Split tracks",
+        category = "View"
+    )]
+    fn toggle_stem_split(&self);
+}
+
+impl ToggleGroupActions for ToggleGroupActionsImpl {
+    fn toggle_drums(&self) {
+        toggle_group_visibility(&state(), "DRUMS").ok();
+    }
+    fn toggle_percussion(&self) {
+        toggle_group_visibility(&state(), "PERCUSSION").ok();
+    }
+    fn toggle_bass(&self) {
+        toggle_group_visibility(&state(), "BASS").ok();
+    }
+    fn toggle_guitars(&self) {
+        toggle_group_visibility(&state(), "GUITARS").ok();
+    }
+    fn toggle_keys(&self) {
+        toggle_group_visibility(&state(), "KEYS").ok();
+    }
+    fn toggle_synths(&self) {
+        toggle_group_visibility(&state(), "SYNTHS").ok();
+    }
+    fn toggle_horns(&self) {
+        toggle_group_visibility(&state(), "HORNS").ok();
+    }
+    fn toggle_harmonica(&self) {
+        toggle_group_visibility(&state(), "HARMONICA").ok();
+    }
+    fn toggle_strings(&self) {
+        toggle_group_visibility(&state(), "STRINGS").ok();
+    }
+    fn toggle_vocals(&self) {
+        toggle_group_visibility(&state(), "VOCALS").ok();
+    }
+    fn toggle_choir(&self) {
+        toggle_group_visibility(&state(), "CHOIR").ok();
+    }
+    fn toggle_orchestra(&self) {
+        toggle_group_visibility(&state(), "ORCHESTRA").ok();
+    }
+    fn toggle_sfx(&self) {
+        toggle_group_visibility(&state(), "SFX").ok();
+    }
+    fn toggle_guide(&self) {
+        toggle_group_visibility(&state(), "GUIDE").ok();
+    }
+    fn toggle_reference(&self) {
+        toggle_group_visibility(&state(), "REFERENCE").ok();
+    }
+    fn toggle_stem_split(&self) {
+        toggle_group_visibility(&state(), "STEM_SPLIT").ok();
+    }
+}
+
 /// Register every architect-declared action in this module against `backend`.
 pub fn register_architect_actions<B: architect::action::ActionBackend>(backend: &B) {
     register_dynamic_template_actions_actions(backend, Arc::new(DynamicTemplateActionsImpl));
     register_auto_color_architect_actions_actions(backend, Arc::new(AutoColorArchitectActionsImpl));
     register_visibility_manager_actions_actions(backend, Arc::new(VisibilityManagerActionsImpl));
+    register_create_group_actions_actions(backend, Arc::new(CreateGroupActionsImpl));
+    register_toggle_group_actions_actions(backend, Arc::new(ToggleGroupActionsImpl));
+}
+
+#[cfg(test)]
+mod architect_actions_id_tests {
+    use super::*;
+
+    #[test]
+    fn create_group_ids_match_existing_reaper_command_convention() {
+        let ids: Vec<&str> = CreateGroupActionsActions::all()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids.len(), 34, "expected all 34 CREATE_NEW_* ids");
+        assert!(ids.contains(&"FTS_DYNAMIC_TEMPLATE_CREATE_NEW_DRUMS"));
+        assert!(ids.contains(&"FTS_DYNAMIC_TEMPLATE_CREATE_NEW_STEM_SPLIT"));
+        assert!(ids.contains(&"FTS_DYNAMIC_TEMPLATE_CREATE_NEW_BASS_SYNTH"));
+        assert!(ids.contains(&"FTS_DYNAMIC_TEMPLATE_CREATE_NEW_ELECTRONIC_KIT"));
+    }
+
+    #[test]
+    fn toggle_group_ids_match_existing_reaper_command_convention() {
+        let ids: Vec<&str> = ToggleGroupActionsActions::all()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids.len(), 16, "expected all 16 TOGGLE_* ids");
+        assert!(ids.contains(&"FTS_VISIBILITY_MANAGER_TOGGLE_DRUMS"));
+        assert!(ids.contains(&"FTS_VISIBILITY_MANAGER_TOGGLE_STEM_SPLIT"));
+    }
 }
