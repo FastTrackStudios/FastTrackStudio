@@ -1,6 +1,6 @@
 //! The full **Omnisphere 3** per-Part signal chain, built as a composition
-//! tree ([`crate::rig_node`]) — the routing experiment companion to
-//! [`crate::nord`]. If the engine can express both the Nord Stage 4 and the
+//! tree ([`signal_sampler::rig_node`]) — the routing experiment companion to
+//! [`signal_sampler::nord`]. If the engine can express both the Nord Stage 4 and the
 //! Omnisphere 3 routing, there aren't many synth architectures it can't.
 //!
 //! Source: the official Omnisphere 3 Reference Guide (v3.0.2c). One Part:
@@ -28,13 +28,13 @@
 //!
 //! Everything is a placeholder until its DSP lands, except Sampler blocks —
 //! [`omnisphere_soundsource_preset`] realizes Layer A/B with real extracted
-//! Omnisphere soundsources ([`BlockImpl::Sample`](crate::rig::BlockImpl)).
+//! Omnisphere soundsources ([`BlockImpl::Sample`](signal_sampler::rig::BlockImpl)).
 //! The Multi level (8 Parts, mixer, 4 shared Aux racks) is a Rig concern and
 //! comes later.
 
 use signal_proto::block::BlockType;
 
-use crate::rig_node::Container;
+use signal_sampler::rig_node::Container;
 
 /// Send target for every layer's aux route (the Part's 4-slot Aux rack).
 const AUX_RACK: &str = "Aux Rack";
@@ -162,7 +162,7 @@ pub fn omnisphere_soundsource_preset() -> Option<Container> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rig_node::Role;
+    use signal_sampler::rig_node::Role;
 
     #[test]
     fn part_has_four_layers_with_the_full_oscillator_stack() {
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn placeholder_part_compiles_to_a_render_tree() {
         let p = omnisphere_preset();
-        let mut rn = crate::node_render::RenderNode::compile(&p, 48_000);
+        let mut rn = signal_sampler::node_render::RenderNode::compile(&p, 48_000);
         rn.prepare(48_000.0, 256);
         // 4 layers × (2 filters + amp + wavetable + waveshaper + dfs) = 24.
         assert_eq!(rn.live_leaves(), 24);
@@ -252,7 +252,7 @@ mod tests {
             eprintln!("skipping: Omnisphere extraction not present");
             return;
         };
-        let mut rn = crate::node_render::RenderNode::compile(&p, 48_000);
+        let mut rn = signal_sampler::node_render::RenderNode::compile(&p, 48_000);
         rn.prepare(48_000.0, 512);
 
         let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);

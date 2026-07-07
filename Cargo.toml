@@ -23,6 +23,7 @@ members = [
     "features/keys",
     "features/orchestra",
     "features/drums",
+    "features/synth",
     "features/plugin-host",
     "features/nam",
     "features/macromod",
@@ -71,6 +72,7 @@ signal-guitar       = { path = "features/guitar" }
 signal-keys         = { path = "features/keys" }
 signal-orchestra    = { path = "features/orchestra" }
 signal-drums        = { path = "features/drums" }
+signal-synth        = { path = "features/synth" }
 
 # ── DSP crates (split FTS plugin repos) ───────────────────────────────
 # Using local paths directly (same as [patch] overrides) to avoid

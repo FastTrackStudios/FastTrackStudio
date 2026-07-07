@@ -5,7 +5,7 @@ use std::path::Path;
 use super::model::{OmniPatch, parse_patch_node};
 use super::tree::patch_to_container;
 use super::{SoundsourceIndex, parse_xml};
-use crate::rig_node::Container;
+use signal_sampler::rig_node::Container;
 
 // ── Multis ───────────────────────────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ pub fn multi_to_container(multi: &OmniMulti, index: &SoundsourceIndex) -> Contai
             continue;
         }
         let mut part = patch_to_container(patch, index);
-        part.role = crate::rig_node::Role::Engine;
+        part.role = signal_sampler::rig_node::Role::Engine;
         part.name = format!("Part {}: {}", i + 1, patch.name);
         part.output_db = if *level <= 0.0 {
             -60.0

@@ -2622,6 +2622,7 @@ dependencies = [
  "architect",
  "facet 0.50.0-rc.1",
  "futures",
+ "midicore",
  "vox",
  "vox-types",
 ]
@@ -6533,6 +6534,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f2dd5c7f8aaf48a76e389068ab25ed80bdbc226b887f9013844c415698c9952"
 
 [[package]]
+name = "midicore"
+version = "0.1.0"
+dependencies = [
+ "midicore-proto",
+]
+
+[[package]]
+name = "midicore-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.1",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "midir"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9994,6 +10012,7 @@ dependencies = [
  "ratatui",
  "signal-plugin-host",
  "signal-sampler",
+ "signal-synth",
  "tracing",
  "tracing-subscriber",
 ]
@@ -10190,6 +10209,16 @@ dependencies = [
  "tokio",
  "utils",
  "uuid 1.23.1",
+]
+
+[[package]]
+name = "signal-synth"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "signal-plugin-host",
+ "signal-proto",
+ "signal-sampler",
 ]
 
 [[package]]

@@ -242,7 +242,7 @@ mod tests {
         assert!((f1.param_f32("cutoff").unwrap() - 0.4375).abs() < 1e-3);
         assert_eq!(f1.param_f32("resonance"), Some(0.25));
         // Renders (placeholder-safe).
-        let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
+        let mut rn = signal_sampler::node_render::RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 256);
         assert!(rn.live_leaves() >= 3, "native filters/amp are live");
     }
@@ -295,7 +295,7 @@ mod tests {
         let tree = load_patch_file(&patch_path, &index).expect("import");
         eprintln!("imported {:?} as {:?}", patch_path.file_name(), tree.name);
 
-        let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
+        let mut rn = signal_sampler::node_render::RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 512);
         let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
         let midi = [PluginMidiEvent {
@@ -338,7 +338,7 @@ mod tests {
             return;
         }
         let tree = load_patch_file(path, &SoundsourceIndex::default()).expect("import");
-        let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
+        let mut rn = signal_sampler::node_render::RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 512);
         let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
         let midi = [PluginMidiEvent {
@@ -375,7 +375,7 @@ mod tests {
         let index = SoundsourceIndex::scan_default();
         let tree = load_patch_file(path, &index).expect("multi import");
         eprintln!("imported multi as {:?}", tree.name);
-        let mut rn = crate::node_render::RenderNode::compile(&tree, 48_000);
+        let mut rn = signal_sampler::node_render::RenderNode::compile(&tree, 48_000);
         rn.prepare(48_000.0, 512);
         let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
         let midi = [PluginMidiEvent {

@@ -23,3 +23,5 @@ eyre.workspace = true
 ratatui = "0.29"
 libc = "0.2"
 tracing-subscriber.workspace = true
+# The keys_tui example's `--omni` flag imports an Omnisphere patch via synth.
+signal-synth.workspace = true
