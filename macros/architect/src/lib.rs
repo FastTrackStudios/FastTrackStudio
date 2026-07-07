@@ -39,8 +39,9 @@ pub use architect_derive::JsonField;
 
 // `#[architect::rpc]` attribute macro — turns a sync (or mixed) trait
 // into a sync API + async vox client + server-side host. See
-// `DESIGN.md` and the `dispatch` module for the runtime contract the
-// emitted code relies on.
+// docs/content/reference/_index.md ("#[architect::rpc] mechanics") and
+// the `dispatch` module for the runtime contract the emitted code
+// relies on.
 pub use architect_rpc_derive::rpc;
 
 // `#[derive(HasDispatcher)]` — kills the four-line manual impl for the
