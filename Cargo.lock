@@ -9907,6 +9907,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-drums"
+version = "0.1.0"
+dependencies = [
+ "signal-sampler",
+]
+
+[[package]]
 name = "signal-extension"
 version = "0.1.0"
 dependencies = [
@@ -10060,6 +10067,15 @@ dependencies = [
  "signal-ui",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "signal-orchestra"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "hound",
+ "signal-sampler",
 ]
 
 [[package]]

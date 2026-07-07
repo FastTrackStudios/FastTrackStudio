@@ -10,14 +10,8 @@
 //! cargo run --release -p signal-sampler --example render_css_live -- css_test_full.mid css_test_full_live.wav
 //! ```
 
-use std::path::PathBuf;
-
 use signal_sampler::SamplerRig;
 
-const CSS_ROOT: &str =
-    "/run/media/AudioHaven/Sampled/Orchestral/Cinematic Series/Cinematic Studio Strings";
-const CSS_CONFIG: &str =
-    "/run/media/Development/FastTrackStudio/sample-collector/specs/cinematic-strings.styx";
 const ID: &str = "strings_1v";
 const SR: u32 = 48_000;
 
@@ -112,29 +106,19 @@ fn main() -> eyre::Result<()> {
     let events = parse_smf(&std::fs::read(&inp)?);
     eprintln!("parsed {} events from {inp}", events.len());
 
-    let css_root = PathBuf::from(CSS_ROOT);
-    let zones = css_root.join("_patches/1st Violins/library.styx");
     let rig = SamplerRig::new_offline_with_cache_budget(SR, Some(8 * 1024 * 1024 * 1024));
-    rig.load_instrument_with_config(
+    // The orchestra feature's strings *definition* — loads CSS 1st Violins with
+    // the exact engine settings (solo mic, arco-attack bloom, release overlap)
+    // that match a real CSS-in-Kontakt render.
+    signal_orchestra::load_strings(
+        &rig,
         ID,
-        &PathBuf::from(CSS_CONFIG),
-        &zones,
-        &css_root,
         "1st Violins",
         "Mix",
-    )?;
-    rig.set_solo_mic(ID, Some("Mix".into()));
-    rig.set_midi_channel(ID, 0);
-    // CSS "Arco attack" slider ships at $mmirg = 30/127 (persistent). Kontakt
-    // ENGINE_PAR_ATTACK is cubic: T(ms) = 15000·(N/1e6)³ with N = round(30/127·1e6)
-    // = 236220 → T ≈ 198 ms. This is the CSS sustain bloom, applied via the
-    // sustain groups' CC_ATTACK→ahdsr_attack modulator (CSS_GROUP_MOD.md §4),
-    // ON TOP of the 4–20 ms baked ENV_FLEX attack. Legato/short/release groups
-    // have no CC_ATTACK modulator (atk=0 in groups.json), so they keep their
-    // sample-baked onsets — and our engine applies attack_frames only to
-    // sustain-layer voices, matching that.
-    rig.set_attack_ms(ID, 198); // $mmirg=30 → 15000·(30/127)³ ms
-    rig.set_release_ms(ID, 400); // $tukcw=400 (note-off overlap fade)
+        signal_orchestra::CSS_ROOT,
+        signal_orchestra::CSS_CONFIG,
+    )
+    .map_err(|e| eyre::eyre!(e))?;
 
     let render = |rig: &SamplerRig, out: &mut Vec<f32>, secs: f64| -> eyre::Result<()> {
         let frames = (secs * SR as f64).round().max(0.0) as usize;

@@ -115,6 +115,8 @@ pub struct KeysRig {
 
 impl KeysRig {
     /// Open a device, build the project, and host `tree` as the playable preset.
+    // r[impl keys.rig.composition-tree]
+    // r[impl keys.rig.output-only]
     pub fn open(prefs: &AudioIoPrefs, tree: &Container) -> eyre::Result<Self> {
         let daw = Standalone::new();
         let project_guid = signal_sampler::rig::uuid_string();
