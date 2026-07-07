@@ -45,6 +45,7 @@
 //! );
 //! ```
 
+mod actions;
 mod connection;
 mod id;
 mod mutation;
@@ -54,6 +55,9 @@ mod resource;
 mod result;
 mod store;
 
+pub use actions::{
+    ActionInvoker, ActionLike, group_actions, use_action_invoker, use_actions_grouped,
+};
 pub use connection::{
     Connection, ConnectionState, use_connect, use_connect_reactive, use_connection,
     use_connection_root,

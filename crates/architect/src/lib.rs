@@ -911,6 +911,55 @@ pub mod action {
         pub toggleable: bool,
     }
 
+    /// Owned counterpart to [`ActionMeta`], for a *family* of actions
+    /// the `#[architect::actions]` macro can't express — a data-driven
+    /// set whose ids/descriptions aren't known until runtime (e.g. one
+    /// action per time signature, one per user-defined preset).
+    /// [`Self::leak`] converts one into the `&'static ActionMeta`
+    /// [`ActionBackend::register`] requires.
+    ///
+    /// Leaking is a deliberate, bounded choice here, not a bug:
+    /// REAPER-style action backends register each action exactly once
+    /// at startup and hold it for the process's lifetime anyway (there
+    /// is no "unregister" in that model) — a family generated once at
+    /// startup from static runtime data (config, a fixed enum's
+    /// variants) matches that lifetime exactly. Don't call [`Self::leak`]
+    /// in a loop that re-registers the *same* dynamic action repeatedly
+    /// (e.g. once per request) — that would leak unboundedly. `id`
+    /// should still be `{NAMESPACE}_{SCREAMING_ID}`-shaped by convention
+    /// so a REAPER `ActionBackend` needs no translation, but nothing
+    /// enforces that at this layer.
+    #[derive(Debug, Clone)]
+    pub struct DynamicActionMeta {
+        pub id: String,
+        pub trait_name: &'static str,
+        pub method_name: String,
+        pub display_name: String,
+        pub description: String,
+        pub category: &'static str,
+        pub group: &'static str,
+        pub toggleable: bool,
+    }
+
+    impl DynamicActionMeta {
+        /// Leak this metadata's owned strings (and the struct itself) to
+        /// produce a `&'static ActionMeta`. See the type's docs for why
+        /// leaking is the right call here.
+        pub fn leak(self) -> &'static ActionMeta {
+            let meta = ActionMeta {
+                id: Box::leak(self.id.into_boxed_str()),
+                trait_name: self.trait_name,
+                method_name: Box::leak(self.method_name.into_boxed_str()),
+                display_name: Box::leak(self.display_name.into_boxed_str()),
+                description: Box::leak(self.description.into_boxed_str()),
+                category: self.category,
+                group: self.group,
+                toggleable: self.toggleable,
+            };
+            Box::leak(Box::new(meta))
+        }
+    }
+
     /// Backend-agnostic action registration sink.
     ///
     /// `register` is called once per action at startup with a

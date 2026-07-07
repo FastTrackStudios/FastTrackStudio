@@ -161,6 +161,11 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
         .unwrap_or_else(|| to_screaming_snake_case(strip_actions_suffix(&trait_name_str)));
 
     let mut const_defs = Vec::new();
+    // (const_ident, cfg_attrs) — the cfg attrs are re-emitted everywhere
+    // this const is referenced (the `all()` push, the register call) so
+    // a `#[cfg]`-gated-off method disappears consistently everywhere,
+    // instead of leaving a dangling reference to a method rustc already
+    // stripped from the trait itself.
     let mut const_idents = Vec::new();
     let mut register_calls = Vec::new();
 
@@ -178,6 +183,16 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
         };
         let attr = method.attrs.remove(idx);
         let parsed = parse_action_attr(&attr)?;
+
+        // Collect (don't remove) any #[cfg(...)] on this method — it
+        // must stay on the method itself so the trait's own definition
+        // still strips it normally, and gets cloned onto every other
+        // emission site below so they strip in lockstep.
+        let cfg_attrs: Vec<&Attribute> = method
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("cfg"))
+            .collect();
 
         // v1 constraint: `fn name(&self)` only — no other params, no return
         // value. See module doc for why.
@@ -217,6 +232,7 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
         let toggleable = parsed.toggleable;
 
         const_defs.push(quote! {
+            #(#cfg_attrs)*
             #vis const #const_ident: ::architect::action::ActionMeta = ::architect::action::ActionMeta {
                 id: #id,
                 trait_name: #trait_name_str,
@@ -228,9 +244,13 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
                 toggleable: #toggleable,
             };
         });
-        const_idents.push(const_ident.clone());
+        const_idents.push((
+            const_ident.clone(),
+            cfg_attrs.iter().map(|a| quote! { #a }).collect::<Vec<_>>(),
+        ));
 
         register_calls.push(quote! {
+            #(#cfg_attrs)*
             {
                 let imp = ::std::clone::Clone::clone(&imp);
                 backend.register(&#const_ident, ::std::sync::Arc::new(move || {
@@ -250,6 +270,20 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
     let actions_marker = format_ident!("{}Actions", trait_name);
     let register_fn = format_ident!("register_{}_actions", to_snake_case(&trait_name_str));
 
+    // `all()` can't be a plain `&[A, B, C]` static array literal once any
+    // element is `#[cfg]`-gated — array literals don't support per-element
+    // cfg on stable Rust, and a gated-off ident wouldn't exist to name.
+    // Building the list via cfg-gated `push` calls into a lazily-built,
+    // process-lifetime `Vec` sidesteps that: each push vanishes in lockstep
+    // with its const/method when the cfg is off, same as any other cfg'd
+    // statement.
+    let all_pushes = const_idents.iter().map(|(ident, cfg_attrs)| {
+        quote! {
+            #(#cfg_attrs)*
+            v.push(#ident);
+        }
+    });
+
     Ok(quote! {
         #trait_item
 
@@ -261,8 +295,13 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
 
         impl #actions_marker {
             #vis fn all() -> &'static [::architect::action::ActionMeta] {
-                static ALL: &[::architect::action::ActionMeta] = &[#(#const_idents),*];
-                ALL
+                static ALL: ::std::sync::OnceLock<::std::vec::Vec<::architect::action::ActionMeta>> =
+                    ::std::sync::OnceLock::new();
+                ALL.get_or_init(|| {
+                    let mut v = ::std::vec::Vec::new();
+                    #(#all_pushes)*
+                    v
+                })
             }
         }
 
