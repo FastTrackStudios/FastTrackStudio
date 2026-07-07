@@ -5,8 +5,10 @@
 //! `.nam` model, and renders it with the same [`SignalFlowGridView`] the full
 //! Signal app uses — the amp shows up as a real block in the grid, with live
 //! input/output meters and a picker over the `.nam` models in your Downloads.
-//! Same renderer pipeline as the plugin/desktop app, so this graduates to the
-//! iPhone (mobile) target unchanged.
+//!
+//! Prototype build: renders via **dioxus-desktop (WRY/WebKit)** for a fast dev
+//! loop. The shipped signal-desktop / plugin UI stays on the Blitz pipeline
+//! (CLAUDE.md); making this amp VST/mobile-compatible is a later step.
 //!
 //! ```text
 //! just amp
@@ -15,8 +17,10 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use dioxus::desktop::tao::dpi::LogicalSize;
+use dioxus::desktop::{Config, WindowBuilder};
 use dioxus::prelude::*;
-use nice_plug_dioxus::{SharedState, TAILWIND_CSS};
+use nice_plug_dioxus::TAILWIND_CSS;
 use signal_sampler::rig::RigBlock;
 use signal_guitar::AmpEngine;
 use signal_sampler::RigAudioPrefs;
@@ -31,7 +35,7 @@ struct ModelEntry {
     name: String,
 }
 
-/// Shared app state handed to the Blitz renderer.
+/// App state provided to the component tree via Dioxus context.
 #[derive(Clone)]
 struct AppState {
     amp: Arc<Mutex<AmpEngine>>,
@@ -137,16 +141,22 @@ fn main() {
         initial,
     };
 
-    let shared = SharedState::new(Arc::new(state));
-    nice_plug_dioxus::open_standalone_with_state(App, 1100, 720, Some(shared));
+    // Prototype renderer: dioxus-desktop (WRY). State goes in via root context.
+    dioxus::LaunchBuilder::desktop()
+        .with_cfg(
+            Config::new().with_window(
+                WindowBuilder::new()
+                    .with_title("Signal Amp")
+                    .with_inner_size(LogicalSize::new(1100.0, 720.0)),
+            ),
+        )
+        .with_context(state)
+        .launch(App);
 }
 
 #[component]
 fn App() -> Element {
-    let shared = use_context::<SharedState>();
-    let state = shared
-        .get::<AppState>()
-        .expect("AppState not in Dioxus context");
+    let state = use_context::<AppState>();
     let amp = state.amp.clone();
     let models = state.models.clone();
 
@@ -185,7 +195,8 @@ fn App() -> Element {
     }
 
     rsx! {
-        // Tailwind — required for SignalFlowGridView's classes under Blitz.
+        // Tailwind — SignalFlowGridView is class-heavy; the WRY webview renders
+        // the bundled stylesheet.
         document::Style { {TAILWIND_CSS} }
         div {
             style: "font-family: system-ui, sans-serif; background: #17171a; color: #e4e4e7; \
