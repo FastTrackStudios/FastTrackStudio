@@ -196,8 +196,11 @@ fn App() -> Element {
 
     rsx! {
         // Tailwind — SignalFlowGridView is class-heavy; the WRY webview renders
-        // the bundled stylesheet.
-        document::Style { {TAILWIND_CSS} }
+        // the bundled stylesheet. Isolated in a prop-less/hook-less child so it
+        // mounts once and is never re-diffed — `App` re-renders at ~30fps from
+        // the meter poller, which would otherwise re-emit the style node every
+        // frame ("Changing the props of Style {}").
+        AmpStyles {}
         div {
             style: "font-family: system-ui, sans-serif; background: #17171a; color: #e4e4e7; \
                     height: 100%; display: flex; flex-direction: column;",
@@ -277,6 +280,19 @@ fn App() -> Element {
                 }
             }
         }
+    }
+}
+
+/// Injects the bundled Tailwind stylesheet exactly once.
+///
+/// Prop-less and hook-less, so Dioxus memoizes it and never re-renders it even
+/// though its parent (`App`) re-renders every frame from the meter poller. This
+/// keeps the `document::Style` node stable and silences the Blitz/WRY
+/// "Changing the props of Style {}" warning.
+#[component]
+fn AmpStyles() -> Element {
+    rsx! {
+        document::Style { {TAILWIND_CSS} }
     }
 }
 
