@@ -7,6 +7,12 @@
 //! untouched and still owns REAPER registration for everything until a
 //! later cutover phase.
 //!
+//! The trait *declarations* (`FtsTempoGridActions`, `FtsActions`) live in
+//! the sibling `fts-extensions-actions` crate — pure metadata, no REAPER
+//! deps — so `fts-cli`'s generated action menu can depend on them without
+//! pulling in this crate's full REAPER binding stack. This module only
+//! holds the impl (which does need everything below) and registration.
+//!
 //! **Deliberately NOT migrated here** (stay on the legacy path):
 //! - `#[cfg(feature = "mod-session")]` mode-debug actions (7) — mixing
 //!   per-method `#[cfg(...)]` with `#[architect::actions]` is untested:
@@ -29,115 +35,10 @@ use crate::tempo::{
     MoveGridVariant, set_move_grid_variant, snap_grid_to_transient_constrained_handler,
     snap_grid_to_transient_fully_constrained_handler, snap_grid_to_transient_handler,
 };
-
-/// Tempo-grid move/snap actions — none shown in REAPER's Extensions menu
-/// (matches the original `action()`, not `menu_action()`, in
-/// `actions::build_action_defs()`).
-#[architect::actions(namespace = "FTS_TEMPO")]
-pub trait FtsTempoGridActions {
-    #[action(
-        description = "Move closest measure grid line to mouse cursor (perform until shortcut released)",
-        group = "Move"
-    )]
-    fn move_measure_grid_to_mouse(&self);
-
-    #[action(
-        description = "Move closest measure grid line to mouse cursor — constrained (perform until shortcut released)",
-        group = "Move"
-    )]
-    fn move_measure_grid_to_mouse_constrained(&self);
-
-    #[action(
-        description = "Move closest measure grid line to mouse cursor — fully constrained (perform until shortcut released)",
-        group = "Move"
-    )]
-    fn move_measure_grid_to_mouse_fully_constrained(&self);
-
-    #[action(
-        description = "Move closest grid line to mouse cursor (perform until shortcut released)",
-        group = "Move"
-    )]
-    fn move_grid_to_mouse(&self);
-
-    #[action(
-        description = "Move closest tempo marker to mouse cursor (perform until shortcut released)",
-        group = "Move"
-    )]
-    fn move_marker_to_mouse(&self);
-
-    #[action(
-        description = "Snap closest measure grid line to next transient",
-        group = "Snap"
-    )]
-    fn snap_grid_to_transient(&self);
-
-    #[action(
-        description = "Snap closest measure grid line to next transient — constrained",
-        group = "Snap"
-    )]
-    fn snap_grid_to_transient_constrained(&self);
-
-    #[action(
-        description = "Snap closest measure grid line to next transient — fully constrained",
-        group = "Snap"
-    )]
-    fn snap_grid_to_transient_fully_constrained(&self);
-}
-
-/// General FTS utility actions — a mix of hidden and Extensions-menu-visible
-/// entries; `category` is set only where the original constructor was
-/// `menu_action`/`toggle_menu_action` (empty `category` == not shown in
-/// menu, per `daw_reaper`'s `ActionBackend` impl).
-#[architect::actions(namespace = "FTS")]
-pub trait FtsActions {
-    #[action(description = "Move cursor left creating time selection by measure")]
-    fn move_cursor_left_creating_time_selection_by_measure(&self);
-
-    #[action(description = "Move cursor right creating time selection by measure")]
-    fn move_cursor_right_creating_time_selection_by_measure(&self);
-
-    #[action(description = "Split selected items at cursor with crossfade on left")]
-    fn split_items_crossfade_left(&self);
-
-    #[action(description = "Test Toggle", category = "Test", toggleable = true)]
-    fn test_toggle(&self);
-
-    #[action(
-        description = "Sync: Toggle clock-sync (multicast peer discovery)",
-        category = "Sync"
-    )]
-    fn clock_sync_toggle(&self);
-
-    #[action(
-        description = "Sync: Toggle drift correction (auto-rate-change)",
-        category = "Sync"
-    )]
-    fn drift_correction_toggle(&self);
-
-    #[action(
-        description = "MIDI mode: Drums (drum-map view + drum keybinds)",
-        category = "MIDI Editor"
-    )]
-    fn midi_mode_drums(&self);
-
-    #[action(description = "MIDI mode: Cycle to next", category = "MIDI Editor")]
-    fn midi_mode_cycle(&self);
-
-    #[action(description = "MIDI: Insert flam at mouse cursor")]
-    fn midi_insert_flam(&self);
-
-    #[action(description = "FastTrackStudio Info", category = "Info")]
-    fn info(&self);
-
-    #[action(description = "Volume Balancer: toggle constant-sum fader linking")]
-    fn volbal_toggle(&self);
-
-    #[action(description = "Volume Balancer: link selected tracks (constant total volume)")]
-    fn volbal_link_selected(&self);
-
-    #[action(description = "Volume Balancer: unlink groups containing selected tracks")]
-    fn volbal_unlink_selected(&self);
-}
+use fts_extensions_actions::{
+    FtsActions, FtsActionsActions, FtsTempoGridActions, FtsTempoGridActionsActions,
+    register_fts_actions_actions, register_fts_tempo_grid_actions_actions,
+};
 
 /// Zero-sized backend for both traits above — every method forwards to the
 /// exact same function `actions::build_action_defs()`'s closures call.

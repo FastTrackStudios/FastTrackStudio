@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/fts-extensions",
+    "crates/fts-extensions-actions",
     "crates/ui-test-standalone",
     "crates/ui-snapshot",
     "xtask",

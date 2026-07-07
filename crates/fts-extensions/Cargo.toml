@@ -47,6 +47,11 @@ host-hooks = []
 # architect::action — declarative action metadata (description/category/
 # group) + backend-agnostic registration, replacing actions-proto.
 architect.workspace = true
+# This crate's own #[architect::actions] trait *declarations* (pure
+# metadata, no REAPER deps) — split out so fts-cli's generated action
+# menu can depend on them without pulling in the full REAPER binding
+# stack this crate carries. See its own crate doc for why.
+fts-extensions-actions = { path = "../fts-extensions-actions" }
 
 # FTS Launcher — search/workflow engine
 fts-launcher = { workspace = true, optional = true }
