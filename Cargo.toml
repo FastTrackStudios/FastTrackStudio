@@ -98,7 +98,7 @@ ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef5
 # upstream facet 0.50 / vox 0.10, matching this workspace); codeberg
 # architect cb/main still pins the old codeberg vox, so we do NOT git-dep
 # these. Currently declared but unused — they light up in Phase 3.
-architect = { path = "../../architect/macros/architect" }
+architect = { path = "../../architect/crates/architect" }
 architect-atom = { path = "../../architect/features/atom" }
 architect-form = { path = "../../architect/features/form" }
 
@@ -219,7 +219,7 @@ daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-
 # already migrated to upstream facet 0.50 / vox 0.10; patch them in here so the
 # whole graph resolves against the migrated sources.
 [patch."https://codeberg.org/FastTrackStudios/architect.git"]
-architect = { path = "../../architect/macros/architect" }
+architect = { path = "../../architect/crates/architect" }
 
 [patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../input_actions/crates/actions-proto" }

@@ -13,6 +13,9 @@ path = "src/main.rs"
 # The live single-amp engine (duplex audio + NAM). `pipewire` gives the native
 # PipeWire duplex backend the rig needs for low-latency guitar I/O.
 signal-sampler = { workspace = true, features = ["pipewire"] }
+# The shared Signal UI — the real signal-flow grid (SignalFlowGridView) + grid
+# model, so the amp renders in the same grid as the full Signal app.
+signal-ui = { workspace = true, default-features = false, features = ["desktop"] }
 # Blitz/Vello/wgpu renderer — the same pipeline as the plugin + desktop app,
 # so this UI renders identically when it graduates to the mobile/plugin target.
 nice-plug-dioxus.workspace = true

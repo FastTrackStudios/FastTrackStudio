@@ -1,21 +1,27 @@
-//! Signal Amp — a standalone neural-amp modeler.
+//! Signal Amp — a standalone neural-amp modeler that renders the live guitar
+//! chain in the shared Signal signal-flow grid.
 //!
 //! Opens the live duplex audio (guitar in → out) via [`AmpEngine`], loads a
-//! `.nam` model, and renders a minimal Blitz/Dioxus UI: the current amp, live
-//! input/output meters, and a picker over the `.nam` models found in your
-//! Downloads. Same renderer pipeline as the plugin/desktop app, so this UI
-//! graduates to the iPhone (mobile) target unchanged.
+//! `.nam` model, and renders it with the same [`SignalFlowGridView`] the full
+//! Signal app uses — the amp shows up as a real block in the grid, with live
+//! input/output meters and a picker over the `.nam` models in your Downloads.
+//! Same renderer pipeline as the plugin/desktop app, so this graduates to the
+//! iPhone (mobile) target unchanged.
 //!
 //! ```text
-//! cargo run --release -p signal-amp --features signal-sampler/pipewire
+//! just amp
 //! ```
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dioxus::prelude::*;
-use nice_plug_dioxus::SharedState;
+use nice_plug_dioxus::{SharedState, TAILWIND_CSS};
+use signal_sampler::rig::RigBlock;
 use signal_sampler::{AmpEngine, RigAudioPrefs};
+use signal_ui::components::{
+    GridBlock, GridJack, GridPosition, SignalFlowGrid, SignalFlowGridView,
+};
 
 /// One selectable model in the picker.
 #[derive(Clone, PartialEq)]
@@ -29,13 +35,35 @@ struct ModelEntry {
 struct AppState {
     amp: Arc<Mutex<AmpEngine>>,
     models: Vec<ModelEntry>,
-    /// The model loaded at startup (so the UI can highlight it), if any.
     initial: Option<String>,
 }
 
 /// The VOX AC30 we default-load if present.
 const DEFAULT_MODEL: &str =
     "/home/cody/Downloads/1965 VOX AC30 Top Boost/'65 AC30_6 - The Iconic Cleanish.nam";
+
+/// Build a [`SignalFlowGrid`] from the live amp chain: a Guitar input jack, the
+/// amp/cab/FX blocks laid left→right, and an output jack. Widget + size come
+/// from the shared [`SignalFlowGrid::widget_for_block_type`] mapping, so an amp
+/// block renders with the `AmpCab` widget exactly like the full Signal app.
+fn build_grid(blocks: &[RigBlock]) -> SignalFlowGrid {
+    let mut grid = SignalFlowGrid::new();
+    grid.inputs.push(GridJack::input("Guitar", 2));
+    let mut col = 1usize;
+    for b in blocks {
+        let (widget, size) = SignalFlowGrid::widget_for_block_type(b.block_type);
+        let short: String = b.name.chars().take(3).collect::<String>().to_uppercase();
+        grid.add_block(
+            GridBlock::new(b.name.clone(), short, b.block_type, GridPosition { row: 2, col })
+                .with_widget(widget)
+                .with_size(size)
+                .with_bypassed(b.bypassed),
+        );
+        col += size.width + 1;
+    }
+    grid.outputs.push(GridJack::output("Out", 2));
+    grid
+}
 
 /// Shallow-scan `~/Downloads` (depth ≤ 2) for `.nam` models.
 fn scan_models() -> Vec<ModelEntry> {
@@ -91,7 +119,6 @@ fn main() {
         }
     };
 
-    // Default-load the VOX AC30 if it's there.
     let mut initial = None;
     if std::path::Path::new(DEFAULT_MODEL).exists() {
         match amp.load_model(DEFAULT_MODEL) {
@@ -110,7 +137,7 @@ fn main() {
     };
 
     let shared = SharedState::new(Arc::new(state));
-    nice_plug_dioxus::open_standalone_with_state(App, 640, 480, Some(shared));
+    nice_plug_dioxus::open_standalone_with_state(App, 1100, 720, Some(shared));
 }
 
 #[component]
@@ -122,20 +149,23 @@ fn App() -> Element {
     let amp = state.amp.clone();
     let models = state.models.clone();
 
-    // Reactive UI state.
-    let model_name = use_signal(|| {
+    let mut model_name = use_signal(|| {
         amp.lock()
             .map(|a| a.model_name().to_string())
             .unwrap_or_else(|_| "—".into())
     });
     let selected = use_signal(|| state.initial.clone());
-    let status = use_signal(String::new);
+    let mut status = use_signal(String::new);
     let mut in_pk = use_signal(|| 0.0f32);
     let mut out_pk = use_signal(|| 0.0f32);
     let mut load_us = use_signal(|| 0u32);
+    let mut grid = use_signal(|| {
+        amp.lock()
+            .map(|a| build_grid(&a.active_blocks()))
+            .unwrap_or_default()
+    });
 
-    // Best-effort meter poll (~30 Hz). The audio runs independently of this;
-    // if the timer doesn't tick in the renderer's executor the amp still works.
+    // Best-effort meter poll (~30 Hz). Audio runs independently of this.
     {
         let amp = amp.clone();
         use_future(move || {
@@ -154,30 +184,41 @@ fn App() -> Element {
     }
 
     rsx! {
+        // Tailwind — required for SignalFlowGridView's classes under Blitz.
+        document::Style { {TAILWIND_CSS} }
         div {
             style: "font-family: system-ui, sans-serif; background: #17171a; color: #e4e4e7; \
-                    height: 100%; padding: 20px; display: flex; flex-direction: column; gap: 16px;",
+                    height: 100%; display: flex; flex-direction: column;",
 
-            // Header
+            // Header + meters
             div {
-                div { style: "font-size: 13px; letter-spacing: 2px; color: #a1a1aa;", "SIGNAL AMP" }
-                div { style: "font-size: 26px; font-weight: 700; color: #f4732a;", "{model_name}" }
+                style: "padding: 16px 20px; border-bottom: 1px solid #27272a; \
+                        display: flex; align-items: center; gap: 24px;",
+                div {
+                    div { style: "font-size: 12px; letter-spacing: 2px; color: #a1a1aa;", "SIGNAL AMP" }
+                    div { style: "font-size: 22px; font-weight: 700; color: #f4732a;", "{model_name}" }
+                }
+                div { style: "flex: 1; display: flex; flex-direction: column; gap: 6px; max-width: 420px;",
+                    Meter { label: "IN", value: in_pk() }
+                    Meter { label: "OUT", value: out_pk() }
+                }
+                div { style: "font-size: 12px; color: #71717a;", "{load_us}µs/blk" }
             }
-
-            // Meters
-            Meter { label: "INPUT", value: in_pk() }
-            Meter { label: "OUTPUT", value: out_pk() }
-            div { style: "font-size: 12px; color: #71717a;", "DSP load: {load_us}µs / block" }
 
             if !status().is_empty() {
-                div { style: "font-size: 12px; color: #eab308;", "{status}" }
+                div { style: "padding: 4px 20px; font-size: 12px; color: #eab308;", "{status}" }
             }
 
-            // Model picker
-            div { style: "font-size: 12px; color: #a1a1aa; margin-top: 4px;", "MODELS ({models.len()})" }
+            // The live signal-flow grid — same component as the full Signal app.
+            div { style: "flex: 1; overflow: auto; padding: 16px; background: #0e0e10;",
+                SignalFlowGridView { grid: grid() }
+            }
+
+            // Model picker (bottom strip)
             div {
-                style: "flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; \
-                        border: 1px solid #27272a; border-radius: 6px; padding: 6px;",
+                style: "border-top: 1px solid #27272a; padding: 8px 20px; \
+                        display: flex; gap: 6px; overflow-x: auto; align-items: center;",
+                div { style: "font-size: 11px; color: #a1a1aa; white-space: nowrap;", "MODELS" }
                 for entry in models.iter().cloned() {
                     {
                         let is_sel = selected().as_deref() == Some(entry.path.as_str());
@@ -187,8 +228,8 @@ fn App() -> Element {
                         rsx! {
                             div {
                                 style: format!(
-                                    "padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; \
-                                     background: {}; color: {};",
+                                    "padding: 5px 10px; border-radius: 4px; cursor: pointer; \
+                                     font-size: 12px; white-space: nowrap; background: {}; color: {};",
                                     if is_sel { "#f4732a" } else { "#1f1f23" },
                                     if is_sel { "#17171a" } else { "#d4d4d8" },
                                 ),
@@ -199,11 +240,16 @@ fn App() -> Element {
                                     let mut model_name = model_name;
                                     let mut status = status;
                                     let mut selected = selected;
+                                    let mut grid = grid;
                                     spawn(async move {
                                         let res = amp.lock().map_err(|_| "engine busy".to_string())
-                                            .and_then(|mut a| a.load_model(&path));
+                                            .and_then(|mut a| {
+                                                a.load_model(&path)?;
+                                                Ok(build_grid(&a.active_blocks()))
+                                            });
                                         match res {
-                                            Ok(()) => {
+                                            Ok(g) => {
+                                                grid.set(g);
                                                 model_name.set(name.clone());
                                                 selected.set(Some(path.clone()));
                                                 status.set(String::new());
@@ -222,10 +268,10 @@ fn App() -> Element {
     }
 }
 
-/// A simple horizontal level meter (linear peak 0..1, log-ish fill).
+/// A simple horizontal level meter (linear peak 0..1, perceptual fill).
 #[component]
 fn Meter(label: String, value: f32) -> Element {
-    let pct = (value.clamp(0.0, 1.0).sqrt() * 100.0) as u32; // sqrt = perceptual-ish
+    let pct = (value.clamp(0.0, 1.0).sqrt() * 100.0) as u32;
     let color = if value > 0.9 {
         "#ef4444"
     } else if value > 0.6 {
@@ -235,10 +281,10 @@ fn Meter(label: String, value: f32) -> Element {
     };
     rsx! {
         div {
-            style: "display: flex; align-items: center; gap: 10px;",
-            div { style: "width: 60px; font-size: 11px; color: #a1a1aa;", "{label}" }
+            style: "display: flex; align-items: center; gap: 8px;",
+            div { style: "width: 28px; font-size: 10px; color: #a1a1aa;", "{label}" }
             div {
-                style: "flex: 1; height: 14px; background: #0e0e10; border-radius: 3px; overflow: hidden;",
+                style: "flex: 1; height: 10px; background: #0e0e10; border-radius: 3px; overflow: hidden;",
                 div { style: format!("height: 100%; width: {pct}%; background: {color};") }
             }
         }
