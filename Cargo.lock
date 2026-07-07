@@ -433,8 +433,9 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
 dependencies = [
+ "architect-action-derive",
  "architect-derive",
  "architect-rpc-derive",
  "eyre",
@@ -448,9 +449,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-action-derive"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -461,7 +472,7 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
 dependencies = [
  "proc-macro2",
  "quote",

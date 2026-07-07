@@ -718,6 +718,50 @@ pub fn register_action_main_thread(
     show_in_menu: bool,
     toggleable: bool,
 ) -> u32 {
+    let command_for_trigger = command_name.to_string();
+    register_action_core(
+        command_name,
+        description,
+        show_in_menu,
+        toggleable,
+        move || notify_action_triggered(command_for_trigger.clone()),
+    )
+}
+
+/// Registers `command_name` with REAPER, invoking `handler` directly when
+/// triggered — no broadcast hop. Used by the `architect::action::ActionBackend`
+/// adapter (see `impl ActionBackend for crate::Reaper` below), whose handler
+/// closures are supplied per-action by `#[architect::actions]`-generated
+/// registration code rather than dispatched by matching a broadcast command
+/// name downstream.
+pub fn register_action_with_handler(
+    command_name: &str,
+    description: &str,
+    show_in_menu: bool,
+    toggleable: bool,
+    handler: std::sync::Arc<dyn Fn() + Send + Sync>,
+) -> u32 {
+    register_action_core(
+        command_name,
+        description,
+        show_in_menu,
+        toggleable,
+        move || handler(),
+    )
+}
+
+/// Shared REAPER action-registration mechanics (dedup, gaccel, menu
+/// bookkeeping) used by both the broadcast-based `register_action_main_thread`
+/// and the direct-handler `register_action_with_handler`. `trigger` is the
+/// callback REAPER invokes when the action fires — the only thing that
+/// differs between the two callers.
+fn register_action_core(
+    command_name: &str,
+    description: &str,
+    show_in_menu: bool,
+    toggleable: bool,
+    trigger: impl FnMut() + 'static,
+) -> u32 {
     if let Some(id) = registered_actions()
         .lock_recoverable("action_registry")
         .get(command_name)
@@ -743,7 +787,6 @@ pub fn register_action_main_thread(
         return id;
     }
 
-    let command_for_trigger = command_name.to_string();
     let kind = if toggleable {
         let command_for_toggle = command_name.to_string();
         ActionKind::Toggleable(Box::new(move || read_toggle_state(&command_for_toggle)))
@@ -754,7 +797,7 @@ pub fn register_action_main_thread(
         command_name.to_string(),
         description.to_string(),
         None,
-        move || notify_action_triggered(command_for_trigger.clone()),
+        trigger,
         kind,
     );
     let command_id = action.command_id();
@@ -1018,9 +1061,74 @@ impl ActionRegistration for crate::Reaper {
     }
 }
 
+// ============================================================================
+// architect::action::ActionBackend — registers `#[architect::actions]`-
+// declared named commands with REAPER.
+//
+// Distinct from `ActionRegistration` above: that trait is the read/query
+// surface (list REAPER's existing actions, execute by id) exposed to RPC
+// clients, mid-port to `#[architect::rpc]` per daw's ARCHITECT_REFACTOR.md
+// item #15 — untouched here. This impl is the write/registration seam
+// consumed by `#[architect::actions]`-generated `register_<trait>_actions`
+// functions (see the FTS action-framework migration), one call per action at
+// extension startup. It goes straight to `register_action_with_handler`
+// (direct trigger, no `notify_action_triggered` broadcast hop) so the
+// handler bound into `ActionMeta` at macro-expansion time is exactly what
+// REAPER invokes — no separate string-match dispatch step needed downstream.
+// ============================================================================
+
+/// Show in the Extensions > FastTrackStudio menu whenever the action
+/// declared a category — an uncategorized action is either internal or not
+/// yet worth surfacing in the menu tree. Pure translation logic, split out
+/// from the `ActionBackend` impl below so it's unit-testable without a live
+/// REAPER instance (everything else `register` does bottoms out in
+/// `Reaper::get()`).
+fn action_show_in_menu(meta: &architect::action::ActionMeta) -> bool {
+    !meta.category.is_empty()
+}
+
+impl architect::action::ActionBackend for crate::Reaper {
+    fn register(
+        &self,
+        meta: &'static architect::action::ActionMeta,
+        handler: std::sync::Arc<dyn Fn() + Send + Sync>,
+    ) {
+        register_action_with_handler(
+            meta.id,
+            meta.description,
+            action_show_in_menu(meta),
+            meta.toggleable,
+            handler,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_meta(category: &'static str) -> architect::action::ActionMeta {
+        architect::action::ActionMeta {
+            id: "FTS_TEST_ACTION",
+            trait_name: "TestActions",
+            method_name: "action",
+            display_name: "Test Action",
+            description: "A test action",
+            category,
+            group: "",
+            toggleable: false,
+        }
+    }
+
+    #[test]
+    fn action_show_in_menu_true_when_categorized() {
+        assert!(action_show_in_menu(&test_meta("Setlist")));
+    }
+
+    #[test]
+    fn action_show_in_menu_false_when_uncategorized() {
+        assert!(!action_show_in_menu(&test_meta("")));
+    }
 
     #[test]
     fn derive_menu_group_session() {
