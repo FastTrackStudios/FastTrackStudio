@@ -102,6 +102,46 @@ impl RawShortMessage {
         let (lsb, msb) = bend.to_halves();
         Self([0xE0 | channel.index(), lsb.get(), msb.get()])
     }
+
+    // ── Ergonomic note/CC predicates for hot-path drain loops (UIs that poll a
+    //    stream and only care about notes + CCs). Byte-level, no allocation. ──
+
+    /// True for a note-on with non-zero velocity (velocity 0 is a note-off).
+    pub const fn is_note_on(&self) -> bool {
+        (self.0[0] & 0xF0) == 0x90 && self.0[2] > 0
+    }
+    /// True for a note-off, including the note-on-velocity-0 convention.
+    pub const fn is_note_off(&self) -> bool {
+        (self.0[0] & 0xF0) == 0x80 || ((self.0[0] & 0xF0) == 0x90 && self.0[2] == 0)
+    }
+    /// True for a Control Change (status `0xB0`).
+    pub const fn is_cc(&self) -> bool {
+        (self.0[0] & 0xF0) == 0xB0
+    }
+    /// Note number (data byte 1) for note messages.
+    pub const fn note(&self) -> u8 {
+        self.0[1]
+    }
+    /// Velocity (data byte 2) for note messages.
+    pub const fn velocity(&self) -> u8 {
+        self.0[2]
+    }
+    /// Controller number (data byte 1) for a CC.
+    pub const fn controller(&self) -> u8 {
+        self.0[1]
+    }
+    /// Controller value (data byte 2) for a CC.
+    pub const fn cc_value(&self) -> u8 {
+        self.0[2]
+    }
+    /// Channel (low nibble of the status byte).
+    pub const fn channel_raw(&self) -> u8 {
+        self.0[0] & 0x0F
+    }
+    /// The raw status byte (data-0).
+    pub const fn status(&self) -> u8 {
+        self.0[0]
+    }
 }
 
 impl ShortMessage for RawShortMessage {
