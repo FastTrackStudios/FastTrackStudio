@@ -2,7 +2,7 @@
 //!
 //! For editing MIDI data in takes, see `Midi`.
 
-use super::{MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget};
+use super::{MidiEvent, MidiInputDevice, MidiOutputDevice, SendMidiTiming, StuffMidiTarget};
 
 #[architect::rpc]
 pub trait LiveMidi {
@@ -23,7 +23,7 @@ pub trait LiveMidi {
     // ── Output ─────────────────────────────────────────────────────
 
     /// Send a MIDI message to a device.
-    fn send_midi(&self, device_id: u32, message: MidiMessage, timing: SendMidiTiming);
+    fn send_midi(&self, device_id: u32, message: MidiEvent, timing: SendMidiTiming);
 
     // ── Input subscription ─────────────────────────────────────────
     //
@@ -39,5 +39,5 @@ pub trait LiveMidi {
     /// Inject into REAPER's internal MIDI message queue. Used for
     /// VKB simulation in integration tests and for sending CC to
     /// plugins that manage presets internally.
-    fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage);
+    fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiEvent);
 }

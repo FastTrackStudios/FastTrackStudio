@@ -53,6 +53,21 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 memmap2 = "0.9"
+# Canonical MIDI types — the single app-facing facade for the architect-
+# structured MIDI crate shared across the FTS stack. Consumers depend ONLY on
+# this crate (never midicore-proto / midicore-midir directly). daw-proto
+# re-exports `midicore::MidiEvent` as its live-MIDI message type.
+# `default-features = false` drops midicore's `vox` service traits (daw defines
+# its own `LiveMidi` RPC), keeping midicore's `#[architect::rpc]` surface out of
+# daw's build graph.
+#
+# NOTE: the `midir` feature is deliberately NOT enabled. It would pull
+# `midicore-midir`, which pins `midir = "0.10"` (alsa-sys 0.3) — that collides
+# with daw's own `midir = "0.11"` (alsa-sys 0.4) via the `links = "alsa"` native
+# lib (only one may link `alsa`). daw consumes no `midicore::midir` symbols
+# (daw-midi-io keeps its own midir 0.11 until the signal stage-2 swap), so the
+# facade's type/codec surface is all daw needs.
+midicore = { path = "../midicore/crates/midicore", default-features = false }
 # Facade crate — the only public API surface for the daw domain
 daw = { path = "crates/daw" }
 # UI crate stays public (Dioxus components with feature flags)

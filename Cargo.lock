@@ -278,7 +278,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -289,7 +289,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -433,11 +433,26 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
 dependencies = [
- "architect-action-derive",
- "architect-derive",
- "architect-rpc-derive",
+ "architect-action-derive 0.1.0",
+ "architect-derive 0.1.0",
+ "architect-rpc-derive 0.1.0",
+ "eyre",
+ "facet 0.50.0-rc.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+ "vox",
+]
+
+[[package]]
+name = "architect"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#430babe647f872bdc49e37034954c0aab30b8ee3"
+dependencies = [
+ "architect-action-derive 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
+ "architect-derive 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
+ "architect-rpc-derive 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "eyre",
  "facet 0.50.0-rc.1",
  "thiserror 2.0.18",
@@ -451,7 +466,16 @@ dependencies = [
 [[package]]
 name = "architect-action-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "architect-action-derive"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#430babe647f872bdc49e37034954c0aab30b8ee3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -461,7 +485,17 @@ dependencies = [
 [[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "architect-derive"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#430babe647f872bdc49e37034954c0aab30b8ee3"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -472,7 +506,16 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "architect-rpc-derive"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#430babe647f872bdc49e37034954c0aab30b8ee3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2058,7 +2101,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "daw"
 version = "0.1.0"
 dependencies = [
- "architect",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "daw-control",
  "daw-csi",
  "daw-module",
@@ -2121,7 +2164,7 @@ dependencies = [
 name = "daw-bridge"
 version = "0.1.0"
 dependencies = [
- "architect",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "crossbeam-channel",
  "daw",
  "daw-allocator",
@@ -2154,7 +2197,7 @@ dependencies = [
 name = "daw-cli"
 version = "0.1.0"
 dependencies = [
- "architect",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "clap",
  "daw",
  "daw-standalone",
@@ -2174,7 +2217,7 @@ dependencies = [
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
- "architect",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "daw-proto",
  "eyre",
  "facet-json 0.50.0-rc.1",
@@ -2298,10 +2341,11 @@ name = "daw-proto"
 version = "0.1.0"
 dependencies = [
  "actions-proto",
- "architect",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "facet 0.50.0-rc.1",
  "facet-json 0.50.0-rc.1",
  "futures",
+ "midicore",
  "vox",
  "vox-phon",
  "vox-types",
@@ -2311,7 +2355,7 @@ dependencies = [
 name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
- "architect",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "base64 0.22.1",
  "camino",
  "crossbeam-channel",
@@ -2346,7 +2390,7 @@ name = "daw-reaper-dioxus"
 version = "0.1.0"
 dependencies = [
  "anyrender_vello",
- "architect",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
@@ -2425,7 +2469,7 @@ dependencies = [
 name = "daw-standalone"
 version = "0.1.0"
 dependencies = [
- "architect",
+ "architect 0.1.0 (git+https://codeberg.org/FastTrackStudios/architect.git?branch=main)",
  "async-lock",
  "base64 0.22.1",
  "clack-extensions",
@@ -3232,7 +3276,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4425,7 +4469,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4710,7 +4754,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5275,6 +5319,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f2dd5c7f8aaf48a76e389068ab25ed80bdbc226b887f9013844c415698c9952"
 
 [[package]]
+name = "midicore"
+version = "0.1.0"
+dependencies = [
+ "midicore-proto",
+]
+
+[[package]]
+name = "midicore-proto"
+version = "0.1.0"
+dependencies = [
+ "architect 0.1.0",
+ "facet 0.50.0-rc.1",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "midir"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5609,7 +5670,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7308,7 +7369,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7855,7 +7916,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8482,7 +8543,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9330,6 +9391,7 @@ dependencies = [
  "vox-phon",
  "vox-rt",
  "vox-service-macros",
+ "vox-stream",
  "vox-types",
 ]
 
@@ -10116,7 +10178,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

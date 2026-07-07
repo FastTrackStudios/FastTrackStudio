@@ -1,6 +1,6 @@
 //! Live MIDI events
 
-use super::MidiMessage;
+use super::MidiEvent;
 use facet::Facet;
 
 /// A live MIDI event with timing information
@@ -11,12 +11,12 @@ pub struct LiveMidiEvent {
     /// Frame offset in 1/1024000 second units (REAPER's MIDI timing)
     pub frame_offset: u32,
     /// The MIDI message
-    pub message: MidiMessage,
+    pub message: MidiEvent,
 }
 
 impl LiveMidiEvent {
     /// Create a new live MIDI event
-    pub fn new(device_id: u32, frame_offset: u32, message: MidiMessage) -> Self {
+    pub fn new(device_id: u32, frame_offset: u32, message: MidiEvent) -> Self {
         Self {
             device_id,
             frame_offset,
@@ -25,7 +25,7 @@ impl LiveMidiEvent {
     }
 
     /// Create an event to be sent immediately
-    pub fn immediate(device_id: u32, message: MidiMessage) -> Self {
+    pub fn immediate(device_id: u32, message: MidiEvent) -> Self {
         Self::new(device_id, 0, message)
     }
 }

@@ -614,7 +614,7 @@ impl Daw {
     pub async fn stuff_midi(
         &self,
         target: daw_proto::StuffMidiTarget,
-        message: daw_proto::MidiMessage,
+        message: daw_proto::MidiEvent,
     ) -> crate::Result<()> {
         self.clients
             .live_midi

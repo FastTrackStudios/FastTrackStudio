@@ -1,150 +1,39 @@
-//! MIDI message types for real-time I/O
+//! MIDI message types for real-time I/O.
+//!
+//! The canonical event type is [`midicore::MidiEvent`] — a structured enum over
+//! constrained newtypes ([`Channel`], [`KeyNumber`], [`Velocity`], …) that makes
+//! illegal MIDI values unrepresentable. It is re-exported here (and, via the
+//! `live_midi` glob, at the `daw_proto` crate root) so existing call sites keep
+//! a stable path. The old hand-rolled `MidiMessage` enum (plain `u8`/`i16`
+//! fields, `note` where midicore says `key`) is gone; construct events with the
+//! newtypes and read them back with the newtype accessors (`.get()`, `.index()`).
 
 use facet::Facet;
 
-/// A parsed MIDI message
-#[repr(C)]
-#[derive(Clone, Debug, Facet)]
-pub enum MidiMessage {
-    /// Note On event
-    NoteOn { channel: u8, note: u8, velocity: u8 },
-    /// Note Off event
-    NoteOff { channel: u8, note: u8, velocity: u8 },
-    /// Control Change (CC)
-    ControlChange {
-        channel: u8,
-        controller: u8,
-        value: u8,
-    },
-    /// Program Change
-    ProgramChange { channel: u8, program: u8 },
-    /// Pitch Bend (-8192 to 8191)
-    PitchBend { channel: u8, value: i16 },
-    /// Channel Pressure (Aftertouch)
-    ChannelPressure { channel: u8, pressure: u8 },
-    /// Polyphonic Key Pressure
-    PolyPressure { channel: u8, note: u8, pressure: u8 },
-    /// System Exclusive
-    SysEx(Vec<u8>),
-    /// Raw MIDI bytes (for unrecognized messages)
-    Raw(Vec<u8>),
-}
+// The canonical MIDI event + the newtypes callers need to build/read it.
+pub use midicore::{
+    Channel, ControllerNumber, ControllerValue, KeyNumber, MidiEvent, PitchBend, Pressure,
+    ProgramNumber, RawShortMessage, ShortMessage, Velocity,
+};
 
-impl MidiMessage {
-    /// Create a Note On message
-    pub fn note_on(channel: u8, note: u8, velocity: u8) -> Self {
-        Self::NoteOn {
-            channel: channel & 0x0F,
-            note: note & 0x7F,
-            velocity: velocity & 0x7F,
-        }
-    }
-
-    /// Create a Note Off message
-    pub fn note_off(channel: u8, note: u8, velocity: u8) -> Self {
-        Self::NoteOff {
-            channel: channel & 0x0F,
-            note: note & 0x7F,
-            velocity: velocity & 0x7F,
-        }
-    }
-
-    /// Create a Control Change message
-    pub fn control_change(channel: u8, controller: u8, value: u8) -> Self {
-        Self::ControlChange {
-            channel: channel & 0x0F,
-            controller: controller & 0x7F,
-            value: value & 0x7F,
-        }
-    }
-
-    /// Create a Program Change message
-    pub fn program_change(channel: u8, program: u8) -> Self {
-        Self::ProgramChange {
-            channel: channel & 0x0F,
-            program: program & 0x7F,
-        }
-    }
-
-    /// Create a Pitch Bend message
-    pub fn pitch_bend(channel: u8, value: i16) -> Self {
-        Self::PitchBend {
-            channel: channel & 0x0F,
-            value: value.clamp(-8192, 8191),
-        }
-    }
-
-    /// Get the MIDI channel (0-15) if applicable
-    pub fn channel(&self) -> Option<u8> {
-        match self {
-            Self::NoteOn { channel, .. }
-            | Self::NoteOff { channel, .. }
-            | Self::ControlChange { channel, .. }
-            | Self::ProgramChange { channel, .. }
-            | Self::PitchBend { channel, .. }
-            | Self::ChannelPressure { channel, .. }
-            | Self::PolyPressure { channel, .. } => Some(*channel),
-            Self::SysEx(_) | Self::Raw(_) => None,
-        }
-    }
-
-    /// Check if this is a note message (on or off)
-    pub fn is_note(&self) -> bool {
-        matches!(self, Self::NoteOn { .. } | Self::NoteOff { .. })
-    }
-
-    /// Check if this is a Note On with non-zero velocity
-    pub fn is_note_on(&self) -> bool {
-        matches!(self, Self::NoteOn { velocity, .. } if *velocity > 0)
-    }
-
-    /// Check if this is a Note Off (or Note On with velocity 0)
-    pub fn is_note_off(&self) -> bool {
-        matches!(
-            self,
-            Self::NoteOff { .. } | Self::NoteOn { velocity: 0, .. }
-        )
-    }
-}
-
-impl MidiMessage {
-    /// Convert to raw MIDI bytes (status, data1, data2).
+/// Host-side conveniences on [`MidiEvent`] that daw call sites relied on when
+/// this was a bespoke enum. Kept as an extension trait since `MidiEvent` is
+/// defined in `midicore`.
+pub trait MidiEventExt {
+    /// Convert to raw MIDI bytes `(status, data1, data2)`.
     ///
-    /// Returns None for SysEx and Raw messages (not short messages).
-    pub fn to_raw_bytes(&self) -> Option<(u8, u8, u8)> {
-        match *self {
-            Self::NoteOn {
-                channel,
-                note,
-                velocity,
-            } => Some((0x90 | channel, note, velocity)),
-            Self::NoteOff {
-                channel,
-                note,
-                velocity,
-            } => Some((0x80 | channel, note, velocity)),
-            Self::ControlChange {
-                channel,
-                controller,
-                value,
-            } => Some((0xB0 | channel, controller, value)),
-            Self::ProgramChange { channel, program } => Some((0xC0 | channel, program, 0)),
-            Self::PitchBend { channel, value } => {
-                let unsigned = (value + 8192) as u16;
-                Some((
-                    0xE0 | channel,
-                    (unsigned & 0x7F) as u8,
-                    (unsigned >> 7) as u8,
-                ))
-            }
-            Self::ChannelPressure { channel, pressure } => Some((0xD0 | channel, pressure, 0)),
-            Self::PolyPressure {
-                channel,
-                note,
-                pressure,
-            } => Some((0xA0 | channel, note, pressure)),
-            Self::SysEx(_) | Self::Raw(_) => None,
-        }
+    /// Returns `None` for SysEx (not a short message). Two-byte messages
+    /// (program change / channel pressure) report `data2 = 0`, matching the
+    /// old `MidiMessage::to_raw_bytes` behavior.
+    fn to_raw_bytes(&self) -> Option<(u8, u8, u8)>;
+}
+
+impl MidiEventExt for MidiEvent {
+    fn to_raw_bytes(&self) -> Option<(u8, u8, u8)> {
+        RawShortMessage::from_event(self).map(|r| {
+            let [status, d1, d2] = r.bytes();
+            (status, d1, d2)
+        })
     }
 }
 

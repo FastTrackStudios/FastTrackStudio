@@ -7,7 +7,8 @@
 //! For editing MIDI data in takes, see `Midi`.
 
 use daw_proto::live_midi::{
-    LiveMidi, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
+    LiveMidi, MidiEvent, MidiEventExt, MidiInputDevice, MidiOutputDevice, SendMidiTiming,
+    StuffMidiTarget,
 };
 use tracing::{debug, warn};
 
@@ -46,7 +47,7 @@ impl LiveMidi for crate::Reaper {
 
     // ── Output (stub) ──────────────────────────────────────────────
 
-    fn send_midi(&self, _device_id: u32, _message: MidiMessage, _timing: SendMidiTiming) {}
+    fn send_midi(&self, _device_id: u32, _message: MidiEvent, _timing: SendMidiTiming) {}
 
     // ── Input subscription (one-shot arm; no streaming) ────────────
 
@@ -61,7 +62,7 @@ impl LiveMidi for crate::Reaper {
     /// Inject into REAPER's internal MIDI queue. Used for VKB
     /// simulation in integration tests and for sending CC to
     /// plugins that manage presets internally.
-    fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage) {
+    fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiEvent) {
         let Some((status, data1, data2)) = message.to_raw_bytes() else {
             warn!(
                 "stuff_midi_message: cannot convert {:?} to short message (SysEx/Raw not supported)",
