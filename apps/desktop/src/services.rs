@@ -57,8 +57,8 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
 fn forwarding_handler() -> gateway::RoutedHandler {
     let forward = gateway::ForwardingHandler::new(gateway::remote_conn());
     gateway::RoutedHandler::new()
-        .with(&setlist_service_service_descriptor(), forward.clone())
-        .with(&song_service_service_descriptor(), forward)
+        .with(setlist_service_service_descriptor(), forward.clone())
+        .with(song_service_service_descriptor(), forward)
 }
 
 /// Connect to the REAPER-hosted `fts-extensions` and publish the live caller.

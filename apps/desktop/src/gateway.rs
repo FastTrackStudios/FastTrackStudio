@@ -255,16 +255,14 @@ impl LinkRx for AxumWsLinkRx {
 // Web Client Registry
 // ============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct WebClientRegistry {
     clients: Arc<tokio::sync::Mutex<Vec<WebClientServiceClient>>>,
 }
 
 impl WebClientRegistry {
     pub fn new() -> Self {
-        Self {
-            clients: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-        }
+        Self::default()
     }
 
     pub async fn register(&self, client: WebClientServiceClient) {
@@ -331,7 +329,7 @@ impl<H: Handler<DriverReplySink>> DynHandler for H {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct RoutedHandler {
     method_map: std::collections::HashMap<vox::MethodId, usize>,
     handlers: Vec<Arc<dyn DynHandler>>,
@@ -339,10 +337,7 @@ pub struct RoutedHandler {
 
 impl RoutedHandler {
     pub fn new() -> Self {
-        Self {
-            method_map: std::collections::HashMap::new(),
-            handlers: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn with<H: Handler<DriverReplySink>>(

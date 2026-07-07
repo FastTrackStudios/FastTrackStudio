@@ -115,9 +115,11 @@ daw-proto = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "m
 dock-proto = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
 dock-dioxus = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
 
-# Actions / Input (sibling repo)
-actions-proto = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
-actions-registry = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
+# Actions / Input (sibling repo). actions-proto/actions-registry (action
+# declaration + registration) retired in favor of architect::actions —
+# see session/fts-extensions. input/input-dioxus/actions-standalone/
+# actions-keybindings (keybinding + MIDI mapping) are a separate concern
+# and stay.
 actions-standalone = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
 actions-keybindings = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
 input-dioxus = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
