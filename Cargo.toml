@@ -112,7 +112,7 @@ architect-form = { path = "../../architect/features/form" }
 # Source is Codeberg, but currently [patch]ed to the local checkout below:
 # daw's vox-0.8.2 alignment (f431088) is NOT yet pushed to codeberg (cb/main
 # daw still uses bearcove vox 0.5). Drop the local patch once it lands.
-daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
+daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
 daw-cli = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
 daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,

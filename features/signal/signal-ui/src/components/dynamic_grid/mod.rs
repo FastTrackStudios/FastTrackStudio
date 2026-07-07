@@ -649,6 +649,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
                     {
                         rsx! {
                             ContainerBackground {
+                                key: "{cg.key}",
                                 name: cg.display_name.clone(),
                                 bg_color: cg.color.bg.to_string(),
                                 fg_color: cg.color.fg.to_string(),
@@ -676,6 +677,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
 
                         rsx! {
                             ModuleBackground {
+                                key: "{group.name}",
                                 name: group.display_name.clone(),
                                 bg_color: group.color.bg.to_string(),
                                 fg_color: group.color.fg.to_string(),
@@ -774,6 +776,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
 
                                     rsx! {
                                         GridBlockCell {
+                                            key: "{col}-{row}",
                                             slot_id: slot_id,
                                             block_type_name: bt.display_name().to_string(),
                                             name: name,
@@ -865,6 +868,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
                                     // aligned but the cell is non-interactive.
                                     rsx! {
                                         div {
+                                            key: "{col}-{row}",
                                             style: "pointer-events: none;",
                                         }
                                     }
@@ -873,6 +877,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
 
                                     rsx! {
                                         EmptyGridCell {
+                                            key: "{col}-{row}",
                                             col: col,
                                             row: row,
                                             is_drag_target: is_drag_target,

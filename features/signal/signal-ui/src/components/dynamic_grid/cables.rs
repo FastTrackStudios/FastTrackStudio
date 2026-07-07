@@ -550,7 +550,7 @@ pub(super) fn CableLayer(props: CableLayerProps) -> Element {
                 height: "{nat_h}",
                 view_box: "0 0 {nat_w} {nat_h}",
 
-                for cable in props.cables.iter() {
+                for (i, cable) in props.cables.iter().enumerate() {
                     {
                         let d = if let Some(ry) = cable.route_y {
                             routed_cable_path(cable.from, cable.to, ry)
@@ -563,6 +563,7 @@ pub(super) fn CableLayer(props: CableLayerProps) -> Element {
                         let opacity = if cable.bypassed { "0.15" } else { "0.7" };
                         rsx! {
                             path {
+                                key: "{i}",
                                 d: "{d}",
                                 fill: "none",
                                 stroke: "{stroke}",
@@ -574,7 +575,7 @@ pub(super) fn CableLayer(props: CableLayerProps) -> Element {
                     }
                 }
 
-                for port in props.module_ports.iter() {
+                for (i, port) in props.module_ports.iter().enumerate() {
                     {
                         let cx = port.pos.0;
                         let cy = port.pos.1;
@@ -583,6 +584,7 @@ pub(super) fn CableLayer(props: CableLayerProps) -> Element {
                         let stroke_op = if port.bypassed { "0.08" } else { "0.4" };
                         rsx! {
                             circle {
+                                key: "{i}",
                                 cx: "{cx}",
                                 cy: "{cy}",
                                 r: "4",
