@@ -155,6 +155,13 @@ session-cli = { git = "https://codeberg.org/FastTrackStudios/session.git", branc
 # by fts-cli to read `<Trait>Actions::all()` and build the generated CLI surface.
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
+# fts-extensions-actions (sibling repo, fts-extensions' workspace) — pure
+# #[architect::actions] trait declarations, no REAPER deps, so fts-cli's
+# generated action menu can include fts-extensions' own actions (21) too,
+# alongside session's 90, without linking the full fts-extensions cdylib
+# crate (which pulls the whole REAPER binding stack).
+fts-extensions-actions = { git = "https://codeberg.org/FastTrackStudios/fts-extensions.git", branch = "feat/setlist-record-groups" }
+
 # Sync (sibling repo)
 sync = { git = "https://codeberg.org/FastTrackStudios/sync.git", branch = "main" }
 sync-proto = { git = "https://codeberg.org/FastTrackStudios/sync.git", branch = "main" }

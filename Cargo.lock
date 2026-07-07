@@ -228,7 +228,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -239,7 +239,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -309,7 +309,7 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#430babe647f872bdc49e37034954c0aab30b8ee3"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#82d796ee0655fcd294ee32030b44eb6aee5c5e57"
 dependencies = [
  "architect-action-derive",
  "architect-derive",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "architect-action-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#430babe647f872bdc49e37034954c0aab30b8ee3"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#82d796ee0655fcd294ee32030b44eb6aee5c5e57"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -337,7 +337,7 @@ dependencies = [
 [[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#430babe647f872bdc49e37034954c0aab30b8ee3"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#82d796ee0655fcd294ee32030b44eb6aee5c5e57"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -348,7 +348,7 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#430babe647f872bdc49e37034954c0aab30b8ee3"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#82d796ee0655fcd294ee32030b44eb6aee5c5e57"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1465,7 +1465,7 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#d66fdfd08ab637a85cfc40f1f3a296466ccb9f2c"
+source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#c684f832381142975442e7356e03468e2dc034b7"
 dependencies = [
  "facet 0.50.0-rc.5",
  "thiserror 2.0.18",
@@ -1501,7 +1501,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2136,7 +2136,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 [[package]]
 name = "daw"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "architect",
  "daw-control",
@@ -2157,7 +2157,7 @@ dependencies = [
 [[package]]
 name = "daw-audio-sync"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "bincode",
  "reaper-low",
@@ -2172,7 +2172,7 @@ dependencies = [
 [[package]]
 name = "daw-control"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "architect",
  "daw-proto",
@@ -2187,7 +2187,7 @@ dependencies = [
 [[package]]
 name = "daw-module"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "tokio",
  "tracing",
@@ -2196,7 +2196,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "actions-proto",
  "architect",
@@ -2209,7 +2209,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "architect",
  "base64 0.22.1",
@@ -2243,7 +2243,7 @@ dependencies = [
 [[package]]
 name = "daw-synchronization"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "daw",
  "daw-reaper",
@@ -2256,7 +2256,7 @@ dependencies = [
 [[package]]
 name = "daw-test-macro"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2266,7 +2266,7 @@ dependencies = [
 [[package]]
 name = "dawfile-aaf"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "cfb 0.10.0",
  "daw-proto",
@@ -2276,7 +2276,7 @@ dependencies = [
 [[package]]
 name = "dawfile-ableton"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "daw-proto",
  "flate2",
@@ -2288,7 +2288,7 @@ dependencies = [
 [[package]]
 name = "dawfile-dawproject"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "daw-proto",
  "roxmltree 0.20.0",
@@ -2299,7 +2299,7 @@ dependencies = [
 [[package]]
 name = "dawfile-protools"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "daw-proto",
  "thiserror 2.0.18",
@@ -2308,7 +2308,7 @@ dependencies = [
 [[package]]
 name = "dawfile-reaper"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "base64 0.22.1",
  "daw-proto",
@@ -3077,7 +3077,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3246,9 +3246,10 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "dynamic-template"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#d66fdfd08ab637a85cfc40f1f3a296466ccb9f2c"
+source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#c684f832381142975442e7356e03468e2dc034b7"
 dependencies = [
  "anyhow",
+ "architect",
  "color-palette",
  "daw",
  "daw-proto",
@@ -3268,7 +3269,7 @@ dependencies = [
 [[package]]
 name = "dynamic-template-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#d66fdfd08ab637a85cfc40f1f3a296466ccb9f2c"
+source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#c684f832381142975442e7356e03468e2dc034b7"
 dependencies = [
  "actions-proto",
  "daw-proto",
@@ -3428,7 +3429,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4234,6 +4235,7 @@ dependencies = [
  "eyre",
  "facet 0.46.5",
  "facet-postcard",
+ "fts-extensions-actions",
  "libc",
  "moire",
  "ratatui",
@@ -4246,6 +4248,14 @@ dependencies = [
  "vox",
  "vox-stream",
  "which 7.0.3",
+]
+
+[[package]]
+name = "fts-extensions-actions"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/fts-extensions.git?branch=feat%2Fsetlist-record-groups#a891d3a4d13b78806d66ec777c589e7707d27c6b"
+dependencies = [
+ "architect",
 ]
 
 [[package]]
@@ -4847,7 +4857,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.62.2",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -5229,7 +5239,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -5571,7 +5581,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6859,7 +6869,7 @@ dependencies = [
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#d66fdfd08ab637a85cfc40f1f3a296466ccb9f2c"
+source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#c684f832381142975442e7356e03468e2dc034b7"
 dependencies = [
  "color-palette",
 ]
@@ -7029,7 +7039,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8433,7 +8443,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.4",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8799,7 +8809,7 @@ dependencies = [
 [[package]]
 name = "reaper-launcher"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -9114,7 +9124,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9438,7 +9448,7 @@ dependencies = [
 [[package]]
 name = "session"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#9a4b8cbc09aa863859f53aaa17ada20e38e8de8c"
 dependencies = [
  "actions-proto",
  "architect",
@@ -9469,7 +9479,7 @@ dependencies = [
 [[package]]
 name = "session"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=main#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=main#9a4b8cbc09aa863859f53aaa17ada20e38e8de8c"
 dependencies = [
  "actions-proto",
  "architect",
@@ -9500,7 +9510,7 @@ dependencies = [
 [[package]]
 name = "session-cli"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#9a4b8cbc09aa863859f53aaa17ada20e38e8de8c"
 dependencies = [
  "clap",
  "daw",
@@ -9521,7 +9531,7 @@ dependencies = [
 [[package]]
 name = "session-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#9a4b8cbc09aa863859f53aaa17ada20e38e8de8c"
 dependencies = [
  "actions-proto",
  "architect",
@@ -9540,7 +9550,7 @@ dependencies = [
 [[package]]
 name = "session-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=main#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=main#9a4b8cbc09aa863859f53aaa17ada20e38e8de8c"
 dependencies = [
  "actions-proto",
  "architect",
@@ -9559,7 +9569,7 @@ dependencies = [
 [[package]]
 name = "session-ui"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#9a4b8cbc09aa863859f53aaa17ada20e38e8de8c"
 dependencies = [
  "daw",
  "dioxus",
@@ -9576,7 +9586,7 @@ dependencies = [
 [[package]]
 name = "session-ui"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=main#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=main#9a4b8cbc09aa863859f53aaa17ada20e38e8de8c"
 dependencies = [
  "daw",
  "dioxus",
@@ -9863,7 +9873,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -10267,7 +10277,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12095,7 +12105,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

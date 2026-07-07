@@ -28,11 +28,10 @@ use architect::action::ActionMeta;
 /// `fts session --actions` / name-resolution.
 ///
 /// fts-extensions' own two action traits (`FtsTempoGridActions`,
-/// `FtsActions`) are NOT included here: `fts-extensions` builds as a
-/// `cdylib` only (no `rlib`), so it can't be linked into this CLI
-/// binary as a normal Rust dependency. Their ~21 actions stay reachable
-/// only via the raw `fts session action <ID>` path until fts-extensions
-/// grows an `rlib` target.
+/// `FtsActions`, ~21 actions) are declared in the sibling
+/// `fts-extensions-actions` crate — pure metadata split out of
+/// `fts-extensions` proper (which builds `cdylib`-only and can't be
+/// linked here) so they can be included in this same generated menu.
 fn action_groups() -> Vec<(&'static str, &'static [ActionMeta])> {
     vec![
         ("setlist_actions", session::setlist_actions::SetlistActionsActions::all()),
@@ -47,6 +46,11 @@ fn action_groups() -> Vec<(&'static str, &'static [ActionMeta])> {
         ("take_ranking", session::take_ranking::TakeRankingActionsActions::all()),
         ("record_actions", session::record_actions::RecordActionsActions::all()),
         ("group_actions", session::group_actions::GroupActionsActions::all()),
+        (
+            "fts_tempo_grid_actions",
+            fts_extensions_actions::FtsTempoGridActionsActions::all(),
+        ),
+        ("fts_actions", fts_extensions_actions::FtsActionsActions::all()),
     ]
 }
 
@@ -85,11 +89,7 @@ pub fn render_actions_help() -> String {
     }
 
     let mut out = String::new();
-    out.push_str("Generated session actions (fts session <name>):\n");
-    out.push_str(
-        "(fts-extensions' own tempo-grid/navigation/etc. actions aren't listed here yet —\n\
-         reach them via `fts session action <ID>` until fts-extensions exposes an rlib.)\n\n",
-    );
+    out.push_str("Generated session actions (fts session <name>):\n\n");
     for (category, mut metas) in by_category {
         out.push_str(&format!("{category}:\n"));
         metas.sort_by_key(|m| m.method_name);

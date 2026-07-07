@@ -15,6 +15,10 @@ session-proto.workspace = true
 # modules emit, to generate the `fts session <action>` subcommand surface.
 session.workspace = true
 architect.workspace = true
+# fts-extensions' own #[architect::actions] declarations (21 actions) —
+# pure metadata, no REAPER deps, so this pulls in nothing heavier than
+# `architect` itself.
+fts-extensions-actions.workspace = true
 daw-proto.workspace = true
 vox.workspace = true
 vox-stream.workspace = true
