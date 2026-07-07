@@ -978,9 +978,10 @@ mod tests {
     fn make_track(name: &str) -> Track {
         // Track is a proto struct with quite a few fields; use Default
         // and tweak only what the assertion looks at.
-        let mut t = Track::default();
-        t.name = name.into();
-        t
+        Track {
+            name: name.into(),
+            ..Track::default()
+        }
     }
 
     #[test]
@@ -1011,10 +1012,12 @@ mod tests {
 
     #[test]
     fn project_current_changed_clears_position_and_records_active_guid() {
-        let mut snap = Snapshot::default();
-        snap.playhead = Some(Position::start());
-        snap.edit_cursor = Some(Position::start());
-        snap.active_project_guid = Some("old".into());
+        let mut snap = Snapshot {
+            playhead: Some(Position::start()),
+            edit_cursor: Some(Position::start()),
+            active_project_guid: Some("old".into()),
+            ..Snapshot::default()
+        };
 
         apply_project_event(
             &mut snap,
@@ -1031,8 +1034,10 @@ mod tests {
 
     #[test]
     fn position_tick_for_inactive_project_is_dropped() {
-        let mut snap = Snapshot::default();
-        snap.active_project_guid = Some("active".into());
+        let mut snap = Snapshot {
+            active_project_guid: Some("active".into()),
+            ..Snapshot::default()
+        };
 
         let mut tick = daw_proto::transport::PositionTick::stopped_at_origin();
         tick.project_guid = "other-tab".into();
@@ -1047,8 +1052,10 @@ mod tests {
 
     #[test]
     fn position_tick_for_active_project_lands() {
-        let mut snap = Snapshot::default();
-        snap.active_project_guid = Some("active".into());
+        let mut snap = Snapshot {
+            active_project_guid: Some("active".into()),
+            ..Snapshot::default()
+        };
 
         let mut tick = daw_proto::transport::PositionTick::stopped_at_origin();
         tick.project_guid = "active".into();

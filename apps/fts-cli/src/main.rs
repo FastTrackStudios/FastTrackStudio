@@ -9,6 +9,7 @@
 //! commented-out blocks in this file and `Cargo.toml` for re-enable
 //! checklists.
 
+mod actions_cli;
 mod daemon;
 mod reaper;
 mod tui;
@@ -93,7 +94,51 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let cli = Cli::parse();
+    // `fts session --actions` / `fts session -a` — print the generated
+    // action menu (from `#[architect::actions]` metadata) and exit,
+    // before clap-derive gets a chance to reject `--actions` as unknown.
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.get(1).map(String::as_str) == Some("session")
+        && raw_args
+            .get(2)
+            .is_some_and(|a| a == "--actions" || a == "-a")
+    {
+        print!("{}", actions_cli::render_actions_help());
+        return Ok(());
+    }
+
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) => {
+            // Fall back to the generated action surface only for the
+            // shape `fts [global flags] session <name>` where `<name>`
+            // isn't one of session-cli's hand-written subcommands (that
+            // case parses fine above and never reaches here). Anything
+            // else (bad flags, wrong arity, --help, etc.) gets clap's
+            // own error/help behavior unchanged.
+            if let Some(pos) = raw_args.iter().position(|a| a == "session")
+                && let Some(name) = raw_args.get(pos + 1)
+                && !name.starts_with('-')
+                && let Some(id) = actions_cli::resolve_action_id(name)
+            {
+                let socket = raw_args
+                    .iter()
+                    .position(|a| a == "--socket")
+                    .and_then(|i| raw_args.get(i + 1))
+                    .map(PathBuf::from);
+                let as_json = raw_args.iter().any(|a| a == "--json");
+                return session_cli::run(
+                    socket,
+                    session_cli::SessionCommand::Action {
+                        command_id: id.to_string(),
+                    },
+                    as_json,
+                )
+                .await;
+            }
+            err.exit();
+        }
+    };
     if cli.interactive {
         return tui::run(cli.socket).await;
     }
@@ -119,6 +164,11 @@ async fn main() -> Result<()> {
 /// - `Ok(Some(false))` — daemon was reached but doesn't know this
 ///   command yet; main should fall through to the direct path.
 /// - `Ok(None)`        — no daemon up; main should fall through.
+///
+/// Not yet wired into `main`'s dispatch — pre-existing, unrelated to the
+/// action-framework migration. Kept (not deleted) since it's working
+/// logic waiting on a call site, not dead code to remove.
+#[allow(dead_code)]
 async fn daemon_fast_path(cmd: &session_cli::SessionCommand) -> Result<Option<bool>> {
     use session_cli::{ModeCommand, SessionCommand};
     let request = match cmd {

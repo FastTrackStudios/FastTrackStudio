@@ -10,6 +10,11 @@ path = "src/main.rs"
 [dependencies]
 session-cli.workspace = true
 session-proto.workspace = true
+# Facade — needed directly (not just transitively) so this crate can read the
+# `<Trait>Actions::all()` const lists the `#[architect::actions]`-decorated
+# modules emit, to generate the `fts session <action>` subcommand surface.
+session.workspace = true
+architect.workspace = true
 daw-proto.workspace = true
 vox.workspace = true
 vox-stream.workspace = true

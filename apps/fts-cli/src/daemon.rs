@@ -61,8 +61,12 @@ pub enum Request {
 
 /// Daemon responses. `Err(String)` carries human-readable detail so
 /// the CLI can surface it without needing typed error mappings.
+///
+/// The payload fields are only read via the `Debug` derive (for
+/// diagnostic logging), which `dead_code` doesn't count as a real use.
 #[derive(Debug, Facet)]
 #[repr(u8)]
+#[allow(dead_code)]
 pub enum Response {
     Pong,
     Ok,

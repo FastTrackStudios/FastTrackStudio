@@ -149,6 +149,10 @@ session-proto = { git = "https://codeberg.org/FastTrackStudios/session.git", bra
 session-ui = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "dev" }
 session-cli = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "dev" }
 
+# architect (sibling repo) — `ActionMeta`/`ActionBackend` types, needed directly
+# by fts-cli to read `<Trait>Actions::all()` and build the generated CLI surface.
+architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
+
 # Sync (sibling repo)
 sync = { git = "https://codeberg.org/FastTrackStudios/sync.git", branch = "main" }
 sync-proto = { git = "https://codeberg.org/FastTrackStudios/sync.git", branch = "main" }
@@ -243,7 +247,6 @@ pollster = "0.4"
 keyflow = { path = "../keyflow/crates/keyflow" }
 engraver = { path = "../keyflow/crates/engraver" }
 keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
-
 
 # Vox is now a plain crates.io dependency (see workspace.dependencies above) —
 # no [patch] redirects needed; the old Codys-Wright/vox fork lineage is retired.
