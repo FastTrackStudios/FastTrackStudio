@@ -480,8 +480,9 @@ checksum = "a00a8f02b994f454d9703dd6a8b6075ba778320550d699198faff1882594c0f7"
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
 dependencies = [
+ "architect-action-derive",
  "architect-derive",
  "architect-rpc-derive",
  "eyre",
@@ -495,9 +496,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-action-derive"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -508,7 +519,7 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#066a38336a69b1a5b31676b17d0d23cfd3fa691f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2106,7 +2117,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 [[package]]
 name = "daw"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "architect",
  "daw-control",
@@ -2128,7 +2139,7 @@ dependencies = [
 [[package]]
 name = "daw-audio-sync"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "bincode",
  "reaper-low",
@@ -2143,7 +2154,7 @@ dependencies = [
 [[package]]
 name = "daw-control"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "architect",
  "daw-proto",
@@ -2158,7 +2169,7 @@ dependencies = [
 [[package]]
 name = "daw-extension-runtime"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "crossbeam-channel",
  "daw-control",
@@ -2177,7 +2188,7 @@ dependencies = [
 [[package]]
 name = "daw-module"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "tokio",
  "tracing",
@@ -2186,7 +2197,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "actions-proto",
  "architect",
@@ -2199,7 +2210,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "architect",
  "base64 0.22.1",
@@ -2233,7 +2244,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper-dioxus"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "anyrender_vello",
  "architect",
@@ -2265,7 +2276,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper-embed"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "cocoa",
  "objc",
@@ -2282,7 +2293,7 @@ dependencies = [
 [[package]]
 name = "daw-synchronization"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "daw",
  "daw-reaper",
@@ -2295,7 +2306,7 @@ dependencies = [
 [[package]]
 name = "daw-test-macro"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2305,7 +2316,7 @@ dependencies = [
 [[package]]
 name = "dawfile-aaf"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "cfb 0.10.0",
  "daw-proto",
@@ -2315,7 +2326,7 @@ dependencies = [
 [[package]]
 name = "dawfile-ableton"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "daw-proto",
  "flate2",
@@ -2327,7 +2338,7 @@ dependencies = [
 [[package]]
 name = "dawfile-dawproject"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "daw-proto",
  "roxmltree 0.20.0",
@@ -2338,7 +2349,7 @@ dependencies = [
 [[package]]
 name = "dawfile-protools"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "daw-proto",
  "thiserror 2.0.18",
@@ -2347,7 +2358,7 @@ dependencies = [
 [[package]]
 name = "dawfile-reaper"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "base64 0.22.1",
  "daw-proto",
@@ -4037,6 +4048,7 @@ dependencies = [
 name = "fts-extensions"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "crossbeam-channel",
  "daw",
  "daw-extension-runtime",
@@ -8183,7 +8195,7 @@ dependencies = [
 [[package]]
 name = "reaper-launcher"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#619258a77c567909a21a75b9f175a74a21cb04af"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -8800,7 +8812,7 @@ dependencies = [
 [[package]]
 name = "session"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#6c445920a1ad43f891776194fdae2ded195a68fd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
 dependencies = [
  "actions-proto",
  "architect",
@@ -8831,20 +8843,16 @@ dependencies = [
 [[package]]
 name = "session-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#6c445920a1ad43f891776194fdae2ded195a68fd"
+source = "git+https://codeberg.org/FastTrackStudios/session.git?branch=dev#164bd6a1c62dca2ffd8b85eafa2aeb671807b8cd"
 dependencies = [
  "actions-proto",
  "architect",
  "daw",
  "eyre",
  "facet 0.50.0-rc.5",
- "futures",
- "gloo-timers",
  "keyflow",
  "serde",
  "thiserror 2.0.18",
- "tokio",
- "tracing",
  "utils",
  "uuid",
  "vox",

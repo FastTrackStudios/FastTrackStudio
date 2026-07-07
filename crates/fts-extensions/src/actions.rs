@@ -20,17 +20,17 @@ use reaper_high::Reaper;
 
 pub type ActionDefs = Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool, bool)>;
 
-fn show(msg: impl Into<String>) {
+pub(crate) fn show(msg: impl Into<String>) {
     Reaper::get().show_console_msg(msg.into());
 }
 
 static TEST_TOGGLE_STATE: AtomicBool = AtomicBool::new(false);
 
-fn sync_toggle_state(command_id: &str, is_on: bool) {
+pub(crate) fn sync_toggle_state(command_id: &str, is_on: bool) {
     daw_reaper::Reaper.set_toggle_state(command_id, is_on);
 }
 
-fn toggle_test_toggle_handler() {
+pub(crate) fn toggle_test_toggle_handler() {
     let new_state = !TEST_TOGGLE_STATE.load(Ordering::Relaxed);
     TEST_TOGGLE_STATE.store(new_state, Ordering::Relaxed);
 
@@ -41,7 +41,7 @@ fn toggle_test_toggle_handler() {
     sync_toggle_state("FTS_TEST_TOGGLE", new_state);
 }
 
-fn move_cursor_creating_time_selection_by_measure(action_id: i32) {
+pub(crate) fn move_cursor_creating_time_selection_by_measure(action_id: i32) {
     let low = reaper_low::Reaper::get();
 
     let previous_cursor = low.GetCursorPosition();

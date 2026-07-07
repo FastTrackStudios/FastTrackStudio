@@ -46,6 +46,7 @@ tracing-appender = "0.2"
 # for `reaper-menu.ini` so we can rename floating toolbars per session
 # mode at extension startup.
 reaper-config = { git = "https://codeberg.org/FastTrackStudios/reaper-file.git", branch = "main" }
+architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
 # ── Version-unification patches (git only; no local sibling paths) ─────────
 # Everything is a git dep now; these patches just pin shared revs across the

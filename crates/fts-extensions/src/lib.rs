@@ -136,6 +136,7 @@ static APP: OnceLock<Fragile<App>> = OnceLock::new();
 // ── Existing modules (not yet DawModule) ─────────────────────────────────────
 
 mod actions;
+mod architect_actions;
 mod continuous_action;
 mod error;
 mod item_actions;
@@ -684,6 +685,29 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
 
     register_actions_sync(&all_defs, modules, panels);
+
+    // ── architect::action registration (additive) ───────────────────────
+    // New declarative action layer alongside the legacy `ActionDefs` path
+    // above. Every action here is ALSO already registered by
+    // `register_actions_sync` / `module::collect_actions` via the modules'
+    // existing `DawModule::actions()` — this second pass re-registers the
+    // same command ids through `daw_reaper::Reaper`'s new
+    // `architect::action::ActionBackend` impl so the metadata (description/
+    // category/group) exists, without removing the legacy path (REAPER's
+    // registry is idempotent per command id — see `register_action_main_thread`).
+    architect_actions::register_actions(&daw_reaper::Reaper);
+    #[cfg(feature = "mod-session")]
+    {
+        session::setlist_actions::register_actions(&daw_reaper::Reaper, daw_reaper::Reaper);
+        session::keyflow_actions::register_actions(&daw_reaper::Reaper, daw_reaper::Reaper);
+        session::preroll_actions::register_actions(&daw_reaper::Reaper, daw_reaper::Reaper);
+        session::auto_color_actions::register_actions(&daw_reaper::Reaper);
+        session::track_manager_actions::register_actions(&daw_reaper::Reaper);
+        session::mode_actions::register_actions(&daw_reaper::Reaper);
+        session::take_ranking::register_actions(&daw_reaper::Reaper);
+        session::record_actions::register_actions(&daw_reaper::Reaper);
+        session::group_actions::register_actions(&daw_reaper::Reaper);
+    }
 
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
