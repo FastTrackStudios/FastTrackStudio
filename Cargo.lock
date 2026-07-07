@@ -9976,6 +9976,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-keys"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-audio-io",
+ "daw-midi-io",
+ "eyre",
+ "libc",
+ "ratatui",
+ "signal-plugin-host",
+ "signal-sampler",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "signal-live"
 version = "0.1.0"
 dependencies = [

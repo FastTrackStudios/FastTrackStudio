@@ -1,11 +1,11 @@
 //! Live **Keys rig** — hosts a composition-tree preset (a [`RenderNode`]) as one
 //! MIDI-driven instrument on daw's audio engine. The MIDI analog of
-//! [`GuitarRig`](crate::rig::GuitarRig), but it plays the Nord-style composition
-//! tree: the central MIDI input feeds the tree, whose [`Zone`](crate::rig_node::Zone)s
+//! [`GuitarRig`](signal_sampler::rig::GuitarRig), but it plays the Nord-style composition
+//! tree: the central MIDI input feeds the tree, whose [`Zone`](signal_sampler::rig_node::Zone)s
 //! route notes to layers (splits + velocity crossfades), and the live oscillators
 //! (and, later, the rest of the native DSP) render the audio.
 //!
-//! Same engine pattern as [`SamplerRig`](crate::SamplerRig): an output-only daw
+//! Same engine pattern as [`SamplerRig`](signal_sampler::SamplerRig): an output-only daw
 //! project with one track; the preset is wrapped as a [`KeysInstrument`]
 //! (`PluginInstance`) inserted into that track's fx slot, and hardware/UI MIDI is
 //! pushed into daw's live-MIDI ring keyed by the track — so the renderer hands it
@@ -24,9 +24,9 @@ use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
 };
 
-use crate::MidiMonitor;
-use crate::node_render::RenderNode;
-use crate::rig_node::Container;
+use signal_sampler::MidiMonitor;
+use signal_sampler::node_render::RenderNode;
+use signal_sampler::rig_node::Container;
 
 /// Block size the keys instrument is prepared for.
 const PREPARE_BLOCK: u32 = 1024;
@@ -117,7 +117,7 @@ impl KeysRig {
     /// Open a device, build the project, and host `tree` as the playable preset.
     pub fn open(prefs: &AudioIoPrefs, tree: &Container) -> eyre::Result<Self> {
         let daw = Standalone::new();
-        let project_guid = crate::rig::uuid_string();
+        let project_guid = signal_sampler::rig::uuid_string();
         daw.seed_project(ProjectInfo {
             guid: project_guid.clone(),
             name: KEYS_PROJECT_NAME.to_string(),
@@ -261,7 +261,7 @@ mod tests {
     /// in CI. Plays a note through the layering demo and checks it's audible.
     #[test]
     fn keys_instrument_renders_a_preset_from_midi() {
-        let preset = crate::nord::layering_demo();
+        let preset = signal_sampler::nord::layering_demo();
         let mut inst = KeysInstrument::new(&preset, 48_000);
         inst.prepare(48_000.0, 256).unwrap();
 
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     #[ignore = "requires the local Keyscape extraction on AudioHaven"]
     fn keys_instrument_renders_the_piano_program() {
-        let Some(preset) = crate::nord::nord_stage_piano_preset() else {
+        let Some(preset) = signal_sampler::nord::nord_stage_piano_preset() else {
             eprintln!("skipping: Keyscape extraction not present");
             return;
         };

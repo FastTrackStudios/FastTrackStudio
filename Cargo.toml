@@ -20,6 +20,7 @@ members = [
     "features/sampler/signal-sampler",
     "features/sampler/signal-sampler-clap",
     "features/guitar",
+    "features/keys",
     "features/plugin-host",
     "features/nam",
     "features/macromod",
@@ -69,6 +70,7 @@ signal-macromod = { path = "features/macromod" }
 signal-plugin-host  = { path = "features/plugin-host", default-features = false }
 signal-sampler      = { path = "features/sampler/signal-sampler" }
 signal-guitar       = { path = "features/guitar" }
+signal-keys         = { path = "features/keys" }
 
 # ── DSP crates (split FTS plugin repos) ───────────────────────────────
 # Using local paths directly (same as [patch] overrides) to avoid

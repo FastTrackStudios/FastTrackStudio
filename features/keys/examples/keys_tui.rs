@@ -21,8 +21,9 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Gauge, Paragraph};
+use signal_keys::KeysRig;
 use signal_sampler::{
-    Container, KeysRig, MidiInputHandle, MidiMessage, MidiSelection, PresetRegistry, RigNode,
+    Container, MidiInputHandle, MidiMessage, MidiSelection, PresetRegistry, RigNode,
 };
 
 const NORD_RED: Color = Color::Rgb(206, 38, 38);
