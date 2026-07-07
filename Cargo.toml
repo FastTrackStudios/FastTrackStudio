@@ -13,7 +13,7 @@ members = [
     "features/signal/signal-controller",
     "features/signal/signal-import",
     "features/signal/signal-daw-bridge",
-    "features/signal/signal",
+    "crates/signal",
     "features/signal/signal-ui",
     "features/signal/signal-browser",
     # ── DSP / plugin / integration feature folders ──
@@ -31,7 +31,7 @@ members = [
     # signal-daw is parked: it depends on daw-standalone extensions (Block
     # plugin format / per-mic bus output) that aren't upstream on Codeberg yet.
     # Still under crates/; re-add once those land in the codeberg daw.
-    # "crates/signal-daw",
+    # "features/signal/signal-daw",
     "xtask",
 ]
 resolver = "2"
@@ -46,7 +46,7 @@ license = "MIT OR Apache-2.0"
 # ── Facade crate ─────────────────────────────────────────────────────
 # The only public API surface for the signal domain.
 # Apps depend on `signal`; never on signal-proto, signal-live, etc.
-signal = { path = "features/signal/signal" }
+signal = { path = "crates/signal" }
 # App crate (binary + lib)
 signal-cli = { path = "apps/cli" }
 signal-desktop = { path = "apps/desktop" }
