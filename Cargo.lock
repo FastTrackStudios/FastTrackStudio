@@ -78,8 +78,9 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#82d796ee0655fcd294ee32030b44eb6aee5c5e57"
 dependencies = [
+ "architect-action-derive",
  "architect-derive",
  "architect-rpc-derive",
  "eyre",
@@ -93,9 +94,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-action-derive"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#82d796ee0655fcd294ee32030b44eb6aee5c5e57"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#82d796ee0655fcd294ee32030b44eb6aee5c5e57"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -106,7 +117,7 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#46847641cceb0e394b81fdda3b3c98f03313139b"
+source = "git+https://codeberg.org/FastTrackStudios/architect.git?branch=main#82d796ee0655fcd294ee32030b44eb6aee5c5e57"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -690,7 +701,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "daw"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "architect",
  "daw-control",
@@ -705,7 +716,7 @@ dependencies = [
 [[package]]
 name = "daw-audio-sync"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "bincode",
  "reaper-low",
@@ -720,7 +731,7 @@ dependencies = [
 [[package]]
 name = "daw-control"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "architect",
  "daw-proto",
@@ -735,7 +746,7 @@ dependencies = [
 [[package]]
 name = "daw-module"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "tokio",
  "tracing",
@@ -744,7 +755,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "actions-proto",
  "architect",
@@ -757,7 +768,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "architect",
  "base64 0.22.1",
@@ -791,7 +802,7 @@ dependencies = [
 [[package]]
 name = "dawfile-aaf"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "cfb",
  "daw-proto",
@@ -801,7 +812,7 @@ dependencies = [
 [[package]]
 name = "dawfile-ableton"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "daw-proto",
  "flate2",
@@ -813,7 +824,7 @@ dependencies = [
 [[package]]
 name = "dawfile-dawproject"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "daw-proto",
  "roxmltree",
@@ -824,7 +835,7 @@ dependencies = [
 [[package]]
 name = "dawfile-protools"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "daw-proto",
  "thiserror 2.0.18",
@@ -833,7 +844,7 @@ dependencies = [
 [[package]]
 name = "dawfile-reaper"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 dependencies = [
  "base64 0.22.1",
  "daw-proto",
@@ -974,6 +985,7 @@ name = "dynamic-template"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "architect",
  "color-palette",
  "daw",
  "daw-proto",
@@ -1479,7 +1491,7 @@ dependencies = [
 [[package]]
 name = "fts-devtools"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#9553e38c5a1800581f28924380a9e469debe3fb6"
+source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#e94fc72c152aeda1b6dad672beb5f81eb1a163a7"
 
 [[package]]
 name = "fts-repo"
@@ -3193,7 +3205,7 @@ dependencies = [
 [[package]]
 name = "swell-ui"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/reaper-lib.git?branch=main#3602c3047b6dea20e7199e9bc6a8cfe7c3bf2149"
+source = "git+https://codeberg.org/FastTrackStudios/reaper-lib.git?branch=main#845773eb1814470d4992768536150a1dc984fd12"
 dependencies = [
  "fragile",
  "libloading 0.9.0",

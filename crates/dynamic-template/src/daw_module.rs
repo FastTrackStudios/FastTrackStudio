@@ -1153,3 +1153,299 @@ fn create_template_specs() -> &'static [CreateTemplateSpec] {
 pub fn module() -> Box<dyn DawModule> {
     Box::new(DynamicTemplateModule)
 }
+
+// ── architect::actions — declarative layer over the actions above ──────────
+//
+// Additive: `DawModule::actions()` above (and the old `actions_proto`-based
+// `dynamic_template_actions`/`auto_color_actions`/`visibility_manager_actions`
+// definitions) are untouched and still do the real REAPER registration. This
+// gives the same ~26 actions real `ActionMeta` (description/category/group)
+// through the new architect primitive, forwarding to the exact same handler
+// functions.
+//
+// NOT covered here: the 16 per-group `TOGGLE_*` and 34 `CREATE_NEW_*` actions
+// — both are genuinely data-driven (`toggle_group_visibility(state, group)` /
+// `create_template_group(suffix)` dispatch on a runtime string), and
+// `#[architect::actions]` v1 only supports static `fn name(&self)` methods,
+// no per-action parameters or a "family" concept for a table-driven action
+// set. Hand-enumerating 50 near-identical methods was judged not worth it
+// ahead of that framework support landing (or a deliberate decision to do it
+// anyway) — left for a follow-up.
+
+struct DynamicTemplateActionsImpl;
+
+#[architect::actions(namespace = "FTS_DYNAMIC_TEMPLATE")]
+trait DynamicTemplateActions {
+    #[action(
+        description = "Organize selected items into a hierarchical track template",
+        category = "General"
+    )]
+    fn sort_selected(&self);
+
+    #[action(
+        description = "Organize all project items into a hierarchical track template",
+        category = "General"
+    )]
+    fn sort_all(&self);
+
+    #[action(
+        description = "Import audio files and organize them into a hierarchical track template",
+        category = "General"
+    )]
+    fn import_and_sort(&self);
+
+    #[action(
+        description = "Run organizer on a built-in sample input set",
+        category = "Dev",
+        group = "Dev"
+    )]
+    fn organize_demo(&self);
+
+    #[action(
+        description = "Log dynamic-template runtime status",
+        category = "Dev",
+        group = "Dev"
+    )]
+    fn log_status(&self);
+
+    #[action(
+        description = "Log configured dynamic-template group names",
+        category = "Dev",
+        group = "Dev"
+    )]
+    fn log_groups(&self);
+}
+
+impl DynamicTemplateActions for DynamicTemplateActionsImpl {
+    fn sort_selected(&self) {
+        dispatch(
+            &dynamic_template_actions::SORT_SELECTED
+                .to_id()
+                .to_command_id(),
+        );
+    }
+    fn sort_all(&self) {
+        dispatch(&dynamic_template_actions::SORT_ALL.to_id().to_command_id());
+    }
+    fn import_and_sort(&self) {
+        dispatch(
+            &dynamic_template_actions::IMPORT_AND_SORT
+                .to_id()
+                .to_command_id(),
+        );
+    }
+    fn organize_demo(&self) {
+        dispatch(
+            &dynamic_template_actions::ORGANIZE_DEMO
+                .to_id()
+                .to_command_id(),
+        );
+    }
+    fn log_status(&self) {
+        log_status_action(&state());
+    }
+    fn log_groups(&self) {
+        log_groups_action();
+    }
+}
+
+struct AutoColorArchitectActionsImpl;
+
+#[architect::actions(namespace = "FTS_AUTO_COLOR")]
+trait AutoColorArchitectActions {
+    #[action(
+        description = "Classify all tracks by instrument group and apply colors",
+        category = "General"
+    )]
+    fn color_all(&self);
+
+    #[action(
+        description = "Classify selected tracks by instrument group and apply colors",
+        category = "General"
+    )]
+    fn color_selected(&self);
+
+    #[action(
+        description = "Toggle auto-color on/off (applies or clears all track colors)",
+        category = "General"
+    )]
+    fn toggle(&self);
+
+    #[action(
+        description = "Reset colors on all tracks to default",
+        category = "General"
+    )]
+    fn clear_all(&self);
+
+    #[action(
+        description = "Reset colors on selected tracks to default",
+        category = "General"
+    )]
+    fn clear_selected(&self);
+}
+
+impl AutoColorArchitectActions for AutoColorArchitectActionsImpl {
+    fn color_all(&self) {
+        dispatch(&auto_color_actions::COLOR_ALL.to_id().to_command_id());
+    }
+    fn color_selected(&self) {
+        dispatch(&auto_color_actions::COLOR_SELECTED.to_id().to_command_id());
+    }
+    fn toggle(&self) {
+        dispatch(&auto_color_actions::TOGGLE.to_id().to_command_id());
+    }
+    fn clear_all(&self) {
+        dispatch(&auto_color_actions::CLEAR_ALL.to_id().to_command_id());
+    }
+    fn clear_selected(&self) {
+        dispatch(&auto_color_actions::CLEAR_SELECTED.to_id().to_command_id());
+    }
+}
+
+struct VisibilityManagerActionsImpl;
+
+#[architect::actions(namespace = "FTS_VISIBILITY_MANAGER")]
+trait VisibilityManagerActions {
+    #[action(description = "Show all tracks (reset visibility)", category = "View")]
+    fn show_all(&self);
+
+    #[action(description = "Hide all group tracks", category = "View")]
+    fn hide_all(&self);
+
+    #[action(
+        description = "Show and size drum tracks for editing, hiding unrelated tracks",
+        category = "View"
+    )]
+    fn profile_drum_editing(&self);
+
+    #[action(
+        description = "Show and size MIDI-oriented template groups for editing",
+        category = "View"
+    )]
+    fn profile_midi_editing(&self);
+
+    #[action(
+        description = "Rebuild the track-to-group classification cache",
+        category = "Dev",
+        group = "Dev"
+    )]
+    fn rebuild_cache(&self);
+
+    #[action(
+        description = "Apply the Organize mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_organize(&self);
+    #[action(
+        description = "Apply the Write mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_write(&self);
+    #[action(
+        description = "Apply the Produce mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_produce(&self);
+    #[action(
+        description = "Apply the Record mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_record(&self);
+    #[action(
+        description = "Apply the Edit mode visibility rules (mixer shows collapsed buses, arrange shows one audio track per instrument)",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_edit(&self);
+    #[action(
+        description = "Apply the Mix mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_mix(&self);
+    #[action(
+        description = "Apply the Master mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_master(&self);
+    #[action(
+        description = "Apply the Live mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_live(&self);
+    #[action(
+        description = "Apply the Video mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_video(&self);
+    #[action(
+        description = "Apply the Scoring mode visibility rules",
+        category = "View",
+        group = "Modes"
+    )]
+    fn mode_scoring(&self);
+}
+
+impl VisibilityManagerActions for VisibilityManagerActionsImpl {
+    fn show_all(&self) {
+        show_all_tracks().ok();
+    }
+    fn hide_all(&self) {
+        hide_all_group_tracks(&state()).ok();
+    }
+    fn profile_drum_editing(&self) {
+        apply_visibility_profile("DRUM_EDITING").ok();
+    }
+    fn profile_midi_editing(&self) {
+        apply_visibility_profile("MIDI_EDITING").ok();
+    }
+    fn rebuild_cache(&self) {
+        if let Ok(cache) = rebuild_group_cache() {
+            state().lock().unwrap().group_cache = cache;
+        }
+    }
+    fn mode_organize(&self) {
+        apply_mode_visibility("organize").ok();
+    }
+    fn mode_write(&self) {
+        apply_mode_visibility("write").ok();
+    }
+    fn mode_produce(&self) {
+        apply_mode_visibility("produce").ok();
+    }
+    fn mode_record(&self) {
+        apply_mode_visibility("record").ok();
+    }
+    fn mode_edit(&self) {
+        apply_mode_visibility("edit").ok();
+    }
+    fn mode_mix(&self) {
+        apply_mode_visibility("mix").ok();
+    }
+    fn mode_master(&self) {
+        apply_mode_visibility("master").ok();
+    }
+    fn mode_live(&self) {
+        apply_mode_visibility("live").ok();
+    }
+    fn mode_video(&self) {
+        apply_mode_visibility("video").ok();
+    }
+    fn mode_scoring(&self) {
+        apply_mode_visibility("scoring").ok();
+    }
+}
+
+/// Register every architect-declared action in this module against `backend`.
+pub fn register_architect_actions<B: architect::action::ActionBackend>(backend: &B) {
+    register_dynamic_template_actions_actions(backend, Arc::new(DynamicTemplateActionsImpl));
+    register_auto_color_architect_actions_actions(backend, Arc::new(AutoColorArchitectActionsImpl));
+    register_visibility_manager_actions_actions(backend, Arc::new(VisibilityManagerActionsImpl));
+}
