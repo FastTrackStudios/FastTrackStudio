@@ -28,10 +28,6 @@ members = [
     "features/macromod",
     "features/reaper/signal-extension",
     "features/reaper/signal-reaper-controller",
-    # signal-daw is parked: it depends on daw-standalone extensions (Block
-    # plugin format / per-mic bus output) that aren't upstream on Codeberg yet.
-    # Still under crates/; re-add once those land in the codeberg daw.
-    # "features/signal/signal-daw",
     "xtask",
 ]
 resolver = "2"
