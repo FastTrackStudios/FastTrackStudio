@@ -5,26 +5,28 @@ members = [
     "apps/mobile",
     "apps/native",
     "apps/tui",
-    "crates/macromod",
-    "crates/nam-manager",
-    "crates/signal",
-    "crates/signal-browser",
-    "crates/signal-controller",
-    "crates/signal-daw-bridge",
+    # ── features/signal — the domain slice (monolithic; context-split later) ──
+    "features/signal/signal-proto",
+    "features/signal/signal-storage",
+    "features/signal/signal-live",
+    "features/signal/signal-controller",
+    "features/signal/signal-import",
+    "features/signal/signal-daw-bridge",
+    "features/signal/signal",
+    "features/signal/signal-ui",
+    "features/signal/signal-browser",
+    # ── DSP / plugin / integration feature folders ──
+    "features/sampler/signal-sampler",
+    "features/sampler/signal-sampler-clap",
+    "features/plugin-host/signal-plugin-host",
+    "features/nam/nam-manager",
+    "features/macromod/macromod",
+    "features/reaper-integration/signal-extension",
+    "features/reaper-integration/fts-signal-controller",
     # signal-daw is parked: it depends on daw-standalone extensions (Block
     # plugin format / per-mic bus output) that aren't upstream on Codeberg yet.
-    # Re-add once those land in the codeberg daw. See [[project_signal_on_daw]].
+    # Still under crates/; re-add once those land in the codeberg daw.
     # "crates/signal-daw",
-    "crates/signal-extension",
-    "crates/fts-signal-controller",
-    "crates/signal-import",
-    "crates/signal-live",
-    "crates/signal-plugin-host",
-    "crates/signal-proto",
-    "crates/signal-sampler",
-    "crates/signal-sampler-clap",
-    "crates/signal-storage",
-    "crates/signal-ui",
     "xtask",
 ]
 resolver = "2"
@@ -39,29 +41,37 @@ license = "MIT OR Apache-2.0"
 # ── Facade crate ─────────────────────────────────────────────────────
 # The only public API surface for the signal domain.
 # Apps depend on `signal`; never on signal-proto, signal-live, etc.
-signal = { path = "crates/signal" }
+signal = { path = "features/signal/signal" }
 # App crate (binary + lib)
 signal-cli = { path = "apps/cli" }
 signal-desktop = { path = "apps/desktop" }
 signal-mobile = { path = "apps/mobile" }
 # UI crate (Dioxus components with feature flags)
-signal-ui = { path = "crates/signal-ui", default-features = false }
+signal-ui = { path = "features/signal/signal-ui", default-features = false }
 # Headless browser data layer (no Dioxus) — consumed by signal-ui and future TUI/CLI.
-signal-browser = { path = "crates/signal-browser" }
-# NOTE: signal-proto, signal-controller, signal-live, signal-storage,
-# signal-import, signal-daw-bridge, nam-manager are INTERNAL.
-# Access them through the `signal` facade crate.
+signal-browser = { path = "features/signal/signal-browser" }
+# Internal domain crates — reached through the `signal` facade by apps, but
+# centralized here (architect convention) so intra-workspace deps are
+# `x.workspace = true` and only this table carries paths.
+signal-proto = { path = "features/signal/signal-proto" }
+signal-controller = { path = "features/signal/signal-controller" }
+signal-live = { path = "features/signal/signal-live" }
+signal-storage = { path = "features/signal/signal-storage" }
+signal-import = { path = "features/signal/signal-import" }
+signal-daw-bridge = { path = "features/signal/signal-daw-bridge" }
+nam-manager = { path = "features/nam/nam-manager" }
+signal-extension = { path = "features/reaper-integration/signal-extension" }
 
 # ── Local utility crates ─────────────────────────────────────────────
-macromod            = { path = "crates/macromod" }
-signal-plugin-host  = { path = "crates/signal-plugin-host", default-features = false }
-signal-sampler      = { path = "crates/signal-sampler" }
+macromod            = { path = "features/macromod/macromod" }
+signal-plugin-host  = { path = "features/plugin-host/signal-plugin-host", default-features = false }
+signal-sampler      = { path = "features/sampler/signal-sampler" }
 
 # ── DSP crates (split FTS plugin repos) ───────────────────────────────
 # Using local paths directly (same as [patch] overrides) to avoid
 # git submodule fetch issues with stale nih-plug submodule rev.
 eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
-fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
+audiocore-dsp = { path = "../Plugins/FTS-Audiocore/crates/audiocore-dsp" }
 # Neural Amp Modeler — safe Rust bindings to NeuralAmpModelerCore. Drives
 # the built-in `FxBackend::Nam` slot in signal-sampler's FX chain so any
 # block (Amp / Drive / Cabinet) can opt into a NAM kind by loading a
@@ -79,6 +89,17 @@ facet-toml = { version = "0.50.0-rc.1" }
 # Upstream vox from crates.io (migrated off the FTS codeberg fork).
 vox = { version = "0.10.0-rc.1" }
 ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+
+# ── Architect framework (feature-slice macros) ───────────────────────
+# Declared here as first-class deps so signal crates can migrate onto
+# #[architect::Entity] / #[architect::rpc] + the atom/form client twins
+# in later phases. Path deps to the local migrated checkout (already on
+# upstream facet 0.50 / vox 0.10, matching this workspace); codeberg
+# architect cb/main still pins the old codeberg vox, so we do NOT git-dep
+# these. Currently declared but unused — they light up in Phase 3.
+architect = { path = "../../architect/macros/architect" }
+architect-atom = { path = "../../architect/features/atom" }
+architect-form = { path = "../../architect/features/form" }
 
 # ── DAW facade crate (sibling repo — single public API surface) ──────
 # Source is Codeberg, but currently [patch]ed to the local checkout below:
@@ -119,7 +140,7 @@ utils = { git = "https://codeberg.org/FastTrackStudios/FastTrackStudio.git", bra
 
 # ── Plugin framework ───────────────────────────────────────────────────
 # Migrated off nih-plug onto fts-plug = the `nice-plug` fork (matches what the
-# FTS-Audiocore plugin crates — fts-plugin-core / audio-gui — link against).
+# FTS-Audiocore plugin crates — audiocore-core / audiocore-gui — link against).
 nice-plug = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug" }
 # Blitz-based Dioxus renderer — used by ALL GUI contexts (desktop standalone,
 # REAPER embedded, VST3/CLAP plugin). Guarantees the same rendering pipeline
@@ -127,8 +148,8 @@ nice-plug = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug" }
 # create_dioxus_editor_with_state() in fts-signal-plugin. Brings its own blitz
 # (DioxusLabs/blitz @ 9ebd23a) + anyrender/stylo stack transitively.
 nice-plug-dioxus = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug-dioxus" }
-fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core", default-features = false }
-audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
+audiocore-core = { path = "../Plugins/FTS-Audiocore/crates/audiocore-core", default-features = false }
+audiocore-gui = { path = "../Plugins/FTS-Audiocore/crates/audiocore-gui" }
 atomic_float = "1"
 crossbeam-channel = "0.5"
 midir = "0.11"
@@ -205,15 +226,15 @@ actions-proto = { path = "../input_actions/crates/actions-proto" }
 # ── Split FTS plugin repo local overrides ───────────────────────────────
 [patch."https://git.starcommand.live/FastTrackStudios/FTS-Plugins.git"]
 eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
-fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
-audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
-fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }
+audiocore-dsp = { path = "../Plugins/FTS-Audiocore/crates/audiocore-dsp" }
+audiocore-gui = { path = "../Plugins/FTS-Audiocore/crates/audiocore-gui" }
+audiocore-core = { path = "../Plugins/FTS-Audiocore/crates/audiocore-core" }
 
 # ── nih-plug → nice-plug migration ──────────────────────────────────────
 # The nih-plug `[patch]` blocks were removed: signal now depends on the
 # `nice-plug` fork (fts-plug) via path deps (see [workspace.dependencies]),
 # matching the FTS-Audiocore plugin crates. The FTS-Audiocore plugin crates
-# (fts-plugin-core, audio-gui — path deps) link `nice-plug` from the same
+# (audiocore-core, audiocore-gui — path deps) link `nice-plug` from the same
 # local checkout, so the whole graph shares one plugin framework + one blitz.
 
 # NOTE: the bearcove/vox → Codys-Wright-fork [patch] block was removed.

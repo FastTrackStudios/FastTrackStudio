@@ -1,0 +1,29 @@
+[package]
+name = "signal-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+dioxus.workspace = true
+fts-ui.workspace = true
+lumen-blocks.workspace = true
+signal.workspace = true
+signal-browser.workspace = true
+daw-midi-io.workspace = true
+signal-controller.workspace = true
+signal-daw-bridge.workspace = true
+uuid = { version = "1", features = ["v4"] }
+tokio = { workspace = true }
+tracing.workspace = true
+audio-controls.workspace = true
+dock-dioxus = { workspace = true, default-features = false }
+dock-proto.workspace = true
+audiocore-gui.workspace = true
+nice-plug-dioxus.workspace = true
+
+[features]
+default = ["web"]
+web = ["dock-dioxus/web"]
+desktop = ["dock-dioxus/web"]
