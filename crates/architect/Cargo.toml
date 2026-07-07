@@ -147,9 +147,9 @@ rt = ["dep:rtrb"]
 sync-client = ["vox", "tokio/rt"]
 
 [dependencies]
-architect-derive = { path = "../architect-derive" }
-architect-rpc-derive = { path = "../architect-rpc-derive" }
-architect-action-derive = { path = "../architect-action-derive" }
+architect-derive = { path = "../../features/macros/architect-derive" }
+architect-rpc-derive = { path = "../../features/macros/architect-rpc-derive" }
+architect-action-derive = { path = "../../features/macros/architect-action-derive" }
 facet.workspace = true
 thiserror.workspace = true
 # Resource handles (`architect::handle`): the id behind `RawHandle`.

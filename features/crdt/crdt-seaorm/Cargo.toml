@@ -10,7 +10,7 @@ license.workspace = true
 [package.metadata."docs.rs"]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
-# SeaORM-backed `Persistence` impl for `libs/crdt`.
+# SeaORM-backed `Persistence` impl for `features/crdt/crdt`.
 #
 # Owns two tables, generic across every feature in the workspace:
 #

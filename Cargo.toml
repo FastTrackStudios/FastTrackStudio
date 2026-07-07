@@ -11,11 +11,10 @@ members = [
     "examples/app/features/example/example-crdt",
     "examples/app/features/example/example-ui",
     "examples/app/features/example/tests/native",
-    "macros/architect",
-    "macros/architect-derive",
-    "macros/architect-rpc-derive",
-    "macros/architect-action-derive",
-    "macros/crdt-derive",
+    "crates/architect",
+    "features/macros/architect-derive",
+    "features/macros/architect-rpc-derive",
+    "features/macros/architect-action-derive",
     "examples/external-stub",
     "examples/custom-server",
     "examples/layered-services",
@@ -27,9 +26,10 @@ members = [
     "features/auth/auth-db",
     "features/auth/auth-client",
     "features/auth/tests/native",
-    "crates/architect-cli",
-    "libs/crdt",
-    "libs/crdt-seaorm",
+    "apps/architect/cli",
+    "features/crdt/crdt",
+    "features/crdt/crdt-derive",
+    "features/crdt/crdt-seaorm",
     # In `members` (so `cargo xtask` / `cargo run -p xtask` can resolve it)
     # but deliberately left out of `default-members` below — it's a build
     # tool, not part of the production graph.
@@ -48,11 +48,10 @@ default-members = [
     "examples/app/features/example/example-crdt",
     "examples/app/features/example/example-ui",
     "examples/app/features/example/tests/native",
-    "macros/architect",
-    "macros/architect-derive",
-    "macros/architect-rpc-derive",
-    "macros/architect-action-derive",
-    "macros/crdt-derive",
+    "crates/architect",
+    "features/macros/architect-derive",
+    "features/macros/architect-rpc-derive",
+    "features/macros/architect-action-derive",
     "examples/external-stub",
     "examples/custom-server",
     "features/atom",
@@ -63,8 +62,9 @@ default-members = [
     "features/auth/auth-db",
     "features/auth/auth-client",
     "features/auth/tests/native",
-    "libs/crdt",
-    "libs/crdt-seaorm",
+    "features/crdt/crdt",
+    "features/crdt/crdt-derive",
+    "features/crdt/crdt-seaorm",
 ]
 # Crates with wasm32 / Dioxus target deps that don't survive a workspace
 # host build sit outside; each invokes cargo directly.
@@ -166,7 +166,7 @@ wasm-bindgen-futures = "0.4"
 # The architect derive crate — owns the macro that emits the wire
 # struct + the SeaORM Model + the auto-generated vox repo trait,
 # all from one source struct. Every entity crate depends on this.
-architect = { path = "macros/architect" }
+architect = { path = "crates/architect" }
 
 # Client-side optimistic / stale-while-revalidate state for Dioxus —
 # the client twin of the server-side Layer/Resource DI. Entity-agnostic
@@ -220,7 +220,7 @@ example-stub-backend = { path = "examples/external-stub" }
 # Persistence trait. Backend-agnostic: pair with crdt-seaorm on the
 # server, with crdt-indexeddb (future) in the browser, or run with the
 # bundled in-memory persistence for tests.
-crdt = { path = "libs/crdt" }
+crdt = { path = "features/crdt/crdt" }
 
 # Object-safe async traits (Persistence). Hot-path traits in this
 # workspace use Rust 2024 async-fn-in-trait via #[vox::service]; we

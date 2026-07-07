@@ -8,7 +8,7 @@
 //!                              EntityCrdt impl + <Name>RepoLoro newtype)
 //!       <name>-db/           SeaORM persistence + optional projections
 //!                              (the snapshot/update tables live in
-//!                              libs/crdt-seaorm; this crate re-exports
+//!                              features/crdt/crdt-seaorm; this crate re-exports
 //!                              the Migrator + holds any feature-specific
 //!                              projection tables)
 //!       <name>/              facade (vox + server + server-axum)
@@ -243,7 +243,7 @@ license.workspace = true
 # newtype that implements the architect-emitted `{pascal}Repo`.
 #
 # All real work happens inside `LoroRepo<{pascal}Entity>` from
-# `libs/crdt`; this crate is intentionally thin so the architect
+# `features/crdt/crdt`; this crate is intentionally thin so the architect
 # derive can emit it from field attributes in a future revision.
 
 [dependencies]
@@ -432,7 +432,7 @@ license.workspace = true
 
 # SeaORM-side concerns for the `{kebab}` feature.
 #
-# The CRDT snapshot/update tables live in `libs/crdt-seaorm` and are
+# The CRDT snapshot/update tables live in `features/crdt/crdt-seaorm` and are
 # generic across every feature. This crate owns just the feature-
 # specific persistence bits:
 #

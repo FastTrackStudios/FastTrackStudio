@@ -17,7 +17,7 @@ app-ui = { path = "../ui" }
 # features → no backend/sea-orm baggage, just the generic composition).
 app-server = { path = "../server", default-features = false }
 example-memory = { path = "../features/example/example-memory" }
-architect = { path = "../../../macros/architect", default-features = false, features = ["local"] }
+architect = { path = "../../../crates/architect", default-features = false, features = ["local"] }
 
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
 vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }

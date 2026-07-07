@@ -1,5 +1,5 @@
 //! Loro-backed `ExampleRepo`. The doc + repo machinery lives in
-//! `libs/crdt`; this crate provides the entity-specific glue:
+//! `features/crdt/crdt`; this crate provides the entity-specific glue:
 //!
 //! 1. `impl EntityCrdt for Example` — codec, id/timestamp policy,
 //!    sort-field lookup. The architect derive will emit this from

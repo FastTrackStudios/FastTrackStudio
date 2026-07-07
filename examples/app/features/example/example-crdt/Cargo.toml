@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 # Loro-backed implementation of `ExampleRepo`. Almost all of the
-# heavy lifting lives in `libs/crdt`'s `LoroRepo<E>`; this crate just
+# heavy lifting lives in `features/crdt/crdt`'s `LoroRepo<E>`; this crate just
 # supplies the `EntityCrdt for Example` impl (wire ↔ LoroMap codec,
 # id/timestamp policy, sort-field lookup) and the one-line forwarding
 # `impl ExampleRepo for LoroRepo<Example>` block.

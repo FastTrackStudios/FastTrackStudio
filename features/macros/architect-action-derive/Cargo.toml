@@ -33,7 +33,7 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 # The runtime crate re-exports the macro as `architect::actions`. Tests
 # consume it that way so the smoke surface matches the user-facing import
 # path.
-architect = { path = "../architect" }
+architect = { path = "../../../crates/architect" }
 # Dev-only: proves `ActionMeta::all()` is enough to mechanically build a
 # `clap::Command` tree, and that the tree composes (standalone vs. mounted
 # under a parent command) without architect itself depending on clap. See

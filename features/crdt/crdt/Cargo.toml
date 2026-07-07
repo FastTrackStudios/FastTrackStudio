@@ -55,7 +55,7 @@ chrono.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-crdt-derive = { path = "../../macros/crdt-derive", version = "*" }
+crdt-derive = { path = "../crdt-derive", version = "*" }
 
 # Declare tokio independently of the workspace dep so wasm32 builds
 # (which can't pull mio / rt-multi-thread) stay clean. `macros` powers
@@ -89,6 +89,6 @@ doctest = false
 crdt = { path = ".", features = ["vox"] }
 # The sync convergence test serves DocSyncHost over the in-process vox
 # transport and runs replicas under tokio.
-architect = { path = "../../macros/architect", features = ["vox", "local"] }
+architect = { path = "../../../crates/architect", features = ["vox", "local"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tempfile = "3"

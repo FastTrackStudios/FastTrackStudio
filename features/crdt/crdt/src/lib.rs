@@ -108,7 +108,7 @@ pub use persistence::{PersistError, Persistence};
 /// the feature crate (e.g. `pub struct ExampleEntity;`), not directly
 /// on the wire struct from `-proto`. The marker is what makes the
 /// orphan rules happy: the wire struct lives in `-proto`, the trait
-/// lives in `libs/crdt`, neither is local to `-crdt` — but the marker
+/// lives in `features/crdt/crdt`, neither is local to `-crdt` — but the marker
 /// is, so `impl EntityCrdt for <Marker>` is allowed, and
 /// `impl <Name>Repo for LoroRepo<Marker>` is too (local type wrapped
 /// before any uncovered type param).

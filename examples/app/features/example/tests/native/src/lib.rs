@@ -284,7 +284,7 @@ async fn external_backend_round_trip() {
 // Same `ExampleRepo` contract, Loro-backed implementation. The doc
 // is the source of truth; the trait surface stays identical. If
 // these tests pass, the contract is genuinely backend-agnostic and
-// generalizing into `libs/crdt` is safe.
+// generalizing into `features/crdt/crdt` is safe.
 
 fn crdt_repo() -> example_crdt::ExampleRepoLoro {
     example_crdt::ExampleRepoLoro::new(&example_crdt::CrdtDoc::ephemeral())
@@ -464,7 +464,7 @@ async fn crdt_two_replicas_converge_after_sync() {
 // Snapshot persistence round-trip: write data, export a full
 // snapshot (the bytes you'd store in `loro_doc.snapshot`), drop the
 // repo, build a fresh LoroDoc, import the bytes, and read everything
-// back. This is the contract `libs/crdt-seaorm`'s `Persistence`
+// back. This is the contract `features/crdt/crdt-seaorm`'s `Persistence`
 // trait has to honor: bytes in, bytes out, identical state.
 #[tokio::test]
 async fn crdt_snapshot_round_trip() {
@@ -531,7 +531,7 @@ async fn crdt_snapshot_round_trip() {
 // Update-log persistence round-trip: instead of storing one snapshot,
 // store the incremental update bytes emitted on every commit and
 // replay them on cold start. This is the second persistence shape
-// `libs/crdt-seaorm` will support — append-mostly with periodic
+// `features/crdt/crdt-seaorm` will support — append-mostly with periodic
 // compaction. Same outcome: bytes in, bytes out, identical state.
 #[tokio::test]
 async fn crdt_update_log_round_trip() {
@@ -598,7 +598,7 @@ async fn crdt_update_log_round_trip() {
 }
 
 // Full `CrdtDoc::open` lifecycle against a real Persistence impl
-// (the in-memory one shipped with libs/crdt). Proves the path the
+// (the in-memory one shipped with features/crdt/crdt). Proves the path the
 // SeaORM persistence will run in production: open, write, compact
 // to flush a snapshot, drop, re-open against the same persistence,
 // observe identical state.

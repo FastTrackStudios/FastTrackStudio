@@ -20,7 +20,7 @@ example = { path = "../features/example/example", features = ["vox", "atom", "fo
 example-ui = { path = "../features/example/example-ui" }
 # The collaborative layer's client side: `use_synced_doc` (the notes
 # replica + its sync driver) and `use_presence_channel` (who's here).
-crdt = { path = "../../../libs/crdt", features = ["dioxus"] }
+crdt = { path = "../../../features/crdt/crdt", features = ["dioxus"] }
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
 vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
 vox-core = "0.10.0-rc.1"
@@ -32,7 +32,7 @@ uuid = { version = "1", features = ["v4", "js"] }
 # too. The native target below layers `local` on top for `Transport::Local`.
 # `atom` + `form` bring the client-state primitives (`architect::Store`,
 # `architect::form::Field`) the screens + feature-ui drive.
-architect = { path = "../../../macros/architect", default-features = false, features = ["schedule", "atom", "form"] }
+architect = { path = "../../../crates/architect", default-features = false, features = ["schedule", "atom", "form"] }
 
 # Native (desktop/CLI/tests) only: architect's in-process transport, so
 # `Transport::Local` can serve a backend over a vox in-memory link. Not
@@ -40,7 +40,7 @@ architect = { path = "../../../macros/architect", default-features = false, feat
 # the browser build stays remote-only. Features merge with the base dep
 # above (→ `schedule` + `local` natively).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-architect = { path = "../../../macros/architect", default-features = false, features = ["local"] }
+architect = { path = "../../../crates/architect", default-features = false, features = ["local"] }
 
 [dev-dependencies]
 # Headless smoke test: mount the full App (router + connection lifecycle)
