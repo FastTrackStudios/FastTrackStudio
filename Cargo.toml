@@ -2,6 +2,7 @@
 members = [
     "crates/midicore",
     "features/midicore-proto",
+    "features/midicore-midir",
 ]
 resolver = "2"
 
@@ -15,6 +16,7 @@ license = "MIT OR Apache-2.0"
 # ── midicore crates ──────────────────────────────────────────────────
 midicore = { path = "crates/midicore" }
 midicore-proto = { path = "features/midicore-proto" }
+midicore-midir = { path = "features/midicore-midir" }
 
 # ── Reflection + RPC framework ───────────────────────────────────────
 facet = { version = "0.50.0-rc.1" }
