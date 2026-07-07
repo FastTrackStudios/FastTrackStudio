@@ -9826,6 +9826,7 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "nice-plug-dioxus",
+ "signal-guitar",
  "signal-sampler",
  "signal-ui",
  "tokio",
@@ -9921,6 +9922,13 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "signal-guitar"
+version = "0.1.0"
+dependencies = [
+ "signal-sampler",
 ]
 
 [[package]]

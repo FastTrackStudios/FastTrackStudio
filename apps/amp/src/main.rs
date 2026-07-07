@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 use dioxus::prelude::*;
 use nice_plug_dioxus::{SharedState, TAILWIND_CSS};
 use signal_sampler::rig::RigBlock;
-use signal_sampler::{AmpEngine, RigAudioPrefs};
+use signal_guitar::AmpEngine;
+use signal_sampler::RigAudioPrefs;
 use signal_ui::components::{
     GridBlock, GridJack, GridPosition, SignalFlowGrid, SignalFlowGridView,
 };
