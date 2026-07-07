@@ -18,7 +18,7 @@ use crate::metadata;
 use crate::module_type::ModuleType;
 use crate::signal_chain::SignalChain;
 use crate::traits;
-use macromod::ParameterValue;
+use signal_macromod::ParameterValue;
 
 // ─── EngineType ────────────────────────────────────────────────
 
@@ -67,16 +67,16 @@ impl EngineType {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Block {
-    parameters: Vec<macromod::BlockParameter>,
+    parameters: Vec<signal_macromod::BlockParameter>,
     /// Optional macro knob bank for this block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub macro_bank: Option<macromod::MacroBank>,
+    pub macro_bank: Option<signal_macromod::MacroBank>,
     /// Optional parameter curation for the custom GUI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub param_curation: Option<macromod::ParamCuration>,
+    pub param_curation: Option<signal_macromod::ParamCuration>,
     /// Optional modulation routing for this block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modulation: Option<macromod::ModulationRouteSet>,
+    pub modulation: Option<signal_macromod::ModulationRouteSet>,
     /// How this block's DSP is realized at runtime — orthogonal to
     /// `BlockType`. `Native` = built-in DSP for this block role; `Nam`
     /// loads a `.nam` neural model; `HostedPlugin` proxies a CLAP/VST3.
@@ -89,15 +89,15 @@ pub struct Block {
 impl Block {
     pub fn new(param_1: f32, param_2: f32, param_3: f32) -> Self {
         Self::from_parameters(vec![
-            macromod::BlockParameter::new("param_1", "Parameter 1", param_1),
-            macromod::BlockParameter::new("param_2", "Parameter 2", param_2),
-            macromod::BlockParameter::new("param_3", "Parameter 3", param_3),
+            signal_macromod::BlockParameter::new("param_1", "Parameter 1", param_1),
+            signal_macromod::BlockParameter::new("param_2", "Parameter 2", param_2),
+            signal_macromod::BlockParameter::new("param_3", "Parameter 3", param_3),
         ])
     }
 
-    pub fn from_parameters(parameters: Vec<macromod::BlockParameter>) -> Self {
+    pub fn from_parameters(parameters: Vec<signal_macromod::BlockParameter>) -> Self {
         let parameters = if parameters.is_empty() {
-            vec![macromod::BlockParameter::new("value", "Value", 0.5)]
+            vec![signal_macromod::BlockParameter::new("value", "Value", 0.5)]
         } else {
             parameters
         };
@@ -111,7 +111,7 @@ impl Block {
         }
     }
 
-    pub fn parameters(&self) -> &[macromod::BlockParameter] {
+    pub fn parameters(&self) -> &[signal_macromod::BlockParameter] {
         &self.parameters
     }
 

@@ -69,7 +69,7 @@ pub use signal_live::engine::{
 
 // Re-export companion crates through the facade so external consumers
 // never need to depend on internal signal crates directly.
-pub use nam_manager;
+pub use signal_nam;
 pub use signal_controller;
 pub use signal_daw_bridge;
 pub use signal_import;

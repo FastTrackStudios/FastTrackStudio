@@ -43,7 +43,7 @@
 //! - **Recursive**: Supports nested sub-macros (children in knob tree)
 
 use daw::rpc::{FxHandle, TrackHandle};
-use macromod::{MacroBank, MacroBinding, MacroKnob};
+use signal_macromod::{MacroBank, MacroBinding, MacroKnob};
 use signal_proto::Block;
 
 use crate::engine::param_bridge::param_name_matches;
@@ -187,7 +187,7 @@ fn collect_knob_bindings<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use macromod::{MacroBank, MacroBinding, MacroKnob};
+    use signal_macromod::{MacroBank, MacroBinding, MacroKnob};
 
     fn make_binding(param_id: &str) -> MacroBinding {
         MacroBinding::from_ids("block1", param_id, 0.0, 1.0)

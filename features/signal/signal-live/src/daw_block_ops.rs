@@ -855,7 +855,7 @@ fn execute_chain_nodes<'a>(
 /// 4. Rewrite the model path
 /// 5. Re-encode and set back via the rebuilt REAPER chunk
 async fn inject_nam_model_state(fx: &daw::rpc::FxHandle, model_path: &str) -> Result<(), String> {
-    use nam_manager::{
+    use signal_nam::{
         decode_chunk, encode_chunk, extract_state_base64, first_base64_segment,
         rebuild_chunk_with_state, rewrite_paths,
     };
@@ -901,7 +901,7 @@ async fn inject_binary_state(fx: &daw::rpc::FxHandle, binary_state: &[u8]) -> Re
         .ok_or("FX has no default chunk to inject state into")?;
 
     let new_b64 = BASE64.encode(binary_state);
-    let rebuilt = nam_manager::rebuild_chunk_with_state(&existing, &new_b64);
+    let rebuilt = signal_nam::rebuild_chunk_with_state(&existing, &new_b64);
     fx.set_state_chunk_encoded(rebuilt)
         .await
         .map_err(|e| format!("Failed to set rebuilt chunk: {e}"))

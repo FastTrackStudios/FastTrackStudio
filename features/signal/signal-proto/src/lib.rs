@@ -93,16 +93,16 @@ pub mod versioning;
 
 // ─── Re-exported from macromod ──────────────────────────────────
 
-pub use macromod::curation as param_curation;
-pub use macromod::easing;
-pub use macromod::macro_bank;
-pub use macromod::runtime;
-pub use macromod::{BlockParameter, MacroBinding, ParamTarget, ParameterValue, ResponseCurve};
+pub use signal_macromod::curation as param_curation;
+pub use signal_macromod::easing;
+pub use signal_macromod::macro_bank;
+pub use signal_macromod::runtime;
+pub use signal_macromod::{BlockParameter, MacroBinding, ParamTarget, ParameterValue, ResponseCurve};
 
 /// Backward-compatible `modulation` module path.
 pub mod modulation {
-    pub use macromod::routing::*;
-    pub use macromod::sources::*;
+    pub use signal_macromod::routing::*;
+    pub use signal_macromod::sources::*;
 }
 
 // ─── Re-exports from ids ────────────────────────────────────────

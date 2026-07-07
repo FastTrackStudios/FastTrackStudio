@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod macro_integration {
-    use macromod::MacroBank;
+    use signal_macromod::MacroBank;
     use signal_live::{
         macro_recorder::MacroRecorder, macro_registry, macro_setup::*, macro_templates,
     };

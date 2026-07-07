@@ -6,9 +6,9 @@
 
 use std::collections::HashMap;
 
-use macromod::routing::ModulationRoute;
-use macromod::runtime::processor::{ModulationProcessor, TickContext};
-use macromod::target::ParamTarget;
+use signal_macromod::routing::ModulationRoute;
+use signal_macromod::runtime::processor::{ModulationProcessor, TickContext};
+use signal_macromod::target::ParamTarget;
 
 /// Binding between a [`ParamTarget`] and a concrete DAW FX parameter.
 #[derive(Debug, Clone)]
@@ -172,8 +172,8 @@ impl ModulationRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use macromod::sources::ModulationSource;
-    use macromod::sources::lfo::{LfoConfig, LfoWaveform};
+    use signal_macromod::sources::ModulationSource;
+    use signal_macromod::sources::lfo::{LfoConfig, LfoWaveform};
 
     fn lfo_route(id: &str, target: ParamTarget, amount: f32) -> ModulationRoute {
         ModulationRoute::new(

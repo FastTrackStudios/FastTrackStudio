@@ -625,7 +625,7 @@ pub fn process_lfo(_params: &LfoParams, _out: &mut [f32]) {
 /// a target parameter path with an amount. Maps to Spectrasonics
 /// `<MOD_MATRIX>` rows.
 ///
-/// **Note**: Signal already has [`macromod::ModulationRouteSet`] at Layer
+/// **Note**: Signal already has [`signal_macromod::ModulationRouteSet`] at Layer
 /// and Engine levels — this Block is for **per-Module** matrix routing
 /// (within a Voice / SubEngine equivalent). Implementation should delegate
 /// to or share infrastructure with `macromod`.
@@ -659,7 +659,7 @@ impl SynthBlockParams for ModMatrixParams {
 /// One macro knob (control source).
 ///
 /// Mirrors Spectrasonics `<Custom0..N>`. Layer-level macros already exist
-/// in [`macromod::MacroBank`]; this Block lets a Module expose its own.
+/// in [`signal_macromod::MacroBank`]; this Block lets a Module expose its own.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct MacroParams {
     pub name: String,

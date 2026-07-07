@@ -18,7 +18,7 @@
 //! block.macro_bank = Some(eq_bank);
 //! ```
 
-use macromod::{MacroBank, MacroBinding, MacroKnob};
+use signal_macromod::{MacroBank, MacroBinding, MacroKnob};
 
 /// Simple 3-band EQ macro configuration.
 ///

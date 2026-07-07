@@ -224,10 +224,10 @@ pub struct Layer {
     pub fx_sends: Vec<FxSend>,
     /// Macro knob bank aggregating block-level macros across modules in this layer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub macro_bank: Option<macromod::MacroBank>,
+    pub macro_bank: Option<signal_macromod::MacroBank>,
     /// Modulation routing for layer-level macro parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modulation: Option<macromod::ModulationRouteSet>,
+    pub modulation: Option<signal_macromod::ModulationRouteSet>,
     pub metadata: Metadata,
 }
 

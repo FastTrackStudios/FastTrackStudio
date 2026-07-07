@@ -180,10 +180,10 @@ pub struct Rig {
     pub input_track_ref: Option<String>,
     /// Macro knob bank for rig-level control of engine/layer parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub macro_bank: Option<macromod::MacroBank>,
+    pub macro_bank: Option<signal_macromod::MacroBank>,
     /// Modulation routing for rig-level macro parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modulation: Option<macromod::ModulationRouteSet>,
+    pub modulation: Option<signal_macromod::ModulationRouteSet>,
     pub metadata: Metadata,
 }
 

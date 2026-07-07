@@ -273,7 +273,7 @@ impl Plugin for FtsSignalController {
         context: &mut impl InitContext<Self>,
     ) -> bool {
         // Set up file-based logging
-        let log_path = "/tmp/fts-signal-controller.log";
+        let log_path = "/tmp/signal-reaper-controller.log";
         if let Ok(file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -282,7 +282,7 @@ impl Plugin for FtsSignalController {
             let _ = fmt::Subscriber::builder()
                 .with_env_filter(
                     EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("fts_signal_controller=debug,warn")),
+                        .unwrap_or_else(|_| EnvFilter::new("signal_reaper_controller=debug,warn")),
                 )
                 .with_writer(file)
                 .with_ansi(false)
@@ -362,7 +362,7 @@ fn signal_timer() {
 }
 
 impl ClapPlugin for FtsSignalController {
-    const CLAP_ID: &'static str = "com.fasttrackstudio.fts-signal-controller";
+    const CLAP_ID: &'static str = "com.fasttrackstudio.signal-reaper-controller";
     const CLAP_DESCRIPTION: Option<&'static str> =
         Some("Per-track signal chain controller — rig setup, macros, cross-track routing");
     const CLAP_MANUAL_URL: Option<&'static str> = None;

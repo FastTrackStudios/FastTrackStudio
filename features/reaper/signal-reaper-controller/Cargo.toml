@@ -1,5 +1,5 @@
 [package]
-name = "fts-signal-controller"
+name = "signal-reaper-controller"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

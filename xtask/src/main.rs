@@ -21,10 +21,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!();
             eprintln!("commands:");
             eprintln!(
-                "  install       Build and install signal-extension + fts-signal-controller into REAPER"
+                "  install       Build and install signal-extension + signal-reaper-controller into REAPER"
             );
             eprintln!(
-                "  uninstall     Remove signal-extension and fts-signal-controller from REAPER"
+                "  uninstall     Remove signal-extension and signal-reaper-controller from REAPER"
             );
             eprintln!("  bundle        Bundle CLAP plugins (delegates to nice_plug_xtask)");
             eprintln!("  status        Show installed extensions and plugins");
@@ -104,7 +104,7 @@ fn install() -> Result<(), Box<dyn std::error::Error>> {
 /// CLAP plugin crates bundled + installed into REAPER by `cargo xtask
 /// install` (package name, bundled artifact name — must match bundler.toml).
 const CLAP_PLUGINS: &[(&str, &str)] = &[
-    ("fts-signal-controller", "FTS Signal Controller.clap"),
+    ("signal-reaper-controller", "FTS Signal Controller.clap"),
     ("signal-sampler-clap", "Signal Sampler.clap"),
 ];
 

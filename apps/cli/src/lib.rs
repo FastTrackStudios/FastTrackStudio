@@ -3694,18 +3694,18 @@ async fn cmd_rigs_open(
 const DEFAULT_NAM_ROOT: &str = "~/Documents/Development/FastTrackStudio/signal-library/nam";
 
 async fn cmd_nam_packs(vendor: Option<&str>, category: Option<&str>) -> Result<()> {
-    let nam_root = signal::nam_manager::nam_root_from_env(&expand_tilde(DEFAULT_NAM_ROOT));
+    let nam_root = signal::signal_nam::nam_root_from_env(&expand_tilde(DEFAULT_NAM_ROOT));
     let packs_dir = nam_root.join("packs");
 
-    let packs = signal::nam_manager::pack::load_packs(&packs_dir)
+    let packs = signal::signal_nam::pack::load_packs(&packs_dir)
         .map_err(|e| eyre::eyre!("Failed to load packs: {e}"))?;
 
     let cat_filter = category
         .map(|c| match c.to_lowercase().as_str() {
-            "amp" => Ok(signal::nam_manager::PackCategory::Amp),
-            "drive" => Ok(signal::nam_manager::PackCategory::Drive),
-            "ir" => Ok(signal::nam_manager::PackCategory::Ir),
-            "archetype" => Ok(signal::nam_manager::PackCategory::Archetype),
+            "amp" => Ok(signal::signal_nam::PackCategory::Amp),
+            "drive" => Ok(signal::signal_nam::PackCategory::Drive),
+            "ir" => Ok(signal::signal_nam::PackCategory::Ir),
+            "archetype" => Ok(signal::signal_nam::PackCategory::Archetype),
             _ => Err(eyre::eyre!(
                 "Unknown category: {c}. Valid: amp, drive, ir, archetype"
             )),
@@ -3761,14 +3761,14 @@ async fn nam_capture_state(fx: &daw::rpc::FxHandle, model_path: &str) -> Result<
         .state_chunk_encoded()
         .await?
         .ok_or_else(|| eyre::eyre!("FX has no default chunk"))?;
-    let segments = signal::nam_manager::extract_state_base64(&reaper_chunk)
+    let segments = signal::signal_nam::extract_state_base64(&reaper_chunk)
         .ok_or_else(|| eyre::eyre!("Failed to extract base64 from chunk"))?;
-    let unified_b64 = signal::nam_manager::first_base64_segment(&segments);
-    let mut nam_chunk = signal::nam_manager::decode_chunk(unified_b64.trim())
+    let unified_b64 = signal::signal_nam::first_base64_segment(&segments);
+    let mut nam_chunk = signal::signal_nam::decode_chunk(unified_b64.trim())
         .map_err(|e| eyre::eyre!("Failed to decode NAM chunk: {e}"))?;
-    signal::nam_manager::rewrite_paths(&mut nam_chunk, Some(model_path), None);
-    let new_b64 = signal::nam_manager::encode_chunk(&nam_chunk);
-    let rebuilt = signal::nam_manager::rebuild_chunk_with_state(&reaper_chunk, &new_b64);
+    signal::signal_nam::rewrite_paths(&mut nam_chunk, Some(model_path), None);
+    let new_b64 = signal::signal_nam::encode_chunk(&nam_chunk);
+    let rebuilt = signal::signal_nam::rebuild_chunk_with_state(&reaper_chunk, &new_b64);
     fx.set_state_chunk_encoded(rebuilt)
         .await
         .map_err(|e| eyre::eyre!("Failed to set chunk: {e}"))?;
@@ -3783,14 +3783,14 @@ fn filter_nam_packs(
     packs_dir: &Path,
     vendor: Option<&str>,
     category: Option<&str>,
-) -> Result<Vec<signal::nam_manager::PackDefinition>> {
-    let packs = signal::nam_manager::pack::load_packs(packs_dir)
+) -> Result<Vec<signal::signal_nam::PackDefinition>> {
+    let packs = signal::signal_nam::pack::load_packs(packs_dir)
         .map_err(|e| eyre::eyre!("Failed to load packs: {e}"))?;
 
     let cat_filter = category
         .map(|c| match c.to_lowercase().as_str() {
-            "amp" => Ok(signal::nam_manager::PackCategory::Amp),
-            "drive" => Ok(signal::nam_manager::PackCategory::Drive),
+            "amp" => Ok(signal::signal_nam::PackCategory::Amp),
+            "drive" => Ok(signal::signal_nam::PackCategory::Drive),
             _ => Err(eyre::eyre!(
                 "Unknown category for import: {c}. Valid: amp, drive"
             )),
@@ -3812,15 +3812,15 @@ fn filter_nam_packs(
             }
             matches!(
                 p.category,
-                signal::nam_manager::PackCategory::Amp | signal::nam_manager::PackCategory::Drive
+                signal::signal_nam::PackCategory::Amp | signal::signal_nam::PackCategory::Drive
             )
         })
         .collect())
 }
 
 /// Collect (tone, filename) pairs from a pack definition.
-fn collect_tone_files(pack: &signal::nam_manager::PackDefinition) -> Vec<(String, String)> {
-    let is_amp = pack.category == signal::nam_manager::PackCategory::Amp;
+fn collect_tone_files(pack: &signal::signal_nam::PackDefinition) -> Vec<(String, String)> {
+    let is_amp = pack.category == signal::signal_nam::PackCategory::Amp;
     let mut tone_files: Vec<(String, String)> = Vec::new();
 
     if is_amp {
@@ -3849,7 +3849,7 @@ const NAM_PLUGIN_NAME: &str = "VST3: NeuralAmpModeler (Steven Atkinson)";
 
 /// Dry-run NAM import: prints what would be imported without REAPER or DB changes.
 async fn cmd_nam_import_dry_run(vendor: Option<&str>, category: Option<&str>) -> Result<()> {
-    let nam_root = signal::nam_manager::nam_root_from_env(&expand_tilde(DEFAULT_NAM_ROOT));
+    let nam_root = signal::signal_nam::nam_root_from_env(&expand_tilde(DEFAULT_NAM_ROOT));
     let packs_dir = nam_root.join("packs");
     let filtered = filter_nam_packs(&packs_dir, vendor, category)?;
 
@@ -3867,7 +3867,7 @@ async fn cmd_nam_import_dry_run(vendor: Option<&str>, category: Option<&str>) ->
             continue;
         }
 
-        let is_amp = pack.category == signal::nam_manager::PackCategory::Amp;
+        let is_amp = pack.category == signal::signal_nam::PackCategory::Amp;
         let category_prefix = if is_amp { "nam-amp" } else { "nam-drive" };
         let preset_id = signal::seed_id(&format!("{}-{}", category_prefix, pack.id));
         let gear_model = pack.gear_model.as_deref().unwrap_or(&pack.label);
@@ -3905,7 +3905,7 @@ async fn cmd_nam_import(
     vendor: Option<&str>,
     category: Option<&str>,
 ) -> Result<()> {
-    let nam_root = signal::nam_manager::nam_root_from_env(&expand_tilde(DEFAULT_NAM_ROOT));
+    let nam_root = signal::signal_nam::nam_root_from_env(&expand_tilde(DEFAULT_NAM_ROOT));
     let packs_dir = nam_root.join("packs");
     let filtered = filter_nam_packs(&packs_dir, vendor, category)?;
 
@@ -3927,7 +3927,7 @@ async fn cmd_nam_import(
             continue;
         }
 
-        let is_amp = pack.category == signal::nam_manager::PackCategory::Amp;
+        let is_amp = pack.category == signal::signal_nam::PackCategory::Amp;
         let category_prefix = if is_amp { "nam-amp" } else { "nam-drive" };
         let block_type = if is_amp {
             signal::BlockType::Amp
@@ -4049,7 +4049,7 @@ async fn cmd_nam_import(
 /// Resolve a NAM file path: {nam_root}/{category_dir}/{pack_directory}/{filename}
 fn resolve_nam_path(
     nam_root: &Path,
-    pack: &signal::nam_manager::PackDefinition,
+    pack: &signal::signal_nam::PackDefinition,
     filename: &str,
 ) -> Option<String> {
     let dir = pack.directory.as_deref().unwrap_or(&pack.id);

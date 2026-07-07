@@ -4361,25 +4361,6 @@ name = "fts-devtools"
 version = "0.1.0"
 
 [[package]]
-name = "fts-signal-controller"
-version = "0.1.0"
-dependencies = [
- "atomic_float",
- "audiocore-core",
- "crossbeam-channel",
- "daw",
- "daw-extension-runtime",
- "eyre",
- "nice-plug",
- "serde",
- "serde_json",
- "signal-proto",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "fts-story-core"
 version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main#079d9e0b14d5bb8b81cc68836e81d74831c5947d"
@@ -6369,15 +6350,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "macromod"
-version = "0.1.0"
-dependencies = [
- "facet 0.50.0-rc.1",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6800,21 +6772,6 @@ dependencies = [
  "spirv",
  "thiserror 2.0.18",
  "unicode-ident",
-]
-
-[[package]]
-name = "nam-manager"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "signal-proto",
- "tempfile",
- "thiserror 2.0.18",
- "walkdir",
 ]
 
 [[package]]
@@ -9849,13 +9806,13 @@ dependencies = [
  "eyre",
  "futures",
  "moire",
- "nam-manager",
  "serde_json",
  "signal-controller",
  "signal-daw-bridge",
  "signal-extension",
  "signal-import",
  "signal-live",
+ "signal-nam",
  "signal-proto",
  "signal-storage",
  "tokio",
@@ -9870,6 +9827,7 @@ dependencies = [
  "dioxus",
  "nice-plug-dioxus",
  "signal-sampler",
+ "signal-ui",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -9955,11 +9913,11 @@ dependencies = [
  "daw-extension-runtime",
  "eyre",
  "fragile",
- "macromod",
  "reaper-low",
  "reaper-macros",
  "serde_json",
  "signal",
+ "signal-macromod",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -10017,16 +9975,25 @@ dependencies = [
  "daw",
  "eyre",
  "futures",
- "macromod",
  "moire",
- "nam-manager",
  "serde",
  "serde_json",
+ "signal-macromod",
+ "signal-nam",
  "signal-proto",
  "signal-storage",
  "tokio",
  "uuid 1.23.1",
  "vox",
+]
+
+[[package]]
+name = "signal-macromod"
+version = "0.1.0"
+dependencies = [
+ "facet 0.50.0-rc.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -10039,6 +10006,21 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "signal-nam"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "signal-proto",
+ "tempfile",
+ "thiserror 2.0.18",
+ "walkdir",
 ]
 
 [[package]]
@@ -10070,13 +10052,32 @@ version = "0.1.0"
 dependencies = [
  "actions-proto",
  "facet 0.50.0-rc.1",
- "macromod",
  "serde",
  "serde_json",
+ "signal-macromod",
  "thiserror 2.0.18",
  "utils",
  "uuid 1.23.1",
  "vox",
+]
+
+[[package]]
+name = "signal-reaper-controller"
+version = "0.1.0"
+dependencies = [
+ "atomic_float",
+ "audiocore-core",
+ "crossbeam-channel",
+ "daw",
+ "daw-extension-runtime",
+ "eyre",
+ "nice-plug",
+ "serde",
+ "serde_json",
+ "signal-proto",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

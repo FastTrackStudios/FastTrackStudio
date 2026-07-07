@@ -12,7 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 daw = { workspace = true, features = ["reaper"] }
 daw-extension-runtime.workspace = true
-macromod.workspace = true
+signal-macromod.workspace = true
 signal.workspace = true
 fragile = "2"
 # Codeberg reaper-rs — must match daw's source (codeberg, same branch) so the

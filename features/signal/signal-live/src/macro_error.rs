@@ -86,7 +86,7 @@ impl std::error::Error for MacroError {}
 ///
 /// - `Ok(())` if inputs are valid
 /// - `Err(MacroError)` if validation fails
-pub fn validate_macro_bank(bank: &macromod::MacroBank) -> MacroResult<()> {
+pub fn validate_macro_bank(bank: &signal_macromod::MacroBank) -> MacroResult<()> {
     if bank.knobs.is_empty() && bank.groups.is_empty() {
         return Err(MacroError::NoBindings);
     }
@@ -133,21 +133,21 @@ pub fn validate_macro_bank(bank: &macromod::MacroBank) -> MacroResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use macromod::MacroKnob;
+    use signal_macromod::MacroKnob;
 
     #[test]
     fn test_validate_empty_bank() {
-        let bank = macromod::MacroBank::default();
+        let bank = signal_macromod::MacroBank::default();
         let result = validate_macro_bank(&bank);
         assert!(matches!(result, Err(MacroError::NoBindings)));
     }
 
     #[test]
     fn test_validate_valid_bank() {
-        let mut bank = macromod::MacroBank::default();
+        let mut bank = signal_macromod::MacroBank::default();
         let mut knob = MacroKnob::new("drive", "Drive");
         knob.bindings
-            .push(macromod::MacroBinding::from_ids("eq", "low", 0.0, 1.0));
+            .push(signal_macromod::MacroBinding::from_ids("eq", "low", 0.0, 1.0));
         bank.add(knob);
 
         let result = validate_macro_bank(&bank);
@@ -156,10 +156,10 @@ mod tests {
 
     #[test]
     fn test_validate_rejects_empty_knob_id() {
-        let mut bank = macromod::MacroBank::default();
+        let mut bank = signal_macromod::MacroBank::default();
         let mut knob = MacroKnob::new("", "Empty ID");
         knob.bindings
-            .push(macromod::MacroBinding::from_ids("eq", "low", 0.0, 1.0));
+            .push(signal_macromod::MacroBinding::from_ids("eq", "low", 0.0, 1.0));
         bank.add(knob);
 
         let result = validate_macro_bank(&bank);

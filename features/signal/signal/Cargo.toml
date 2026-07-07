@@ -16,7 +16,7 @@ signal-import.workspace = true
 signal-live.workspace = true
 signal-proto.workspace = true
 signal-storage.workspace = true
-nam-manager.workspace = true
+signal-nam.workspace = true
 daw = { workspace = true, optional = true }
 tokio.workspace = true
 moire.workspace = true

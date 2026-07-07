@@ -79,7 +79,7 @@ pub mod macro_system;
 pub mod macro_templates;
 
 // Re-export macromod types for unified macro system
-pub use macromod::{
+pub use signal_macromod::{
     binding::MacroBinding,
     easing::EasingCurve,
     macro_bank::{GroupSelector, MacroBank, MacroGroup, MacroKnob},
