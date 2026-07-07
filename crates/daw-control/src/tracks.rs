@@ -478,6 +478,16 @@ impl TrackHandle {
         Ok(())
     }
 
+    /// Set the track's record-input source (hardware audio channel, MIDI, or
+    /// raw REAPER `I_RECINPUT`). Mirrors [`set_input_monitor`](Self::set_input_monitor).
+    pub async fn set_record_input(&self, input: daw_proto::track::RecordInput) -> Result<()> {
+        self.clients
+            .track
+            .set_record_input(self.context(), self.track_ref(), input)
+            .await??;
+        Ok(())
+    }
+
     /// Set polarity / phase invert.
     pub async fn set_phase_inverted(&self, inverted: bool) -> Result<()> {
         self.clients
