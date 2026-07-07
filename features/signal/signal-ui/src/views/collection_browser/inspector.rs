@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 
 use crate::components::dynamic_grid::{GridSelection, GridSlot};
+use crate::components::{Knob, KnobSize};
 
 #[derive(Props, Clone, PartialEq)]
 pub(super) struct BlockInspectorPanelProps {
@@ -68,32 +69,31 @@ pub(super) fn BlockInspectorPanel(props: BlockInspectorPanelProps) -> Element {
                             div { class: "px-3 py-2 space-y-1.5",
                                 style: "border-top: 1px solid rgba(255,255,255,0.06);",
                                 SectionHeader { size: SectionHeaderSize::Small, class: "mb-1", label: "Parameters ({slot.parameters.len()})" }
-                                for (name, value) in slot.parameters.iter() {
-                                    {
-                                        let pct = (value * 100.0).round() as u32;
-                                        let name = name.clone();
-                                        let slot_id = slot.id;
-                                        let on_change = props.on_param_change.clone();
-                                        rsx! {
-                                            div { key: "{name}", class: "flex items-center gap-2",
-                                                span { class: "text-[11px] text-zinc-400 w-24 truncate flex-shrink-0", "{name}" }
-                                                input {
-                                                    r#type: "range",
-                                                    min: "0",
-                                                    max: "100",
-                                                    value: "{pct}",
-                                                    class: "flex-1 h-1.5",
-                                                    style: "accent-color: {color.bg};",
-                                                    oninput: move |evt: Event<FormData>| {
-                                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                                            let normalized = (v / 100.0).clamp(0.0, 1.0);
-                                                            if let Some(ref cb) = on_change {
-                                                                cb.call((slot_id, name.clone(), normalized));
-                                                            }
+                                div { class: "flex flex-wrap gap-3 justify-center py-1",
+                                    for (name, value) in slot.parameters.iter() {
+                                        {
+                                            let pct = (value * 100.0).round() as u32;
+                                            let name = name.clone();
+                                            let label = name.clone();
+                                            let slot_id = slot.id;
+                                            let val = *value as f64;
+                                            let accent = color.bg.to_string();
+                                            let on_change = props.on_param_change.clone();
+                                            rsx! {
+                                                Knob {
+                                                    key: "{name}",
+                                                    value: val,
+                                                    size: KnobSize::Medium,
+                                                    label: label,
+                                                    display_value: format!("{pct}%"),
+                                                    color: accent,
+                                                    on_change: move |v: f64| {
+                                                        let normalized = v.clamp(0.0, 1.0) as f32;
+                                                        if let Some(ref cb) = on_change {
+                                                            cb.call((slot_id, name.clone(), normalized));
                                                         }
                                                     },
                                                 }
-                                                span { class: "text-[10px] text-zinc-600 w-8 text-right flex-shrink-0", "{pct}%" }
                                             }
                                         }
                                     }

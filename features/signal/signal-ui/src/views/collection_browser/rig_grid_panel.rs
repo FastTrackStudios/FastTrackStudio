@@ -53,7 +53,16 @@ pub fn RigGridPanel(props: RigGridPanelProps) -> Element {
         );
         chain.set(props.initial_slots.clone());
         last_initial.set(props.initial_slots.clone());
-        selection.set(None);
+        // Preserve the selection across live-state updates (bypass / param
+        // changes keep the same slot ids) so the inspector and Space-toggle
+        // don't flicker; only drop it if the selected block actually vanished.
+        let sel_gone = match selection() {
+            Some(GridSelection::Block(id)) => !props.initial_slots.iter().any(|s| s.id == id),
+            _ => false,
+        };
+        if sel_gone {
+            selection.set(None);
+        }
         connections.set(Vec::new());
     }
 

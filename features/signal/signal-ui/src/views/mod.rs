@@ -4,9 +4,11 @@
 //! to fetch data, manage state, and compose the dumb [`crate::components`]
 //! building blocks into full editor/browser views.
 
+mod audio_settings;
 mod block_detail;
 mod block_editor;
 mod collection_browser;
+mod guitar_rig;
 mod metadata_display;
 mod module_view;
 mod rig_preset_canvas;
@@ -45,6 +47,11 @@ pub use collection_browser::{
     LayerFlowData, ModuleChainData, RigGridPanel, engines_to_grid_slots, resolve_layer_engines,
     resolve_scene_engines, rig_type_to_engine_type,
 };
+pub use audio_settings::{
+    AudioDevice, AudioPrefs, AudioSettingsBridge, AudioSettingsModal, LiveBlock, PerfStack, PerformanceModel,
+    RigAudioHandle,
+};
+pub use guitar_rig::GuitarRigView;
 pub use metadata_display::MetadataDisplay;
 pub use module_view::{ModuleView, ModuleViewMode, ParamChange};
 pub use rig_preset_canvas::RigPresetCanvas;

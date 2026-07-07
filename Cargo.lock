@@ -815,6 +815,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "audiocore-dsp"
+version = "0.1.0"
+dependencies = [
+ "ebur128",
+]
+
+[[package]]
 name = "audiocore-gui"
 version = "0.1.0"
 dependencies = [
@@ -941,7 +948,7 @@ dependencies = [
  "bitflags 2.11.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -1512,6 +1519,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chorus-dsp"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1750,6 +1764,20 @@ checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "comp"
+version = "0.1.0"
+dependencies = [
+ "comp-dsp",
+]
+
+[[package]]
+name = "comp-dsp"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
 ]
 
 [[package]]
@@ -2481,6 +2509,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dasp_frame"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a3937f5fe2135702897535c8d4a5553f8b116f76c1529088797f2eee7c5cd6"
+dependencies = [
+ "dasp_sample",
+]
+
+[[package]]
 name = "dasp_sample"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2754,6 +2791,21 @@ checksum = "73770f8e1fe7d64df17ca66ad28994a0a623ea497fa69486e14984e715c5d174"
 dependencies = [
  "adler32",
  "byteorder",
+]
+
+[[package]]
+name = "delay"
+version = "0.1.0"
+dependencies = [
+ "delay-dsp",
+]
+
+[[package]]
+name = "delay-dsp"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "eq-dsp",
 ]
 
 [[package]]
@@ -3584,6 +3636,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "ebur128"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e227cc62d64d6fe01abbef48134b9c1f17d470cef1e7a56337ad05b1f81df7f9"
+dependencies = [
+ "bitflags 1.3.2",
+ "dasp_frame",
+ "dasp_sample",
+ "smallvec 1.15.1",
+]
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3641,6 +3705,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "eq"
+version = "0.1.0"
+dependencies = [
+ "eq-dsp",
+]
+
+[[package]]
+name = "eq-dsp"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
 ]
 
 [[package]]
@@ -4127,6 +4205,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast-interleave"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0a5ab837f0983c0a9210d7847931f64e3be67fcb0ab93d625f7845a0132c825"
+
+[[package]]
 name = "fast-srgb8"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4168,6 +4252,17 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fixed-resample"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e548b80c8a294b230847d73ae8e53d1b2d5b407a1a9ec51c9698a761c4610b1"
+dependencies = [
+ "arrayvec",
+ "fast-interleave",
+ "rubato",
+]
 
 [[package]]
 name = "flacenc"
@@ -4349,6 +4444,13 @@ dependencies = [
 [[package]]
 name = "fts-devtools"
 version = "0.1.0"
+
+[[package]]
+name = "fts-modulation"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+]
 
 [[package]]
 name = "fts-story-core"
@@ -6616,6 +6718,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "modulation"
+version = "0.1.0"
+dependencies = [
+ "chorus-dsp",
+ "trem-dsp",
+ "wah-dsp",
+]
+
+[[package]]
 name = "moire"
 version = "1.0.0"
 source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
@@ -7058,6 +7169,15 @@ dependencies = [
  "rand 0.8.6",
  "smallvec 1.15.1",
  "zeroize",
+]
+
+[[package]]
+name = "num-complex"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -8430,6 +8550,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "primal-check"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc0d895b311e3af9902528fbb8f928688abbd95872819320517cc24ca6b2bd08"
+dependencies = [
+ "num-integer",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8891,6 +9020,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "realfft"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f821338fddb99d089116342c46e9f1fbf3828dba077674613e734e01d6ea8677"
+dependencies = [
+ "rustfft",
+]
+
+[[package]]
 name = "reaper-common-types"
 version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
@@ -9125,6 +9263,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverb"
+version = "0.1.0"
+dependencies = [
+ "reverb-dsp",
+]
+
+[[package]]
+name = "reverb-dsp"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "crossbeam-channel",
+ "eq-dsp",
+ "realfft",
+ "symphonium",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rfd"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9251,6 +9408,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ade083ccbb4bf536df69d1f6432cc23deb7acccff86b183f3923a6fd56a1153"
 
 [[package]]
+name = "rubato"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5258099699851cfd0082aeb645feb9c084d9a5e1f1b8d5372086b989fc5e56a1"
+dependencies = [
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "realfft",
+]
+
+[[package]]
 name = "rust_decimal"
 version = "1.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9292,6 +9461,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
+]
+
+[[package]]
+name = "rustfft"
+version = "6.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21db5f9893e91f41798c88680037dba611ca6674703c1a18601b01a72c8adb89"
+dependencies = [
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "primal-check",
+ "strength_reduce",
+ "transpose",
 ]
 
 [[package]]
@@ -9951,6 +10134,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-fx"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "comp",
+ "delay",
+ "eq",
+ "modulation",
+ "reverb",
+ "signal-plugin-host",
+]
+
+[[package]]
 name = "signal-guitar"
 version = "0.1.0"
 dependencies = [
@@ -10164,6 +10360,7 @@ dependencies = [
  "neural-amp-modeler",
  "ratatui",
  "rayon",
+ "signal-fx",
  "signal-plugin-host",
  "signal-proto",
  "symphonia",
@@ -10732,6 +10929,12 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "strength_reduce"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
 
 [[package]]
 name = "strict-num"
@@ -11308,6 +11511,18 @@ checksum = "ee27c85ab799a338446b68eec77abf42e1a6f1bb490656e121c6e27bfbab9f16"
 dependencies = [
  "symphonia-core",
  "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonium"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94700d892b055c7c25e2fc5319b43d59434119627a08a5096cdcd0fe5345914f"
+dependencies = [
+ "fast-interleave",
+ "fixed-resample",
+ "log",
+ "symphonia",
 ]
 
 [[package]]
@@ -11961,6 +12176,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "transpose"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
+dependencies = [
+ "num-integer",
+ "strength_reduce",
+]
+
+[[package]]
 name = "tray-icon"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11979,6 +12204,14 @@ dependencies = [
  "png 0.17.16",
  "thiserror 2.0.18",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "trem-dsp"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "fts-modulation",
 ]
 
 [[package]]
@@ -12635,6 +12868,14 @@ version = "0.1.0"
 source = "git+https://github.com/robbert-vdh/vst3-sys.git?branch=fix%2Fdrop-box-from-raw#b3ff4d775940f5b476b9d1cca02a90e07e1922a2"
 dependencies = [
  "vst3-com",
+]
+
+[[package]]
+name = "wah-dsp"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "fts-modulation",
 ]
 
 [[package]]
@@ -14617,11 +14858,3 @@ checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
 dependencies = [
  "zune-core",
 ]
-
-[[patch.unused]]
-name = "audiocore-dsp"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "eq-dsp"
-version = "0.1.0"

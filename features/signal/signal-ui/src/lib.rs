@@ -54,4 +54,7 @@ pub use hooks::use_signal_service;
 pub use panel_registration::register_panels;
 pub use processing_chain::ProcessingChain;
 pub use shell::SignalRoot;
-pub use views::SignalSlider;
+pub use views::{
+    AudioDevice, AudioPrefs, AudioSettingsBridge, AudioSettingsModal, GuitarRigView, LiveBlock,
+    PerfStack, PerformanceModel, RigAudioHandle, SignalSlider,
+};

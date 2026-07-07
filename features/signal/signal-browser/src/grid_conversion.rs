@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use signal::SignalChain;
+use signal::template::{RigTemplate, SignalChainTemplate, SignalNodeTemplate};
 
 use crate::types::{EngineFlowData, GridSlot, ModuleChainData};
 
@@ -416,3 +417,166 @@ fn find_free_module_row(
 }
 
 // endregion: --- Converters
+
+// region: --- Template converters
+
+/// Flatten a rig *template* (an all-unassigned structural blueprint) into grid
+/// slots for the interactive `DynamicGridView`.
+///
+/// Unlike [`engines_to_grid_slots`], which operates on resolved rig data, this
+/// walks the template hierarchy directly (engines → layers → modules → template
+/// nodes). Every emitted slot is marked `is_template = true` so the grid renders
+/// each block as a dashed placeholder awaiting a plugin/preset assignment.
+///
+/// Layout mirrors the resolved converters: modules flow left→right, wrap at
+/// [`SOFT_MAX_COLS`], and `Split` nodes fan their wet lanes into parallel rows.
+/// Empty lanes (dry pass-through) are skipped, exactly as in
+/// [`flatten_chain_nodes`].
+pub fn template_to_grid_slots(rig: &RigTemplate) -> Vec<GridSlot> {
+    let mut slots = Vec::new();
+    let mut engine_base_row: usize = 0;
+
+    for engine in &rig.engines {
+        let engine_key = engine.name.clone();
+        let mut engine_height: usize = 1;
+        // Each layer is laid out in its own horizontal band, offset to the right
+        // of the previous layer within this engine.
+        let mut layer_col_offset: usize = 0;
+
+        for layer in &engine.layers {
+            let layer_key = format!("{}/{}", engine.name, layer.name);
+            let mut col = layer_col_offset;
+            let mut base_row = engine_base_row;
+
+            for module in &layer.modules {
+                let module_key = format!("{}/{}/{}", engine.name, layer.name, module.name);
+                let width = count_template_width(&module.chain.nodes);
+
+                // Wrap to the next row band when this module would overflow.
+                if col > layer_col_offset && col + width > layer_col_offset + SOFT_MAX_COLS {
+                    col = layer_col_offset;
+                    base_row += ROW_BAND_STRIDE;
+                }
+
+                let before = slots.len();
+                let mut cursor = col;
+                flatten_template_nodes(
+                    &module.chain.nodes,
+                    &module_key,
+                    Some(&layer_key),
+                    Some(&engine_key),
+                    Some(module.module_type),
+                    &mut cursor,
+                    base_row,
+                    &mut slots,
+                );
+                col = cursor;
+
+                for s in &slots[before..] {
+                    engine_height = engine_height.max((s.row + 1).saturating_sub(engine_base_row));
+                }
+            }
+
+            // Next layer starts to the right of everything placed so far.
+            let placed_max_col = slots.iter().map(|s| s.col).max();
+            layer_col_offset = placed_max_col.map_or(layer_col_offset, |c| c + 2);
+        }
+
+        engine_base_row += engine_height + 1;
+    }
+
+    slots
+}
+
+/// Column width a template chain needs (for wrap decisions). Mirror of
+/// [`count_chain_width`] for template nodes.
+fn count_template_width(nodes: &[SignalNodeTemplate]) -> usize {
+    let mut width = 0;
+    for node in nodes {
+        match node {
+            SignalNodeTemplate::Block(_) => width += 1,
+            SignalNodeTemplate::Split { lanes } => {
+                let max_lane_width = lanes
+                    .iter()
+                    .filter(|lane| !lane.nodes.is_empty())
+                    .map(|lane| count_template_width(&lane.nodes))
+                    .max()
+                    .unwrap_or(0);
+                width += max_lane_width;
+            }
+        }
+    }
+    width
+}
+
+/// Recursively flatten template nodes into template placeholder slots. Mirror of
+/// [`flatten_chain_nodes`] but reads `SignalNodeTemplate` and emits
+/// `is_template = true` slots with no parameters.
+#[allow(clippy::too_many_arguments)]
+fn flatten_template_nodes(
+    nodes: &[SignalNodeTemplate],
+    module_key: &str,
+    layer_key: Option<&str>,
+    engine_key: Option<&str>,
+    module_type: Option<signal::ModuleType>,
+    col_cursor: &mut usize,
+    base_row: usize,
+    slots: &mut Vec<GridSlot>,
+) {
+    for node in nodes {
+        match node {
+            SignalNodeTemplate::Block(bt) => {
+                slots.push(GridSlot {
+                    id: uuid::Uuid::new_v4(),
+                    block_type: bt.block_type,
+                    block_preset_name: Some(bt.name.clone()),
+                    plugin_name: None,
+                    col: *col_cursor,
+                    row: base_row,
+                    module_group: Some(module_key.to_string()),
+                    module_type,
+                    layer_group: layer_key.map(|s| s.to_string()),
+                    engine_group: engine_key.map(|s| s.to_string()),
+                    is_template: true,
+                    bypassed: false,
+                    is_phantom: false,
+                    parameters: Vec::new(),
+                    preset_id: None,
+                    snapshot_id: None,
+                });
+                *col_cursor += 1;
+            }
+            SignalNodeTemplate::Split { lanes } => {
+                let split_start_col = *col_cursor;
+                let mut max_col = split_start_col;
+
+                let wet: Vec<&SignalChainTemplate> =
+                    lanes.iter().filter(|l| !l.nodes.is_empty()).collect();
+                let wet_count = wet.len();
+                let vert_offset = wet_count.saturating_sub(1) / 2;
+
+                for (i, lane) in wet.iter().enumerate() {
+                    let lane_row = (base_row + i).saturating_sub(vert_offset);
+                    let mut lane_col = split_start_col;
+                    flatten_template_nodes(
+                        &lane.nodes,
+                        module_key,
+                        layer_key,
+                        engine_key,
+                        module_type,
+                        &mut lane_col,
+                        lane_row,
+                        slots,
+                    );
+                    if lane_col > max_col {
+                        max_col = lane_col;
+                    }
+                }
+
+                *col_cursor = max_col;
+            }
+        }
+    }
+}
+
+// endregion: --- Template converters

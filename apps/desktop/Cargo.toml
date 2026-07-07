@@ -22,7 +22,10 @@ dev = ["dioxus/desktop"]
 [dependencies]
 signal.workspace = true
 midicore.workspace = true
-signal-sampler.workspace = true
+# `pipewire` gives the native PipeWire duplex backend (shared device access, no
+# exclusive-ALSA "device busy"). Same as apps/amp. Requires libpipewire at
+# build/link time (provided by the flake dev shell).
+signal-sampler = { workspace = true, features = ["pipewire"] }
 signal-ui = { workspace = true, default-features = false, features = ["desktop"] }
 # Blitz renderer — same pipeline as fts-signal-plugin (VST3/CLAP).
 # Do NOT enable dioxus/desktop here; that pulls in WebKit/WRY which conflicts.

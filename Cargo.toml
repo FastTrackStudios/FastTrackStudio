@@ -19,16 +19,32 @@ members = [
     # ── DSP / plugin / integration feature folders ──
     "features/sampler/signal-sampler",
     "features/sampler/signal-sampler-clap",
-    "features/guitar",
-    "features/keys",
-    "features/orchestra",
-    "features/drums",
-    "features/synth",
+    "features/rigs/guitar",
+    "features/rigs/keys",
+    "features/rigs/orchestra",
+    "features/rigs/drums",
+    "features/rigs/synth",
     "features/plugin-host",
     "features/nam",
     "features/macromod",
     "features/reaper/signal-extension",
     "features/reaper/signal-reaper-controller",
+    # ── features/fx — built-in FX (vendored from FTS plugin repos) ──
+    # Facade crates (eq / comp / reverb / delay) are the public deps; the
+    # -dsp crates are internal (like signal-proto under the signal facade).
+    "features/fx/eq/eq",
+    "features/fx/eq/eq-dsp",
+    "features/fx/comp/comp",
+    "features/fx/comp/comp-dsp",
+    "features/fx/reverb/reverb",
+    "features/fx/reverb/reverb-dsp",
+    "features/fx/delay/delay",
+    "features/fx/delay/delay-dsp",
+    "features/fx/modulation/modulation",
+    "features/fx/modulation/chorus-dsp",
+    "features/fx/modulation/trem-dsp",
+    "features/fx/modulation/wah-dsp",
+    "features/fx/signal-fx",
     "xtask",
 ]
 resolver = "2"
@@ -68,17 +84,34 @@ signal-extension = { path = "features/reaper/signal-extension" }
 signal-macromod = { path = "features/macromod" }
 signal-plugin-host  = { path = "features/plugin-host", default-features = false }
 signal-sampler      = { path = "features/sampler/signal-sampler" }
-signal-guitar       = { path = "features/guitar" }
-signal-keys         = { path = "features/keys" }
-signal-orchestra    = { path = "features/orchestra" }
-signal-drums        = { path = "features/drums" }
-signal-synth        = { path = "features/synth" }
+signal-guitar       = { path = "features/rigs/guitar" }
+signal-keys         = { path = "features/rigs/keys" }
+signal-orchestra    = { path = "features/rigs/orchestra" }
+signal-drums        = { path = "features/rigs/drums" }
+signal-synth        = { path = "features/rigs/synth" }
 
-# ── DSP crates (split FTS plugin repos) ───────────────────────────────
-# Using local paths directly (same as [patch] overrides) to avoid
-# git submodule fetch issues with stale nih-plug submodule rev.
-eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
+# ── FX DSP crates (vendored into features/fx/) ────────────────────────
+# The built-in FX for signal, migrated from the standalone FTS plugin repos.
+# `audiocore-dsp` (the shared primitives) stays a path-dep to FTS-Audiocore
+# since daw links it too — one workspace entry, one place to bump.
+# Facade crates — the public FX deps (downstream uses these, not `*-dsp`).
+eq = { path = "features/fx/eq/eq" }
+comp = { path = "features/fx/comp/comp" }
+reverb = { path = "features/fx/reverb/reverb" }
+delay = { path = "features/fx/delay/delay" }
+modulation = { path = "features/fx/modulation/modulation" }
+# Internal DSP cores (behind the facades).
+eq-dsp = { path = "features/fx/eq/eq-dsp" }
+comp-dsp = { path = "features/fx/comp/comp-dsp" }
+reverb-dsp = { path = "features/fx/reverb/reverb-dsp" }
+delay-dsp = { path = "features/fx/delay/delay-dsp" }
+chorus-dsp = { path = "features/fx/modulation/chorus-dsp" }
+trem-dsp = { path = "features/fx/modulation/trem-dsp" }
+wah-dsp = { path = "features/fx/modulation/wah-dsp" }
+signal-fx = { path = "features/fx/signal-fx" }
+# Shared FTS-Audiocore primitives — path-deps (daw links them too); one entry.
 audiocore-dsp = { path = "../Plugins/FTS-Audiocore/crates/audiocore-dsp" }
+fts-modulation = { path = "../Plugins/FTS-Audiocore/crates/fts-modulation" }
 # Neural Amp Modeler — safe Rust bindings to NeuralAmpModelerCore. Drives
 # the built-in `FxBackend::Nam` slot in signal-sampler's FX chain so any
 # block (Amp / Drive / Cabinet) can opt into a NAM kind by loading a
@@ -233,7 +266,7 @@ actions-proto = { path = "../input_actions/crates/actions-proto" }
 
 # ── Split FTS plugin repo local overrides ───────────────────────────────
 [patch."https://git.starcommand.live/FastTrackStudios/FTS-Plugins.git"]
-eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
+eq-dsp = { path = "features/fx/eq/eq-dsp" }
 audiocore-dsp = { path = "../Plugins/FTS-Audiocore/crates/audiocore-dsp" }
 audiocore-gui = { path = "../Plugins/FTS-Audiocore/crates/audiocore-gui" }
 audiocore-core = { path = "../Plugins/FTS-Audiocore/crates/audiocore-core" }

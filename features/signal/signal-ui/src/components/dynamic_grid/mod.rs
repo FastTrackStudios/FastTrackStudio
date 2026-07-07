@@ -104,6 +104,16 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
         }
     };
 
+    // Re-measure the viewport a few times shortly after mount so the auto-fit
+    // uses the *settled* container size (the first measurement can happen before
+    // the flex layout finishes, leaving the grid zoomed-out until a scroll).
+    use_future(move || async move {
+        for ms in [80u64, 250, 600] {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            update_viewport();
+        }
+    });
+
     // Use committed_chain if it exists, otherwise use props.chain
     let chain_snapshot: Vec<GridSlot> = {
         let committed = committed_chain.read();
