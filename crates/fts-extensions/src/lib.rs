@@ -707,6 +707,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         session::take_ranking::register_actions(&daw_reaper::Reaper);
         session::record_actions::register_actions(&daw_reaper::Reaper);
         session::group_actions::register_actions(&daw_reaper::Reaper);
+        dynamic_template::daw_module::register_architect_actions(&daw_reaper::Reaper);
     }
 
     let app = APP.get().unwrap().get();
