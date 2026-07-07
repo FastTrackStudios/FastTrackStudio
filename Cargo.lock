@@ -208,6 +208,7 @@ dependencies = [
 name = "architect"
 version = "0.1.0"
 dependencies = [
+ "architect-action-derive",
  "architect-atom",
  "architect-derive",
  "architect-form",
@@ -234,6 +235,17 @@ dependencies = [
  "vox-types",
  "wasm-bindgen-futures",
  "web-time",
+]
+
+[[package]]
+name = "architect-action-derive"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "clap",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]

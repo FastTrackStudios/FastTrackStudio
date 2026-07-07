@@ -49,6 +49,11 @@ pub use architect_rpc_derive::rpc;
 // macro namespace, trait in the type namespace).
 pub use architect_rpc_derive::HasDispatcher;
 
+// `#[architect::actions]` — named-command traits (REAPER-style: id,
+// description, category, group), backend-agnostic registration. See
+// the `action` module for the runtime contract.
+pub use architect_action_derive::actions;
+
 // Re-export facet unconditionally — every architect-emitted struct
 // uses it for wire encoding regardless of whether RPC is in play.
 pub use facet;
@@ -853,6 +858,66 @@ pub mod dispatch {
             let result = futures_lite::future::block_on(fut).unwrap();
             assert_eq!(result, payload);
         }
+    }
+}
+
+pub mod action {
+    //! Runtime support for `#[architect::actions]` — named-command
+    //! traits (REAPER-style: a stable id, a human description, a
+    //! category + group for menu/CLI placement) that are triggered, not
+    //! queried. Distinct from `#[architect::rpc]`, which models data
+    //! operations with arguments and return values.
+    //!
+    //! architect has zero awareness of any particular host here — no
+    //! REAPER, no CLI framework. [`ActionBackend`] is the seam: a REAPER
+    //! extension implements it to call `reaper_high::Reaper::register_action`
+    //! per [`ActionMeta`]; a CLI binary implements it to build a
+    //! `clap::Command` tree grouped by `category`; a test implements it
+    //! as a plain in-memory map. The macro only emits metadata + a
+    //! generic `register_<trait>_actions(backend, imp)` function that
+    //! feeds one [`ActionMeta`] + handler pair per action into whatever
+    //! `ActionBackend` the caller supplies.
+
+    use std::sync::Arc;
+
+    /// Static metadata for one action, emitted by `#[architect::actions]`
+    /// for every `#[action(...)]`-decorated trait method.
+    ///
+    /// `id` is namespace-prefixed SCREAMING_SNAKE_CASE (e.g.
+    /// `SESSION_LOAD_DEMO_SETLIST`) — the macro derives the namespace
+    /// from the trait name (stripping a trailing `Actions`) unless
+    /// `#[architect::actions(namespace = "...")]` overrides it. This is
+    /// the same convention REAPER named commands already use, so a
+    /// REAPER `ActionBackend` can register `id` directly with no
+    /// translation.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ActionMeta {
+        pub id: &'static str,
+        pub trait_name: &'static str,
+        pub method_name: &'static str,
+        pub display_name: &'static str,
+        pub description: &'static str,
+        /// Empty string when the action declares no `category`. Left as
+        /// a plain `&str` (not `Option`) so callers building a menu/CLI
+        /// tree can group-by directly without an `unwrap_or_default`.
+        pub category: &'static str,
+        pub group: &'static str,
+        pub toggleable: bool,
+    }
+
+    /// Backend-agnostic action registration sink.
+    ///
+    /// `register` is called once per action at startup with a
+    /// `'static`-lifetime `meta` (the macro-emitted `const`) and a
+    /// handler closure that already has the implementor bound in — the
+    /// backend only needs to store `(meta, handler)` and invoke the
+    /// handler by `meta.id` when its host (REAPER, a CLI dispatcher, a
+    /// test) decides to run it. Threading the handler onto the right
+    /// execution context (e.g. REAPER's main thread) is the backend's
+    /// job, not this trait's — reuse [`super::dispatch::Dispatcher`] for
+    /// that inside the backend impl if the host needs it.
+    pub trait ActionBackend: Send + Sync + 'static {
+        fn register(&self, meta: &'static ActionMeta, handler: Arc<dyn Fn() + Send + Sync>);
     }
 }
 
