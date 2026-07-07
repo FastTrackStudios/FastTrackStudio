@@ -59,13 +59,17 @@ impl SetlistActions for FakeSession {
     }
 }
 
+/// One registered (metadata, handler) pair — factored out purely to
+/// satisfy clippy's `type_complexity` lint on the field below.
+type RegisteredAction = (&'static ActionMeta, Arc<dyn Fn() + Send + Sync>);
+
 /// Stand-in for a real host (REAPER named-command table, a CLI
 /// dispatcher). Stores `(meta, handler)` and invokes by id — exactly
 /// the shape `daw-reaper`'s `register_action_main_thread` or a CLI
 /// subcommand handler would wrap.
 #[derive(Default)]
 struct InMemoryActionBackend {
-    registered: Mutex<Vec<(&'static ActionMeta, Arc<dyn Fn() + Send + Sync>)>>,
+    registered: Mutex<Vec<RegisteredAction>>,
 }
 
 impl ActionBackend for InMemoryActionBackend {
