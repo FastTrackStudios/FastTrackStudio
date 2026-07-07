@@ -1,0 +1,22 @@
+[package]
+name = "signal-amp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "signal-amp"
+path = "src/main.rs"
+
+[dependencies]
+# The live single-amp engine (duplex audio + NAM). `pipewire` gives the native
+# PipeWire duplex backend the rig needs for low-latency guitar I/O.
+signal-sampler = { workspace = true, features = ["pipewire"] }
+# Blitz/Vello/wgpu renderer — the same pipeline as the plugin + desktop app,
+# so this UI renders identically when it graduates to the mobile/plugin target.
+nice-plug-dioxus.workspace = true
+dioxus.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

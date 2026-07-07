@@ -9864,6 +9864,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-amp"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "nice-plug-dioxus",
+ "signal-sampler",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "signal-browser"
 version = "0.1.0"
 dependencies = [
