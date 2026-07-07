@@ -192,16 +192,16 @@ pub struct SignalLive<
     St = SceneTemplateRepoLive,
     Ra = RackRepoLive,
 > where
-    B: BlockRepo,
-    M: ModuleRepo,
-    L: LayerRepo,
-    E: EngineRepo,
-    R: RigRepo,
-    P: ProfileRepo,
-    So: SongRepo,
-    Se: SetlistRepo,
-    St: SceneTemplateRepo,
-    Ra: RackRepo,
+    B: BlockRepo + 'static,
+    M: ModuleRepo + 'static,
+    L: LayerRepo + 'static,
+    E: EngineRepo + 'static,
+    R: RigRepo + 'static,
+    P: ProfileRepo + 'static,
+    So: SongRepo + 'static,
+    Se: SetlistRepo + 'static,
+    St: SceneTemplateRepo + 'static,
+    Ra: RackRepo + 'static,
 {
     pub(crate) block_repo: Arc<B>,
     pub(crate) module_repo: Arc<M>,
@@ -218,16 +218,16 @@ pub struct SignalLive<
 
 impl<B, M, L, E, R, P, So, Se, St, Ra> Clone for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
-    B: BlockRepo,
-    M: ModuleRepo,
-    L: LayerRepo,
-    E: EngineRepo,
-    R: RigRepo,
-    P: ProfileRepo,
-    So: SongRepo,
-    Se: SetlistRepo,
-    St: SceneTemplateRepo,
-    Ra: RackRepo,
+    B: BlockRepo + 'static,
+    M: ModuleRepo + 'static,
+    L: LayerRepo + 'static,
+    E: EngineRepo + 'static,
+    R: RigRepo + 'static,
+    P: ProfileRepo + 'static,
+    So: SongRepo + 'static,
+    Se: SetlistRepo + 'static,
+    St: SceneTemplateRepo + 'static,
+    Ra: RackRepo + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -248,16 +248,16 @@ where
 
 impl<B, M, L, E, R, P, So, Se, St, Ra> SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
-    B: BlockRepo,
-    M: ModuleRepo,
-    L: LayerRepo,
-    E: EngineRepo,
-    R: RigRepo,
-    P: ProfileRepo,
-    So: SongRepo,
-    Se: SetlistRepo,
-    St: SceneTemplateRepo,
-    Ra: RackRepo,
+    B: BlockRepo + 'static,
+    M: ModuleRepo + 'static,
+    L: LayerRepo + 'static,
+    E: EngineRepo + 'static,
+    R: RigRepo + 'static,
+    P: ProfileRepo + 'static,
+    So: SongRepo + 'static,
+    Se: SetlistRepo + 'static,
+    St: SceneTemplateRepo + 'static,
+    Ra: RackRepo + 'static,
 {
     pub fn new(
         block_repo: Arc<B>,

@@ -7,16 +7,16 @@ use super::*;
 
 impl<B, M, L, E, R, P, So, Se, St, Ra> RigService for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
-    B: BlockRepo,
-    M: ModuleRepo,
-    L: LayerRepo,
-    E: EngineRepo,
-    R: RigRepo,
-    P: ProfileRepo,
-    So: SongRepo,
-    Se: SetlistRepo,
-    St: SceneTemplateRepo,
-    Ra: RackRepo,
+    B: BlockRepo + 'static,
+    M: ModuleRepo + 'static,
+    L: LayerRepo + 'static,
+    E: EngineRepo + 'static,
+    R: RigRepo + 'static,
+    P: ProfileRepo + 'static,
+    So: SongRepo + 'static,
+    Se: SetlistRepo + 'static,
+    St: SceneTemplateRepo + 'static,
+    Ra: RackRepo + 'static,
 {
     async fn list_rigs(&self) -> Result<Vec<Rig>, SignalServiceError> {
         {
