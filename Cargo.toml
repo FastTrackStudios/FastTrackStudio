@@ -19,9 +19,9 @@ members = [
     # ── DSP / plugin / integration feature folders ──
     "features/sampler/signal-sampler",
     "features/sampler/signal-sampler-clap",
-    "features/signal-plugin-host",
-    "features/signal-nam",
-    "features/signal-macromod",
+    "features/plugin-host",
+    "features/nam",
+    "features/macromod",
     "features/reaper/signal-extension",
     "features/reaper/signal-reaper-controller",
     # signal-daw is parked: it depends on daw-standalone extensions (Block
@@ -60,12 +60,12 @@ signal-live = { path = "features/signal/signal-live" }
 signal-storage = { path = "features/signal/signal-storage" }
 signal-import = { path = "features/signal/signal-import" }
 signal-daw-bridge = { path = "features/signal/signal-daw-bridge" }
-signal-nam = { path = "features/signal-nam" }
+signal-nam = { path = "features/nam" }
 signal-extension = { path = "features/reaper/signal-extension" }
 
 # ── Local utility crates ─────────────────────────────────────────────
-signal-macromod = { path = "features/signal-macromod" }
-signal-plugin-host  = { path = "features/signal-plugin-host", default-features = false }
+signal-macromod = { path = "features/macromod" }
+signal-plugin-host  = { path = "features/plugin-host", default-features = false }
 signal-sampler      = { path = "features/sampler/signal-sampler" }
 
 # ── DSP crates (split FTS plugin repos) ───────────────────────────────
