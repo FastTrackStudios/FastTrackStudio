@@ -169,6 +169,7 @@ pub fn FxBindingPanel(props: FxBindingPanelProps) -> Element {
                 class: "flex flex-col gap-1 max-h-64 overflow-y-auto",
                 for binding in props.bindings.iter() {
                     div {
+                        key: "{binding.module_name}",
                         class: "flex items-center justify-between px-2 py-1.5 rounded text-xs hover:bg-muted",
                         div {
                             class: "flex items-center gap-2",

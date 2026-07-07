@@ -21,7 +21,7 @@ dev = ["dioxus/desktop"]
 
 [dependencies]
 signal.workspace = true
-daw-midi-io.workspace = true
+midicore.workspace = true
 signal-sampler.workspace = true
 signal-ui = { workspace = true, default-features = false, features = ["desktop"] }
 # Blitz renderer — same pipeline as fts-signal-plugin (VST3/CLAP).

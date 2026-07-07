@@ -286,7 +286,7 @@ fn CollectionCard(
                                 div { class: "text-sm font-medium", "{variant_name}" }
                                 p { class: "text-xs text-zinc-600",
                                     for parameter in vb.parameters().iter() {
-                                        span { "{parameter.name()} {parameter.value().get():.2} " }
+                                        span { key: "{parameter.name()}", "{parameter.name()} {parameter.value().get():.2} " }
                                     }
                                 }
                             }

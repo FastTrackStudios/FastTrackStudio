@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+tracing.workspace = true
 # The shared sampler engine expresses the Omnisphere routing tree + render
 # nodes; synth is the Omnisphere definition + patch importer on top.
 signal-sampler.workspace = true

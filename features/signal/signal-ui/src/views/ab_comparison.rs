@@ -331,6 +331,7 @@ pub fn ABComparison(props: ABComparisonProps) -> Element {
                         };
                         rsx! {
                             button {
+                                key: "{filter.label()}",
                                 class: format!("px-2 py-0.5 rounded text-xs font-medium transition-colors {active_class}"),
                                 onclick: move |_| {
                                     if let Some(cb) = &props.on_filter_change {
@@ -373,6 +374,7 @@ pub fn ABComparison(props: ABComparisonProps) -> Element {
 
                 for row in props.rows.iter() {
                     ComparisonRowView {
+                        key: "{row.param_id}",
                         row: row.clone(),
                         on_copy_a_to_b: props.on_copy_a_to_b.clone(),
                         on_copy_b_to_a: props.on_copy_b_to_a.clone(),

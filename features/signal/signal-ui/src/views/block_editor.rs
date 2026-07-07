@@ -353,7 +353,7 @@ fn MiniKnobParam(
                     class: "text-xs font-mono text-zinc-300 text-center bg-zinc-800 border border-zinc-600 rounded w-14 px-1 outline-none focus:border-blue-500",
                     r#type: "text",
                     value: "{edit_text}",
-                    autofocus: true,
+                    "autofocus": true,
                     oninput: move |e| {
                         edit_text.set(e.value());
                     },

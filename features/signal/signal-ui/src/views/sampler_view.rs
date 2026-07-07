@@ -17,7 +17,7 @@
 
 use dioxus::prelude::*;
 
-use daw_midi_io::MidiStream;
+use midicore::midir::MidiStream;
 
 use crate::components::piano::{Piano, WaterfallNote, WaterfallState};
 
@@ -181,19 +181,23 @@ pub fn SamplerView() -> Element {
                 waterfall.write().tick(0.016);
                 // Process MIDI events if a device is connected.
                 if let Some(ref midi) = midi {
-                    for ev in midi.drain() {
-                        if ev.is_note_on() {
-                            let mut an = active_notes.write();
-                            if !an.contains(&ev.note) {
-                                an.push(ev.note);
+                    for raw in midi.drain() {
+                        match raw.to_event() {
+                            Some(midicore::MidiEvent::NoteOn { key, .. }) => {
+                                let note = key.get();
+                                let mut an = active_notes.write();
+                                if !an.contains(&note) {
+                                    an.push(note);
+                                }
+                                drop(an);
+                                waterfall.write().spawn(note, Some("#e8813a".to_string()));
                             }
-                            drop(an);
-                            waterfall
-                                .write()
-                                .spawn(ev.note, Some("#e8813a".to_string()));
-                        } else if ev.is_note_off() {
-                            active_notes.write().retain(|&n| n != ev.note);
-                            waterfall.write().release(ev.note);
+                            Some(midicore::MidiEvent::NoteOff { key, .. }) => {
+                                let note = key.get();
+                                active_notes.write().retain(|&n| n != note);
+                                waterfall.write().release(note);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -536,6 +540,7 @@ fn InstrumentHeader(lib_name: &'static str, patch_name: &'static str) -> Element
                 style: "display:flex; align-items:center; gap:6px; flex-shrink:0;",
                 for (icon, tip) in [("⚙", "Options"), ("💾", "Save"), ("↩", "Reset")] {
                     button {
+                        key: "{icon}",
                         title: "{tip}",
                         style: format!(
                             "width:28px; height:28px; border-radius:5px; \
@@ -720,6 +725,7 @@ fn MapperTab() -> Element {
                     ("C1–B5", "70–100%","ff"),
                 ] {
                     div {
+                        key: "{label}",
                         style: format!(
                             "display:flex; align-items:center; gap:8px; margin-bottom:4px;"
                         ),
@@ -749,7 +755,7 @@ fn MapperTab() -> Element {
                          border-bottom:1px solid {BORDER};"
                     ),
                     for col in ["Sample", "Root", "Lo–Hi Key", "Lo–Hi Vel"] {
-                        span { style: format!("font-size:10px; font-weight:700; color:{TEXT_DIM};"), "{col}" }
+                        span { key: "{col}", style: format!("font-size:10px; font-weight:700; color:{TEXT_DIM};"), "{col}" }
                     }
                 }
                 // Rows
@@ -799,7 +805,7 @@ fn ModulationTab() -> Element {
                          background:{BG_ELEVATED}; padding:5px 10px; border-bottom:1px solid {BORDER};"
                     ),
                     for col in ["Source", "Destination", "Amount"] {
-                        span { style: format!("font-size:10px; font-weight:700; color:{TEXT_DIM};"), "{col}" }
+                        span { key: "{col}", style: format!("font-size:10px; font-weight:700; color:{TEXT_DIM};"), "{col}" }
                     }
                 }
                 for (i, (src, dst, amt)) in [

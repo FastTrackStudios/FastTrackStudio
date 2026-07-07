@@ -2596,17 +2596,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-midi-io"
-version = "0.1.0"
-dependencies = [
- "crossbeam-channel",
- "daw-proto",
- "eyre",
- "midir",
- "tracing",
-]
-
-[[package]]
 name = "daw-module"
 version = "0.1.0"
 dependencies = [
@@ -6537,7 +6526,19 @@ checksum = "6f2dd5c7f8aaf48a76e389068ab25ed80bdbc226b887f9013844c415698c9952"
 name = "midicore"
 version = "0.1.0"
 dependencies = [
+ "midicore-midir",
  "midicore-proto",
+]
+
+[[package]]
+name = "midicore-midir"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "eyre",
+ "midicore-proto",
+ "midir",
+ "tracing",
 ]
 
 [[package]]
@@ -9910,11 +9911,11 @@ dependencies = [
 name = "signal-desktop"
 version = "0.1.0"
 dependencies = [
- "daw-midi-io",
  "dioxus",
  "dock-dioxus",
  "dock-proto",
  "eyre",
+ "midicore",
  "nice-plug-dioxus",
  "signal",
  "signal-sampler",
@@ -10006,9 +10007,9 @@ version = "0.1.0"
 dependencies = [
  "daw",
  "daw-audio-io",
- "daw-midi-io",
  "eyre",
  "libc",
+ "midicore",
  "ratatui",
  "signal-plugin-host",
  "signal-sampler",
@@ -10077,10 +10078,10 @@ dependencies = [
 name = "signal-native"
 version = "0.1.0"
 dependencies = [
- "daw-midi-io",
  "dioxus-native",
  "eyre",
  "futures-timer",
+ "midicore",
  "signal-plugin-host",
  "signal-sampler",
  "signal-ui",
@@ -10150,7 +10151,6 @@ dependencies = [
  "crossbeam-channel",
  "daw",
  "daw-audio-io",
- "daw-midi-io",
  "eyre",
  "facet 0.50.0-rc.1",
  "facet-styx",
@@ -10160,6 +10160,7 @@ dependencies = [
  "keyflow-orchestra",
  "libc",
  "memmap2",
+ "midicore",
  "neural-amp-modeler",
  "ratatui",
  "rayon",
@@ -10219,6 +10220,7 @@ dependencies = [
  "signal-plugin-host",
  "signal-proto",
  "signal-sampler",
+ "tracing",
 ]
 
 [[package]]
@@ -10245,12 +10247,12 @@ version = "0.1.0"
 dependencies = [
  "audio-controls",
  "audiocore-gui",
- "daw-midi-io",
  "dioxus",
  "dock-dioxus",
  "dock-proto",
  "fts-ui",
  "lumen-blocks",
+ "midicore",
  "nice-plug-dioxus",
  "signal",
  "signal-browser",

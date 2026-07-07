@@ -19,7 +19,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use daw_midi_io::MidiStream;
+use midicore::midir::MidiStream;
 use dioxus::prelude::*;
 use signal_sampler::{PreloadProfile, SamplerRig};
 use signal_ui::components::Piano;
@@ -174,14 +174,14 @@ fn PlayerPanel() -> Element {
                     let Some(ref midi) = midi else { continue };
                     for ev in midi.drain() {
                         if ev.is_note_on() {
-                            sampler.note_on(INSTRUMENT_ID, ev.note, ev.velocity);
+                            sampler.note_on(INSTRUMENT_ID, ev.note(), ev.velocity());
                             let mut an = active_notes.write();
-                            if !an.contains(&ev.note) {
-                                an.push(ev.note);
+                            if !an.contains(&ev.note()) {
+                                an.push(ev.note());
                             }
                         } else if ev.is_note_off() {
-                            sampler.note_off(INSTRUMENT_ID, ev.note);
-                            active_notes.write().retain(|&n| n != ev.note);
+                            sampler.note_off(INSTRUMENT_ID, ev.note());
+                            active_notes.write().retain(|&n| n != ev.note());
                         } else if ev.is_cc() {
                             // Forward control changes (e.g. CC64 sustain pedal)
                             // so the engine's damper / pedal logic runs.

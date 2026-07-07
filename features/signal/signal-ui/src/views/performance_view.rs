@@ -80,6 +80,7 @@ pub fn PerfSceneGrid(props: PerfSceneGridProps) -> Element {
                     };
                     rsx! {
                         button {
+                            key: "{scene.id}",
                             class: format!(
                                 "flex flex-col items-center justify-center p-6 rounded-xl transition-all min-h-[100px] {active_class}"
                             ),
@@ -227,6 +228,7 @@ pub fn SnapshotBank(props: SnapshotBankProps) -> Element {
                     };
                     rsx! {
                         button {
+                            key: "{slot.index}",
                             class: format!(
                                 "relative flex flex-col items-center justify-center p-2 rounded-lg border transition-all min-h-[60px] {active_class}"
                             ),

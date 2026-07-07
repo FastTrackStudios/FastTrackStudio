@@ -121,10 +121,11 @@ daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git",
 # exposed via the `daw` facade, so consumed directly from the patched-local daw
 # checkout. The guitar rig (signal-sampler) runs on its DuplexMonitor.
 daw-audio-io = { path = "../daw/features/audio/daw-audio-io", features = ["monitor"] }
-# Reusable hardware MIDI input (device enumeration + one/all/virtual port
-# selection) feeding daw_proto::MidiMessage to a sink. Same patched-local daw
-# checkout; the live strings rig forwards it into daw's live-MIDI ring.
-daw-midi-io = { path = "../daw/features/audio/daw-midi-io" }
+# Canonical MIDI vocabulary + OS (midir) backend. Consumers depend ONLY on the
+# `midicore` facade (never midicore-proto / midicore-midir directly). The live
+# strings/keys rigs open ports via `midicore::midir` and forward the decoded
+# `midicore::MidiEvent` into daw's live-MIDI ring.
+midicore = { path = "../midicore/crates/midicore", features = ["midir"] }
 
 # ── Shared infrastructure ────────────────────────────────────────────
 # audio-controls was removed on feat/ui-showcase (folded into daw-ui); it

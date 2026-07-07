@@ -99,8 +99,8 @@ pub fn ReviewList(
             }
 
             // Review cards
-            for review in visible.iter() {
-                ReviewCard { review: review.clone() }
+            for (i, review) in visible.iter().enumerate() {
+                ReviewCard { key: "{i}", review: review.clone() }
             }
 
             // "Show more" hint

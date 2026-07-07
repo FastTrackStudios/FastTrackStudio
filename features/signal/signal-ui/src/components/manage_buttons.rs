@@ -148,7 +148,7 @@ pub fn CreateSetlistButton(on_created: Option<EventHandler<()>>) -> Element {
                 class: "px-1.5 py-0.5 text-[10px] rounded bg-zinc-800 border border-zinc-600 text-zinc-200 outline-none w-24",
                 placeholder: "Setlist name...",
                 value: "{name_text}",
-                autofocus: true,
+                "autofocus": true,
                 oninput: move |e| name_text.set(e.value()),
                 onkeydown: move |e: KeyboardEvent| {
                     e.stop_propagation();

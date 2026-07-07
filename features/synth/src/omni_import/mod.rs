@@ -300,7 +300,11 @@ mod tests {
         let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
         let midi = [PluginMidiEvent {
             offset: 0,
-            message: daw::service::MidiMessage::note_on(0, 60, 100),
+            message: daw::service::MidiEvent::NoteOn {
+                channel: daw::service::Channel::new(0),
+                key: daw::service::KeyNumber::new(60),
+                velocity: daw::service::Velocity::new(100),
+            },
         }];
         let mut heard = 0.0f32;
         for _ in 0..600 {
@@ -343,7 +347,11 @@ mod tests {
         let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
         let midi = [PluginMidiEvent {
             offset: 0,
-            message: daw::service::MidiMessage::note_on(0, 60, 100),
+            message: daw::service::MidiEvent::NoteOn {
+                channel: daw::service::Channel::new(0),
+                key: daw::service::KeyNumber::new(60),
+                velocity: daw::service::Velocity::new(100),
+            },
         }];
         let mut heard = 0.0f32;
         for b in 0..8 {
@@ -380,7 +388,11 @@ mod tests {
         let (mut l, mut r) = (vec![0.0; 512], vec![0.0; 512]);
         let midi = [PluginMidiEvent {
             offset: 0,
-            message: daw::service::MidiMessage::note_on(0, 60, 100),
+            message: daw::service::MidiEvent::NoteOn {
+                channel: daw::service::Channel::new(0),
+                key: daw::service::KeyNumber::new(60),
+                velocity: daw::service::Velocity::new(100),
+            },
         }];
         let mut heard = 0.0f32;
         for _ in 0..600 {

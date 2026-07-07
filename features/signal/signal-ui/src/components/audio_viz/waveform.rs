@@ -56,6 +56,7 @@ pub fn WaveformDisplay(props: WaveformDisplayProps) -> Element {
                     let left = i as f64 * bar_w;
                     rsx! {
                         div {
+                            key: "{i}",
                             class: format!("{} opacity-80", props.color),
                             style: "position: absolute; left: {left:.1}px; top: {bar_top:.1}px; width: {bar_w:.1}px; height: {bar_full_h:.1}px; border-radius: 1px;",
                         }

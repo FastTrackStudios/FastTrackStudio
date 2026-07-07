@@ -70,6 +70,7 @@ pub fn ContextMenu(props: ContextMenuProps) -> Element {
                         };
                         rsx! {
                             button {
+                                key: "{item.id}",
                                 class: format!(
                                     "w-full flex items-center justify-between px-3 py-1.5 text-xs transition-colors {} {}",
                                     text_class,

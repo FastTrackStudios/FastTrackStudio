@@ -21,7 +21,7 @@ dioxus = { package = "dioxus-native", git = "https://github.com/DioxusLabs/blitz
 signal-ui = { workspace = true, default-features = false, features = ["desktop"] }
 # The sampler player under test + MIDI input.
 signal-sampler.workspace = true
-daw-midi-io.workspace = true
+midicore.workspace = true
 # CLAP plugin host (re-exported through signal-sampler too — direct dep here
 # only for the picker UI types: PluginEntry / PluginParamInfo / scan_plugins).
 signal-plugin-host = { workspace = true, features = ["clap-host"] }

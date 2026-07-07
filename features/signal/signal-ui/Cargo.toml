@@ -11,7 +11,7 @@ fts-ui.workspace = true
 lumen-blocks.workspace = true
 signal.workspace = true
 signal-browser.workspace = true
-daw-midi-io.workspace = true
+midicore.workspace = true
 signal-controller.workspace = true
 signal-daw-bridge.workspace = true
 uuid = { version = "1", features = ["v4"] }

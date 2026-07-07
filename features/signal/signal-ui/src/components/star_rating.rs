@@ -27,6 +27,7 @@ pub fn StarRating(
         span { class: "inline-flex items-center gap-0.5 {class}",
             for i in 1..=5u8 {
                 span {
+                    key: "{i}",
                     class: if i <= score { "text-yellow-400" } else { "text-zinc-600" },
                     if i <= score { "\u{2605}" } else { "\u{2606}" }
                 }
@@ -67,6 +68,7 @@ pub fn StarRatingInput(
             onmouseleave: move |_| hover_score.set(0),
             for i in 1..=5u8 {
                 span {
+                    key: "{i}",
                     class: if i <= display_score { "text-yellow-400 text-lg" } else { "text-zinc-600 text-lg" },
                     class: if !disabled { "hover:scale-110 transition-transform" } else { "" },
                     onmouseenter: {

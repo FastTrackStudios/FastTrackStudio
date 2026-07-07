@@ -107,6 +107,7 @@ pub fn SongEditor(props: SongEditorProps) -> Element {
                         };
                         rsx! {
                             div {
+                                key: "{section.id}",
                                 class: format!(
                                     "flex items-start gap-2 px-2 py-1.5 rounded border cursor-pointer transition-colors {selected_class}"
                                 ),
@@ -225,6 +226,7 @@ pub fn SetlistEditor(props: SetlistEditorProps) -> Element {
                         };
                         rsx! {
                             div {
+                                key: "{song.id}",
                                 class: format!(
                                     "flex items-center gap-3 px-3 py-2 rounded cursor-pointer transition-colors {selected_class}"
                                 ),

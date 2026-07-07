@@ -23,7 +23,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Gauge, Paragraph};
 use signal_keys::KeysRig;
 use signal_sampler::{
-    Container, MidiInputHandle, MidiMessage, MidiSelection, PresetRegistry, RigNode,
+    Container, MidiEvent, MidiInputHandle, MidiSelection, PresetRegistry, RigNode,
 };
 
 const NORD_RED: Color = Color::Rgb(206, 38, 38);
@@ -98,7 +98,7 @@ fn main() -> eyre::Result<()> {
     for port in KeysRig::midi_input_ports() {
         midi_choices.push(MidiChoice {
             label: port.clone(),
-            sel: MidiSelection::Port(port),
+            sel: MidiSelection::NameContains(port),
         });
     }
     midi_choices.push(MidiChoice {
@@ -362,11 +362,11 @@ fn note_for_key(c: char, octave: i32) -> Option<u8> {
 fn fold_monitor_held(monitor: &signal_sampler::MidiMonitor, held: &mut HashSet<u8>) {
     for msg in monitor.recent() {
         match msg {
-            MidiMessage::NoteOn { note, velocity, .. } if velocity > 0 => {
-                held.insert(note);
+            MidiEvent::NoteOn { key, velocity, .. } if velocity.get() > 0 => {
+                held.insert(key.get());
             }
-            MidiMessage::NoteOn { note, .. } | MidiMessage::NoteOff { note, .. } => {
-                held.remove(&note);
+            MidiEvent::NoteOn { key, .. } | MidiEvent::NoteOff { key, .. } => {
+                held.remove(&key.get());
             }
             _ => {}
         }

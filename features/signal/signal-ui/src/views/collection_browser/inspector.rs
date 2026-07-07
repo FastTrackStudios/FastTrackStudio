@@ -75,7 +75,7 @@ pub(super) fn BlockInspectorPanel(props: BlockInspectorPanelProps) -> Element {
                                         let slot_id = slot.id;
                                         let on_change = props.on_param_change.clone();
                                         rsx! {
-                                            div { class: "flex items-center gap-2",
+                                            div { key: "{name}", class: "flex items-center gap-2",
                                                 span { class: "text-[11px] text-zinc-400 w-24 truncate flex-shrink-0", "{name}" }
                                                 input {
                                                     r#type: "range",
@@ -228,7 +228,7 @@ pub(super) fn BlockInspectorPanel(props: BlockInspectorPanelProps) -> Element {
                                 let preset = slot.block_preset_name.as_deref().unwrap_or("—");
                                 let sc = slot.block_type.color();
                                 rsx! {
-                                    div { class: "flex items-center gap-2 pl-2",
+                                    div { key: "{slot.id}", class: "flex items-center gap-2 pl-2",
                                         StatusDot { color: StatusDotColor::Custom(sc.bg.to_string()), size: StatusDotSize::Small }
                                         span { class: "text-zinc-500 truncate", "{bt}" }
                                         span { class: "text-zinc-300 truncate", "{preset}" }

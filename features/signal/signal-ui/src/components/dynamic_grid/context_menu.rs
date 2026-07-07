@@ -208,7 +208,7 @@ fn render_block_menu(
                     class: "w-full px-2 py-1 text-xs bg-background border border-border rounded text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
                     placeholder: "{action_label}",
                     value: "{current_name}",
-                    autofocus: true,
+                    "autofocus": true,
                     oninput: move |evt| save_name.set(evt.value()),
                     onkeydown: {
                         let slot = slot.clone();
@@ -359,7 +359,7 @@ fn render_module_menu(
                     class: "w-full px-2 py-1 text-xs bg-background border border-border rounded text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
                     placeholder: "{action_label}",
                     value: "{current_name}",
-                    autofocus: true,
+                    "autofocus": true,
                     oninput: move |evt| save_name.set(evt.value()),
                     onkeydown: {
                         let slots = module_slots.clone();

@@ -132,6 +132,7 @@ pub fn MidiLearnPanel(props: MidiLearnPanelProps) -> Element {
                         let mapping_id = mapping.id.clone();
                         rsx! {
                             div {
+                                key: "{mapping_id}",
                                 class: "flex items-center justify-between px-2 py-1.5 rounded hover:bg-muted group",
 
                                 div {

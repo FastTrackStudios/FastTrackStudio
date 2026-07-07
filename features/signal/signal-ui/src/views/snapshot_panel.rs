@@ -140,6 +140,7 @@ pub fn SnapshotPanel(props: SnapshotPanelProps) -> Element {
                         let snap_id2 = snap.id.clone();
                         rsx! {
                             div {
+                                key: "{snap_id}",
                                 class: "flex items-center justify-between px-2 py-1.5 rounded hover:bg-muted group",
 
                                 div {

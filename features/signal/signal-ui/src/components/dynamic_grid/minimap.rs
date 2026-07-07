@@ -68,6 +68,7 @@ pub fn Minimap(props: MinimapProps) -> Element {
                     let h = cell_h.max(2.0);
                     rsx! {
                         div {
+                            key: "{slot.col}-{slot.row}",
                             class: "absolute rounded-[1px]",
                             style: "left: {x:.1}px; top: {y:.1}px; width: {w:.1}px; height: {h:.1}px; background-color: {slot.color}; opacity: 0.7;",
                         }

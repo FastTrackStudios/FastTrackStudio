@@ -14,7 +14,7 @@
 
 use dioxus::prelude::*;
 
-use daw_midi_io::MidiStream;
+use midicore::midir::MidiStream;
 use signal::{Signal, connect_db_seeded};
 #[cfg(not(feature = "dev"))]
 use signal_sampler::SamplerRig;

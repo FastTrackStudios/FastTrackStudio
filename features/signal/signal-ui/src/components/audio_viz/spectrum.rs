@@ -40,7 +40,7 @@ pub fn SpectrumAnalyzer(props: SpectrumAnalyzerProps) -> Element {
             class: format!("relative overflow-hidden rounded bg-muted/30 flex items-end {}", props.class),
             style: "width: {w}px; height: {h}px; gap: {gap}px;",
 
-            for bin in props.bins.iter() {
+            for (i, bin) in props.bins.iter().enumerate() {
                 {
                     let mag = bin.clamp(0.0, 1.0);
                     let bar_h = (mag * hf).max(1.0);
@@ -54,6 +54,7 @@ pub fn SpectrumAnalyzer(props: SpectrumAnalyzerProps) -> Element {
                     };
                     rsx! {
                         div {
+                            key: "{i}",
                             class: "rounded-t transition-all duration-75",
                             style: format!("width: {bar_w:.1}px; height: {bar_h:.1}px; {color}"),
                         }

@@ -92,6 +92,7 @@ pub fn ProfileList(props: ProfileListProps) -> Element {
                         };
                         rsx! {
                             button {
+                                key: "{profile.id}",
                                 class: format!("flex items-center justify-between px-2 py-1.5 rounded text-left transition-colors {selected_class}"),
                                 onclick: move |_| {
                                     if let Some(cb) = &props.on_select {
@@ -114,6 +115,7 @@ pub fn ProfileList(props: ProfileListProps) -> Element {
                                         class: "flex gap-0.5",
                                         for tag in profile.tags.iter().take(2) {
                                             span {
+                                                key: "{tag}",
                                                 class: "px-1 py-0.5 rounded text-[9px] bg-muted text-muted-foreground",
                                                 "{tag}"
                                             }
@@ -185,6 +187,7 @@ pub fn PatchEditor(props: PatchEditorProps) -> Element {
                         };
                         rsx! {
                             div {
+                                key: "{patch.id}",
                                 class: format!(
                                     "flex items-center gap-2 px-3 py-2 rounded border cursor-pointer transition-colors {selected_class}"
                                 ),
@@ -240,6 +243,7 @@ pub fn PatchEditor(props: PatchEditorProps) -> Element {
                         class: "flex flex-col gap-1",
                         for ovr in props.overrides.iter() {
                             div {
+                                key: "{ovr.param_name}",
                                 class: "flex items-center justify-between px-2 py-1 rounded text-xs hover:bg-muted",
                                 span {
                                     class: "font-medium",

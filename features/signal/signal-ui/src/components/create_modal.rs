@@ -256,7 +256,7 @@ pub fn CreateModal(
                             r#type: "text",
                             placeholder: "{config.name_placeholder}",
                             value: "{name}",
-                            autofocus: true,
+                            "autofocus": true,
                             oninput: move |e| name.set(e.value().clone()),
                             onkeydown: {
                                 let mut do_submit = do_submit.clone();

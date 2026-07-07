@@ -132,6 +132,7 @@ pub fn AutomationLane(props: AutomationLaneProps) -> Element {
                             let y = (1.0 - pct) * hf;
                             rsx! {
                                 line {
+                                    key: "{pct}",
                                     x1: "0",
                                     y1: "{y:.1}",
                                     x2: "{wf}",
@@ -162,6 +163,7 @@ pub fn AutomationLane(props: AutomationLaneProps) -> Element {
                             let cy = ((1.0 - point.value) * hf).clamp(0.0, hf);
                             rsx! {
                                 circle {
+                                    key: "{point.time}",
                                     cx: "{cx:.1}",
                                     cy: "{cy:.1}",
                                     r: "3",
@@ -219,6 +221,7 @@ pub fn AutomationLaneList(props: AutomationLaneListProps) -> Element {
             class: format!("flex flex-col border-t border-border {}", props.class),
             for lane in props.lanes.iter() {
                 AutomationLane {
+                    key: "{lane.id}",
                     lane: lane.clone(),
                     time_range: props.time_range,
                     width: props.width,

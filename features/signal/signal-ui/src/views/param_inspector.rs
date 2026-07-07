@@ -339,6 +339,7 @@ pub fn ParamInspector(props: ParamInspectorProps) -> Element {
 
                 for row in props.params.iter() {
                     ParamRowView {
+                        key: "{row.id}",
                         row: row.clone(),
                         on_value_change: props.on_value_change.clone(),
                     }

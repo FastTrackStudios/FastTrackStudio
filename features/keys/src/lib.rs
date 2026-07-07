@@ -28,6 +28,36 @@ use signal_sampler::MidiMonitor;
 use signal_sampler::node_render::RenderNode;
 use signal_sampler::rig_node::Container;
 
+/// Build a channel-0 `MidiEvent::NoteOn` from raw note/velocity.
+fn ev_note_on(note: u8, vel: u8) -> midicore::MidiEvent {
+    use midicore::{Channel, KeyNumber, MidiEvent, Velocity};
+    MidiEvent::NoteOn {
+        channel: Channel::new(0),
+        key: KeyNumber::new(note),
+        velocity: Velocity::new(vel),
+    }
+}
+
+/// Build a channel-0 `MidiEvent::NoteOff` from a raw note.
+fn ev_note_off(note: u8) -> midicore::MidiEvent {
+    use midicore::{Channel, KeyNumber, MidiEvent, Velocity};
+    MidiEvent::NoteOff {
+        channel: Channel::new(0),
+        key: KeyNumber::new(note),
+        velocity: Velocity::new(0),
+    }
+}
+
+/// Build a channel-0 `MidiEvent::ControlChange` from raw controller/value.
+fn ev_cc(controller: u8, value: u8) -> midicore::MidiEvent {
+    use midicore::{Channel, ControllerNumber, ControllerValue, MidiEvent};
+    MidiEvent::ControlChange {
+        channel: Channel::new(0),
+        controller: ControllerNumber::new(controller),
+        value: ControllerValue::new(value),
+    }
+}
+
 /// Block size the keys instrument is prepared for.
 const PREPARE_BLOCK: u32 = 1024;
 const KEYS_PROJECT_NAME: &str = "FTS Keys";
@@ -188,46 +218,44 @@ impl KeysRig {
 
     // ── MIDI driving ─────────────────────────────────────────────────────
 
-    fn dispatch(&self, msg: daw::service::MidiMessage) {
+    fn dispatch(&self, msg: midicore::MidiEvent) {
         self.daw.push_live_midi(&self.track_guid, msg);
     }
 
     pub fn note_on(&self, note: u8, velocity: u8) {
-        self.dispatch(daw::service::MidiMessage::note_on(0, note, velocity));
+        self.dispatch(ev_note_on(note, velocity));
     }
     pub fn note_off(&self, note: u8) {
-        self.dispatch(daw::service::MidiMessage::note_off(0, note, 0));
+        self.dispatch(ev_note_off(note));
     }
     pub fn cc(&self, controller: u8, value: u8) {
-        self.dispatch(daw::service::MidiMessage::control_change(
-            0, controller, value,
-        ));
+        self.dispatch(ev_cc(controller, value));
     }
     /// All Notes Off (CC 123).
     pub fn all_notes_off(&self) {
-        self.dispatch(daw::service::MidiMessage::control_change(0, 123, 0));
+        self.dispatch(ev_cc(123, 0));
     }
     /// Panic — All Sound Off (CC 120).
     pub fn panic(&self) {
-        self.dispatch(daw::service::MidiMessage::control_change(0, 120, 0));
+        self.dispatch(ev_cc(120, 0));
     }
 
     /// Enumerate hardware MIDI input ports.
     pub fn midi_input_ports() -> Vec<String> {
-        daw_midi_io::input_ports()
+        midicore::midir::input_ports()
     }
 
     /// Open a hardware MIDI keyboard and forward its events into the rig.
     pub fn attach_midi(
         &self,
-        selection: daw_midi_io::MidiSelection,
-    ) -> eyre::Result<daw_midi_io::MidiInput> {
+        selection: midicore::PortSelector,
+    ) -> eyre::Result<midicore::midir::MidiInput> {
         let daw = self.daw.clone();
         let track = self.track_guid.clone();
         let monitor = self.midi_monitor.clone();
-        daw_midi_io::MidiInput::open(selection, move |msg| {
-            monitor.record(&msg);
-            daw.push_live_midi(&track, msg);
+        midicore::midir::MidiInput::open(selection, move |t: midicore::TimedEvent| {
+            monitor.record(&t.event);
+            daw.push_live_midi(&track, t.event);
         })
     }
 
@@ -272,7 +300,7 @@ mod tests {
         // A right-hand note, hard hit → the Bright Lead layer sounds.
         let midi = [PluginMidiEvent {
             offset: 0,
-            message: daw::service::MidiMessage::note_on(0, 72, 110),
+            message: ev_note_on(72, 110),
         }];
         let ev = PluginEvents {
             params: &[],
@@ -305,7 +333,7 @@ mod tests {
         let (mut outl, mut outr) = (vec![0.0f32; 512], vec![0.0f32; 512]);
         let midi = [PluginMidiEvent {
             offset: 0,
-            message: daw::service::MidiMessage::note_on(0, 60, 100),
+            message: ev_note_on(60, 100),
         }];
         // Samples decode on a background thread — retrigger until audible.
         let mut heard = 0.0f32;

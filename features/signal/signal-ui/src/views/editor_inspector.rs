@@ -359,7 +359,7 @@ pub fn EditorInspectorPanel(props: EditorInspectorPanelProps) -> Element {
                                         let preset = slot.block_preset_name.as_deref().unwrap_or("—");
                                         let sc = slot.block_type.color();
                                         rsx! {
-                                            div { class: "flex items-center gap-2",
+                                            div { key: "{slot.id}", class: "flex items-center gap-2",
                                                 StatusDot { color: StatusDotColor::Custom(sc.bg.to_string()), size: StatusDotSize::Small }
                                                 span { class: "text-[11px] text-zinc-500 truncate", "{bt}" }
                                                 span { class: "text-[11px] text-zinc-300 truncate", "{preset}" }

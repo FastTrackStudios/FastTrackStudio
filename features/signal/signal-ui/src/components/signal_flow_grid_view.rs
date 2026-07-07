@@ -75,7 +75,7 @@ pub fn SignalFlowGridView(
                 div {
                     class: "absolute left-0 top-0 bottom-0 w-8 flex flex-col justify-start gap-2 pt-2",
                     for jack in &grid.inputs {
-                        JackLabel { jack: jack.clone() }
+                        JackLabel { key: "{jack.label}", jack: jack.clone() }
                     }
                 }
 
@@ -83,7 +83,7 @@ pub fn SignalFlowGridView(
                 div {
                     class: "absolute right-0 top-0 bottom-0 w-8 flex flex-col justify-start gap-2 pt-2",
                     for jack in &grid.outputs {
-                        JackLabel { jack: jack.clone() }
+                        JackLabel { key: "{jack.label}", jack: jack.clone() }
                     }
                 }
 
@@ -97,6 +97,7 @@ pub fn SignalFlowGridView(
 
                     for block in &grid.blocks {
                         GridBlockCell {
+                            key: "{block.id}",
                             block: block.clone(),
                             on_click: on_block_click.clone(),
                             on_bypass: on_block_bypass.clone(),
