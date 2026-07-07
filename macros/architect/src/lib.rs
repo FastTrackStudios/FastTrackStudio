@@ -749,6 +749,11 @@ pub mod dispatch {
 
     // ── Standard dispatcher: caller-supplied spawn (main-thread queues) ─
 
+    /// A boxed, type-erased "run this on the target execution context"
+    /// callback — factored out purely to satisfy clippy's
+    /// `type_complexity` lint on [`SpawnDispatcher`]'s field.
+    type SpawnFn = dyn Fn(Box<dyn FnOnce() + Send + 'static>) + Send + Sync;
+
     /// Marshals each closure through a caller-supplied spawn function
     /// and awaits the result over a oneshot. This is the dispatcher for
     /// backends whose work must run under a specific thread affinity —
@@ -773,7 +778,7 @@ pub mod dispatch {
     /// `Default` path doesn't apply).
     #[derive(Clone)]
     pub struct SpawnDispatcher {
-        spawn: std::sync::Arc<dyn Fn(Box<dyn FnOnce() + Send + 'static>) + Send + Sync>,
+        spawn: std::sync::Arc<SpawnFn>,
     }
     impl core::fmt::Debug for SpawnDispatcher {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -841,7 +846,7 @@ pub mod dispatch {
 
             // Dropped-task path: a spawner that never runs the task
             // resolves ShutDown instead of hanging.
-            let dead = SpawnDispatcher::new(|task| drop(task));
+            let dead = SpawnDispatcher::new(drop);
             let err = futures_lite::future::block_on(run(&dead, || 0u32)).unwrap_err();
             assert_eq!(err, DispatchError::ShutDown);
 
