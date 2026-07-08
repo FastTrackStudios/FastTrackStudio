@@ -112,7 +112,7 @@ impl Biquad {
     pub fn tick(&mut self, input: f64, ch: usize) -> f64 {
         let output = self.b0 * input + self.z1[ch];
         self.z1[ch] = self.b1 * input - self.a1 * output + self.z2[ch];
-        self.z2[ch] = self.b2 * input - self.a2 * output;
+        self.z2[ch] = crate::denormal::flush(self.b2 * input - self.a2 * output);
         output
     }
 

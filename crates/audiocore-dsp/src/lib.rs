@@ -9,12 +9,16 @@
 
 pub mod biquad;
 pub mod db;
+pub mod dc_blocker;
 pub mod delay_line;
+pub mod denormal;
 pub mod dither;
 pub mod envelope;
 pub mod gain_curve;
+pub mod grain_pitch;
 pub mod loudness;
 pub mod note_sync;
+pub mod one_pole;
 pub mod oversampling;
 pub mod prng;
 pub mod slew;
