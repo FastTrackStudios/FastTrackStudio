@@ -356,7 +356,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "audio-gui"
+name = "audiocore-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "atomic_float",
+ "audiocore-gui",
+ "nice-plug",
+ "nice-plug-dioxus",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "audiocore-dsp"
+version = "0.1.0"
+dependencies = [
+ "ebur128",
+]
+
+[[package]]
+name = "audiocore-gui"
 version = "0.1.0"
 dependencies = [
  "nice-plug",
@@ -1818,30 +1838,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "fts-dsp"
-version = "0.1.0"
-dependencies = [
- "ebur128",
-]
-
-[[package]]
 name = "fts-modulation"
 version = "0.1.0"
 dependencies = [
- "fts-dsp",
-]
-
-[[package]]
-name = "fts-plugin-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "atomic_float",
- "audio-gui",
- "nice-plug",
- "nice-plug-dioxus",
- "thiserror 2.0.18",
- "tracing",
+ "audiocore-dsp",
 ]
 
 [[package]]
@@ -1857,7 +1857,7 @@ dependencies = [
 name = "fts-themes"
 version = "0.1.0"
 dependencies = [
- "fts-plugin-core",
+ "audiocore-core",
 ]
 
 [[package]]
@@ -2927,8 +2927,8 @@ name = "meter-plugin"
 version = "0.1.0"
 dependencies = [
  "atomic_float",
- "audio-gui",
- "fts-plugin-core",
+ "audiocore-core",
+ "audiocore-gui",
  "meter-dsp",
  "meter-ui",
  "nice-plug",
@@ -3126,6 +3126,7 @@ dependencies = [
 name = "nice-plug-dioxus"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
  "anyrender_vello",
  "baseview",
  "blitz-dom",
