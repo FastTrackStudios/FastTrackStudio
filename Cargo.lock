@@ -10984,6 +10984,7 @@ dependencies = [
  "comp",
  "delay",
  "eq",
+ "hound",
  "modulation",
  "reverb",
  "signal-plugin-host",
