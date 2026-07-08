@@ -50,6 +50,8 @@ members = [
     "features/fx/reverb/reverb-dsp",
     "features/fx/delay/delay",
     "features/fx/delay/delay-dsp",
+    "features/fx/pitch/pitch",
+    "features/fx/pitch/pitch-dsp",
     "features/fx/modulation/modulation",
     "features/fx/modulation/chorus-dsp",
     "features/fx/modulation/trem-dsp",
@@ -119,6 +121,8 @@ spectrum-analyzer-ui = { path = "features/fx/eq/spectrum-analyzer/spectrum-analy
 comp = { path = "features/fx/comp/comp" }
 reverb = { path = "features/fx/reverb/reverb" }
 delay = { path = "features/fx/delay/delay" }
+pitch = { path = "features/fx/pitch/pitch" }
+pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
 modulation = { path = "features/fx/modulation/modulation" }
 # Internal DSP cores (behind the facades).
 eq-dsp = { path = "features/fx/eq/eq-dsp" }
