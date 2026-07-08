@@ -33,12 +33,12 @@ pub struct GridContextMenuProps {
 
     // Module-level callbacks
     #[props(default)]
-    pub on_save_module_preset_as: Option<EventHandler<(Vec<GridSlot>, String, signal::ModuleType)>>,
+    pub on_save_module_preset_as: Option<EventHandler<(Vec<GridSlot>, String, signal_proto::ModuleType)>>,
     #[props(default)]
     pub on_save_module_snapshot: Option<EventHandler<Vec<GridSlot>>>,
     #[props(default)]
     pub on_save_module_snapshot_as:
-        Option<EventHandler<(Vec<GridSlot>, String, signal::ModuleType)>>,
+        Option<EventHandler<(Vec<GridSlot>, String, signal_proto::ModuleType)>>,
 
     /// Called to close the menu after an action completes.
     pub on_close: EventHandler<()>,
@@ -292,7 +292,7 @@ fn render_block_menu(
 fn render_module_menu(
     name: &str,
     module_slots: Vec<GridSlot>,
-    module_type: signal::ModuleType,
+    module_type: signal_proto::ModuleType,
     mut name_action: Signal<Option<&'static str>>,
     mut save_name: Signal<String>,
     props: &GridContextMenuProps,

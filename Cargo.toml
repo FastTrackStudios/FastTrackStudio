@@ -3,6 +3,8 @@ members = [
     "apps/amp",
     "apps/cli",
     "apps/desktop",
+    "apps/rigd",
+    "apps/web",
     "apps/mobile",
     "apps/native",
     "apps/tui",
@@ -16,10 +18,14 @@ members = [
     "crates/signal",
     "features/signal/signal-ui",
     "features/signal/signal-browser",
+    "features/signal/signal-grid",
+    "features/signal/signal-grid-ui",
     # ── DSP / plugin / integration feature folders ──
     "features/sampler/signal-sampler",
     "features/sampler/signal-sampler-clap",
     "features/rigs/guitar",
+    "features/rigs/guitar/proto",
+    "features/rigs/guitar/ui",
     "features/rigs/keys",
     "features/rigs/orchestra",
     "features/rigs/drums",
@@ -72,6 +78,8 @@ signal-browser = { path = "features/signal/signal-browser" }
 # centralized here (architect convention) so intra-workspace deps are
 # `x.workspace = true` and only this table carries paths.
 signal-proto = { path = "features/signal/signal-proto" }
+signal-grid = { path = "features/signal/signal-grid" }
+signal-grid-ui = { path = "features/signal/signal-grid-ui" }
 signal-controller = { path = "features/signal/signal-controller" }
 signal-live = { path = "features/signal/signal-live" }
 signal-storage = { path = "features/signal/signal-storage" }
@@ -85,6 +93,8 @@ signal-macromod = { path = "features/macromod" }
 signal-plugin-host  = { path = "features/plugin-host", default-features = false }
 signal-sampler      = { path = "features/sampler/signal-sampler" }
 signal-guitar       = { path = "features/rigs/guitar" }
+signal-guitar-proto = { path = "features/rigs/guitar/proto" }
+signal-guitar-ui    = { path = "features/rigs/guitar/ui" }
 signal-keys         = { path = "features/rigs/keys" }
 signal-orchestra    = { path = "features/rigs/orchestra" }
 signal-drums        = { path = "features/rigs/drums" }
@@ -128,6 +138,9 @@ facet-toml = { version = "0.50.0-rc.1" }
 # ── ROAM service framework ───────────────────────────────────────────
 # Upstream vox from crates.io (migrated off the FTS codeberg fork).
 vox = { version = "0.10.0-rc.1" }
+vox-core = { version = "0.10.0-rc.1" }
+vox-websocket = { version = "0.10.0-rc.1" }
+axum = { version = "0.8", features = ["ws"] }
 ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # ── Architect framework (feature-slice macros) ───────────────────────

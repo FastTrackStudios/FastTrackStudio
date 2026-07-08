@@ -55,6 +55,11 @@ pub use panel_registration::register_panels;
 pub use processing_chain::ProcessingChain;
 pub use shell::SignalRoot;
 pub use views::{
-    AudioDevice, AudioPrefs, AudioSettingsBridge, AudioSettingsModal, GuitarRigView, LiveBlock,
-    PerfStack, PerformanceModel, RigAudioHandle, SignalSlider,
+    AudioDevice, AudioDevices, AudioPrefs, AudioSettingsBridge, AudioSettingsModal, GuitarRigView,
+    LiveBlock, PerfStack, PerformanceModel, SignalSlider,
 };
+// Generated vox clients for the rig services — the host app establishes the
+// connection (in-process LocalServer or remote WebSocket) and provides these
+// via Dioxus context; views consume them with `try_consume_context`.
+pub use signal_guitar_proto::audio::AudioSettingsClient;
+pub use signal_guitar_proto::rig::{RigClient, RigStreamClient};

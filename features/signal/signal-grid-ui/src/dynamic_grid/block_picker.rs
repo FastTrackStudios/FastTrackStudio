@@ -5,12 +5,12 @@
 
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use signal::block::BlockCategory;
-use signal::defaults::{
+use signal_proto::block::BlockCategory;
+use signal_proto::defaults::{
     NDSP_ARCHETYPE_X_PLUGIN_NAMES, archetype_label, archetype_seed_slug, archetype_x_templates,
 };
-use signal::plugin_block::PluginBlockDef;
-use signal::{ALL_BLOCK_TYPES, BlockType, ModuleType};
+use signal_proto::plugin_block::PluginBlockDef;
+use signal_proto::{ALL_BLOCK_TYPES, BlockType, ModuleType};
 use uuid::Uuid;
 
 use super::layout::module_type_color;

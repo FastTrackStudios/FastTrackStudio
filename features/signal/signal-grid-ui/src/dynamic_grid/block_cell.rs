@@ -35,6 +35,13 @@ pub(super) fn GridBlockCell(props: GridBlockCellProps) -> Element {
     let dot_style = format!("background-color: {};", props.dot_color);
     let port_half = props.port_half;
 
+    // The block TYPE is the primary (centered) label; the block's own name —
+    // its preset — is the secondary line, shown only when it actually adds
+    // information (skip "Compressor / Compressor" duplication).
+    let preset = (!props.name.trim().is_empty()
+        && !props.name.eq_ignore_ascii_case(&props.block_type_name))
+    .then(|| props.name.clone());
+
     let left_port_style = format!(
         "left: {}px; top: 50%; transform: translateY(-50%); \
          width: {}px; height: {}px; background-color: {}; opacity: {};",
@@ -61,19 +68,19 @@ pub(super) fn GridBlockCell(props: GridBlockCellProps) -> Element {
                 oncontextmenu: move |evt: MouseEvent| {
                     props.on_context_menu.call(evt);
                 },
-                div { class: "flex items-center gap-1.5",
-                    div {
-                        class: "w-2.5 h-2.5 rounded-full flex-shrink-0",
-                        style: "{dot_style}",
-                    }
-                    span {
-                        class: "text-[9px] font-mono uppercase opacity-60 leading-none",
-                        "{props.block_type_name}"
-                    }
+                div {
+                    class: "w-2.5 h-2.5 rounded-full flex-shrink-0",
+                    style: "{dot_style}",
                 }
                 span {
-                    class: "text-[11px] font-medium truncate max-w-full text-center px-1 leading-tight",
-                    "{props.name}"
+                    class: "text-[11px] font-semibold truncate max-w-full text-center px-1 leading-tight",
+                    "{props.block_type_name}"
+                }
+                if let Some(preset) = preset {
+                    span {
+                        class: "text-[9px] font-mono truncate max-w-full text-center px-1 opacity-60 leading-none",
+                        "{preset}"
+                    }
                 }
             }
             // Left input port

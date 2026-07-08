@@ -109,7 +109,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
     // the flex layout finishes, leaving the grid zoomed-out until a scroll).
     use_future(move || async move {
         for ms in [80u64, 250, 600] {
-            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            architect::platform::sleep(std::time::Duration::from_millis(ms)).await;
             update_viewport();
         }
     });
@@ -420,7 +420,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
                 mounted_el.set(Some(evt.data()));
                 update_viewport();
                 spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    architect::platform::sleep(std::time::Duration::from_millis(50)).await;
                     update_viewport();
                 });
             },

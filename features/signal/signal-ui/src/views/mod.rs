@@ -48,8 +48,8 @@ pub use collection_browser::{
     resolve_scene_engines, rig_type_to_engine_type,
 };
 pub use audio_settings::{
-    AudioDevice, AudioPrefs, AudioSettingsBridge, AudioSettingsModal, LiveBlock, PerfStack, PerformanceModel,
-    RigAudioHandle,
+    AudioDevice, AudioDevices, AudioPrefs, AudioSettingsBridge, AudioSettingsModal, LiveBlock,
+    PerfStack, PerformanceModel,
 };
 pub use guitar_rig::GuitarRigView;
 pub use metadata_display::MetadataDisplay;

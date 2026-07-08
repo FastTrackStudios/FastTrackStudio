@@ -11,8 +11,6 @@
 //! Interactive controls use the themed `lumen_blocks` components (Button,
 //! Dropdown) so they follow the active theme.
 
-use std::time::Duration;
-
 use dioxus::prelude::*;
 use lumen_blocks::components::button::{Button, ButtonVariant};
 use lumen_blocks::components::dropdown::{Dropdown, DropdownContent, DropdownItem, DropdownTrigger};
@@ -21,10 +19,14 @@ use signal::defaults::guitar::guitar_rig_template;
 use signal::{BlockType, Preset, Signal};
 use signal_browser::grid_conversion::template_to_grid_slots;
 
+use signal_guitar_proto::audio::AudioSettingsClient;
+use signal_guitar_proto::rig::{RigClient, RigEvent, RigStreamClient};
+use signal_guitar_ui::{MeterPair, PerformGrid, meter_level};
+
 use crate::components::{block_color, BlockColor, GridSelection, GridSlot};
 use crate::views::{
-    AudioPrefs, AudioSettingsBridge, AudioSettingsModal, LiveBlock, PerfStack, PerformanceModel,
-    RigAudioHandle, RigGridPanel,
+    AudioPrefs, AudioSettingsBridge, AudioSettingsModal, LiveBlock, PerformanceModel,
+    RigGridPanel,
 };
 
 /// Stable Uuid derived from a block's string id (so the grid keeps a consistent
@@ -77,12 +79,6 @@ enum Mode {
     Perform,
 }
 
-/// Map a linear peak (0..1) to a perceptual meter level (0..1) via a sqrt curve,
-/// so quiet-but-present signal is clearly visible.
-fn meter_level(peak: f32) -> f64 {
-    (peak.max(0.0).sqrt() as f64).min(1.0)
-}
-
 /// Guitar-relevant block types offered in the preset sidebar selector.
 const PRESET_BLOCK_TYPES: &[(BlockType, &str)] = &[
     (BlockType::Amp, "Amp"),
@@ -115,44 +111,77 @@ pub fn GuitarRigView() -> Element {
     let mut right_open = use_signal(|| false);
     let mut audio_open = use_signal(|| false);
 
-    // Audio capability injected by the host app (device lists + persistence).
-    let ctx_bridge = use_hook(try_consume_context::<AudioSettingsBridge>);
-    // Live rig transport + meters (host-provided).
-    let rig_handle = use_hook(try_consume_context::<RigAudioHandle>);
+    // Rig + audio-settings service clients (host-provided vox connections —
+    // in-process on desktop, WebSocket from a browser; the view can't tell).
+    let rig = use_hook(try_consume_context::<RigClient>);
+    let rig_stream = use_hook(try_consume_context::<RigStreamClient>);
+    let settings = use_hook(try_consume_context::<AudioSettingsClient>);
+
+    // Device lists, fetched once over the settings service.
+    let devices = use_resource({
+        let settings = settings.clone();
+        move || {
+            let settings = settings.clone();
+            async move {
+                match settings {
+                    Some(s) => s.devices().await.ok(),
+                    None => None,
+                }
+            }
+        }
+    });
 
     // Shared, editable prefs — both the quick picker and the modal read/write
-    // this one signal so they never disagree. Seeded from the persisted prefs.
-    let mut prefs = use_signal(|| {
-        ctx_bridge
-            .as_ref()
-            .map(|b| b.prefs.clone())
-            .unwrap_or_default()
-    });
+    // this one signal so they never disagree. Seeded from the persisted prefs
+    // once the settings service answers.
+    let mut prefs = use_signal(AudioPrefs::default);
+    {
+        let settings = settings.clone();
+        use_future(move || {
+            let settings = settings.clone();
+            async move {
+                if let Some(s) = settings {
+                    if let Ok(p) = s.prefs().await {
+                        prefs.set(p);
+                    }
+                }
+            }
+        });
+    }
 
     // Apply = update shared state, persist, and re-open the live rig so device /
     // buffer changes take effect immediately (the engine is always running).
     let apply = {
-        let ctx_bridge = ctx_bridge.clone();
-        let rig_handle = rig_handle.clone();
+        let settings = settings.clone();
+        let rig_for_apply = rig.clone();
         use_callback(move |p: AudioPrefs| {
             prefs.set(p.clone());
-            if let Some(b) = &ctx_bridge {
-                b.on_save.call(p);
-            }
-            if let Some(h) = &rig_handle {
-                h.start.call(());
-            }
+            let settings = settings.clone();
+            let rig = rig_for_apply.clone();
+            spawn(async move {
+                if let Some(s) = settings {
+                    let _ = s.save_prefs(p).await;
+                }
+                if let Some(r) = rig {
+                    let _ = r.start().await;
+                }
+            });
         })
     };
 
-    // A per-render bridge carrying the *current* shared prefs, handed to the
-    // modal + quick picker so their edits round-trip through `apply`.
-    let live_bridge = ctx_bridge.as_ref().map(|b| AudioSettingsBridge {
-        inputs: b.inputs.clone(),
-        outputs: b.outputs.clone(),
-        prefs: prefs(),
-        on_save: apply,
-    });
+    // A per-render bridge carrying the *current* shared prefs + device lists,
+    // handed to the modal + quick picker so their edits round-trip through
+    // `apply`.
+    let live_bridge = devices
+        .read()
+        .as_ref()
+        .and_then(|d| d.clone())
+        .map(|d| AudioSettingsBridge {
+            inputs: d.inputs,
+            outputs: d.outputs,
+            prefs: prefs(),
+            on_save: apply,
+        });
 
     let mut running = use_signal(|| false);
     let mut in_level = use_signal(|| 0.0f64);
@@ -162,24 +191,59 @@ pub fn GuitarRigView() -> Element {
     let mut live_blocks = use_signal(Vec::<LiveBlock>::new);
     let mut selected_block = use_signal(|| None::<String>);
 
-    // Poll meters + performance + the live FX chain while the rig runs.
+    // Seed the perf model + chain once (the event stream only carries
+    // *changes*; a fresh subscriber needs the current state to start from).
     {
-        let rig_handle = rig_handle.clone();
+        let rig = rig.clone();
         use_future(move || {
-            let rig_handle = rig_handle.clone();
+            let rig = rig.clone();
             async move {
-                loop {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    if let Some(h) = &rig_handle {
-                        running.set(h.is_running.call(()));
-                        in_level.set(meter_level(h.input_peak.call(())));
-                        out_level.set(meter_level(h.output_peak.call(())));
-                        perf.set(h.perf_model.call(()));
-                        live_blocks.set(h.active_chain.call(()));
-                    }
+                let Some(rig) = rig else { return };
+                if let Ok(s) = rig.status().await {
+                    running.set(s.running);
+                    in_level.set(meter_level(s.input_peak));
+                    out_level.set(meter_level(s.output_peak));
+                }
+                if let Ok(p) = rig.perf().await {
+                    perf.set(p);
+                }
+                if let Ok(c) = rig.chain().await {
+                    live_blocks.set(c);
                 }
             }
         });
+    }
+
+    // Live updates: subscribe to the rig's `#[subscribe]` event stream —
+    // meters at meter rate, perf/chain on mutation. No polling; a remote
+    // (WebSocket) GUI gets the same pushes.
+    {
+        let rig_stream = rig_stream.clone();
+        architect::use_stream(
+            move |sink| {
+                let rig_stream = rig_stream.clone();
+                async move {
+                    match rig_stream {
+                        Some(s) => s.events(sink).await.is_ok(),
+                        None => false,
+                    }
+                }
+            },
+            move |ev: RigEvent| {
+                // Signals are Copy; rebind mutably inside the `Fn` closure.
+                let (mut running, mut in_level, mut out_level, mut perf, mut live_blocks) =
+                    (running, in_level, out_level, perf, live_blocks);
+                match ev {
+                    RigEvent::Status(s) => {
+                        running.set(s.running);
+                        in_level.set(meter_level(s.input_peak));
+                        out_level.set(meter_level(s.output_peak));
+                    }
+                    RigEvent::Perf(p) => perf.set(p),
+                    RigEvent::Chain(c) => live_blocks.set(c),
+                }
+            },
+        );
     }
 
     let block_count = live_blocks().len();
@@ -230,7 +294,7 @@ pub fn GuitarRigView() -> Element {
                 div { class: "flex-1" }
 
                 // Live IN/OUT meters (engine is always running)
-                if rig_handle.is_some() {
+                if rig.is_some() {
                     div { class: "flex items-center gap-2 mr-2",
                         MeterPair { input: in_level(), output: out_level() }
                     }
@@ -269,12 +333,14 @@ pub fn GuitarRigView() -> Element {
                     class: "flex-1 min-h-0 flex flex-row overflow-hidden outline-none",
                     tabindex: "0",
                     onkeydown: {
-                        let rig_handle = rig_handle.clone();
+                        let rig = rig.clone();
                         move |e: KeyboardEvent| {
                             if e.code() == Code::Space {
                                 e.prevent_default();
-                                if let (Some(h), Some(id)) = (&rig_handle, selected_block()) {
-                                    h.toggle_block_bypass.call(id);
+                                if let (Some(r), Some(id)) = (rig.clone(), selected_block()) {
+                                    spawn(async move {
+                                        let _ = r.toggle_block_bypass(id).await;
+                                    });
                                 }
                             }
                         }
@@ -295,11 +361,13 @@ pub fn GuitarRigView() -> Element {
                                 });
                             },
                             on_param_change: {
-                                let rig_handle = rig_handle.clone();
+                                let rig = rig.clone();
                                 move |(uuid, name, value): (uuid::Uuid, String, f32)| {
-                                    if let Some(h) = &rig_handle {
+                                    if let Some(r) = rig.clone() {
                                         if let Some(id) = slots().iter().find(|s| s.id == uuid).and_then(|s| s.preset_id.clone()) {
-                                            h.set_block_param.call((id, name, value));
+                                            spawn(async move {
+                                                let _ = r.set_block_param(id, name, value).await;
+                                            });
                                         }
                                     }
                                 }
@@ -309,13 +377,37 @@ pub fn GuitarRigView() -> Element {
                 }
             } else {
                 div { class: "flex-1 min-h-0 overflow-hidden p-4",
-                    if let Some(h) = rig_handle.clone() {
+                    if let Some(r) = rig.clone() {
                         PerformGrid {
                             model: perf(),
-                            on_press: h.press_stack,
-                            on_toggle_fx: h.toggle_fx,
-                            on_toggle_boost: h.toggle_boost,
-                            on_tap_tempo: h.tap_tempo,
+                            on_press: Callback::new({
+                                let r = r.clone();
+                                move |i: usize| {
+                                    let r = r.clone();
+                                    spawn(async move { let _ = r.press_stack(i as u32).await; });
+                                }
+                            }),
+                            on_toggle_fx: Callback::new({
+                                let r = r.clone();
+                                move |_: ()| {
+                                    let r = r.clone();
+                                    spawn(async move { let _ = r.toggle_fx().await; });
+                                }
+                            }),
+                            on_toggle_boost: Callback::new({
+                                let r = r.clone();
+                                move |_: ()| {
+                                    let r = r.clone();
+                                    spawn(async move { let _ = r.toggle_boost().await; });
+                                }
+                            }),
+                            on_tap_tempo: Callback::new({
+                                let r = r.clone();
+                                move |_: ()| {
+                                    let r = r.clone();
+                                    spawn(async move { let _ = r.tap_tempo().await; });
+                                }
+                            }),
                         }
                     } else {
                         div { class: "flex items-center justify-center h-full",
@@ -335,42 +427,6 @@ pub fn GuitarRigView() -> Element {
                 }
             } else {
                 AudioUnavailableModal { on_close: move |_| audio_open.set(false) }
-            }
-        }
-    }
-}
-
-/// Compact IN / OUT level meters for the top bar (confirms signal passthrough).
-#[component]
-fn MeterPair(input: f64, output: f64) -> Element {
-    rsx! {
-        div { class: "flex items-center gap-3",
-            MeterBar { label: "IN", level: input }
-            MeterBar { label: "OUT", level: output }
-        }
-    }
-}
-
-/// A single horizontal level meter with an explicit, always-visible fill.
-#[component]
-fn MeterBar(label: &'static str, level: f64) -> Element {
-    let clamped = level.clamp(0.0, 1.0);
-    let pct = (clamped * 100.0) as u32;
-    let color = if clamped > 0.9 {
-        "#ef4444"
-    } else if clamped > 0.7 {
-        "#eab308"
-    } else {
-        "#22c55e"
-    };
-    rsx! {
-        div { class: "flex items-center gap-1.5",
-            span { class: "text-[10px] font-semibold text-muted-foreground w-7 text-right", "{label}" }
-            div { class: "relative w-32 h-3 rounded bg-black/50 overflow-hidden border border-border",
-                div {
-                    class: "absolute inset-y-0 left-0 transition-[width] duration-75",
-                    style: "width: {pct}%; background-color: {color};",
-                }
             }
         }
     }
@@ -438,151 +494,6 @@ fn AudioUnavailableModal(on_close: EventHandler<()>) -> Element {
                     Button { variant: ButtonVariant::Outline, on_click: move |_| on_close.call(()), "Close" }
                 }
             }
-        }
-    }
-}
-
-/// Tile background + text color for a folder (footswitch), by name.
-fn folder_color(name: &str) -> (&'static str, &'static str) {
-    match name.to_ascii_lowercase().as_str() {
-        "clean" => ("#38bdf8", "#082f49"),   // light blue / dark text
-        "crunch" => ("#2563eb", "#ffffff"),  // darker blue / white
-        "drive" => ("#f97316", "#ffffff"),   // orange / white
-        "lead" => ("#ef4444", "#ffffff"),    // red / white
-        "ambient" => ("#06b6d4", "#04222a"), // cyan / dark text
-        _ => ("#3f3f46", "#e4e4e7"),         // zinc fallback
-    }
-}
-
-/// Perform-mode footswitch grid: a full-height 4×2 grid — five colored folder
-/// tiles (Clean/Crunch/Drive/Lead/Ambient) plus Tap Tempo, FX Toggle, and
-/// Volume Boost function switches.
-#[component]
-fn PerformGrid(
-    model: PerformanceModel,
-    on_press: Callback<usize>,
-    on_toggle_fx: Callback<()>,
-    on_toggle_boost: Callback<()>,
-    on_tap_tempo: Callback<()>,
-) -> Element {
-    let stacks = model.stacks;
-    let fx_sub = if model.fx_bypass { "Bypassed" } else { "Active" };
-    let boost_sub = if model.boost { "+6 dB" } else { "Off" };
-    rsx! {
-        div { class: "grid grid-cols-4 grid-rows-2 gap-3 h-full",
-            // Folders (positions 1–5): Clean, Crunch, Drive, Lead, Ambient.
-            for i in 0..5usize {
-                if let Some(stack) = stacks.get(i).cloned() {
-                    StackTile { key: "s{i}", index: i, stack, on_press }
-                } else {
-                    div { key: "s{i}", class: "rounded-xl border-2 border-dashed border-border/30" }
-                }
-            }
-            // Position 6: Tap Tempo (white, blinking at tempo).
-            TapTempoTile { tempo_bpm: model.tempo_bpm, on_tap: on_tap_tempo }
-            // Position 7: FX Toggle (pink).
-            FnTile {
-                title: "FX Toggle".to_string(),
-                subtitle: fx_sub.to_string(),
-                bg: "#ec4899".to_string(),
-                text: "#ffffff".to_string(),
-                active: model.fx_bypass,
-                onclick: on_toggle_fx,
-            }
-            // Position 8: Volume Boost (white).
-            FnTile {
-                title: "Boost".to_string(),
-                subtitle: boost_sub.to_string(),
-                bg: "#fafafa".to_string(),
-                text: "#0a0a0a".to_string(),
-                active: model.boost,
-                onclick: on_toggle_boost,
-            }
-        }
-    }
-}
-
-/// One colored footswitch folder tile.
-#[component]
-fn StackTile(index: usize, stack: PerfStack, on_press: Callback<usize>) -> Element {
-    let (bg, text) = folder_color(&stack.name);
-    let state_cls = if stack.is_active {
-        "ring-4 ring-white/80 shadow-xl opacity-100"
-    } else {
-        "opacity-[0.22] saturate-50 hover:opacity-60"
-    };
-    rsx! {
-        button {
-            class: format!(
-                "relative flex flex-col items-center justify-center gap-1 rounded-xl transition-all h-full {state_cls}"
-            ),
-            style: "background-color: {bg}; color: {text};",
-            onclick: move |_| on_press.call(index),
-            // Amber dot while the current patch is still loading.
-            if !stack.available {
-                span { class: "absolute top-2 right-2 w-2.5 h-2.5 rounded-full",
-                    style: "background-color: #fde047;" }
-            }
-            span { class: "text-2xl font-bold tracking-wide", "{stack.name}" }
-            span { class: "text-sm font-semibold opacity-90", "{stack.current_patch}" }
-            if stack.patch_count > 1 {
-                span { class: "text-[11px] font-mono opacity-75", "{stack.position + 1}/{stack.patch_count}" }
-            }
-        }
-    }
-}
-
-/// A function-switch tile (FX Toggle, Volume Boost).
-#[component]
-fn FnTile(
-    title: String,
-    subtitle: String,
-    bg: String,
-    text: String,
-    active: bool,
-    onclick: Callback<()>,
-) -> Element {
-    let state_cls = if active {
-        "ring-4 ring-white/80 shadow-xl opacity-100"
-    } else {
-        "opacity-[0.3] saturate-50 hover:opacity-70"
-    };
-    rsx! {
-        button {
-            class: format!(
-                "flex flex-col items-center justify-center gap-1 rounded-xl transition-all h-full {state_cls}"
-            ),
-            style: "background-color: {bg}; color: {text};",
-            onclick: move |_| onclick.call(()),
-            span { class: "text-xl font-bold tracking-wide", "{title}" }
-            span { class: "text-xs opacity-80", "{subtitle}" }
-        }
-    }
-}
-
-/// Tap Tempo tile — white, with a light blinking at the current tempo.
-#[component]
-fn TapTempoTile(tempo_bpm: u32, on_tap: Callback<()>) -> Element {
-    let mut lit = use_signal(|| false);
-    // Blink the indicator at the tempo (toggle twice per beat).
-    use_future(move || async move {
-        loop {
-            let bpm = tempo_bpm.max(40) as u64;
-            let half_ms = (60_000 / bpm / 2).max(60);
-            tokio::time::sleep(Duration::from_millis(half_ms)).await;
-            lit.toggle();
-        }
-    });
-    let dot_color = if lit() { "#ef4444" } else { "#d4d4d8" };
-    rsx! {
-        button {
-            class: "relative flex flex-col items-center justify-center gap-1 rounded-xl transition-all h-full opacity-90 hover:opacity-100",
-            style: "background-color: #fafafa; color: #0a0a0a;",
-            onclick: move |_| on_tap.call(()),
-            span { class: "absolute top-2 right-2 w-3 h-3 rounded-full transition-colors",
-                style: "background-color: {dot_color};" }
-            span { class: "text-lg font-bold tracking-wide", "Tap Tempo" }
-            span { class: "text-[11px] text-zinc-500", "{tempo_bpm} BPM · hold: tuner" }
         }
     }
 }

@@ -44,9 +44,11 @@ pub(super) fn EmptyGridCell(props: EmptyGridCellProps) -> Element {
                          rounded-lg border border-dashed cursor-pointer \
                          border-zinc-600/40 bg-zinc-800/20"
                     } else {
+                        // Resting empty cells are a barely-there hint — they
+                        // only assert themselves on hover or as drop targets.
                         "group absolute inset-0 flex items-center justify-center \
                          rounded-lg border border-dashed cursor-pointer \
-                         border-transparent bg-transparent \
+                         border-zinc-800/40 bg-transparent \
                          hover:border-zinc-600/40 hover:bg-zinc-800/20"
                     },
                     onclick: move |evt| props.on_click.call(evt),

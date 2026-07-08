@@ -1,12 +1,12 @@
 //! Typestate types for the grid view — making invalid states unrepresentable.
 
-use signal::block::BlockColor;
+use signal_proto::block::BlockColor;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid slot — re-exported from signal-browser (headless data type)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub use signal_browser::GridSlot;
+pub use signal_grid::GridSlot;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Block visual state
@@ -35,12 +35,14 @@ impl BlockVisualState {
             Self::Dragging
         } else if is_drop_target {
             Self::DropTarget
+        } else if is_selected {
+            // Selection wins over bypass — a clicked block must show it's
+            // selected (the inspector reports the bypass state).
+            Self::Selected
         } else if is_bypassed {
             Self::Bypassed
         } else if is_template {
             Self::Template
-        } else if is_selected {
-            Self::Selected
         } else {
             Self::Normal
         }
@@ -53,8 +55,11 @@ impl BlockVisualState {
                 "background-color: {}10; border-color: {}20; color: {}40; opacity: 0.4; border-style: dashed;",
                 color.bg, color.bg, color.fg,
             ),
+            // Bypassed reads as "present but inactive": desaturated accent,
+            // faint fill — but the label stays legible and the cell stays
+            // clickable/inspectable.
             Self::Bypassed => format!(
-                "background-color: {}08; border-color: {}15; color: {}30; opacity: 0.25; border-style: solid;",
+                "background-color: {}0a; border-color: {}35; color: {}b0; opacity: 0.8; border-style: solid; filter: saturate(0.45);",
                 color.bg, color.bg, color.fg,
             ),
             Self::Template => format!(
@@ -78,7 +83,7 @@ impl BlockVisualState {
 
     pub fn port_opacity(&self) -> &'static str {
         match self {
-            Self::Bypassed => "0.25",
+            Self::Bypassed => "0.5",
             _ => "1",
         }
     }
@@ -133,7 +138,9 @@ impl ModuleVisualState {
     pub fn opacity(&self) -> &'static str {
         match self {
             Self::Dragging => "0.85",
-            Self::Bypassed => "0.25",
+            // Keep fully-bypassed modules readable — the cells inside carry
+            // their own muted treatment.
+            Self::Bypassed => "0.6",
             _ => "1",
         }
     }
