@@ -91,6 +91,7 @@ pub fn RigPanel() -> Element {
                 output_device: sel_out(),
                 sample_rate: sel_sr(),
                 buffer_size: sel_buf(),
+                ..Default::default()
             };
             if let Err(e) = mgr.save() {
                 status.set(format!("save failed: {e}"));
