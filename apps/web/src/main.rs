@@ -70,21 +70,65 @@ async fn connect_once(url: &str) -> Option<(RigClient, RigStreamClient, AudioSet
 
 #[component]
 fn App() -> Element {
-    // Retry until the core answers — a rig that boots after the page (or
-    // restarts mid-set) is picked up without a manual reload.
+    // Connection lifecycle: retry until the core answers, watchdog-ping
+    // while connected, and on engine death tear the UI down, reconnect,
+    // and remount fresh (new subscriptions, reseeded state) — no manual
+    // reload, ever.
     let mut attempts = use_signal(|| 0u32);
-    let clients = use_resource(move || async move {
-        let url = server_url();
-        loop {
-            if let Some(c) = connect_once(&url).await {
-                return c;
+    let mut generation = use_signal(|| 0u32);
+    // The engine was up and went away (vs never seen) — changes the copy.
+    let mut lost = use_signal(|| false);
+
+    let clients = use_resource(move || {
+        let generation = generation();
+        async move {
+            let url = server_url();
+            loop {
+                if let Some(c) = connect_once(&url).await {
+                    attempts.set(0);
+                    return (generation, c);
+                }
+                attempts += 1;
+                architect::platform::sleep(std::time::Duration::from_millis(1200)).await;
             }
-            attempts += 1;
-            architect::platform::sleep(std::time::Duration::from_millis(1500)).await;
         }
     });
 
-    let state = clients.read().as_ref().cloned();
+    // Watchdog: ping the rig every 1.5 s. Two consecutive failures =
+    // engine down → bump the generation (reconnect loop + full remount).
+    use_future(move || async move {
+        let mut fails = 0u32;
+        loop {
+            architect::platform::sleep(std::time::Duration::from_millis(1500)).await;
+            let current = clients.peek().as_ref().cloned();
+            let Some((gen, (rig, _, _))) = current else {
+                fails = 0;
+                continue;
+            };
+            if gen != *generation.peek() {
+                fails = 0;
+                continue;
+            }
+            if rig.status().await.is_ok() {
+                fails = 0;
+                lost.set(false);
+            } else {
+                fails += 1;
+                if fails >= 2 {
+                    tracing::warn!("rig core lost — reconnecting");
+                    fails = 0;
+                    lost.set(true);
+                    generation += 1; // restarts the connect resource
+                }
+            }
+        }
+    });
+
+    let state = clients
+        .read()
+        .as_ref()
+        .filter(|(gen, _)| *gen == generation())
+        .map(|(_, c)| c.clone());
     rsx! {
         document::Title { "Signal · Guitar Rig" }
         document::Style { {BASE_CSS} }
@@ -94,14 +138,14 @@ fn App() -> Element {
                 let _ = provide_context(rig);
                 let _ = provide_context(stream);
                 let _ = provide_context(settings);
-                rsx! { GuitarRigRemote {} }
+                rsx! { GuitarRigRemote { key: "{generation}" } }
             }
             None => rsx! {
                 div { class: "flex flex-col items-center justify-center gap-3 h-full",
                     span { class: "w-3 h-3 rounded-full animate-pulse",
-                        style: "background-color: #22c55e;" }
+                        style: if lost() { "background-color: #ef4444;" } else { "background-color: #22c55e;" } }
                     span { class: "text-sm font-semibold", style: "color: #e4e4e7;",
-                        "Looking for the rig core…"
+                        if lost() { "Engine down — reconnecting…" } else { "Looking for the rig core…" }
                     }
                     span { class: "text-xs font-mono", style: "color: #71717a;",
                         "{server_url()}"
