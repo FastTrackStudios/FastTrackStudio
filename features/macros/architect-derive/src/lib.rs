@@ -781,8 +781,10 @@ fn build_events_block(
         #[cfg(feature = "vox")]
         #[::vox::service]
         #vis trait #events_trait {
-            /// Attach `sink` to the event feed. Returns once attached;
-            /// events flow on the channel.
+            /// Attach `sink` to the event feed. The call stays in flight for
+            /// the life of the subscription (vox channels are request-scoped)
+            /// — events flow on the channel while it runs; cancel the call to
+            /// unsubscribe. Errors resolve the call immediately.
             async fn subscribe(
                 &self,
                 sink: ::vox::Tx<#event_ident>,
@@ -893,6 +895,11 @@ fn build_events_block(
                             pending,
                             ::core::option::Option::Some(#event_ident::Snapshot(list.items)),
                         );
+                        // vox scopes channels to their request: delivering
+                        // the response terminates the sink. Hold the request
+                        // open for the life of the subscription — the client
+                        // unsubscribes by cancelling the call.
+                        ::core::future::pending::<()>().await;
                         ::core::result::Result::Ok(())
                     }
                     ::core::result::Result::Err(e) => {

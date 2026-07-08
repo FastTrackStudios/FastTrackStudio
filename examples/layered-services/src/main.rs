@@ -411,21 +411,38 @@ fn main() {
         let stream: TickerStreamClient = local.establish().await.expect("local establish");
 
         let (tx, mut rx) = vox::channel::<TickEvent>();
-        stream.ticks(tx).await.expect("subscribe");
+        // vox scopes channels to their request, so the subscribe call stays
+        // in flight for the life of the subscription — spawn it and keep the
+        // handle; aborting it is the unsubscribe. (`architect::use_stream`
+        // does exactly this race internally.)
+        let subscription = tokio::spawn(async move { stream.ticks(tx).await });
+
+        // Wait for the attach before publishing — the subscribe call is in
+        // flight on another task, so give its attach a moment to land.
+        // (`publish` returns the live subscriber count; the warm-up event
+        // that lands post-attach is skipped below.)
+        while live.ticks.publish(TickEvent {
+            value: Counter::current(&live),
+        }) == 0
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
 
         let a = Ticker::tick(&live); // publish-on-write
         let b = Ticker::tick(&live);
 
         // `SelfRef` lends the decoded event while the receive buffer is
         // alive — copy the payload out inside `map` (same pattern as
-        // `architect::use_stream`).
+        // `architect::use_stream`). Replay + the warm-up publish may precede
+        // `a`, so collect until `b` arrives and assert the tail.
         let mut received = Vec::new();
-        while received.len() < 2 {
+        while received.last() != Some(&b) {
             let event = rx.recv().await.expect("recv").expect("stream still open");
             let _ = event.map(|ev| received.push(ev.value));
         }
-        assert_eq!(received, vec![a, b]);
+        assert_eq!(&received[received.len() - 2..], &[a, b]);
         info!(?received, "subscriber received publish-on-write events");
+        subscription.abort(); // unsubscribe: cancel the in-flight call
     });
 
     // ── 7. Blocking facade (sync-client) ─────────────────────────────

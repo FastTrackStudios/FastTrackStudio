@@ -1294,6 +1294,12 @@ fn emit_stream_block(
             quote! {
                 async fn #name(&self, sink: ::architect::vox::Tx<#ev>) {
                     self.inner.#hub_fn().attach(sink);
+                    // vox scopes channels to their request: delivering the
+                    // response terminates the sink. Hold the request open for
+                    // the life of the subscription — the client unsubscribes
+                    // by cancelling the call (dropping its future), which
+                    // drops this handler and closes the channel.
+                    ::core::future::pending::<()>().await;
                 }
             }
         } else {
@@ -1312,6 +1318,8 @@ fn emit_stream_block(
             quote! {
                 async fn #name(&self, #(#inputs,)* sink: ::architect::vox::Tx<#ev>) {
                     self.inner.#attach_fn(#(#call_args,)* sink);
+                    // Hold the request open — see the parameterless variant.
+                    ::core::future::pending::<()>().await;
                 }
             }
         }

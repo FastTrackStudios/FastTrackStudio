@@ -40,9 +40,15 @@ use architect_atom::{Store, StoreEntity};
 /// component, handing each received event to `on_event`.
 ///
 /// `subscribe` is given the fresh [`vox::Tx`] to pass into the service's
-/// subscribe method and returns whether the subscription was established
-/// — return `false` while the connection isn't up (the hook re-runs when
-/// whatever signals the future read change, so it retries on `Ready`).
+/// subscribe method. vox scopes channels to their request, so subscribe
+/// hosts hold the call **in flight** for the life of the subscription —
+/// the returned future staying pending *is* the healthy state; events pump
+/// concurrently while it runs. It resolving means the subscription ended:
+/// return `false` for "couldn't establish" (connection not up — the hook
+/// re-runs when whatever signals the future read change, so it retries on
+/// `Ready`); a server-side subscribe error resolves it likewise.
+/// Unsubscribe is automatic: unmounting (or a hook re-run) drops the
+/// in-flight call, which cancels the request and closes the channel.
 pub fn use_stream<Ev, F, Fut, A>(subscribe: F, on_event: A)
 where
     Ev: Clone + facet::Facet<'static> + 'static,
@@ -52,26 +58,39 @@ where
 {
     use_resource(move || {
         let (tx, mut rx) = vox::channel::<Ev>();
-        let established = subscribe(tx);
+        let call = subscribe(tx);
         let on_event = on_event.clone();
         async move {
-            if !established.await {
-                return;
-            }
             // Pump until the stream ends (server gone, channel closed) or
             // the component unmounts / the subscription restarts (this
             // future is dropped either way).
-            while let Ok(Some(event)) = rx.recv().await {
-                // `SelfRef` has no owned extraction (its value may borrow
-                // from the receive buffer); `map` lends us the value by
-                // move while the buffer is alive, so cloning out is sound
-                // — our `Ev: Clone + 'static` events own their data.
-                let mut owned: Option<Ev> = None;
-                let _ = event.map(|ev| owned = Some(ev.clone()));
-                if let Some(ev) = owned {
-                    on_event(ev);
+            let pump = async move {
+                while let Ok(Some(event)) = rx.recv().await {
+                    // `SelfRef` has no owned extraction (its value may borrow
+                    // from the receive buffer); `map` lends us the value by
+                    // move while the buffer is alive, so cloning out is sound
+                    // — our `Ev: Clone + 'static` events own their data.
+                    let mut owned: Option<Ev> = None;
+                    let _ = event.map(|ev| owned = Some(ev.clone()));
+                    if let Some(ev) = owned {
+                        on_event(ev);
+                    }
                 }
-            }
+            };
+            // Race the in-flight subscribe call against the pump: the call
+            // resolving means the subscription is over (couldn't establish,
+            // server error, or server-side stream end) — stop either way.
+            let mut call = core::pin::pin!(call);
+            let mut pump = core::pin::pin!(pump);
+            core::future::poll_fn(move |cx| {
+                use core::future::Future;
+                use core::task::Poll;
+                if call.as_mut().poll(cx).is_ready() {
+                    return Poll::Ready(());
+                }
+                pump.as_mut().poll(cx)
+            })
+            .await;
         }
     });
 }
