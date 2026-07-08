@@ -11017,6 +11017,8 @@ name = "signal-guitar"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "facet 0.50.0-rc.1",
+ "facet-styx",
  "midicore",
  "signal-fx",
  "signal-guitar-proto",
