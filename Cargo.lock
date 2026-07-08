@@ -2805,7 +2805,6 @@ name = "delay-dsp"
 version = "0.1.0"
 dependencies = [
  "audiocore-dsp",
- "eq-dsp",
 ]
 
 [[package]]
@@ -9275,7 +9274,6 @@ version = "0.1.0"
 dependencies = [
  "audiocore-dsp",
  "crossbeam-channel",
- "eq-dsp",
  "realfft",
  "symphonium",
  "thiserror 2.0.18",
