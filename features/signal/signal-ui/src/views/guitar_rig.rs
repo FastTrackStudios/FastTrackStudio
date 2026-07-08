@@ -244,7 +244,7 @@ pub fn GuitarRigView() -> Element {
                     }
                     RigEvent::Perf(p) => perf.set(p),
                     RigEvent::Chain(c) => live_blocks.set(c),
-                    RigEvent::Spectrum(_) => {}
+                    RigEvent::Spectrum(_) | RigEvent::CompWave(..) => {}
                 }
             },
         );

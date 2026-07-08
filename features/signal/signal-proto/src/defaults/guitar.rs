@@ -108,7 +108,7 @@ fn amp() -> ModuleTemplate {
     ModuleTemplate::new("Amp", ModuleType::Amp)
         .with_metadata(
             TemplateMetadata::new()
-                .with_description("Parallel amplifier pair — input splits to both amps"),
+                .with_description("Amplifier block — parallel amp pair into gate and amp EQ"),
         )
         .with_node(SignalNodeTemplate::Split {
             lanes: vec![
@@ -116,17 +116,19 @@ fn amp() -> ModuleTemplate {
                 SignalChainTemplate::serial(vec![BlockTemplate::new("Amp R", BlockType::Amp)]),
             ],
         })
+        // Post-amp shaping lives with the amp — the gate and EQ are dialed
+        // against the amp's character, so they're part of the module (2×2:
+        // amps left, gate → EQ right).
+        .with_block(BlockTemplate::new("Gate", BlockType::Gate))
+        .with_block(BlockTemplate::new("Amp EQ", BlockType::Eq))
 }
 
-/// Post-amp utility pair: noise gate + the Boost gain block the boost
-/// footswitch drives.
+/// The Boost gain block the boost footswitch drives.
 fn utility() -> ModuleTemplate {
     ModuleTemplate::new("Utility", ModuleType::Volume)
         .with_metadata(
-            TemplateMetadata::new()
-                .with_description("Post-amp utilities — gate and boost gain"),
+            TemplateMetadata::new().with_description("Post-amp utilities — boost gain"),
         )
-        .with_block(BlockTemplate::new("Gate", BlockType::Gate))
         .with_block(BlockTemplate::new("Boost", BlockType::Volume))
 }
 
@@ -242,8 +244,8 @@ mod tests {
             .map(|m| m.chain.missing_assignments().len())
             .collect();
         // Source(2), Dynamics(1), Special(4), Drive(4), Volume(1), Pre-FX(1),
-        // Amp(2), Utility(2), Modulation(3), Time(4), Motion(3), Mastering(4)
-        assert_eq!(counts, [2, 1, 4, 4, 1, 1, 2, 2, 3, 4, 3, 4]);
+        // Amp(4), Utility(1), Modulation(3), Time(4), Motion(3), Mastering(4)
+        assert_eq!(counts, [2, 1, 4, 4, 1, 1, 4, 1, 3, 4, 3, 4]);
     }
 
     #[test]
@@ -254,19 +256,19 @@ mod tests {
             .iter()
             .map(|m| m.chain.missing_assignments().len())
             .sum();
-        assert_eq!(total, 31);
+        assert_eq!(total, 32);
     }
 
     #[test]
     fn guitar_template_all_blocks_unassigned() {
         let t = guitar_rig_template();
         let missing = t.missing_assignments();
-        // rig_id + engine_id + layer_id + 31 blocks = 34
+        // rig_id + engine_id + layer_id + 32 blocks = 35
         let block_missing: Vec<_> = missing
             .iter()
             .filter(|m| m.level == AssignmentLevel::Block)
             .collect();
-        assert_eq!(block_missing.len(), 31);
+        assert_eq!(block_missing.len(), 32);
     }
 
     #[test]
@@ -275,8 +277,8 @@ mod tests {
         let amp_module = &t.engines[0].layers[0].modules[6];
         assert_eq!(amp_module.name, "Amp");
 
-        // The amp module has a single Split node with 2 lanes
-        assert_eq!(amp_module.chain.nodes.len(), 1);
+        // Split (amp pair) followed by the serial gate → amp EQ.
+        assert_eq!(amp_module.chain.nodes.len(), 3);
         match &amp_module.chain.nodes[0] {
             SignalNodeTemplate::Split { lanes } => {
                 assert_eq!(lanes.len(), 2);
