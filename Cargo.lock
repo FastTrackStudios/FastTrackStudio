@@ -10092,6 +10092,7 @@ version = "0.1.0"
 dependencies = [
  "audiocore-dsp",
  "crossbeam-channel",
+ "pitch-dsp",
  "realfft",
  "symphonium",
  "thiserror 2.0.18",
