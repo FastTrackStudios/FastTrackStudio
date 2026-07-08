@@ -49,9 +49,10 @@ pub(super) fn ModuleBackground(props: ModuleBackgroundProps) -> Element {
             div {
                 class: "flex items-center gap-1.5 px-2",
                 style: "{title_style} pointer-events: none;",
-                div {
-                    class: "w-2 h-2 rounded-full flex-shrink-0",
-                    style: "background-color: {props.bg_color};",
+                span {
+                    class: "text-[9px] leading-none flex-shrink-0",
+                    style: "color: {props.bg_color};",
+                    {crate::icons::module_icon(&props.name)}
                 }
                 span {
                     class: "text-[8px] font-semibold tracking-wide whitespace-nowrap opacity-80",

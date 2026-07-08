@@ -159,12 +159,16 @@ pub fn RigGridPanel(props: RigGridPanelProps) -> Element {
                 },
             }
         }
-        BlockInspectorPanel {
-            selection: current_sel,
-            chain: current_chain,
-            on_param_change: param_change_handler,
-            on_save: on_save_prop.clone(),
-            on_save_as_new: on_save_as_new_prop.clone(),
+        // The inspector only exists while something is selected — no idle
+        // "select a block…" placeholder bar eating canvas space.
+        if current_sel.is_some() {
+            BlockInspectorPanel {
+                selection: current_sel,
+                chain: current_chain,
+                on_param_change: param_change_handler,
+                on_save: on_save_prop.clone(),
+                on_save_as_new: on_save_as_new_prop.clone(),
+            }
         }
     }
 }

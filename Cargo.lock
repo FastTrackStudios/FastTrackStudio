@@ -3995,6 +3995,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "eq-profiles"
+version = "0.1.0"
+
+[[package]]
+name = "eq-ui"
+version = "0.1.0"
+dependencies = [
+ "atomic_float",
+ "audiocore-core",
+ "eq-profiles",
+ "fts-ui",
+ "fts-ui-audio",
+ "futures-timer",
+ "nice-plug",
+ "nice-plug-dioxus",
+ "parking_lot",
+ "pollster",
+ "spectrum-analyzer",
+ "wgpu",
+]
+
+[[package]]
 name = "equator"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4772,6 +4794,16 @@ dependencies = [
  "time",
  "tracing",
  "tw_merge",
+]
+
+[[package]]
+name = "fts-ui-audio"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/fts-ui.git?branch=main#065601046fee293319bd4c955dc6b7378da2dcda"
+dependencies = [
+ "dioxus",
+ "fts-ui",
+ "tracing",
 ]
 
 [[package]]
@@ -5777,7 +5809,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -9180,7 +9212,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.2",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -9218,7 +9250,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -10751,6 +10783,8 @@ name = "signal-guitar"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "midicore",
+ "signal-fx",
  "signal-guitar-proto",
  "signal-proto",
  "signal-sampler",
@@ -10776,6 +10810,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "dioxus",
+ "eq-ui",
  "lumen-blocks",
  "signal-grid",
  "signal-grid-ui",
@@ -11004,6 +11039,7 @@ dependencies = [
  "neural-amp-modeler",
  "ratatui",
  "rayon",
+ "sha2",
  "signal-fx",
  "signal-plugin-host",
  "signal-proto",
@@ -11343,6 +11379,36 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps 6.2.2",
+]
+
+[[package]]
+name = "spectrum-analyzer"
+version = "0.1.0"
+dependencies = [
+ "spectrum-analyzer-dsp",
+ "spectrum-analyzer-ui",
+]
+
+[[package]]
+name = "spectrum-analyzer-dsp"
+version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "parking_lot",
+ "realfft",
+ "rtrb",
+]
+
+[[package]]
+name = "spectrum-analyzer-ui"
+version = "0.1.0"
+dependencies = [
+ "audiocore-core",
+ "dioxus",
+ "fts-ui",
+ "fts-ui-audio",
+ "nice-plug-dioxus",
+ "spectrum-analyzer-dsp",
 ]
 
 [[package]]
@@ -14349,7 +14415,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

@@ -9,6 +9,8 @@ use super::layout::PORT_SIZE;
 pub(super) struct GridBlockCellProps {
     pub slot_id: Uuid,
     pub block_type_name: String,
+    /// Glyph for the block's type (see `icons::block_icon`).
+    pub icon: String,
     pub name: String,
     pub cell_style: String,
     pub cell_class: String,
@@ -32,7 +34,6 @@ pub(super) struct GridBlockCellProps {
 
 #[component]
 pub(super) fn GridBlockCell(props: GridBlockCellProps) -> Element {
-    let dot_style = format!("background-color: {};", props.dot_color);
     let port_half = props.port_half;
 
     // The block TYPE is the primary (centered) label; the block's own name —
@@ -68,9 +69,10 @@ pub(super) fn GridBlockCell(props: GridBlockCellProps) -> Element {
                 oncontextmenu: move |evt: MouseEvent| {
                     props.on_context_menu.call(evt);
                 },
-                div {
-                    class: "w-2.5 h-2.5 rounded-full flex-shrink-0",
-                    style: "{dot_style}",
+                span {
+                    class: "text-[11px] leading-none flex-shrink-0",
+                    style: "color: {props.dot_color};",
+                    "{props.icon}"
                 }
                 span {
                     class: "text-[11px] font-semibold truncate max-w-full text-center px-1 leading-tight",

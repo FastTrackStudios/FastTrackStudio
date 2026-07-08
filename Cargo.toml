@@ -40,6 +40,10 @@ members = [
     # -dsp crates are internal (like signal-proto under the signal facade).
     "features/fx/eq/eq",
     "features/fx/eq/eq-dsp",
+    "features/fx/eq/eq-profiles",
+    "features/fx/eq/eq-ui",
+    "features/fx/eq/spectrum-analyzer/spectrum-analyzer",
+    "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp",
     "features/fx/comp/comp",
     "features/fx/comp/comp-dsp",
     "features/fx/reverb/reverb",
@@ -106,6 +110,12 @@ signal-synth        = { path = "features/rigs/synth" }
 # since daw links it too — one workspace entry, one place to bump.
 # Facade crates — the public FX deps (downstream uses these, not `*-dsp`).
 eq = { path = "features/fx/eq/eq" }
+# The full Pro-Q EQ editor. Core (graph model / response / SVG / interaction)
+# is wasm-portable; the vello/nice-plug editor is behind its `native` feature.
+eq-ui = { path = "features/fx/eq/eq-ui", default-features = false }
+spectrum-analyzer = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer" }
+spectrum-analyzer-dsp = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp" }
+spectrum-analyzer-ui = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer-ui" }
 comp = { path = "features/fx/comp/comp" }
 reverb = { path = "features/fx/reverb/reverb" }
 delay = { path = "features/fx/delay/delay" }
@@ -205,12 +215,14 @@ nice-plug-dioxus = { path = "../FTS-Plugins/forks/fts-plug/crates/nice-plug-diox
 audiocore-core = { path = "../Plugins/FTS-Audiocore/crates/audiocore-core", default-features = false }
 audiocore-gui = { path = "../Plugins/FTS-Audiocore/crates/audiocore-gui" }
 atomic_float = "1"
+once_cell = "1"
 crossbeam-channel = "0.5"
 midir = "0.11"
 
 # ── UI ────────────────────────────────────────────────────────────────
 dioxus = "=0.7.9"
 fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
+fts-ui-audio = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 
 # ── Async runtime ────────────────────────────────────────────────────

@@ -7,10 +7,12 @@
 //! native / browser timers on wasm).
 
 pub mod dynamic_grid;
+pub mod icons;
 mod inspector;
 mod knob;
 mod panel;
 
 pub use inspector::BlockInspectorPanel;
 pub use knob::{Knob, KnobSize};
+pub use icons::{block_icon, module_icon};
 pub use panel::RigGridPanel;

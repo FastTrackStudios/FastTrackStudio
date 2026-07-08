@@ -789,6 +789,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
                                             key: "{col}-{row}",
                                             slot_id: slot_id,
                                             block_type_name: bt.display_name().to_string(),
+                                            icon: crate::icons::block_icon(bt).to_string(),
                                             name: name,
                                             cell_style: cell_style,
                                             cell_class: cell_class,

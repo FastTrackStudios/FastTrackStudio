@@ -1,8 +1,8 @@
-//! Guitar rig template — 11-module signal chain with 28 block slots.
+//! Guitar rig template — 12-module signal chain with 31 block slots.
 //!
 //! Signal chain order:
 //! Source → Dynamics → Special → Drive → Volume Pedal → Pre-FX →
-//! Amp → Modulation → Time → Motion → Mastering
+//! Amp → Utility → Modulation → Time → Motion → Mastering
 //!
 //! Two modules use parallel routing:
 //! - **Amp**: dual-amp split (Amp L ∥ Amp R)
@@ -14,7 +14,7 @@ use crate::template::{
 };
 use crate::{BlockType, ModuleType};
 
-/// Standard guitar rig template with 11 modules in a single engine/layer.
+/// Standard guitar rig template with 12 modules in a single engine/layer.
 ///
 /// All block preset slots are `Assignment::Unassigned` — this is a structural
 /// blueprint awaiting plugin assignments from the user or a preset browser.
@@ -27,6 +27,7 @@ pub fn guitar_rig_template() -> RigTemplate {
         .with_module(volume())
         .with_module(prefx())
         .with_module(amp())
+        .with_module(utility())
         .with_module(modulation())
         .with_module(time())
         .with_module(motion())
@@ -117,6 +118,18 @@ fn amp() -> ModuleTemplate {
         })
 }
 
+/// Post-amp utility pair: noise gate + the Boost gain block the boost
+/// footswitch drives.
+fn utility() -> ModuleTemplate {
+    ModuleTemplate::new("Utility", ModuleType::Volume)
+        .with_metadata(
+            TemplateMetadata::new()
+                .with_description("Post-amp utilities — gate and boost gain"),
+        )
+        .with_block(BlockTemplate::new("Gate", BlockType::Gate))
+        .with_block(BlockTemplate::new("Boost", BlockType::Volume))
+}
+
 fn modulation() -> ModuleTemplate {
     ModuleTemplate::new("Modulation", ModuleType::Modulation)
         .with_metadata(
@@ -193,11 +206,11 @@ mod tests {
     use crate::template::AssignmentLevel;
 
     #[test]
-    fn guitar_template_has_11_modules() {
+    fn guitar_template_has_12_modules() {
         let t = guitar_rig_template();
         let engine = &t.engines[0];
         let layer = &engine.layers[0];
-        assert_eq!(layer.modules.len(), 11);
+        assert_eq!(layer.modules.len(), 12);
 
         let names: Vec<&str> = layer.modules.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(
@@ -210,6 +223,7 @@ mod tests {
                 "Volume",
                 "Pre-FX",
                 "Amp",
+                "Utility",
                 "Modulation",
                 "Time",
                 "Motion",
@@ -228,31 +242,31 @@ mod tests {
             .map(|m| m.chain.missing_assignments().len())
             .collect();
         // Source(2), Dynamics(1), Special(4), Drive(4), Volume(1), Pre-FX(1),
-        // Amp(2), Modulation(3), Time(4), Motion(3), Mastering(4)
-        assert_eq!(counts, [2, 1, 4, 4, 1, 1, 2, 3, 4, 3, 4]);
+        // Amp(2), Utility(2), Modulation(3), Time(4), Motion(3), Mastering(4)
+        assert_eq!(counts, [2, 1, 4, 4, 1, 1, 2, 2, 3, 4, 3, 4]);
     }
 
     #[test]
-    fn guitar_template_total_29_blocks() {
+    fn guitar_template_total_31_blocks() {
         let t = guitar_rig_template();
         let modules = &t.engines[0].layers[0].modules;
         let total: usize = modules
             .iter()
             .map(|m| m.chain.missing_assignments().len())
             .sum();
-        assert_eq!(total, 29);
+        assert_eq!(total, 31);
     }
 
     #[test]
     fn guitar_template_all_blocks_unassigned() {
         let t = guitar_rig_template();
         let missing = t.missing_assignments();
-        // rig_id + engine_id + layer_id + 29 blocks = 32
+        // rig_id + engine_id + layer_id + 31 blocks = 34
         let block_missing: Vec<_> = missing
             .iter()
             .filter(|m| m.level == AssignmentLevel::Block)
             .collect();
-        assert_eq!(block_missing.len(), 29);
+        assert_eq!(block_missing.len(), 31);
     }
 
     #[test]
@@ -277,7 +291,7 @@ mod tests {
     #[test]
     fn guitar_template_time_is_two_sequential_splits() {
         let t = guitar_rig_template();
-        let time_module = &t.engines[0].layers[0].modules[8];
+        let time_module = &t.engines[0].layers[0].modules[9];
         assert_eq!(time_module.name, "Time");
 
         // Two sequential Split nodes
@@ -329,8 +343,8 @@ mod tests {
         let t = guitar_rig_template();
         let modules = &t.engines[0].layers[0].modules;
 
-        // Every module except Amp (6) and Time (8) should be purely serial
-        let serial_indices = [0, 1, 2, 3, 4, 5, 7, 9, 10];
+        // Every module except Amp (6) and Time (9) should be purely serial
+        let serial_indices = [0, 1, 2, 3, 4, 5, 7, 8, 10, 11];
         for &i in &serial_indices {
             for node in &modules[i].chain.nodes {
                 assert!(
