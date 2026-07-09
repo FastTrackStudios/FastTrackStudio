@@ -67,7 +67,7 @@ memmap2 = "0.9"
 # lib (only one may link `alsa`). daw consumes no `midicore::midir` symbols
 # (daw-midi-io keeps its own midir 0.11 until the signal stage-2 swap), so the
 # facade's type/codec surface is all daw needs.
-midicore = { path = "../midicore/crates/midicore", default-features = false }
+midicore = { git = "https://codeberg.org/FastTrackStudios/midicore.git", branch = "main", default-features = false }
 # Facade crate — the only public API surface for the daw domain
 daw = { path = "crates/daw" }
 # UI crate stays public (Dioxus components with feature flags)
@@ -320,3 +320,8 @@ not_unsafe_ptr_arg_deref = "allow"
 only_used_in_recursion = "allow"
 unnecessary_sort_by = "allow"
 unusual_byte_groupings = "allow"
+
+# Local dev: midicore is consumed via git (so daw itself stays consumable
+# as a git dependency downstream) but developed side-by-side.
+[patch."https://codeberg.org/FastTrackStudios/midicore.git"]
+midicore = { path = "../midicore/crates/midicore" }
