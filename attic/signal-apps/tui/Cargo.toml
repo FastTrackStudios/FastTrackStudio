@@ -1,0 +1,22 @@
+[package]
+name = "signal-tui"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move signal workspace edition; migrate deliberately
+
+[[bin]]
+name = "signal-tui"
+path = "src/main.rs"
+
+[dependencies]
+signal-sampler.workspace = true
+signal-browser.workspace = true
+eyre.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.30"
+crossterm = "0.28"
+walkdir = "2"
+midir.workspace = true
+crossbeam-channel.workspace = true
+libc = "0.2"

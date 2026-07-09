@@ -1,0 +1,29 @@
+[package]
+name = "session-desktop"
+version.workspace = true
+edition = "2021"  # original edition of the dissolved workspace (root is 2024)
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "session-desktop"
+path = "src/main.rs"
+
+[dependencies]
+architect = { workspace = true, features = ["vox", "server-axum"] }
+daw = { workspace = true, features = ["reaper"] }
+daw-reaper.workspace = true
+session.workspace = true
+session-ui = { workspace = true, default-features = false, features = ["desktop"] }
+dioxus = { workspace = true, features = ["desktop"] }
+vox.workspace = true
+vox-stream.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+eyre.workspace = true
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+
+[lints]
+workspace = true

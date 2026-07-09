@@ -1,3 +1,0 @@
-# MSRV floor for clippy's version-gated lints. Pinned a touch below the
-# toolchain in rust-toolchain.toml.
-msrv = "1.90"

@@ -1,0 +1,23 @@
+@import "tailwindcss";
+/* Reuse the desktop app's theme tokens (dark `:root`) verbatim. */
+@import "../desktop/fts-theme.css";
+
+/* Scan this app + the editor UI crates for Tailwind class usage. */
+@source "./src/**/*.rs";
+@source "../../../crates/keyflow/keyflow-ui/src/**/*.rs";
+@source "../../../../../.cargo/git/checkouts/fts-ui-*/*/crates/*/src/**/*.rs";
+
+@layer base {
+  body {
+    @apply bg-background text-foreground text-[13px] font-sans antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+}

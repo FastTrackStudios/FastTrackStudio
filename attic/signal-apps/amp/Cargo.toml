@@ -1,0 +1,31 @@
+[package]
+name = "signal-amp"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move signal workspace edition; migrate deliberately
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "signal-amp"
+path = "src/main.rs"
+
+[dependencies]
+# The live single-amp engine (duplex audio + NAM). `pipewire` gives the native
+# PipeWire duplex backend the rig needs for low-latency guitar I/O.
+signal-sampler = { workspace = true, features = ["pipewire"] }
+signal-guitar.workspace = true
+# The shared Signal UI — the real signal-flow grid (SignalFlowGridView) + grid
+# model, so the amp renders in the same grid as the full Signal app.
+signal-ui = { workspace = true, default-features = false, features = ["desktop"] }
+# Prototype renderer: dioxus-desktop (WRY/WebKit) for a fast dev loop (hot
+# reload, devtools, mature CSS). NOTE: this is the ONE prototype app allowed to
+# use the standard desktop renderer — the shipped signal-desktop / plugin UI
+# stays on the Blitz pipeline per CLAUDE.md. VST-compat is a later step.
+dioxus = { workspace = true, features = ["desktop"] }
+# Kept only for its compiled Tailwind stylesheet string (TAILWIND_CSS); signal-ui
+# pulls the crate transitively anyway. dioxus core is pinned =0.7.9 and shared,
+# so the Blitz + WRY renderers coexist and we simply launch via WRY here.
+nice-plug-dioxus.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

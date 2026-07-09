@@ -1,0 +1,19 @@
+[package]
+name = "pitch-plugin"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition = "2021"          # kept on 2021 — pre-move signal workspace edition; migrate deliberately
+description = "FTS Pitch — CLAP/VST3 pitch shifter plugin"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+audio-gui = { workspace = true }
+fts-plugin-core = { workspace = true }
+fts-dsp = { workspace = true }
+pitch-dsp = { workspace = true }
+nih_plug = { workspace = true }
+atomic_float = { workspace = true }
+serde = { workspace = true }

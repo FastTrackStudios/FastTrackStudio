@@ -1,0 +1,48 @@
+[package]
+name = "session-web"
+version.workspace = true
+edition = "2021"  # original edition of the dissolved workspace (root is 2024)
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "session-web"
+path = "src/main.rs"
+
+[dependencies]
+# Dioxus UI framework (web/WASM target)
+dioxus = { workspace = true }
+
+# Vox RPC over WebSocket (WASM-compatible)
+vox.workspace = true
+vox-websocket.workspace = true
+
+# Session control — setlist and song navigation (via facade)
+session-proto.workspace = true
+vox-core = "0.10.0-rc.5"
+futures-util = { version = "0.3", default-features = false }
+# wasm: uuid v4 ids need the js RNG backend.
+uuid = { version = "1", features = ["js"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+# Session UI components (web feature = default)
+session-ui = { workspace = true, features = ["web"] }
+
+# Async / WASM utilities
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# Web APIs (window.location for WebSocket URL)
+web-sys = { version = "0.3", features = ["Window", "Location", "Performance"] }
+
+# Logging in browser
+tracing = "0.1"
+tracing-wasm = "0.2"
+
+[features]
+default = ["web"]
+web = ["dioxus/web"]
+
+[lints]
+workspace = true
