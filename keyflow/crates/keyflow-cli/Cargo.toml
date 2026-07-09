@@ -31,7 +31,7 @@ keyflow-orchestra = { path = "../keyflow-orchestra" }
 keyflow-sync = { path = "../keyflow-sync" }
 
 clap = { version = "4", features = ["derive"] }
-dawfile-reaper = { path = "../../../daw/features/backends/reaper/dawfile-reaper", optional = true }
+dawfile-reaper = { path = "../../../features/dawfile/dawfile-reaper", optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 

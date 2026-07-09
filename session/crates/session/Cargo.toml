@@ -48,7 +48,7 @@ daw = { workspace = true, features = ["standalone", "file", "test-harness"] }
 # "audio" is required: daw-standalone's unconditional `sync` module references
 # the feature-gated `audio_engine` (compile error with default features) —
 # same workaround dynamic-template carries.
-daw-standalone = { path = "../../../daw/features/standalone/daw-standalone", features = ["bootstrap", "audio"] }
+daw-standalone = { path = "../../../features/standalone/daw-standalone", features = ["bootstrap", "audio"] }
 daw-proto = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -15,7 +15,7 @@ path = "src/main.rs"
 # SAME blitz rev (9ebd23a) that `nice-plug-dioxus` declares, so the whole graph
 # shares one blitz / dioxus-core (also used by nice_plug_dioxus + signal-ui).
 # Run with `dx serve --platform native` (hot-reload) or `cargo run`.
-dioxus = { package = "dioxus-native", git = "https://github.com/DioxusLabs/blitz.git", rev = "9ebd23a", features = ["prelude", "system-fonts"] }
+dioxus = { package = "dioxus-native", git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893", features = ["prelude", "system-fonts"] }
 # Shared UI components (Piano, …). Built against crates.io dioxus 0.7.x; unifies
 # with dioxus-native on dioxus-core at link time.
 signal-ui = { workspace = true, default-features = false, features = ["desktop"] }

@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-fts-devtools = { path = "../../daw/crates/fts-devtools" }
+fts-devtools = { path = "../../libs/devtools/fts-devtools" }
 # Test-runner orchestration now lives at `daw::test::runner` behind the
 # `test-harness` feature (former `reaper-test` crate with its `runner` feature).
 daw = { workspace = true, features = ["test-harness"] }

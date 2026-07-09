@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 # fts-devtools lives in the sibling daw workspace (the old starcommand
 # remote is gone — a path dep keeps xtask buildable everywhere).
-fts-devtools = { path = "../../daw/crates/fts-devtools" }
+fts-devtools = { path = "../../libs/devtools/fts-devtools" }
 # CLAP/VST3 bundler — the nice-plug fork's xtask (fts-plug). Replaces nih_plug_xtask.
 nice-plug-xtask = { path = "../../libs/nice-plug/nice-plug-xtask" }
 # `reaper-test` folded into the daw facade behind `test-harness`; the runner

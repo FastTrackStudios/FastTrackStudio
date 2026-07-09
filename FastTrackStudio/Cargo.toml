@@ -95,13 +95,13 @@ keyflow-ui = { path = "../keyflow/crates/keyflow-ui", default-features = false }
 # sibling crate for in-process REAPER extension hosting (folding it
 # into `daw` would cycle through daw-reaper → keyflow → daw, see daw
 # a823b67).
-daw = { path = "../daw/crates/daw" }
-daw-cli = { path = "../daw/apps/daw/cli" }
-daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-runtime" }
+daw = { path = "../crates/daw/daw" }
+daw-cli = { path = "../apps/daw-cli" }
+daw-extension-runtime = { path = "../features/reaper/daw-extension-runtime" }
 # `daw-proto` is listed here so the fts-cli TUI can build typed
 # service clients (TransportClient, TracksClient, ProjectsClient) on
 # top of the Vox connection it shares with session-cli.
-daw-proto = { path = "../daw/crates/daw-proto" }
+daw-proto = { path = "../crates/daw/proto" }
 
 # Dock UI (sibling repo)
 dock-proto = { path = "../libs/dock/dock-proto" }
@@ -170,7 +170,7 @@ reaper-common-types = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.g
 # NOTE: the former `reaper-test` / `reaper-test-macro` crates were folded into
 # the `daw` facade's `test-harness` feature (daw 9b04180). xtask now depends on
 # `daw = { features = ["test-harness"] }` for the `daw::test::runner` harness.
-reaper-launcher = { path = "../daw/features/backends/reaper/reaper-launcher" }
+reaper-launcher = { path = "../features/reaper/reaper-launcher" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
