@@ -152,6 +152,10 @@ facet-toml = { version = "0.50.0-rc.5" }
 # ── ROAM service framework ───────────────────────────────────────────
 # Upstream vox from crates.io (migrated off the FTS codeberg fork).
 vox = { version = "0.10.0-rc.5" }
+# Session domain (standalone engine): the rig's Session view is a session
+# client — protocol + UI crates only (both wasm-clean).
+session-proto = { path = "../session/crates/session-proto" }
+session-ui = { path = "../session/crates/session-ui", default-features = false }
 vox-core = { version = "0.10.0-rc.5" }
 vox-websocket = { version = "0.10.0-rc.5" }
 axum = { version = "0.8", features = ["ws"] }
@@ -292,6 +296,9 @@ daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-
 # whole graph resolves against the migrated sources.
 [patch."https://codeberg.org/FastTrackStudios/architect.git"]
 architect = { path = "../../architect/crates/architect" }
+
+[patch."https://codeberg.org/FastTrackStudios/midicore.git"]
+midicore = { path = "../midicore/crates/midicore" }
 
 [patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../input_actions/crates/actions-proto" }

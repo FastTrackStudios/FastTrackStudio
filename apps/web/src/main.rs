@@ -8,6 +8,9 @@
 //!   cargo run -p signal-rigd                # the headless core (native)
 //!   cd apps/web && dx serve --platform web  # this UI
 
+#[cfg(target_arch = "wasm32")]
+mod session_client;
+
 use dioxus::prelude::*;
 
 use signal_guitar_proto::audio::AudioSettingsClient;
@@ -151,6 +154,14 @@ fn App() -> Element {
             }
         }
     });
+
+    // Session-engine link (Session view: songs/sections/charts) — its own
+    // reconnect loop against the standalone session gateway (:3030).
+    #[cfg(target_arch = "wasm32")]
+    {
+        let session_state = use_signal(|| session_ui::ConnectionState::Disconnected);
+        use_hook(move || session_client::start(session_state));
+    }
 
     let state = clients
         .read()

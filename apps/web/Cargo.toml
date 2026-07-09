@@ -13,8 +13,14 @@ authors.workspace = true
 dioxus = { workspace = true, features = ["web", "launch"] }
 signal-guitar-proto.workspace = true
 signal-guitar-ui.workspace = true
+vox.workspace = true
 vox-core.workspace = true
 vox-websocket.workspace = true
+session-proto.workspace = true
+session-ui = { workspace = true, features = ["web"] }
+wasm-bindgen-futures = "0.4"
+gloo-timers = { version = "0.3", features = ["futures"] }
+futures-util = { version = "0.3", default-features = false }
 tracing.workspace = true
 web-sys = { version = "0.3", features = ["Window", "Location"] }
 # Portable sleep for the connect-retry loop (browser timers on wasm).
