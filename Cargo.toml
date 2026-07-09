@@ -124,6 +124,13 @@ members = [
     # ── features/engraver ─────────────────────────────────────────────
     "features/engraver/engraver",
     "features/engraver/proto",
+    # ── features/dynamic-template (subtree-imported, wave 3) ──────────
+    "features/dynamic-template/dynamic-template",
+    "features/dynamic-template/dynamic-template-proto",
+    "features/dynamic-template/dynamic-template-extension",
+    "features/dynamic-template/music-catalog",
+    "features/dynamic-template/color-palette",
+    "features/dynamic-template/tests",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/daw-cli",
     "apps/keyflow-cli",
@@ -289,13 +296,18 @@ vox-stream = { version = "0.10.0-rc.5" }
 # ── Architect framework ───────────────────────────────────────────────
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
-# ── Dynamic session templates (session/keyflow domains) ───────────────
-dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+# ── Dynamic session templates (subtree-imported into the tree) ────────
+dynamic-template = { path = "features/dynamic-template/dynamic-template" }
+dynamic-template-proto = { path = "features/dynamic-template/dynamic-template-proto" }
 # Canonical music-production taxonomy (instrument groups + the REAPER
 # 128-slot group partition). Single source of truth shared with
 # dynamic-template.
-music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
-color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+music-catalog = { path = "features/dynamic-template/music-catalog" }
+color-palette = { path = "features/dynamic-template/color-palette" }
+# Monarchy hierarchy framework (dynamic-template's engine). NOTE: monarchy
+# still derives against facet 0.46 internally; its public trait surface
+# carries no facet::Facet bounds, so the two facet versions coexist.
+monarchy = { git = "https://codeberg.org/FastTrackStudios/monarchy.git", branch = "main" }
 
 # ── MusicXML parsing (keyflow) ─────────────────────────────────────────
 musicxml = "1.1"
@@ -431,17 +443,9 @@ midir = "0.11"
 [patch."https://codeberg.org/FastTrackStudios/architect.git"]
 architect = { path = "../architect/crates/architect" }
 
-# daw.git: dynamic-template.git (external, pulled via the session facade)
-# still references daw.git — the repo is gone but survives in git caches;
-# fold its daw crates onto this tree so ONE daw instance exists graph-wide.
-# daw-control + daw-reaper must fold too — the daw streams port keeps them
-# in lockstep with daw-proto (stream clients / EventStream / StreamSource).
-[patch."https://codeberg.org/FastTrackStudios/daw.git"]
-daw = { path = "crates/daw/daw" }
-daw-proto = { path = "crates/daw/proto" }
-daw-module = { path = "crates/daw/module" }
-daw-control = { path = "crates/daw/control" }
-daw-reaper = { path = "features/reaper/daw-reaper" }
+# NOTE: the old daw.git patch table is gone — dynamic-template (the only
+# thing that still referenced the dead daw.git repo) is subtree-imported at
+# features/dynamic-template/ and consumes the in-tree daw crates directly.
 
 # keyflow.git: Editor.git (and older git-dep graphs) reference keyflow.git;
 # fold those onto this workspace's crates so one keyflow exists graph-wide.

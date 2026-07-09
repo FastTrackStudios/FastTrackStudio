@@ -91,7 +91,7 @@ dependencies = [
 name = "actions-keybindings"
 version = "0.1.0"
 dependencies = [
- "actions-proto 0.1.0",
+ "actions-proto",
  "tracing",
 ]
 
@@ -105,20 +105,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "actions-proto"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/input_actions.git?branch=main#724ef8e34115fcde1e60e047ea364d56008e269a"
-dependencies = [
- "convert_case 0.6.0",
- "facet 0.50.0-rc.5",
- "vox",
-]
-
-[[package]]
 name = "actions-reaper"
 version = "0.1.0"
 dependencies = [
- "actions-proto 0.1.0",
+ "actions-proto",
  "actions-registry",
  "reaper-high",
  "reaper-medium",
@@ -131,7 +121,7 @@ dependencies = [
 name = "actions-registry"
 version = "0.1.0"
 dependencies = [
- "actions-proto 0.1.0",
+ "actions-proto",
  "tokio",
  "tracing",
  "vox",
@@ -141,7 +131,7 @@ dependencies = [
 name = "actions-standalone"
 version = "0.1.0"
 dependencies = [
- "actions-proto 0.1.0",
+ "actions-proto",
  "async-lock",
  "tracing",
 ]
@@ -1788,7 +1778,7 @@ dependencies = [
  "byteorder",
  "candle-kernels",
  "candle-ug",
- "cudarc 0.19.7",
+ "cudarc 0.19.8",
  "float8 0.6.1",
  "gemm 0.19.0",
  "half",
@@ -2340,7 +2330,6 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#5536a425e6560ca756f191137e6505fb1fb1739e"
 dependencies = [
  "facet 0.50.0-rc.5",
  "thiserror 2.0.18",
@@ -2430,6 +2419,17 @@ dependencies = [
  "once_cell",
  "unicode-width",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "console"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fe5f465a4f6fee88fad41b85d990f84c835335e85b5d9e6e63e0d06d28cba7c"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3136,9 +3136,9 @@ dependencies = [
 
 [[package]]
 name = "cudarc"
-version = "0.19.7"
+version = "0.19.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cea5f10a99e025c1b44ae2354c2d8326b25ddbd0baf76bde8e55cfd4018a2cc"
+checksum = "42310153e06cf4cd532901f7096beb27504d681736a29ee90728ae4e2d93b2a8"
 dependencies = [
  "float8 0.7.0",
  "half",
@@ -3551,7 +3551,7 @@ dependencies = [
 name = "daw-proto"
 version = "0.1.0"
 dependencies = [
- "actions-proto 0.1.0",
+ "actions-proto",
  "architect",
  "facet 0.50.0-rc.5",
  "facet-json 0.50.0-rc.5",
@@ -4047,6 +4047,12 @@ dependencies = [
  "rustc_version",
  "syn 2.0.118",
 ]
+
+[[package]]
+name = "diff"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 
 [[package]]
 name = "digest"
@@ -4849,7 +4855,6 @@ checksum = "e1d926b4d407d372f141f93bb444696142c29d32962ccbd3531117cf3aa0bfa9"
 [[package]]
 name = "dynamic-template"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#5536a425e6560ca756f191137e6505fb1fb1739e"
 dependencies = [
  "anyhow",
  "architect",
@@ -4870,14 +4875,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "dynamic-template-extension"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "dynamic-template-proto"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#5536a425e6560ca756f191137e6505fb1fb1739e"
 dependencies = [
- "actions-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/input_actions.git?branch=main)",
+ "actions-proto",
  "daw-proto",
  "facet 0.50.0-rc.5",
  "thiserror 2.0.18",
+ "vox",
+]
+
+[[package]]
+name = "dynamic-template-tests"
+version = "0.1.0"
+dependencies = [
+ "color-palette",
+ "daw-proto",
+ "dynamic-template",
+ "insta",
+ "monarchy",
+ "pretty_assertions",
+ "tempfile",
+ "tokio",
  "vox",
 ]
 
@@ -5125,9 +5153,9 @@ dependencies = [
 
 [[package]]
 name = "env_filter"
-version = "1.0.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e90c2accc4b07a8456ea0debdc2e7587bdd890680d71173a15d4ae604f6eef"
+checksum = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217"
 dependencies = [
  "log",
  "regex",
@@ -5135,9 +5163,9 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.11.10"
+version = "0.11.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0621c04f2196ac3f488dd583365b9c09be011a4ab8b9f37248ffcc8f6198b56a"
+checksum = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6"
 dependencies = [
  "anstream",
  "anstyle",
@@ -5790,7 +5818,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "719a903cc23e4a89e87962c2a80fdb45cdaad0983a89bd150bb57b4c8571a7d5"
 dependencies = [
- "cudarc 0.19.7",
+ "cudarc 0.19.8",
  "half",
  "num-traits",
  "rand 0.9.4",
@@ -7982,7 +8010,7 @@ version = "0.17.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
 dependencies = [
- "console",
+ "console 0.15.11",
  "number_prefix",
  "portable-atomic",
  "unicode-width",
@@ -8013,7 +8041,7 @@ name = "input"
 version = "0.1.0"
 dependencies = [
  "actions-keybindings",
- "actions-proto 0.1.0",
+ "actions-proto",
  "facet 0.50.0-rc.5",
  "serde",
  "serde_json",
@@ -8028,6 +8056,18 @@ dependencies = [
  "dioxus",
  "input",
  "tokio",
+]
+
+[[package]]
+name = "insta"
+version = "1.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86f0f8fee8c926415c58d6ae43a08523a26faccb2323f5e6b644fe7dd4ef6b82"
+dependencies = [
+ "console 0.16.4",
+ "once_cell",
+ "similar",
+ "tempfile",
 ]
 
 [[package]]
@@ -9781,7 +9821,6 @@ dependencies = [
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#5536a425e6560ca756f191137e6505fb1fb1739e"
 dependencies = [
  "color-palette",
 ]
@@ -11939,6 +11978,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 
 [[package]]
+name = "pretty_assertions"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
+dependencies = [
+ "diff",
+ "yansi",
+]
+
+[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13618,7 +13667,7 @@ dependencies = [
 name = "session"
 version = "0.1.0"
 dependencies = [
- "actions-proto 0.1.0",
+ "actions-proto",
  "architect",
  "chrono",
  "daw",
@@ -13680,7 +13729,7 @@ dependencies = [
 name = "session-proto"
 version = "0.1.0"
 dependencies = [
- "actions-proto 0.1.0",
+ "actions-proto",
  "architect",
  "daw-proto",
  "eyre",
@@ -13822,6 +13871,12 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "simplecss"
