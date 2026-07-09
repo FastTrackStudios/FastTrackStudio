@@ -56,6 +56,7 @@ members = [
     "libs/monarchy/monarchy-derive",
     "libs/vox-discover",
     "libs/installer-core",
+    "libs/engine-launcher",
     "libs/neural-amp-modeler",
     "libs/moire-trace-capture",
     # ── crates/ — domain cores ────────────────────────────────────────
@@ -128,6 +129,7 @@ members = [
     "features/reaper/session-extension",
     # ── crates/keyflow — keyflow domain core (wave 3) ─────────────────
     "crates/keyflow/keyflow",
+    "crates/keyflow/cli",
     "crates/keyflow/keyflow-proto",
     "crates/keyflow/keyflow-syntax",
     "crates/keyflow/keyflow-text",
@@ -207,11 +209,10 @@ members = [
     "features/reaper/signal-extension",
     "features/reaper/signal-reaper-controller",
     # ── apps ──────────────────────────────────────────────────────────
-    "apps/daw-cli",
     "apps/fasttrackstudio",
     "apps/installer",
-    "apps/keyflow-cli",
-    "apps/rigd",
+    "apps/fts-cli",
+    "apps/signal-engine",
     "apps/signal-web",
     "apps/site",
 ]
@@ -255,6 +256,7 @@ iced_baseview = { path = "libs/nice-plug/iced_baseview", default-features = fals
 utils = { path = "libs/utils" }
 vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
+engine-launcher = { path = "libs/engine-launcher" }
 neural-amp-modeler = { path = "libs/neural-amp-modeler" }
 moire-trace-capture = { path = "libs/moire-trace-capture" }
 audiocore-core = { path = "crates/audiocore/audiocore-core" }
@@ -324,7 +326,6 @@ daw-standalone = { path = "features/standalone/daw-standalone" }
 daw-csi = { path = "features/surfaces/daw-csi" }
 daw-ui = { path = "features/daw-ui/daw-ui", default-features = false }
 daw-theme-reaper = { path = "features/daw-ui/daw-theme-reaper" }
-daw-cli = { path = "apps/daw-cli" }
 
 # ── session domain (wave 3) ───────────────────────────────────────────
 # `session` is the facade — the only public API surface for the session
@@ -353,6 +354,7 @@ keyflow-orchestra = { path = "crates/keyflow/keyflow-orchestra" }
 keyflow-sync = { path = "crates/keyflow/keyflow-sync" }
 keyflow-daw-analysis = { path = "crates/keyflow/keyflow-daw-analysis" }
 keyflow-ui = { path = "crates/keyflow/keyflow-ui" }
+keyflow-cli = { path = "crates/keyflow/cli" }
 tree-sitter-keyflow = { path = "crates/keyflow/tree-sitter-keyflow" }
 # Engraver — defaults OFF at the root (the full `engraver` feature drags
 # wgpu/vello + PDF export); consumers opt into `svg`/`wgpu`/`engraver`.
@@ -704,7 +706,7 @@ collapsible_match = "allow"
 filter_next = "allow"
 
 # ── Dev profile (carried from the dissolved signal workspace) ──────────
-# The live rig runs from target/debug/signal-rigd: the vendored NAM C++
+# The live rig runs from target/debug/signal-engine (formerly signal-rigd): the vendored NAM C++
 # core and the DSP crates are unusable at opt-level 0 (~10-50x slower,
 # xruns), so dependencies build at release opt in dev while the thin
 # app/UI workspace crates stay at light opt for fast rebuilds.

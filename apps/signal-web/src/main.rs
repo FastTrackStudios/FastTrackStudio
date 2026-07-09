@@ -1,11 +1,11 @@
 //! Signal Web — the guitar rig UI in the browser, as a pure remote.
 //!
-//! Connects to a running `signal-rigd` over a vox WebSocket and mounts the
+//! Connects to a running `signal-engine` over a vox WebSocket and mounts the
 //! same [`GuitarRigRemote`] components the desktop shell uses. The audio
 //! engine never leaves the rigd process — only the UI is wasm.
 //!
 //! Run:
-//!   cargo run -p signal-rigd                # the headless core (native)
+//!   cargo run -p signal-engine              # the headless core (native)
 //!   cd apps/web && dx serve --platform web  # this UI
 
 #[cfg(target_arch = "wasm32")]
@@ -61,9 +61,10 @@ select:focus, input:focus {
 "#;
 
 /// Where the rig core lives. Same host as the page by default; override at
-/// build time with `RIGD_URL` if the core runs elsewhere.
+/// build time with `SIGNAL_ENGINE_URL` (or the legacy `RIGD_URL`) if the
+/// core runs elsewhere.
 fn server_url() -> String {
-    if let Some(url) = option_env!("RIGD_URL") {
+    if let Some(url) = option_env!("SIGNAL_ENGINE_URL").or(option_env!("RIGD_URL")) {
         return url.to_string();
     }
     let host = web_sys::window()
@@ -191,7 +192,7 @@ fn App() -> Element {
                     }
                     if attempts() > 0 {
                         span { class: "text-xs", style: "color: #71717a;",
-                            "Retrying — start signal-rigd and this page will connect on its own."
+                            "Retrying — start signal-engine and this page will connect on its own."
                         }
                     }
                 }

@@ -6,7 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 # The browser remote: the same guitar-rig UI (`signal-guitar-ui`), connected
-# to a running `signal-rigd` over a vox WebSocket. Only the UI is wasm — the
+# to a running `signal-engine` over a vox WebSocket. Only the UI is wasm — the
 # audio engine stays native in rigd.
 
 [dependencies]

@@ -1,5 +1,7 @@
 //! CLI tests for DAW launch profile discovery.
 
+#![cfg(feature = "cli")]
+
 use serde_json::Value;
 use std::process::Command;
 

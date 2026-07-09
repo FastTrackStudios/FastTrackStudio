@@ -1,3 +1,11 @@
+//! keyflow-cli — the `kf` command-line surface as a library.
+//!
+//! Former `apps/keyflow-cli` binary crate, kept as a crates/keyflow/cli
+//! subcrate (its clap tree + render pipeline are too large to inline into
+//! the `keyflow` facade cleanly). Embedders call [`cli_main`] with
+//! pre-split argv: the thin `kf` binary (src/main.rs) and the unified
+//! `fts keyflow` / `fts kf` subcommand mount the same surface.
+
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -1012,15 +1020,17 @@ fn svg_to_png(svg: &str, scale: f32, font_bundle: &ChartFontBundle) -> Result<Ve
         .map_err(|e| format!("PNG encode failed: {e}"))
 }
 
-fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .init();
-
-    let cli = Cli::parse();
+/// Run the `kf` CLI from pre-split argv (element 0 is the program name).
+///
+/// Exits the process with status 1 on error (CLI semantics). Tracing/log
+/// setup is the caller's job — the `kf` binary installs an env-filter
+/// subscriber, `fts` installs its own.
+pub fn cli_main<I, T>(args: I)
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let cli = Cli::parse_from(args);
 
     if let Err(e) = run(cli) {
         eprintln!("Error: {e}");

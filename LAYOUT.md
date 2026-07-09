@@ -58,10 +58,11 @@ consumed as `x.workspace = true`.
 | new | from |
 |---|---|
 | apps/fasttrackstudio | (already there) — THE app |
-| apps/rigd | signal/apps/rigd |
+| apps/signal-engine | signal/apps/rigd (was `signal-rigd`) |
 | apps/signal-web | signal/apps/web |
-| apps/daw-cli | daw/apps/daw/cli |
-| apps/keyflow-cli | keyflow/crates/keyflow-cli |
+| apps/fts-cli | NEW — the one `fts` CLI (mounts daw::cli + keyflow-cli, manages engines) |
+| (dissolved) apps/daw-cli | folded into crates/daw/daw as `daw::cli` behind the `cli` feature (thin `daw` bin kept) |
+| (moved) apps/keyflow-cli | crates/keyflow/cli — lib-first (`keyflow_cli::cli_main`), thin `kf` bin kept |
 | apps/installer | FastTrackStudio/apps/installer |
 | apps/site | fasttrackstudio-site repo (subtree import; package renamed fts-site) — fasttrackstudio.app |
 | apps/docs-site | unified docs site (dodeca + kf docs; NOT a cargo member) — docs.fasttrackstudio.app; keyflow docs content moved here from crates/keyflow/docs |
@@ -88,4 +89,4 @@ consumed as `x.workspace = true`.
   signal-ui migrates off it
 - signal-audio remnants, duplicate wav/resampler helpers → libs/utils
   or audiocore-dsp
-- three CLIs → one `fts` CLI in apps/ (subcommands)
+- ~~three CLIs → one `fts` CLI in apps/ (subcommands)~~ — done: apps/fts-cli
