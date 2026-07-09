@@ -88,8 +88,8 @@ fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", rev = "d9f0
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
 # Facet reflection — align the stack to the current 0.50 line.
-facet = { version = "0.50.0-rc.1" }
-facet-json = { version = "0.50.0-rc.1" }
+facet = { version = "0.50.0-rc.5" }
+facet-json = { version = "0.50.0-rc.5" }
 
 # architect framework — defines #[architect::rpc] for sync-trait → vox
 # bridge generation plus the Entity derive for CRUD-shaped data.
@@ -98,10 +98,10 @@ facet-json = { version = "0.50.0-rc.1" }
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
 # VOX service framework — consumed from crates.io (upstream facet/vox monorepo).
-vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
-vox-types = { version = "0.10.0-rc.1" }
-vox-phon = { version = "0.10.0-rc.1" }
-vox-stream = { version = "0.10.0-rc.1" }
+vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
+vox-types = { version = "0.10.0-rc.5" }
+vox-phon = { version = "0.10.0-rc.5" }
+vox-stream = { version = "0.10.0-rc.5" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -166,7 +166,7 @@ futures = "0.3"
 midir = "0.11"
 # Styx config parsing into Facet types (surface zone definitions).
 # 5.0 pairs with facet 0.50 (same pairing as the fts `input` repo).
-facet-styx = "5.0.0-rc.1"
+facet-styx = "5.0.0-rc.5"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
