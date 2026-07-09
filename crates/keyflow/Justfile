@@ -25,17 +25,16 @@ ci:
 changelog:
     git cliff -o CHANGELOG.md
 
-# Docsite dev loop — kf-block watcher + ddc live reload on :8080.
+# Docsite moved to the unified FTS docs site: apps/docs-site (the keyflow
+# section lives at /keyflow/). These recipes delegate there.
 docs-serve:
-    ./docs/serve.sh
+    ../../apps/docs-site/serve.sh
 
-# Build the docsite to docs/output.
 docs-build:
-    ./docs/build.sh
+    ../../apps/docs-site/build.sh
 
-# Build + deploy the docsite to fly.io (app: keyflow-docs).
 docs-deploy:
-    ./docs/deploy.sh
+    ../../apps/docs-site/deploy.sh
 
 # Web editor with live reload.
 web-editor:

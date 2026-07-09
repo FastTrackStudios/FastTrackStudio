@@ -214,6 +214,7 @@ members = [
     "apps/fts-cli",
     "apps/signal-engine",
     "apps/signal-web",
+    "apps/site",
 ]
 # attic/ holds parked crates (dead apps, legacy shells) — never built.
 exclude = [
@@ -625,6 +626,7 @@ keyflow-midi = { path = "crates/keyflow/keyflow-midi" }
 keyflow-syntax = { path = "crates/keyflow/keyflow-syntax" }
 keyflow-chordpro = { path = "crates/keyflow/keyflow-chordpro" }
 keyflow-daw-analysis = { path = "crates/keyflow/keyflow-daw-analysis" }
+keyflow-ui = { path = "crates/keyflow/keyflow-ui" }
 engraver = { path = "features/engraver/engraver" }
 engraver-proto = { path = "features/engraver/proto" }
 

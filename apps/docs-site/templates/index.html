@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}FastTrackStudio Docs{% endblock title %}
+{% block body_class %}home{% endblock body_class %}
+
+{% block body %}
+<div class="hero">
+    <div class="hero-content">
+        <p class="hero-kicker">Charts · Rigs · Sessions · DAW</p>
+        <h1 class="hero-title">FastTrackStudio</h1>
+        <p class="hero-tagline">Documentation for the whole stack.</p>
+        <p class="hero-sub">Keyflow chart notation, Signal rigs and plugins, Session coordination, DAW integration, the architect framework, and the shared toolchain — one docs site.</p>
+        <div class="hero-actions">
+            <a href="/keyflow/guide/" class="btn btn-primary">Keyflow guide</a>
+            <a href="/architect/" class="btn btn-secondary">architect</a>
+        </div>
+    </div>
+</div>
+
+<div class="layout">
+    <aside class="sidebar">
+        <nav class="sidebar-nav">
+            {% for sub in root.subsections %}
+            <div class="sidebar-section">
+                <h3><a href="{{ sub.permalink }}">{{ sub.title }}</a></h3>
+                <ul>
+                    {% for page in sub.pages %}
+                    <li><a href="{{ page.permalink }}">{{ page.title }}</a></li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endfor %}
+
+        </nav>
+    </aside>
+    <main class="content">
+        <article>
+            {{ section.content | safe }}
+        </article>
+    </main>
+</div>
+{% endblock body %}

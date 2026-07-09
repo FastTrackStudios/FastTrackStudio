@@ -1,0 +1,121 @@
+# fasttrackstudio.app — the public website (Dioxus web app).
+#
+# Subtree-imported from the standalone fasttrackstudio-site repo (history
+# preserved) and dissolved into the root workspace: intra-tree deps
+# (keyflow, fts-ui, dioxus pins) come from [workspace.dependencies]; the
+# Editor crates stay a git dep (external repo — its keyflow.git references
+# fold onto the in-tree crates via the root [patch] table).
+[package]
+name = "fts-site"
+version = "0.1.0"
+authors = ["Cody Wright <acodywright@gmail.com>"]
+edition = "2024"
+description = "FastTrackStudio website — landing, live keyflow editor, chart browser"
+
+[dependencies]
+# Dioxus web framework — root pins =0.7.9 (lib only); the site re-enables
+# router here and web/desktop via its own features below.
+dioxus = { workspace = true, features = ["router"] }
+
+# UI component library (shadcn-inspired, Tailwind-styled)
+lucide-dioxus = { workspace = true }
+
+# Chart parsing and layout
+keyflow = { workspace = true, features = ["engraver", "text", "highlighting"] }
+
+# Live contenteditable editor + keyflow language bindings (homepage demo).
+# External repo — kept as a git dep; NOT an intra-tree crate.
+editor = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
+editor-keyflow = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
+editor-keyflow-lang = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
+
+# FTS design system (components, layout, typography, theme tokens)
+fts-ui = { workspace = true }
+
+# Color type used by the engraver's SVG export config
+peniko = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Archive creation for multi-file exports (site-only dep — no root pin)
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+# Logging
+tracing = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Override fontique to disable system feature (not available on WASM)
+fontique = { version = "0.2", default-features = false, features = ["std"] }
+parley = { version = "0.2", default-features = false, features = ["std"] }
+
+# Override uuid to enable js feature for WASM (uses browser crypto API)
+uuid = { version = "1.0", features = ["serde", "v4", "js"] }
+
+# WASM-specific utilities
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+tracing-wasm = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "registry"] }
+
+# Async timers for WASM — "futures" feature backs the debounced live-preview
+# render task in LiveEditor.
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# Web APIs
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Navigator",
+    "CanvasRenderingContext2d",
+    "Performance",
+    "Location",
+    # Mouse/touch interaction
+    "MouseEvent",
+    "WheelEvent",
+    "EventTarget",
+    "AddEventListenerOptions",
+    "DomRect",
+    # Resize observation
+    "ResizeObserver",
+    "ResizeObserverEntry",
+    "ResizeObserverOptions",
+    "ResizeObserverBoxOptions",
+    # File download
+    "Blob",
+    "BlobPropertyBag",
+    "Url",
+    "HtmlAnchorElement",
+    # SVG fallback rendering
+    "HtmlImageElement",
+] }
+
+# Async runtime for WASM — deliberately NOT the workspace tokio (that one is
+# full-featured and pulls mio, which breaks wasm32 builds).
+tokio = { version = "1.48", default-features = false, features = ["sync"] }
+
+# Random number generation for WASM (needed for getrandom 0.2 used by uuid)
+getrandom = { version = "0.2", features = ["js"] }
+# getrandom 0.3 pulled in by transitive deps - need wasm_js feature for wasm32
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Desktop/server dependencies
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[features]
+default = ["web"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+
+[lints]
+workspace = true
