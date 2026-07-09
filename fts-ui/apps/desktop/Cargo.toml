@@ -1,0 +1,12 @@
+[package]
+name = "fts-ui-showcase-desktop"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["desktop"] }
+fts-ui = { workspace = true }
+fts-story-shell.workspace = true
+
+[lints]
+workspace = true

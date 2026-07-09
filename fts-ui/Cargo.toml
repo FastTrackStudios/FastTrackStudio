@@ -1,0 +1,54 @@
+[workspace]
+members = ["crates/*", "apps/*", "xtask"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+fts-ui = { path = "crates/fts-ui" }
+fts-ui-audio = { path = "crates/fts-ui-audio" }
+clsx = "0.1.1"
+dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
+# Blitz / dioxus-native — upstream DioxusLabs/blitz.
+# Re-exported as `dioxus` (via `package = "dioxus-native"`) inside the
+# native app so component code can keep `use dioxus::prelude::*` unchanged.
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude", "system-fonts"] }
+lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "837c9d4c1c9f99b19de7a3f087d8af1b0538dcae", default-features = false }
+lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
+tracing = { version = "0.1", features = ["std"] }
+tw_merge = "0.1.21"
+
+# fts-story — story registry / Lookbook shell / VRT runner. Currently
+# pulled via path dep against a sibling checkout for fast iteration; swap
+# to `git = "https://git.starcommand.live/FastTrackStudios/fts-story", rev = "<sha>"`
+# once the API stabilises.
+fts-story-runtime   = { git = "https://git.starcommand.live/FastTrackStudios/fts-story.git", branch = "main" }
+fts-story-shell     = { git = "https://git.starcommand.live/FastTrackStudios/fts-story.git", branch = "main" }
+fts-story-snapshots = { git = "https://git.starcommand.live/FastTrackStudios/fts-story.git", branch = "main" }
+fts-story-parity    = { git = "https://git.starcommand.live/FastTrackStudios/fts-story.git", branch = "main" }
+linkme              = "0.3"
+# fzf-style fuzzy matching — the matcher core extracted from Helix's
+# Nucleo. Used to rank cmdk-style searches in Combobox / Command.
+nucleo-matcher      = "0.3"
+# Color space conversions used by the ColorPicker wrapper. Pinned to
+# match the version that `dioxus-primitives::color_picker` builds against.
+palette             = "0.7.6"
+
+[workspace.lints.rust]
+unused = "warn"
+
+# Stylistic clippy lints allowed during stabilization (same policy as daw):
+# they're churn, not bugs. Tighten per-crate in a later cleanup sweep.
+# Each crate opts in via `[lints] workspace = true`.
+[workspace.lints.clippy]
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
+
