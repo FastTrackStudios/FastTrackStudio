@@ -27,6 +27,25 @@ html, body, #main {
     overflow: hidden;
     background: oklch(14.5% 0 0);
 }
+/* Slim, theme-colored scrollbars everywhere. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #3f3f46 transparent;
+}
+*::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+    border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: #52525b;
+}
 "#;
 
 /// Where the rig core lives. Same host as the page by default; override at
