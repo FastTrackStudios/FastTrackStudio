@@ -128,7 +128,7 @@ impl CueBank {
         bank: &mut SampleBank,
         texts: &[String],
         target_sample_rate: u32,
-        mut tts: Option<&mut dyn TtsRenderer>,
+        mut tts: Option<&mut (dyn TtsRenderer + '_)>,
     ) -> Vec<String> {
         let mut loaded = Vec::new();
         for text in texts {

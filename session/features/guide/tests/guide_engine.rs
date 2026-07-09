@@ -417,6 +417,111 @@ fn engine_stops_triggering_when_not_playing() {
     assert!(l.iter().all(|v| *v == 0.0));
 }
 
+// ─── SampleBank::synthesize_defaults ────────────────────────────────────
+
+/// Peak absolute value across all channels of a sample.
+fn peak(sample: &session_guide::AudioSample) -> f32 {
+    sample
+        .data
+        .iter()
+        .flat_map(|ch| ch.iter())
+        .fold(0.0f32, |m, v| m.max(v.abs()))
+}
+
+#[test]
+fn synthesize_defaults_fills_all_slots_non_silent_and_bounded() {
+    const SR: u32 = 48_000;
+    let mut engine = GuideEngine::default();
+    engine.bank_mut().synthesize_defaults(SR);
+    let bank = engine.bank();
+
+    let named = [
+        ("beat", bank.beat.as_ref()),
+        ("eighth", bank.eighth.as_ref()),
+        ("sixteenth", bank.sixteenth.as_ref()),
+        ("triplet", bank.triplet.as_ref()),
+        ("accent", bank.measure_accent.as_ref()),
+    ];
+    for (name, slot) in named {
+        let sample = slot.unwrap_or_else(|| panic!("{name} not synthesized"));
+        let p = peak(sample);
+        assert!(p > 0.05, "{name} is silent (peak {p})");
+        assert!(p <= 1.0, "{name} exceeds full scale (peak {p})");
+        assert_eq!(sample.sample_rate, SR);
+        // Bounded length: every placeholder is well under half a second.
+        assert!(sample.frames() < SR as usize / 2, "{name} too long");
+    }
+    for (i, slot) in bank.counts.iter().enumerate() {
+        let sample = slot.as_ref().unwrap_or_else(|| panic!("count {i} missing"));
+        let p = peak(sample);
+        assert!(p > 0.05 && p <= 1.0, "count {i} peak {p} out of range");
+    }
+    // Section-guide chimes cover the standard keys.
+    for key in ["Verse_1", "Chorus_None", "Pre Chorus_2", "Ending_None"] {
+        let sample = &bank.guides[key];
+        let p = peak(sample);
+        assert!(p > 0.05 && p <= 1.0, "guide {key} peak {p} out of range");
+        assert!(sample.frames() < SR as usize, "guide {key} too long");
+    }
+}
+
+#[test]
+fn synthesize_defaults_never_overwrites_loaded_samples() {
+    const SR: u32 = 48_000;
+    let mut engine = GuideEngine::default();
+    engine.bank_mut().beat = Some(impulse(SR));
+    engine.bank_mut().counts[0] = Some(impulse(SR));
+    engine.bank_mut().insert_guide("Chorus_None", impulse(SR));
+    engine.bank_mut().synthesize_defaults(SR);
+
+    let bank = engine.bank();
+    assert_eq!(bank.beat.as_ref().unwrap().frames(), 1);
+    assert_eq!(bank.counts[0].as_ref().unwrap().frames(), 1);
+    assert_eq!(bank.guides["Chorus_None"].frames(), 1);
+    // ...while empty slots were still filled.
+    assert!(bank.measure_accent.is_some());
+    assert!(bank.counts[1].is_some());
+    assert!(bank.guides.contains_key("Verse_1"));
+}
+
+#[test]
+fn synthesized_bank_renders_audible_guide() {
+    // End-to-end: a zero-asset engine + demo-like schedule produces
+    // non-silent output through render_stereo.
+    const SR: f64 = 48_000.0;
+    let mut engine = GuideEngine::default();
+    engine.bank_mut().synthesize_defaults(SR as u32);
+
+    let mut first = section(4.0, 12.0, "Verse 1", "Verse");
+    first.is_first_section = true;
+    first.count_in_position = Some(0.0);
+    first.section_number = Some(1);
+    engine.set_sections(
+        &[first],
+        &GuideSongTiming {
+            tempo_bpm: 120.0,
+            time_sig_num: 4,
+            time_sig_den: 4,
+        },
+    );
+
+    let mut l = vec![0.0f32; 4096];
+    let mut r = vec![0.0f32; 4096];
+    let clock = BlockClock {
+        playing: true,
+        pos_seconds: 0.0,
+        pos_beats: 0.0,
+        tempo_bpm: 120.0,
+        time_sig_num: 4,
+        time_sig_den: 4,
+        sample_rate: SR,
+    };
+    engine.render_stereo(&mut l, &mut r, &clock);
+    let p = l.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!(p > 0.05, "synthesized guide rendered silence (peak {p})");
+    assert!(p <= 2.0, "synthesized guide clipped wildly (peak {p})");
+}
+
 #[test]
 fn measure_accent_replaces_beat_one() {
     const SR: f64 = 1000.0;

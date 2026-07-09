@@ -277,6 +277,110 @@ impl SampleBank {
     pub fn insert_guide(&mut self, key: impl Into<String>, sample: AudioSample) {
         self.guides.insert(key.into(), sample);
     }
+
+    /// Fill every EMPTY slot with a synthesized placeholder so the guide
+    /// is audible with zero assets on disk. Loaded samples are never
+    /// overwritten — call the `load_*` methods first, then this.
+    ///
+    /// Design (all short exponentially-decaying sine bursts, peak < 1.0):
+    /// - click: 1 kHz tick for beats (30 ms), 1.5 kHz accent (35 ms),
+    ///   quieter/shorter ticks for eighths, sixteenths and triplets;
+    /// - count voices 1-8: a distinct pitch per count (C-major scale
+    ///   C5..C6, ~110 ms) so count-ins are followable without speech;
+    /// - section guides: a two-tone chime inserted under the standard
+    ///   `"{type}_{number}"` keys for every known section type (numbers
+    ///   `None` and 1..=8), so section cues sound even with no voice
+    ///   library and no TTS.
+    pub fn synthesize_defaults(&mut self, sample_rate: u32) {
+        if self.beat.is_none() {
+            self.beat = Some(synth_tick(1_000.0, 30.0, 0.5, sample_rate));
+        }
+        if self.measure_accent.is_none() {
+            self.measure_accent = Some(synth_tick(1_500.0, 35.0, 0.65, sample_rate));
+        }
+        if self.eighth.is_none() {
+            self.eighth = Some(synth_tick(1_000.0, 18.0, 0.35, sample_rate));
+        }
+        if self.sixteenth.is_none() {
+            self.sixteenth = Some(synth_tick(1_000.0, 12.0, 0.25, sample_rate));
+        }
+        if self.triplet.is_none() {
+            self.triplet = Some(synth_tick(1_200.0, 18.0, 0.35, sample_rate));
+        }
+
+        // Count voices: one scale degree per count number (C5 major).
+        const COUNT_HZ: [f32; 8] = [523.25, 587.33, 659.25, 698.46, 783.99, 880.0, 987.77, 1046.5];
+        for (i, slot) in self.counts.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(synth_tick(COUNT_HZ[i], 110.0, 0.5, sample_rate));
+            }
+        }
+
+        // Section-guide chime under the keys `CueSchedule` looks up
+        // (`get_guide_key` shapes) for every section type the legacy
+        // library knows, in both spaced and hyphenated spellings.
+        const SECTION_TYPES: [&str; 21] = [
+            "Verse",
+            "Chorus",
+            "Bridge",
+            "Intro",
+            "Outro",
+            "Instrumental",
+            "Pre Chorus",
+            "Pre-Chorus",
+            "Post Chorus",
+            "Post-Chorus",
+            "Breakdown",
+            "Interlude",
+            "Tag",
+            "Ending",
+            "Solo",
+            "Vamp",
+            "Turnaround",
+            "Refrain",
+            "Rap",
+            "Acapella",
+            "Exhortation",
+        ];
+        let chime = synth_chime(sample_rate);
+        for ty in SECTION_TYPES {
+            let key = get_guide_key(ty, None);
+            if !self.guides.contains_key(&key) {
+                self.guides.insert(key, chime.clone());
+            }
+            for n in 1..=8u32 {
+                let key = get_guide_key(ty, Some(n));
+                if !self.guides.contains_key(&key) {
+                    self.guides.insert(key, chime.clone());
+                }
+            }
+        }
+    }
+}
+
+/// A short exponentially-decaying sine burst (hard attack, tau = dur/6).
+fn synth_tick(freq_hz: f32, dur_ms: f32, gain: f32, sample_rate: u32) -> AudioSample {
+    let sr = sample_rate.max(1) as f32;
+    let frames = ((dur_ms / 1000.0) * sr).round().max(1.0) as usize;
+    let tau = (dur_ms / 1000.0) / 6.0;
+    let samples = (0..frames)
+        .map(|i| {
+            let t = i as f32 / sr;
+            gain * (std::f32::consts::TAU * freq_hz * t).sin() * (-t / tau).exp()
+        })
+        .collect();
+    AudioSample::mono(samples, sample_rate)
+}
+
+/// Two-tone "ding-dong" chime used as the section-guide placeholder.
+fn synth_chime(sample_rate: u32) -> AudioSample {
+    let a = synth_tick(880.0, 140.0, 0.4, sample_rate);
+    let b = synth_tick(1_318.5, 180.0, 0.4, sample_rate);
+    let gap = (sample_rate as f32 * 0.06) as usize; // 60 ms between tones
+    let mut samples = a.data.into_iter().next().unwrap_or_default();
+    samples.resize(samples.len() + gap, 0.0);
+    samples.extend(b.data.into_iter().next().unwrap_or_default());
+    AudioSample::mono(samples, sample_rate)
 }
 
 #[cfg(test)]
