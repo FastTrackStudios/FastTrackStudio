@@ -1,0 +1,27 @@
+[package]
+name = "fts-ui"
+description = "FastTrack Studio design system — facade crate that re-exports feature crates"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# This crate intentionally contains no logic of its own. It is a thin facade
+# that re-exports the capability crates under `features/`, each gated behind a
+# Cargo feature:
+#   * `core`  (default) -> fts-ui-core,  re-exported flat (`fts_ui::prelude`, …)
+# Add new capabilities by adding a crate under features/ and a matching feature
+# + optional dependency here.
+
+[features]
+default = ["core"]
+core = ["dep:fts-ui-core"]
+# Forward the core router feature. `?` so enabling `router` doesn't force-enable
+# core; it only applies if core is already on (which it is by default).
+router = ["fts-ui-core?/router"]
+
+[dependencies]
+fts-ui-core = { workspace = true, optional = true }
+
+[lints]
+workspace = true

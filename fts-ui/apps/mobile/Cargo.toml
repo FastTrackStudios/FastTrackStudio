@@ -1,0 +1,11 @@
+[package]
+name = "fts-ui-showcase-mobile"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["mobile"] }
+fts-ui.workspace = true
+
+[lints]
+workspace = true
