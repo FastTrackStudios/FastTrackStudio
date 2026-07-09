@@ -4,6 +4,8 @@
 //!
 //!   cargo xtask reaper-test -- actions_cli
 
+#![cfg(all(feature = "cli", feature = "test-harness"))]
+
 use daw::test::reaper_test;
 use serde_json::Value;
 use std::process::Command;
