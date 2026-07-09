@@ -1,0 +1,116 @@
+/* Full-screen Keyflow Editor studio layout. Token colors and diagnostic
+   squiggles are injected at runtime by `editor_keyflow_lang::highlight_css`;
+   the editor's own structural styles come from `editor::EDITOR_STYLE`.
+   This fills whatever height its parent gives it (see main.rs's Layout,
+   which sizes `main` to the viewport minus the nav on the /editor route). */
+
+.kf-studio {
+  --kf-border: rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.kf-studio-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--kf-border);
+  background: color-mix(in srgb, var(--color-card, #18181b) 60%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.kf-studio-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 768px) {
+  .kf-studio-split {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+}
+
+.kf-studio-editor-pane,
+.kf-studio-preview-pane {
+  min-height: 0;
+  overflow: auto;
+}
+
+.kf-studio-editor-pane {
+  border-right: 1px solid var(--kf-border);
+}
+
+@media (max-width: 768px) {
+  .kf-studio-editor-pane {
+    border-right: none;
+    border-bottom: 1px solid var(--kf-border);
+  }
+}
+
+/* The editor view fills the pane; monospace so highlight cells line up. */
+.kf-live-editor-frame {
+  position: relative;
+  height: 100%;
+  min-height: 100%;
+  padding: 20px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 14px;
+  line-height: 21px;
+}
+
+/* Print-preview-style backdrop — a pannable/zoomable viewport (not a
+   scrolling container: pan/zoom is driven by a CSS transform on
+   `.kf-studio-pages`, set from Rust in live_editor.rs, matching the
+   drag-to-pan + wheel-to-zoom interaction keyflow-ui's native chart panels
+   use). `overflow: hidden` because the transform, not native scroll, moves
+   content around. */
+.kf-studio-preview-pane {
+  position: relative;
+  overflow: hidden;
+  background: #26262b;
+  cursor: grab;
+}
+
+.kf-studio-preview-pane:active {
+  cursor: grabbing;
+}
+
+/* Absolutely-positioned so it doesn't participate in normal flow — its
+   position comes entirely from the transform (translate + scale) applied
+   inline. Pages stack vertically inside at their true point-derived size
+   (see RenderedPage::width_px/height_px in live_editor.rs) — "actual size",
+   not stretched to fit the pane. */
+.kf-studio-pages {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.kf-studio-page {
+  background: #ffffff;
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.kf-render svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.kf-render-error {
+  color: #e5484d;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  padding: 16px;
+}
