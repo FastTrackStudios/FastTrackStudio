@@ -1,0 +1,33 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Internal crates
+dock-proto = { path = "crates/dock-proto" }
+dock-dioxus = { path = "crates/dock-dioxus" }
+
+# Facet reflection framework - use crates.io 0.43.x to match roam's constraint
+facet = { version = "0.46" }
+facet-core = { version = "0.46" }
+facet-json = { version = "0.46" }
+facet-postcard = { version = "0.46" }
+facet-pretty = { version = "0.46" }
+facet-value = { version = "0.46" }
+facet-yaml = { version = "0.46" }
+
+# UI framework
+dioxus = "0.7.2"
+
+# Async / observability
+tokio = { version = "1.48", features = ["full"] }
+tracing = { version = "0.1", features = ["std"] }
+
+[workspace.lints.rust]
+unused = "warn"
