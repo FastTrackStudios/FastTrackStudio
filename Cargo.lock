@@ -4050,6 +4050,7 @@ name = "daw"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "clap",
  "daw-control",
  "daw-csi",
  "daw-module",
@@ -4067,9 +4068,13 @@ dependencies = [
  "dawfile-reaper",
  "eyre",
  "facet 0.50.0-rc.5",
+ "facet-json 0.50.0-rc.5",
+ "libc",
  "moire",
  "reaper-launcher",
+ "serde_json",
  "tokio",
+ "tracing-subscriber",
  "vox",
  "vox-stream",
 ]
@@ -4137,26 +4142,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid 1.23.4",
- "vox",
- "vox-stream",
-]
-
-[[package]]
-name = "daw-cli"
-version = "0.1.0"
-dependencies = [
- "architect",
- "clap",
- "daw",
- "daw-standalone",
- "dawfile-reaper",
- "eyre",
- "facet 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
- "libc",
- "serde_json",
- "tokio",
- "tracing-subscriber",
  "vox",
  "vox-stream",
 ]
