@@ -7,6 +7,7 @@ members = [
     "crates/session-extension",
     "crates/session-proto",
     "crates/session-ui",
+    "features/guide",
     "xtask",
 ]
 resolver = "2"
@@ -25,6 +26,9 @@ license = "MIT OR Apache-2.0"
 session = { path = "crates/session" }
 session-proto = { path = "crates/session-proto" }
 session-ui = { path = "crates/session-ui", default-features = false }
+# Portable guide engine (click / count-in / section guide, ported from
+# legacy fts-guide). Optional `tts` feature adds local Chatterbox TTS.
+session-guide = { path = "features/guide" }
 
 # ── DAW domain ───────────────────────────────────────────────────────
 # `daw` is the facade — types/handles/services for the DAW domain. The
@@ -132,6 +136,11 @@ eyre = "0.6"
 daw = { path = "../daw/crates/daw" }
 daw-proto = { path = "../daw/crates/daw-proto" }
 daw-module = { path = "../daw/crates/daw-module" }
+# daw-control + daw-reaper must fold onto the tree too — the daw
+# streams port keeps them in lockstep with daw-proto (stream clients /
+# EventStream / StreamSource hub impls).
+daw-control = { path = "../daw/crates/daw-control" }
+daw-reaper = { path = "../daw/features/backends/reaper/daw-reaper" }
 
 [patch."https://github.com/bearcove/moire"]
 moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
