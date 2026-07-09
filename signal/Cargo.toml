@@ -209,7 +209,7 @@ dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = f
 dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # Utils from FastTrackStudio monorepo
-utils = { git = "https://codeberg.org/FastTrackStudios/FastTrackStudio.git", branch = "main" }
+utils = { path = "../FastTrackStudio/crates/shared/utils" }
 
 # ── Plugin framework ───────────────────────────────────────────────────
 # Migrated off nih-plug onto fts-plug = the `nice-plug` fork (matches what the

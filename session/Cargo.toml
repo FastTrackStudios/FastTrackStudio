@@ -92,7 +92,7 @@ dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
 # ── Shared infrastructure ───────────────────────────────────────────
-utils = { git = "https://codeberg.org/FastTrackStudios/fts-utils.git", branch = "main" }
+utils = { path = "../FastTrackStudio/crates/shared/utils" }
 
 # ── Instrumentation ─────────────────────────────────────────────────
 moire = { version = "1.0" }  # diagnostics disabled — dladdr panics inside REAPER-loaded .so
