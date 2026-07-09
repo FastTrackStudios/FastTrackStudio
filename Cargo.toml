@@ -24,7 +24,7 @@ vox = { version = "0.10.0-rc.5" }
 vox-types = { version = "0.10.0-rc.5" }
 # architect provides #[architect::rpc]; path fixed to crates/architect (the
 # repo moved it out of the old macros/architect location).
-architect = { path = "../../architect/crates/architect" }
+architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
 # ── Vendored patches (mirrors architect/signal) ──────────────────────
 # architect's graph reaches moire (via vox); pin every moire crate to the FTS
@@ -50,3 +50,8 @@ moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", r
 moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+# Local dev: architect via git (midicore stays git-consumable); sibling
+# checkout patched in for development.
+[patch."https://codeberg.org/FastTrackStudios/architect.git"]
+architect = { path = "../../architect/crates/architect" }
