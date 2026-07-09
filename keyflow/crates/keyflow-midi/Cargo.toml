@@ -1,0 +1,19 @@
+[package]
+name = "keyflow-midi"
+version.workspace = true
+edition = "2024"
+description = "Keyflow MIDI import helpers"
+
+[features]
+default = []
+
+[dependencies]
+keyflow-proto = { path = "../keyflow-proto" }
+keyflow-text = { path = "../keyflow-text" }
+midly = "0.5"
+
+[dev-dependencies]
+roxmltree = "0.20"
+
+[lints]
+workspace = true

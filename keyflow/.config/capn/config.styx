@@ -1,0 +1,26 @@
+@schema {id crate:capn-config@1, cli capn}
+
+pre-commit {
+  generate-readmes false
+  rustfmt true
+  cargo-lock true
+  arborium true
+  edition-2024 false
+  external-path-deps true
+  internal-dev-deps-release-plz false
+}
+
+pre-push {
+  clippy true
+  // session.git's main migrated to facet 0.50/vox 0.10 (codeberg a452c03),
+  // so keyflow-ui's desktop-panels path (default feature, pulls session) is
+  // covered by the plain default-features clippy pass already. Still not
+  // --all-features: keyflow-sync's `cuda`/`whisper-cuda` features need a CUDA
+  // toolchain the gate host doesn't reliably provide, so only the non-cuda
+  // keyflow-sync features are added explicitly.
+  clippy-features (keyflow-sync/onnx keyflow-sync/download keyflow-sync/whisper)
+  nextest true
+  doc-tests false
+  docs false
+  cargo-shear true
+}

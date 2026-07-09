@@ -1,0 +1,18 @@
+[package]
+name = "keyflow-text"
+version.workspace = true
+edition.workspace = true
+description = "Keyflow text parsing and highlighting helpers"
+
+[features]
+default = []
+highlighting = ["keyflow-syntax/highlighting"]
+
+[dependencies]
+keyflow-proto = { path = "../keyflow-proto" }
+keyflow-syntax = { path = "../keyflow-syntax" }
+keyflow-chordpro = { path = "../keyflow-chordpro" }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
