@@ -1,7 +1,7 @@
 [package]
 name = "signal-cli"
 version.workspace = true
-edition.workspace = true
+edition = "2021"          # kept on 2021 — pre-move signal workspace edition; migrate deliberately
 
 [lib]
 name = "signal_cli"
