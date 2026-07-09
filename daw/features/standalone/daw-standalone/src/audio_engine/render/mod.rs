@@ -906,6 +906,22 @@ impl ProjectRenderer {
         master
     }
 
+    /// Transport-derived clock info at `seconds` for the aux post-render
+    /// hook: `(pos_beats, tempo_bpm, time_sig_num, time_sig_den)` from
+    /// the revision-cached snapshot (tempo map + project transport).
+    /// Falls back to 120 bpm 4/4 when the project has no snapshot.
+    pub(crate) fn clock_info(&self, seconds: f64) -> (f64, f64, u32, u32) {
+        match self.snapshot() {
+            Some(snap) => (
+                snap.tempo_map.seconds_to_beat(seconds),
+                snap.tempo_map.tempo_at(seconds),
+                snap.beats_per_measure,
+                snap.time_sig_den,
+            ),
+            None => (seconds * 2.0, 120.0, 4, 4),
+        }
+    }
+
     /// Revision-cached [`RenderSnapshot`] — rebuilt only when the
     /// project's mutation revision moves.
     fn snapshot(&self) -> Option<Arc<RenderSnapshot>> {

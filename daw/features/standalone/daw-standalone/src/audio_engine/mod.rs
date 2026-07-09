@@ -26,6 +26,9 @@
 //!                    └────────────────────────────┘
 //! ```
 
+/// Post-render aux hook (guide/click overlays) for project-mode engines.
+#[cfg(feature = "audio")]
+pub mod aux_render;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod decoder;
 /// Native PipeWire duplex engine (one realtime callback, no ring). Linux-only.
@@ -54,6 +57,8 @@ pub mod web;
 #[cfg(feature = "audio")]
 pub mod test_tone;
 
+#[cfg(feature = "audio")]
+pub use aux_render::{AuxClock, AuxRenderer};
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
 #[cfg(all(feature = "pipewire", target_os = "linux"))]

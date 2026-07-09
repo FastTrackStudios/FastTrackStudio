@@ -23,7 +23,13 @@ use crate::sync::Standalone;
 use crate::transport_engine::{PlayStateRepr, TransportShared};
 
 use super::DecodedAudio;
+use super::aux_render::{AuxClock, AuxRenderer, AuxSlot};
 use super::render::ProjectRenderer;
+
+/// Largest block (in frames) the aux staging buffer covers. Callbacks
+/// larger than this fall back to the direct path (no aux hook) so the
+/// audio thread never allocates.
+const AUX_MAX_FRAMES: usize = 16_384;
 
 // Engine-level device selection. On native this is the shared
 // `daw_audio_io::AudioIoPrefs`; on wasm (where `daw_audio_io` is a
@@ -237,6 +243,11 @@ impl MixerState {
 pub struct AudioEngine {
     state: Arc<Mutex<MixerState>>,
     shared: Arc<TransportShared>,
+    /// Post-render aux hook slot (project mode only; see
+    /// [`aux_render`](super::aux_render)). The audio callback `try_lock`s
+    /// it once per block; [`set_aux_renderer`](Self::set_aux_renderer)
+    /// installs the hook from a control thread.
+    aux: AuxSlot,
     // cpal stream is kept alive; dropping it stops audio output
     _stream: Stream,
     /// Live hardware-input stream (project mode, when any track records
@@ -367,6 +378,10 @@ impl AudioEngine {
         Ok(Self {
             state,
             shared,
+            // Slot exists for API symmetry but is never read by the
+            // private-mixer callback — the aux hook only fires in
+            // project mode (`with_project*` / `attached_to`).
+            aux: AuxSlot::default(),
             _stream: stream,
             #[cfg(not(target_arch = "wasm32"))]
             _input_stream: None,
@@ -464,24 +479,28 @@ impl AudioEngine {
         };
 
         let config = out.config;
+        let aux: AuxSlot = AuxSlot::default();
         let stream = match out.sample_format {
             SampleFormat::F32 => Self::build_project_stream::<f32>(
                 &out.device,
                 &config,
                 renderer.clone(),
                 shared.clone(),
+                aux.clone(),
             )?,
             SampleFormat::I16 => Self::build_project_stream::<i16>(
                 &out.device,
                 &config,
                 renderer.clone(),
                 shared.clone(),
+                aux.clone(),
             )?,
             SampleFormat::U16 => Self::build_project_stream::<u16>(
                 &out.device,
                 &config,
                 renderer.clone(),
                 shared.clone(),
+                aux.clone(),
             )?,
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
@@ -499,12 +518,35 @@ impl AudioEngine {
         Ok(Self {
             state,
             shared,
+            aux,
             _stream: stream,
             #[cfg(not(target_arch = "wasm32"))]
             _input_stream: input_stream,
             #[cfg(not(target_arch = "wasm32"))]
             _prefetch: prefetch,
         })
+    }
+
+    /// Install (or replace) the post-render aux hook — see
+    /// [`aux_render`](super::aux_render) for the contract. Project-mode
+    /// engines call it once per audio callback after the project block is
+    /// written into the **interleaved** f32 staging buffer (and before
+    /// device-format conversion); the hook ADDS into that buffer. It is
+    /// also called while stopped (`playing == false`, zeroed buffer) so
+    /// tails can flush. The audio callback only `try_lock`s the slot, so
+    /// installing never blocks the audio thread. No-op audio-wise on
+    /// private-mixer engines ([`new`](Self::new) / [`with_shared`](Self::with_shared)).
+    pub fn set_aux_renderer(&self, hook: AuxRenderer) {
+        if let Ok(mut slot) = self.aux.lock() {
+            *slot = Some(hook);
+        }
+    }
+
+    /// Remove the aux hook (dropped off the audio thread, here).
+    pub fn clear_aux_renderer(&self) {
+        if let Ok(mut slot) = self.aux.lock() {
+            *slot = None;
+        }
     }
 
     /// Highest hardware input channel any track records from
@@ -582,9 +624,39 @@ impl AudioEngine {
         config: &StreamConfig,
         renderer: Arc<ProjectRenderer>,
         shared: Arc<TransportShared>,
+        aux: AuxSlot,
     ) -> Result<Stream, String> {
         let channels = config.channels as usize;
+        let sample_rate = config.sample_rate;
         let daw = renderer.daw().clone();
+        // Interleaved f32 staging buffer, pre-sized so the callback
+        // never allocates. The block is written here first, the aux
+        // hook adds into it, then it's converted to the device format.
+        let mut stage: Vec<f32> = vec![0.0; AUX_MAX_FRAMES * channels.max(1)];
+        // Runs the aux hook (if installed) over the staged block.
+        // try_lock only: a control-thread install in progress just
+        // skips the hook for this block.
+        let run_aux = move |aux: &AuxSlot,
+                            renderer: &ProjectRenderer,
+                            buf: &mut [f32],
+                            playing: bool,
+                            pos_seconds: f64| {
+            let Ok(mut slot) = aux.try_lock() else { return };
+            let Some(hook) = slot.as_mut() else { return };
+            let (pos_beats, tempo_bpm, time_sig_num, time_sig_den) =
+                renderer.clock_info(pos_seconds);
+            let clock = AuxClock {
+                playing,
+                pos_seconds,
+                pos_beats,
+                tempo_bpm,
+                time_sig_num,
+                time_sig_den,
+                sample_rate: sample_rate as f64,
+                channels,
+            };
+            hook(buf, &clock);
+        };
         let stream = device
             .build_output_stream(
                 *config,
@@ -595,10 +667,13 @@ impl AudioEngine {
                     }
                     let num_frames = num_samples / channels;
                     let playing = shared.play_state().is_advancing();
+                    let start = shared.playhead_samples().0.max(0) as u64;
+                    let pos_seconds = start as f64 / sample_rate as f64;
+                    // Oversized blocks bypass the staging buffer (and the
+                    // aux hook) rather than allocate on the audio thread.
+                    let use_stage = num_samples <= stage.len();
+
                     if !playing {
-                        for s in data.iter_mut() {
-                            *s = T::from_sample(0.0);
-                        }
                         // Meters fall to silence instead of freezing
                         // at the last rendered block's peaks.
                         let meters = daw.meters();
@@ -607,9 +682,21 @@ impl AudioEngine {
                                 cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
                             }
                         }
+                        if use_stage {
+                            let stage = &mut stage[..num_samples];
+                            stage.fill(0.0);
+                            // Stopped: zeroed block, hook flushes tails.
+                            run_aux(&aux, &renderer, stage, false, pos_seconds);
+                            for (out, &v) in data.iter_mut().zip(stage.iter()) {
+                                *out = T::from_sample(v);
+                            }
+                        } else {
+                            for s in data.iter_mut() {
+                                *s = T::from_sample(0.0);
+                            }
+                        }
                         return;
                     }
-                    let start = shared.playhead_samples().0.max(0) as u64;
 
                     // Render. The renderer briefly acquires the project
                     // Mutex (revision check; full re-walk only after an
@@ -617,19 +704,39 @@ impl AudioEngine {
                     // callback never blocks.
                     let block = renderer.render_block(start, num_frames);
 
-                    // Interleave the stereo block into the cpal
-                    // buffer (handle channel-count mismatch by
-                    // duplicating or summing).
-                    for frame in 0..num_frames {
-                        let l = block.samples.get(frame * 2).copied().unwrap_or(0.0);
-                        let r = block.samples.get(frame * 2 + 1).copied().unwrap_or(0.0);
-                        for ch in 0..channels {
-                            let v = match ch {
-                                0 => l,
-                                1 => r,
-                                _ => (l + r) * 0.5, // surround channels get the mono sum
-                            };
-                            data[frame * channels + ch] = T::from_sample(v);
+                    // Interleave the stereo block (handle channel-count
+                    // mismatch by duplicating or summing), staging as f32
+                    // so the aux hook can add before format conversion.
+                    if use_stage {
+                        let stage = &mut stage[..num_samples];
+                        for frame in 0..num_frames {
+                            let l = block.samples.get(frame * 2).copied().unwrap_or(0.0);
+                            let r = block.samples.get(frame * 2 + 1).copied().unwrap_or(0.0);
+                            for ch in 0..channels {
+                                let v = match ch {
+                                    0 => l,
+                                    1 => r,
+                                    _ => (l + r) * 0.5, // surround channels get the mono sum
+                                };
+                                stage[frame * channels + ch] = v;
+                            }
+                        }
+                        run_aux(&aux, &renderer, stage, true, pos_seconds);
+                        for (out, &v) in data.iter_mut().zip(stage.iter()) {
+                            *out = T::from_sample(v);
+                        }
+                    } else {
+                        for frame in 0..num_frames {
+                            let l = block.samples.get(frame * 2).copied().unwrap_or(0.0);
+                            let r = block.samples.get(frame * 2 + 1).copied().unwrap_or(0.0);
+                            for ch in 0..channels {
+                                let v = match ch {
+                                    0 => l,
+                                    1 => r,
+                                    _ => (l + r) * 0.5,
+                                };
+                                data[frame * channels + ch] = T::from_sample(v);
+                            }
                         }
                     }
 

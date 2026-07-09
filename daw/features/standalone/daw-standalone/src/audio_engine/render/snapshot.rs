@@ -48,6 +48,8 @@ pub(crate) struct RenderSnapshot {
     pub(crate) tempo_map: TempoMap,
     /// Time-signature numerator (beats per measure) for click accents.
     pub(crate) beats_per_measure: u32,
+    /// Time-signature denominator, carried for the aux-render clock.
+    pub(crate) time_sig_den: u32,
     /// Master fader gain (linear).
     pub(crate) master_volume: f64,
     /// Master pan (−1…1).
@@ -77,6 +79,7 @@ impl RenderSnapshot {
         let order = graph::topo_order(&tracks);
         let solo_pass = graph::solo_pass(&tracks);
         let beats_per_measure = p.transport.time_signature.numerator().max(1);
+        let time_sig_den = p.transport.time_signature.denominator().max(1);
         let input_channels = tracks.iter().map(|t| t.input_channel).collect();
         Arc::new(Self {
             tracks,
@@ -84,6 +87,7 @@ impl RenderSnapshot {
             solo_pass,
             tempo_map,
             beats_per_measure,
+            time_sig_den,
             master_volume: p.master_volume,
             master_pan: p.master_pan,
             master_muted: p.master_muted,
@@ -324,6 +328,19 @@ impl TempoMap {
         }
         let seg = self.segments[idx];
         seg.start_beat + (seconds - seg.start_seconds) * seg.bpm / 60.0
+    }
+
+    /// Tempo (BPM) of the segment containing `seconds`.
+    pub(crate) fn tempo_at(&self, seconds: f64) -> f64 {
+        let mut idx = 0usize;
+        for (i, s) in self.segments.iter().enumerate() {
+            if s.start_seconds <= seconds {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+        self.segments[idx].bpm
     }
 
     /// Convert project-time beats (= PPQ in quarter notes) to seconds.
