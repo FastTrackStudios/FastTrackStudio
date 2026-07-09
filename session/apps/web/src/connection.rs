@@ -8,7 +8,7 @@
 //!
 //! 1. Derive WebSocket URL from the page hostname (same host, port 3030)
 //! 2. Connect via `vox-websocket::WsLink`
-//! 3. Establish vox session with `WebClientServiceDispatcher` handler
+//! 3. Establish typed vox clients (RPC + stream lanes)
 //! 4. Initialize `Session` singleton with `SetlistServiceClient`
 //! 5. Fetch initial setlist, then wait for push events
 

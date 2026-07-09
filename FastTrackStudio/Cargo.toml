@@ -8,11 +8,7 @@ members = [
     "crates/shared/utils",
     "crates/shared/vox-discover",
     # Apps
-    "apps/desktop",
     "apps/keyflow-playground",
-    "apps/web",
-    "apps/mobile",
-    "apps/fts-cli",
     "apps/installer",
     "apps/tests/wasm",
     # Tools

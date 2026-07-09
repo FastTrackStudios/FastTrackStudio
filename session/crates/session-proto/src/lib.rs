@@ -40,10 +40,8 @@ pub use routing_project::{LoopbackConfig, RoutingChannel, RoutingGroup};
 pub use services::{
     AudioLatencyInfo, MeasureInfo, SessionServiceError, SetlistEvent, SetlistService,
     SetlistServiceClient, SetlistServiceDispatcher, SongService, SongServiceClient,
-    SongServiceDispatcher, SongTransportState, WebClientService, WebClientServiceClient,
-    WebClientServiceDispatcher, serve_setlist_service, serve_song_service,
-    serve_web_client_service, setlist_service_service_descriptor, song_service_service_descriptor,
-    web_client_service_service_descriptor,
+    SongServiceDispatcher, SongTransportState, serve_setlist_service, serve_song_service,
+    setlist_service_service_descriptor, song_service_service_descriptor,
 };
 pub use setlist::{ActiveIndices, AdvanceMode, QueuedTarget, Setlist};
 pub use song::{Comment, Section, SectionType, Song, SongChartHydration, SongDetectedChord};

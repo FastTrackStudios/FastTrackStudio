@@ -455,27 +455,6 @@ pub use setlist_service::{
 // Web Client Push Service (desktop → browser)
 // =============================================================================
 
-/// Service implemented by web clients to receive pushed state from the desktop.
-///
-/// The desktop gateway calls these methods on each connected web client when
-/// session state changes. This avoids the need for vox channels (which don't
-/// work on WASM) by using regular bidirectional RPC instead.
-pub mod web_client_service {
-    use super::SetlistEvent;
-
-    #[architect::rpc]
-    pub trait WebClientService {
-        /// Receive a setlist event pushed from the desktop.
-        async fn push_event(&self, event: SetlistEvent);
-    }
-}
-
-pub use web_client_service::{
-    Service as WebClientServiceLayer, WebClientService, WebClientServiceClient,
-    WebClientServiceDispatcher, layer as web_client_service_layer,
-    serve as serve_web_client_service, web_client_service_rpc_service_descriptor,
-    web_client_service_service_descriptor,
-};
 
 // ─── Mode control ──────────────────────────────────────────────────────
 //
