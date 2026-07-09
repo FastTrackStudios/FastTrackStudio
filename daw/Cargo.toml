@@ -213,21 +213,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # architect + input_actions resolve from codeberg main (both carry the
 # facet-0.50/vox-0.10 migration as of 2026-07-02); the dev-only local path
 # patches from the migration window are gone.
-# [patch."https://codeberg.org/FastTrackStudios/keyflow.git"]
-# keyflow = { path = "../keyflow/crates/keyflow" }
 
-# [patch."https://codeberg.org/FastTrackStudios/dock-dioxus.git"]
-# dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
-# dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # [patch."https://codeberg.org/FastTrackStudios/dynamic-template.git"]
 # color-palette = { path = "../dynamic-template/crates/color-palette" }
 # music-catalog = { path = "../dynamic-template/crates/music-catalog" }
 # dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-proto" }
 
-# [patch."https://codeberg.org/FastTrackStudios/session.git"]
-# session = { path = "../session/crates/session" }
-# session-ui = { path = "../session/crates/session-ui" }
 
 # [patch."https://codeberg.org/FastTrackStudios/monarchy.git"]
 # monarchy = { path = "../monarchy/crates/monarchy" }
@@ -323,5 +315,3 @@ unusual_byte_groupings = "allow"
 
 # Local dev: midicore is consumed via git (so daw itself stays consumable
 # as a git dependency downstream) but developed side-by-side.
-[patch."https://codeberg.org/FastTrackStudios/midicore.git"]
-midicore = { path = "../midicore/crates/midicore" }

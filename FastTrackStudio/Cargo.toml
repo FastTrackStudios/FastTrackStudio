@@ -240,11 +240,6 @@ pollster = "0.4"
 # Re-enable when signal bumps to bearcove/vox@27eef573 (or matches
 # whatever rev daw/session settle on).
 #
-# [patch."https://codeberg.org/FastTrackStudios/signal.git"]
-# signal = { path = "../signal/crates/signal" }
-# signal-ui = { path = "../signal/crates/signal-ui" }
-# signal-cli = { path = "../signal/apps/cli" }
-# macromod = { path = "../signal/crates/macromod" }
 
 # LOCAL DEV (do not commit): redirect the keyflow facade crates to the sibling
 # checkout. The published keyflow main (aa9fe949) declares `fts-ui` as a path
@@ -252,18 +247,6 @@ pollster = "0.4"
 # local keyflow HEAD declares it as a git dep. Drop this block once that fix is
 # pushed to keyflow main. The facade crates pull their internal keyflow-* deps
 # via relative paths inside the sibling workspace, so those resolve locally too.
-[patch."https://codeberg.org/FastTrackStudios/keyflow.git"]
-keyflow = { path = "../keyflow/crates/keyflow" }
-engraver = { path = "../keyflow/crates/engraver" }
-keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
-
-# Vox is now a plain crates.io dependency (see workspace.dependencies above) —
-# no [patch] redirects needed; the old Codys-Wright/vox fork lineage is retired.
-
-# ── Vendored patches ──────────────────────────────────────────────────
-# moire: FTS fork (NixOS frame-pointer tolerance + facet alignment), same
-# rev fts-extensions pins. Unifies crates.io moire with the git rev that vox
-# pulls in, avoiding duplicate moire-runtime #[ctor] registrations that crash.
 [patch."https://github.com/bearcove/moire"]
 moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }

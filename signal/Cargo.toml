@@ -265,15 +265,8 @@ clap = { version = "4", features = ["derive"] }
 # `[patch."https://codeberg.org/FastTrackStudios/<repo>.git"]` block pointing at
 # its checkout (mind the daw `features/`-layout paths).
 #
-# [patch."https://codeberg.org/FastTrackStudios/dock-dioxus.git"]
-# dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
-# dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 #
-# [patch."https://codeberg.org/FastTrackStudios/FastTrackStudio.git"]
-# utils = { path = "../FastTrackStudio/crates/shared/utils" }
 #
-# [patch."https://codeberg.org/FastTrackStudios/fts-ui.git"]
-# fts-ui = { path = "../fts-ui/crates/fts-ui" }
 #
 # ── daw local override (cross-repo audio-engine work) ───────────────────
 # The DAW audio engine is being migrated to own all of signal's audio I/O
@@ -282,28 +275,9 @@ clap = { version = "4", features = ["derive"] }
 # together. Drop this block + bump the git pin once the daw changes land on
 # codeberg `feat/ui-showcase`. `audio-controls` (branch=main) is intentionally
 # NOT patched — it was removed on feat/ui-showcase, so it stays on git main.
-[patch."https://codeberg.org/FastTrackStudios/daw.git"]
-daw = { path = "../daw/crates/daw" }
-daw-cli = { path = "../daw/apps/daw/cli" }
-daw-proto = { path = "../daw/crates/daw-proto" }
-daw-reaper = { path = "../daw/features/backends/reaper/daw-reaper" }
-daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-runtime" }
-
-# ── architect + input_actions local overrides (migrated siblings) ───────
-# signal's graph reaches architect / actions-proto transitively (through daw's
-# `#[architect::rpc]` dispatchers and input_actions). The local checkouts are
-# already migrated to upstream facet 0.50 / vox 0.10; patch them in here so the
-# whole graph resolves against the migrated sources.
 [patch."https://codeberg.org/FastTrackStudios/architect.git"]
 architect = { path = "../../architect/crates/architect" }
 
-[patch."https://codeberg.org/FastTrackStudios/midicore.git"]
-midicore = { path = "../midicore/crates/midicore" }
-
-[patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "../input_actions/crates/actions-proto" }
-
-# ── Split FTS plugin repo local overrides ───────────────────────────────
 [patch."https://git.starcommand.live/FastTrackStudios/FTS-Plugins.git"]
 eq-dsp = { path = "features/fx/eq/eq-dsp" }
 audiocore-dsp = { path = "../Plugins/FTS-Audiocore/crates/audiocore-dsp" }
