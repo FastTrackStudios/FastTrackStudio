@@ -47,7 +47,7 @@ editor-keyflow = { git = "https://codeberg.org/FastTrackStudios/Editor.git", bra
 editor-keyflow-lang = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
 
 # FastTrack Studio shared design system. Lives in the sibling fts-ui repo.
-fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main", package = "fts-ui" }
+fts-ui = { path = "../fts-ui/crates/fts-ui", package = "fts-ui" }
 
 # Facet reflection — 0.50 line (paired across the FTS stack; see daw).
 facet = { version = "0.50.0-rc.1" }
@@ -91,18 +91,18 @@ dioxus-native = "0.7.9"
 # dep was lifted (daw 11c6062 + keyflow-daw-analysis here), so keyflow
 # could now use `daw` — but for purely type/trait imports the internal
 # crates are still the lighter choice.
-daw-module = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-proto = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-dawfile-reaper = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-module = { path = "../daw/crates/daw-module" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+dawfile-reaper = { path = "../daw/features/backends/reaper/dawfile-reaper" }
 # Full daw facade — needed by `keyflow-daw-analysis` only.
-daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw = { path = "../daw/crates/daw" }
 keyflow-daw-analysis = { path = "crates/keyflow-daw-analysis" }
 color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
 music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
-session = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "main" }
-session-ui = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "main" }
-dock-dioxus = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
-dock-proto = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
+session = { path = "../session/crates/session" }
+session-ui = { path = "../session/crates/session-ui" }
+dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
+dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # Common dependencies
 serde = { version = "1.0", features = ["derive"] }
@@ -154,7 +154,7 @@ engraver-proto = { path = "crates/engraver-proto" }
 # Some transitive deps still reference input_actions by its old github URL;
 # fold those onto the codeberg main copy.
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
-actions-proto = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
+actions-proto = { path = "../input_actions/crates/actions-proto" }
 
 # Redirect every transitive bearcove/moire reference onto the FastTrackStudios
 # moire fork @ 7a2f1dc — the rev daw/session pair with the FTS vox fork (avoids

@@ -93,9 +93,9 @@ moire = { version = "1.0" }
 # Keyflow/Engraver crates (sibling repo — facade pattern)
 # NOTE: keyflow-proto, keyflow-text, keyflow-midi, engraver-proto are INTERNAL.
 # Access them through the `keyflow` or `engraver` facade crates.
-keyflow = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
-engraver = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
-keyflow-ui = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main", default-features = false }
+keyflow = { path = "../keyflow/crates/keyflow" }
+engraver = { path = "../keyflow/crates/engraver" }
+keyflow-ui = { path = "../keyflow/crates/keyflow-ui", default-features = false }
 
 # DAW domain
 # `daw` is the facade. `daw-cli` is a public sibling crate of CLI
@@ -103,27 +103,27 @@ keyflow-ui = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch
 # sibling crate for in-process REAPER extension hosting (folding it
 # into `daw` would cycle through daw-reaper → keyflow → daw, see daw
 # a823b67).
-daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-cli = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw = { path = "../daw/crates/daw" }
+daw-cli = { path = "../daw/apps/daw/cli" }
+daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-runtime" }
 # `daw-proto` is listed here so the fts-cli TUI can build typed
 # service clients (TransportClient, TracksClient, ProjectsClient) on
 # top of the Vox connection it shares with session-cli.
-daw-proto = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-proto = { path = "../daw/crates/daw-proto" }
 
 # Dock UI (sibling repo)
-dock-proto = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
-dock-dioxus = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
+dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
+dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 
 # Actions / Input (sibling repo). actions-proto/actions-registry (action
 # declaration + registration) retired in favor of architect::actions —
 # see session/fts-extensions. input/input-dioxus/actions-standalone/
 # actions-keybindings (keybinding + MIDI mapping) are a separate concern
 # and stay.
-actions-standalone = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
-actions-keybindings = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
-input-dioxus = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
-input = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
+actions-standalone = { path = "../input_actions/crates/actions-standalone" }
+actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
+input-dioxus = { path = "../input_actions/crates/input-dioxus" }
+input = { path = "../input_actions/crates/input" }
 
 # Dynamic template (sibling repo)
 color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
@@ -138,18 +138,18 @@ vox-discover = { path = "crates/shared/vox-discover" }
 installer-core = { path = "crates/shared/installer-core" }
 
 # Signal (sibling repo)
-signal = { git = "https://codeberg.org/FastTrackStudios/signal.git", branch = "main" }
-signal-ui = { git = "https://codeberg.org/FastTrackStudios/signal.git", branch = "main", default-features = false }
-signal-cli = { git = "https://codeberg.org/FastTrackStudios/signal.git", branch = "main" }
-macromod = { git = "https://codeberg.org/FastTrackStudios/signal.git", branch = "main" }
+signal = { path = "../signal/crates/signal" }
+signal-ui = { path = "../signal/features/signal/signal-ui", default-features = false }
+signal-cli = { path = "../signal/apps/cli" }
+macromod = { path = "../signal/features/macromod" }
 
 # Session (sibling repo)
 # NOTE: session-proto is listed here for use by session-ui (internal domain crate only).
 # App crates must NOT depend on session-proto directly — use the `session` facade instead.
-session = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "dev" }
-session-proto = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "dev" }
-session-ui = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "dev" }
-session-cli = { git = "https://codeberg.org/FastTrackStudios/session.git", branch = "dev" }
+session = { path = "../session/crates/session" }
+session-proto = { path = "../session/crates/session-proto" }
+session-ui = { path = "../session/crates/session-ui" }
+session-cli = { path = "../session/apps/cli" }
 
 # architect (sibling repo) — `ActionMeta`/`ActionBackend` types, needed directly
 # by fts-cli to read `<Trait>Actions::all()` and build the generated CLI surface.
@@ -178,7 +178,7 @@ reaper-common-types = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.g
 # NOTE: the former `reaper-test` / `reaper-test-macro` crates were folded into
 # the `daw` facade's `test-harness` feature (daw 9b04180). xtask now depends on
 # `daw = { features = ["test-harness"] }` for the `daw::test::runner` harness.
-reaper-launcher = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+reaper-launcher = { path = "../daw/features/backends/reaper/reaper-launcher" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
@@ -186,7 +186,7 @@ raw-window-handle = "0.4.2"
 palette = "0.7.3"
 
 # FTS design system (wraps lumen-blocks, lucide-dioxus, layout, typography)
-fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
+fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
 # Lumen blocks (Dioxus shadcn-inspired components)
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }

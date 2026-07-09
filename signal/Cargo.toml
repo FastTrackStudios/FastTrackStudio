@@ -176,9 +176,9 @@ architect-form = { path = "../../architect/features/form" }
 # Source is Codeberg, but currently [patch]ed to the local checkout below:
 # daw's vox-0.8.2 alignment (f431088) is NOT yet pushed to codeberg (cb/main
 # daw still uses bearcove vox 0.5). Drop the local patch once it lands.
-daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-cli = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
-daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "feat/ui-showcase" }
+daw = { path = "../daw/crates/daw" }
+daw-cli = { path = "../daw/apps/daw/cli" }
+daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-runtime" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 # Reusable audio I/O (device enumeration + JACK host + live DuplexMonitor). Not
@@ -196,17 +196,17 @@ midicore = { path = "../midicore/crates/midicore", features = ["midir"] }
 # still lives at features/audio/audio-controls on cb/main, so pin separately.
 # Cargo treats `?branch=main` and `?branch=feat/ui-showcase` as distinct git
 # sources, so daw's other deps stay on the feat branch.
-# Pinned to the last rev carrying features/audio/audio-controls (removed on newer main).
-audio-controls = { git = "https://codeberg.org/FastTrackStudios/daw.git", rev = "74e84e3a61c11f3ae1416d99300b670dbea2089e" }
+# Vendored back into daw/features/audio (removed on newer daw main).
+audio-controls = { path = "../daw/features/audio/audio-controls" }
 # NOTE: the standalone `reaper-test` crate was removed from daw main and folded
 # into the `daw` facade behind the `test-harness` feature, re-exported as
 # `daw::test` (alias `ReaperTestContext`, `#[reaper_test]` macro). Test crates
 # now enable `daw[test-harness]` and `use daw::test::*` instead.
 
 # ── Sibling repos ────────────────────────────────────────────────────
-actions-proto = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
-dock-dioxus = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
-dock-proto = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
+actions-proto = { path = "../input_actions/crates/actions-proto" }
+dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = false }
+dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # Utils from FastTrackStudio monorepo
 utils = { git = "https://codeberg.org/FastTrackStudios/FastTrackStudio.git", branch = "main" }
@@ -230,8 +230,8 @@ midir = "0.11"
 
 # ── UI ────────────────────────────────────────────────────────────────
 dioxus = "=0.7.9"
-fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
-fts-ui-audio = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
+fts-ui = { path = "../fts-ui/crates/fts-ui" }
+fts-ui-audio = { path = "../fts-ui/crates/fts-ui-audio" }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 
 # ── Async runtime ────────────────────────────────────────────────────

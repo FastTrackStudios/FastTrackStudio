@@ -31,11 +31,11 @@ session-ui = { path = "crates/session-ui", default-features = false }
 # extension-runtime crate is a documented public sibling (couldn't fold
 # into the facade — cycle through daw-reaper → keyflow → daw). It's
 # only needed by the in-process REAPER extension binary in this repo.
-daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-reaper = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-proto = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-daw-synchronization = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw = { path = "../daw/crates/daw" }
+daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-runtime" }
+daw-reaper = { path = "../daw/features/backends/reaper/daw-reaper" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-synchronization = { path = "../daw/features/sync/daw-synchronization" }
 
 # ── REAPER bindings (reaper-rs) ──────────────────────────────────────
 # Needed by REAPER-touching action modules (e.g. take_ranking) that
@@ -72,8 +72,8 @@ facet-json = { version = "0.50.0-rc.5" }
 facet-postcard = { version = "0.50.0-rc.5" }
 
 # ── Keyflow (sibling repo — facade pattern) ─────────────────────────
-keyflow = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
-keyflow-daw-analysis = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
+keyflow = { path = "../keyflow/crates/keyflow" }
+keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
 
 # ── Dynamic session templates ───────────────────────────────────────
 dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
@@ -82,14 +82,14 @@ dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-templa
 music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
 
 # ── Actions / Input (sibling repo) ──────────────────────────────────
-actions-proto = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
+actions-proto = { path = "../input_actions/crates/actions-proto" }
 
 # ── Dock UI (sibling repo) ──────────────────────────────────────────
-dock-dioxus = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
-dock-proto = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
+dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = false }
+dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # ── FTS design system ───────────────────────────────────────────────
-fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
+fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
 # ── Shared infrastructure ───────────────────────────────────────────
 utils = { git = "https://codeberg.org/FastTrackStudios/fts-utils.git", branch = "main" }
