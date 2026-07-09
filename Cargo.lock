@@ -6784,6 +6784,7 @@ dependencies = [
  "daw",
  "daw-standalone",
  "dioxus",
+ "engine-launcher",
  "eyre",
  "keyflow",
  "session",
@@ -6796,6 +6797,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vox",
+ "vox-core",
+ "vox-websocket",
 ]
 
 [[package]]
