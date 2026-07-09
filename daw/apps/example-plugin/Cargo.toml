@@ -1,0 +1,25 @@
+[package]
+name = "example-plugin"
+version.workspace = true
+edition.workspace = true
+description = "Example CLAP plugin with DAW API access — no direct reaper-rs dependency"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+# Plugin framework
+nih_plug.workspace = true
+
+# DAW API — the only dependency needed for REAPER access
+daw = { path = "../../crates/daw", features = ["reaper"] }
+
+[dev-dependencies]
+# Integration-test harness folded into the daw facade's `test-harness`
+# feature (replaces the former `reaper-test` crate).
+daw = { path = "../../crates/daw", features = ["reaper", "test-harness"] }
+tokio = { workspace = true, features = ["time"] }
+eyre = "0.6"
+
+[lints]
+workspace = true

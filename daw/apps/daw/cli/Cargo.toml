@@ -1,0 +1,53 @@
+[package]
+name = "daw-cli"
+version.workspace = true
+edition.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[lib]
+name = "daw_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "daw"
+path = "src/main.rs"
+
+[dependencies]
+daw.workspace = true
+vox.workspace = true
+vox-stream.workspace = true
+tokio.workspace = true
+clap.workspace = true
+eyre.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde_json.workspace = true
+facet.workspace = true
+facet-json.workspace = true
+libc = "0.2"
+dawfile-reaper = { path = "../../../features/backends/reaper/dawfile-reaper" }
+
+[features]
+# The architect rpc macro gates its vox-emitted items on the consumer
+# crate's `vox` feature (used by the wire probe tests).
+default = ["vox"]
+vox = []
+
+[dev-dependencies]
+# Integration-test harness via the daw facade's `test-harness` feature
+# (replaces the former `reaper-test` crate).
+daw = { path = "../../../crates/daw", features = ["test-harness"] }
+# In-process standalone backend so the agent-facing op/batch/call
+# commands are exercised over a real vox link without REAPER.
+daw-standalone = { path = "../../../features/standalone/daw-standalone", features = ["bootstrap", "audio"] }
+# Minimal vox wire probes (nested-Result payload schema exchange).
+architect = { workspace = true, features = ["vox", "local"] }
+facet.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+eyre.workspace = true
+
+[lints]
+workspace = true

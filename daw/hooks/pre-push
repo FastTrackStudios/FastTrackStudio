@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# FTS pre-push gate — capn pre-push (clippy -D warnings, nextest, cargo-shear;
+# see .config/capn/config.styx). capn comes from the fts-repo dev shell;
+# override with CAPN_BIN. Bypass with HAVE_MERCY=1..3 (capn convention).
+set -euo pipefail
+CAPN_BIN="${CAPN_BIN:-capn}"
+exec "$CAPN_BIN" pre-push
