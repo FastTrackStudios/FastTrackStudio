@@ -1,10 +1,11 @@
-# FastTrackStudio — ONE root workspace (restructure wave 1).
+# FastTrackStudio — ONE root workspace.
 #
-# Wave 1 members: libs/ (UI + infrastructure libraries) and the leaf domain
-# crates (audiocore, midicore, input). The remaining domain workspaces
-# (daw, session, signal, keyflow, apps/fasttrackstudio, FastTrackStudio)
-# are excluded and dissolve into this workspace in later waves — see
-# LAYOUT.md for the target shape.
+# Every crate in the tree is a member here (libs/, crates/, features/,
+# apps/) — the old per-domain workspaces (daw, session, signal, keyflow,
+# FastTrackStudio, Plugins) are fully dissolved. One lockfile, one
+# target/, one [workspace.dependencies] table carrying every intra-repo
+# path dep exactly once. See LAYOUT.md for the shape; parked/legacy code
+# lives in attic/.
 
 [workspace]
 resolver = "3"
@@ -190,16 +191,15 @@ members = [
     "features/reaper/signal-reaper-controller",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/daw-cli",
+    "apps/fasttrackstudio",
+    "apps/installer",
     "apps/keyflow-cli",
     "apps/rigd",
     "apps/signal-web",
 ]
-# Not-yet-moved domain workspaces (later waves) — keep them out of this one.
+# attic/ holds parked crates (dead apps, legacy shells) — never built.
 exclude = [
     "attic",
-    "apps/fasttrackstudio",
-    "FastTrackStudio",
-    "Plugins",
 ]
 
 [workspace.package]
