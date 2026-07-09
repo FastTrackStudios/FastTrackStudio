@@ -1,0 +1,65 @@
+[workspace]
+members = [
+    "crates/fts-story-core",
+    "crates/fts-story-macros",
+    "crates/fts-story-runtime",
+    "crates/fts-story-shell",
+    "crates/fts-story-snapshots",
+    "crates/fts-story-parity",
+    "crates/fts-story-fuzz",
+    "xtask",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+repository = "https://git.starcommand.live/FastTrackStudios/fts-story"
+
+[workspace.dependencies]
+# Internal
+fts-story-core    = { path = "crates/fts-story-core",    version = "0.1.0" }
+fts-story-macros  = { path = "crates/fts-story-macros",  version = "0.1.0" }
+fts-story-runtime = { path = "crates/fts-story-runtime", version = "0.1.0" }
+fts-story-shell   = { path = "crates/fts-story-shell",   version = "0.1.0" }
+fts-story-snapshots     = { path = "crates/fts-story-snapshots",     version = "0.1.0" }
+fts-story-parity        = { path = "crates/fts-story-parity",        version = "0.1.0" }
+
+# Dioxus — loose `0.7` requirement so this crate is consumable by every
+# dioxus 0.7.x project we care about (`frame` is on 0.7.2, `fts-ui` on
+# 0.7.6, both unify on the same dioxus-core). The native/Blitz target is
+# fed via `dioxus-native` inside `fts-story-snapshots`, not here.
+dioxus = { version = "0.7", default-features = false, features = ["lib"] }
+
+# Compile-time story registration. Provides `#[distributed_slice]` so each
+# `#[story]` invocation can append to a global slice the VRT runner reads.
+linkme = "0.3"
+
+# Proc-macro plumbing
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+
+# Image diffing for VRT
+dssim-core = "3"
+png = "0.17"
+
+# Fuzz / property-based testing
+proptest = "1"
+
+# Misc
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[workspace.lints.rust]
+unused = "warn"
+
+[workspace.lints.clippy]
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
+type_complexity = "allow"
