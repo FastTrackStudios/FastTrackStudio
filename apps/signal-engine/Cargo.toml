@@ -1,11 +1,11 @@
 [package]
-name = "signal-rigd"
+name = "signal-engine"
 version.workspace = true
 edition = "2021"          # kept on 2021 — pre-move signal workspace edition; migrate deliberately
 license.workspace = true
 authors.workspace = true
 
-# The headless rig daemon: the 100%-headless guitar-rig core serving its vox
+# The signal engine: the 100%-headless guitar-rig core serving its vox
 # router over a WebSocket. Every GUI — browser wasm, desktop, tablets on the
 # same network, an embedded pedalboard's front panel — is a remote client of
 # this process. This is the same router the desktop app serves in-process.

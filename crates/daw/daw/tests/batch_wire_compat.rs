@@ -7,6 +7,8 @@
 //! (`Result<(), VoxError>`) surfaced as an opaque schema-kind
 //! mismatch at the client.
 
+#![cfg(all(feature = "cli", feature = "vox"))]
+
 use architect::{Layer, Scope, Services};
 use daw::service as proto;
 

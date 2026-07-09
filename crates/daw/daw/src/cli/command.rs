@@ -1,10 +1,14 @@
-//! daw — CLI tool for live-querying a running REAPER instance
+//! The `daw` clap command tree + dispatcher.
+//!
+//! [`cli_main`] is the embeddable entry point: it takes pre-split argv
+//! (element 0 is the program/subcommand name, e.g. `daw`), so both the
+//! standalone `daw` binary and `fts daw <...>` mount the same surface.
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-/// CLI flag form of [`daw::service::ScreensetKind`].
+/// CLI flag form of [`crate::service::ScreensetKind`].
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum ScreensetKindArg {
     Window,
@@ -12,16 +16,16 @@ enum ScreensetKindArg {
     SelectionSet,
 }
 
-impl From<ScreensetKindArg> for daw::service::ScreensetKind {
+impl From<ScreensetKindArg> for crate::service::ScreensetKind {
     fn from(arg: ScreensetKindArg) -> Self {
         match arg {
-            ScreensetKindArg::Window => daw::service::ScreensetKind::Window,
-            ScreensetKindArg::TrackSet => daw::service::ScreensetKind::TrackSet,
-            ScreensetKindArg::SelectionSet => daw::service::ScreensetKind::SelectionSet,
+            ScreensetKindArg::Window => crate::service::ScreensetKind::Window,
+            ScreensetKindArg::TrackSet => crate::service::ScreensetKind::TrackSet,
+            ScreensetKindArg::SelectionSet => crate::service::ScreensetKind::SelectionSet,
         }
     }
 }
-use daw_cli::cli_values::{OnOff, ToolbarIconKindValue, TrackColor, TrackFolderDepth, TrackName};
+use crate::cli::cli_values::{OnOff, ToolbarIconKindValue, TrackColor, TrackFolderDepth, TrackName};
 use eyre::Result;
 use serde_json::Value;
 
@@ -859,7 +863,7 @@ fn print_action_list(value: Value, as_json: bool, columns: &str) -> Result<()> {
 }
 
 async fn run_sync(command: &SyncCommand, json_out: bool) -> Result<()> {
-    use daw_cli::sync as s;
+    use crate::cli::sync as s;
     match command {
         SyncCommand::Spawn { count, profile } => {
             if *count == 0 {
@@ -891,16 +895,16 @@ async fn run_sync(command: &SyncCommand, json_out: bool) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
-
-    let cli = Cli::parse();
+/// Run the `daw` CLI from pre-split argv (element 0 is the program name).
+///
+/// Tracing/log setup is the caller's job — the standalone binary installs
+/// an env-filter subscriber, `fts` installs its own.
+pub async fn cli_main<I, T>(args: I) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let cli = Cli::parse_from(args);
 
     // Commands that don't need an RPC connection
     match cli.command {
@@ -909,45 +913,45 @@ async fn main() -> Result<()> {
             ref config,
         } => {
             let selected = profile.as_deref().or(config.as_deref());
-            return daw_cli::cmd_launch(selected);
+            return crate::cli::cmd_launch(selected);
         }
         Command::Profiles => {
-            return daw_cli::cmd_profiles(cli.json);
+            return crate::cli::cmd_profiles(cli.json);
         }
         Command::Sync { ref command } => {
             return run_sync(command, cli.json).await;
         }
         Command::Quit { pid } => {
-            return daw_cli::cmd_quit(pid);
+            return crate::cli::cmd_quit(pid);
         }
         Command::ServiceCatalog => {
-            return print_value(daw_cli::ops::service_catalog(), cli.json);
+            return print_value(crate::cli::ops::service_catalog(), cli.json);
         }
         Command::Actions {
             command: ActionsCommand::Aliases,
         } => {
-            return print_value(daw_cli::ops::action_aliases(), cli.json);
+            return print_value(crate::cli::ops::action_aliases(), cli.json);
         }
         _ => {}
     }
 
-    let daw = daw_cli::connect(cli.socket).await?;
+    let daw = crate::cli::connect(cli.socket).await?;
     run_rpc_command(&daw, cli.command, cli.json).await
 }
 
-async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> Result<()> {
+async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) -> Result<()> {
     match command {
-        Command::Info => daw_cli::cmd_info(daw, json).await?,
-        Command::Tracks => daw_cli::cmd_tracks(daw, json).await?,
-        Command::Track { ref track } => daw_cli::cmd_track(daw, track, json).await?,
+        Command::Info => crate::cli::cmd_info(daw, json).await?,
+        Command::Tracks => crate::cli::cmd_tracks(daw, json).await?,
+        Command::Track { ref track } => crate::cli::cmd_track(daw, track, json).await?,
         Command::Call {
             ref target,
             ref args,
         } => print_value(
-            daw_cli::ops::run_call(daw, target, args.as_deref()).await?,
+            crate::cli::ops::run_call(daw, target, args.as_deref()).await?,
             json,
         )?,
-        Command::Op { ref op } => print_value(daw_cli::ops::run_op(daw, op).await?, json)?,
+        Command::Op { ref op } => print_value(crate::cli::ops::run_op(daw, op).await?, json)?,
         Command::Batch { ref program } => {
             let text = if program == "-" {
                 use std::io::Read;
@@ -957,47 +961,47 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             } else {
                 std::fs::read_to_string(program)?
             };
-            print_value(daw_cli::ops::run_batch(daw, &text).await?, json)?
+            print_value(crate::cli::ops::run_batch(daw, &text).await?, json)?
         }
-        Command::Fx { ref track } => daw_cli::cmd_fx(daw, track, json).await?,
-        Command::Params { ref track, ref fx } => daw_cli::cmd_params(daw, track, fx, json).await?,
-        Command::LastTouchedFx => print_value(daw_cli::ops::last_touched_fx(daw).await?, json)?,
+        Command::Fx { ref track } => crate::cli::cmd_fx(daw, track, json).await?,
+        Command::Params { ref track, ref fx } => crate::cli::cmd_params(daw, track, fx, json).await?,
+        Command::LastTouchedFx => print_value(crate::cli::ops::last_touched_fx(daw).await?, json)?,
         Command::BypassFx { ref track, ref fx } => print_value(
-            daw_cli::ops::fx_set_enabled(daw, track, fx, false).await?,
+            crate::cli::ops::fx_set_enabled(daw, track, fx, false).await?,
             json,
         )?,
         Command::EnableFx { ref track, ref fx } => print_value(
-            daw_cli::ops::fx_set_enabled(daw, track, fx, true).await?,
+            crate::cli::ops::fx_set_enabled(daw, track, fx, true).await?,
             json,
         )?,
         Command::FxAdd {
             ref track,
             ref name,
             at,
-        } => print_value(daw_cli::ops::fx_add(daw, track, name, at).await?, json)?,
+        } => print_value(crate::cli::ops::fx_add(daw, track, name, at).await?, json)?,
         Command::FxRemove { ref track, ref fx } => {
-            print_value(daw_cli::ops::fx_remove(daw, track, fx).await?, json)?
+            print_value(crate::cli::ops::fx_remove(daw, track, fx).await?, json)?
         }
         Command::FxEnable {
             ref track,
             ref fx,
             enabled,
         } => print_value(
-            daw_cli::ops::fx_set_enabled(daw, track, fx, enabled.0).await?,
+            crate::cli::ops::fx_set_enabled(daw, track, fx, enabled.0).await?,
             json,
         )?,
         Command::FxMove {
             ref track,
             ref fx,
             index,
-        } => print_value(daw_cli::ops::fx_move(daw, track, fx, index).await?, json)?,
+        } => print_value(crate::cli::ops::fx_move(daw, track, fx, index).await?, json)?,
         Command::FxSetParam {
             ref track,
             ref fx,
             param,
             value,
         } => print_value(
-            daw_cli::ops::fx_set_param(daw, track, fx, param, value).await?,
+            crate::cli::ops::fx_set_param(daw, track, fx, param, value).await?,
             json,
         )?,
         Command::FxSetParamName {
@@ -1006,110 +1010,110 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             ref param,
             value,
         } => print_value(
-            daw_cli::ops::fx_set_param_by_name(daw, track, fx, param, value).await?,
+            crate::cli::ops::fx_set_param_by_name(daw, track, fx, param, value).await?,
             json,
         )?,
         Command::FxUi {
             ref track,
             ref fx,
             ref action,
-        } => print_value(daw_cli::ops::fx_ui(daw, track, fx, action).await?, json)?,
+        } => print_value(crate::cli::ops::fx_ui(daw, track, fx, action).await?, json)?,
         Command::FxPreset {
             ref track,
             ref fx,
             ref action,
             index,
         } => print_value(
-            daw_cli::ops::fx_preset(daw, track, fx, action, index).await?,
+            crate::cli::ops::fx_preset(daw, track, fx, action, index).await?,
             json,
         )?,
-        Command::Transport => daw_cli::cmd_transport(daw, json).await?,
-        Command::Play => print_value(daw_cli::ops::transport_control(daw, "play").await?, json)?,
-        Command::Stop => print_value(daw_cli::ops::transport_control(daw, "stop").await?, json)?,
-        Command::Pause => print_value(daw_cli::ops::transport_control(daw, "pause").await?, json)?,
+        Command::Transport => crate::cli::cmd_transport(daw, json).await?,
+        Command::Play => print_value(crate::cli::ops::transport_control(daw, "play").await?, json)?,
+        Command::Stop => print_value(crate::cli::ops::transport_control(daw, "stop").await?, json)?,
+        Command::Pause => print_value(crate::cli::ops::transport_control(daw, "pause").await?, json)?,
         Command::Record => {
-            print_value(daw_cli::ops::transport_control(daw, "record").await?, json)?
+            print_value(crate::cli::ops::transport_control(daw, "record").await?, json)?
         }
         Command::PlayPause => print_value(
-            daw_cli::ops::transport_control(daw, "play_pause").await?,
+            crate::cli::ops::transport_control(daw, "play_pause").await?,
             json,
         )?,
         Command::Loop => print_value(
-            daw_cli::ops::transport_control(daw, "toggle_loop").await?,
+            crate::cli::ops::transport_control(daw, "toggle_loop").await?,
             json,
         )?,
 
-        Command::Markers => daw_cli::cmd_markers(daw, json).await?,
+        Command::Markers => crate::cli::cmd_markers(daw, json).await?,
 
-        Command::Regions => daw_cli::cmd_regions(daw, json).await?,
+        Command::Regions => crate::cli::cmd_regions(daw, json).await?,
 
-        Command::Plugins => daw_cli::cmd_plugins(daw, json).await?,
-        Command::LoadedPlugins => print_value(daw_cli::ops::plugin_loader_list(daw).await?, json)?,
+        Command::Plugins => crate::cli::cmd_plugins(daw, json).await?,
+        Command::LoadedPlugins => print_value(crate::cli::ops::plugin_loader_list(daw).await?, json)?,
         Command::LoadPlugin { ref path } => {
-            print_value(daw_cli::ops::plugin_loader_load(daw, path).await?, json)?
+            print_value(crate::cli::ops::plugin_loader_load(daw, path).await?, json)?
         }
-        Command::Ping => daw_cli::cmd_ping(daw).await?,
-        Command::Projects => daw_cli::cmd_projects(daw, json).await?,
-        Command::NewProject => print_value(daw_cli::ops::create_project(daw).await?, json)?,
+        Command::Ping => crate::cli::cmd_ping(daw).await?,
+        Command::Projects => crate::cli::cmd_projects(daw, json).await?,
+        Command::NewProject => print_value(crate::cli::ops::create_project(daw).await?, json)?,
         Command::SelectProject { ref guid } => {
-            print_value(daw_cli::ops::select_project(daw, guid).await?, json)?
+            print_value(crate::cli::ops::select_project(daw, guid).await?, json)?
         }
-        Command::Open { ref path } => daw_cli::cmd_open(daw, path, json).await?,
-        Command::Close { ref guid } => daw_cli::cmd_close(daw, guid.as_deref()).await?,
-        Command::Save => print_value(daw_cli::ops::save_project(daw).await?, json)?,
-        Command::SaveAll => print_value(daw_cli::ops::save_all_projects(daw).await?, json)?,
-        Command::Undo => print_value(daw_cli::ops::project_undo(daw).await?, json)?,
-        Command::Redo => print_value(daw_cli::ops::project_redo(daw).await?, json)?,
+        Command::Open { ref path } => crate::cli::cmd_open(daw, path, json).await?,
+        Command::Close { ref guid } => crate::cli::cmd_close(daw, guid.as_deref()).await?,
+        Command::Save => print_value(crate::cli::ops::save_project(daw).await?, json)?,
+        Command::SaveAll => print_value(crate::cli::ops::save_all_projects(daw).await?, json)?,
+        Command::Undo => print_value(crate::cli::ops::project_undo(daw).await?, json)?,
+        Command::Redo => print_value(crate::cli::ops::project_redo(daw).await?, json)?,
         Command::RunCommand { ref command } => {
-            print_value(daw_cli::ops::project_run_command(daw, command).await?, json)?
+            print_value(crate::cli::ops::project_run_command(daw, command).await?, json)?
         }
 
         Command::AddTrack { ref name, at } => {
-            daw_cli::cmd_add_track(daw, name.as_deref(), at, json).await?
+            crate::cli::cmd_add_track(daw, name.as_deref(), at, json).await?
         }
-        Command::RemoveTrack { ref track } => daw_cli::cmd_remove_track(daw, track).await?,
+        Command::RemoveTrack { ref track } => crate::cli::cmd_remove_track(daw, track).await?,
         Command::Mute { ref track } => print_value(
-            daw_cli::ops::track_set(daw, track, "muted", bool_value(true)).await?,
+            crate::cli::ops::track_set(daw, track, "muted", bool_value(true)).await?,
             json,
         )?,
         Command::Unmute { ref track } => print_value(
-            daw_cli::ops::track_set(daw, track, "muted", bool_value(false)).await?,
+            crate::cli::ops::track_set(daw, track, "muted", bool_value(false)).await?,
             json,
         )?,
         Command::Solo { ref track } => print_value(
-            daw_cli::ops::track_set(daw, track, "soloed", bool_value(true)).await?,
+            crate::cli::ops::track_set(daw, track, "soloed", bool_value(true)).await?,
             json,
         )?,
         Command::Unsolo { ref track } => print_value(
-            daw_cli::ops::track_set(daw, track, "soloed", bool_value(false)).await?,
+            crate::cli::ops::track_set(daw, track, "soloed", bool_value(false)).await?,
             json,
         )?,
         Command::Arm { ref track } => print_value(
-            daw_cli::ops::track_set(daw, track, "armed", bool_value(true)).await?,
+            crate::cli::ops::track_set(daw, track, "armed", bool_value(true)).await?,
             json,
         )?,
         Command::Disarm { ref track } => print_value(
-            daw_cli::ops::track_set(daw, track, "armed", bool_value(false)).await?,
+            crate::cli::ops::track_set(daw, track, "armed", bool_value(false)).await?,
             json,
         )?,
         Command::SelectTrack { ref track } => print_value(
-            daw_cli::ops::track_set(daw, track, "selected", bool_value(true)).await?,
+            crate::cli::ops::track_set(daw, track, "selected", bool_value(true)).await?,
             json,
         )?,
         Command::DeselectTrack { ref track } => print_value(
-            daw_cli::ops::track_set(daw, track, "selected", bool_value(false)).await?,
+            crate::cli::ops::track_set(daw, track, "selected", bool_value(false)).await?,
             json,
         )?,
         Command::TrackRename {
             ref track,
             ref name,
-        } => print_value(daw_cli::ops::track_rename(daw, track, &name.0).await?, json)?,
+        } => print_value(crate::cli::ops::track_rename(daw, track, &name.0).await?, json)?,
         Command::TrackColor { ref track, color } => print_value(
-            daw_cli::ops::track_set_color(daw, track, color.0).await?,
+            crate::cli::ops::track_set_color(daw, track, color.0).await?,
             json,
         )?,
         Command::TrackFolderDepth { ref track, depth } => print_value(
-            daw_cli::ops::track_set_folder_depth(daw, track, depth.0).await?,
+            crate::cli::ops::track_set_folder_depth(daw, track, depth.0).await?,
             json,
         )?,
         Command::TrackSet {
@@ -1117,11 +1121,11 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             ref field,
             ref value,
         } => print_value(
-            daw_cli::ops::track_set(daw, track, field, cli_value(value)).await?,
+            crate::cli::ops::track_set(daw, track, field, cli_value(value)).await?,
             json,
         )?,
         Command::TrackMove { ref track, index } => {
-            print_value(daw_cli::ops::track_move(daw, track, index).await?, json)?
+            print_value(crate::cli::ops::track_move(daw, track, index).await?, json)?
         }
         Command::TrackExtState {
             ref track,
@@ -1129,7 +1133,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             ref key,
             ref value,
         } => print_value(
-            daw_cli::ops::track_ext_state(daw, track, section, key, value.as_deref()).await?,
+            crate::cli::ops::track_ext_state(daw, track, section, key, value.as_deref()).await?,
             json,
         )?,
         Command::TrackExtStateDelete {
@@ -1137,25 +1141,25 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             ref section,
             ref key,
         } => print_value(
-            daw_cli::ops::track_delete_ext_state(daw, track, section, key).await?,
+            crate::cli::ops::track_delete_ext_state(daw, track, section, key).await?,
             json,
         )?,
 
-        Command::AudioEngine => print_value(daw_cli::ops::audio_engine(daw).await?, json)?,
+        Command::AudioEngine => print_value(crate::cli::ops::audio_engine(daw).await?, json)?,
         Command::AudioEngineDo { ref action } => {
-            print_value(daw_cli::ops::audio_engine_control(daw, action).await?, json)?
+            print_value(crate::cli::ops::audio_engine_control(daw, action).await?, json)?
         }
         Command::Action { ref action_id } => {
-            print_value(daw_cli::ops::action_execute(daw, action_id).await?, json)?
+            print_value(crate::cli::ops::action_execute(daw, action_id).await?, json)?
         }
         Command::ActionLookup { ref command_name } => {
-            print_value(daw_cli::ops::action_lookup(daw, command_name).await?, json)?
+            print_value(crate::cli::ops::action_lookup(daw, command_name).await?, json)?
         }
         Command::ActionToggle {
             ref command_name,
             is_on,
         } => print_value(
-            daw_cli::ops::action_set_toggle(daw, command_name, is_on.0).await?,
+            crate::cli::ops::action_set_toggle(daw, command_name, is_on.0).await?,
             json,
         )?,
         Command::Actions { ref command } => match command {
@@ -1166,7 +1170,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(daw, filter, section, query.as_deref(), *limit).await?,
+                crate::cli::ops::action_list(daw, filter, section, query.as_deref(), *limit).await?,
                 json,
                 columns,
             )?,
@@ -1176,7 +1180,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(daw, "sws", section, query.as_deref(), *limit).await?,
+                crate::cli::ops::action_list(daw, "sws", section, query.as_deref(), *limit).await?,
                 json,
                 columns,
             )?,
@@ -1186,7 +1190,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(daw, "reaper", section, query.as_deref(), *limit).await?,
+                crate::cli::ops::action_list(daw, "reaper", section, query.as_deref(), *limit).await?,
                 json,
                 columns,
             )?,
@@ -1196,7 +1200,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(daw, "non-reaper", section, query.as_deref(), *limit)
+                crate::cli::ops::action_list(daw, "non-reaper", section, query.as_deref(), *limit)
                     .await?,
                 json,
                 columns,
@@ -1207,38 +1211,38 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(daw, "registered", section, query.as_deref(), *limit)
+                crate::cli::ops::action_list(daw, "registered", section, query.as_deref(), *limit)
                     .await?,
                 json,
                 columns,
             )?,
-            ActionsCommand::Aliases => print_value(daw_cli::ops::action_aliases(), json)?,
+            ActionsCommand::Aliases => print_value(crate::cli::ops::action_aliases(), json)?,
             ActionsCommand::ExecAlias { alias } => {
-                print_value(daw_cli::ops::action_execute_alias(daw, alias).await?, json)?
+                print_value(crate::cli::ops::action_execute_alias(daw, alias).await?, json)?
             }
             ActionsCommand::Lookup { command_name } => {
-                print_value(daw_cli::ops::action_lookup(daw, command_name).await?, json)?
+                print_value(crate::cli::ops::action_lookup(daw, command_name).await?, json)?
             }
             ActionsCommand::Exec { action_id } => {
-                print_value(daw_cli::ops::action_execute(daw, action_id).await?, json)?
+                print_value(crate::cli::ops::action_execute(daw, action_id).await?, json)?
             }
             ActionsCommand::Toggle {
                 command_name,
                 state,
             } => print_value(
-                daw_cli::ops::action_set_toggle(daw, command_name, parse_toggle_state(state)?)
+                crate::cli::ops::action_set_toggle(daw, command_name, parse_toggle_state(state)?)
                     .await?,
                 json,
             )?,
-            ActionsCommand::Toolbar => print_value(daw_cli::ops::toolbar_status(daw).await?, json)?,
+            ActionsCommand::Toolbar => print_value(crate::cli::ops::toolbar_status(daw).await?, json)?,
         },
-        Command::Toolbar => print_value(daw_cli::ops::toolbar_status(daw).await?, json)?,
+        Command::Toolbar => print_value(crate::cli::ops::toolbar_status(daw).await?, json)?,
         Command::ToolbarLive { target } => print_value(
-            daw_cli::ops::toolbar_live(daw, target.as_deref()).await?,
+            crate::cli::ops::toolbar_live(daw, target.as_deref()).await?,
             json,
         )?,
         Command::ToolbarConfig { path, target } => print_value(
-            daw_cli::ops::toolbar_config(daw, &path, target.as_deref()).await?,
+            crate::cli::ops::toolbar_config(daw, &path, target.as_deref()).await?,
             json,
         )?,
         Command::ToolbarAdd {
@@ -1251,7 +1255,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             icon_kind,
             flags,
         } => print_value(
-            daw_cli::ops::toolbar_add(
+            crate::cli::ops::toolbar_add(
                 daw,
                 &command_name,
                 &label,
@@ -1275,7 +1279,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             icon_kind,
             flags,
         } => print_value(
-            daw_cli::ops::toolbar_update(
+            crate::cli::ops::toolbar_update(
                 daw,
                 &command_name,
                 &label,
@@ -1293,7 +1297,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             command_name,
             target,
         } => print_value(
-            daw_cli::ops::toolbar_remove(daw, &command_name, &target).await?,
+            crate::cli::ops::toolbar_remove(daw, &command_name, &target).await?,
             json,
         )?,
         Command::ToolbarMove {
@@ -1301,7 +1305,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             position,
             target,
         } => print_value(
-            daw_cli::ops::toolbar_move(daw, &command_name, &target, position).await?,
+            crate::cli::ops::toolbar_move(daw, &command_name, &target, position).await?,
             json,
         )?,
         Command::ToolbarIcon {
@@ -1311,7 +1315,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             icon_kind,
             clear,
         } => print_value(
-            daw_cli::ops::toolbar_icon(
+            crate::cli::ops::toolbar_icon(
                 daw,
                 &command_name,
                 &target,
@@ -1322,7 +1326,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             .await?,
             json,
         )?,
-        Command::Screensets => print_value(daw_cli::ops::screenset_list(daw).await?, json)?,
+        Command::Screensets => print_value(crate::cli::ops::screenset_list(daw).await?, json)?,
         Command::ScreensetCapture {
             id,
             name,
@@ -1332,7 +1336,7 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             actions_on_apply,
             persist,
         } => print_value(
-            daw_cli::ops::screenset_capture(
+            crate::cli::ops::screenset_capture(
                 daw,
                 &id,
                 name.as_deref(),
@@ -1346,42 +1350,42 @@ async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> R
             json,
         )?,
         Command::ScreensetShow { id } => {
-            print_value(daw_cli::ops::screenset_show(daw, &id).await?, json)?
+            print_value(crate::cli::ops::screenset_show(daw, &id).await?, json)?
         }
         Command::ScreensetApply { id } => {
-            print_value(daw_cli::ops::screenset_apply(daw, &id).await?, json)?
+            print_value(crate::cli::ops::screenset_apply(daw, &id).await?, json)?
         }
         Command::ScreensetDelete { id, persist } => print_value(
-            daw_cli::ops::screenset_delete(daw, &id, persist).await?,
+            crate::cli::ops::screenset_delete(daw, &id, persist).await?,
             json,
         )?,
         Command::Combine {
             ref input,
             ref output,
             gap,
-        } => daw_cli::cmd_combine(daw, input, output.as_deref(), gap).await?,
+        } => crate::cli::cmd_combine(daw, input, output.as_deref(), gap).await?,
         Command::RppSummary { ref path } => {
-            print_value(daw_cli::ops::rpp_summary(daw, path).await?, json)?
+            print_value(crate::cli::ops::rpp_summary(daw, path).await?, json)?
         }
-        Command::Items { ref track } => daw_cli::cmd_items(daw, track, json).await?,
-        Command::Takes { ref track, item } => daw_cli::cmd_takes(daw, track, item, json).await?,
+        Command::Items { ref track } => crate::cli::cmd_items(daw, track, json).await?,
+        Command::Takes { ref track, item } => crate::cli::cmd_takes(daw, track, item, json).await?,
         Command::TakeDelete {
             ref track,
             item,
             take,
-        } => daw_cli::cmd_take_delete(daw, track, item, take).await?,
+        } => crate::cli::cmd_take_delete(daw, track, item, take).await?,
         Command::TakePreservePitch {
             ref track,
             item,
             take,
             preserve,
-        } => daw_cli::cmd_take_preserve_pitch(daw, track, item, take, preserve.0).await?,
+        } => crate::cli::cmd_take_preserve_pitch(daw, track, item, take, preserve.0).await?,
         Command::TakeSetSource {
             ref track,
             item,
             take,
             ref path,
-        } => daw_cli::cmd_take_set_source(daw, track, item, take, path).await?,
+        } => crate::cli::cmd_take_set_source(daw, track, item, take, path).await?,
         // Already handled above
         Command::Launch { .. }
         | Command::Profiles

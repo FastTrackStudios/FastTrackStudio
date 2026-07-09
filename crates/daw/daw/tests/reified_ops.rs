@@ -2,7 +2,9 @@
 //! `daw call`, `daw batch`): CLI op helpers → in-process Standalone
 //! over a real vox memory link.
 
-use daw_cli::ops::{run_batch, run_call, run_op};
+#![cfg(feature = "cli")]
+
+use daw::cli::ops::{run_batch, run_call, run_op};
 use daw_standalone::bootstrap::build_in_process_daw;
 use daw_standalone::sync::Standalone;
 

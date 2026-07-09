@@ -1,4 +1,4 @@
-//! signal-rigd — the headless guitar-rig core, served over a WebSocket.
+//! signal-engine — the headless guitar-rig core, served over a WebSocket.
 //!
 //! Opens the live audio engine (guitar in → NAM chain → out), loads the
 //! profile, and mounts the rig's vox `LayerRouter` at `ws://<host>:4040/vox`.
@@ -15,8 +15,17 @@ use architect::axum_ws;
 use signal_guitar::GuitarRigBackend;
 use signal_guitar::proto::rig::Rig as _;
 
-/// Default bind address; override with `RIGD_ADDR`.
+/// Default bind address; override with `SIGNAL_ENGINE_ADDR` (or the legacy
+/// `RIGD_ADDR`, still honored so existing live setups keep working).
 const DEFAULT_ADDR: &str = "0.0.0.0:4040";
+
+/// Bind address: `SIGNAL_ENGINE_ADDR` wins, then the legacy `RIGD_ADDR`,
+/// then the default.
+fn bind_addr() -> String {
+    std::env::var("SIGNAL_ENGINE_ADDR")
+        .or_else(|_| std::env::var("RIGD_ADDR"))
+        .unwrap_or_else(|_| DEFAULT_ADDR.to_string())
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -59,10 +68,10 @@ async fn main() {
         .route("/vox", get(vox_handler))
         .with_state(state);
 
-    let addr = std::env::var("RIGD_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
+    let addr = bind_addr();
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("bind {addr}: {e}"));
-    tracing::info!("signal-rigd serving ws://{addr}/vox");
+    tracing::info!("signal-engine serving ws://{addr}/vox");
     axum::serve(listener, app).await.expect("axum serve");
 }

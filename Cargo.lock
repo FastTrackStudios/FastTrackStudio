@@ -4050,6 +4050,7 @@ name = "daw"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "clap",
  "daw-control",
  "daw-csi",
  "daw-module",
@@ -4067,9 +4068,13 @@ dependencies = [
  "dawfile-reaper",
  "eyre",
  "facet 0.50.0-rc.5",
+ "facet-json 0.50.0-rc.5",
+ "libc",
  "moire",
  "reaper-launcher",
+ "serde_json",
  "tokio",
+ "tracing-subscriber",
  "vox",
  "vox-stream",
 ]
@@ -4137,26 +4142,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid 1.23.4",
- "vox",
- "vox-stream",
-]
-
-[[package]]
-name = "daw-cli"
-version = "0.1.0"
-dependencies = [
- "architect",
- "clap",
- "daw",
- "daw-standalone",
- "dawfile-reaper",
- "eyre",
- "facet 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
- "libc",
- "serde_json",
- "tokio",
- "tracing-subscriber",
  "vox",
  "vox-stream",
 ]
@@ -5984,6 +5969,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine-launcher"
+version = "0.1.0"
+
+[[package]]
 name = "engraver"
 version = "0.1.0"
 dependencies = [
@@ -6795,6 +6784,7 @@ dependencies = [
  "daw",
  "daw-standalone",
  "dioxus",
+ "engine-launcher",
  "eyre",
  "keyflow",
  "session",
@@ -6807,6 +6797,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vox",
+ "vox-core",
+ "vox-websocket",
 ]
 
 [[package]]
@@ -7160,6 +7152,25 @@ dependencies = [
 [[package]]
 name = "fts-audio-proto"
 version = "0.1.0"
+
+[[package]]
+name = "fts-cli"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "clap",
+ "daw",
+ "daw-standalone",
+ "engine-launcher",
+ "eyre",
+ "keyflow-cli",
+ "session",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "vox",
+]
 
 [[package]]
 name = "fts-devtools"
@@ -16306,6 +16317,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-engine"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "signal-guitar",
+ "signal-sampler",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "signal-extension"
 version = "0.1.0"
 dependencies = [
@@ -16555,19 +16579,6 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-proto",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "signal-rigd"
-version = "0.1.0"
-dependencies = [
- "architect",
- "axum",
- "signal-guitar",
- "signal-sampler",
  "tokio",
  "tracing",
  "tracing-subscriber",

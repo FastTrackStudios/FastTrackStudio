@@ -2,7 +2,14 @@
 name = "keyflow-cli"
 version.workspace = true
 edition = "2021"  # original edition of the dissolved workspace (root is 2024)
-description = "CLI tool for parsing and rendering Keyflow charts"
+description = "The kf CLI surface for parsing and rendering Keyflow charts (lib + thin `kf` bin)"
+
+# Library-first: `keyflow_cli::cli_main(argv)` is the embeddable entry
+# (mounted at `fts keyflow` / `fts kf` by the unified CLI); the `kf`
+# binary is a thin wrapper kept for muscle memory / onnx feature builds.
+[lib]
+name = "keyflow_cli"
+path = "src/lib.rs"
 
 [[bin]]
 name = "kf"

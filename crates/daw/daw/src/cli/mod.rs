@@ -1,8 +1,11 @@
-//! daw-cli library — reusable components for DAW CLI tools.
+//! `daw` CLI — the DAW command-line surface (former `daw-cli` crate),
+//! folded into the facade behind the `cli` feature.
 //!
 //! Provides socket discovery, connection management, track/FX resolution,
 //! formatting helpers, and command implementations for querying a running
-//! REAPER instance via the vox RPC protocol.
+//! REAPER instance via the vox RPC protocol. The clap command tree +
+//! dispatcher live in [`command`]; embedders (the `fts` CLI, the thin
+//! `daw` binary) call [`cli_main`] with pre-split argv.
 
 use std::collections::BTreeSet;
 use std::os::unix::process::CommandExt;
@@ -10,15 +13,18 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::{env, fs};
 
-use daw::rpc::Daw;
-use daw::service::FxType;
+use crate::rpc::Daw;
+use crate::service::FxType;
 use eyre::{Result, bail};
 use serde_json::json;
 use vox::{Caller, ConnectionHandle};
 
 pub mod cli_values;
+pub mod command;
 pub mod ops;
 pub mod sync;
+
+pub use command::cli_main;
 
 /// Minimal `FromVoxLane` client that captures the DAW service lane's
 /// `Caller` (vox 0.10 replacement for the removed `NoopClient`).
@@ -712,7 +718,7 @@ pub async fn resolve_track(daw: &Daw, track_arg: &str) -> Result<(String, String
 }
 
 /// Resolve a track argument and return the TrackHandle directly.
-pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::rpc::TrackHandle> {
+pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<crate::rpc::TrackHandle> {
     let (guid, _) = resolve_track(daw, track_arg).await?;
     let project = daw.current_project().await?;
     project
@@ -724,10 +730,10 @@ pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::rpc
 
 /// Resolve an FX argument (index or name) on a track's FX chain.
 pub async fn resolve_fx_handle(
-    fx_chain: &daw::rpc::FxChain,
+    fx_chain: &crate::rpc::FxChain,
     fx_arg: &str,
     track_name: &str,
-) -> Result<daw::rpc::FxHandle> {
+) -> Result<crate::rpc::FxHandle> {
     let fx_handle = if let Ok(idx) = fx_arg.parse::<u32>() {
         fx_chain.by_index(idx).await?
     } else {
@@ -740,7 +746,7 @@ pub async fn resolve_fx_handle(
 // Formatting Helpers
 // ============================================================================
 
-pub fn format_position(pos: &daw::service::primitives::Position) -> String {
+pub fn format_position(pos: &crate::service::primitives::Position) -> String {
     if let Some(ref musical) = pos.musical {
         format!(
             "{}.{}.{:03}",
@@ -1440,7 +1446,7 @@ pub async fn cmd_remove_track(daw: &Daw, track_arg: &str) -> Result<()> {
     let project = daw.current_project().await?;
     project
         .tracks()
-        .remove(daw::service::TrackRef::Guid(guid.clone()))
+        .remove(crate::service::TrackRef::Guid(guid.clone()))
         .await?;
     println!("Removed track \"{}\" ({})", name, guid);
     Ok(())
@@ -1602,7 +1608,7 @@ async fn resolve_take(
     track_arg: &str,
     item_idx: u32,
     take_idx: u32,
-) -> Result<daw::rpc::TakeHandle> {
+) -> Result<crate::rpc::TakeHandle> {
     let track = resolve_track_handle(daw, track_arg).await?;
     let item = track
         .items()
