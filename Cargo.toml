@@ -57,19 +57,19 @@ reaper-macros = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", b
 # old FastTrackStudios vox fork (0.8.x) is gone.
 # `transport-local` on top of the daw/keyflow baseline (["runtime"]): the
 # standalone setlist harness serves/connects over `local://` Unix sockets.
-vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime", "transport-local"] }
-vox-types = { version = "0.10.0-rc.1" }
-vox-stream = { version = "0.10.0-rc.1" }
-vox-websocket = { version = "0.10.0-rc.1" }
+vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime", "transport-local"] }
+vox-types = { version = "0.10.0-rc.5" }
+vox-stream = { version = "0.10.0-rc.5" }
+vox-websocket = { version = "0.10.0-rc.5" }
 
 # ── Architect service framework ─────────────────────────────────────
 # Codeberg main; path-patched to the local migrated checkout below.
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
 
 # ── Facet reflection — 0.50 line (paired across the FTS stack) ──────
-facet = { version = "0.50.0-rc.1" }
-facet-json = { version = "0.50.0-rc.1" }
-facet-postcard = { version = "0.50.0-rc.1" }
+facet = { version = "0.50.0-rc.5" }
+facet-json = { version = "0.50.0-rc.5" }
+facet-postcard = { version = "0.50.0-rc.5" }
 
 # ── Keyflow (sibling repo — facade pattern) ─────────────────────────
 keyflow = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
