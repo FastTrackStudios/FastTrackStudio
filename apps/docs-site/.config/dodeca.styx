@@ -1,0 +1,15 @@
+// docs.fasttrackstudio.app — the unified FTS docs site.
+//
+// `content` points at the GENERATED tree, not the authored one. Authors edit
+// content/; `kf docs` renders its ```kf``` blocks to inline SVG into
+// .rendered (a mirror tree), which stock dodeca then builds. Run build.sh
+// (one shot) or serve.sh (watch + serve) — never `ddc` directly on raw
+// source.
+content .rendered
+output output
+
+// The shared engraving-font stylesheet (`kf docs` writes it; chart pages
+// <link> it). Served verbatim at /kf-fonts.css — no cache-busting — so the
+// stable <link href> resolves. It's CSS, so the font subsetter leaves it
+// alone.
+stable_assets ( kf-fonts.css )
