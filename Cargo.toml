@@ -34,6 +34,8 @@ members = [
     "libs/nice-plug/egui-baseview",
     "libs/nice-plug/iced_baseview",
     "libs/utils",
+    "libs/monarchy/monarchy",
+    "libs/monarchy/monarchy-derive",
     "libs/vox-discover",
     "libs/installer-core",
     "libs/neural-amp-modeler",
@@ -304,10 +306,10 @@ dynamic-template-proto = { path = "features/dynamic-template/dynamic-template-pr
 # dynamic-template.
 music-catalog = { path = "features/dynamic-template/music-catalog" }
 color-palette = { path = "features/dynamic-template/color-palette" }
-# Monarchy hierarchy framework (dynamic-template's engine). NOTE: monarchy
-# still derives against facet 0.46 internally; its public trait surface
-# carries no facet::Facet bounds, so the two facet versions coexist.
-monarchy = { git = "https://codeberg.org/FastTrackStudios/monarchy.git", branch = "main" }
+# Monarchy hierarchy framework (dynamic-template's engine) — subtree-
+# imported at libs/monarchy so the whole graph shares one facet line.
+monarchy = { path = "libs/monarchy/monarchy" }
+monarchy_derive = { path = "libs/monarchy/monarchy-derive" }
 
 # ── MusicXML parsing (keyflow) ─────────────────────────────────────────
 musicxml = "1.1"

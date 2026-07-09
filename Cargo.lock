@@ -9754,7 +9754,6 @@ dependencies = [
 [[package]]
 name = "monarchy"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/monarchy.git?branch=main#9268a0736aa0d3d00ad5f455e4d1dbee9620ae48"
 dependencies = [
  "facet 0.50.0-rc.5",
  "monarchy_derive",
@@ -9767,9 +9766,9 @@ dependencies = [
 [[package]]
 name = "monarchy_derive"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/monarchy.git?branch=main#9268a0736aa0d3d00ad5f455e4d1dbee9620ae48"
 dependencies = [
  "convert_case 0.6.0",
+ "monarchy",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
