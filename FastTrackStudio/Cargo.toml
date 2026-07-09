@@ -129,11 +129,10 @@ dynamic-template = { path = "../features/dynamic-template/dynamic-template" }
 vox-discover = { path = "../libs/vox-discover" }
 installer-core = { path = "../libs/installer-core" }
 
-# Signal (sibling repo)
-signal = { path = "../signal/crates/signal" }
-signal-ui = { path = "../signal/features/signal/signal-ui", default-features = false }
-signal-cli = { path = "../signal/apps/cli" }
-macromod = { path = "../signal/features/macromod" }
+# Signal — dissolved into the root workspace (wave 4). No member of this
+# LEGACY workspace consumed these entries, so they were dropped; the crates
+# now live at ../crates/signal/* and ../features/fx/macromod (signal-cli is
+# parked in ../attic/signal-apps/cli).
 
 # Session (sibling repo)
 # NOTE: session-proto is listed here for use by session-ui (internal domain crate only).

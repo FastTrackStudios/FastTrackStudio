@@ -133,14 +133,70 @@ members = [
     "features/dynamic-template/music-catalog",
     "features/dynamic-template/color-palette",
     "features/dynamic-template/tests",
+    # ── crates/signal — signal domain core (wave 4) ───────────────────
+    # `signal` is the facade — the only public API surface for the signal
+    # domain. proto/live/storage/controller/import/daw-bridge are INTERNAL
+    # (signal-ui / signal-browser / signal-grid-ui are the documented
+    # exceptions: Dioxus components / the headless browser data layer).
+    "crates/signal/signal",
+    "crates/signal/proto",
+    "crates/signal/ui",
+    "crates/signal/live",
+    "crates/signal/storage",
+    "crates/signal/controller",
+    "crates/signal/import",
+    "crates/signal/browser",
+    "crates/signal/grid",
+    "crates/signal/grid-ui",
+    "crates/signal/daw-bridge",
+    # ── features/fx — built-in FX (wave 4; vendored from FTS plugin repos)
+    # Facade crates (eq / comp / reverb / delay / …) are the public deps;
+    # the -dsp crates are internal (like signal-proto under the facade).
+    # The per-FX -ui/-profiles crates + apps/ plugin binaries moved along
+    # inside each FX dir; they stay implicit members via path deps.
+    "features/fx/eq/eq",
+    "features/fx/eq/eq-dsp",
+    "features/fx/eq/eq-profiles",
+    "features/fx/eq/eq-ui",
+    "features/fx/eq/spectrum-analyzer/spectrum-analyzer",
+    "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp",
+    "features/fx/comp/comp",
+    "features/fx/comp/comp-dsp",
+    "features/fx/reverb/reverb",
+    "features/fx/reverb/reverb-dsp",
+    "features/fx/delay/delay",
+    "features/fx/delay/delay-dsp",
+    "features/fx/pitch/pitch",
+    "features/fx/pitch/pitch-dsp",
+    "features/fx/modulation/modulation",
+    "features/fx/modulation/chorus-dsp",
+    "features/fx/modulation/trem-dsp",
+    "features/fx/modulation/wah-dsp",
+    "features/fx/signal-fx",
+    "features/fx/macromod",
+    # ── features/rigs / sampler / nam / plugin-host (wave 4) ──────────
+    "features/rigs/guitar",
+    "features/rigs/guitar/proto",
+    "features/rigs/guitar/ui",
+    "features/rigs/keys",
+    "features/rigs/orchestra",
+    "features/rigs/drums",
+    "features/rigs/synth",
+    "features/sampler/signal-sampler",
+    "features/sampler/signal-sampler-clap",
+    "features/nam",
+    "features/plugin-host",
+    "features/reaper/signal-extension",
+    "features/reaper/signal-reaper-controller",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/daw-cli",
     "apps/keyflow-cli",
+    "apps/rigd",
+    "apps/signal-web",
 ]
 # Not-yet-moved domain workspaces (later waves) — keep them out of this one.
 exclude = [
     "attic",
-    "signal",
     "apps/fasttrackstudio",
     "FastTrackStudio",
     "Plugins",
@@ -285,15 +341,74 @@ tree-sitter-keyflow = { path = "crates/keyflow/tree-sitter-keyflow" }
 engraver = { path = "features/engraver/engraver", default-features = false }
 engraver-proto = { path = "features/engraver/proto", default-features = false }
 
+# ── signal domain (wave 4) ────────────────────────────────────────────
+# `signal` is the facade — the only public API surface for the signal
+# domain. Apps depend on `signal`, `signal-ui`, or `signal-sampler`;
+# never on the internal domain crates (proto/live/storage/controller/
+# import/daw-bridge/nam-manager).
+signal = { path = "crates/signal/signal" }
+signal-proto = { path = "crates/signal/proto" }
+signal-ui = { path = "crates/signal/ui", default-features = false }
+signal-browser = { path = "crates/signal/browser" }
+signal-grid = { path = "crates/signal/grid" }
+signal-grid-ui = { path = "crates/signal/grid-ui" }
+signal-controller = { path = "crates/signal/controller" }
+signal-live = { path = "crates/signal/live" }
+signal-storage = { path = "crates/signal/storage" }
+signal-import = { path = "crates/signal/import" }
+signal-daw-bridge = { path = "crates/signal/daw-bridge" }
+signal-nam = { path = "features/nam" }
+signal-extension = { path = "features/reaper/signal-extension" }
+signal-macromod = { path = "features/fx/macromod" }
+signal-plugin-host = { path = "features/plugin-host", default-features = false }
+signal-sampler = { path = "features/sampler/signal-sampler" }
+signal-guitar = { path = "features/rigs/guitar" }
+signal-guitar-proto = { path = "features/rigs/guitar/proto" }
+signal-guitar-ui = { path = "features/rigs/guitar/ui" }
+signal-keys = { path = "features/rigs/keys" }
+signal-orchestra = { path = "features/rigs/orchestra" }
+signal-drums = { path = "features/rigs/drums" }
+signal-synth = { path = "features/rigs/synth" }
+
+# ── features/fx — built-in FX (wave 4) ────────────────────────────────
+# Facade crates — the public FX deps (downstream uses these, not `*-dsp`).
+eq = { path = "features/fx/eq/eq" }
+# The full Pro-Q EQ editor. Core (graph model / response / SVG / interaction)
+# is wasm-portable; the vello/nice-plug editor is behind its `native` feature.
+eq-ui = { path = "features/fx/eq/eq-ui", default-features = false }
+eq-profiles = { path = "features/fx/eq/eq-profiles" }
+spectrum-analyzer = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer" }
+spectrum-analyzer-dsp = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp" }
+spectrum-analyzer-ui = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer-ui" }
+comp = { path = "features/fx/comp/comp" }
+reverb = { path = "features/fx/reverb/reverb" }
+delay = { path = "features/fx/delay/delay" }
+pitch = { path = "features/fx/pitch/pitch" }
+pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
+modulation = { path = "features/fx/modulation/modulation" }
+# Internal DSP cores (behind the facades).
+eq-dsp = { path = "features/fx/eq/eq-dsp" }
+comp-dsp = { path = "features/fx/comp/comp-dsp" }
+reverb-dsp = { path = "features/fx/reverb/reverb-dsp" }
+delay-dsp = { path = "features/fx/delay/delay-dsp" }
+chorus-dsp = { path = "features/fx/modulation/chorus-dsp" }
+trem-dsp = { path = "features/fx/modulation/trem-dsp" }
+wah-dsp = { path = "features/fx/modulation/wah-dsp" }
+signal-fx = { path = "features/fx/signal-fx" }
+
 # ── Facet reflection + vox RPC — the rc.5 fleet pins ──────────────────
 facet = { version = "0.50.0-rc.5" }
 facet-json = { version = "0.50.0-rc.5" }
 facet-postcard = { version = "0.50.0-rc.5" }
 facet-styx = { version = "5.0.0-rc.5" }
+facet-toml = { version = "0.50.0-rc.5" }
 vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
 vox-types = { version = "0.10.0-rc.5" }
 vox-phon = { version = "0.10.0-rc.5" }
 vox-stream = { version = "0.10.0-rc.5" }
+vox-core = { version = "0.10.0-rc.5" }
+vox-websocket = { version = "0.10.0-rc.5" }
+axum = { version = "0.8", features = ["ws"] }
 
 # ── Architect framework ───────────────────────────────────────────────
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
@@ -438,6 +553,10 @@ enumflags2 = "0.7"
 fragile = "2"
 # Hardware MIDI I/O — 0.11 to share one alsa-sys across the stack.
 midir = "0.11"
+# Audio I/O host abstraction — the signal rigs run on cpal's native
+# pipewire host (via daw-audio-io); the `pipewire`/`jack` backends are
+# feature-gated per consumer.
+cpal = "0.18"
 
 # ── Patches ───────────────────────────────────────────────────────────
 # architect: consumed as a git dep, developed side-by-side in the sibling
@@ -537,3 +656,14 @@ double_must_use = "allow"
 vec_init_then_push = "allow"
 collapsible_match = "allow"
 filter_next = "allow"
+
+# ── Dev profile (carried from the dissolved signal workspace) ──────────
+# The live rig runs from target/debug/signal-rigd: the vendored NAM C++
+# core and the DSP crates are unusable at opt-level 0 (~10-50x slower,
+# xruns), so dependencies build at release opt in dev while the thin
+# app/UI workspace crates stay at light opt for fast rebuilds.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
