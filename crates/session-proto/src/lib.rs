@@ -55,7 +55,7 @@ pub use track_structure::{
 // (SongId and SectionId are already in scope from the definitions above)
 
 // Re-export position types from daw-proto for convenience
-pub use daw::service::MusicalPosition;
+pub use daw_proto::MusicalPosition;
 
 /// Session service - provides session-specific functionality
 #[architect::rpc]

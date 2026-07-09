@@ -5,7 +5,7 @@
 
 use crate::SongId;
 use crate::setlist::Setlist;
-use daw::service::TimeSignature;
+use daw_proto::TimeSignature;
 use facet::Facet;
 
 /// Offset entry for a single song within the setlist timeline.

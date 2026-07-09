@@ -8,7 +8,6 @@
 #[cfg(target_arch = "wasm32")]
 mod connection;
 #[cfg(target_arch = "wasm32")]
-mod web_client_handler;
 
 #[cfg(target_arch = "wasm32")]
 use dioxus::prelude::*;

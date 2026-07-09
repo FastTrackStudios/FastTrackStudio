@@ -86,43 +86,14 @@ fn DesktopSessionShell() -> Element {
 
         let session = Session::get();
 
+        // Periodically re-scan for new/closed projects; the stream pumps
+        // publish resulting events into the `#[subscribe]` hub for every
+        // subscriber (this desktop UI included — via its own stream client).
         loop {
             if let Err(e) = session.setlist().build_from_open_projects().await {
                 tracing::warn!("build_from_open_projects failed: {e:?}");
             }
-
-            let (tx, mut rx) = vox::channel::<session::SetlistEvent>();
-
-            if let Err(e) = session.setlist().subscribe(tx).await {
-                tracing::error!("Failed to subscribe to setlist events: {e:?}");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                continue;
-            }
-
-            tracing::info!("Subscribed to setlist events");
-
-            // Periodically re-scan REAPER for new/closed projects
-            let poll_session = session.clone();
-            let poll_handle = tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    if let Err(e) = poll_session.setlist().build_from_open_projects().await {
-                        tracing::debug!("Periodic project scan failed: {e:?}");
-                    }
-                }
-            });
-
-            let web_registry = gateway::web_client_registry();
-
-            while let Ok(Some(event_ref)) = rx.recv().await {
-                let event = event_ref.get();
-                web_registry.broadcast(event).await;
-                session_ui::apply_setlist_event(event);
-            }
-
-            poll_handle.abort();
-            tracing::info!("Setlist event subscription ended, will retry...");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     });
 

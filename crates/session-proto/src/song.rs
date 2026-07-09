@@ -7,7 +7,7 @@
 //! across the codebase, while providing session-specific wrappers where needed.
 
 use crate::{SectionId, SongId};
-use daw::service::{Position, TimeSignature};
+use daw_proto::{Position, TimeSignature};
 use facet::Facet;
 
 // Re-export section types from keyflow as the single source of truth

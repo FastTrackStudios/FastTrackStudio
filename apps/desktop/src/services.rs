@@ -27,12 +27,32 @@ const SOCKET_SUFFIX: &str = ".sock";
 /// regardless of whether REAPER is connected.
 pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
     let setlist = SetlistServiceImpl::with_daw(Reaper);
+    // Stream pumps: one process-wide task per `#[subscribe]` hub (events +
+    // active indices) — subscribers share the hubs via the stream layer.
+    setlist.start_stream_pumps();
+    // The desktop UI is in-process: attach a local subscriber and fold
+    // events straight into session-ui's globals (same bridge the web
+    // client uses over the wire).
+    {
+        use session::services::setlist_service::SetlistServiceStreamSource;
+        let (tx, mut rx) = vox::channel::<session::SetlistEvent>();
+        setlist.events_hub().attach(tx);
+        tokio::spawn(async move {
+            while let Ok(Some(ev)) = rx.recv().await {
+                session_ui::apply_setlist_event(ev.get());
+            }
+        });
+    }
     let song = SongServiceImpl::new();
 
-    let handler = gateway::RoutedHandler::new()
+    let handler = architect::LayerRouter::new()
         .with(
             setlist_service_service_descriptor(),
-            serve_setlist_service(setlist),
+            serve_setlist_service(setlist.clone()),
+        )
+        .with(
+            session::services::setlist_service::setlist_service_stream_service_descriptor(),
+            session::services::setlist_service::stream_serve(setlist),
         )
         .with(
             song_service_service_descriptor(),

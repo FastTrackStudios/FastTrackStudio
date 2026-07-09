@@ -45,9 +45,9 @@ pub fn apply_setlist_event(event: &SetlistEvent) {
 
         SetlistEvent::ActiveIndicesChanged(indices) => {
             *PLAYBACK_STATE.write() = if indices.is_playing {
-                daw::service::PlayState::Playing
+                daw_proto::PlayState::Playing
             } else {
-                daw::service::PlayState::Stopped
+                daw_proto::PlayState::Stopped
             };
             *ACTIVE_INDICES.write() = indices.clone();
         }
@@ -139,9 +139,9 @@ fn apply_transport_update(transports: &[SongTransportState]) {
         }
 
         let new_playing = if is_playing {
-            daw::service::PlayState::Playing
+            daw_proto::PlayState::Playing
         } else {
-            daw::service::PlayState::Stopped
+            daw_proto::PlayState::Stopped
         };
         if *PLAYBACK_STATE.read() != new_playing {
             *PLAYBACK_STATE.write() = new_playing;

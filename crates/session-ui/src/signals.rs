@@ -27,7 +27,7 @@
 //! ```
 
 use crate::prelude::*;
-use daw::service::{MusicalPosition, PlayState};
+use daw_proto::{MusicalPosition, PlayState};
 use session_proto::{ActiveIndices, Setlist, SetlistServiceClient, SongChartHydration};
 use std::collections::HashMap;
 
@@ -424,7 +424,7 @@ impl Session {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransportState {
     /// Current position with time, musical, and MIDI representations
-    pub position: daw::service::Position,
+    pub position: daw_proto::Position,
     /// Current tempo in BPM
     pub bpm: f64,
     /// Time signature numerator
@@ -442,7 +442,7 @@ pub struct TransportState {
 impl Default for TransportState {
     fn default() -> Self {
         Self {
-            position: daw::service::Position::default(),
+            position: daw_proto::Position::default(),
             bpm: 120.0,
             time_sig_num: 4,
             time_sig_denom: 4,
@@ -456,7 +456,7 @@ impl Default for TransportState {
 impl TransportState {
     /// Create a new transport state
     pub fn new(
-        position: daw::service::Position,
+        position: daw_proto::Position,
         bpm: f64,
         time_sig_num: i32,
         time_sig_denom: i32,

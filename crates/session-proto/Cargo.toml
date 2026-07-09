@@ -18,7 +18,7 @@ vox-types.workspace = true
 actions-proto.workspace = true
 architect = { workspace = true, features = ["vox"] }
 facet.workspace = true
-daw.workspace = true
+daw-proto.workspace = true
 keyflow.workspace = true
 utils.workspace = true
 # Used inside the `utils::typed_uuid_id!` macro expansion (SongId/SectionId) —

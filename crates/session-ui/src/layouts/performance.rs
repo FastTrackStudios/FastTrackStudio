@@ -284,9 +284,9 @@ pub fn TransportPanel() -> Element {
     let playback_state = *PLAYBACK_STATE.read();
     let is_playing = matches!(
         playback_state,
-        daw::service::PlayState::Playing | daw::service::PlayState::Recording
+        daw_proto::PlayState::Playing | daw_proto::PlayState::Recording
     );
-    let is_recording = matches!(playback_state, daw::service::PlayState::Recording);
+    let is_recording = matches!(playback_state, daw_proto::PlayState::Recording);
 
     // Record-arm has no push signal yet, so track the operator's intent
     // locally (optimistic). Toggling sends the arm/disarm to the active
@@ -671,7 +671,7 @@ fn PerformanceMainContent() -> Element {
                             position_percent: position_percent.min(100.0),
                             measure_number: display_number,
                             time_signature: Some((time_sig_num as u8, time_sig_denom as u8)),
-                            musical_position: daw::service::MusicalPosition::new(
+                            musical_position: daw_proto::MusicalPosition::new(
                                 measure_from_content_start,
                                 0,
                                 0,
@@ -817,7 +817,7 @@ fn PerformanceMainContent() -> Element {
                                 comment_markers: section_comment_markers.read().clone(),
                                 song_key: song_key.clone(),
                                 on_measure_click: Some(Callback::new({
-                                    move |musical_position: daw::service::MusicalPosition| {
+                                    move |musical_position: daw_proto::MusicalPosition| {
                                         if let Some(song_idx) = song_index {
                                             // The measure field contains the absolute measure number
                                             let measure = musical_position.measure;

@@ -17,10 +17,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use session::{SetlistServiceClient, WebClientServiceDispatcher};
+use session_proto::SetlistServiceClient;
+use vox_core;
+use vox;
 use vox_websocket::WsLink;
 
-use crate::web_client_handler::WebClientHandler;
 use session_ui::{
     ACTIVE_INDICES, ConnectionState, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, Session,
 };
@@ -102,74 +103,48 @@ async fn try_connect_and_run(
     ws_url: &str,
     state_signal: &mut Signal<ConnectionState>,
 ) -> Result<(), String> {
-    let link = WsLink::connect(ws_url)
-        .await
-        .map_err(|e| format!("WebSocket connect failed: {e}"))?;
-
-    log("[session-web] WebSocket connected, initiating vox handshake...");
-
-    let handler = WebClientServiceDispatcher::new(WebClientHandler);
-    let handshake_result = vox::HandshakeResult {
-        role: vox::SessionRole::Initiator,
-        our_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Odd,
-            max_concurrent_requests: 64,
-        },
-        peer_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Even,
-            max_concurrent_requests: 64,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-    };
-    let (caller, _session_handle) =
-        vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
-            .establish::<vox::DriverCaller>(handler)
+    // Typed clients, one lane each (a vox caller is service-bound once
+    // constructed): the RPC surface + the `#[subscribe]` stream sibling.
+    async fn connect_link(url: &str) -> Result<vox_websocket::WsLink, String> {
+        WsLink::connect(url)
             .await
-            .map_err(|e| format!("Handshake failed: {e:?}"))?;
+            .map_err(|e| format!("WebSocket connect failed: {e:?}"))
+    }
+    let rpc: SetlistServiceClient = vox_core::initiator_on(connect_link(ws_url).await?)
+        .establish()
+        .await
+        .map_err(|e| format!("handshake (rpc): {e:?}"))?;
+    let stream: session_proto::services::setlist_service::SetlistServiceStreamClient =
+        vox_core::initiator_on(connect_link(ws_url).await?)
+            .establish()
+            .await
+            .map_err(|e| format!("handshake (stream): {e:?}"))?;
 
     log("[session-web] Connection established!");
     state_signal.set(ConnectionState::Connected);
+    let _ = Session::init(rpc);
 
-    // Initialize Session singleton with SetlistServiceClient
-    let handle = vox::ErasedCaller::new(caller);
-    let setlist_client = SetlistServiceClient::new(handle);
-    let _ = Session::init(setlist_client);
-
-    log("[session-web] Session initialized");
-
-    // Fetch initial setlist
+    // Seed, then fold the event stream into the UI globals. The stream
+    // call stays in flight for the life of the subscription; when it ends
+    // the connection is gone and the outer loop reconnects.
     if let Err(e) = fetch_setlist().await {
         log(&format!("[session-web] Failed to fetch setlist: {e}"));
     }
 
-    // Keep alive — poll connection health
-    let connection_lost = Rc::new(Cell::new(false));
-    let lost_clone = connection_lost.clone();
-
-    let session = Session::get();
-    let client = session.setlist().clone();
-
-    wasm_bindgen_futures::spawn_local(async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(5000).await;
-            if client.get_audio_latency_info().await.is_err() {
-                log("[session-web] Connection health check failed");
-                lost_clone.set(true);
-                break;
-            }
+    let (tx, mut rx) = vox::channel::<session_proto::SetlistEvent>();
+    let events_call = stream.events(tx);
+    let recv_loop = async move {
+        while let Ok(Some(ev)) = rx.recv().await {
+            session_ui::apply_setlist_event(ev.get());
         }
-    });
-
-    loop {
-        gloo_timers::future::TimeoutFuture::new(100).await;
-        if connection_lost.get() {
-            break;
-        }
-    }
+    };
+    futures_util::future::join(
+        async {
+            let _ = events_call.await;
+        },
+        recv_loop,
+    )
+    .await;
 
     Ok(())
 }

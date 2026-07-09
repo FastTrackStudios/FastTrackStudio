@@ -10,6 +10,7 @@ name = "session-desktop"
 path = "src/main.rs"
 
 [dependencies]
+architect = { workspace = true, features = ["vox", "server-axum"] }
 daw = { workspace = true, features = ["reaper"] }
 daw-reaper.workspace = true
 session.workspace = true

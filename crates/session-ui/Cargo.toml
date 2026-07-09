@@ -12,7 +12,7 @@ test = false
 session-proto = { workspace = true }
 
 # DAW types (for PlayState, etc.)
-daw = { workspace = true }
+daw-proto = { workspace = true }
 
 # FTS UI components
 fts-ui.workspace = true

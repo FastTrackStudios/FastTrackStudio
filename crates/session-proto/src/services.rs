@@ -5,7 +5,7 @@
 use crate::setlist::{ActiveIndices, Setlist};
 use crate::song::{Section, Song, SongChartHydration};
 use crate::{SectionId, SongId};
-use daw::service::MusicalPosition;
+use daw_proto::MusicalPosition;
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 use vox::Tx;
@@ -79,7 +79,7 @@ pub struct SongTransportState {
     /// Current position with time, musical, and MIDI representations
     /// The musical position comes from REAPER's tempo map and properly
     /// accounts for tempo and time signature changes throughout the project
-    pub position: daw::service::Position,
+    pub position: daw_proto::Position,
     /// Position as progress within the song (0.0 - 1.0)
     pub progress: f64,
     /// Current section index (if in a section)
@@ -92,7 +92,7 @@ pub struct SongTransportState {
     pub is_looping: bool,
     /// Loop region start/end in seconds (relative to song start)
     /// Only present when looping is enabled and loop points are set
-    pub loop_region: Option<daw::service::LoopRegion>,
+    pub loop_region: Option<daw_proto::LoopRegion>,
     /// Current tempo in BPM
     pub bpm: f64,
     /// Time signature numerator
@@ -105,7 +105,7 @@ impl Default for SongTransportState {
     fn default() -> Self {
         Self {
             song_index: 0,
-            position: daw::service::Position::default(),
+            position: daw_proto::Position::default(),
             progress: 0.0,
             section_index: None,
             section_progress: None,
@@ -412,14 +412,16 @@ pub mod setlist_service {
         // Subscriptions
         // =========================================================================
 
-        /// Subscribe to setlist events
-        async fn subscribe(&self, events: Tx<SetlistEvent>) -> Result<(), SessionServiceError>;
+        /// Every setlist change, as it happens — remotes render from this
+        /// stream instead of polling (architect `#[subscribe]`; works on
+        /// wasm over WsLink, replacing the old reverse-dispatch
+        /// WebClientService push).
+        #[subscribe]
+        fn events(&self) -> SetlistEvent;
 
-        /// Subscribe to active indices changes
-        async fn subscribe_active(
-            &self,
-            indices: Tx<ActiveIndices>,
-        ) -> Result<(), SessionServiceError>;
+        /// Active song/section cursor changes, as they happen.
+        #[subscribe]
+        fn active_indices(&self) -> ActiveIndices;
 
         // =========================================================================
         // Audio Engine (proxy)
