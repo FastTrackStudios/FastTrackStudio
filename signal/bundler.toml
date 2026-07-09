@@ -1,0 +1,8 @@
+# Plugin metadata for nih_plug_xtask bundler.
+# See: https://github.com/robbert-vdh/nih-plug/blob/master/bundler.toml
+
+[signal-reaper-controller]
+name = "FTS Signal Controller"
+
+[signal-sampler-clap]
+name = "Signal Sampler"
