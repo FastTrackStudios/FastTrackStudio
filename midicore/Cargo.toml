@@ -1,0 +1,57 @@
+[workspace]
+members = [
+    "crates/midicore",
+    "features/midicore-proto",
+    "features/midicore-midir",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# ── midicore crates ──────────────────────────────────────────────────
+midicore = { path = "crates/midicore" }
+midicore-proto = { path = "features/midicore-proto" }
+midicore-midir = { path = "features/midicore-midir" }
+
+# ── Reflection + RPC framework ───────────────────────────────────────
+facet = { version = "0.50.0-rc.5" }
+vox = { version = "0.10.0-rc.5" }
+vox-types = { version = "0.10.0-rc.5" }
+# architect provides #[architect::rpc]; path fixed to crates/architect (the
+# repo moved it out of the old macros/architect location).
+architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
+
+# ── Vendored patches (mirrors architect/signal) ──────────────────────
+# architect's graph reaches moire (via vox); pin every moire crate to the FTS
+# fork at one rev so there's a single runtime graph (avoids duplicate #[ctor]).
+[patch."https://github.com/bearcove/moire"]
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+[patch.crates-io]
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+# Local dev: architect via git (midicore stays git-consumable); sibling
+# checkout patched in for development.
+[patch."https://codeberg.org/FastTrackStudios/architect.git"]
+architect = { path = "../../architect/crates/architect" }
