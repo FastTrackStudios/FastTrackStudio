@@ -3244,11 +3244,15 @@ dependencies = [
  "architect",
  "daw-proto",
  "eyre",
+ "facet 0.50.0-rc.5",
  "facet-json 0.50.0-rc.5",
+ "futures",
+ "moire",
  "serde",
  "serde_json",
  "tracing",
  "vox",
+ "vox-types",
 ]
 
 [[package]]
