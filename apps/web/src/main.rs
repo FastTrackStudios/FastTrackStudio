@@ -27,6 +27,15 @@ html, body, #main {
     overflow: hidden;
     background: oklch(14.5% 0 0);
 }
+/* Native form controls follow the dark theme. */
+:root { color-scheme: dark; }
+select, input {
+    accent-color: #8fa8c8;
+    outline: none;
+}
+select:focus, input:focus {
+    border-color: #52525b !important;
+}
 /* Slim, theme-colored scrollbars everywhere. */
 * {
     scrollbar-width: thin;
