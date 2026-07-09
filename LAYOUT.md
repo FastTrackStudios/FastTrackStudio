@@ -83,7 +83,6 @@ consumed as `x.workspace = true`.
 
 ## Dedup queue (after the move settles)
 
-- keyflow-midi → thin adapters over crates/midicore (delete crate)
 - keyflow-daw-analysis's daw types → daw-proto only
 - audio-controls (vendored) → fold into features/daw-ui or delete after
   signal-ui migrates off it
