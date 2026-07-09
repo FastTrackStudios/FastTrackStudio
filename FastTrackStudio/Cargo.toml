@@ -118,10 +118,10 @@ input-dioxus = { path = "../crates/input/input-dioxus" }
 input = { path = "../crates/input/input" }
 
 # Dynamic template (sibling repo)
-color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
-music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
-dynamic-template-proto = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
-dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+color-palette = { path = "../features/dynamic-template/color-palette" }
+music-catalog = { path = "../features/dynamic-template/music-catalog" }
+dynamic-template-proto = { path = "../features/dynamic-template/dynamic-template-proto" }
+dynamic-template = { path = "../features/dynamic-template/dynamic-template" }
 
 # Shared infrastructure
 # NOTE: `audio-controls` was merged into daw's `daw-ui` crate upstream
