@@ -5,7 +5,6 @@
 # FastTrackStudio, Plugins) are fully dissolved. One lockfile, one
 # target/, one [workspace.dependencies] table carrying every intra-repo
 # path dep exactly once. See LAYOUT.md for the shape; parked/legacy code
-# lives in attic/.
 
 [workspace]
 resolver = "3"
@@ -215,10 +214,6 @@ members = [
     "apps/signal-engine",
     "apps/signal-web",
     "apps/site",
-]
-# attic/ holds parked crates (dead apps, legacy shells) — never built.
-exclude = [
-    "attic",
 ]
 
 [workspace.package]
