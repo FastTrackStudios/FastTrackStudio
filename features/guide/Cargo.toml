@@ -1,7 +1,7 @@
 [package]
 name = "session-guide"
 version.workspace = true
-edition.workspace = true
+edition = "2021"  # original edition of the dissolved workspace (root is 2024)
 authors.workspace = true
 license.workspace = true
 description = "Portable guide engine: click track, count-in, and spoken section guide (ported from legacy fts-guide)"

@@ -13,7 +13,7 @@ name = "session"
 path = "src/main.rs"
 
 [dependencies]
-session-proto = { path = "../session-proto" }
+session-proto.workspace = true
 actions-proto.workspace = true
 architect.workspace = true
 daw = { workspace = true, features = ["file", "reaper"] }
@@ -28,7 +28,10 @@ reaper-medium = { workspace = true }
 dynamic-template.workspace = true
 # Canonical 128-slot group partition lives here (music_catalog::groups).
 music-catalog.workspace = true
-vox.workspace = true
+# `transport-local` on top of the root ["runtime"] baseline: the standalone
+# setlist harness serves/connects over `local://` Unix sockets (carried
+# over from the dissolved session workspace's vox pin).
+vox = { workspace = true, features = ["transport-local"] }
 tokio = { version = "1.48", features = ["rt", "sync", "time", "macros"] }
 moire.workspace = true
 eyre.workspace = true
@@ -48,7 +51,7 @@ daw = { workspace = true, features = ["standalone", "file", "test-harness"] }
 # "audio" is required: daw-standalone's unconditional `sync` module references
 # the feature-gated `audio_engine` (compile error with default features) —
 # same workaround dynamic-template carries.
-daw-standalone = { path = "../../../features/standalone/daw-standalone", features = ["bootstrap", "audio"] }
+daw-standalone = { workspace = true, features = ["bootstrap", "audio"] }
 daw-proto = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
