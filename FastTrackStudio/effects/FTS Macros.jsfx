@@ -1,0 +1,828 @@
+desc:FTS Macros
+//tags: utility macro control automation modulation
+//author: FastTrackStudio
+
+// ═══════════════════════════════════════════════════════════════════════
+// FTS Macros — parameter modulation controller for FastTrackStudio.
+//
+// Mirrors the architecture of FXD Macros: 8 macro modulators that drive
+// FX parameters via MIDI CC on bus 15 (channel 16) through REAPER's
+// parameter linking system.
+//
+// Each macro can operate as one of:
+//   - Macro (direct knob value)
+//   - LFO (tempo-synced or free-running)
+//   - Envelope (ADSR triggered by MIDI notes)
+//   - Step Sequencer (beat-synced pattern)
+//   - Follower (audio envelope follower)
+//   - Random (smoothed random with chance/interval)
+//
+// The FTS REAPER extension assigns parameters by calling:
+//   TrackFX_SetNamedConfigParm(track, fx, "param.N.plink.active", "1")
+//   TrackFX_SetNamedConfigParm(track, fx, "param.N.plink.effect", "-100")
+//   TrackFX_SetNamedConfigParm(track, fx, "param.N.plink.param", "-1")
+//   TrackFX_SetNamedConfigParm(track, fx, "param.N.plink.midi_bus", "15")
+//   TrackFX_SetNamedConfigParm(track, fx, "param.N.plink.midi_chan", "16")
+//   TrackFX_SetNamedConfigParm(track, fx, "param.N.plink.midi_msg", "176")
+//   TrackFX_SetNamedConfigParm(track, fx, "param.N.plink.midi_msg2", CC)
+//
+// gmem layout (named "FTSMacros"):
+//   gmem[1]       — this track's DIY GUID (set at init)
+//   gmem[2]       — selected track's DIY GUID (from FTS extension)
+//   gmem[3]       — parameter instance count
+//   gmem[4]       — mode (command from FTS extension)
+//   gmem[5]       — which macro is being assigned/tweaked
+//   gmem[6]       — which parameter's mod range is being tweaked
+//   gmem[7]       — parameter value retrieval trigger
+//   gmem[8]       — general purpose value from extension
+//   gmem[9..24]   — per-macro parameter values from extension
+//   gmem[100..108]— modulator output values sent back to extension
+//   gmem[100000+] — parameter original values before modulation
+//
+// Memory tables (JSFX local memory):
+//   ModAmt[M*1000+P]    — mod amount for macro M on parameter P
+//   P_OrigV[P]          — original parameter value before modulation
+//   MOD_CURVE[M*1000+P] — mod curve for macro M on parameter P
+//   McOut[1..8]          — current modulator output per macro
+// ═══════════════════════════════════════════════════════════════════════
+
+// ─── Macro Sliders (automatable, 0–1) ─────────────────────────────
+slider1:0<0,1>Macro 1
+slider2:0<0,1>Macro 2
+slider3:0<0,1>Macro 3
+slider4:0<0,1>Macro 4
+slider5:0<0,1>Macro 5
+slider6:0<0,1>Macro 6
+slider7:0<0,1>Macro 7
+slider8:0<0,1>Macro 8
+
+// ─── Morph (preset interpolation via Aftertouch on bus 15) ────────
+slider9:0<0,127>Morph 1
+slider10:0<0,127>Morph 2
+slider11:0<0,127>Morph 3
+slider12:0<0,127>Morph 4
+slider13:0<0,127>Morph 5
+slider14:0<0,127>Morph 6
+slider15:0<0,127>Morph 7
+slider16:0<0,127>Morph 8
+
+// ─── Automatable parameters (for LFO gain/speed automation) ───────
+slider17:0<0,1>Automatable Param 1
+slider18:0<0,1>Automatable Param 2
+slider19:0<0,1>Automatable Param 3
+slider20:0<0,1>Automatable Param 4
+slider21:0<0,1>Automatable Param 5
+slider22:0<0,1>Automatable Param 6
+slider23:0<0,1>Automatable Param 7
+slider24:0<0,1>Automatable Param 8
+
+// ─── Track ID ────────────────────────────────────────────────────
+slider25:0<100000000, 999999999>-Diy_Trk_ID
+
+in_pin:none
+out_pin:none
+
+options:gmem=FTSMacros
+
+@init
+
+ext_noinit = 1;
+ext_midi_bus = 1;
+
+// ─── Track GUID assignment ──────────────────────────────────────
+gmem[4] == 0.1 ? (
+  trkGUID_Num = gmem[1];
+  slider25 = trkGUID_Num;
+) : (
+  trkGUID_Num = slider25;
+);
+
+// ─── Memory table base addresses ─────────────────────────────────
+// ModAmt:   base 0,       mod amount per macro per param (M*1000+P)
+// P_OrigV:  base 100000,  original param values
+// MOD_CURVE: base 200000, mod curve per macro per param
+// McOut:    base 300000,  current modulator output [1..8]
+// LFO:     base 400000,  LFO node data
+// SEQ:     base 500000,  step sequencer data (64 steps * 8 macros)
+
+ModAmt   = 0;
+P_OrigV  = 100000;
+MOD_CURVE = 200000;
+McOut    = 300000;
+LFO_Data = 400000;
+SEQ      = 500000;
+
+// ─── Per-macro modulator state ───────────────────────────────────
+// Using JSFX namespace instances (Mc1..Mc8)
+
+function InitMacro(macro_num) (
+  this.Macro = macro_num;
+  this.type = 0;     // 0=macro, 1=env, 2=LFO, 3=step, 4=follower, 5=random
+  this.Slider = 0;
+  this.Out = 0;
+  this.atk = 0.01;
+  this.Rel = 0.1;
+  this.LFO_Spd = 1;
+  this.LFO_Len = 4;
+  this.LFO_Gain = 1;
+  this.LFO_Gain_Auto = 0;
+  this.LFO_Spd_Auto = 0;
+  this.LFO_NodeCt = 0;
+  this.EnvOrLoop = 0;   // 0=loop, 1=envelope
+  this.Legato = 0;
+  this.Rel_Type = 0;    // 0=latch, 1=simple, 2=custom, 3=no-jump
+  this.Rel_Node = 0;
+  this.Rel_V = -999;
+  this.LowestNote = 0;
+  this.HighestNote = 127;
+  this.bp = 0;
+  this.CurrentPos = 0;
+  this.SEQ_Leng = 8;
+  this.SEQ_DNom = 4;
+  this.FOL_Gain = 1;
+  this.FOL_out = 0;
+  this.Rdm_Chance = 100;
+  this.Rdm_Smooth = 0;
+  this.RDM_Interval = 10;
+  this.Rdm_time = 0;
+  this.Rdm_Next_Out = 0;
+);
+
+Mc1.InitMacro(1);
+Mc2.InitMacro(2);
+Mc3.InitMacro(3);
+Mc4.InitMacro(4);
+Mc5.InitMacro(5);
+Mc6.InitMacro(6);
+Mc7.InitMacro(7);
+Mc8.InitMacro(8);
+
+P.Inst = 0;          // total parameter instances assigned
+midiamp = 0;
+midinote = 0;
+TotalNotesHeld = 0;
+NoteOn = 0;
+
+// ─── Curve evaluation ────────────────────────────────────────────
+function GetCurveValue(x, p, xmin, xmax, ymin, ymax) (
+  x <= xmin ? ymin :
+  x >= xmax ? ymax :
+  (
+    x_norm = (x - xmin) / (xmax - xmin);
+    p > 1 ? (
+      y_norm = x_norm ^ p;
+    ) : p < 0 ? (
+      p_abs = abs(p);
+      y_norm = log(1 + (exp(p_abs) - 1) * x_norm) / log(exp(p_abs));
+    ) : (
+      y_norm = x_norm;
+    );
+    ymin + y_norm * (ymax - ymin);
+  );
+);
+
+function fmod(n, k) ( n - k * floor(n / k); );
+
+// ─── Modulator calculation ───────────────────────────────────────
+function CalculatMacroAmt() local(BipolarRange, MR) (
+  BipolarRange = 0;
+
+  this.type == 3 ? (  // Step sequencer
+    this.CurrentPos = (beat_position * this.SEQ_DNom) % this.SEQ_Leng;
+    this.Out = SEQ[this.CurrentPos + 1 + 64 * (this.Macro - 1)];
+  ) : this.type == 1 ? (  // Envelope
+    this.Out = midiamp > 0 ? min(this.bp / max(this.atk, 0.001), 1) : max(1 - this.bp / max(this.Rel, 0.001), 0);
+  ) : this.type == 4 ? (  // Follower
+    this.Out = this.FOL_out * this.FOL_Gain;
+  ) : this.type == 2 ? (  // LFO
+    this.LFO_Gain_Auto != 0 ? (
+      this.LFO_Gain = slider(16 + this.LFO_Gain_Auto);
+    );
+    this.LFO_Spd_Auto != 0 ? (
+      this.LFO_Spd = max(pow(slider(16 + this.LFO_Spd_Auto) * 128, 0.5), 0.125);
+    );
+    this.EnvOrLoop == 0 ? (
+      // Free-running LFO — simple sine for now, node-based can be added later
+      this.bp += beat_per_block * this.LFO_Spd;
+      this.CurrentPos = fmod(this.bp, this.LFO_Len);
+      // Default sine LFO
+      this.Out = (sin(this.CurrentPos / this.LFO_Len * 2 * $pi) * 0.5 + 0.5) * this.LFO_Gain;
+    ) : (
+      // Envelope-triggered LFO
+      this.EnvOrLoop == 1 ? (
+        this.bp += beat_per_block * this.LFO_Spd;
+        this.CurrentPos = min(this.bp, this.LFO_Len);
+        this.Out = (sin(this.CurrentPos / this.LFO_Len * 2 * $pi) * 0.5 + 0.5) * this.LFO_Gain;
+      );
+    );
+  ) : this.type == 5 ? (  // Random
+    this.Rdm_time += 1 * (samplesblock / 64);
+    this.Rdm_time > this.RDM_Interval ? (
+      rand(100) < this.Rdm_Chance ? (
+        this.Rdm_Next_Out = rand(1);
+      );
+      this.Rdm_Smooth == 0 ? (
+        this.Rdm_Next_Out != 0 ? (this.Out = this.Rdm_Next_Out);
+      );
+      this.Rdm_time = 0;
+    );
+    this.Rdm_Smooth != 0 ? (
+      Rdm_Smooth_v = 10 - this.Rdm_Smooth * 0.99 / 10;
+      this.Out = this.Out + (this.Rdm_Next_Out - this.Out) * min((this.Rdm_time / this.RDM_Interval) * Rdm_Smooth_v, 1);
+    );
+  ) : (  // Macro (type 0) — direct slider value
+    this.Out = this.Slider;
+  );
+);
+
+// ─── Send modulator info back to extension via gmem ──────────────
+function SendInfoBackToImGui() (
+  this.type == 3 ? (
+    gmem[100 + this.Macro] = SEQ[this.CurrentPos + 1 + 64 * (this.Macro - 1)] * 127;
+  ) : this.type == 1 ? (
+    gmem[100 + this.Macro] = this.Out * 127;
+  ) : this.type == 4 ? (
+    gmem[100 + this.Macro] = this.FOL_out * this.FOL_Gain * 127;
+  ) : this.type == 2 ? (
+    gmem[100 + this.Macro] = this.Out * 127;
+  ) : this.type == 5 ? (
+    gmem[100 + this.Macro] = this.Out * 127;
+  ) : (
+    gmem[100 + this.Macro] = this.Slider * 127;
+  );
+);
+
+// ─── Follower (runs at sample rate) ──────────────────────────────
+function DoFollower() (
+  this.type == 4 ? (
+    // Simple envelope follower: smoothed absolute value
+    input_level = abs(spl0 + spl1) * 0.5;
+    this.FOL_out += (input_level - this.FOL_out) * 0.01;
+  );
+);
+
+// ─── Note trigger helpers ────────────────────────────────────────
+function SetBpTo0(note) local(highestNote) (
+  this.EnvOrLoop == 1 ? (
+    highestNote = this.HighestNote > 0 ? this.HighestNote : 127;
+    note >= this.LowestNote && note <= highestNote ? (
+      this.Legato == 0 ? (
+        this.bp = 0;
+      ) : this.Legato == 1 && TotalNotesHeld == 1 ? (
+        this.bp = 0;
+      );
+    );
+  );
+);
+
+function SetBPToRel_Node() (
+  this.Rel_Type == 2 || this.Rel_Type == 3 ? (
+    this.Legato == 0 || (this.Legato == 1 && TotalNotesHeld == 0) ? (
+      // Move to release phase
+      this.bp = 0;
+    );
+  );
+);
+
+function DoMidiTriggeredActions() (
+  this.EnvOrLoop == 1 ? (
+    this.bp += beat_per_block * this.LFO_Spd;
+    this.CurrentPos = min(this.bp, this.LFO_Len);
+  );
+);
+
+function DoMidi_Release() (
+  this.EnvOrLoop == 1 && (this.Rel_Type == 2 || this.Rel_Type == 3) ? (
+    this.bp += beat_per_block * this.LFO_Spd;
+    this.CurrentPos = min(this.bp, this.LFO_Len);
+  );
+);
+
+// ─── Serialization helpers ───────────────────────────────────────
+function SaveAllModulatorInfo() (
+  file_var(0, this.type);
+  file_var(0, this.LFO_Spd);
+  file_var(0, this.LFO_Len);
+  file_var(0, this.LFO_Gain);
+  file_var(0, this.Legato);
+  file_var(0, this.EnvOrLoop);
+  file_var(0, this.LFO_NodeCt);
+  file_var(0, this.Rel_Type);
+  file_var(0, this.Rel_Node);
+  file_var(0, this.LowestNote);
+  file_var(0, this.HighestNote);
+  file_var(0, this.atk);
+  file_var(0, this.Rel);
+  file_var(0, this.SEQ_Leng);
+  file_var(0, this.SEQ_DNom);
+  file_var(0, this.FOL_Gain);
+  file_var(0, this.Rdm_Chance);
+  file_var(0, this.Rdm_Smooth);
+  file_var(0, this.RDM_Interval);
+);
+
+// ─── Set modulator type (called from extension via gmem mode) ────
+function SetTypeTo(T) local(Macro) (
+  Macro = gmem[5];
+  Macro == 1 ? (Mc1.type = T);
+  Macro == 2 ? (Mc2.type = T);
+  Macro == 3 ? (Mc3.type = T);
+  Macro == 4 ? (Mc4.type = T);
+  Macro == 5 ? (Mc5.type = T);
+  Macro == 6 ? (Mc6.type = T);
+  Macro == 7 ? (Mc7.type = T);
+  Macro == 8 ? (Mc8.type = T);
+);
+
+// ─── Calculate total modulation output for a parameter ───────────
+function CalculateTotalOut(i) local(total, M, ID, Amt, Bi_ofs, out, Curve) (
+  M = 1;
+  total = 0;
+  Bi_ofs = 0;
+
+  loop(8,
+    ID = 1000 * (M - 1) + i;
+    ModAmt[ID] != 0 ? (
+      ModAmt[ID] > 99 ? (  // bipolar
+        Bi_ofs = (ModAmt[ID] - 100);
+        Amt = (ModAmt[ID] - 100) * 2;
+      ) : (
+        Amt = ModAmt[ID];
+      );
+
+      out = McOut[M];
+
+      Curve = MOD_CURVE[M * 1000 + i];
+      Curve != 0 ? (
+        out = GetCurveValue(McOut[M], -Curve, 0, 1, 0, 1);
+      );
+
+      total += out * Amt - Bi_ofs;
+    );
+    M += 1;
+  );
+
+  total * 127;
+);
+
+
+@slider
+
+Mc1.Slider = slider1;
+Mc2.Slider = slider2;
+Mc3.Slider = slider3;
+Mc4.Slider = slider4;
+Mc5.Slider = slider5;
+Mc6.Slider = slider6;
+Mc7.Slider = slider7;
+Mc8.Slider = slider8;
+trkGUID_Num = slider25;
+
+
+@serialize
+
+file_var(0, P.Inst);
+
+// Save/restore per-parameter mod amounts and original values
+i = 1;
+while (i <= P.Inst) (
+  m = 1;
+  while (m <= 8) (
+    file_var(0, ModAmt[i + m * 1000]);
+    m += 1;
+  );
+  file_var(0, P_OrigV[i]);
+  i += 1;
+);
+
+// Save/restore mod curves
+file_mem(0, MOD_CURVE, 80000);
+
+// Save/restore all modulator state
+Mc1.SaveAllModulatorInfo();
+Mc2.SaveAllModulatorInfo();
+Mc3.SaveAllModulatorInfo();
+Mc4.SaveAllModulatorInfo();
+Mc5.SaveAllModulatorInfo();
+Mc6.SaveAllModulatorInfo();
+Mc7.SaveAllModulatorInfo();
+Mc8.SaveAllModulatorInfo();
+
+// Save/restore step sequencer data
+file_mem(0, SEQ, 512);  // 64 steps * 8 macros
+
+
+@sample
+
+// Run envelope followers at sample rate
+Mc1.DoFollower();
+Mc2.DoFollower();
+Mc3.DoFollower();
+Mc4.DoFollower();
+Mc5.DoFollower();
+Mc6.DoFollower();
+Mc7.DoFollower();
+Mc8.DoFollower();
+
+
+@block
+
+// ─── Tempo info ──────────────────────────────────────────────────
+beat_per_spl = tempo / (srate * 60);
+beat_per_block = beat_per_spl * samplesblock;
+
+Sel_Trk_GUID_num = gmem[2];
+midi_bus = 15;
+
+// ─── Morph: send aftertouch when morph sliders change ────────────
+Sldr9 != slider9   ? (midisend(0, $xAF, 1, slider9));   Sldr9 = slider9;
+Sldr10 != slider10 ? (midisend(0, $xAF, 2, slider10));  Sldr10 = slider10;
+Sldr11 != slider11 ? (midisend(0, $xAF, 3, slider11));  Sldr11 = slider11;
+Sldr12 != slider12 ? (midisend(0, $xAF, 4, slider12));  Sldr12 = slider12;
+Sldr13 != slider13 ? (midisend(0, $xAF, 5, slider13));  Sldr13 = slider13;
+Sldr14 != slider14 ? (midisend(0, $xAF, 6, slider14));  Sldr14 = slider14;
+Sldr15 != slider15 ? (midisend(0, $xAF, 7, slider15));  Sldr15 = slider15;
+Sldr16 != slider16 ? (midisend(0, $xAF, 8, slider16));  Sldr16 = slider16;
+
+// ─── Extension commands via gmem ─────────────────────────────────
+mode = gmem[4];
+
+trkGUID_Num === gmem[2] ? (
+  Macro = gmem[5];
+
+  mode == 1 ? (  // User is right-dragging on param (assigning mod range)
+    P.Inst = gmem[3];
+    Param = gmem[6];
+    Macro < 500000 ? (
+      ModAmt[Param + Macro * 1000] = gmem[Param + Macro * 1000];
+    );
+  );
+
+  mode == 2 ? (  // User adjusting envelope attack
+    gmem[9]  != 0 ? (Mc1.atk = gmem[9]);
+    gmem[11] != 0 ? (Mc2.atk = gmem[11]);
+    gmem[13] != 0 ? (Mc3.atk = gmem[13]);
+    gmem[15] != 0 ? (Mc4.atk = gmem[15]);
+    gmem[17] != 0 ? (Mc5.atk = gmem[17]);
+    gmem[19] != 0 ? (Mc6.atk = gmem[19]);
+    gmem[21] != 0 ? (Mc7.atk = gmem[21]);
+    gmem[23] != 0 ? (Mc8.atk = gmem[23]);
+    SetTypeTo(1);  // env
+  );
+
+  mode == 3 ? (  // User adjusting envelope release
+    gmem[10] != 0 ? (Mc1.Rel = gmem[10]);
+    gmem[12] != 0 ? (Mc2.Rel = gmem[12]);
+    gmem[14] != 0 ? (Mc3.Rel = gmem[14]);
+    gmem[16] != 0 ? (Mc4.Rel = gmem[16]);
+    gmem[18] != 0 ? (Mc5.Rel = gmem[18]);
+    gmem[20] != 0 ? (Mc6.Rel = gmem[20]);
+    gmem[22] != 0 ? (Mc7.Rel = gmem[22]);
+    gmem[24] != 0 ? (Mc8.Rel = gmem[24]);
+    SetTypeTo(1);  // env
+  );
+
+  mode == 4 ? ( SetTypeTo(1); );   // Set type to envelope
+  mode == 5 ? ( SetTypeTo(0); );   // Set type to macro
+  mode == 6 ? ( SetTypeTo(3); );   // Set type to step sequencer
+
+  mode == 7 ? (  // User tweaking step value
+    SetTypeTo(3);
+    WhichStep = gmem[113];
+    Macro == 1 ? (SEQ[WhichStep] = gmem[112]);
+    Macro == 2 ? (SEQ[WhichStep + 64] = gmem[112]);
+    Macro == 3 ? (SEQ[WhichStep + 64 * 2] = gmem[112]);
+    Macro == 4 ? (SEQ[WhichStep + 64 * 3] = gmem[112]);
+    Macro == 5 ? (SEQ[WhichStep + 64 * 4] = gmem[112]);
+    Macro == 6 ? (SEQ[WhichStep + 64 * 5] = gmem[112]);
+    Macro == 7 ? (SEQ[WhichStep + 64 * 6] = gmem[112]);
+    Macro == 8 ? (SEQ[WhichStep + 64 * 7] = gmem[112]);
+  );
+
+  mode == 8 ? (  // User changing seq length/denominator
+    gmem[9] != 0 ? (
+      Macro == 1 ? (Mc1.SEQ_Leng = gmem[9]);
+      Macro == 2 ? (Mc2.SEQ_Leng = gmem[9]);
+      Macro == 3 ? (Mc3.SEQ_Leng = gmem[9]);
+      Macro == 4 ? (Mc4.SEQ_Leng = gmem[9]);
+      Macro == 5 ? (Mc5.SEQ_Leng = gmem[9]);
+      Macro == 6 ? (Mc6.SEQ_Leng = gmem[9]);
+      Macro == 7 ? (Mc7.SEQ_Leng = gmem[9]);
+      Macro == 8 ? (Mc8.SEQ_Leng = gmem[9]);
+      gmem[9] = 0;
+    );
+    gmem[10] != 0 ? (
+      Macro == 1 ? (Mc1.SEQ_DNom = gmem[10]);
+      Macro == 2 ? (Mc2.SEQ_DNom = gmem[10]);
+      Macro == 3 ? (Mc3.SEQ_DNom = gmem[10]);
+      Macro == 4 ? (Mc4.SEQ_DNom = gmem[10]);
+      Macro == 5 ? (Mc5.SEQ_DNom = gmem[10]);
+      Macro == 6 ? (Mc6.SEQ_DNom = gmem[10]);
+      Macro == 7 ? (Mc7.SEQ_DNom = gmem[10]);
+      Macro == 8 ? (Mc8.SEQ_DNom = gmem[10]);
+      gmem[10] = 0;
+    );
+  );
+
+  mode == 9 ? ( SetTypeTo(4); );   // Set type to follower
+
+  mode == 10 ? (  // Follower smoothness
+    Macro == 1 ? (Mc1.FOL_Gain = gmem[9]);
+    Macro == 2 ? (Mc2.FOL_Gain = gmem[9]);
+    Macro == 3 ? (Mc3.FOL_Gain = gmem[9]);
+    Macro == 4 ? (Mc4.FOL_Gain = gmem[9]);
+    Macro == 5 ? (Mc5.FOL_Gain = gmem[9]);
+    Macro == 6 ? (Mc6.FOL_Gain = gmem[9]);
+    Macro == 7 ? (Mc7.FOL_Gain = gmem[9]);
+    Macro == 8 ? (Mc8.FOL_Gain = gmem[9]);
+  );
+
+  mode == 12 ? (  // LFO speed
+    SetTypeTo(2);
+    Macro == 1 ? (Mc1.LFO_Spd = gmem[9]);
+    Macro == 2 ? (Mc2.LFO_Spd = gmem[9]);
+    Macro == 3 ? (Mc3.LFO_Spd = gmem[9]);
+    Macro == 4 ? (Mc4.LFO_Spd = gmem[9]);
+    Macro == 5 ? (Mc5.LFO_Spd = gmem[9]);
+    Macro == 6 ? (Mc6.LFO_Spd = gmem[9]);
+    Macro == 7 ? (Mc7.LFO_Spd = gmem[9]);
+    Macro == 8 ? (Mc8.LFO_Spd = gmem[9]);
+  );
+
+  mode == 13 ? (  // LFO length
+    SetTypeTo(2);
+    Macro == 1 ? (Mc1.LFO_Len = gmem[9]);
+    Macro == 2 ? (Mc2.LFO_Len = gmem[9]);
+    Macro == 3 ? (Mc3.LFO_Len = gmem[9]);
+    Macro == 4 ? (Mc4.LFO_Len = gmem[9]);
+    Macro == 5 ? (Mc5.LFO_Len = gmem[9]);
+    Macro == 6 ? (Mc6.LFO_Len = gmem[9]);
+    Macro == 7 ? (Mc7.LFO_Len = gmem[9]);
+    Macro == 8 ? (Mc8.LFO_Len = gmem[9]);
+  );
+
+  mode == 14 ? (  // LFO gain
+    SetTypeTo(2);
+    Macro == 1 ? (Mc1.LFO_Gain = gmem[9]);
+    Macro == 2 ? (Mc2.LFO_Gain = gmem[9]);
+    Macro == 3 ? (Mc3.LFO_Gain = gmem[9]);
+    Macro == 4 ? (Mc4.LFO_Gain = gmem[9]);
+    Macro == 5 ? (Mc5.LFO_Gain = gmem[9]);
+    Macro == 6 ? (Mc6.LFO_Gain = gmem[9]);
+    Macro == 7 ? (Mc7.LFO_Gain = gmem[9]);
+    Macro == 8 ? (Mc8.LFO_Gain = gmem[9]);
+  );
+
+  mode == 18 ? (  // LFO type (loop or envelope)
+    Macro == 1 ? (Mc1.EnvOrLoop = gmem[9]);
+    Macro == 2 ? (Mc2.EnvOrLoop = gmem[9]);
+    Macro == 3 ? (Mc3.EnvOrLoop = gmem[9]);
+    Macro == 4 ? (Mc4.EnvOrLoop = gmem[9]);
+    Macro == 5 ? (Mc5.EnvOrLoop = gmem[9]);
+    Macro == 6 ? (Mc6.EnvOrLoop = gmem[9]);
+    Macro == 7 ? (Mc7.EnvOrLoop = gmem[9]);
+    Macro == 8 ? (Mc8.EnvOrLoop = gmem[9]);
+  );
+
+  mode == 19 ? (  // LFO release type
+    Macro == 1 ? (Mc1.Rel_Type = gmem[9]);
+    Macro == 2 ? (Mc2.Rel_Type = gmem[9]);
+    Macro == 3 ? (Mc3.Rel_Type = gmem[9]);
+    Macro == 4 ? (Mc4.Rel_Type = gmem[9]);
+    Macro == 5 ? (Mc5.Rel_Type = gmem[9]);
+    Macro == 6 ? (Mc6.Rel_Type = gmem[9]);
+    Macro == 7 ? (Mc7.Rel_Type = gmem[9]);
+    Macro == 8 ? (Mc8.Rel_Type = gmem[9]);
+  );
+
+  mode == 21 ? (  // Legato mode
+    Macro == 1 ? (Mc1.Legato = gmem[9]);
+    Macro == 2 ? (Mc2.Legato = gmem[9]);
+    Macro == 3 ? (Mc3.Legato = gmem[9]);
+    Macro == 4 ? (Mc4.Legato = gmem[9]);
+    Macro == 5 ? (Mc5.Legato = gmem[9]);
+    Macro == 6 ? (Mc6.Legato = gmem[9]);
+    Macro == 7 ? (Mc7.Legato = gmem[9]);
+    Macro == 8 ? (Mc8.Legato = gmem[9]);
+  );
+
+  mode == 22 ? (  // Note filter range
+    Macro == 1 ? (Mc1.LowestNote = gmem[9]; Mc1.HighestNote = gmem[10]);
+    Macro == 2 ? (Mc2.LowestNote = gmem[9]; Mc2.HighestNote = gmem[10]);
+    Macro == 3 ? (Mc3.LowestNote = gmem[9]; Mc3.HighestNote = gmem[10]);
+    Macro == 4 ? (Mc4.LowestNote = gmem[9]; Mc4.HighestNote = gmem[10]);
+    Macro == 5 ? (Mc5.LowestNote = gmem[9]; Mc5.HighestNote = gmem[10]);
+    Macro == 6 ? (Mc6.LowestNote = gmem[9]; Mc6.HighestNote = gmem[10]);
+    Macro == 7 ? (Mc7.LowestNote = gmem[9]; Mc7.HighestNote = gmem[10]);
+    Macro == 8 ? (Mc8.LowestNote = gmem[9]; Mc8.HighestNote = gmem[10]);
+  );
+
+  mode == 26 ? (  // Set modulator curve
+    prm = gmem[6];
+    mod_m = gmem[5];
+    MOD_CURVE[mod_m * 1000 + prm] = gmem[8];
+  );
+
+  mode == 27 ? ( SetTypeTo(5); );  // Set type to random
+
+  // ─── Parameter value retrieval ─────────────────────────────────
+  gmem[7] != 0 ? (
+    P_Id = gmem[7];
+    P_OrigV[P_Id] = gmem[P_OrigV + P_Id];
+    gmem[8] != 0 ? (
+      ModAmt[Param + Macro * 1000] = gmem[Param + Macro * 1000];
+    );
+  );
+);
+
+// ─── MIDI processing (note on/off for envelope triggers) ─────────
+while (midirecv(offset, msg1, msg2, msg3)) (
+  noteStatus = msg1 & $xF0;
+
+  noteStatus == $x90 ? (  // Note On
+    msg3 != 0 ? (
+      midinote = msg2;
+      NoteOn = 1;
+      midiamp = 128;
+
+      TotalNotesHeld += 1;
+      Mc1.SetBpTo0(midinote);
+      Mc2.SetBpTo0(midinote);
+      Mc3.SetBpTo0(midinote);
+      Mc4.SetBpTo0(midinote);
+      Mc5.SetBpTo0(midinote);
+      Mc6.SetBpTo0(midinote);
+      Mc7.SetBpTo0(midinote);
+      Mc8.SetBpTo0(midinote);
+
+      midisend(offset, msg1, msg2, msg3);
+    );
+  ) : noteStatus == $x80 ? (  // Note Off
+    msg2 == midinote ? midiamp = 0;
+    TotalNotesHeld = max(TotalNotesHeld - 1, 0);
+
+    Mc1.SetBPToRel_Node();
+    Mc2.SetBPToRel_Node();
+    Mc3.SetBPToRel_Node();
+    Mc4.SetBPToRel_Node();
+    Mc5.SetBPToRel_Node();
+    Mc6.SetBPToRel_Node();
+    Mc7.SetBPToRel_Node();
+    Mc8.SetBPToRel_Node();
+
+    NoteOn = 0;
+    midisend(offset, msg1, msg2, msg3);
+  ) : (
+    midisend(offset, msg1, msg2, msg3);
+  );
+);
+
+// ─── Run MIDI-triggered actions (envelopes) ──────────────────────
+NoteOn ? (
+  Mc1.DoMidiTriggeredActions();
+  Mc2.DoMidiTriggeredActions();
+  Mc3.DoMidiTriggeredActions();
+  Mc4.DoMidiTriggeredActions();
+  Mc5.DoMidiTriggeredActions();
+  Mc6.DoMidiTriggeredActions();
+  Mc7.DoMidiTriggeredActions();
+  Mc8.DoMidiTriggeredActions();
+) : (
+  Mc1.DoMidi_Release();
+  Mc2.DoMidi_Release();
+  Mc3.DoMidi_Release();
+  Mc4.DoMidi_Release();
+  Mc5.DoMidi_Release();
+  Mc6.DoMidi_Release();
+  Mc7.DoMidi_Release();
+  Mc8.DoMidi_Release();
+);
+
+// ─── Calculate all modulators ────────────────────────────────────
+Mc1.CalculatMacroAmt();
+Mc2.CalculatMacroAmt();
+Mc3.CalculatMacroAmt();
+Mc4.CalculatMacroAmt();
+Mc5.CalculatMacroAmt();
+Mc6.CalculatMacroAmt();
+Mc7.CalculatMacroAmt();
+Mc8.CalculatMacroAmt();
+
+McOut[1] = Mc1.Out;
+McOut[2] = Mc2.Out;
+McOut[3] = Mc3.Out;
+McOut[4] = Mc4.Out;
+McOut[5] = Mc5.Out;
+McOut[6] = Mc6.Out;
+McOut[7] = Mc7.Out;
+McOut[8] = Mc8.Out;
+
+// ─── Send MIDI CC to all linked parameters ───────────────────────
+i = 1;
+while (i <= P.Inst) (
+  SendAmt = min(P_OrigV[i] * 127 + CalculateTotalOut(i), 127);
+  SendAmt = max(SendAmt, 0);
+  midisend(0, $xBF, i, SendAmt);  // CC on channel 16, bus 15
+  i += 1;
+);
+
+// ─── Send modulator values back to FTS extension ─────────────────
+trkGUID_Num === gmem[2] ? (
+  Mc1.SendInfoBackToImGui();
+  Mc2.SendInfoBackToImGui();
+  Mc3.SendInfoBackToImGui();
+  Mc4.SendInfoBackToImGui();
+  Mc5.SendInfoBackToImGui();
+  Mc6.SendInfoBackToImGui();
+  Mc7.SendInfoBackToImGui();
+  Mc8.SendInfoBackToImGui();
+);
+
+// ─── Track play state for note-held counting ─────────────────────
+PlayState == 1 ? (
+  (play_state != 1 && play_state != 5) ? (
+    TotalNotesHeld = 0;
+  );
+);
+play_state == 1 || play_state == 5 ? (
+  PlayState = 1;
+) : (
+  PlayState = 0;
+);
+
+
+@gfx 520 350
+
+gfx_setfont(1, "Arial", 14);
+gfx_set(0.85, 0.85, 0.85);
+
+// Title
+gfx_x = 16; gfx_y = 12;
+gfx_setfont(1, "Arial", 18);
+gfx_drawstr("FTS Macros");
+
+gfx_setfont(1, "Arial", 11);
+gfx_x = 16; gfx_y = 36;
+gfx_set(0.5, 0.5, 0.5);
+sprintf(#inst_str, "Track ID: %d  |  Params: %d", trkGUID_Num, P.Inst);
+gfx_drawstr(#inst_str);
+
+// ─── Macro bars ──────────────────────────────────────────────────
+bar_x = 16;
+bar_w = 60;
+bar_h = 200;
+bar_y = 58;
+bar_gap = 2;
+
+i = 0;
+loop(8,
+  x = bar_x + i * (bar_w + bar_gap);
+
+  // Background
+  gfx_set(0.15, 0.15, 0.18);
+  gfx_rect(x, bar_y, bar_w, bar_h);
+
+  // Modulator output bar
+  mod_val = McOut[i + 1];
+  mod_val = min(max(mod_val, 0), 1);
+  fill_h = mod_val * bar_h;
+  gfx_set(0.2, 0.45, 0.65);
+  gfx_rect(x, bar_y + bar_h - fill_h, bar_w, fill_h);
+
+  // Macro slider value indicator line
+  raw_val = i == 0 ? slider1 : i == 1 ? slider2 : i == 2 ? slider3 :
+            i == 3 ? slider4 : i == 4 ? slider5 : i == 5 ? slider6 :
+            i == 6 ? slider7 : slider8;
+  line_y = bar_y + bar_h - raw_val * bar_h;
+  gfx_set(0.9, 0.9, 0.9);
+  gfx_rect(x, line_y - 1, bar_w, 2);
+
+  // Type indicator
+  gfx_set(0.6, 0.6, 0.6);
+  gfx_setfont(1, "Arial", 9);
+  mc_type = i == 0 ? Mc1.type : i == 1 ? Mc2.type : i == 2 ? Mc3.type :
+            i == 3 ? Mc4.type : i == 4 ? Mc5.type : i == 5 ? Mc6.type :
+            i == 6 ? Mc7.type : Mc8.type;
+  gfx_x = x + 2; gfx_y = bar_y + 2;
+  mc_type == 0 ? gfx_drawstr("MC") :
+  mc_type == 1 ? gfx_drawstr("ENV") :
+  mc_type == 2 ? gfx_drawstr("LFO") :
+  mc_type == 3 ? gfx_drawstr("SEQ") :
+  mc_type == 4 ? gfx_drawstr("FOL") :
+  mc_type == 5 ? gfx_drawstr("RND");
+
+  // Label
+  gfx_set(0.8, 0.8, 0.8);
+  gfx_setfont(1, "Arial", 11);
+  gfx_x = x + 4; gfx_y = bar_y + bar_h + 6;
+  sprintf(#lbl, "M%d", i + 1);
+  gfx_drawstr(#lbl);
+
+  // Value text
+  gfx_x = x + 4; gfx_y = bar_y + bar_h + 20;
+  gfx_set(0.6, 0.6, 0.6);
+  sprintf(#val, "%.0f%%", mod_val * 100);
+  gfx_drawstr(#val);
+
+  i += 1;
+);

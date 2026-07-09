@@ -1,0 +1,48 @@
+[package]
+name = "fasttrackstudio-desktop"
+version = "0.1.0"
+authors = ["Cody Wright <acodywright@gmail.com>"]
+edition.workspace = true
+
+[dependencies]
+# UI
+dioxus = { workspace = true, features = ["desktop"] }
+
+# Session — facade, UI, and the shared CLI connection helper
+session.workspace = true
+session-ui = { workspace = true, features = ["web"] }
+session-cli.workspace = true
+
+# Vox RPC (gateway link/dispatch + connection)
+vox.workspace = true
+
+# DAW protocol — typed service clients (EventBus + transport/track/marker/
+# region/tempo/project) for the live DAW status panel fed from fts-extensions.
+daw-proto.workspace = true
+
+# DAW facade — Tools page uses daw::file::convert for cross-format
+# session import (PTX/ALS/AAF/DAWproject → RPP).
+daw = { workspace = true, features = ["reaper", "convert"] }
+# Keyflow chart rendering (.kf → SVG) for the Tools page's chart card.
+# `text` parses .kf source; `engraver` lays out + serializes SVG.
+keyflow = { workspace = true, features = ["text", "engraver"] }
+# Keyflow live chart editor (split editor + WGPU preview, PDF export).
+# `web` pulls dioxus/desktop + `desktop-panels` (ChartView/ChartEditorLayout,
+# ChartGraphics WGPU-behind-transparent-WebView overlay).
+keyflow-ui = { workspace = true, features = ["web"] }
+
+# Native file dialogs for the Tools page
+rfd = "0.17"
+
+# WebSocket gateway
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs"] }
+
+# Async
+tokio = { workspace = true, features = ["full"] }
+moire.workspace = true
+
+# Utils
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+eyre.workspace = true

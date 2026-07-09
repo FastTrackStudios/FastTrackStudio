@@ -1,0 +1,17 @@
+configVersion = "2.1"
+maxIterations = 10
+agent = "claude"
+tracker = "beads-bv"
+autoCommit = true
+subagentTracingDetail = "minimal"
+
+[agentOptions]
+[trackerOptions]
+beadsDir = ".beads"
+labels = ""
+
+[parallel]
+mode = "auto"
+
+[notifications]
+sound = "system"

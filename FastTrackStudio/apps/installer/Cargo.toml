@@ -1,0 +1,16 @@
+[package]
+name = "fts-installer"
+version = "0.1.0"
+authors = ["Cody Wright <acodywright@gmail.com>"]
+edition.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["desktop"] }
+installer-core.workspace = true
+utils.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+eyre.workspace = true
+clap.workspace = true
+rfd = "0.17"

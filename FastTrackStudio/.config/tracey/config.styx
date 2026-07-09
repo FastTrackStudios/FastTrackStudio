@@ -1,0 +1,41 @@
+@schema {id crate:tracey-config@1, cli tracey}
+
+# This repo is the user-facing FastTrackStudio application (desktop + web +
+# mobile) that connects to the REAPER-hosted fts-extensions over vox/roam.
+# The signal/session/sync domain crates and their specs live in sibling repos
+# (each with its own tracey config). The specs kept here describe the
+# domain behaviour the app surfaces; impls point at this repo's app + shared
+# crates that consume those domains.
+
+specs (
+    {
+        name signal
+        include (docs/spec/signal/**/*.md)
+        impls (
+            {
+                name app
+                include (apps/**/src/**/*.rs)
+                exclude (apps/tests/**)
+            }
+            {
+                name shared
+                include (crates/shared/**/src/**/*.rs)
+            }
+        )
+    }
+    {
+        name session
+        include (docs/spec/session/**/*.md)
+        impls (
+            {
+                name app
+                include (apps/**/src/**/*.rs)
+                exclude (apps/tests/**)
+            }
+            {
+                name shared
+                include (crates/shared/**/src/**/*.rs)
+            }
+        )
+    }
+)

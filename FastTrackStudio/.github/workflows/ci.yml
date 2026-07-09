@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NIXPKGS_ALLOW_UNFREE: 1
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout sibling repos
+        run: |
+          cd ..
+          for repo in daw input_actions keyflow monarchy dock-dioxus dynamic-template; do
+            gh repo clone FastTrackStudios/$repo -- --depth 1
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: fasttrackstudio
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        continue-on-error: true
+
+      - name: Clippy
+        run: nix develop --impure --command cargo clippy --workspace -- -D warnings
+
+      - name: Format
+        run: nix develop --impure --command cargo fmt --all -- --check
+
+      - name: Tests
+        run: nix develop --impure --command cargo nextest run --workspace
