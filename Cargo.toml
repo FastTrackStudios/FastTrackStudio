@@ -34,10 +34,10 @@ input = { path = "crates/input" }
 
 # Roam RPC framework. Consumed from crates.io (upstream facet/vox monorepo).
 # `runtime` (no default tokio-net transport) keeps the wasm build mio-free.
-vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
+vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
 
 # Facet reflection — align the whole stack to the current 0.50 line.
-facet = { version = "0.50.0-rc.1" }
+facet = { version = "0.50.0-rc.5" }
 
 # REAPER bindings (FTS fork with v7.63 ruler lane APIs)
 reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
