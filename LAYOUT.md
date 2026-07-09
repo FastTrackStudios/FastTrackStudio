@@ -63,6 +63,8 @@ consumed as `x.workspace = true`.
 | apps/daw-cli | daw/apps/daw/cli |
 | apps/keyflow-cli | keyflow/crates/keyflow-cli |
 | apps/installer | FastTrackStudio/apps/installer |
+| apps/site | fasttrackstudio-site repo (subtree import; package renamed fts-site) — fasttrackstudio.app |
+| apps/docs-site | unified docs site (dodeca + kf docs; NOT a cargo member) — docs.fasttrackstudio.app; keyflow docs content moved here from crates/keyflow/docs |
 | (park/delete) | signal/apps/{desktop,mobile,native,tui,cli,amp}, session/apps/*, fts-ui/apps/*, daw/apps/{daw/native,example-*}, FastTrackStudio/apps/keyflow-playground — audit per-app: keep only what runs |
 
 ## Root workspace rules
