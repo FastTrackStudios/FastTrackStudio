@@ -1999,8 +1999,8 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "daw-control 0.1.0",
- "daw-module 0.1.0",
- "daw-proto 0.1.0",
+ "daw-module",
+ "daw-proto",
  "daw-reaper 0.1.0",
  "daw-standalone",
  "daw-test-macro",
@@ -2012,21 +2012,6 @@ dependencies = [
  "tokio",
  "vox",
  "vox-stream",
-]
-
-[[package]]
-name = "daw"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
-dependencies = [
- "architect",
- "daw-control 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
- "daw-module 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
- "daw-reaper 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
- "facet 0.50.0-rc.5",
- "tokio",
- "vox",
 ]
 
 [[package]]
@@ -2073,7 +2058,7 @@ name = "daw-control"
 version = "0.1.0"
 dependencies = [
  "architect",
- "daw-proto 0.1.0",
+ "daw-proto",
  "eyre",
  "facet-json 0.50.0-rc.5",
  "serde",
@@ -2088,7 +2073,7 @@ version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
 dependencies = [
  "architect",
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "eyre",
  "facet-json 0.50.0-rc.5",
  "serde",
@@ -2103,8 +2088,8 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "daw-control 0.1.0",
- "daw-module 0.1.0",
- "daw-proto 0.1.0",
+ "daw-module",
+ "daw-proto",
  "daw-reaper 0.1.0",
  "eyre",
  "reaper-high",
@@ -2124,15 +2109,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-module"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
-dependencies = [
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "daw-proto"
 version = "0.1.0"
 dependencies = [
@@ -2140,21 +2116,7 @@ dependencies = [
  "architect",
  "facet 0.50.0-rc.5",
  "futures",
- "midicore 0.1.0",
- "vox",
- "vox-types",
-]
-
-[[package]]
-name = "daw-proto"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
-dependencies = [
- "actions-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/input_actions.git?branch=main)",
- "architect",
- "facet 0.50.0-rc.5",
- "futures",
- "midicore 0.1.0 (git+https://codeberg.org/FastTrackStudios/midicore.git?branch=main)",
+ "midicore",
  "vox",
  "vox-types",
 ]
@@ -2169,7 +2131,7 @@ dependencies = [
  "crossbeam-channel",
  "daw-audio-sync 0.1.0",
  "daw-control 0.1.0",
- "daw-proto 0.1.0",
+ "daw-proto",
  "dawfile-aaf 0.1.0",
  "dawfile-ableton 0.1.0",
  "dawfile-dawproject 0.1.0",
@@ -2203,7 +2165,7 @@ dependencies = [
  "crossbeam-channel",
  "daw-audio-sync 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
  "daw-control 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "dawfile-aaf 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
  "dawfile-ableton 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
  "dawfile-dawproject 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
@@ -2236,7 +2198,7 @@ dependencies = [
  "cpal",
  "daw-audio-io",
  "daw-control 0.1.0",
- "daw-proto 0.1.0",
+ "daw-proto",
  "eyre",
  "gloo-timers",
  "memmap2",
@@ -2255,7 +2217,7 @@ dependencies = [
 name = "daw-synchronization"
 version = "0.1.0"
 dependencies = [
- "daw 0.1.0",
+ "daw",
  "daw-reaper 0.1.0",
  "facet 0.50.0-rc.5",
  "tokio",
@@ -2277,7 +2239,7 @@ name = "dawfile-aaf"
 version = "0.1.0"
 dependencies = [
  "cfb 0.10.0",
- "daw-proto 0.1.0",
+ "daw-proto",
  "thiserror 2.0.18",
 ]
 
@@ -2287,7 +2249,7 @@ version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
 dependencies = [
  "cfb 0.10.0",
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "thiserror 2.0.18",
 ]
 
@@ -2295,7 +2257,7 @@ dependencies = [
 name = "dawfile-ableton"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "flate2",
  "quick-xml 0.37.5",
  "roxmltree 0.20.0",
@@ -2307,7 +2269,7 @@ name = "dawfile-ableton"
 version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
 dependencies = [
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "flate2",
  "quick-xml 0.37.5",
  "roxmltree 0.20.0",
@@ -2318,7 +2280,7 @@ dependencies = [
 name = "dawfile-dawproject"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "roxmltree 0.20.0",
  "thiserror 2.0.18",
  "zip",
@@ -2329,7 +2291,7 @@ name = "dawfile-dawproject"
 version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
 dependencies = [
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "roxmltree 0.20.0",
  "thiserror 2.0.18",
  "zip",
@@ -2339,7 +2301,7 @@ dependencies = [
 name = "dawfile-protools"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "thiserror 2.0.18",
 ]
 
@@ -2348,7 +2310,7 @@ name = "dawfile-protools"
 version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
 dependencies = [
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "thiserror 2.0.18",
 ]
 
@@ -2357,7 +2319,7 @@ name = "dawfile-reaper"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "daw-proto 0.1.0",
+ "daw-proto",
  "nom 8.0.0",
  "rayon",
  "serde",
@@ -2370,7 +2332,7 @@ version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/daw.git?branch=main#de3021c34a99b7175fec699b8313f29ef7a03b82"
 dependencies = [
  "base64 0.22.1",
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "nom 8.0.0",
  "rayon",
  "serde",
@@ -3232,8 +3194,8 @@ dependencies = [
  "anyhow",
  "architect",
  "color-palette",
- "daw 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw",
+ "daw-proto",
  "daw-reaper 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
  "dynamic-template-proto",
  "eyre",
@@ -3253,7 +3215,7 @@ version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#5536a425e6560ca756f191137e6505fb1fb1739e"
 dependencies = [
  "actions-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/input_actions.git?branch=main)",
- "daw-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet 0.50.0-rc.5",
  "thiserror 2.0.18",
  "vox",
@@ -5466,8 +5428,8 @@ version = "0.0.1"
 dependencies = [
  "color-eyre",
  "colored",
- "daw-module 0.1.0",
- "daw-proto 0.1.0",
+ "daw-module",
+ "daw-proto",
  "derive_more 1.0.0",
  "engraver",
  "facet 0.50.0-rc.5",
@@ -5489,7 +5451,7 @@ name = "keyflow-daw-analysis"
 version = "0.0.1"
 dependencies = [
  "architect",
- "daw 0.1.0",
+ "daw",
  "eyre",
  "facet 0.50.0-rc.5",
  "keyflow",
@@ -5512,7 +5474,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "color-palette",
- "daw-proto 0.1.0",
+ "daw-proto",
  "facet 0.50.0-rc.5",
  "helgoboss-midi",
  "keyflow-syntax",
@@ -6192,31 +6154,12 @@ dependencies = [
 name = "midicore"
 version = "0.1.0"
 dependencies = [
- "midicore-proto 0.1.0",
-]
-
-[[package]]
-name = "midicore"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/midicore.git?branch=main#5cfda2a5861ebb2681220379d8b6d95d104dc09c"
-dependencies = [
- "midicore-proto 0.1.0 (git+https://codeberg.org/FastTrackStudios/midicore.git?branch=main)",
+ "midicore-proto",
 ]
 
 [[package]]
 name = "midicore-proto"
 version = "0.1.0"
-dependencies = [
- "architect",
- "facet 0.50.0-rc.5",
- "vox",
- "vox-types",
-]
-
-[[package]]
-name = "midicore-proto"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/midicore.git?branch=main#5cfda2a5861ebb2681220379d8b6d95d104dc09c"
 dependencies = [
  "architect",
  "facet 0.50.0-rc.5",
@@ -9069,8 +9012,8 @@ dependencies = [
  "actions-proto 0.1.0",
  "architect",
  "chrono",
- "daw 0.1.0",
- "daw-proto 0.1.0",
+ "daw",
+ "daw-proto",
  "daw-reaper 0.1.0",
  "daw-standalone",
  "daw-synchronization",
@@ -9099,8 +9042,8 @@ name = "session-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
- "daw 0.1.0",
- "daw-proto 0.1.0",
+ "daw",
+ "daw-proto",
  "dynamic-template",
  "eyre",
  "facet 0.50.0-rc.5",
@@ -9120,7 +9063,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "axum",
- "daw 0.1.0",
+ "daw",
  "daw-reaper 0.1.0",
  "dioxus",
  "eyre",
@@ -9139,7 +9082,7 @@ name = "session-extension"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "daw 0.1.0",
+ "daw",
  "daw-extension-runtime",
  "daw-reaper 0.1.0",
  "eyre",
@@ -9157,7 +9100,7 @@ version = "0.1.0"
 dependencies = [
  "actions-proto 0.1.0",
  "architect",
- "daw-proto 0.1.0",
+ "daw-proto",
  "eyre",
  "facet 0.50.0-rc.5",
  "facet-postcard",
@@ -9175,7 +9118,7 @@ dependencies = [
 name = "session-ui"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "dioxus",
  "dock-dioxus",
  "dock-proto",
@@ -12411,7 +12354,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "daw 0.1.0",
+ "daw",
  "fts-devtools",
  "fts-repo",
 ]

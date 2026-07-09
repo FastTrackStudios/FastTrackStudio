@@ -194,7 +194,7 @@ pub mod daw_services {
         };
         handler = handler.merge(daw::Mounted::new(
             session_mode_service_service_descriptor(),
-            serve_session_mode_service(SessionModeServiceImpl),
+            serve_session_mode_service(SessionModeServiceImpl::default()),
         ));
         handler = handler.merge(daw::Mounted::new(
             take_ranking_service_service_descriptor(),

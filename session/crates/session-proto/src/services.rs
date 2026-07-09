@@ -509,12 +509,11 @@ pub mod session_mode_service {
         /// yet (static set).
         async fn list_modes(&self) -> Result<Vec<String>, SessionServiceError>;
 
-        /// Subscribe to mode changes. Pushes the new slug each time the
-        /// active mode flips — either via `set_mode` over RPC, the
-        /// in-REAPER hotkey action, or `restore_persisted_mode` at
-        /// startup. Clients can keep a local cache up-to-date with
-        /// zero polling.
-        async fn subscribe(&self, tx: Tx<String>);
+        /// Mode changes, as they happen: the new slug each time the
+        /// active mode flips — `set_mode` over RPC, the in-REAPER hotkey
+        /// action, or `restore_persisted_mode` at startup. Zero polling.
+        #[subscribe]
+        fn mode_changes(&self) -> String;
     }
 }
 

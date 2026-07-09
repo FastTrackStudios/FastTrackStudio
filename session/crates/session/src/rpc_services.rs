@@ -28,8 +28,44 @@ use crate::take_ranking::{self, RankAction};
 
 // ─── SessionModeService ─────────────────────────────────────────────────
 
-#[derive(Clone, Default)]
-pub struct SessionModeServiceImpl;
+#[derive(Clone)]
+pub struct SessionModeServiceImpl {
+    /// `#[subscribe]` hub for mode changes; a pump bridges the internal
+    /// broadcast into it (replay 1 = late subscribers get current mode).
+    modes_hub: architect::PubSub<String>,
+}
+
+impl Default for SessionModeServiceImpl {
+    fn default() -> Self {
+        let hub = architect::PubSub::sliding(1);
+        // Seed + pump: current mode first, then every flip.
+        hub.publish(mode_actions::current_mode().slug().to_string());
+        let pump = hub.clone();
+        let mut rx = mode_actions::mode_broadcast().subscribe();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(slug) => {
+                        pump.publish(slug);
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "SessionMode pump lagged");
+                    }
+                }
+            }
+        });
+        Self { modes_hub: hub }
+    }
+}
+
+impl session_proto::services::session_mode_service::SessionModeServiceStreamSource
+    for SessionModeServiceImpl
+{
+    fn mode_changes_hub(&self) -> &architect::PubSub<String> {
+        &self.modes_hub
+    }
+}
 
 impl SessionModeService for SessionModeServiceImpl {
     async fn current_mode(&self) -> Result<String, SessionServiceError> {
@@ -53,31 +89,6 @@ impl SessionModeService for SessionModeServiceImpl {
         Ok(Mode::ALL.iter().map(|m| m.slug().to_string()).collect())
     }
 
-    async fn subscribe(&self, tx: Tx<String>) {
-        // Seed with the current value so subscribers don't have to do
-        // an extra `current_mode` RPC right after subscribe to know the
-        // initial state.
-        let initial = mode_actions::current_mode().slug().to_string();
-        let mut rx = mode_actions::mode_broadcast().subscribe();
-        tokio::spawn(async move {
-            if tx.send(initial).await.is_err() {
-                return;
-            }
-            loop {
-                match rx.recv().await {
-                    Ok(slug) => {
-                        if tx.send(slug).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                    Err(RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "SessionMode subscriber lagged");
-                    }
-                }
-            }
-        });
-    }
 }
 
 // ─── TakeRankingService ────────────────────────────────────────────────

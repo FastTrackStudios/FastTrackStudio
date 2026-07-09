@@ -125,6 +125,14 @@ eyre = "0.6"
 # All moire crates must point to the same fork rev to avoid duplicate
 # moire-runtime #[ctor] registrations that crash. Aligned with daw (7a2f1dc).
 
+# dynamic-template.git (external) still references daw.git — the repo is
+# gone but survives in git caches; fold its daw crates onto this tree so
+# one daw instance exists graph-wide.
+[patch."https://codeberg.org/FastTrackStudios/daw.git"]
+daw = { path = "../daw/crates/daw" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-module = { path = "../daw/crates/daw-module" }
+
 [patch."https://github.com/bearcove/moire"]
 moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
