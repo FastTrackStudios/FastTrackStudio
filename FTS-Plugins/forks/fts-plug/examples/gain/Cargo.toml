@@ -1,0 +1,16 @@
+[package]
+name = "gain"
+version = "0.1.0"
+edition.workspace = true
+authors = ["Robbert van der Helm <mail@robbertvanderhelm.nl>"]
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nice-plug = { path = "../../crates/nice-plug", features = [
+    "assert_process_allocs",
+] }
+parking_lot.workspace = true
