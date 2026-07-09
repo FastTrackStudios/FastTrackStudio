@@ -19,9 +19,9 @@ midicore-proto = { path = "features/midicore-proto" }
 midicore-midir = { path = "features/midicore-midir" }
 
 # ── Reflection + RPC framework ───────────────────────────────────────
-facet = { version = "0.50.0-rc.1" }
-vox = { version = "0.10.0-rc.1" }
-vox-types = { version = "0.10.0-rc.1" }
+facet = { version = "0.50.0-rc.5" }
+vox = { version = "0.10.0-rc.5" }
+vox-types = { version = "0.10.0-rc.5" }
 # architect provides #[architect::rpc]; path fixed to crates/architect (the
 # repo moved it out of the old macros/architect location).
 architect = { path = "../../architect/crates/architect" }
