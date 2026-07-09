@@ -1,42 +1,21 @@
-[workspace]
-members = [".", ]
-resolver = "2"
-
-[workspace.lints.rust]
-
-[workspace.lints.clippy]
-
-[workspace.dependencies]
-# Keyflow/Engraver
-keyflow = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
-
-# The standalone Editor (contenteditable widget), shared with Task and
-# keyflow's examples/web-editor. `editor-keyflow-lang` supplies keyflow syntax
-# highlighting + IDE diagnostics decorations; `editor-keyflow` renders `.kf`
-# source to a live SVG preview. Web/wasm only.
-editor = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
-editor-keyflow = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
-editor-keyflow-lang = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
-
-# FTS design system
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
-lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
-
-# Anyrender / Vello rendering
-anyrender_vello = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
-vello = { version = "0.9", features = ["wgpu"] }
-peniko = "0.6"
-
+# fasttrackstudio.app — the public website (Dioxus web app).
+#
+# Subtree-imported from the standalone fasttrackstudio-site repo (history
+# preserved) and dissolved into the root workspace: intra-tree deps
+# (keyflow, fts-ui, dioxus pins) come from [workspace.dependencies]; the
+# Editor crates stay a git dep (external repo — its keyflow.git references
+# fold onto the in-tree crates via the root [patch] table).
 [package]
-name = "fasttrackstudio-web"
+name = "fts-site"
 version = "0.1.0"
 authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2024"
-description = "FastTrackStudio Web App - Documentation, chart browser, and more"
+description = "FastTrackStudio website — landing, live keyflow editor, chart browser"
 
 [dependencies]
-# Dioxus web framework
-dioxus = { version = "0.7.9", features = ["router"] }
+# Dioxus web framework — root pins =0.7.9 (lib only); the site re-enables
+# router here and web/desktop via its own features below.
+dioxus = { workspace = true, features = ["router"] }
 
 # UI component library (shadcn-inspired, Tailwind-styled)
 lucide-dioxus = { workspace = true }
@@ -44,10 +23,11 @@ lucide-dioxus = { workspace = true }
 # Chart parsing and layout
 keyflow = { workspace = true, features = ["engraver", "text", "highlighting"] }
 
-# Live contenteditable editor + keyflow language bindings (homepage demo)
-editor = { workspace = true }
-editor-keyflow = { workspace = true }
-editor-keyflow-lang = { workspace = true }
+# Live contenteditable editor + keyflow language bindings (homepage demo).
+# External repo — kept as a git dep; NOT an intra-tree crate.
+editor = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
+editor-keyflow = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
+editor-keyflow-lang = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
 
 # FTS design system (components, layout, typography, theme tokens)
 fts-ui = { workspace = true }
@@ -56,17 +36,17 @@ fts-ui = { workspace = true }
 peniko = { workspace = true }
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Error handling
-anyhow = "1.0"
+anyhow = { workspace = true }
 
-# Archive creation for multi-file exports
+# Archive creation for multi-file exports (site-only dep — no root pin)
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 # Logging
-tracing = "0.1"
+tracing = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # Override fontique to disable system feature (not available on WASM)
@@ -118,22 +98,19 @@ web-sys = { version = "0.3", features = [
     "HtmlImageElement",
 ] }
 
-# Async runtime for WASM
-tokio = { version = "1.0", default-features = false, features = ["sync"] }
+# Async runtime for WASM — deliberately NOT the workspace tokio (that one is
+# full-featured and pulls mio, which breaks wasm32 builds).
+tokio = { version = "1.48", default-features = false, features = ["sync"] }
 
 # Random number generation for WASM (needed for getrandom 0.2 used by uuid)
 getrandom = { version = "0.2", features = ["js"] }
-# getrandom 0.3 pulled in by iroh/pkarr - need wasm_js feature for wasm32
+# getrandom 0.3 pulled in by transitive deps - need wasm_js feature for wasm32
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Desktop/server dependencies
-tokio = { version = "1.0", features = ["full"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-[profile.dev]
-# opt-level 1 prevents "too many locals" WASM errors caused by unoptimized debug builds
-opt-level = 1
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [features]
 default = ["web"]
@@ -142,21 +119,3 @@ desktop = ["dioxus/desktop"]
 
 [lints]
 workspace = true
-
-[patch."https://codeberg.org/FastTrackStudios/keyflow.git"]
-keyflow = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow" }
-engraver = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/engraver" }
-engraver-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/engraver-proto" }
-keyflow-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-proto" }
-keyflow-text = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-text" }
-keyflow-ui = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-ui" }
-
-[patch."https://codeberg.org/FastTrackStudios/daw.git"]
-# TEMPORARY: daw-module's own tokio dep inherits the daw workspace's
-# full-featured tokio, which pulls mio and breaks wasm32 builds (this repo's
-# only wasm consumer of daw-module, via keyflow's unconditional dependency
-# on it). Fixed locally (scoped, non-workspace tokio dep, "rt" only) but not
-# yet pushed to daw.git@main — that repo currently has unrelated local WIP
-# blocking its pre-commit gate. Drop this patch once the fix lands upstream.
-daw-module = { path = "/run/media/Development/FastTrackStudio/daw/crates/daw-module" }
-

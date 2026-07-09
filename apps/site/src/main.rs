@@ -37,7 +37,7 @@ fn main() {
         console_error_panic_hook::set_once();
 
         let filter = tracing_subscriber::EnvFilter::new(
-            "warn,fasttrackstudio_web=debug,keyflow=info,keyflow::engraver=debug",
+            "warn,fts_site=debug,keyflow=info,keyflow::engraver=debug",
         );
 
         tracing_subscriber::registry()
@@ -55,7 +55,7 @@ fn main() {
         tracing_subscriber::fmt()
             .with_env_filter(
                 EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                    EnvFilter::new("warn,fasttrackstudio_web=debug,keyflow=info")
+                    EnvFilter::new("warn,fts_site=debug,keyflow=info")
                 }),
             )
             .init();
