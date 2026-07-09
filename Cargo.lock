@@ -5969,6 +5969,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine-launcher"
+version = "0.1.0"
+
+[[package]]
 name = "engraver"
 version = "0.1.0"
 dependencies = [
@@ -7145,6 +7149,25 @@ dependencies = [
 [[package]]
 name = "fts-audio-proto"
 version = "0.1.0"
+
+[[package]]
+name = "fts-cli"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "clap",
+ "daw",
+ "daw-standalone",
+ "engine-launcher",
+ "eyre",
+ "keyflow-cli",
+ "session",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "vox",
+]
 
 [[package]]
 name = "fts-devtools"

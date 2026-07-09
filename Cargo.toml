@@ -56,6 +56,7 @@ members = [
     "libs/monarchy/monarchy-derive",
     "libs/vox-discover",
     "libs/installer-core",
+    "libs/engine-launcher",
     "libs/neural-amp-modeler",
     "libs/moire-trace-capture",
     # ── crates/ — domain cores ────────────────────────────────────────
@@ -128,6 +129,7 @@ members = [
     "features/reaper/session-extension",
     # ── crates/keyflow — keyflow domain core (wave 3) ─────────────────
     "crates/keyflow/keyflow",
+    "crates/keyflow/cli",
     "crates/keyflow/keyflow-proto",
     "crates/keyflow/keyflow-syntax",
     "crates/keyflow/keyflow-text",
@@ -209,7 +211,7 @@ members = [
     # ── apps ──────────────────────────────────────────────────────────
     "apps/fasttrackstudio",
     "apps/installer",
-    "crates/keyflow/cli",
+    "apps/fts-cli",
     "apps/signal-engine",
     "apps/signal-web",
 ]
@@ -253,6 +255,7 @@ iced_baseview = { path = "libs/nice-plug/iced_baseview", default-features = fals
 utils = { path = "libs/utils" }
 vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
+engine-launcher = { path = "libs/engine-launcher" }
 neural-amp-modeler = { path = "libs/neural-amp-modeler" }
 moire-trace-capture = { path = "libs/moire-trace-capture" }
 audiocore-core = { path = "crates/audiocore/audiocore-core" }
