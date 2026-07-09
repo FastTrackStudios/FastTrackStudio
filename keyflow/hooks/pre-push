@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-set -eux
-"${CAPN_BIN:-capn}" pre-push
