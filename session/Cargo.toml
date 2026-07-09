@@ -86,17 +86,17 @@ dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-templa
 music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
 
 # ── Actions / Input (sibling repo) ──────────────────────────────────
-actions-proto = { path = "../input_actions/crates/actions-proto" }
+actions-proto = { path = "../crates/input/actions-proto" }
 
 # ── Dock UI (sibling repo) ──────────────────────────────────────────
-dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = false }
-dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
+dock-dioxus = { path = "../libs/dock/dock-dioxus", default-features = false }
+dock-proto = { path = "../libs/dock/dock-proto" }
 
 # ── FTS design system ───────────────────────────────────────────────
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
+fts-ui = { path = "../libs/fts-ui/fts-ui" }
 
 # ── Shared infrastructure ───────────────────────────────────────────
-utils = { path = "../FastTrackStudio/crates/shared/utils" }
+utils = { path = "../libs/utils" }
 
 # ── Instrumentation ─────────────────────────────────────────────────
 moire = { version = "1.0" }  # diagnostics disabled — dladdr panics inside REAPER-loaded .so

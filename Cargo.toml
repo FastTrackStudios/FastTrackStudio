@@ -1,0 +1,255 @@
+# FastTrackStudio — ONE root workspace (restructure wave 1).
+#
+# Wave 1 members: libs/ (UI + infrastructure libraries) and the leaf domain
+# crates (audiocore, midicore, input). The remaining domain workspaces
+# (daw, session, signal, keyflow, apps/fasttrackstudio, FastTrackStudio)
+# are excluded and dissolve into this workspace in later waves — see
+# LAYOUT.md for the target shape.
+
+[workspace]
+resolver = "3"
+members = [
+    # ── libs/ — UI + infrastructure libraries ─────────────────────────
+    "libs/fts-ui/fts-ui",
+    "libs/fts-ui/fts-ui-audio",
+    "libs/fts-ui/showcase",
+    "libs/fts-story/fts-story-core",
+    "libs/fts-story/fts-story-macros",
+    "libs/fts-story/fts-story-runtime",
+    "libs/fts-story/fts-story-shell",
+    "libs/fts-story/fts-story-snapshots",
+    "libs/fts-story/fts-story-parity",
+    "libs/fts-story/fts-story-fuzz",
+    "libs/dock/dock-dioxus",
+    "libs/dock/dock-proto",
+    "libs/nice-plug/nice-plug",
+    "libs/nice-plug/nice-plug-core",
+    "libs/nice-plug/nice-plug-derive",
+    "libs/nice-plug/nice-plug-dioxus",
+    "libs/nice-plug/nice-plug-egui",
+    "libs/nice-plug/nice-plug-iced",
+    "libs/nice-plug/nice-plug-xtask",
+    "libs/nice-plug/nice-log",
+    "libs/nice-plug/cargo-nice-plug",
+    "libs/nice-plug/egui-baseview",
+    "libs/nice-plug/iced_baseview",
+    "libs/utils",
+    "libs/vox-discover",
+    "libs/installer-core",
+    "libs/neural-amp-modeler",
+    "libs/moire-trace-capture",
+    # ── crates/ — domain cores ────────────────────────────────────────
+    "crates/audiocore/audiocore-core",
+    "crates/audiocore/audiocore-dsp",
+    "crates/audiocore/audiocore-gui",
+    "crates/audiocore/fts-modulation",
+    "crates/audiocore/fts-sample",
+    "crates/audiocore/fts-themes",
+    "crates/audiocore/meter-dsp",
+    "crates/audiocore/meter-ui",
+    "crates/midicore/midicore",
+    "crates/midicore/midicore-proto",
+    "crates/midicore/midicore-midir",
+    "crates/input/actions-proto",
+    "crates/input/actions-registry",
+    "crates/input/actions-keybindings",
+    "crates/input/actions-standalone",
+    # NOTE: actions-reaper belongs in features/reaper/ — relocate when the
+    # reaper wave lands. Moved here so dissolving input_actions doesn't
+    # strand it.
+    "crates/input/actions-reaper",
+    "crates/input/input",
+    "crates/input/input-dioxus",
+]
+# Not-yet-moved domain workspaces (later waves) — keep them out of this one.
+exclude = [
+    "daw",
+    "session",
+    "signal",
+    "keyflow",
+    "apps/fasttrackstudio",
+    "FastTrackStudio",
+    "Plugins",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+repository = "https://codeberg.org/FastTrackStudios/FastTrackStudio"
+
+[workspace.dependencies]
+# ── Internal — every moved crate, path declared ONCE here ─────────────
+fts-ui = { path = "libs/fts-ui/fts-ui" }
+fts-ui-audio = { path = "libs/fts-ui/fts-ui-audio" }
+fts-ui-showcase = { path = "libs/fts-ui/showcase" }
+fts-story-core = { path = "libs/fts-story/fts-story-core" }
+fts-story-macros = { path = "libs/fts-story/fts-story-macros" }
+fts-story-runtime = { path = "libs/fts-story/fts-story-runtime" }
+fts-story-shell = { path = "libs/fts-story/fts-story-shell" }
+fts-story-snapshots = { path = "libs/fts-story/fts-story-snapshots" }
+fts-story-parity = { path = "libs/fts-story/fts-story-parity" }
+fts-story-fuzz = { path = "libs/fts-story/fts-story-fuzz" }
+dock-dioxus = { path = "libs/dock/dock-dioxus", default-features = false }
+dock-proto = { path = "libs/dock/dock-proto" }
+nice-plug = { path = "libs/nice-plug/nice-plug" }
+nice-plug-core = { path = "libs/nice-plug/nice-plug-core" }
+nice-plug-derive = { path = "libs/nice-plug/nice-plug-derive" }
+nice-plug-dioxus = { path = "libs/nice-plug/nice-plug-dioxus" }
+nice-plug-egui = { path = "libs/nice-plug/nice-plug-egui" }
+nice-plug-iced = { path = "libs/nice-plug/nice-plug-iced" }
+nice-plug-xtask = { path = "libs/nice-plug/nice-plug-xtask" }
+nice-log = { path = "libs/nice-plug/nice-log" }
+egui-baseview = { path = "libs/nice-plug/egui-baseview", default-features = false }
+iced_baseview = { path = "libs/nice-plug/iced_baseview", default-features = false }
+utils = { path = "libs/utils" }
+vox-discover = { path = "libs/vox-discover" }
+installer-core = { path = "libs/installer-core" }
+neural-amp-modeler = { path = "libs/neural-amp-modeler" }
+moire-trace-capture = { path = "libs/moire-trace-capture" }
+audiocore-core = { path = "crates/audiocore/audiocore-core" }
+audiocore-dsp = { path = "crates/audiocore/audiocore-dsp", default-features = false }
+audiocore-gui = { path = "crates/audiocore/audiocore-gui" }
+fts-modulation = { path = "crates/audiocore/fts-modulation" }
+fts-sample = { path = "crates/audiocore/fts-sample" }
+fts-themes = { path = "crates/audiocore/fts-themes" }
+meter-dsp = { path = "crates/audiocore/meter-dsp" }
+meter-ui = { path = "crates/audiocore/meter-ui" }
+midicore = { path = "crates/midicore/midicore" }
+midicore-proto = { path = "crates/midicore/midicore-proto" }
+midicore-midir = { path = "crates/midicore/midicore-midir" }
+actions-proto = { path = "crates/input/actions-proto" }
+actions-registry = { path = "crates/input/actions-registry" }
+actions-keybindings = { path = "crates/input/actions-keybindings" }
+actions-standalone = { path = "crates/input/actions-standalone" }
+actions-reaper = { path = "crates/input/actions-reaper" }
+input = { path = "crates/input/input" }
+input-dioxus = { path = "crates/input/input-dioxus" }
+
+# ── Facet reflection + vox RPC — the rc.5 fleet pins ──────────────────
+facet = { version = "0.50.0-rc.5" }
+facet-json = { version = "0.50.0-rc.5" }
+facet-styx = { version = "5.0.0-rc.5" }
+vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
+vox-types = { version = "0.10.0-rc.5" }
+
+# ── Architect framework ───────────────────────────────────────────────
+architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
+
+# ── UI framework ──────────────────────────────────────────────────────
+dioxus = { version = "=0.7.9", default-features = false, features = ["lib"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "9ebd23a", features = ["prelude", "system-fonts"] }
+lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "837c9d4c1c9f99b19de7a3f087d8af1b0538dcae", default-features = false }
+lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
+clsx = "0.1.1"
+tw_merge = "0.1.21"
+nucleo-matcher = "0.3"
+palette = "0.7.6"
+linkme = "0.3"
+
+# ── REAPER bindings (FTS fork with v7.63 ruler lane APIs) ─────────────
+reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+
+# ── Async runtime ─────────────────────────────────────────────────────
+tokio = { version = "1.48", features = ["full"] }
+futures = "0.3"
+
+# ── Serialization ─────────────────────────────────────────────────────
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+anyhow = "1.0"
+
+# ── Observability ─────────────────────────────────────────────────────
+tracing = { version = "0.1", features = ["std"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+moire = { version = "1.0" }
+
+# ── Proc-macro plumbing ───────────────────────────────────────────────
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+
+# ── fts-story tooling ─────────────────────────────────────────────────
+dssim-core = "3"
+png = "0.17"
+proptest = "1"
+
+# ── Audio / plugin framework externals (nice-plug + audiocore) ───────
+atomic_float = "1.1"
+atomic_refcell = "0.1"
+bitflags = "2.11"
+baseview = "0.1.1"
+raw-window-handle = "0.5"
+realfft = "3.0"
+approx = "0.5.1"
+crossbeam = "0.8"
+crossbeam-channel = "0.5"
+open = "5.3.3"
+triple_buffer = "9.0.0"
+rtrb = "0.3.3"
+semver = "1.0.27"
+pollster = "0.4.0"
+parking_lot = "0.12"
+egui = { version = "0.34.1", default-features = false, features = ["bytemuck"] }
+symphonium = { version = "0.6", default-features = false, features = ["wav", "pcm", "fft-resampler"] }
+once_cell = "1.19"
+
+# ── Utilities ─────────────────────────────────────────────────────────
+eyre = "0.6"
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+clap = { version = "4", features = ["derive"] }
+
+# ── Patches ───────────────────────────────────────────────────────────
+# architect: consumed as a git dep, developed side-by-side in the sibling
+# checkout (already on upstream facet 0.50 / vox 0.10).
+[patch."https://codeberg.org/FastTrackStudios/architect.git"]
+architect = { path = "../architect/crates/architect" }
+
+# moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
+# All moire crates must point to the same fork rev to avoid duplicate
+# moire-runtime #[ctor] registrations (aligned with daw/session/signal).
+[patch."https://github.com/bearcove/moire"]
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+[patch.crates-io]
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+# ── Lints — merged union of the dissolved workspaces' policies ─────────
+[workspace.lints.rust]
+dead_code = "allow"
+unused = "allow"
+unused_unsafe = "allow"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "allow"
+private_intra_doc_links = "allow"
+redundant_explicit_links = "allow"
+
+[workspace.lints.clippy]
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
+type_complexity = "allow"

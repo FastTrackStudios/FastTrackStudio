@@ -3168,8 +3168,8 @@ dependencies = [
 name = "dock-proto"
 version = "0.1.0"
 dependencies = [
- "facet 0.46.5",
- "facet-json 0.46.1",
+ "facet 0.50.0-rc.5",
+ "facet-json 0.50.0-rc.5",
  "uuid",
 ]
 
@@ -3403,7 +3403,6 @@ dependencies = [
  "const-fnv1a-hash",
  "iddqd",
  "impls",
- "uuid",
 ]
 
 [[package]]
@@ -9506,7 +9505,6 @@ dependencies = [
  "vox-phon",
  "vox-rt",
  "vox-service-macros",
- "vox-stream",
  "vox-types",
 ]
 

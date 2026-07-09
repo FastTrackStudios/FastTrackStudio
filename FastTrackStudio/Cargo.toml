@@ -3,10 +3,6 @@ name = "fasttrackstudio"
 
 [workspace]
 members = [
-    # Crates
-    "crates/shared/installer-core",
-    "crates/shared/utils",
-    "crates/shared/vox-discover",
     # Apps
     "apps/keyflow-playground",
     "apps/installer",
@@ -108,18 +104,18 @@ daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-
 daw-proto = { path = "../daw/crates/daw-proto" }
 
 # Dock UI (sibling repo)
-dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
-dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
+dock-proto = { path = "../libs/dock/dock-proto" }
+dock-dioxus = { path = "../libs/dock/dock-dioxus" }
 
 # Actions / Input (sibling repo). actions-proto/actions-registry (action
 # declaration + registration) retired in favor of architect::actions —
 # see session/fts-extensions. input/input-dioxus/actions-standalone/
 # actions-keybindings (keybinding + MIDI mapping) are a separate concern
 # and stay.
-actions-standalone = { path = "../input_actions/crates/actions-standalone" }
-actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
-input-dioxus = { path = "../input_actions/crates/input-dioxus" }
-input = { path = "../input_actions/crates/input" }
+actions-standalone = { path = "../crates/input/actions-standalone" }
+actions-keybindings = { path = "../crates/input/actions-keybindings" }
+input-dioxus = { path = "../crates/input/input-dioxus" }
+input = { path = "../crates/input/input" }
 
 # Dynamic template (sibling repo)
 color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
@@ -130,8 +126,8 @@ dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-templa
 # Shared infrastructure
 # NOTE: `audio-controls` was merged into daw's `daw-ui` crate upstream
 # (daw afec7be) and no longer exists as a standalone crate; unused here.
-vox-discover = { path = "crates/shared/vox-discover" }
-installer-core = { path = "crates/shared/installer-core" }
+vox-discover = { path = "../libs/vox-discover" }
+installer-core = { path = "../libs/installer-core" }
 
 # Signal (sibling repo)
 signal = { path = "../signal/crates/signal" }
@@ -163,7 +159,7 @@ sync = { git = "https://codeberg.org/FastTrackStudios/sync.git", branch = "main"
 sync-proto = { git = "https://codeberg.org/FastTrackStudios/sync.git", branch = "main" }
 sync-ui = { git = "https://codeberg.org/FastTrackStudios/sync.git", branch = "main" }
 
-utils = { path = "crates/shared/utils" }
+utils = { path = "../libs/utils" }
 
 # REAPER extension dependencies (FTS fork with v7.63 ruler lane APIs)
 reaper-low = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
@@ -182,7 +178,7 @@ raw-window-handle = "0.4.2"
 palette = "0.7.3"
 
 # FTS design system (wraps lumen-blocks, lucide-dioxus, layout, typography)
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
+fts-ui = { path = "../libs/fts-ui/fts-ui" }
 
 # Lumen blocks (Dioxus shadcn-inspired components)
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }

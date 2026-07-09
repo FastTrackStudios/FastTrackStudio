@@ -67,7 +67,7 @@ memmap2 = "0.9"
 # lib (only one may link `alsa`). daw consumes no `midicore::midir` symbols
 # (daw-midi-io keeps its own midir 0.11 until the signal stage-2 swap), so the
 # facade's type/codec surface is all daw needs.
-midicore = { path = "../midicore/crates/midicore", default-features = false }
+midicore = { path = "../crates/midicore/midicore", default-features = false }
 # Facade crate — the only public API surface for the daw domain
 daw = { path = "crates/daw" }
 # UI crate stays public (Dioxus components with feature flags)
@@ -83,7 +83,7 @@ daw-synchronization = { path = "features/sync/daw-synchronization" }
 daw-network = { path = "features/sync/daw-network" }
 # FTS design system — used by `daw-ui`'s `reaper-test-panels` feature so the
 # Native vs Desktop renderer demo panels can ship from this repo.
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
+fts-ui = { path = "../libs/fts-ui/fts-ui" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
@@ -134,9 +134,9 @@ vst3 = "0.3"
 libloading = "0.8"
 
 # Sibling repos
-actions-proto = { path = "../input_actions/crates/actions-proto" }
-dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = false }
-dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
+actions-proto = { path = "../crates/input/actions-proto" }
+dock-dioxus = { path = "../libs/dock/dock-dioxus", default-features = false }
+dock-proto = { path = "../libs/dock/dock-proto" }
 
 # Testing — the harness now lives inside the `daw` facade behind the
 # `test-harness` feature; consumers enable that feature instead of
