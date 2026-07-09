@@ -16306,6 +16306,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-engine"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "signal-guitar",
+ "signal-sampler",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "signal-extension"
 version = "0.1.0"
 dependencies = [
@@ -16555,19 +16568,6 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-proto",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "signal-rigd"
-version = "0.1.0"
-dependencies = [
- "architect",
- "axum",
- "signal-guitar",
- "signal-sampler",
  "tokio",
  "tracing",
  "tracing-subscriber",

@@ -58,7 +58,7 @@ consumed as `x.workspace = true`.
 | new | from |
 |---|---|
 | apps/fasttrackstudio | (already there) — THE app |
-| apps/rigd | signal/apps/rigd |
+| apps/signal-engine | signal/apps/rigd (was `signal-rigd`) |
 | apps/signal-web | signal/apps/web |
 | apps/daw-cli | daw/apps/daw/cli |
 | apps/keyflow-cli | keyflow/crates/keyflow-cli |

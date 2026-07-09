@@ -211,7 +211,7 @@ members = [
     "apps/fasttrackstudio",
     "apps/installer",
     "apps/keyflow-cli",
-    "apps/rigd",
+    "apps/signal-engine",
     "apps/signal-web",
 ]
 # attic/ holds parked crates (dead apps, legacy shells) — never built.
@@ -702,7 +702,7 @@ collapsible_match = "allow"
 filter_next = "allow"
 
 # ── Dev profile (carried from the dissolved signal workspace) ──────────
-# The live rig runs from target/debug/signal-rigd: the vendored NAM C++
+# The live rig runs from target/debug/signal-engine (formerly signal-rigd): the vendored NAM C++
 # core and the DSP crates are unusable at opt-level 0 (~10-50x slower,
 # xruns), so dependencies build at release opt in dev while the thin
 # app/UI workspace crates stay at light opt for fast rebuilds.
