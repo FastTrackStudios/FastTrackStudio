@@ -14,7 +14,6 @@
 use crate::batch::ProjectArg;
 use crate::marker::event::MarkerStreamEvent;
 use crate::{DawResult, Marker, ProjectContext};
-use vox::Tx;
 
 /// Operations on the markers of a project. `ProjectContext` flows
 /// through each call so backends can serve any project.
@@ -49,7 +48,8 @@ pub trait Markers {
     /// Move the marker to a ruler lane. `None` returns it to the DAW default.
     fn set_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) -> DawResult<()>;
 
-    /// Subscribe to marker changes across all open projects. Subscribers
-    /// filter by `project_guid` on the envelope.
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerStreamEvent>);
+    /// Marker changes across all open projects, as they happen.
+    /// Subscribers filter by `project_guid` on the envelope.
+    #[subscribe]
+    fn events(&self) -> MarkerStreamEvent;
 }

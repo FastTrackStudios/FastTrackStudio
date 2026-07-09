@@ -16,7 +16,6 @@ use super::{RecordInput, ReorderTracksBehavior, Track, TrackRef};
 use crate::batch::{ProjectArg, TrackArg};
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
-use vox::Tx;
 
 /// Track-scoped ext state payload — groups section + key + value into
 /// a single Facet struct. Kept here so batch op definitions can name
@@ -174,7 +173,9 @@ pub trait Tracks {
 
     // ── Streaming ───────────────────────────────────────────────────
 
-    /// Subscribe to track add/remove/modify events across all open
-    /// projects. Subscribers filter by `project_guid` on the envelope.
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<TrackStreamEvent>);
+    /// Track add/remove/modify events across all open projects, as
+    /// they happen. Served from the backend's `TracksStreamSource`
+    /// hub; subscribers filter by `project_guid` on the envelope.
+    #[subscribe]
+    fn events(&self) -> TrackStreamEvent;
 }

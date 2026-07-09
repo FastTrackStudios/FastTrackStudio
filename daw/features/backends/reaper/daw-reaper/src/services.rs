@@ -70,8 +70,16 @@ impl Services for Reaper {
             plugin_loader::Service,
             automation::Service,
             batch::Service,
-            event_bus::Service,
             diagnostics::Service,
+            // `#[subscribe]` stream siblings — served from the central
+            // event hub's PubSub hubs (see `event_hub.rs` + each
+            // domain's StreamSource impl). The event-bus base service
+            // is empty post-port; only its stream sibling is mounted.
+            track::StreamService,
+            marker::StreamService,
+            region::StreamService,
+            tempo_map::StreamService,
+            event_bus::StreamService,
         ]
     }
 }

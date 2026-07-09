@@ -23,10 +23,19 @@ fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
 }
 
 fn publish_region_event(daw: &Standalone, project_guid: &str, event: RegionEvent) {
-    let _ = daw.region_events.send(RegionStreamEvent {
+    let event = RegionStreamEvent {
         project_guid: project_guid.to_string(),
         event,
-    });
+    };
+    daw.bus_events
+        .publish(daw_proto::event_bus::DawEvent::Region(event.clone()));
+    daw.region_events.publish(event);
+}
+
+impl daw_proto::region::RegionsStreamSource for Standalone {
+    fn events_hub(&self) -> &architect::PubSub<RegionStreamEvent> {
+        &self.region_events
+    }
 }
 
 impl Regions for Standalone {
@@ -141,31 +150,4 @@ impl Regions for Standalone {
         Ok(())
     }
 
-    async fn subscribe(
-        &self,
-        project: ProjectContext,
-        tx: vox::Tx<daw_proto::region::RegionStreamEvent>,
-    ) {
-        let project_guid = resolve_project(self, &project);
-        let mut rx = self.region_events.subscribe();
-        moire::task::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if project_guid
-                            .as_ref()
-                            .is_some_and(|guid| event.project_guid != *guid)
-                        {
-                            continue;
-                        }
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                }
-            }
-        });
-    }
 }

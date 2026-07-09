@@ -18,6 +18,7 @@
 
 use std::sync::OnceLock;
 
+use daw_proto::event_bus::DawEvent;
 use daw_proto::marker::MarkerStreamEvent;
 use daw_proto::project::ProjectStreamEvent;
 use daw_proto::region::RegionStreamEvent;
@@ -34,10 +35,20 @@ const CONTINUOUS_BUFFER: usize = 16;
 
 /// The hub. One instance per process — fetched via [`hub()`].
 ///
-/// Clone-cheap (each field is a `broadcast::Sender` which is
-/// effectively an `Arc` internally), but consumers should reach
-/// for [`hub()`] rather than copying fields around.
-#[derive(Debug, Clone)]
+/// Clone-cheap (each field is a `broadcast::Sender` or an
+/// `architect::PubSub`, both effectively `Arc`s internally), but
+/// consumers should reach for [`hub()`] rather than copying fields
+/// around.
+///
+/// Two fan-out layers coexist:
+///
+/// - **broadcast senders** — in-process consumers (sync engine,
+///   diagnostics, transport streaming pumps).
+/// - **`architect::PubSub` hubs** — the wire surface for the
+///   `#[subscribe]` stream services (tracks / markers / regions /
+///   tempo map) plus the cross-domain [`DawEvent`] bus. Each
+///   `publish_*` feeds both, so poll sites keep one publish call.
+#[derive(Clone)]
 pub struct DawEventHub {
     // ── Occasional ───────────────────────────────────────────────
     /// Transport state transitions (play/stop/record/tempo/loop).
@@ -57,6 +68,15 @@ pub struct DawEventHub {
     /// Position ticks. Pushed at ~30Hz from the REAPER main loop.
     /// Drop-old semantics on backpressure.
     position_tx: broadcast::Sender<PositionTick>,
+
+    // ── `#[subscribe]` stream hubs (wire subscribers) ────────────
+    markers_hub: architect::PubSub<MarkerStreamEvent>,
+    regions_hub: architect::PubSub<RegionStreamEvent>,
+    tracks_hub: architect::PubSub<TrackStreamEvent>,
+    tempo_map_hub: architect::PubSub<TempoMapStreamEvent>,
+    /// Cross-domain bus — every domain's publish also lands here,
+    /// wrapped in [`DawEvent`]. Subscribers filter client-side.
+    bus_hub: architect::PubSub<DawEvent>,
 }
 
 impl DawEventHub {
@@ -69,7 +89,34 @@ impl DawEventHub {
             tempo_map_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
             projects_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
             position_tx: broadcast::channel(CONTINUOUS_BUFFER).0,
+            markers_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
+            regions_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
+            tracks_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
+            tempo_map_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
+            bus_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
         }
+    }
+
+    // ── Stream hubs (mounted via `*::StreamService`) ─────────────
+
+    pub fn markers_hub(&self) -> &architect::PubSub<MarkerStreamEvent> {
+        &self.markers_hub
+    }
+
+    pub fn regions_hub(&self) -> &architect::PubSub<RegionStreamEvent> {
+        &self.regions_hub
+    }
+
+    pub fn tracks_hub(&self) -> &architect::PubSub<TrackStreamEvent> {
+        &self.tracks_hub
+    }
+
+    pub fn tempo_map_hub(&self) -> &architect::PubSub<TempoMapStreamEvent> {
+        &self.tempo_map_hub
+    }
+
+    pub fn bus_hub(&self) -> &architect::PubSub<DawEvent> {
+        &self.bus_hub
     }
 
     // ── Transport state ──────────────────────────────────────────
@@ -79,11 +126,12 @@ impl DawEventHub {
     }
 
     pub fn publish_transport_state(&self, event: TransportEvent) {
+        self.bus_hub.publish(DawEvent::TransportState(event.clone()));
         let _ = self.transport_state_tx.send(event);
     }
 
     pub fn transport_state_subscriber_count(&self) -> usize {
-        self.transport_state_tx.receiver_count()
+        self.transport_state_tx.receiver_count() + self.bus_hub.subscriber_count()
     }
 
     // ── Position ─────────────────────────────────────────────────
@@ -93,11 +141,12 @@ impl DawEventHub {
     }
 
     pub fn publish_position(&self, tick: PositionTick) {
+        self.bus_hub.publish(DawEvent::TransportPosition(tick.clone()));
         let _ = self.position_tx.send(tick);
     }
 
     pub fn position_subscriber_count(&self) -> usize {
-        self.position_tx.receiver_count()
+        self.position_tx.receiver_count() + self.bus_hub.subscriber_count()
     }
 
     // ── Markers ──────────────────────────────────────────────────
@@ -107,11 +156,15 @@ impl DawEventHub {
     }
 
     pub fn publish_marker(&self, event: MarkerStreamEvent) {
+        self.bus_hub.publish(DawEvent::Marker(event.clone()));
+        self.markers_hub.publish(event.clone());
         let _ = self.markers_tx.send(event);
     }
 
     pub fn markers_subscriber_count(&self) -> usize {
         self.markers_tx.receiver_count()
+            + self.markers_hub.subscriber_count()
+            + self.bus_hub.subscriber_count()
     }
 
     // ── Regions ──────────────────────────────────────────────────
@@ -121,11 +174,15 @@ impl DawEventHub {
     }
 
     pub fn publish_region(&self, event: RegionStreamEvent) {
+        self.bus_hub.publish(DawEvent::Region(event.clone()));
+        self.regions_hub.publish(event.clone());
         let _ = self.regions_tx.send(event);
     }
 
     pub fn regions_subscriber_count(&self) -> usize {
         self.regions_tx.receiver_count()
+            + self.regions_hub.subscriber_count()
+            + self.bus_hub.subscriber_count()
     }
 
     // ── Tracks ───────────────────────────────────────────────────
@@ -135,11 +192,15 @@ impl DawEventHub {
     }
 
     pub fn publish_track(&self, event: TrackStreamEvent) {
+        self.bus_hub.publish(DawEvent::Track(event.clone()));
+        self.tracks_hub.publish(event.clone());
         let _ = self.tracks_tx.send(event);
     }
 
     pub fn tracks_subscriber_count(&self) -> usize {
         self.tracks_tx.receiver_count()
+            + self.tracks_hub.subscriber_count()
+            + self.bus_hub.subscriber_count()
     }
 
     // ── Tempo map ────────────────────────────────────────────────
@@ -149,11 +210,15 @@ impl DawEventHub {
     }
 
     pub fn publish_tempo_map(&self, event: TempoMapStreamEvent) {
+        self.bus_hub.publish(DawEvent::TempoMap(event.clone()));
+        self.tempo_map_hub.publish(event.clone());
         let _ = self.tempo_map_tx.send(event);
     }
 
     pub fn tempo_map_subscriber_count(&self) -> usize {
         self.tempo_map_tx.receiver_count()
+            + self.tempo_map_hub.subscriber_count()
+            + self.bus_hub.subscriber_count()
     }
 
     // ── Projects ─────────────────────────────────────────────────
@@ -163,11 +228,12 @@ impl DawEventHub {
     }
 
     pub fn publish_project(&self, event: ProjectStreamEvent) {
+        self.bus_hub.publish(DawEvent::Project(event.clone()));
         let _ = self.projects_tx.send(event);
     }
 
     pub fn projects_subscriber_count(&self) -> usize {
-        self.projects_tx.receiver_count()
+        self.projects_tx.receiver_count() + self.bus_hub.subscriber_count()
     }
 }
 

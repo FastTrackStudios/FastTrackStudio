@@ -433,19 +433,19 @@ pub struct Standalone {
     /// in `plugin_instances` after an FX is inserted.
     pub(crate) loaded_plugins:
         Arc<Mutex<std::collections::HashMap<String, daw_proto::LoadedPluginInfo>>>,
-    /// Track-domain event broadcaster. Mutating `Tracks` methods publish
-    /// here; per-subscriber vox pumps bridge broadcast events into `Tx`.
-    pub(crate) track_events:
-        Arc<tokio::sync::broadcast::Sender<daw_proto::track::TrackStreamEvent>>,
-    /// FX-domain events (param changes, add/remove, bypass) — feeds
-    /// the event bus for control surfaces / UIs.
-    pub(crate) fx_events: Arc<tokio::sync::broadcast::Sender<daw_proto::fx::FxStreamEvent>>,
-    pub(crate) marker_events:
-        Arc<tokio::sync::broadcast::Sender<daw_proto::marker::MarkerStreamEvent>>,
-    pub(crate) region_events:
-        Arc<tokio::sync::broadcast::Sender<daw_proto::region::RegionStreamEvent>>,
-    pub(crate) tempo_map_events:
-        Arc<tokio::sync::broadcast::Sender<daw_proto::tempo_map::TempoMapStreamEvent>>,
+    /// Track-domain stream hub. Mutating `Tracks` methods publish
+    /// here; the architect stream layer attaches every subscriber
+    /// sink (`TracksStreamSource`).
+    pub(crate) track_events: architect::PubSub<daw_proto::track::TrackStreamEvent>,
+    pub(crate) marker_events: architect::PubSub<daw_proto::marker::MarkerStreamEvent>,
+    pub(crate) region_events: architect::PubSub<daw_proto::region::RegionStreamEvent>,
+    pub(crate) tempo_map_events: architect::PubSub<daw_proto::tempo_map::TempoMapStreamEvent>,
+    /// Cross-domain event-bus hub (`EventBusStreamSource`). Every
+    /// per-domain publish site also wraps its event in [`DawEvent`]
+    /// and publishes here; per-project transport pumps bridge
+    /// transport state + position ticks in as well. Subscribers
+    /// filter client-side.
+    pub(crate) bus_events: architect::PubSub<daw_proto::event_bus::DawEvent>,
     /// Per-track peak-meter bank, written by the audio engine and read by the
     /// `Peaks` service. Replaceable (the track count is fixed per bank) so an
     /// audio engine can install a freshly-sized bank when it attaches; empty
@@ -478,11 +478,11 @@ impl Standalone {
             )),
             plugin_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
             loaded_plugins: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            track_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
-            fx_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
-            marker_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
-            region_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
-            tempo_map_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
+            track_events: architect::PubSub::sliding(1024),
+            marker_events: architect::PubSub::sliding(1024),
+            region_events: architect::PubSub::sliding(1024),
+            tempo_map_events: architect::PubSub::sliding(1024),
+            bus_events: architect::PubSub::sliding(1024),
             meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
             live_midi_tx: Arc::new(Mutex::new(None)),
         }
@@ -522,11 +522,66 @@ impl Standalone {
             48_000,
             initial_bpm,
         ));
-        let mut engines = self.transport_engines.lock().expect("engines poisoned");
-        engines
-            .entry(guid.to_string())
-            .or_insert_with(|| bundle.clone())
-            .clone()
+        let (bundle, inserted) = {
+            let mut engines = self.transport_engines.lock().expect("engines poisoned");
+            match engines.entry(guid.to_string()) {
+                std::collections::hash_map::Entry::Occupied(e) => (e.get().clone(), false),
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    (v.insert(bundle).clone(), true)
+                }
+            }
+        };
+        if inserted {
+            // One process-wide pump per project bundle bridging
+            // transport state + position ticks onto the event-bus hub
+            // (replaces the per-bus-subscriber pumps of the old
+            // `EventBus::subscribe`).
+            self.spawn_bus_transport_bridge(guid, &bundle);
+        }
+        bundle
+    }
+
+    /// Bridge one project's transport stream onto the cross-domain
+    /// event-bus hub. Runs for the life of the process; the bus hub
+    /// fans events out to however many subscribers exist (zero-cost
+    /// publish when there are none).
+    fn spawn_bus_transport_bridge(
+        &self,
+        guid: &str,
+        bundle: &Arc<crate::transport_engine::TransportBundle>,
+    ) {
+        use daw_proto::event_bus::DawEvent;
+        use daw_proto::transport::TransportStreamEvent;
+
+        let initial_proto = self
+            .with_project(guid, |p| p.transport.clone())
+            .unwrap_or_default();
+        let (ttx, mut trx) = vox::channel();
+        let _join = crate::transport_engine::spawn_subscriber_pump(
+            guid.to_string(),
+            bundle.shared.clone(),
+            initial_proto,
+            daw_proto::transport::TransportSubscription {
+                state: true,
+                position: true,
+            },
+            ttx,
+        );
+        let bus = self.bus_events.clone();
+        moire::task::spawn(async move {
+            while let Ok(Some(ev)) = trx.recv().await {
+                let mut owned = None;
+                let _ = ev.map(|e| owned = Some(e));
+                match owned.expect("SelfRef::map runs once") {
+                    TransportStreamEvent::State(s) => {
+                        bus.publish(DawEvent::TransportState(s));
+                    }
+                    TransportStreamEvent::Position(p) => {
+                        bus.publish(DawEvent::TransportPosition(p));
+                    }
+                }
+            }
+        });
     }
 
     /// Seed an empty project into the state.

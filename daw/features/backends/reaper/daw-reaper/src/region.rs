@@ -244,24 +244,11 @@ impl Regions for crate::Reaper {
         Err(not_found_region())
     }
 
-    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<RegionStreamEvent>) {
-        let mut rx = crate::event_hub::hub().subscribe_regions();
-        moire::task::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                    Err(RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "regions subscriber lagged");
-                    }
-                }
-            }
-        });
+}
+
+impl daw_proto::region::RegionsStreamSource for crate::Reaper {
+    fn events_hub(&self) -> &architect::PubSub<RegionStreamEvent> {
+        crate::event_hub::hub().regions_hub()
     }
 }
 

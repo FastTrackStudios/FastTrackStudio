@@ -412,27 +412,10 @@ impl TempoMap for crate::Reaper {
         Ok(())
     }
 
-    async fn subscribe(
-        &self,
-        _project: ProjectContext,
-        tx: vox::Tx<daw_proto::tempo_map::TempoMapStreamEvent>,
-    ) {
-        let mut rx = crate::event_hub::hub().subscribe_tempo_map();
-        moire::task::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                    Err(RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "tempo_map subscriber lagged");
-                    }
-                }
-            }
-        });
+}
+
+impl daw_proto::tempo_map::TempoMapStreamSource for crate::Reaper {
+    fn events_hub(&self) -> &architect::PubSub<daw_proto::tempo_map::TempoMapStreamEvent> {
+        crate::event_hub::hub().tempo_map_hub()
     }
 }

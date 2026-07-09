@@ -9,7 +9,6 @@ use super::TempoPoint;
 use super::event::TempoMapStreamEvent;
 use crate::batch::ProjectArg;
 use crate::{DawResult, ProjectContext};
-use vox::Tx;
 
 #[architect::rpc(ops(ProjectContext as ProjectArg))]
 pub trait TempoMap {
@@ -72,6 +71,8 @@ pub trait TempoMap {
         denominator: i32,
     ) -> DawResult<()>;
 
-    /// Subscribe to tempo-map changes across all open projects.
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<TempoMapStreamEvent>);
+    /// Tempo-map changes across all open projects, as they happen.
+    /// Subscribers filter by `project_guid` on the envelope.
+    #[subscribe]
+    fn events(&self) -> TempoMapStreamEvent;
 }

@@ -143,7 +143,11 @@ pub(crate) use daw_proto::WindowGeometryClient;
 pub(crate) use daw_proto::batch::BatchExecutionClient;
 pub(crate) use daw_proto::diagnostics::DiagnosticsClient;
 pub(crate) use daw_proto::dock_host::DockHostingClient;
-pub(crate) use daw_proto::event_bus::EventBusClient;
+pub(crate) use daw_proto::event_bus::EventBusStreamClient;
+pub(crate) use daw_proto::marker::MarkersStreamClient;
+pub(crate) use daw_proto::region::RegionsStreamClient;
+pub(crate) use daw_proto::tempo_map::TempoMapStreamClient;
+pub(crate) use daw_proto::track::TracksStreamClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoadingClient;
 pub(crate) use daw_proto::toolbar::ToolbarClient;
 pub(crate) use daw_proto::window_manager::WindowManagerClient;
@@ -173,6 +177,7 @@ mod project;
 mod regions;
 mod routing;
 mod screenset;
+mod stream;
 mod tempo_map;
 mod toolbar;
 mod tracks;
@@ -199,6 +204,7 @@ pub use self::project::Project;
 pub use self::regions::Regions;
 pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
 pub use self::screenset::Screensets;
+pub use self::stream::EventStream;
 pub use self::tempo_map::TempoMap;
 pub use self::toolbar::Toolbar;
 pub use self::tracks::{TrackHandle, Tracks};
@@ -239,9 +245,16 @@ architect::clients! {
         pub(crate) plugin_loader: PluginLoadingClient,
         pub(crate) batch: BatchExecutionClient,
         pub(crate) diagnostics: DiagnosticsClient,
-        pub(crate) event_bus: EventBusClient,
+        // `#[subscribe]` stream siblings — argless subscriptions;
+        // filtering happens client-side in the handle wrappers.
+        pub(crate) track_stream: TracksStreamClient,
+        pub(crate) marker_stream: MarkersStreamClient,
+        pub(crate) region_stream: RegionsStreamClient,
+        pub(crate) tempo_map_stream: TempoMapStreamClient,
+        pub(crate) event_bus_stream: EventBusStreamClient,
     }
 }
+
 
 /// DAW API entry point
 ///

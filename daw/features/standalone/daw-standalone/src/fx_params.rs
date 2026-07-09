@@ -93,10 +93,13 @@ impl Standalone {
     }
 
     pub(crate) fn publish_fx_event(&self, project_guid: &str, event: FxEvent) {
-        let _ = self.fx_events.send(FxStreamEvent {
-            project_guid: project_guid.to_string(),
-            event,
-        });
+        // FX has no per-domain stream service yet — events reach
+        // consumers via the cross-domain event-bus hub.
+        self.bus_events
+            .publish(daw_proto::event_bus::DawEvent::Fx(FxStreamEvent {
+                project_guid: project_guid.to_string(),
+                event,
+            }));
     }
 
     /// Every parameter of a live plugin instance, slot-indexed and

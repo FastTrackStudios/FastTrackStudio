@@ -59,7 +59,15 @@ impl Services for Standalone {
             window_geometry::Service,
             peak::Service,
             plugin_loader::Service,
-            event_bus::Service,
+            // `#[subscribe]` stream siblings — served from the PubSub
+            // hubs on `Standalone` (see each domain's StreamSource
+            // impl). The event-bus base service is empty post-port;
+            // only its stream sibling is mounted.
+            track::StreamService,
+            marker::StreamService,
+            region::StreamService,
+            tempo_map::StreamService,
+            event_bus::StreamService,
         ]
     }
 }

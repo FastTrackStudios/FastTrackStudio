@@ -112,10 +112,19 @@ fn moved_events(before: &[Track], after: &[Track]) -> Vec<TrackEvent> {
 
 fn publish_track_events(daw: &Standalone, project_guid: &str, events: Vec<TrackEvent>) {
     for event in events {
-        let _ = daw.track_events.send(TrackStreamEvent {
+        let event = TrackStreamEvent {
             project_guid: project_guid.to_string(),
             event,
-        });
+        };
+        daw.bus_events
+            .publish(daw_proto::event_bus::DawEvent::Track(event.clone()));
+        daw.track_events.publish(event);
+    }
+}
+
+impl daw_proto::track::TracksStreamSource for Standalone {
+    fn events_hub(&self) -> &architect::PubSub<TrackStreamEvent> {
+        &self.track_events
     }
 }
 
@@ -770,33 +779,6 @@ impl Tracks for Standalone {
         })?
     }
 
-    async fn subscribe(
-        &self,
-        project: ProjectContext,
-        tx: vox::Tx<daw_proto::track::TrackStreamEvent>,
-    ) {
-        let project_guid = resolve_project(self, &project);
-        let mut rx = self.track_events.subscribe();
-        moire::task::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if project_guid
-                            .as_ref()
-                            .is_some_and(|guid| event.project_guid != *guid)
-                        {
-                            continue;
-                        }
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                }
-            }
-        });
-    }
 }
 
 // ── Inherent helpers for reading extended track state ────────────────

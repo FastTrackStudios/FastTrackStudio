@@ -257,24 +257,11 @@ impl Markers for Reaper {
         Err(DawError::not_found("Marker", &id.to_string()))
     }
 
-    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<MarkerStreamEvent>) {
-        let mut rx = crate::event_hub::hub().subscribe_markers();
-        moire::task::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                    Err(RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "markers subscriber lagged");
-                    }
-                }
-            }
-        });
+}
+
+impl daw_proto::marker::MarkersStreamSource for Reaper {
+    fn events_hub(&self) -> &architect::PubSub<MarkerStreamEvent> {
+        crate::event_hub::hub().markers_hub()
     }
 }
 

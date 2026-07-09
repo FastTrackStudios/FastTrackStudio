@@ -30,6 +30,21 @@ fn seeded() -> Standalone {
     s
 }
 
+/// Wait for an in-flight `#[subscribe]` attach to land on the server
+/// hub before mutating. The stream call is fire-and-hold (it never
+/// completes while the subscription lives), so the client can't
+/// observe the attach — poll the backend's subscriber count, exactly
+/// like architect's layered-services example does before publishing.
+async fn settle_subscription(count: impl Fn() -> usize, at_least: usize) {
+    for _ in 0..200 {
+        if count() >= at_least {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    panic!("subscription attach never landed");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn current_project_through_in_process_daw() -> eyre::Result<()> {
     let bundle = build_in_process_daw(seeded()).await?;
@@ -279,7 +294,7 @@ async fn track_structure_routing_and_colors_through_in_process_daw() -> eyre::Re
     Ok(())
 }
 
-async fn next_track_event(rx: &mut vox::Rx<TrackStreamEvent>) -> eyre::Result<TrackStreamEvent> {
+async fn next_track_event(rx: &mut daw_control::EventStream<TrackStreamEvent>) -> eyre::Result<TrackStreamEvent> {
     let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for track event"))??
@@ -289,7 +304,7 @@ async fn next_track_event(rx: &mut vox::Rx<TrackStreamEvent>) -> eyre::Result<Tr
     Ok(out.expect("vox SelfRef::map runs once"))
 }
 
-async fn next_marker_event(rx: &mut vox::Rx<MarkerStreamEvent>) -> eyre::Result<MarkerStreamEvent> {
+async fn next_marker_event(rx: &mut daw_control::EventStream<MarkerStreamEvent>) -> eyre::Result<MarkerStreamEvent> {
     let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for marker event"))??
@@ -300,7 +315,7 @@ async fn next_marker_event(rx: &mut vox::Rx<MarkerStreamEvent>) -> eyre::Result<
 }
 
 async fn wait_for_marker_event(
-    rx: &mut vox::Rx<MarkerStreamEvent>,
+    rx: &mut daw_control::EventStream<MarkerStreamEvent>,
     pred: impl Fn(&MarkerEvent) -> bool,
 ) -> eyre::Result<MarkerStreamEvent> {
     let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
@@ -315,7 +330,7 @@ async fn wait_for_marker_event(
     }
 }
 
-async fn next_region_event(rx: &mut vox::Rx<RegionStreamEvent>) -> eyre::Result<RegionStreamEvent> {
+async fn next_region_event(rx: &mut daw_control::EventStream<RegionStreamEvent>) -> eyre::Result<RegionStreamEvent> {
     let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for region event"))??
@@ -326,7 +341,7 @@ async fn next_region_event(rx: &mut vox::Rx<RegionStreamEvent>) -> eyre::Result<
 }
 
 async fn wait_for_region_event(
-    rx: &mut vox::Rx<RegionStreamEvent>,
+    rx: &mut daw_control::EventStream<RegionStreamEvent>,
     pred: impl Fn(&RegionEvent) -> bool,
 ) -> eyre::Result<RegionStreamEvent> {
     let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
@@ -342,7 +357,7 @@ async fn wait_for_region_event(
 }
 
 async fn next_tempo_event(
-    rx: &mut vox::Rx<TempoMapStreamEvent>,
+    rx: &mut daw_control::EventStream<TempoMapStreamEvent>,
 ) -> eyre::Result<TempoMapStreamEvent> {
     let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
         .await
@@ -354,7 +369,7 @@ async fn next_tempo_event(
 }
 
 async fn wait_for_tempo_event(
-    rx: &mut vox::Rx<TempoMapStreamEvent>,
+    rx: &mut daw_control::EventStream<TempoMapStreamEvent>,
     pred: impl Fn(&TempoMapEvent) -> bool,
 ) -> eyre::Result<TempoMapStreamEvent> {
     let deadline = web_time::Instant::now() + std::time::Duration::from_secs(10);
@@ -369,7 +384,7 @@ async fn wait_for_tempo_event(
     }
 }
 
-async fn next_daw_event(rx: &mut vox::Rx<DawEvent>) -> eyre::Result<DawEvent> {
+async fn next_daw_event(rx: &mut daw_control::EventStream<DawEvent>) -> eyre::Result<DawEvent> {
     let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for daw event"))??
@@ -380,7 +395,7 @@ async fn next_daw_event(rx: &mut vox::Rx<DawEvent>) -> eyre::Result<DawEvent> {
 }
 
 async fn wait_for_daw_event(
-    rx: &mut vox::Rx<DawEvent>,
+    rx: &mut daw_control::EventStream<DawEvent>,
     pred: impl Fn(&DawEvent) -> bool,
 ) -> eyre::Result<DawEvent> {
     let deadline = web_time::Instant::now() + std::time::Duration::from_secs(10);
@@ -396,7 +411,7 @@ async fn wait_for_daw_event(
 }
 
 async fn wait_for_track_event(
-    rx: &mut vox::Rx<TrackStreamEvent>,
+    rx: &mut daw_control::EventStream<TrackStreamEvent>,
     pred: impl Fn(&TrackEvent) -> bool,
 ) -> eyre::Result<TrackStreamEvent> {
     let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
@@ -419,6 +434,11 @@ async fn marker_region_lanes_and_events_through_in_process_daw() -> eyre::Result
 
     let markers = project.markers();
     let mut marker_rx = markers.subscribe().await?;
+    {
+        use daw_proto::marker::MarkersStreamSource;
+        let hub = bundle.standalone.events_hub().clone();
+        settle_subscription(move || hub.subscriber_count(), 1).await;
+    }
     let marker_id = markers.add(2.5, "Verse").await?;
     let added_marker = wait_for_marker_event(&mut marker_rx, |event| {
         matches!(event, MarkerEvent::Added(marker) if marker.id == Some(marker_id) && marker.name == "Verse")
@@ -449,6 +469,11 @@ async fn marker_region_lanes_and_events_through_in_process_daw() -> eyre::Result
 
     let regions = project.regions();
     let mut region_rx = regions.subscribe().await?;
+    {
+        use daw_proto::region::RegionsStreamSource;
+        let hub = bundle.standalone.events_hub().clone();
+        settle_subscription(move || hub.subscriber_count(), 1).await;
+    }
     let region_id = regions.add(4.0, 12.0, "Chorus").await?;
     let added_region = wait_for_region_event(&mut region_rx, |event| {
         matches!(event, RegionEvent::Added(region) if region.id == Some(region_id) && region.name == "Chorus")
@@ -488,7 +513,11 @@ async fn tempo_map_points_time_signatures_and_events_through_in_process_daw() ->
     let project_guid = project.info().await?.guid;
     let tempo_map = project.tempo_map();
     let mut rx = tempo_map.subscribe().await?;
-    tokio::task::yield_now().await;
+    {
+        use daw_proto::tempo_map::TempoMapStreamSource;
+        let hub = bundle.standalone.events_hub().clone();
+        settle_subscription(move || hub.subscriber_count(), 1).await;
+    }
 
     tempo_map.set_default_tempo(120.0).await?;
     tempo_map.set_default_time_signature(4, 4).await?;
@@ -600,7 +629,11 @@ async fn event_bus_multiplexes_standalone_marker_region_tempo_events() -> eyre::
             .for_project(project_guid),
         )
         .await?;
-    tokio::task::yield_now().await;
+    {
+        use daw_proto::event_bus::EventBusStreamSource;
+        let hub = bundle.standalone.events_hub().clone();
+        settle_subscription(move || hub.subscriber_count(), 1).await;
+    }
 
     let marker_id = project.markers().add(1.0, "Bus Marker").await?;
     wait_for_daw_event(&mut rx, |event| {
@@ -630,6 +663,11 @@ async fn track_subscribe_emits_mutation_events_through_in_process_daw() -> eyre:
     let project_guid = project.info().await?.guid;
     let tracks = project.tracks();
     let mut rx = tracks.subscribe().await?;
+    {
+        use daw_proto::track::TracksStreamSource;
+        let hub = bundle.standalone.events_hub().clone();
+        settle_subscription(move || hub.subscriber_count(), 1).await;
+    }
 
     let guitar = tracks.add("Guitar", None).await?;
     let added = wait_for_track_event(

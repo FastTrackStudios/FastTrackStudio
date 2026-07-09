@@ -29,10 +29,19 @@ impl HasDispatcher for Standalone {
 }
 
 fn publish_marker_event(daw: &Standalone, project_guid: &str, event: MarkerEvent) {
-    let _ = daw.marker_events.send(MarkerStreamEvent {
+    let event = MarkerStreamEvent {
         project_guid: project_guid.to_string(),
         event,
-    });
+    };
+    daw.bus_events
+        .publish(daw_proto::event_bus::DawEvent::Marker(event.clone()));
+    daw.marker_events.publish(event);
+}
+
+impl daw_proto::marker::MarkersStreamSource for Standalone {
+    fn events_hub(&self) -> &architect::PubSub<MarkerStreamEvent> {
+        &self.marker_events
+    }
 }
 
 impl Markers for Standalone {
@@ -153,33 +162,6 @@ impl Markers for Standalone {
         Ok(())
     }
 
-    async fn subscribe(
-        &self,
-        project: ProjectContext,
-        tx: vox::Tx<daw_proto::marker::MarkerStreamEvent>,
-    ) {
-        let project_guid = resolve_project(self, &project);
-        let mut rx = self.marker_events.subscribe();
-        moire::task::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if project_guid
-                            .as_ref()
-                            .is_some_and(|guid| event.project_guid != *guid)
-                        {
-                            continue;
-                        }
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                }
-            }
-        });
-    }
 }
 
 /// Map a `ProjectContext` onto a concrete guid the standalone state

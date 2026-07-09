@@ -125,11 +125,23 @@ impl Markers {
         Ok(())
     }
 
-    /// Subscribe to marker add/remove/modify events.
-    pub async fn subscribe(&self) -> Result<vox::Rx<daw_proto::marker::MarkerStreamEvent>> {
-        let (tx, rx) = vox::channel();
-        self.clients.marker.subscribe(self.context(), tx).await?;
-        Ok(rx)
+    /// Subscribe to marker add/remove/modify events for this project.
+    /// The server streams every open project's events; filtering to
+    /// this handle's `project_guid` happens client-side. Drop the
+    /// returned stream to unsubscribe.
+    pub async fn subscribe(
+        &self,
+    ) -> Result<crate::EventStream<daw_proto::marker::MarkerStreamEvent>> {
+        let (raw_tx, raw_rx) = vox::channel();
+        let stream = self.clients.marker_stream.clone();
+        let want = self.project_id.clone();
+        Ok(crate::EventStream::spawn(
+            async move {
+                let _ = stream.events(raw_tx).await;
+            },
+            raw_rx,
+            Box::new(move |ev| ev.project_guid == want),
+        ))
     }
 }
 

@@ -1,19 +1,19 @@
 //! `EventBus` service — single-subscribe surface for all stream domains.
 //!
-//! Architect-bridged: the only method is async + streaming, so the
-//! bridge classifies the trait as `AllAsync` and passes calls through
-//! unchanged. The Reaper backend wires a `select!` over whichever hub
-//! receivers the `BusFilter` enables and wraps each event in
-//! `DawEvent`.
+//! Architect `#[subscribe]` stream: the backend publishes every
+//! domain's events into one `PubSub<DawEvent>` hub
+//! (`EventBusStreamSource`), and subscribers receive everything.
+//! Filtering is client-side — [`BusFilter`](super::BusFilter) moved
+//! off the wire and into the consumer (see `daw_control::Events`),
+//! matching the architect idiom of argless subscriptions.
 
-use super::event::{BusFilter, DawEvent};
-use vox::Tx;
+use super::event::DawEvent;
 
 #[architect::rpc]
 pub trait EventBus {
-    /// Subscribe to a multiplexed stream of `DawEvent`s. `filter`
-    /// selects which domains forward to `tx`; disabled domains are
-    /// never observed (no decode, no broadcast subscription, no
-    /// wakeups for the forwarder task).
-    async fn subscribe(&self, filter: BusFilter, tx: Tx<DawEvent>);
+    /// Every event from every domain, multiplexed on one channel, as
+    /// it happens. Subscribers filter by variant / `project_guid`
+    /// client-side.
+    #[subscribe]
+    fn events(&self) -> DawEvent;
 }

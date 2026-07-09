@@ -1771,16 +1771,15 @@ fn volume_label(volume: f64) -> String {
 
 // ── Async edge: services + hardware ─────────────────────────────────
 
-/// Move the next event out of a vox stream (local copy of the daw
-/// facade's `RxExt::next_owned` — daw-csi can't depend on `daw`, the
-/// facade depends on us).
-async fn next_owned<T>(rx: &mut vox::Rx<T>) -> eyre::Result<Option<T>>
-where
-    T: facet::Facet<'static> + 'static,
-{
+/// Move the next event out of the event bus's client-filtered
+/// `EventStream` (the architect `#[subscribe]` port of the old
+/// `Rx`-based `next_owned`).
+async fn next_owned_bus(
+    rx: &mut daw_control::EventStream<DawEvent>,
+) -> eyre::Result<Option<DawEvent>> {
     match rx.recv().await {
         Ok(Some(selfref)) => {
-            let mut taken: Option<T> = None;
+            let mut taken: Option<DawEvent> = None;
             let _ = selfref.map(|value| {
                 taken = Some(value);
             });
@@ -1978,7 +1977,7 @@ pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
                     port.send(&msg);
                 }
             }
-            ev = next_owned(&mut bus) => {
+            ev = next_owned_bus(&mut bus) => {
                 match ev? {
                     None => return Ok(()), // bus closed — host shutting down
                     Some(DawEvent::Track(te)) => {

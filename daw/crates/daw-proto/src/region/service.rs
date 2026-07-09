@@ -15,7 +15,6 @@ use super::event::RegionStreamEvent;
 use crate::batch::ProjectArg;
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
-use vox::Tx;
 
 /// Lane placement request — kept here so retired batch ops can still
 /// name it without dragging in the full lane surface.
@@ -63,7 +62,8 @@ pub trait Regions {
     /// default region lane.
     fn set_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) -> DawResult<()>;
 
-    /// Subscribe to region changes across all open projects. Subscribers
-    /// filter by `project_guid` on the envelope.
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionStreamEvent>);
+    /// Region changes across all open projects, as they happen.
+    /// Subscribers filter by `project_guid` on the envelope.
+    #[subscribe]
+    fn events(&self) -> RegionStreamEvent;
 }
