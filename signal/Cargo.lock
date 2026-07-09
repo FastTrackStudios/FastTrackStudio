@@ -2129,7 +2129,6 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#5536a425e6560ca756f191137e6505fb1fb1739e"
 dependencies = [
  "facet 0.50.0-rc.5",
  "thiserror 2.0.18",
@@ -8361,7 +8360,6 @@ dependencies = [
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dynamic-template.git?branch=main#5536a425e6560ca756f191137e6505fb1fb1739e"
 dependencies = [
  "color-palette",
 ]
