@@ -1,0 +1,172 @@
+[workspace]
+members = [
+    "apps/cli",
+    "apps/desktop",
+    "apps/web",
+    "crates/session",
+    "crates/session-extension",
+    "crates/session-proto",
+    "crates/session-ui",
+    "xtask",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# ── Session crates (facade pattern) ──────────────────────────────────
+# `session` is the facade — the only public API surface for the session domain.
+# `session-proto` is INTERNAL. App crates must NOT depend on it directly;
+# use the `session` facade instead. session-ui is an exception (Dioxus components).
+session = { path = "crates/session" }
+session-proto = { path = "crates/session-proto" }
+session-ui = { path = "crates/session-ui", default-features = false }
+
+# ── DAW domain ───────────────────────────────────────────────────────
+# `daw` is the facade — types/handles/services for the DAW domain. The
+# extension-runtime crate is a documented public sibling (couldn't fold
+# into the facade — cycle through daw-reaper → keyflow → daw). It's
+# only needed by the in-process REAPER extension binary in this repo.
+daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-proto = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+daw-synchronization = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+
+# ── REAPER bindings (reaper-rs) ──────────────────────────────────────
+# Needed by REAPER-touching action modules (e.g. take_ranking) that
+# call raw FFI for cursor / item selection / take-marker operations.
+# Branch must match daw-reaper's pin or Cargo will resolve two copies.
+reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+
+# ── Testing ─────────────────────────────────────────────────────────
+# The former standalone `reaper-test` crate was folded into the daw
+# facade as `daw::test` (behind the `test-harness` feature). Consumers
+# now enable that feature on `daw` instead of depending on reaper-test.
+
+# ── Vox service framework ────────────────────────────────────────────
+# Consumed from crates.io (upstream facet/vox monorepo) — 0.10 line paired
+# with facet 0.50 across the FTS stack (see daw + keyflow migrations). The
+# old FastTrackStudios vox fork (0.8.x) is gone.
+# `transport-local` on top of the daw/keyflow baseline (["runtime"]): the
+# standalone setlist harness serves/connects over `local://` Unix sockets.
+vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime", "transport-local"] }
+vox-types = { version = "0.10.0-rc.5" }
+vox-stream = { version = "0.10.0-rc.5" }
+vox-websocket = { version = "0.10.0-rc.5" }
+
+# ── Architect service framework ─────────────────────────────────────
+# Codeberg main; path-patched to the local migrated checkout below.
+architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
+
+# ── Facet reflection — 0.50 line (paired across the FTS stack) ──────
+facet = { version = "0.50.0-rc.5" }
+facet-json = { version = "0.50.0-rc.5" }
+facet-postcard = { version = "0.50.0-rc.5" }
+
+# ── Keyflow (sibling repo — facade pattern) ─────────────────────────
+keyflow = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
+keyflow-daw-analysis = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", branch = "main" }
+
+# ── Dynamic session templates ───────────────────────────────────────
+dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+# Canonical music-production taxonomy (instrument groups + the REAPER 128-slot
+# group partition). Single source of truth shared with dynamic-template.
+music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+
+# ── Actions / Input (sibling repo) ──────────────────────────────────
+actions-proto = { git = "https://codeberg.org/FastTrackStudios/input_actions.git", branch = "main" }
+
+# ── Dock UI (sibling repo) ──────────────────────────────────────────
+dock-dioxus = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
+dock-proto = { git = "https://codeberg.org/FastTrackStudios/dock-dioxus.git", branch = "main" }
+
+# ── FTS design system ───────────────────────────────────────────────
+fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
+
+# ── Shared infrastructure ───────────────────────────────────────────
+utils = { git = "https://codeberg.org/FastTrackStudios/fts-utils.git", branch = "main" }
+
+# ── Instrumentation ─────────────────────────────────────────────────
+moire = { version = "1.0" }  # diagnostics disabled — dladdr panics inside REAPER-loaded .so
+
+# ── UI framework ─────────────────────────────────────────────────────
+dioxus = "0.7.2"
+
+# ── Async runtime ───────────────────────────────────────────────────
+tokio = { version = "1.48", features = ["full"] }
+
+# ── Serialization ───────────────────────────────────────────────────
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+# ── Observability ───────────────────────────────────────────────────
+tracing = { version = "0.1", features = ["std"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# ── Utilities ────────────────────────────────────────────────────────
+eyre = "0.6"
+
+# ── Patches ──────────────────────────────────────────────────────────
+# Git-dep policy: sibling crates resolve from codeberg.org via
+# [workspace.dependencies] above. EXCEPTION (temporary): the facet-0.50 /
+# vox-0.10 migration is only in local checkouts, so local-path [patch]
+# blocks below point at them until the migrations land on codeberg mains.
+
+# moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
+# All moire crates must point to the same fork rev to avoid duplicate
+# moire-runtime #[ctor] registrations that crash. Aligned with daw (7a2f1dc).
+
+[patch."https://github.com/bearcove/moire"]
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+[patch.crates-io]
+moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+
+[workspace.lints.rust]
+dead_code = "allow"
+unused = "allow"
+
+[workspace.lints.clippy]
+# Stylistic lints that don't reflect real bugs and create churn on a
+# fast-moving codebase. To take effect, each crate's Cargo.toml needs
+# `[lints] workspace = true`.
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
+# Additional stylistic lints flagged on the existing source — not bugs.
+manual_c_str_literals = "allow"
+branches_sharing_code = "allow"
+needless_borrow = "allow"
+needless_borrows_for_generic_args = "allow"
+collapsible_if = "allow"
+map_clone = "allow"
+unnecessary_map_or = "allow"
+if_same_then_else = "allow"
+redundant_locals = "allow"

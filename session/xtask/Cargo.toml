@@ -1,0 +1,13 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fts-devtools = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+# Test-runner orchestration now lives at `daw::test::runner` behind the
+# `test-harness` feature (former `reaper-test` crate with its `runner` feature).
+daw = { workspace = true, features = ["test-harness"] }
+# Shared FTS hygiene CI battery (fmt → clippy → check → nextest).
+fts-repo = { git = "https://codeberg.org/FastTrackStudios/fts-repo", branch = "main" }
