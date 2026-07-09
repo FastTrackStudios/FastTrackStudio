@@ -192,7 +192,8 @@ midicore = { path = "../midicore/crates/midicore", features = ["midir"] }
 # still lives at features/audio/audio-controls on cb/main, so pin separately.
 # Cargo treats `?branch=main` and `?branch=feat/ui-showcase` as distinct git
 # sources, so daw's other deps stay on the feat branch.
-audio-controls = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
+# Pinned to the last rev carrying features/audio/audio-controls (removed on newer main).
+audio-controls = { git = "https://codeberg.org/FastTrackStudios/daw.git", rev = "74e84e3a61c11f3ae1416d99300b670dbea2089e" }
 # NOTE: the standalone `reaper-test` crate was removed from daw main and folded
 # into the `daw` facade behind the `test-harness` feature, re-exported as
 # `daw::test` (alias `ReaperTestContext`, `#[reaper_test]` macro). Test crates
@@ -280,6 +281,8 @@ clap = { version = "4", features = ["derive"] }
 [patch."https://codeberg.org/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
 daw-cli = { path = "../daw/apps/daw/cli" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-reaper = { path = "../daw/features/backends/reaper/daw-reaper" }
 daw-extension-runtime = { path = "../daw/features/backends/reaper/daw-extension-runtime" }
 
 # ── architect + input_actions local overrides (migrated siblings) ───────

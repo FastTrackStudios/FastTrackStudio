@@ -1,0 +1,118 @@
+//! Session-engine client — connects the rig remote to a standalone
+//! `session` desktop/gateway (default port 3030) so the Session view can
+//! render the performance layout: songs, sections, charts + chords, live.
+//!
+//! Adapted from `session/apps/web` — same vox handshake and
+//! `WebClientService` push channel; session-ui's global signals carry the
+//! state into `PerformanceLayout`.
+
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::Duration;
+
+use dioxus::prelude::*;
+use session::{SetlistServiceClient, WebClientServiceDispatcher};
+use session_ui::{ConnectionState, Session, apply_setlist_event};
+use vox_websocket::WsLink;
+
+/// Gateway URL: same host as the page, port 3030 (session gateway default).
+fn session_ws_url() -> String {
+    let host = web_sys::window()
+        .and_then(|w| w.location().hostname().ok())
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    format!("ws://{host}:3030/ws")
+}
+
+/// Push-event handler: the gateway streams setlist/transport events at us.
+struct WebClientHandler;
+
+impl session::WebClientService for WebClientHandler {
+    async fn push_event(&self, event: session::SetlistEvent) {
+        apply_setlist_event(event);
+    }
+}
+
+/// Kick off the session connection loop (retries forever; harmless when no
+/// session engine is running — the Session view just shows disconnected).
+pub fn start(mut state: Signal<ConnectionState>) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let url = session_ws_url();
+        let mut attempt = 0u32;
+        loop {
+            state.set(ConnectionState::Connecting);
+            match connect_once(&url, &mut state).await {
+                Ok(()) => attempt = 0,
+                Err(e) => tracing::debug!("session gateway: {e}"),
+            }
+            state.set(ConnectionState::Disconnected);
+            let backoff = Duration::from_millis(500)
+                .mul_f64(1.5f64.powi(attempt.min(8) as i32))
+                .min(Duration::from_secs(10));
+            gloo_timers::future::TimeoutFuture::new(backoff.as_millis() as u32).await;
+            attempt = attempt.saturating_add(1);
+        }
+    });
+}
+
+async fn connect_once(url: &str, state: &mut Signal<ConnectionState>) -> Result<(), String> {
+    let link = WsLink::connect(url)
+        .await
+        .map_err(|e| format!("connect: {e:?}"))?;
+
+    let handler = WebClientServiceDispatcher::new(WebClientHandler);
+    let handshake = vox::HandshakeResult {
+        role: vox::SessionRole::Initiator,
+        our_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Odd,
+            max_concurrent_requests: 64,
+        },
+        peer_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Even,
+            max_concurrent_requests: 64,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
+    };
+    let (caller, _session_handle) = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
+        .establish::<vox::DriverCaller>(handler)
+        .await
+        .map_err(|e| format!("handshake: {e:?}"))?;
+
+    state.set(ConnectionState::Connected);
+    let setlist_client = SetlistServiceClient::new(vox::ErasedCaller::new(caller));
+    let _ = Session::init(setlist_client);
+
+    // Seed the setlist from whatever projects the engine has open.
+    let session = Session::get();
+    let client = session.setlist().clone();
+    if client.build_from_open_projects().await.is_ok() {
+        if let Ok(setlist) = client.setlist().await {
+            *session_ui::SETLIST_STRUCTURE.write() = setlist;
+        }
+    }
+
+    // Health-check loop: a failed call = connection gone → reconnect.
+    let lost = Rc::new(Cell::new(false));
+    let lost2 = lost.clone();
+    let health = client.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(5000).await;
+            if health.get_audio_latency_info().await.is_err() {
+                lost2.set(true);
+                break;
+            }
+        }
+    });
+    loop {
+        gloo_timers::future::TimeoutFuture::new(200).await;
+        if lost.get() {
+            break;
+        }
+    }
+    Ok(())
+}
