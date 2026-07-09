@@ -104,8 +104,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 uuid = { version = "1", features = ["v4"] }
 
 # Serialization: vox uses facet for wire encoding.
-facet = { version = "0.50.0-rc.1", features = ["reflect", "chrono", "uuid"] }
-facet-pretty = "0.50.0-rc.1"
+facet = { version = "0.50.0-rc.5", features = ["reflect", "chrono", "uuid"] }
+facet-pretty = "0.50.0-rc.5"
 
 # Test-data + db-seed generation. Architect emits #[derive(Dummy)] on
 # every Create/Update/List/Model struct when the `fake` feature is on,
@@ -135,10 +135,10 @@ heck = "0.5"
 # describes them as `String` in the schema so plan-based/wasm decode
 # agrees. The client crates (examples/app/{ui,desktop,tests/web}) pin the
 # SAME rev so server + clients share one coherent wire schema.
-vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
-vox-core = "0.10.0-rc.1"
-vox-types = "0.10.0-rc.1"
-vox-websocket = "0.10.0-rc.1"
+vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
+vox-core = "0.10.0-rc.5"
+vox-types = "0.10.0-rc.5"
+vox-websocket = "0.10.0-rc.5"
 
 # Loro — CRDT engine. Local-first state lives inside a LoroDoc;
 # SeaORM stores the doc's snapshot + update log as opaque bytes.
