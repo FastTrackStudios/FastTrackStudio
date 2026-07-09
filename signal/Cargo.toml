@@ -154,8 +154,8 @@ facet-toml = { version = "0.50.0-rc.5" }
 vox = { version = "0.10.0-rc.5" }
 # Session domain (standalone engine): the rig's Session view is a session
 # client — protocol + UI crates only (both wasm-clean).
-session-proto = { path = "../session/crates/session-proto" }
-session-ui = { path = "../session/crates/session-ui", default-features = false }
+session-proto = { path = "../crates/session/proto" }
+session-ui = { path = "../crates/session/ui", default-features = false }
 vox-core = { version = "0.10.0-rc.5" }
 vox-websocket = { version = "0.10.0-rc.5" }
 axum = { version = "0.8", features = ["ws"] }

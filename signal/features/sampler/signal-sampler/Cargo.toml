@@ -95,4 +95,4 @@ libc = "0.2"
 # thiserror / zip). Deliberately a dev-dependency: the library's document
 # annotation stays keyflow-free for phase 1. TODO(document-mode): unify the
 # inference (ported from keyflow's mirror.rs) into one shared crate.
-keyflow-orchestra = { path = "../../../../keyflow/crates/keyflow-orchestra" }
+keyflow-orchestra = { path = "../../../../crates/keyflow/keyflow-orchestra" }

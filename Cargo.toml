@@ -100,15 +100,38 @@ members = [
     "features/surfaces/daw-csi",
     "features/daw-ui/daw-ui",
     "features/daw-ui/daw-theme-reaper",
+    # ── crates/session — session domain core (wave 3) ─────────────────
+    "crates/session/session",
+    "crates/session/proto",
+    "crates/session/ui",
+    "features/guide",
+    "features/reaper/session-extension",
+    # ── crates/keyflow — keyflow domain core (wave 3) ─────────────────
+    "crates/keyflow/keyflow",
+    "crates/keyflow/keyflow-proto",
+    "crates/keyflow/keyflow-syntax",
+    "crates/keyflow/keyflow-text",
+    "crates/keyflow/keyflow-chordpro",
+    "crates/keyflow/keyflow-midi",
+    "crates/keyflow/keyflow-live",
+    "crates/keyflow/keyflow-lsp",
+    "crates/keyflow/keyflow-musicxml",
+    "crates/keyflow/keyflow-orchestra",
+    "crates/keyflow/keyflow-sync",
+    "crates/keyflow/keyflow-daw-analysis",
+    "crates/keyflow/keyflow-ui",
+    "crates/keyflow/tree-sitter-keyflow",
+    # ── features/engraver ─────────────────────────────────────────────
+    "features/engraver/engraver",
+    "features/engraver/proto",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/daw-cli",
+    "apps/keyflow-cli",
 ]
 # Not-yet-moved domain workspaces (later waves) — keep them out of this one.
 exclude = [
     "attic",
-    "session",
     "signal",
-    "keyflow",
     "apps/fasttrackstudio",
     "FastTrackStudio",
     "Plugins",
@@ -220,9 +243,43 @@ daw-ui = { path = "features/daw-ui/daw-ui", default-features = false }
 daw-theme-reaper = { path = "features/daw-ui/daw-theme-reaper" }
 daw-cli = { path = "apps/daw-cli" }
 
+# ── session domain (wave 3) ───────────────────────────────────────────
+# `session` is the facade — the only public API surface for the session
+# domain. session-proto is INTERNAL (session-ui and session-guide are the
+# documented exceptions: Dioxus components / the guide engine).
+session = { path = "crates/session/session" }
+session-proto = { path = "crates/session/proto" }
+session-ui = { path = "crates/session/ui", default-features = false }
+# Portable guide engine (click / count-in / section guide). Optional `tts`
+# feature adds local Chatterbox TTS (its ort/chatterbox pins live in the
+# crate's own manifest, not here).
+session-guide = { path = "features/guide" }
+
+# ── keyflow domain (wave 3) ───────────────────────────────────────────
+# `keyflow` and `engraver` are the facades; keyflow-proto/-text/-midi/
+# -syntax/-live and engraver-proto are INTERNAL to the domain.
+keyflow = { path = "crates/keyflow/keyflow" }
+keyflow-proto = { path = "crates/keyflow/keyflow-proto" }
+keyflow-syntax = { path = "crates/keyflow/keyflow-syntax" }
+keyflow-text = { path = "crates/keyflow/keyflow-text" }
+keyflow-chordpro = { path = "crates/keyflow/keyflow-chordpro" }
+keyflow-midi = { path = "crates/keyflow/keyflow-midi" }
+keyflow-live = { path = "crates/keyflow/keyflow-live" }
+keyflow-musicxml = { path = "crates/keyflow/keyflow-musicxml" }
+keyflow-orchestra = { path = "crates/keyflow/keyflow-orchestra" }
+keyflow-sync = { path = "crates/keyflow/keyflow-sync" }
+keyflow-daw-analysis = { path = "crates/keyflow/keyflow-daw-analysis" }
+keyflow-ui = { path = "crates/keyflow/keyflow-ui" }
+tree-sitter-keyflow = { path = "crates/keyflow/tree-sitter-keyflow" }
+# Engraver — defaults OFF at the root (the full `engraver` feature drags
+# wgpu/vello + PDF export); consumers opt into `svg`/`wgpu`/`engraver`.
+engraver = { path = "features/engraver/engraver", default-features = false }
+engraver-proto = { path = "features/engraver/proto", default-features = false }
+
 # ── Facet reflection + vox RPC — the rc.5 fleet pins ──────────────────
 facet = { version = "0.50.0-rc.5" }
 facet-json = { version = "0.50.0-rc.5" }
+facet-postcard = { version = "0.50.0-rc.5" }
 facet-styx = { version = "5.0.0-rc.5" }
 vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
 vox-types = { version = "0.10.0-rc.5" }
@@ -231,6 +288,17 @@ vox-stream = { version = "0.10.0-rc.5" }
 
 # ── Architect framework ───────────────────────────────────────────────
 architect = { git = "https://codeberg.org/FastTrackStudios/architect.git", branch = "main" }
+
+# ── Dynamic session templates (session/keyflow domains) ───────────────
+dynamic-template = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+# Canonical music-production taxonomy (instrument groups + the REAPER
+# 128-slot group partition). Single source of truth shared with
+# dynamic-template.
+music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+
+# ── MusicXML parsing (keyflow) ─────────────────────────────────────────
+musicxml = "1.1"
 
 # ── UI framework ──────────────────────────────────────────────────────
 dioxus = { version = "=0.7.9", default-features = false, features = ["lib"] }
@@ -285,6 +353,18 @@ wgpu = { version = "29", features = ["wgsl"] }
 vello = { version = "0.9", features = ["wgpu"] }
 skrifa = "0.37"
 anyrender_vello = "0.11"
+# keyflow-ui / engraver-proto renderer stack (paired with dioxus-native
+# 0.7.9 from crates.io). NOTE: keyflow-ui pins anyrender_vello 0.10.1 and
+# dioxus-native 0.7.9 INLINE in its own manifest — they collide with the
+# root's anyrender_vello 0.11 / blitz-git dioxus-native pins above, and
+# root pins win in the workspace table, so the conflicting pair stays
+# crate-local.
+anyrender = "0.10"
+anyrender_vello_hybrid = "0.5.1"
+vello_hybrid = "0.0.6"
+vello_common = "0.0.6"
+peniko = "0.6"
+kurbo = "0.13"
 
 # ── Platform UI bindings ──────────────────────────────────────────────
 cocoa = "0.26"
@@ -351,6 +431,37 @@ midir = "0.11"
 [patch."https://codeberg.org/FastTrackStudios/architect.git"]
 architect = { path = "../architect/crates/architect" }
 
+# daw.git: dynamic-template.git (external, pulled via the session facade)
+# still references daw.git — the repo is gone but survives in git caches;
+# fold its daw crates onto this tree so ONE daw instance exists graph-wide.
+# daw-control + daw-reaper must fold too — the daw streams port keeps them
+# in lockstep with daw-proto (stream clients / EventStream / StreamSource).
+[patch."https://codeberg.org/FastTrackStudios/daw.git"]
+daw = { path = "crates/daw/daw" }
+daw-proto = { path = "crates/daw/proto" }
+daw-module = { path = "crates/daw/module" }
+daw-control = { path = "crates/daw/control" }
+daw-reaper = { path = "features/reaper/daw-reaper" }
+
+# keyflow.git: Editor.git (and older git-dep graphs) reference keyflow.git;
+# fold those onto this workspace's crates so one keyflow exists graph-wide.
+# (Carried over from the dissolved keyflow workspace's self-patch.)
+[patch."https://codeberg.org/FastTrackStudios/keyflow.git"]
+keyflow = { path = "crates/keyflow/keyflow" }
+keyflow-proto = { path = "crates/keyflow/keyflow-proto" }
+keyflow-text = { path = "crates/keyflow/keyflow-text" }
+keyflow-midi = { path = "crates/keyflow/keyflow-midi" }
+keyflow-syntax = { path = "crates/keyflow/keyflow-syntax" }
+keyflow-chordpro = { path = "crates/keyflow/keyflow-chordpro" }
+keyflow-daw-analysis = { path = "crates/keyflow/keyflow-daw-analysis" }
+engraver = { path = "features/engraver/engraver" }
+engraver-proto = { path = "features/engraver/proto" }
+
+# Some transitive deps still reference input_actions by its old github URL;
+# fold those onto the in-tree copy. (From the dissolved keyflow workspace.)
+[patch."https://github.com/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "crates/input/actions-proto" }
+
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid duplicate
 # moire-runtime #[ctor] registrations (aligned with daw/session/signal).
@@ -401,3 +512,22 @@ not_unsafe_ptr_arg_deref = "allow"
 only_used_in_recursion = "allow"
 unnecessary_sort_by = "allow"
 unusual_byte_groupings = "allow"
+# from the dissolved session workspace
+manual_c_str_literals = "allow"
+branches_sharing_code = "allow"
+needless_borrow = "allow"
+needless_borrows_for_generic_args = "allow"
+collapsible_if = "allow"
+map_clone = "allow"
+unnecessary_map_or = "allow"
+if_same_then_else = "allow"
+redundant_locals = "allow"
+# from the dissolved keyflow workspace
+large_enum_variant = "allow"
+explicit_counter_loop = "allow"
+manual_strip = "allow"
+too_many_arguments = "allow"
+double_must_use = "allow"
+vec_init_then_push = "allow"
+collapsible_match = "allow"
+filter_next = "allow"

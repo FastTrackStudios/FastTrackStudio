@@ -4,7 +4,7 @@
 
 /* Scan this app + the editor UI crates for Tailwind class usage. */
 @source "./src/**/*.rs";
-@source "../../../keyflow/crates/keyflow-ui/src/**/*.rs";
+@source "../../../crates/keyflow/keyflow-ui/src/**/*.rs";
 @source "../../../../../.cargo/git/checkouts/fts-ui-*/*/crates/*/src/**/*.rs";
 
 @layer base {

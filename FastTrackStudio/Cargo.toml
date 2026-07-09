@@ -85,9 +85,9 @@ moire = { version = "1.0" }
 # Keyflow/Engraver crates (sibling repo — facade pattern)
 # NOTE: keyflow-proto, keyflow-text, keyflow-midi, engraver-proto are INTERNAL.
 # Access them through the `keyflow` or `engraver` facade crates.
-keyflow = { path = "../keyflow/crates/keyflow" }
-engraver = { path = "../keyflow/crates/engraver" }
-keyflow-ui = { path = "../keyflow/crates/keyflow-ui", default-features = false }
+keyflow = { path = "../crates/keyflow/keyflow" }
+engraver = { path = "../features/engraver/engraver" }
+keyflow-ui = { path = "../crates/keyflow/keyflow-ui", default-features = false }
 
 # DAW domain
 # `daw` is the facade. `daw-cli` is a public sibling crate of CLI
@@ -138,10 +138,10 @@ macromod = { path = "../signal/features/macromod" }
 # Session (sibling repo)
 # NOTE: session-proto is listed here for use by session-ui (internal domain crate only).
 # App crates must NOT depend on session-proto directly — use the `session` facade instead.
-session = { path = "../session/crates/session" }
-session-proto = { path = "../session/crates/session-proto" }
-session-ui = { path = "../session/crates/session-ui" }
-session-cli = { path = "../session/apps/cli" }
+session = { path = "../crates/session/session" }
+session-proto = { path = "../crates/session/proto" }
+session-ui = { path = "../crates/session/ui" }
+# session-cli parked in attic/session-apps/cli (wave 3) — no member consumed it.
 
 # architect (sibling repo) — `ActionMeta`/`ActionBackend` types, needed directly
 # by fts-cli to read `<Trait>Actions::all()` and build the generated CLI surface.

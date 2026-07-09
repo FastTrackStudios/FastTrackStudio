@@ -4495,7 +4495,7 @@ dependencies = [
 
 [[package]]
 name = "engraver-proto"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyrender 0.10.0",
  "bitflags 2.13.0",
@@ -7222,7 +7222,7 @@ dependencies = [
 
 [[package]]
 name = "keyflow"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "color-eyre",
  "colored",
@@ -7242,11 +7242,11 @@ dependencies = [
 
 [[package]]
 name = "keyflow-chordpro"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "keyflow-orchestra"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "musicxml",
  "thiserror 2.0.18",
@@ -7272,7 +7272,7 @@ dependencies = [
 
 [[package]]
 name = "keyflow-syntax"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "facet 0.50.0-rc.5",
  "serde",
@@ -7281,7 +7281,7 @@ dependencies = [
 
 [[package]]
 name = "keyflow-text"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "keyflow-chordpro",
  "keyflow-proto",
