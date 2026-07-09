@@ -41,6 +41,7 @@ consumed as `x.workspace = true`.
 
 | new | from |
 |---|---|
+| libs/architect/* | subtree import of FastTrackStudios/architect ({architect,macros/*,atom,form,auth/*,crdt/*}; examples/xtask dropped) |
 | libs/fts-ui/* | fts-ui/crates/{fts-ui,fts-ui-audio,showcase} |
 | libs/fts-story/* | fts-story/crates/* |
 | libs/dock/* | dock-dioxus/crates/{dock-dioxus,dock-proto} |
@@ -71,7 +72,9 @@ consumed as `x.workspace = true`.
   the rc.5 fleet pins) + every internal crate as `{ path = … }`.
 - Member manifests use `x.workspace = true` for EVERYTHING shared.
 - Old domain workspace Cargo.tomls are deleted as their members move.
-- architect stays external: one `[patch]` for its git URL → ../architect.
+- architect lives in-tree at `libs/architect/` (subtree import, history
+  preserved): `{architect,macros/*,atom,form,auth/*,crdt/*}` are root
+  members; plain path deps in `[workspace.dependencies]`, no `[patch]`.
 - Keep per-crate feature gates so cold builds stay lean (reaper,
   standalone, audio, tts, wasm UI, etc.).
 
