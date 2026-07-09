@@ -1,0 +1,12 @@
+[package]
+name = "audiocore-gui"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Shared Dioxus audio GUI components for FTS plugins — Blitz-compatible, inline-styled"
+
+[dependencies]
+nice-plug = { workspace = true }
+nice-plug-dioxus = { workspace = true }
+parking_lot = "0.12"
