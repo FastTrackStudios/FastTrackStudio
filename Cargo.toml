@@ -145,15 +145,15 @@ cpal = "0.18"
 
 # ── Facet reflection ─────────────────────────────────────────────────
 # Upstream facet/facet-styx from crates.io (migrated off the FTS codeberg fork).
-facet = { version = "0.50.0-rc.1" }
-facet-styx = { version = "5.0.0-rc.1" }
-facet-toml = { version = "0.50.0-rc.1" }
+facet = { version = "0.50.0-rc.5" }
+facet-styx = { version = "5.0.0-rc.5" }
+facet-toml = { version = "0.50.0-rc.5" }
 
 # ── ROAM service framework ───────────────────────────────────────────
 # Upstream vox from crates.io (migrated off the FTS codeberg fork).
-vox = { version = "0.10.0-rc.1" }
-vox-core = { version = "0.10.0-rc.1" }
-vox-websocket = { version = "0.10.0-rc.1" }
+vox = { version = "0.10.0-rc.5" }
+vox-core = { version = "0.10.0-rc.5" }
+vox-websocket = { version = "0.10.0-rc.5" }
 axum = { version = "0.8", features = ["ws"] }
 ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
