@@ -5,7 +5,10 @@ authors = ["Cody Wright <acodywright@gmail.com>"]
 edition.workspace = true
 
 [dependencies]
-dioxus = { workspace = true, features = ["desktop"] }
+# Root pins dioxus default-features = false, features = ["lib"]; the
+# installer is a desktop binary (launch/asset! macros), so defaults go
+# back on plus the desktop renderer.
+dioxus = { workspace = true, default-features = true, features = ["desktop", "launch"] }
 installer-core.workspace = true
 utils.workspace = true
 tokio.workspace = true
