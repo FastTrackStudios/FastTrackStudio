@@ -193,7 +193,8 @@ pub fn fit_note(
     steps: usize,
     verbose: bool,
 ) -> Result<(Vec<Partial>, Residual, f32, f32)> {
-    let dev = Device::Cpu;
+    // GPU when built with --features cuda (RTX 4080), CPU otherwise.
+    let dev = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
     let t_len = target.len();
     let tgt = Tensor::from_vec(target.to_vec(), t_len, &dev)?;
     let loss_fn = MultiStft::new(&tgt, sr as f32, &dev)?;

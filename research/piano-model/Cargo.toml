@@ -28,9 +28,13 @@ cpal = "0.15"         # realtime audio output (playable engine)
 midir = "0.10"        # MIDI input (playable engine)
 crossbeam-channel = "0.5"  # lock-free MIDI event queue into the audio thread
 # DDSP training: differentiable additive+noise synth fit to the samples by
-# gradient descent (candle = pure-Rust autograd, CPU; matches the WASM target).
-candle-core = "0.8"
-candle-nn = "0.8"
+# gradient descent (candle = pure-Rust autograd; CPU default, `cuda` feature
+# lights up the RTX 4080 for batch tuning — needs nvcc, present via nix).
+candle-core = "0.9"
+candle-nn = "0.9"
+
+[features]
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
 
 [profile.release]
 opt-level = 3
