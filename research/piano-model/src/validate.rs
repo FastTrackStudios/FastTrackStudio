@@ -246,10 +246,14 @@ impl RefTrack {
         let (mut acc, mut wsum) = (0.0f64, 0.0f64);
         for k in 0..self.freqs.len() {
             let floor = self.mat[k].iter().cloned().fold(f32::MAX, f32::min) - self.peak + 3.0;
-            // weight: the partial's peak level (linear) — loud partials matter more
-            let w = 10f64.powf(
-                (self.mat[k].iter().cloned().fold(f32::MIN, f32::max) - self.peak) as f64 / 20.0,
-            );
+            // weight: the partial's peak level (linear) in WHICHEVER signal is
+            // louder. Weighting by the reference alone makes a partial the
+            // model renders 40 dB too loud nearly invisible to the loss when
+            // the reference barely has it (measured at note 96 — the fitter
+            // plateaued because its worst error carried no weight).
+            let ref_pk = self.mat[k].iter().cloned().fold(f32::MIN, f32::max) - self.peak;
+            let mod_pk = tm[k].iter().cloned().fold(f32::MIN, f32::max) - pm;
+            let w = 10f64.powf(ref_pk.max(mod_pk) as f64 / 20.0);
             for i in 0..frames.min(tm[k].len()).min(self.mat[k].len()) {
                 let a = (tm[k][i] - pm).max(floor);
                 let b = (self.mat[k][i] - self.peak).max(floor);

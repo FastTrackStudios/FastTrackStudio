@@ -48,6 +48,13 @@ pub struct WgNote {
     /// i.e. the aftersound level / envelope knee. Fit per note.
     #[serde(default = "default_skew")]
     pub skew: f32,
+    /// Per-note hammer: stiffness multiplier, felt exponent, velocity scale.
+    #[serde(default = "default_one")]
+    pub hammer_k: f32,
+    #[serde(default = "default_pexp")]
+    pub hammer_p: f32,
+    #[serde(default = "default_one")]
+    pub hammer_v: f32,
     /// Body/radiation EQ breakpoints (freq Hz, linear gain): the reference's
     /// partial amplitudes ÷ the raw bridge output's, sampled AT the partials.
     /// This is the commuted-synthesis body — the piece a bridge-velocity
@@ -63,6 +70,12 @@ pub struct WgNote {
 
 fn default_skew() -> f32 {
     0.15
+}
+fn default_one() -> f32 {
+    1.0
+}
+fn default_pexp() -> f32 {
+    2.8
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

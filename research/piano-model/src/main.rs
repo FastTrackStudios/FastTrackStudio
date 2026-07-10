@@ -955,6 +955,11 @@ fn cmd_wg(
     let mut cs = waveguide::CoupledStrings::new(&p, sr, strings, detune, zb);
     if let Some(e) = &entry {
         cs.skew = e.skew;
+        cs.set_hammer(waveguide::HammerParams {
+            k_scale: e.hammer_k,
+            p_exp: e.hammer_p,
+            v_scale: e.hammer_v,
+        });
     }
     cs.strike(vel01, strike);
     for x in buf.iter_mut() {
@@ -992,11 +997,13 @@ fn render_wg_cell(
     vel: u8,
     strike: f32,
     skew: f32,
+    hammer: waveguide::HammerParams,
     n: usize,
     body_bps: Option<&[(f32, f32)]>,
 ) -> Vec<f32> {
     let mut cs = waveguide::CoupledStrings::new(p, sr, strings, detune, zb);
     cs.skew = skew;
+    cs.set_hammer(hammer);
     cs.strike(vel as f32 / 127.0, strike);
     let mut model = vec![0.0f32; n];
     for x in model.iter_mut() {
@@ -1132,7 +1139,7 @@ fn cmd_wg_table(
                     let p = waveguide::StringParams {
                         f0, t60, brightness: cand, inharmonicity: b, n_disp,
                     };
-                    let model = render_wg_cell(&p, sr, strings, detune, zb, ref_vel, strike, 0.15, nr, None);
+                    let model = render_wg_cell(&p, sr, strings, detune, zb, ref_vel, strike, 0.15, waveguide::HammerParams::default(), nr, None);
                     let am = analyze::analyze_note(&model, sr, f0, 24);
                     let magm = analyze::avg_mag(&model, sr, 3.0);
                     let (mut lo2, mut hi2) = (0.0f64, 0.0f64);
@@ -1169,8 +1176,10 @@ fn cmd_wg_table(
                     let p = waveguide::StringParams {
                         f0, t60: t, brightness, inharmonicity: b, n_disp: nd,
                     };
-                    let model =
-                        render_wg_cell(&p, sr, strings, dt, z, ref_vel_e, strike, sk, nr, None);
+                    let model = render_wg_cell(
+                        &p, sr, strings, dt, z, ref_vel_e, strike, sk,
+                        waveguide::HammerParams::default(), nr, None,
+                    );
                     validate::envelope_rmse_db(&model, &real.samples[..nr], sr)
                 };
                 let mut best = eval(t60, zb, dt_fit, sk_fit);
@@ -1224,7 +1233,7 @@ fn cmd_wg_table(
                     f0, t60, brightness, inharmonicity: b, n_disp: n_disp_final,
                 };
                 let nr = n.min((6.0 * sr as f32) as usize);
-                let model = render_wg_cell(&pfin, sr, strings, dt_fit, zb, ref_vel, strike, sk_fit, nr, None);
+                let model = render_wg_cell(&pfin, sr, strings, dt_fit, zb, ref_vel, strike, sk_fit, waveguide::HammerParams::default(), nr, None);
                 let am = analyze::analyze_note(&model, sr, f0, 24);
                 let mut bps: Vec<(f32, f32)> = r
                     .modal
@@ -1257,6 +1266,9 @@ fn cmd_wg_table(
                 strike,
                 detune: dt_fit,
                 skew: sk_fit,
+                hammer_k: 1.0,
+                hammer_p: 2.8,
+                hammer_v: 1.0,
                 body,
                 prompt_ref: prompt,
                 after_ref: after,
@@ -1401,7 +1413,8 @@ fn load_tuning_samples(lib: &Path, manifest: Option<&Path>) -> Result<Vec<sample
 /// Simple deterministic LCG for the fit proposals.
 fn lcg(state: &mut u64) -> f32 {
     *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-    ((*state >> 33) as f32) / (u32::MAX >> 1) as f32 // 0..2
+    // 31 random bits / (2^31 − 1) → uniform 0..1
+    ((*state >> 33) as f32) / (u32::MAX >> 1) as f32
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1447,12 +1460,20 @@ fn cmd_wg_fit(
             let sr = 44_100u32;
             let n = (dur * sr as f32) as usize;
 
-            // param vector: [t60, zb, brightness, detune, skew, strike, b]
-            let mut x = [row.t60, row.zb, row.brightness, row.detune, row.skew, row.strike, row.b];
-            let lo = [2.0, 20.0, 0.05, 0.05, 0.02, 0.03, row.b * 0.5];
-            let hi = [150.0, 20_000.0, 0.98, 2.0, 0.8, 0.22, row.b * 2.0];
+            // param vector:
+            // [t60, zb, brightness, detune, skew, strike, b, hammer_k, hammer_p, hammer_v]
+            let mut x = [
+                row.t60, row.zb, row.brightness, row.detune, row.skew, row.strike, row.b,
+                row.hammer_k, row.hammer_p, row.hammer_v,
+            ];
+            // hammer_k spans 5e-4..8: real treble needs contact times of
+            // MULTIPLE periods (the spectral null on partial 2 is the sound
+            // of the register) — measured at n96: k_scale 0.001 took the
+            // strict loss from 41 → 12.8 dB
+            let lo = [2.0, 20.0, 0.05, 0.05, 0.02, 0.03, row.b * 0.5, 5e-4, 1.6, 0.4];
+            let hi = [150.0, 20_000.0, 0.98, 2.0, 0.8, 0.22, row.b * 2.0, 8.0, 3.8, 1.8];
 
-            let loss = |x: &[f32; 7]| -> f32 {
+            let loss = |x: &[f32; 10]| -> f32 {
                 let n_disp = wgtable::pick_n_disp(row.f0, x[6], x[2], sr);
                 let p = waveguide::StringParams {
                     f0: row.f0,
@@ -1461,9 +1482,10 @@ fn cmd_wg_fit(
                     inharmonicity: x[6],
                     n_disp,
                 };
+                let hammer = waveguide::HammerParams { k_scale: x[7], p_exp: x[8], v_scale: x[9] };
                 let mut total = 0.0f32;
                 for (rv, real, track) in &refs {
-                    let m = render_wg_cell(&p, sr, strings, x[3], x[1], *rv, x[5], x[4], n, None);
+                    let m = render_wg_cell(&p, sr, strings, x[3], x[1], *rv, x[5], x[4], hammer, n, None);
                     let pe = track.rmse_vs(&m, sr);
                     let env = validate::envelope_rmse_db(&m, real, sr);
                     let pe = if pe.is_finite() { pe } else { 60.0 };
@@ -1477,10 +1499,20 @@ fn cmd_wg_fit(
             let start = best;
             let mut rng = 0x9E3779B97F4A7C15u64 ^ (note as u64) << 32;
             for e in 0..evals {
-                // shrink step size over the run: ×2 range → ×1.1
-                let scale = 2.0f32 * (0.55f32).powf(4.0 * e as f32 / evals as f32) + 1.05;
-                let i = (lcg(&mut rng) * 3.5) as usize % 7;
-                let step = scale.powf(lcg(&mut rng) - 1.0); // log-uniform in [1/scale, scale]
+                // shrink step size over the run: ×2 range → ×1.1; every 10th
+                // proposal is a LONG JUMP (×30 range) so a monotone-but-far
+                // optimum (e.g. a 1000× softer hammer) stays reachable —
+                // greedy small steps provably stalled on exactly that
+                let scale = if e % 10 == 9 {
+                    30.0
+                } else {
+                    2.0f32 * (0.55f32).powf(4.0 * e as f32 / evals as f32) + 1.05
+                };
+                // lcg is 0..1: scale by the FULL param count (a 0..5 scaling
+                // here meant params 5..9 — strike, B, the whole hammer — were
+                // never proposed; three fit runs stalled on exactly those)
+                let i = (lcg(&mut rng) * 10.0) as usize % 10;
+                let step = scale.powf(2.0 * lcg(&mut rng) - 1.0); // log-uniform [1/scale, scale]
                 let mut cand = x;
                 cand[i] = (cand[i] * step).clamp(lo[i], hi[i]);
                 let l = loss(&cand);
@@ -1498,6 +1530,9 @@ fn cmd_wg_fit(
             new_row.skew = x[4];
             new_row.strike = x[5];
             new_row.b = x[6];
+            new_row.hammer_k = x[7];
+            new_row.hammer_p = x[8];
+            new_row.hammer_v = x[9];
             new_row.n_disp = wgtable::pick_n_disp(row.f0, x[6], x[2], sr);
             Some((note, new_row, start, best))
         })
@@ -1580,8 +1615,12 @@ fn cmd_validate(
             };
             let body_bps = entry.and_then(|e| e.body.as_deref());
             let skew_c = entry.map(|e| e.skew).unwrap_or(0.15);
-            let model =
-                render_wg_cell(&p, sr, strings, detune_c, zb_c, *vel, strike_c, skew_c, n, body_bps);
+            let hammer_c = entry
+                .map(|e| waveguide::HammerParams { k_scale: e.hammer_k, p_exp: e.hammer_p, v_scale: e.hammer_v })
+                .unwrap_or_default();
+            let model = render_wg_cell(
+                &p, sr, strings, detune_c, zb_c, *vel, strike_c, skew_c, hammer_c, n, body_bps,
+            );
             Some(validate::validate_cell(*note, *vel, &model, &real.samples[..n], sr, &tol))
         })
         .collect();

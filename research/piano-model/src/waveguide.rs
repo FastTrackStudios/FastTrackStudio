@@ -48,6 +48,24 @@ pub struct StringParams {
     pub n_disp: usize,     // dispersion allpass count
 }
 
+/// Per-note nonlinear-hammer parameters (fit against the library; the
+/// defaults reproduce the keyboard-graded curves).
+#[derive(Clone, Copy)]
+pub struct HammerParams {
+    /// Multiplier on the register-graded felt stiffness.
+    pub k_scale: f32,
+    /// Felt stiffness exponent (soft ~2.2 .. hard ~3.5).
+    pub p_exp: f32,
+    /// Multiplier on the contact-velocity map.
+    pub v_scale: f32,
+}
+
+impl Default for HammerParams {
+    fn default() -> Self {
+        Self { k_scale: 1.0, p_exp: 2.8, v_scale: 1.0 }
+    }
+}
+
 pub struct StringWaveguide {
     buf: Vec<f32>,
     n: usize,
@@ -62,6 +80,7 @@ pub struct StringWaveguide {
     // hammer excitation queued at note-on
     exc: Vec<f32>,
     exc_pos: usize,
+    pub hammer: HammerParams,
 }
 
 /// Exact phase delay (in samples) of the first-order allpass
@@ -178,6 +197,7 @@ impl StringWaveguide {
             sr,
             exc: Vec::new(),
             exc_pos: 0,
+            hammer: HammerParams::default(),
         }
     }
 
@@ -197,11 +217,11 @@ impl StringWaveguide {
         let f0_est = self.sr / self.n as f32;
         let g = (f0_est / 220.0).clamp(0.1, 20.0); // 1.0 at A3
         let m = (0.009 * g.powf(-0.3)).clamp(0.004, 0.014); // kg
-        let k = (1.5e9 * g.powf(1.5)).clamp(1e7, 1e11); // felt stiffness
-        let p_exp = 2.8f32; // felt stiffness exponent
+        let k = (self.hammer.k_scale * 1.5e9 * g.powf(1.5)).clamp(1e7, 1e12); // felt stiffness
+        let p_exp = self.hammer.p_exp; // felt stiffness exponent
         let two_r = 10.0f32; // 2× string wave impedance, kg/s
         let dt = 1.0 / self.sr;
-        let v0 = 1.2 + 4.3 * vel01; // hammer speed at contact, m/s
+        let v0 = self.hammer.v_scale * (1.2 + 4.3 * vel01); // contact speed, m/s
 
         let mut xh = 0.0f32; // hammer position
         let mut vh = v0;
@@ -347,6 +367,12 @@ impl CoupledStrings {
     /// micro-misalignment); that asymmetry is what SEEDS the antisymmetric
     /// modes, so the aftersound starts ~20 dB under the prompt sound instead
     /// of near silence (Weinreich §V).
+    pub fn set_hammer(&mut self, h: HammerParams) {
+        for s in &mut self.strings {
+            s.hammer = h;
+        }
+    }
+
     pub fn strike(&mut self, vel01: f32, strike_pos: f32) {
         let n = self.strings.len();
         for (i, s) in self.strings.iter_mut().enumerate() {
