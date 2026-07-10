@@ -7310,20 +7310,25 @@ name = "fasttrackstudio"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "axum",
  "daw",
  "daw-standalone",
  "dioxus",
  "engine-launcher",
  "eyre",
  "getrandom 0.3.4",
+ "include_dir",
  "keyflow",
  "session",
  "session-guide",
  "session-proto",
  "session-ui",
+ "signal-guitar",
  "signal-guitar-proto",
  "signal-guitar-ui",
+ "signal-sampler",
  "tokio",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "vox",
@@ -10278,6 +10283,25 @@ name = "impls"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a46645bbd70538861a90d0f26c31537cdf1e44aae99a794fb75a664b70951bc"
+
+[[package]]
+name = "include_dir"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
 
 [[package]]
 name = "indenter"
@@ -18045,20 +18069,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal-engine"
-version = "0.1.0"
-dependencies = [
- "architect",
- "axum",
- "signal-guitar",
- "signal-sampler",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "signal-extension"
 version = "0.1.0"
 dependencies = [
@@ -18422,28 +18432,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid 1.23.4",
-]
-
-[[package]]
-name = "signal-web"
-version = "0.1.0"
-dependencies = [
- "architect",
- "dioxus",
- "futures-util",
- "getrandom 0.3.4",
- "gloo-timers",
- "session-proto",
- "session-ui",
- "signal-guitar-proto",
- "signal-guitar-ui",
- "tracing",
- "uuid 1.23.4",
- "vox",
- "vox-core",
- "vox-websocket",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]

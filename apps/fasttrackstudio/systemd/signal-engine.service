@@ -1,7 +1,9 @@
 # FastTrackStudio signal engine — supervised for live use.
-# Installed by `just rig-install` to ~/.config/systemd/user/; the binary
-# and web bundle live in ~/.local/lib/fts/ (decoupled from the dev
-# target/ dir so builds can't disturb the running service).
+# Installed by `just rig-install` to ~/.config/systemd/user/; the ONE
+# fasttrackstudio binary lives in ~/.local/lib/fts/ (decoupled from the
+# dev target/ dir so builds can't disturb the running service) and runs
+# in headless engine mode; the web remote is embedded in the binary
+# (feature embed-web).
 #
 #   systemctl --user status signal-engine     # health
 #   journalctl --user -u signal-engine -f     # logs
@@ -14,8 +16,7 @@ After=pipewire.service
 Wants=pipewire.service
 
 [Service]
-ExecStart=%h/.local/lib/fts/signal-engine
-Environment=SIGNAL_WEB_DIST=%h/.local/lib/fts/signal-web
+ExecStart=%h/.local/lib/fts/fasttrackstudio --engine
 Environment=RUST_BACKTRACE=1
 # Crash-only: whatever happens, be back in ~1s.
 Restart=always

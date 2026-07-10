@@ -11,7 +11,7 @@ description = "fts — the one FastTrackStudio CLI (daw, keyflow, engines, statu
 #   fts daw <...>            the daw command tree (daw::cli, feature `daw`)
 #   fts keyflow <...>        the kf command tree  (keyflow-cli, feature `keyflow`;
 #                            alias: fts kf)
-#   fts signal engine        spawn the signal-engine binary (headless rig core)
+#   fts signal engine        spawn `fasttrackstudio --engine` (headless rig core)
 #   fts session engine       in-process standalone session engine on ws://:3030/ws
 #   fts status               probe the known engine ports and report up/down
 #

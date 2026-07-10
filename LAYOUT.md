@@ -58,8 +58,8 @@ consumed as `x.workspace = true`.
 | new | from |
 |---|---|
 | apps/fasttrackstudio | (already there) — THE app |
-| apps/signal-engine | signal/apps/rigd (was `signal-rigd`) |
-| apps/signal-web | signal/apps/web |
+| (dissolved) apps/signal-engine | signal/apps/rigd (was `signal-rigd`) → folded into apps/fasttrackstudio (`fasttrackstudio --engine`, src/engine_main.rs) |
+| (deleted) apps/signal-web | signal/apps/web → superseded by the fasttrackstudio web build (`dx build --platform web --no-default-features --features signal`) |
 | apps/fts-cli | NEW — the one `fts` CLI (mounts daw::cli + keyflow-cli, manages engines) |
 | (dissolved) apps/daw-cli | folded into crates/daw/daw as `daw::cli` behind the `cli` feature (thin `daw` bin kept) |
 | (moved) apps/keyflow-cli | crates/keyflow/cli — lib-first (`keyflow_cli::cli_main`), thin `kf` bin kept |

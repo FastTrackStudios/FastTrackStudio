@@ -2,7 +2,8 @@
 //!
 //! Mounts the domain CLIs as subcommands (`fts daw <...>` → `daw::cli`,
 //! `fts keyflow <...>` → `keyflow-cli`) and manages the headless engines:
-//! `fts signal engine` spawns the `signal-engine` binary (the rig core,
+//! `fts signal engine` runs the headless signal engine — the
+//! `fasttrackstudio` binary in `--engine` mode (the rig core,
 //! ws://:4040/vox), `fts session engine` runs the standalone session
 //! engine in-process (ws://:3030/ws), `fts status` probes both ports.
 
@@ -56,8 +57,8 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum SignalCmd {
-    /// Spawn the signal-engine binary (guitar in → NAM chain → out,
-    /// vox router on ws://:4040/vox). Detaches by default.
+    /// Spawn the signal engine — `fasttrackstudio --engine` (guitar in →
+    /// NAM chain → out, vox router on ws://:4040/vox). Detaches by default.
     Engine {
         /// Bind address for the engine (sets SIGNAL_ENGINE_ADDR).
         #[arg(long)]
@@ -115,7 +116,7 @@ fn main() -> Result<()> {
     }
 }
 
-/// `fts signal engine` — spawn the signal-engine binary as a child process.
+/// `fts signal engine` — spawn `fasttrackstudio --engine` as a child process.
 fn signal_engine(addr: Option<String>, foreground: bool) -> Result<()> {
     // Only meaningful on the default port — a custom --addr is the
     // caller saying "bind here", e.g. a second engine next to a live one.
@@ -141,7 +142,7 @@ fn signal_engine(addr: Option<String>, foreground: bool) -> Result<()> {
     };
     match &spawned.source {
         LaunchSource::Binary(path) => eprintln!("spawned {}", path.display()),
-        LaunchSource::Cargo => eprintln!("no signal-engine binary found — `cargo run -p signal-engine` (dev fallback)"),
+        LaunchSource::Cargo => eprintln!("no fasttrackstudio binary found — `cargo run -p fasttrackstudio -- --engine` (dev fallback)"),
     }
 
     if foreground {
@@ -151,7 +152,7 @@ fn signal_engine(addr: Option<String>, foreground: bool) -> Result<()> {
         let mut child = spawned.child;
         let status = child.wait()?;
         if !status.success() {
-            eyre::bail!("signal-engine exited: {status}");
+            eyre::bail!("signal engine exited: {status}");
         }
         Ok(())
     } else {

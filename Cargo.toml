@@ -211,8 +211,6 @@ members = [
     "apps/fasttrackstudio",
     "apps/installer",
     "apps/fts-cli",
-    "apps/signal-engine",
-    "apps/signal-web",
     "apps/site",
 ]
 
@@ -426,6 +424,9 @@ vox-websocket = { version = "0.10.0-rc.5" }
 iroh = { version = "1" }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
+# Embeds the staged fasttrackstudio web bundle into the native binary
+# (apps/fasttrackstudio feature `embed-web`).
+include_dir = "0.7"
 
 # ── Architect framework — in-tree at libs/architect (subtree import) ──
 architect = { path = "libs/architect/architect" }
@@ -703,7 +704,7 @@ collapsible_match = "allow"
 filter_next = "allow"
 
 # ── Dev profile (carried from the dissolved signal workspace) ──────────
-# The live rig runs from target/debug/signal-engine (formerly signal-rigd): the vendored NAM C++
+# The live rig runs from `fasttrackstudio --engine` (formerly signal-engine/signal-rigd): the vendored NAM C++
 # core and the DSP crates are unusable at opt-level 0 (~10-50x slower,
 # xruns), so dependencies build at release opt in dev while the thin
 # app/UI workspace crates stay at light opt for fast rebuilds.

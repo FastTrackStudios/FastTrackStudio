@@ -2,7 +2,10 @@
 @import "./fts-theme.css";
 
 /* Scan app source and UI crate dependencies for Tailwind class usage.
- * Paths are relative to this file (apps/signal-web/) in the root workspace. */
+ * Paths are relative to this file (apps/fasttrackstudio/) in the root
+ * workspace. Output: assets/tailwind-signal.css (`just tailwind`), inlined
+ * by src/rig_view.rs — distinct from assets/tailwind.css, the
+ * session-scoped sheet loaded via asset!(). */
 @source "./src/**/*.rs";
 @source "../../crates/signal/ui/src/**/*.rs";
 @source "../../crates/signal/grid-ui/src/**/*.rs";

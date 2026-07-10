@@ -11,7 +11,14 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
 
 - The **live guitar rig** is a systemd user service (`signal-engine`,
   release build at ~/.local/lib/fts, deployed by `just rig-install`;
-  logs: `journalctl --user -u signal-engine -f`). Hardened + drilled
+  logs: `journalctl --user -u signal-engine -f`). NOTE: after the
+  single-binary consolidation (item 14, done in-tree) the unit keeps its
+  `signal-engine` name but the NEXT `just rig-install` deploys ONE
+  binary — `~/.local/lib/fts/fasttrackstudio` run as `fasttrackstudio
+  --engine`, web remote embedded (`--features embed-web`). The CURRENTLY
+  deployed install still runs the old `signal-engine` binary +
+  `signal-web` bundle until that deploy happens (both left in place by
+  rig-install; clean by hand after confirming). Hardened + drilled
   2026-07-10: kill -9 → serving in 1.45s with last patch/song/tempo
   restored; pipewire daemon death → detected → self-restart, back in
   ~15s; USB device re-link watchdog; plugin panics bypass the block;
@@ -23,10 +30,10 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
   working-tree diffs to commit. Reload with the ↻ header button.
 - **Voyager (mac)** still has the OLD multi-repo clones + bootstrap
   script (~/voyager-bootstrap.sh) — must be re-pointed: fresh clone of
-  the monorepo, `nix develop`, `cargo build --release -p signal-engine`,
-  re-sync the web bundle. Its rig config/NAM paths were already migrated
+  the monorepo, `nix develop`, `just rig-install` (one binary:
+  `fasttrackstudio --engine`, web bundle embedded). Its rig config/NAM paths were already migrated
   to /Users/codywright. The flake is darwin-ready (apple-sdk_15 branch)
-  and signal-engine's PipeWire backend is now Linux-gated (plain cpal →
+  and the engine's PipeWire backend is now Linux-gated (plain cpal →
   CoreAudio elsewhere) — darwin build is UNTESTED, first `cargo build`
   on voyager will tell.
 
@@ -88,16 +95,16 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    clang env vars (see the flake notes / agent report in git history).
 11. **iroh p2p transport** (`architect::iroh_link`, feature `iroh`):
    vox Link over iroh 1.0 QUIC bi-streams (u32-BE framing, ALPN
-   `architect/vox/1`). signal-engine serves it beside ws by default —
+   `architect/vox/1`). The signal engine serves it beside ws by default —
    device key `~/.config/signal/iroh.key`, id logged + written to
    `~/.config/signal/iroh-endpoint-id`. The app dials it via
    `SIGNAL_ENGINE_IROH_ID` or the connect-screen form (saved to
    `~/.config/fts/signal-engine-iroh-id`; app device key
    `~/.config/fts/iroh.key`). iroh is wired in the BROWSER too:
-   signal-web + the fts web build dial by rig key (device key in
+   the fts web build dials by rig key (device key in
    localStorage `fts.iroh-key`, relay-only in the sandbox). The engine
-   serves the web remote itself (tower-http ServeDir; `SIGNAL_WEB_DIST`
-   → `<exe>/signal-web` → target/dx/...; `just signal-web-sync`).
+   serves the web remote itself (embedded bundle / SIGNAL_WEB_DIST /
+   legacy dirs — see item 14).
    Loopback vox handshake tested (`cargo test -p architect --features
    iroh`); real cross-network dial via n0 discovery/relays UNTESTED —
    browser iroh dial also untested end-to-end. Next: engine id
@@ -134,14 +141,27 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    WaveNet ~3.9x realtime native scalar; try +simd128 on wasm, and a
    set_slimmable_size knob on PureNamModel is a small follow-up.
 
-14. **Single-binary consolidation (APPROVED, next up)**: fold
-   apps/signal-engine into apps/fasttrackstudio — `fasttrackstudio`
-   = desktop app, `fasttrackstudio --engine` = headless engine; web
-   bundle EMBEDDED in the binary (two-stage: dx web build → native
-   build embeds; kills SIGNAL_WEB_DIST + signal-web-sync); Engines
-   panel spawns current_exe() --engine; apps/signal-web retires (the
-   fts web build supersedes it); systemd unit + rig-install shrink to
-   one artifact. Process split stays a runtime property.
+14. **Single-binary consolidation — DONE (2026-07-10, not yet deployed)**:
+   apps/signal-engine folded into apps/fasttrackstudio
+   (`src/engine_main.rs`; `fasttrackstudio --engine` = the headless
+   engine, plain-arg match, no GUI/session bootstrap in that mode);
+   apps/signal-web DELETED (the fts web build supersedes it — its
+   tailwind input.css/fts-theme.css moved to apps/fasttrackstudio/,
+   sheet now assets/tailwind-signal.css, distinct from the session
+   sheet assets/tailwind.css). Web bundle EMBEDDED via include_dir
+   behind feature `embed-web` (staging: `just web-stage` → dx web build
+   → apps/fasttrackstudio/web-dist/, gitignored). Engine web-asset
+   precedence: SIGNAL_WEB_DIST → embedded → <exe_dir>/signal-web
+   (legacy) → target/dx/fasttrackstudio → headless-only. SIGNAL_WEB_DIST
+   still honored as an override. engine-launcher's SIGNAL_ENGINE now
+   resolves the `fasttrackstudio` binary with `--engine` (self-spawn via
+   current_exe when the app supervises its own engine; systemd unit name
+   stays `signal-engine`). Justfile: `signal-web-sync` removed,
+   `web-stage` added, `rig-install` deploys the one binary, `tailwind`
+   builds the signal sheet in apps/fasttrackstudio. Run `just
+   rig-install` to move the live service onto the new artifact. Process
+   split stays a runtime property. (dx note: wasm-opt SIGABRTs in this
+   shell — dx continues with unoptimized wasm; bundle works.)
 
 ## Gotchas that will bite again
 
@@ -150,7 +170,9 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
   Keep `Cargo.lock` committed. Remaining such table: keyflow.git
   (Editor.git references it).
 - `pkill -f <pattern>` kills your own shell if the pattern appears in
-  the command line (exit 144). Use narrowed patterns (`signal-engine$`).
+  the command line (exit 144). Use narrowed patterns — and note the
+  engine process is now `fasttrackstudio --engine` (the old deploy was
+  `signal-engine$`).
 - Tailwind: run `just tailwind` BEFORE `dx build` whenever UI classes
   change.
 - One blitz rev tree-wide (`links = servo_style_crate` collisions);
