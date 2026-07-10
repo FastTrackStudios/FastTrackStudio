@@ -67,6 +67,9 @@ enum SignalCmd {
         #[arg(long)]
         foreground: bool,
     },
+    /// Stop the signal engine (the systemd user unit — same switch the
+    /// desktop app uses; a stop is final, nothing restarts it).
+    Stop,
 }
 
 #[derive(Subcommand)]
@@ -106,6 +109,9 @@ fn main() -> Result<()> {
         Cmd::Signal {
             command: SignalCmd::Engine { addr, foreground },
         } => signal_engine(addr, foreground),
+        Cmd::Signal {
+            command: SignalCmd::Stop,
+        } => signal_stop(),
         Cmd::Session {
             command: SessionCmd::Engine { addr },
         } => session_engine_cmd(addr),
@@ -123,6 +129,18 @@ fn signal_engine(addr: Option<String>, foreground: bool) -> Result<()> {
     if addr.is_none() && probe(&SIGNAL_ENGINE) {
         println!(
             "signal engine already running — {}",
+            SIGNAL_ENGINE.ws_url()
+        );
+        return Ok(());
+    }
+
+    // Default detached start goes through the systemd user unit when
+    // installed (`just rig-install`) — same switch the desktop app uses:
+    // crash-supervised while running, `fts signal stop` is final.
+    if addr.is_none() && !foreground && engine_launcher::systemd_available(&SIGNAL_ENGINE) {
+        engine_launcher::systemd_start(&SIGNAL_ENGINE)?;
+        println!(
+            "signal engine started (systemd user unit) — {}",
             SIGNAL_ENGINE.ws_url()
         );
         return Ok(());
@@ -159,6 +177,25 @@ fn signal_engine(addr: Option<String>, foreground: bool) -> Result<()> {
         println!("signal engine started — pid {} — {url}", spawned.pid());
         Ok(())
     }
+}
+
+/// `fts signal stop` — stop the engine's systemd user unit.
+fn signal_stop() -> Result<()> {
+    if engine_launcher::systemd_active(&SIGNAL_ENGINE) {
+        engine_launcher::systemd_stop(&SIGNAL_ENGINE)?;
+        println!("signal engine stopped");
+        return Ok(());
+    }
+    if probe(&SIGNAL_ENGINE) {
+        eyre::bail!(
+            "an engine is serving {} but not via the systemd unit — \
+             stop it where it was started (desktop app child, foreground \
+             terminal, or kill its pid)",
+            SIGNAL_ENGINE.ws_url()
+        );
+    }
+    println!("signal engine is not running");
+    Ok(())
 }
 
 /// `fts session engine` — the in-process standalone session engine.
