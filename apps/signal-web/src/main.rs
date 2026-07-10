@@ -2,15 +2,21 @@
 //!
 //! Connects to a running `signal-engine` over a vox WebSocket and mounts the
 //! same [`GuitarRigRemote`] components the desktop shell uses. The audio
-//! engine never leaves the rigd process — only the UI is wasm.
+//! engine never leaves the engine process — only the UI is wasm.
+//!
+//! The engine serves this bundle itself (http://<host>:4040/), so by default
+//! the remote talks to the same origin it was loaded from. A connect screen
+//! lets the user point it elsewhere (ws url) or at an iroh endpoint id
+//! ("rig key"); choices persist in localStorage.
 //!
 //! Run:
-//!   cargo run -p signal-engine              # the headless core (native)
-//!   cd apps/web && dx serve --platform web  # this UI
+//!   cargo run -p signal-engine                     # the headless core (native)
+//!   cd apps/signal-web && dx serve --platform web  # this UI (dev loop)
 
 #[cfg(target_arch = "wasm32")]
 mod session_client;
 
+use architect::iroh_link::iroh;
 use dioxus::prelude::*;
 
 use signal_guitar_proto::audio::AudioSettingsClient;
@@ -60,27 +66,116 @@ select:focus, input:focus {
 }
 "#;
 
-/// Where the rig core lives. Same host as the page by default; override at
-/// build time with `SIGNAL_ENGINE_URL` (or the legacy `RIGD_URL`) if the
-/// core runs elsewhere.
-fn server_url() -> String {
+// ── Connection target ────────────────────────────────────────────────────
+
+/// localStorage key: user-saved ws url override.
+const LS_WS_URL: &str = "fts.engine.ws-url";
+/// localStorage key: user-saved iroh endpoint id ("rig key").
+const LS_IROH_ID: &str = "fts.engine.iroh-id";
+
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+/// Read a localStorage key, treating blank/whitespace as unset.
+fn ls_get(key: &str) -> Option<String> {
+    local_storage()?
+        .get_item(key)
+        .ok()
+        .flatten()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Write a localStorage key; a blank value removes it.
+fn ls_set(key: &str, value: &str) {
+    let Some(storage) = local_storage() else {
+        return;
+    };
+    let v = value.trim();
+    let _ = if v.is_empty() {
+        storage.remove_item(key)
+    } else {
+        storage.set_item(key, v)
+    };
+}
+
+/// Where the rig core lives when nothing is saved: same origin as the page —
+/// the engine serves this bundle itself, so `ws(s)://<location.host>/vox` is
+/// the engine. Exceptions:
+/// - a compile-time `SIGNAL_ENGINE_URL` (or legacy `RIGD_URL`) still wins;
+/// - a localhost dx dev server (`dx serve`, default port 8080) is not the
+///   engine — fall back to the engine's default port.
+fn same_origin_url() -> String {
     if let Some(url) = option_env!("SIGNAL_ENGINE_URL").or(option_env!("RIGD_URL")) {
         return url.to_string();
     }
-    let host = web_sys::window()
-        .and_then(|w| w.location().hostname().ok())
-        .filter(|h| !h.is_empty())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
-    format!("ws://{host}:4040/vox")
+    let loc = web_sys::window().map(|w| w.location());
+    let hostname = loc
+        .as_ref()
+        .and_then(|l| l.hostname().ok())
+        .unwrap_or_default();
+    if hostname.is_empty() {
+        return "ws://127.0.0.1:4040/vox".to_string();
+    }
+    let port = loc.as_ref().and_then(|l| l.port().ok()).unwrap_or_default();
+    let localhost = hostname == "localhost" || hostname == "127.0.0.1" || hostname == "[::1]";
+    if localhost && port == "8080" {
+        // `dx serve` on its own port — the engine isn't this origin.
+        return "ws://127.0.0.1:4040/vox".to_string();
+    }
+    let https = loc
+        .as_ref()
+        .and_then(|l| l.protocol().ok())
+        .as_deref()
+        == Some("https:");
+    let host = loc.as_ref().and_then(|l| l.host().ok()).unwrap_or(hostname);
+    let scheme = if https { "wss" } else { "ws" };
+    format!("{scheme}://{host}/vox")
 }
 
-/// Establish one typed client over its own WebSocket (a vox caller is
-/// service-bound once constructed, so sibling services don't share one).
-async fn establish<C: vox_core::FromVoxLane>(url: &str) -> Option<C> {
-    let link = vox_websocket::WsLink::connect(url)
-        .await
-        .map_err(|e| tracing::error!("ws connect {url}: {e:?}"))
-        .ok()?;
+/// How to reach the engine. Precedence: saved iroh id > saved ws url >
+/// same-origin default.
+#[derive(Clone, PartialEq, Debug)]
+enum Target {
+    Ws(String),
+    Iroh(String),
+}
+
+impl Target {
+    /// Resolve the current target from localStorage + location.
+    fn effective() -> Target {
+        if let Some(id) = ls_get(LS_IROH_ID) {
+            return Target::Iroh(id);
+        }
+        if let Some(url) = ls_get(LS_WS_URL) {
+            return Target::Ws(url);
+        }
+        Target::Ws(same_origin_url())
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Target::Ws(url) => url.clone(),
+            Target::Iroh(id) => format!("iroh:{id}"),
+        }
+    }
+}
+
+// ── Connect flow ─────────────────────────────────────────────────────────
+
+type Clients = (RigClient, RigStreamClient, AudioSettingsClient);
+
+/// Establish one typed client over a fresh lane on `link`. Every transport
+/// (WebSocket today, iroh p2p once its wasm port lands) funnels through this
+/// single `initiator_on` flow — hand it a [`vox::Link`], get a typed client.
+async fn establish_on<C, L>(link: L) -> Option<C>
+where
+    C: vox_core::FromVoxLane,
+    L: vox::Link + 'static,
+    L::Tx: vox::MaybeSend + vox::MaybeSync + 'static,
+    L::Rx: vox::MaybeSend + 'static,
+{
     vox_core::initiator_on(link)
         .establish::<C>()
         .await
@@ -88,16 +183,87 @@ async fn establish<C: vox_core::FromVoxLane>(url: &str) -> Option<C> {
         .ok()
 }
 
-fn main() {
-    dioxus::launch(App);
+async fn dial_ws(url: &str) -> Option<vox_websocket::WsLink> {
+    vox_websocket::WsLink::connect(url)
+        .await
+        .map_err(|e| tracing::error!("ws connect {url}: {e:?}"))
+        .ok()
 }
 
-/// One connect attempt for all three clients.
-async fn connect_once(url: &str) -> Option<(RigClient, RigStreamClient, AudioSettingsClient)> {
-    let rig: RigClient = establish(url).await?;
-    let stream: RigStreamClient = establish(url).await?;
-    let settings: AudioSettingsClient = establish(url).await?;
+/// One WebSocket connect attempt for all three clients — one link per typed
+/// client (a vox caller is service-bound once constructed, so sibling
+/// services don't share one).
+async fn connect_ws(url: &str) -> Option<Clients> {
+    let rig: RigClient = establish_on(dial_ws(url).await?).await?;
+    let stream: RigStreamClient = establish_on(dial_ws(url).await?).await?;
+    let settings: AudioSettingsClient = establish_on(dial_ws(url).await?).await?;
     Some((rig, stream, settings))
+}
+
+/// localStorage key: this browser's iroh device key (hex) — the same key
+/// the fasttrackstudio web build uses, so one origin = one device
+/// identity.
+const LS_DEVICE_KEY: &str = "fts.iroh-key";
+
+/// This browser's iroh endpoint — one per page, device key persisted in
+/// localStorage. Browsers dial relay-only (no UDP in the sandbox).
+async fn app_endpoint() -> Option<iroh::Endpoint> {
+    static CELL: std::sync::OnceLock<iroh::Endpoint> = std::sync::OnceLock::new();
+    if let Some(ep) = CELL.get() {
+        return Some(ep.clone());
+    }
+    let key = match ls_get(LS_DEVICE_KEY)
+        .and_then(|hex| architect::iroh_link::secret_key_from_hex(&hex).ok())
+    {
+        Some(key) => key,
+        None => {
+            let key = iroh::SecretKey::generate();
+            ls_set(LS_DEVICE_KEY, &architect::iroh_link::secret_key_to_hex(&key));
+            key
+        }
+    };
+    let ep = architect::iroh_link::bind_endpoint(key)
+        .await
+        .map_err(|e| tracing::error!("iroh bind: {e}"))
+        .ok()?;
+    Some(CELL.get_or_init(|| ep).clone())
+}
+
+async fn dial_iroh(
+    ep: &iroh::Endpoint,
+    id: iroh::EndpointId,
+) -> Option<architect::iroh_link::IrohLink> {
+    architect::iroh_link::connect(ep, id)
+        .await
+        .map_err(|e| tracing::error!("iroh connect {id}: {e:?}"))
+        .ok()
+}
+
+/// One connect attempt over iroh, by bare endpoint id ("rig key") — one
+/// bi-stream link per typed client, same shape as [`connect_ws`].
+async fn connect_iroh(id: &str) -> Option<Clients> {
+    let id: iroh::EndpointId = id
+        .trim()
+        .parse()
+        .map_err(|e| tracing::error!("bad rig key: {e}"))
+        .ok()?;
+    let ep = app_endpoint().await?;
+    let rig: RigClient = establish_on(dial_iroh(&ep, id).await?).await?;
+    let stream: RigStreamClient = establish_on(dial_iroh(&ep, id).await?).await?;
+    let settings: AudioSettingsClient = establish_on(dial_iroh(&ep, id).await?).await?;
+    Some((rig, stream, settings))
+}
+
+/// One connect attempt against the current target.
+async fn connect_once(target: &Target) -> Option<Clients> {
+    match target {
+        Target::Ws(url) => connect_ws(url).await,
+        Target::Iroh(id) => connect_iroh(id).await,
+    }
+}
+
+fn main() {
+    dioxus::launch(App);
 }
 
 #[component]
@@ -110,18 +276,28 @@ fn App() -> Element {
     let mut generation = use_signal(|| 0u32);
     // The engine was up and went away (vs never seen) — changes the copy.
     let mut lost = use_signal(|| false);
+    // Where to connect (saved iroh id > saved ws url > same-origin default);
+    // the settings panel rewrites this after persisting to localStorage.
+    let target = use_signal(Target::effective);
+    // Settings overlay while connected (gear button, top-right).
+    let mut show_settings = use_signal(|| false);
 
     let clients = use_resource(move || {
         let generation = generation();
+        let target = target();
         async move {
-            let url = server_url();
             loop {
-                if let Some(c) = connect_once(&url).await {
+                if let Some(c) = connect_once(&target).await {
                     attempts.set(0);
                     return (generation, c);
                 }
                 attempts += 1;
-                architect::platform::sleep(std::time::Duration::from_millis(1200)).await;
+                // Relay dials are slower than a LAN ws — back off harder.
+                let wait = match &target {
+                    Target::Ws(_) => 1200,
+                    Target::Iroh(_) => 5000,
+                };
+                architect::platform::sleep(std::time::Duration::from_millis(wait)).await;
             }
         }
     });
@@ -178,25 +354,157 @@ fn App() -> Element {
                 let _ = provide_context(rig);
                 let _ = provide_context(stream);
                 let _ = provide_context(settings);
-                rsx! { GuitarRigRemote { key: "{generation}" } }
-            }
-            None => rsx! {
-                div { class: "flex flex-col items-center justify-center gap-3 h-full",
-                    span { class: "w-3 h-3 rounded-full animate-pulse",
-                        style: if lost() { "background-color: #ef4444;" } else { "background-color: #22c55e;" } }
-                    span { class: "text-sm font-semibold", style: "color: #e4e4e7;",
-                        if lost() { "Engine down — reconnecting…" } else { "Looking for the rig core…" }
+                rsx! {
+                    GuitarRigRemote { key: "{generation}" }
+                    // Small header affordance: reopen the connect screen
+                    // while connected.
+                    button {
+                        style: "position: fixed; top: 6px; right: 6px; z-index: 50; \
+                                width: 26px; height: 26px; display: flex; align-items: center; \
+                                justify-content: center; background: rgba(24, 24, 27, 0.75); \
+                                border: 1px solid #3f3f46; border-radius: 6px; color: #a1a1aa; \
+                                font-size: 13px; cursor: pointer; padding: 0;",
+                        title: "Engine connection…",
+                        onclick: move |_| show_settings.set(true),
+                        "⚙"
                     }
-                    span { class: "text-xs font-mono", style: "color: #71717a;",
-                        "{server_url()}"
-                    }
-                    if attempts() > 0 {
-                        span { class: "text-xs", style: "color: #71717a;",
-                            "Retrying — start signal-engine and this page will connect on its own."
+                    if show_settings() {
+                        div {
+                            style: "position: fixed; inset: 0; z-index: 60; display: flex; \
+                                    align-items: center; justify-content: center; \
+                                    background: rgba(0, 0, 0, 0.6);",
+                            onclick: move |_| show_settings.set(false),
+                            div {
+                                onclick: move |e| e.stop_propagation(),
+                                ConnectSettings {
+                                    target,
+                                    generation,
+                                    on_applied: move |_| show_settings.set(false),
+                                }
+                            }
                         }
                     }
                 }
+            }
+            None => rsx! {
+                div {
+                    style: "display: flex; flex-direction: column; align-items: center; \
+                            justify-content: center; gap: 14px; height: 100%; \
+                            background: #0a0a0a; overflow-y: auto;",
+                    div {
+                        style: "display: flex; flex-direction: column; align-items: center; gap: 8px;",
+                        span { class: "animate-pulse",
+                            style: if lost() {
+                                "width: 12px; height: 12px; border-radius: 9999px; background-color: #ef4444;"
+                            } else {
+                                "width: 12px; height: 12px; border-radius: 9999px; background-color: #22c55e;"
+                            } }
+                        span { style: "font-size: 14px; font-weight: 600; color: #e4e4e7;",
+                            if lost() { "Engine down — reconnecting…" } else { "Looking for the rig core…" }
+                        }
+                        span { style: "font-size: 12px; font-family: monospace; color: #71717a;",
+                            "{target().label()}"
+                        }
+                        if attempts() > 0 {
+                            span { style: "font-size: 12px; color: #71717a;",
+                                "Retrying — start signal-engine and this page will connect on its own."
+                            }
+                        }
+                    }
+                    ConnectSettings { target, generation }
+                }
             },
+        }
+    }
+}
+
+/// The connect/settings card: enter a ws URL or an iroh endpoint id ("rig
+/// key"); both persist to localStorage (`fts.engine.ws-url`,
+/// `fts.engine.iroh-id`). A saved rig key takes precedence over a saved ws
+/// url, which takes precedence over the same-origin default.
+#[component]
+fn ConnectSettings(
+    target: Signal<Target>,
+    generation: Signal<u32>,
+    on_applied: Option<EventHandler<()>>,
+) -> Element {
+    let mut ws_url = use_signal(|| ls_get(LS_WS_URL).unwrap_or_default());
+    let mut iroh_id = use_signal(|| ls_get(LS_IROH_ID).unwrap_or_default());
+
+    let mut apply = {
+        let mut target = target;
+        let mut generation = generation;
+        move |ws: String, iroh: String| {
+            ls_set(LS_WS_URL, &ws);
+            ls_set(LS_IROH_ID, &iroh);
+            target.set(Target::effective());
+            generation += 1; // tear down + reconnect against the new target
+            if let Some(cb) = &on_applied {
+                cb.call(());
+            }
+        }
+    };
+
+    let label_style = "font-size: 11px; font-weight: 600; letter-spacing: 0.05em; \
+                       text-transform: uppercase; color: #a1a1aa;";
+    let input_style = "width: 100%; box-sizing: border-box; padding: 7px 10px; \
+                       font-size: 13px; font-family: monospace; color: #e4e4e7; \
+                       background: #101012; border: 1px solid #3f3f46; border-radius: 6px;";
+
+    rsx! {
+        div {
+            style: "display: flex; flex-direction: column; gap: 12px; \
+                    width: min(420px, calc(100vw - 32px)); padding: 16px; \
+                    background: #18181b; border: 1px solid #27272a; border-radius: 10px;",
+            span { style: "font-size: 13px; font-weight: 600; color: #e4e4e7;",
+                "Engine connection"
+            }
+            div { style: "display: flex; flex-direction: column; gap: 5px;",
+                label { style: "{label_style}", "WebSocket URL" }
+                input {
+                    style: "{input_style}",
+                    r#type: "text",
+                    placeholder: "{same_origin_url()}",
+                    value: "{ws_url}",
+                    oninput: move |e| ws_url.set(e.value()),
+                }
+            }
+            div { style: "display: flex; flex-direction: column; gap: 5px;",
+                label { style: "{label_style}", "Rig key (iroh endpoint id)" }
+                input {
+                    style: "{input_style}",
+                    r#type: "text",
+                    placeholder: "paste the engine's endpoint id",
+                    value: "{iroh_id}",
+                    oninput: move |e| iroh_id.set(e.value()),
+                }
+                span { style: "font-size: 11px; color: #71717a;",
+                    "Takes precedence over the URL when set. The browser dials \
+                     the rig p2p over iroh relays — any network, no port \
+                     forwarding."
+                }
+            }
+            div { style: "display: flex; gap: 8px;",
+                button {
+                    style: "flex: 1; padding: 7px 10px; font-size: 13px; font-weight: 600; \
+                            color: #0a0a0a; background: #8fa8c8; border: none; \
+                            border-radius: 6px; cursor: pointer;",
+                    onclick: move |_| apply(ws_url(), iroh_id()),
+                    "Save & Connect"
+                }
+                button {
+                    style: "padding: 7px 10px; font-size: 13px; color: #a1a1aa; \
+                            background: transparent; border: 1px solid #3f3f46; \
+                            border-radius: 6px; cursor: pointer;",
+                    title: "Clear saved overrides and use the same-origin default",
+                    onclick: move |_| {
+                        ws_url.set(String::new());
+                        iroh_id.set(String::new());
+                        apply(String::new(), String::new());
+                    },
+                    "Use default"
+                }
+            }
         }
     }
 }

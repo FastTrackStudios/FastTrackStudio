@@ -22,9 +22,9 @@ wasm-bindgen-futures = "0.4"
 gloo-timers = { version = "0.3", features = ["futures"] }
 futures-util = { version = "0.3", default-features = false }
 tracing.workspace = true
-web-sys = { version = "0.3", features = ["Window", "Location"] }
+web-sys = { version = "0.3", features = ["Window", "Location", "Storage"] }
 # Portable sleep for the connect-retry loop (browser timers on wasm).
-architect = { workspace = true, features = ["platform"] }
+architect = { workspace = true, features = ["platform", "iroh"] }
 
 # wasm: uuid (pulled via signal-proto's typed ids) needs the js RNG.
 uuid = { version = "1", features = ["js"] }
