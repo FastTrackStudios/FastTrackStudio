@@ -39,6 +39,12 @@ pub async fn resolve(client: &reqwest::Client, tag: Option<&str>) -> eyre::Resul
     let status = resp.status();
     let body = resp.bytes().await.wrap_err("reading release response")?;
     if !status.is_success() {
+        // Gitea's /releases/latest EXCLUDES prereleases — when only
+        // alphas exist it 404s. Fall back to the newest release of any
+        // kind.
+        if status.as_u16() == 404 && tag.is_none() {
+            return Box::pin(resolve_newest_any(client)).await;
+        }
         let hint = match (status.as_u16(), tag) {
             (404, Some(tag)) => format!(" (no release tagged {tag}?)"),
             (404, None) => " (no releases published yet?)".to_string(),
@@ -85,4 +91,32 @@ pub async fn resolve(client: &reqwest::Client, tag: Option<&str>) -> eyre::Resul
         .find(|a| a.name == "SHA256SUMS");
 
     Ok(Release { tag, tarball, sums })
+}
+
+/// Newest release of any kind (prereleases included): first entry of
+/// the paginated list.
+async fn resolve_newest_any(client: &reqwest::Client) -> eyre::Result<Release> {
+    let url = format!("{API_BASE}/releases?limit=1");
+    let mut req = client.get(&url).header("Accept", "application/json");
+    if let Ok(token) = std::env::var("CODEBERG_TOKEN") {
+        if !token.is_empty() {
+            req = req.header("Authorization", format!("token {token}"));
+        }
+    }
+    let resp = req.send().await.wrap_err_with(|| format!("requesting {url}"))?;
+    let status = resp.status();
+    let body = resp.bytes().await.wrap_err("reading releases response")?;
+    if !status.is_success() {
+        return Err(eyre!("{url} -> HTTP {status}"));
+    }
+    let list: serde_json::Value =
+        serde_json::from_slice(&body).wrap_err("parsing releases JSON")?;
+    let first = list
+        .as_array()
+        .and_then(|a| a.first())
+        .ok_or_else(|| eyre!("no releases published yet"))?;
+    let tag = first["tag_name"]
+        .as_str()
+        .ok_or_else(|| eyre!("release JSON has no tag_name"))?;
+    Box::pin(resolve(client, Some(tag))).await
 }
