@@ -14,6 +14,7 @@ mod sample;
 mod soundboard;
 mod synth;
 mod table;
+mod validate;
 mod waveguide;
 
 use model::ModelConfig;
@@ -180,6 +181,45 @@ enum Cmd {
         #[arg(long)]
         body_ref: Option<PathBuf>,
     },
+    /// Validation harness: render the waveguide engine for a grid of
+    /// (note, velocity) cells, score each against the nearest reference
+    /// sample (tuning, B, two-stage decay, brightness, LSD, envelope corr)
+    /// with tolerance gates, and write an HTML diff report.
+    Validate {
+        #[arg(long, default_value = DEFAULT_LIB)]
+        lib: PathBuf,
+        /// MIDI notes, comma-separated.
+        #[arg(long, default_value = "45,50,57,60,64,69")]
+        notes: String,
+        /// MIDI velocities, comma-separated (nearest sampled layer is used).
+        #[arg(long, default_value = "32,64,94,110")]
+        vels: String,
+        /// Tolerance level: strict | default | relaxed.
+        #[arg(long, default_value = "default")]
+        level: String,
+        /// Seconds of audio to compare per cell.
+        #[arg(long, default_value_t = 10.0)]
+        dur: f32,
+        // engine params (same knobs as `wg`)
+        #[arg(long, default_value_t = 60.0)]
+        t60: f32,
+        #[arg(long, default_value_t = 550.0)]
+        zb: f32,
+        #[arg(long, default_value_t = 0.92)]
+        brightness: f32,
+        #[arg(long, default_value_t = 2.745e-4)]
+        inharm: f32,
+        #[arg(long, default_value_t = 8)]
+        n_disp: usize,
+        #[arg(long, default_value_t = 0.08)]
+        strike: f32,
+        #[arg(long, default_value_t = 3)]
+        strings: usize,
+        #[arg(long, default_value_t = 0.3)]
+        detune: f32,
+        #[arg(long, default_value = "out/validate.html")]
+        report: PathBuf,
+    },
     /// THE accuracy metric between any two audio files (multi-res log-spectral
     /// distance, dB; 0 = perfect null, single digits = perceptually close).
     Lsd {
@@ -324,6 +364,14 @@ fn main() -> Result<()> {
             attack_ms,
             outdir,
         } => cmd_decompose(lib, note, vel, attack_ms, outdir),
+        Cmd::Validate {
+            lib, notes, vels, level, dur, t60, zb, brightness, inharm, n_disp,
+            strike, strings, detune, report,
+        } => cmd_validate(
+            lib, notes, vels, level, dur,
+            waveguide::StringParams { f0: 0.0, t60, brightness, inharmonicity: inharm, n_disp },
+            strike, strings, detune, zb, report,
+        ),
         Cmd::Lsd { a, b } => {
             let aa = audio::load_any(&a)?;
             let bb = audio::load_any(&b)?;
@@ -775,6 +823,84 @@ fn cmd_wg(
     }
     synth::write_wav(&out, &buf, sr)?;
     println!("waveguide note {note} vel {vel} (f0 {f0:.2} Hz) → {}", out.display());
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_validate(
+    lib: PathBuf,
+    notes: String,
+    vels: String,
+    level: String,
+    dur: f32,
+    base: waveguide::StringParams,
+    strike: f32,
+    strings: usize,
+    detune: f32,
+    zb: f32,
+    report: PathBuf,
+) -> Result<()> {
+    use rayon::prelude::*;
+
+    let want_notes: Vec<u8> = notes.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let want_vels: Vec<u8> = vels.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let tol = validate::Tolerances::by_name(&level);
+    let (samples, _) = sample::scan(&lib);
+
+    // per requested cell: the pedal-up sample with the nearest velocity layer
+    let mut cells: Vec<(u8, u8, PathBuf)> = Vec::new();
+    for &note in &want_notes {
+        for &vel in &want_vels {
+            let best = samples
+                .iter()
+                .filter(|s| s.artic == sample::Artic::PedalUp && s.note == Some(note))
+                .min_by_key(|s| (s.vel.unwrap_or(0) as i32 - vel as i32).abs());
+            match best {
+                Some(s) => cells.push((note, s.vel.unwrap_or(vel), s.path.clone())),
+                None => eprintln!("no PU sample for note {note} — skipped"),
+            }
+        }
+    }
+    cells.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    println!("validating {} cells at level '{level}'…", cells.len());
+
+    let mut reports: Vec<validate::CellReport> = cells
+        .par_iter()
+        .filter_map(|(note, vel, path)| {
+            let real = audio::load_any(path).ok()?;
+            let sr = real.sr;
+            let n = ((dur * sr as f32) as usize).min(real.samples.len());
+            let p = waveguide::StringParams { f0: analyze::midi_hz(*note), ..base };
+            let mut cs = waveguide::CoupledStrings::new(&p, sr, strings, detune, zb);
+            cs.strike(*vel as f32 / 127.0, strike);
+            let mut model = vec![0.0f32; n];
+            for x in model.iter_mut() {
+                *x = cs.process();
+            }
+            synth::normalize(&mut model, 0.9);
+            Some(validate::validate_cell(*note, *vel, &model, &real.samples[..n], sr, &tol))
+        })
+        .collect();
+    reports.sort_by_key(|c| (c.note, c.vel));
+
+    for c in &reports {
+        let status = if c.passed { "PASS" } else { "FAIL" };
+        println!(
+            "  n{:3} v{:3}  {status}  tune {:+5.1}c  B {:.1e}/{:.1e}  prompt {:4.1}/{:4.1}s  after {:4.1}/{:4.1}s  bright {:.3}/{:.3}  LSD {:5.1}  env {:.3}  {}",
+            c.note, c.vel, c.tune_cents, c.b_model, c.b_ref,
+            c.prompt_model, c.prompt_ref, c.after_model, c.after_ref,
+            c.bright_model, c.bright_ref, c.lsd_db, c.env_corr,
+            c.failures.join("; "),
+        );
+    }
+    let passed = reports.iter().filter(|c| c.passed).count();
+    println!("{passed}/{} cells passed", reports.len());
+
+    if let Some(par) = report.parent() {
+        std::fs::create_dir_all(par)?;
+    }
+    std::fs::write(&report, validate::html_report("City Grand — waveguide vs Keyscape", &level, &reports))?;
+    println!("HTML report → {}", report.display());
     Ok(())
 }
 
