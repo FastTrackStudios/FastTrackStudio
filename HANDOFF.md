@@ -114,17 +114,22 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    third-party (ToneHunt-style downloads) — check redistribution
    licensing before making the repo public. To refresh the defaults,
    re-copy ~/.config/signal/rig and re-run the path rewrite.
-13. **Rig-in-the-browser (WebAudio) roadmap** (scouted 2026-07-09):
-   UI already wasm; eq/comp/audiocore-dsp/daw-audio-graph already
-   compile for wasm32. Blockers: neural-amp-modeler is C++/Eigen via cc
-   (needs emscripten/wasm-clang port or pure-Rust NAM inference — the
-   critical path), reverb→pitch pulls signalsmith-stretch (C++), and
-   GuitarRigBackend entangles pipewire/midir/fs (needs a wasm-safe
-   control core split; proto traits are the clean seam). Prior art:
-   daw-standalone has a working wasm AudioWorklet renderer
-   (`src/audio_engine/web.rs` + examples/web_worklet/processor.js).
-   PoC order: NAM-on-wasm → nam_load_from_bytes → GuitarWorklet adapter
-   → getUserMedia glue → local param stub.
+13. **Rig-in-the-browser (WebAudio) roadmap**: the DSP layer is now
+   FULLY wasm-clean — neural-amp-modeler has a pure-Rust inference
+   engine (src/pure/, parity-tested vs the C++ core on all 11 shipped
+   models, LSTM bit-exact; NamModel::from_bytes for browsers; native
+   FFI path unchanged), and signalsmith-stretch is opt-in (Shimmer
+   never used it; reverb/delay ride pitch-dsp's pure-Rust modules).
+   eq/comp/reverb/delay/audiocore-dsp/daw-audio-graph all check on
+   wasm32. Remaining for the PoC (mic → NAM → out): a GuitarWorklet
+   wasm-bindgen adapter (copy daw-standalone's
+   src/audio_engine/web.rs + examples/web_worklet/processor.js
+   pattern), getUserMedia glue, then the big one — split a wasm-safe
+   control core out of GuitarRigBackend (pipewire/midir/fs shell vs
+   plain state; proto traits are the seam) so the browser serves
+   Rig/AudioSettings/RigStream locally. Perf notes: heaviest rig
+   WaveNet ~3.9x realtime native scalar; try +simd128 on wasm, and a
+   set_slimmable_size knob on PureNamModel is a small follow-up.
 
 ## Gotchas that will bite again
 
