@@ -1,0 +1,76 @@
+# FastTrackStudio heavy CI — SELF-HOSTED runner required.
+#
+# Codeberg's shared runners cap at 4cpu/8GB/10min (see ci.yml), which
+# cannot cold-build this workspace. These stages need a self-hosted
+# forgejo-runner registered with label `fts-selfhosted` on a machine
+# that has the repo's toolchain (rust 1.94 pin via `nix develop`, or a
+# host rustup toolchain + clang for the wasm stage).
+#
+# Trigger: workflow_dispatch only. On-push would leave jobs queued
+# forever while no runner is registered — dispatch keeps the workflow
+# correct-but-pending instead of dishonestly red/stuck.
+#
+# The REAPER stage additionally needs a REAPER install on the runner:
+# REAPER's license does NOT permit redistribution, so it can never run
+# on shared/public runners or from a container image we publish. Keep
+# it self-hosted-only, on a machine where REAPER is licensed.
+
+name: ci-heavy
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_reaper:
+        description: "Also run the REAPER integration suites (needs REAPER installed on the runner)"
+        required: false
+        default: "false"
+
+jobs:
+  workspace-check:
+    runs-on: fts-selfhosted
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: cargo check --workspace
+        run: cargo check --workspace --exclude vox-discover
+
+  fast-tests:
+    runs-on: fts-selfhosted
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: signal-guitar
+        run: cargo test -p signal-guitar
+      - name: daw-standalone (audio)
+        run: cargo test -p daw-standalone --features audio
+      - name: neural-amp-modeler
+        run: cargo test -p neural-amp-modeler
+      - name: architect (iroh)
+        run: cargo test -p architect --features iroh
+      - name: pitch-dsp
+        run: cargo test -p pitch-dsp
+
+  # Browser-remote build of THE app. Needs the wasm32 target and clang
+  # (ring's build script) — provided by the repo flake's dev shell; a
+  # bare rustup toolchain also works if clang is on PATH.
+  wasm-check:
+    runs-on: fts-selfhosted
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: wasm check (fasttrackstudio, signal feature)
+        run: |
+          rustup target add wasm32-unknown-unknown || true
+          cargo check -p fasttrackstudio --target wasm32-unknown-unknown \
+            --no-default-features --features signal
+
+  # REAPER integration suites — the vendored extension stack and the daw
+  # domain, exercised through a real headless REAPER (daw::test harness,
+  # Dummy audio). Requires REAPER on the runner (unredistributable), so
+  # this stage is opt-in even on the self-hosted runner.
+  reaper-integration:
+    runs-on: fts-selfhosted
+    if: ${{ inputs.run_reaper == 'true' }}
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: extension suite (fts-extensions)
+        run: just reaper-integration-test
+      - name: daw suite (daw-reaper)
+        run: just daw-reaper-test

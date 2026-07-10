@@ -171,13 +171,59 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    NOTE: org asset quota is 1.5GiB (Snowflake) — cleaned 141 stale Task
    container versions to make room; a truncated upload serves a
    truncated asset silently, so verify sizes after upload.
-16. **fts-extensions vendoring — PLANNED, not executed**: land at
-   apps/extensions/reaper-fts-extensions (USER DECISION — the
-   apps/extensions/<host>-fts-extensions convention for future
-   ableton/logic outputs). Full plan (dep repoint map, reaper-input +
-   fts-launcher also missing from the monorepo, risks) in the scout
-   report in git history / session notes. B compiles standalone; same
-   reaper-rs fork+branch as A, facet/vox pins identical.
+16. **fts-extensions vendoring — DONE + integration tests GREEN**:
+   lives at apps/extensions/reaper-fts-extensions (cdylib
+   `reaper_fts_extensions.so`, `just ext-install` symlinks it into
+   ~/.fts-dev/UserPlugins). `just reaper-integration-test` boots a
+   headless REAPER (Dummy audio) with the extension loaded and runs
+   apps/extensions/reaper-fts-extensions/tests/extension_loads.rs —
+   13/13 green (~11s): action-surface inventory, action-list presence,
+   keyflow marker/region insertion incl. lane/color/retro-rename
+   assertions. The extension IS the daw socket host (host-hooks default
+   feature) — never install daw-bridge next to it, the two fight over
+   fts-daw-<pid>.sock.
+17. **REAPER test harness (daw::test, feature test-harness)** — the
+   two Linux killers are fixed: (a) REAPER's ALSA-via-PipeWire path
+   can block the MAIN THREAD forever in snd_pcm_prepare, starving
+   extension timers so every main-thread RPC hangs (ConnectionClosed);
+   patch_ini now forces `linux_audio_mode=2` (Dummy) for test rigs,
+   override with FTS_LINUX_AUDIO_MODE. (b) several
+   ActionRegistration methods were stubs since the architect::rpc
+   port — execute_named_action / execute_command / execute_action /
+   list_actions / set_toggle_state / unregister are now real.
+18. **daw REAPER suite — `just daw-reaper-test` GREEN (95 tests)**:
+   daw-reaper-xtask (features/reaper/daw-reaper/xtask) builds an
+   isolated rig at target/fts-reaper-test (only daw-bridge in
+   UserPlugins), boots headless REAPER, runs
+   features/reaper/daw-reaper/tests/reaper_*.rs — action registry
+   (30), transport, tempo map, items, routing, ext-state, automation,
+   dawfile, dock host, screenset, window geometry, multi-daw. The
+   ActionRegistration port was completed for this (list_actions /
+   execute_action / set_toggle_state / unregister / toggle-flip on
+   trigger — all were stubs). KNOWN-BROKEN skips live in the xtask
+   with reasons; the big one is the **stale-ReaProject crash class**:
+   any suite that creates tracks/items/takes in an isolated tab and
+   closes it (reaper_project_isolation, reaper_takes,
+   fx_operations_…) panics daw-bridge off-main with reaper-rs
+   "ReaProject doesn't exist anymore" and kills the daw runtime.
+   Fix belongs in daw-reaper's pointer validation / whatever
+   background path holds the closed tab (suspect: audio-sync hook /
+   broadcast pollers). Smaller skips: vox response-schema bug on
+   restore_layout; tempo add_point count drift on REAPER 7.75;
+   toolbar button registration in the isolated rig; main-window
+   nudge headless; 60s timer soak.
+19. **CI (Forgejo Actions on codeberg)**: Actions ENABLED on the repo
+   (was off). `.forgejo/workflows/ci.yml` runs on push/PR using
+   codeberg's shared runners — but those cap at 4cpu/8GB/10min
+   (codeberg-tiny/small/medium), which cannot cold-build this
+   workspace, so the shared stage is only `cargo metadata --locked`
+   (manifest + lockfile gate; the tree is NOT rustfmt-clean, so no fmt
+   gate). `.forgejo/workflows/ci-heavy.yml` (workspace check, fast
+   crate test suites, wasm check, REAPER integration) needs a
+   SELF-HOSTED runner labeled `fts-selfhosted` and is
+   workflow_dispatch-only until one is registered — REAPER's license
+   forbids redistribution, so the REAPER stage can only ever run
+   self-hosted, opt-in via the run_reaper input.
 
 ## Gotchas that will bite again
 

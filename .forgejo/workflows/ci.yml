@@ -1,0 +1,37 @@
+# FastTrackStudio CI — Forgejo Actions (Codeberg)
+#
+# Runner reality check (2026-07, codeberg.org/actions/meta):
+#   Codeberg's shared runners are codeberg-tiny (1cpu/2GB/2min),
+#   codeberg-small (2cpu/4GB/5min) and codeberg-medium (4cpu/8GB/10min).
+#   A ~160-crate workspace does not cold-build inside 10 minutes, so the
+#   shared runners only carry the cheap, honest stage below. Every
+#   compile-heavy stage lives in ci-heavy.yml and runs on a SELF-HOSTED
+#   runner (label `fts-selfhosted`); until such a runner is registered
+#   those stages are workflow_dispatch-only — visibly absent from push
+#   CI, never silently green.
+#
+# Register a self-hosted runner (machine with the nix dev shell + cargo):
+#   forgejo-runner register --instance https://codeberg.org \
+#     --token <Settings > Actions > Runners token> \
+#     --labels fts-selfhosted
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Workspace manifest + lockfile gate: every member manifest parses,
+  # the dependency graph resolves, and Cargo.lock is in sync (--locked
+  # fails on drift). No compilation — fits the shared runner's cap.
+  # (cargo fmt --check is NOT here: the tree is not fmt-clean today.)
+  manifest:
+    runs-on: codeberg-medium
+    container:
+      image: docker.io/library/rust:1.90-bookworm
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: cargo metadata --locked (manifest + lockfile sanity)
+        run: cargo metadata --locked --format-version 1 > /dev/null
