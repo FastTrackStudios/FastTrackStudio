@@ -15,9 +15,7 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
   2026-07-10: kill -9 → serving in 1.45s with last patch/song/tempo
   restored; pipewire daemon death → detected → self-restart, back in
   ~15s; USB device re-link watchdog; plugin panics bypass the block;
-  MIDI hot-plug; poison-tolerant locks throughout. STILL PENDING: `sudo
-  loginctl enable-linger cody` (user must run — boot-start without
-  login). It serves ws + the web remote at http://<host>:4040/ and its
+  MIDI hot-plug; poison-tolerant locks throughout. It serves ws + the web remote at http://<host>:4040/ and its
   iroh id (`~/.config/signal/iroh-endpoint-id`). Rig config: `~/.config/signal/rig` is a SYMLINK into the
   repo (`features/rigs/guitar/default-config/`, set up by `just
   rig-link`; old dir kept as rig.bak-*) — live edits (editor or the
