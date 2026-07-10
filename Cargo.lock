@@ -3152,6 +3152,16 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "colored"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
+dependencies = [
+ "lazy_static",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "colored"
 version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
@@ -4499,7 +4509,7 @@ dependencies = [
  "daw-standalone",
  "eyre",
  "facet 0.50.0-rc.5",
- "facet-styx",
+ "facet-styx 5.0.0-rc.5",
  "midir",
  "tokio",
  "tracing",
@@ -4791,7 +4801,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "eyre",
- "fts-ui",
+ "fts-ui 0.1.0",
  "tokio",
  "tracing",
  "wasm-bindgen",
@@ -5137,6 +5147,19 @@ name = "diff"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
+
+[[package]]
+name = "dify"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90ce0fb972943b4e88cd03b8f92953df0c71bb05e0bde8e5b684895d808013cc"
+dependencies = [
+ "anyhow",
+ "colored 2.2.0",
+ "getopts",
+ "image",
+ "rayon",
+]
 
 [[package]]
 name = "digest"
@@ -6485,7 +6508,7 @@ dependencies = [
  "bitflags 2.13.0",
  "bytemuck",
  "color-eyre",
- "colored",
+ "colored 3.1.1",
  "derive_more 1.0.0",
  "env_logger",
  "facet 0.50.0-rc.5",
@@ -6714,7 +6737,7 @@ dependencies = [
  "atomic_float",
  "audiocore-core",
  "eq-profiles",
- "fts-ui",
+ "fts-ui 0.1.0",
  "fts-ui-audio",
  "futures-timer",
  "nice-plug",
@@ -6906,10 +6929,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c2ad271d54e76358f179bc5f75483c4ed025d1009a8599f299ac7bee99dbdd"
 dependencies = [
  "autocfg",
+ "camino",
  "chrono",
  "const-fnv1a-hash",
  "iddqd",
  "impls",
+ "indexmap",
  "uuid 1.23.4",
 ]
 
@@ -6931,6 +6956,15 @@ checksum = "39aaece2ca1e5aad3e2bee0f4fea23ae0a11eb5a0b88bb265ec09c39d580aac5"
 dependencies = [
  "facet-core 0.50.0-rc.5",
  "facet-reflect 0.50.0-rc.5",
+]
+
+[[package]]
+name = "facet-error"
+version = "0.50.0-rc.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175f8aab2cbd354a829214f7f033c5dff59c60b66848fc833116a4dabcc7f7c6"
+dependencies = [
+ "facet 0.50.0-rc.5",
 ]
 
 [[package]]
@@ -7126,6 +7160,7 @@ dependencies = [
  "facet-core 0.46.5",
  "facet-path 0.46.5",
  "hashbrown 0.17.1",
+ "regex",
  "smallvec 2.0.0-alpha.10",
 ]
 
@@ -7165,6 +7200,23 @@ dependencies = [
 
 [[package]]
 name = "facet-styx"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1632b326f6333ccaa4a1f296af05e0b3b11e3e26091b2320122b44ae3106864c"
+dependencies = [
+ "ariadne",
+ "facet 0.46.5",
+ "facet-core 0.46.5",
+ "facet-format 0.47.1",
+ "facet-reflect 0.46.5",
+ "serde_json",
+ "styx-format 3.0.2",
+ "styx-parse 3.0.2",
+ "styx-tree 3.0.2",
+]
+
+[[package]]
+name = "facet-styx"
 version = "5.0.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1a948b17c9fb97ed52e2b51f6800c2c39e03eed9ffd33167f57397d371ba88"
@@ -7174,12 +7226,26 @@ dependencies = [
  "facet-core 0.50.0-rc.5",
  "facet-format 0.50.0-rc.5",
  "facet-reflect 0.50.0-rc.5",
+ "figue",
  "margin",
  "margin-term",
  "serde_json",
- "styx-format",
- "styx-parse",
- "styx-tree",
+ "styx-format 5.0.0-rc.5",
+ "styx-parse 5.0.0-rc.5",
+ "styx-tree 5.0.0-rc.5",
+]
+
+[[package]]
+name = "facet-testhelpers"
+version = "0.46.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c57670e26e2300e0f66b38e25a8f26e19383360844561f376ad409237e0ceb6"
+dependencies = [
+ "color-backtrace",
+ "facet-testhelpers-macros 0.46.5",
+ "termcolor",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -7189,10 +7255,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56162eecfe969391bf91e88d5ea10ec5a99e5e4fba22cdca3104eda87367e109"
 dependencies = [
  "color-backtrace",
- "facet-testhelpers-macros",
+ "facet-testhelpers-macros 0.50.0-rc.5",
  "termcolor",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "facet-testhelpers-macros"
+version = "0.46.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "764fd33552bc478506efdc5714065ca5150027e36da3b45d7d028cf183dfddf7"
+dependencies = [
+ "quote",
+ "unsynn",
 ]
 
 [[package]]
@@ -7375,6 +7451,41 @@ checksum = "38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f"
 dependencies = [
  "memoffset 0.9.1",
  "rustc_version",
+]
+
+[[package]]
+name = "figue"
+version = "5.0.0-rc.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d683110c41f61f23e580c2f11887cfd2667a75388dbbc551b0fec025d3f6aaa8"
+dependencies = [
+ "ariadne",
+ "camino",
+ "facet 0.50.0-rc.5",
+ "facet-core 0.50.0-rc.5",
+ "facet-error",
+ "facet-format 0.50.0-rc.5",
+ "facet-json 0.50.0-rc.5",
+ "facet-pretty",
+ "facet-reflect 0.50.0-rc.5",
+ "figue-attrs",
+ "heck 0.5.0",
+ "indexmap",
+ "owo-colors",
+ "strip-ansi-escapes",
+ "strsim 0.11.1",
+ "supports-color 3.0.2",
+ "tracing",
+ "unicode-width",
+]
+
+[[package]]
+name = "figue-attrs"
+version = "5.0.0-rc.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfb26d9b503638fe61b04ef7d76d0d53f39993549948c0267e05094185b6b808"
+dependencies = [
+ "facet 0.50.0-rc.5",
 ]
 
 [[package]]
@@ -7733,6 +7844,50 @@ name = "fts-devtools"
 version = "0.1.0"
 
 [[package]]
+name = "fts-extensions"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crossbeam-channel",
+ "daw",
+ "daw-extension-runtime",
+ "daw-reaper",
+ "daw-synchronization",
+ "dynamic-template",
+ "eyre",
+ "fragile",
+ "fts-extensions-actions",
+ "fts-launcher",
+ "fts-ui 0.1.0",
+ "keyflow-orchestra",
+ "reaper-config",
+ "reaper-high",
+ "reaper-input",
+ "reaper-low",
+ "reaper-macros",
+ "reaper-medium",
+ "session",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "fts-extensions-actions"
+version = "0.1.0"
+dependencies = [
+ "architect",
+]
+
+[[package]]
+name = "fts-extensions-xtask"
+version = "0.1.0"
+dependencies = [
+ "daw",
+]
+
+[[package]]
 name = "fts-installer"
 version = "0.1.0"
 dependencies = [
@@ -7746,6 +7901,27 @@ dependencies = [
  "sha2 0.10.9",
  "tar",
  "tokio",
+]
+
+[[package]]
+name = "fts-launcher"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "dioxus-native",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+ "fts-ui 0.1.0",
+ "launcher-core",
+ "launcher-ui",
+ "providers",
+ "reaper-high",
+ "reaper-medium",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "winit 0.31.0-beta.2",
 ]
 
 [[package]]
@@ -7775,7 +7951,7 @@ dependencies = [
  "editor-keyflow",
  "editor-keyflow-lang",
  "fontique 0.2.0",
- "fts-ui",
+ "fts-ui 0.1.0",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "gloo-timers",
@@ -7806,11 +7982,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-story-core"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main#079d9e0b14d5bb8b81cc68836e81d74831c5947d"
+dependencies = [
+ "linkme",
+]
+
+[[package]]
 name = "fts-story-fuzz"
 version = "0.1.0"
 dependencies = [
- "fts-story-core",
- "fts-story-runtime",
+ "fts-story-core 0.1.0",
+ "fts-story-runtime 0.1.0",
  "fts-story-snapshots",
  "proptest",
 ]
@@ -7826,12 +8010,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-story-macros"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main#079d9e0b14d5bb8b81cc68836e81d74831c5947d"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "fts-story-parity"
 version = "0.1.0"
 dependencies = [
  "dssim-core",
- "fts-story-core",
- "fts-story-runtime",
+ "fts-story-core 0.1.0",
+ "fts-story-runtime 0.1.0",
  "fts-story-snapshots",
  "png 0.17.16",
  "rgb",
@@ -7843,8 +8038,19 @@ name = "fts-story-runtime"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-story-core",
- "fts-story-macros",
+ "fts-story-core 0.1.0",
+ "fts-story-macros 0.1.0",
+ "linkme",
+]
+
+[[package]]
+name = "fts-story-runtime"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main#079d9e0b14d5bb8b81cc68836e81d74831c5947d"
+dependencies = [
+ "dioxus",
+ "fts-story-core 0.1.0 (git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main)",
+ "fts-story-macros 0.1.0 (git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main)",
  "linkme",
 ]
 
@@ -7853,8 +8059,8 @@ name = "fts-story-shell"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-story-core",
- "fts-story-runtime",
+ "fts-story-core 0.1.0",
+ "fts-story-runtime 0.1.0",
 ]
 
 [[package]]
@@ -7870,8 +8076,8 @@ dependencies = [
  "dioxus-native",
  "dioxus-native-dom",
  "dssim-core",
- "fts-story-core",
- "fts-story-runtime",
+ "fts-story-core 0.1.0",
+ "fts-story-runtime 0.1.0",
  "fts-story-shell",
  "futures-util",
  "peniko 0.6.1",
@@ -7896,8 +8102,27 @@ dependencies = [
  "dioxus",
  "dioxus-primitives 0.0.1 (git+https://github.com/DioxusLabs/components?rev=837c9d4c1c9f99b19de7a3f087d8af1b0538dcae)",
  "fts-story-parity",
- "fts-story-runtime",
+ "fts-story-runtime 0.1.0",
  "fts-story-snapshots",
+ "linkme",
+ "lucide-dioxus 2.26.0",
+ "nucleo-matcher",
+ "palette",
+ "time",
+ "tracing",
+ "tw_merge",
+]
+
+[[package]]
+name = "fts-ui"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/fts-ui.git?branch=main#065601046fee293319bd4c955dc6b7378da2dcda"
+dependencies = [
+ "chrono",
+ "clsx",
+ "dioxus",
+ "dioxus-primitives 0.0.1 (git+https://github.com/DioxusLabs/components?rev=837c9d4c1c9f99b19de7a3f087d8af1b0538dcae)",
+ "fts-story-runtime 0.1.0 (git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main)",
  "linkme",
  "lucide-dioxus 2.26.0",
  "nucleo-matcher",
@@ -7912,7 +8137,7 @@ name = "fts-ui-audio"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-ui",
+ "fts-ui 0.1.0",
  "tracing",
 ]
 
@@ -7922,7 +8147,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
- "fts-ui",
+ "fts-ui 0.1.0",
 ]
 
 [[package]]
@@ -11047,7 +11272,7 @@ name = "keyflow"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "colored",
+ "colored 3.1.1",
  "daw-module",
  "daw-proto",
  "dawfile-reaper",
@@ -11232,7 +11457,7 @@ dependencies = [
  "dioxus-native",
  "dock-dioxus",
  "dock-proto",
- "fts-ui",
+ "fts-ui 0.1.0",
  "keyflow",
  "kurbo 0.13.1",
  "lucide-dioxus 2.577.0",
@@ -11375,6 +11600,34 @@ name = "lab"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf36173d4167ed999940f804952e6b08197cae5ad5d572eb4db150ce8ad5d58f"
+
+[[package]]
+name = "launcher-core"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=main#23cc19406c07a9116b755901475a4ee9c21a3c76"
+dependencies = [
+ "chrono",
+ "facet 0.46.5",
+ "facet-styx 3.0.2",
+ "nucleo-matcher",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.8.2",
+ "tracing",
+]
+
+[[package]]
+name = "launcher-ui"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=main#23cc19406c07a9116b755901475a4ee9c21a3c76"
+dependencies = [
+ "dioxus",
+ "fts-ui 0.1.0 (git+https://codeberg.org/FastTrackStudios/fts-ui.git?branch=main)",
+ "launcher-core",
+ "lucide-dioxus 2.26.0",
+ "tracing",
+]
 
 [[package]]
 name = "lazy-js-bundle"
@@ -15704,6 +15957,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "providers"
+version = "0.1.0"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=main#23cc19406c07a9116b755901475a4ee9c21a3c76"
+dependencies = [
+ "launcher-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "psl-types"
 version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16444,8 +16709,53 @@ name = "reaper-config"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.13.0",
+ "facet 0.50.0-rc.5",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "reaper-dioxus"
+version = "0.1.0"
+dependencies = [
+ "anyrender_vello 0.11.0",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
+ "cocoa 0.26.1",
+ "crossbeam",
+ "daw",
+ "dioxus-devtools",
+ "dioxus-native",
+ "futures-util",
+ "keyboard-types 0.7.0",
+ "libc",
+ "objc",
+ "raw-window-handle 0.6.2",
+ "reaper-embed",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
+ "tracing",
+ "vello",
+ "wgpu 29.0.4",
+ "x11-dl",
+]
+
+[[package]]
+name = "reaper-embed"
+version = "0.1.0"
+dependencies = [
+ "cocoa 0.26.1",
+ "objc",
+ "pollster",
+ "raw-window-handle 0.6.2",
+ "skrifa 0.37.0",
+ "thiserror 2.0.18",
+ "tracing",
+ "vello",
+ "wgpu 29.0.4",
+ "x11-dl",
 ]
 
 [[package]]
@@ -16473,6 +16783,51 @@ dependencies = [
  "regex",
  "tracing",
  "winapi",
+]
+
+[[package]]
+name = "reaper-hwnd"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "reaper-input"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "daw",
+ "dioxus-native",
+ "enumflags2",
+ "facet 0.50.0-rc.5",
+ "facet-json 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+ "figue",
+ "fts-ui 0.1.0",
+ "helgoboss-midi",
+ "input",
+ "once_cell",
+ "reaper-config",
+ "reaper-dioxus",
+ "reaper-embed",
+ "reaper-high",
+ "reaper-hwnd",
+ "reaper-kbd",
+ "reaper-low",
+ "reaper-medium",
+ "swell-ui",
+ "tracing",
+ "vello",
+]
+
+[[package]]
+name = "reaper-kbd"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.13.0",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -17934,7 +18289,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "eyre",
- "fts-ui",
+ "fts-ui 0.1.0",
  "lucide-dioxus 2.577.0",
  "session-proto",
  "tracing",
@@ -18113,7 +18468,7 @@ dependencies = [
  "architect",
  "audio-controls",
  "dioxus",
- "fts-ui",
+ "fts-ui 0.1.0",
  "lumen-blocks",
  "signal-grid",
  "signal-proto",
@@ -18127,7 +18482,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "facet 0.50.0-rc.5",
- "facet-styx",
+ "facet-styx 5.0.0-rc.5",
  "midicore",
  "signal-fx",
  "signal-guitar-proto",
@@ -18334,7 +18689,7 @@ dependencies = [
  "daw-audio-io",
  "eyre",
  "facet 0.50.0-rc.5",
- "facet-styx",
+ "facet-styx 5.0.0-rc.5",
  "facet-toml",
  "flacenc",
  "hound",
@@ -18367,7 +18722,7 @@ dependencies = [
  "audiocore-core",
  "eyre",
  "facet 0.50.0-rc.5",
- "facet-styx",
+ "facet-styx 5.0.0-rc.5",
  "hound",
  "nice-plug",
  "serde",
@@ -18384,7 +18739,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "facet 0.50.0-rc.5",
- "facet-styx",
+ "facet-styx 5.0.0-rc.5",
  "sea-orm",
  "serde",
  "serde_json",
@@ -18416,7 +18771,7 @@ dependencies = [
  "dioxus",
  "dock-dioxus",
  "dock-proto",
- "fts-ui",
+ "fts-ui 0.1.0",
  "lumen-blocks",
  "midicore",
  "nice-plug-dioxus",
@@ -18882,7 +19237,7 @@ version = "0.1.0"
 dependencies = [
  "audiocore-core",
  "dioxus",
- "fts-ui",
+ "fts-ui 0.1.0",
  "fts-ui-audio",
  "nice-plug-dioxus",
  "spectrum-analyzer-dsp",
@@ -19297,6 +19652,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strip-ansi-escapes"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a8f8038e7e7969abb3f1b7c2a811225e9296da208539e0f79c5251d6cac0025"
+dependencies = [
+ "vte",
+]
+
+[[package]]
 name = "strsim"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -19534,12 +19898,33 @@ dependencies = [
 
 [[package]]
 name = "styx-cst"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5913c79e5ee8466a7bbfe29e6697ea0ab1ef1b06fab89769c094a7e75da7776"
+dependencies = [
+ "rowan",
+ "styx-tokenizer 3.0.1",
+]
+
+[[package]]
+name = "styx-cst"
 version = "5.0.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4f59f441607e9bdf8cc2d6907a713f8ad82a0f2952b4f0c52e8b49ed624d334"
 dependencies = [
  "rowan",
- "styx-tokenizer",
+ "styx-tokenizer 5.0.0-rc.5",
+]
+
+[[package]]
+name = "styx-format"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29fef3586e6fad909b5bbab8cb85e38c96974ffdfaa57fc3ab2c81b0f7fd00be"
+dependencies = [
+ "styx-cst 3.0.2",
+ "styx-parse 3.0.2",
+ "styx-tree 3.0.2",
 ]
 
 [[package]]
@@ -19548,9 +19933,19 @@ version = "5.0.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f78560ef305254e73442a8c742d86f0aa348b287765cb1ac52a59882d248c6aa"
 dependencies = [
- "styx-cst",
- "styx-parse",
- "styx-tree",
+ "styx-cst 5.0.0-rc.5",
+ "styx-parse 5.0.0-rc.5",
+ "styx-tree 5.0.0-rc.5",
+]
+
+[[package]]
+name = "styx-parse"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b17c2ab20c37e53d88be2cacc3b2bae1fe8bdb0b10a052f032c1f842be90265c"
+dependencies = [
+ "styx-tokenizer 3.0.1",
+ "tracing",
 ]
 
 [[package]]
@@ -19559,7 +19954,16 @@ version = "5.0.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5870d3d6e90a1fec36a7a793a536a588e5efbb4093a071c91e9199a7e7df33d5"
 dependencies = [
- "styx-tokenizer",
+ "styx-tokenizer 5.0.0-rc.5",
+ "tracing",
+]
+
+[[package]]
+name = "styx-tokenizer"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bb4d54574c87d2e1436ecdcf316b76cc5f5ab6defad83811434b2a2be908133"
+dependencies = [
  "tracing",
 ]
 
@@ -19574,13 +19978,24 @@ dependencies = [
 
 [[package]]
 name = "styx-tree"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a065556559a4d24c7a5b7dc59f347f7887c9b4b083549c0b8f2b213c5025f5"
+dependencies = [
+ "ariadne",
+ "facet-testhelpers 0.46.5",
+ "styx-parse 3.0.2",
+]
+
+[[package]]
+name = "styx-tree"
 version = "5.0.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0a11f0b1db6814e3ec5d96afe4b29ed4567bf93cfbf3b1952b713eba577ad35"
 dependencies = [
  "ariadne",
- "facet-testhelpers",
- "styx-parse",
+ "facet-testhelpers 0.50.0-rc.5",
+ "styx-parse 5.0.0-rc.5",
 ]
 
 [[package]]
@@ -19753,6 +20168,12 @@ dependencies = [
  "tracing",
  "winapi",
 ]
+
+[[package]]
+name = "symlink"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7973cce6668464ea31f176d85b13c7ab3bba2cb3b77a2ed26abd7801688010a"
 
 [[package]]
 name = "symphonia"
@@ -20923,6 +21344,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-appender"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "050686193eb999b4bb3bc2acfa891a13da00f79734704c4b8b4ef1a10b368a3c"
+dependencies = [
+ "crossbeam-channel",
+ "symlink",
+ "thiserror 2.0.18",
+ "time",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-attributes"
 version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21512,6 +21946,26 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "ug",
+]
+
+[[package]]
+name = "ui-snapshot"
+version = "0.1.0"
+dependencies = [
+ "anyrender 0.11.1",
+ "anyrender_vello_cpu",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
+ "clap",
+ "dify",
+ "dioxus",
+ "dioxus-native",
+ "fts-ui 0.1.0",
+ "image",
+ "kurbo 0.13.1",
+ "peniko 0.6.1",
+ "png 0.17.16",
 ]
 
 [[package]]
@@ -22509,6 +22963,15 @@ version = "0.1.0"
 source = "git+https://github.com/robbert-vdh/vst3-sys.git?branch=fix%2Fdrop-box-from-raw#b3ff4d775940f5b476b9d1cca02a90e07e1922a2"
 dependencies = [
  "vst3-com",
+]
+
+[[package]]
+name = "vte"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "231fdcd7ef3037e8330d8e17e61011a2c244126acc0a982f4040ac3f9f0bc077"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

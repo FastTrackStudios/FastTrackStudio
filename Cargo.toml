@@ -113,8 +113,15 @@ members = [
     "features/reaper/daw-reaper-embed",
     "features/reaper/reaper-launcher",
     "features/reaper/reaper-config",
+    "features/reaper/reaper-kbd",
+    "features/reaper/reaper-hwnd",
+    "features/reaper/reaper-embed",
+    "features/reaper/reaper-dioxus",
+    "features/reaper/reaper-input",
     "features/reaper/daw-perf-test",
     "features/reaper/actions-reaper",
+    # ── features/launcher — launcher search/workflow engine + panel ────
+    "features/launcher/fts-launcher",
     # ── features/standalone / surfaces / daw-ui ───────────────────────
     "features/standalone/daw-standalone",
     "features/surfaces/daw-csi",
@@ -212,6 +219,13 @@ members = [
     "apps/installer",
     "apps/fts-cli",
     "apps/site",
+    # ── apps/extensions — DAW-host extension cdylibs ──────────────────
+    #    (apps/extensions/<host>-fts-extensions; reaper is the first host)
+    "apps/extensions/reaper-fts-extensions",
+    "apps/extensions/reaper-fts-extensions/actions",
+    "apps/extensions/reaper-fts-extensions/xtask",
+    # ── libs/fts-ui extras ────────────────────────────────────────────
+    "libs/fts-ui/ui-snapshot",
 ]
 
 [workspace.package]
@@ -315,6 +329,16 @@ daw-reaper-dioxus-ext = { path = "features/reaper/daw-reaper-dioxus-ext" }
 daw-reaper-embed = { path = "features/reaper/daw-reaper-embed" }
 reaper-launcher = { path = "features/reaper/reaper-launcher" }
 reaper-config = { path = "features/reaper/reaper-config" }
+reaper-kbd = { path = "features/reaper/reaper-kbd" }
+reaper-hwnd = { path = "features/reaper/reaper-hwnd" }
+reaper-embed = { path = "features/reaper/reaper-embed" }
+reaper-dioxus = { path = "features/reaper/reaper-dioxus" }
+# default-features = false: `overlay-prewarm` allocates wgpu/Vello surfaces
+# eagerly, which OOMs when loaded at REAPER plugin_main time. The only
+# consumer (fts-extensions) wants it off; enable per-member if needed.
+reaper-input = { path = "features/reaper/reaper-input", default-features = false }
+fts-launcher = { path = "features/launcher/fts-launcher" }
+fts-extensions-actions = { path = "apps/extensions/reaper-fts-extensions/actions" }
 daw-standalone = { path = "features/standalone/daw-standalone" }
 daw-csi = { path = "features/surfaces/daw-csi" }
 daw-ui = { path = "features/daw-ui/daw-ui", default-features = false }
@@ -415,6 +439,8 @@ facet-json = { version = "0.50.0-rc.5" }
 facet-postcard = { version = "0.50.0-rc.5" }
 facet-styx = { version = "5.0.0-rc.5" }
 facet-toml = { version = "0.50.0-rc.5" }
+# figue pairs with facet-styx 5.0 (reaper-input keybind config parsing).
+figue = { version = "5.0.0-rc.5" }
 vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
 vox-types = { version = "0.10.0-rc.5" }
 vox-phon = { version = "0.10.0-rc.5" }
@@ -544,6 +570,8 @@ vello_hybrid = "0.0.6"
 vello_common = "0.0.6"
 peniko = "0.6"
 kurbo = "0.13"
+# Deterministic CPU rendering for the ui-snapshot regression gate.
+anyrender_vello_cpu = "0.14"
 
 # ── Platform UI bindings ──────────────────────────────────────────────
 cocoa = "0.26"
@@ -562,6 +590,7 @@ anyhow = "1.0"
 # ── Observability ─────────────────────────────────────────────────────
 tracing = { version = "0.1", features = ["std"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 moire = { version = "1.0" }
 
 # ── Proc-macro plumbing ───────────────────────────────────────────────
@@ -593,12 +622,17 @@ parking_lot = "0.12"
 egui = { version = "0.34.1", default-features = false, features = ["bytemuck"] }
 symphonium = { version = "0.6", default-features = false, features = ["wav", "pcm", "fft-resampler"] }
 once_cell = "1.19"
+helgoboss-midi = "0.4"
 
 # ── Utilities ─────────────────────────────────────────────────────────
 eyre = "0.6"
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 clap = { version = "4", features = ["derive"] }
 memmap2 = "0.9"
+camino = "1.2"
+# Fuzzy PNG diffing (ui-snapshot; same lib Blitz's WPT runner uses).
+dify = "0.8"
+image = { version = "0.25", default-features = false, features = ["png"] }
 enumflags2 = "0.7"
 fragile = "2"
 # Hardware MIDI I/O — 0.11 to share one alsa-sys across the stack.
