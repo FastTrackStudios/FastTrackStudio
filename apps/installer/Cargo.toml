@@ -4,16 +4,20 @@ version = "0.1.0"
 authors = ["Cody Wright <acodywright@gmail.com>"]
 edition.workspace = true
 
+# Thin downloader/installer for FastTrackStudio releases (codeberg).
+# Resolves a release via the Gitea API, downloads the platform tarball
+# with progress + retry, verifies SHA256SUMS, and applies the same
+# installed layout as `just install` / the tarball's install.sh.
+
 [dependencies]
-# Root pins dioxus default-features = false, features = ["lib"]; the
-# installer is a desktop binary (launch/asset! macros), so defaults go
-# back on plus the desktop renderer.
-dioxus = { workspace = true, default-features = true, features = ["desktop", "launch"] }
 installer-core.workspace = true
-utils.workspace = true
-tokio.workspace = true
-tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
-eyre.workspace = true
 clap.workspace = true
-rfd = "0.17"
+eyre.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+# Same HTTP stack as installer-core (rustls, streaming).
+reqwest = { version = "0.12", features = ["stream", "rustls-tls"], default-features = false }
+tar = "0.4"
+flate2 = "1"

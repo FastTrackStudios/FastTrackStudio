@@ -63,7 +63,7 @@ consumed as `x.workspace = true`.
 | apps/fts-cli | NEW — the one `fts` CLI (mounts daw::cli + keyflow-cli, manages engines) |
 | (dissolved) apps/daw-cli | folded into crates/daw/daw as `daw::cli` behind the `cli` feature (thin `daw` bin kept) |
 | (moved) apps/keyflow-cli | crates/keyflow/cli — lib-first (`keyflow_cli::cli_main`), thin `kf` bin kept |
-| apps/installer | FastTrackStudio/apps/installer |
+| apps/installer | FastTrackStudio/apps/installer — rebuilt as `fts-installer`, a thin clap CLI that downloads/installs codeberg releases (old Dioxus wizard in git history) |
 | apps/site | fasttrackstudio-site repo (subtree import; package renamed fts-site) — fasttrackstudio.app |
 | apps/docs-site | unified docs site (dodeca + kf docs; NOT a cargo member) — docs.fasttrackstudio.app; keyflow docs content moved here from crates/keyflow/docs |
 | (park/delete) | signal/apps/{desktop,mobile,native,tui,cli,amp}, session/apps/*, fts-ui/apps/*, daw/apps/{daw/native,example-*}, FastTrackStudio/apps/keyflow-playground — audit per-app: keep only what runs |

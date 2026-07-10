@@ -1,295 +1,208 @@
-//! FastTrackStudio Installer — downloads REAPER, installs extensions and presets.
+//! fts-installer — thin downloader/installer for FastTrackStudio releases.
 //!
-//! ## CLI flags
+//! Resolves a release on codeberg (Gitea API), downloads the platform
+//! tarball with progress + retry, verifies it against the release's
+//! SHA256SUMS when present, extracts it, and applies the installed layout
+//! (the same one `just install` and the tarball's `install.sh` produce):
 //!
 //! ```text
-//! fts-installer [OPTIONS]
-//!
-//!   --silent              Run without GUI (headless install)
-//!   --install-dir <PATH>  Override the default install directory
+//! <prefix>/.local/lib/fts/{fasttrackstudio,fts,VERSION}
+//! <prefix>/.local/bin/{fasttrackstudio,fts}      (symlinks)
+//! <prefix>/.config/systemd/user/signal-engine.service   (installed, NOT enabled)
+//! <prefix>/.local/share/applications/fasttrackstudio.desktop
+//! <prefix>/.local/share/icons/hicolor/scalable/apps/fasttrackstudio.svg
 //! ```
+//!
+//! `--prefix` defaults to `$HOME`; with a non-home prefix the systemd /
+//! desktop-database refreshes are skipped (test installs).
 
-mod app;
-mod wizard;
+mod codeberg;
+mod fetch;
+mod layout;
 
 use std::path::PathBuf;
 
-use clap::Parser;
-use dioxus::desktop::tao::dpi::LogicalSize;
-use dioxus::desktop::{Config, WindowBuilder};
-use dioxus::prelude::*;
-use installer_core::{InstallContext, InstallEvent, InstallPlan};
-use tracing_subscriber::prelude::*;
+use clap::{Args, Parser, Subcommand};
+use eyre::{Context, eyre};
 
-const MAIN_CSS: Asset = asset!("/assets/main.css");
-const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+use crate::layout::Layout;
+
+/// Platform suffix used in release asset names, e.g.
+/// `fasttrackstudio-v0.1.0-x86_64-linux.tar.gz`.
+pub fn platform_suffix() -> eyre::Result<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Ok("x86_64-linux"),
+        (os, arch) => Err(eyre!(
+            "no FastTrackStudio release builds for {os}/{arch} yet (currently only linux/x86_64)"
+        )),
+    }
+}
 
 #[derive(Parser)]
-#[command(name = "fts-installer", about = "FastTrackStudio Installer")]
+#[command(name = "fts-installer", version, about = "Download and install FastTrackStudio")]
 struct Cli {
-    /// Run without GUI (headless install).
-    #[arg(long)]
-    silent: bool,
+    #[command(subcommand)]
+    command: Option<Cmd>,
 
-    /// Override the default install directory.
-    #[arg(long, value_name = "PATH")]
-    install_dir: Option<PathBuf>,
+    /// (default command) install options
+    #[command(flatten)]
+    install: InstallArgs,
 }
 
-/// Log file location: ~/Library/Logs/FastTrackStudio/installer.log (macOS)
-/// or ~/.local/share/FastTrackStudio/installer.log (Linux).
-fn log_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    if cfg!(target_os = "macos") {
-        Some(home.join("Library/Logs/FastTrackStudio/installer.log"))
-    } else {
-        Some(home.join(".local/share/FastTrackStudio/installer.log"))
-    }
+#[derive(Subcommand)]
+enum Cmd {
+    /// Download and install FastTrackStudio (the default).
+    Install(InstallArgs),
+    /// Install the latest release unless it is already installed.
+    Update {
+        /// Install under this directory instead of $HOME.
+        #[arg(long, value_name = "DIR")]
+        prefix: Option<PathBuf>,
+    },
+    /// Remove an installed FastTrackStudio (keeps user data in
+    /// ~/.config/fts and ~/.config/signal).
+    Uninstall {
+        /// Uninstall from this directory instead of $HOME.
+        #[arg(long, value_name = "DIR")]
+        prefix: Option<PathBuf>,
+    },
 }
 
-fn main() {
+#[derive(Args, Default)]
+struct InstallArgs {
+    /// Install a specific release tag (e.g. v0.1.0) instead of the latest.
+    #[arg(long, value_name = "TAG")]
+    version: Option<String>,
+
+    /// Install under this directory instead of $HOME.
+    #[arg(long, value_name = "DIR")]
+    prefix: Option<PathBuf>,
+
+    /// Install from a direct tarball URL, skipping the codeberg API.
+    #[arg(long, value_name = "URL")]
+    url: Option<String>,
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let cli = Cli::parse();
+    let result = match cli.command {
+        None => install(cli.install).await,
+        Some(Cmd::Install(args)) => install(args).await,
+        Some(Cmd::Update { prefix }) => update(prefix).await,
+        Some(Cmd::Uninstall { prefix }) => Layout::new(prefix).and_then(|l| l.uninstall()),
+    };
+    if let Err(e) = result {
+        eprintln!("error: {e:#}");
+        std::process::exit(1);
+    }
+}
 
-    // Log to stderr + file (if writable).
-    let stderr_layer = tracing_subscriber::fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_filter(tracing_subscriber::EnvFilter::new("info,installer_core=debug"));
+async fn install(args: InstallArgs) -> eyre::Result<()> {
+    let layout = Layout::new(args.prefix)?;
+    let client = fetch::http_client()?;
 
-    let registry = tracing_subscriber::registry().with(stderr_layer);
-
-    if let Some(path) = log_path() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+    // Resolve the tarball URL (+ optional SHA256SUMS location).
+    let (tarball_url, tarball_name, sums_url, tag) = match &args.url {
+        Some(url) => {
+            let name = url
+                .rsplit('/')
+                .next()
+                .filter(|n| !n.is_empty())
+                .ok_or_else(|| eyre!("--url has no filename component: {url}"))?
+                .to_string();
+            // Best-effort: look for SHA256SUMS next to the tarball.
+            let sums = url.rsplit_once('/').map(|(dir, _)| format!("{dir}/SHA256SUMS"));
+            (url.clone(), name, sums, None)
         }
-        if let Ok(file) = std::fs::File::create(&path) {
-            let file_layer = tracing_subscriber::fmt::layer()
-                .with_ansi(false)
-                .with_writer(file)
-                .with_filter(tracing_subscriber::EnvFilter::new("debug"));
-            registry.with(file_layer).init();
-            eprintln!("Logging to {}", path.display());
-        } else {
-            registry.init();
+        None => {
+            let release = codeberg::resolve(&client, args.version.as_deref()).await?;
+            println!("release: {} ({})", release.tag, release.tarball.name);
+            (
+                release.tarball.url,
+                release.tarball.name,
+                release.sums.map(|a| a.url),
+                Some(release.tag),
+            )
         }
-    } else {
-        registry.init();
     };
 
-    let plan = match &cli.install_dir {
-        Some(dir) => InstallPlan::with_install_dir(dir.clone()),
-        None => InstallPlan::default_for_machine(),
-    };
+    install_tarball(&client, &layout, &tarball_url, &tarball_name, sums_url.as_deref()).await?;
 
-    if cli.silent {
-        run_silent(plan);
+    if let Some(tag) = tag {
+        println!("installed FastTrackStudio {tag}");
     } else {
-        // Store the plan override for the GUI to pick up.
-        INITIAL_PLAN.with(|p| *p.borrow_mut() = Some(plan));
-
-        let config = Config::new().with_window(
-            WindowBuilder::new()
-                .with_title("FastTrackStudio Installer")
-                .with_inner_size(LogicalSize::new(640.0_f64, 500.0_f64))
-                .with_resizable(false),
-        );
-
-        dioxus::LaunchBuilder::desktop()
-            .with_cfg(config)
-            .launch(app::App);
+        println!("installed FastTrackStudio from {tarball_url}");
     }
+    Ok(())
 }
 
-thread_local! {
-    /// Allows main() to pass CLI overrides to the Dioxus app component.
-    pub static INITIAL_PLAN: std::cell::RefCell<Option<InstallPlan>> = const { std::cell::RefCell::new(None) };
+async fn update(prefix: Option<PathBuf>) -> eyre::Result<()> {
+    let layout = Layout::new(prefix)?;
+    let client = fetch::http_client()?;
+    let release = codeberg::resolve(&client, None).await?;
+    let latest = release.tag.trim_start_matches('v').to_string();
+
+    match layout.installed_version() {
+        Some(installed) if installed.trim_start_matches('v') == latest => {
+            println!("FastTrackStudio {installed} is already the latest release — nothing to do");
+            return Ok(());
+        }
+        Some(installed) => println!("updating {installed} -> {} ...", release.tag),
+        None => println!("no installed version found — installing {} ...", release.tag),
+    }
+
+    install_tarball(
+        &client,
+        &layout,
+        &release.tarball.url,
+        &release.tarball.name,
+        release.sums.as_ref().map(|a| a.url.as_str()),
+    )
+    .await?;
+    println!("installed FastTrackStudio {}", release.tag);
+    Ok(())
 }
 
-/// Headless installer — runs all steps, prints progress to stdout, exits with
-/// appropriate status code.
-fn run_silent(plan: InstallPlan) {
-    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-    rt.block_on(async move {
-        if let Err(errors) = plan.validate() {
-            for e in &errors {
-                eprintln!("error: {e}");
+/// Download → verify → extract → apply layout.
+async fn install_tarball(
+    client: &reqwest::Client,
+    layout: &Layout,
+    tarball_url: &str,
+    tarball_name: &str,
+    sums_url: Option<&str>,
+) -> eyre::Result<()> {
+    let work = tempfile_dir()?;
+    let tarball_path = work.join(tarball_name);
+
+    fetch::download(client, tarball_url, &tarball_path, tarball_name).await?;
+
+    // Verify against SHA256SUMS when we can get it (release asset, or a
+    // sibling of a --url tarball); a missing sums file is only a warning.
+    match sums_url {
+        Some(url) => match fetch::fetch_text(client, url).await {
+            Ok(sums) => {
+                fetch::verify_sha256(&tarball_path, tarball_name, &sums)?;
+                println!("  sha256 verified");
             }
-            std::process::exit(1);
-        }
+            Err(e) => println!("  warning: SHA256SUMS not fetched ({e}); skipping verification"),
+        },
+        None => println!("  warning: no SHA256SUMS available; skipping verification"),
+    }
 
-        println!("Installing to {}", plan.install_root.display());
+    let stage = work.join("extracted");
+    fetch::extract_tarball(&tarball_path, &stage)
+        .wrap_err_with(|| format!("extracting {tarball_name}"))?;
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
-        let ctx = InstallContext {
-            plan,
-            extension_bytes: vec![],
-            fts_extensions: crate::bundled_extensions(),
-            launcher_bin: crate::find_launcher_bin(),
-            selected_profiles: installer_core::profiles::ALL_PROFILES
-                .iter()
-                .map(|p| p.id.to_string())
-                .collect(),
-        };
+    layout.install(&stage)?;
 
-        let handle = tokio::spawn(async move {
-            installer_core::run_all_steps(ctx, tx).await
-        });
-
-        // Print progress events to stdout.
-        while let Some(event) = rx.recv().await {
-            match &event {
-                InstallEvent::StepStarted { label, .. } => {
-                    println!("  [{label}] started");
-                }
-                InstallEvent::StepProgress { step: _, fraction, message } => {
-                    if !message.is_empty() {
-                        println!("  ... {message} ({:.0}%)", fraction * 100.0);
-                    }
-                }
-                InstallEvent::StepCompleted(step) => {
-                    println!("  [{}] done", step.label());
-                }
-                InstallEvent::StepFailed { step, error } => {
-                    eprintln!("  [{}] FAILED: {error}", step.label());
-                }
-                InstallEvent::AllCompleted => {
-                    println!("Installation complete.");
-                }
-            }
-        }
-
-        match handle.await.expect("install task panicked") {
-            Ok(()) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("Installation failed: {e:#}");
-                std::process::exit(1);
-            }
-        }
-    });
+    let _ = std::fs::remove_dir_all(&work);
+    Ok(())
 }
 
-/// Find the fts-bundle directory inside the installer .app bundle.
-///
-/// Layout: FtsInstaller.app/Contents/Resources/fts-bundle/
-///   ├── reaper-launcher
-///   ├── extensions/
-///   │   ├── sync-extension
-///   │   └── signal-extension
-///   ├── fx/
-///   │   └── FTS Signal Controller.clap
-///   └── daw-bridge/
-///       └── libreaper_daw_bridge.dylib
-fn fts_bundle_dir() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    // Inside .app/Contents/MacOS/fts-installer
-    let resources = exe.parent()?.parent()?.join("Resources/fts-bundle");
-    if resources.exists() {
-        return Some(resources);
-    }
-    // Dev builds: check cargo workspace
-    for candidate in ["target/release", "../target/release", "../../target/release"] {
-        let p = PathBuf::from(candidate);
-        if p.join("reaper-launcher").exists() {
-            return Some(p);
-        }
-    }
-    None
-}
-
-/// Find the reaper-launcher binary.
-pub fn find_launcher_bin() -> Option<PathBuf> {
-    let bundle = fts_bundle_dir()?;
-    let launcher = bundle.join("reaper-launcher");
-    if launcher.exists() {
-        Some(launcher)
-    } else {
-        None
-    }
-}
-
-/// Discover FTS extensions bundled in the installer .app.
-pub fn bundled_extensions() -> Vec<installer_core::steps::install_fts_extensions::BundledExtension> {
-    // We can't use include_bytes! for runtime-discovered files, so we read them
-    // from disk and leak the memory (installer is short-lived, this is fine).
-    let bundle = match fts_bundle_dir() {
-        Some(b) => b,
-        None => return vec![],
-    };
-
-    let mut exts = Vec::new();
-
-    // FTS extensions → UserPlugins/fts-extensions/
-    let ext_dir = bundle.join("extensions");
-    if ext_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&ext_dir) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if let Ok(data) = std::fs::read(entry.path()) {
-                        let rel_path = format!("UserPlugins/fts-extensions/{name}");
-                        // Leak the strings/data so they have 'static lifetime
-                        let rel: &'static str = Box::leak(rel_path.into_boxed_str());
-                        let bytes: &'static [u8] = Box::leak(data.into_boxed_slice());
-                        exts.push(installer_core::BundledExtension {
-                            rel_path: rel,
-                            data: bytes,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    // CLAP plugins → UserPlugins/FX/FTS/
-    let fx_dir = bundle.join("fx");
-    if fx_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&fx_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.ends_with(".clap") {
-                    // CLAP plugins are directories — copy as a single file marker for now
-                    // TODO: handle .clap bundle directories properly
-                }
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    if let Ok(data) = std::fs::read(entry.path()) {
-                        let rel_path = format!("UserPlugins/FX/FTS/{name}");
-                        let rel: &'static str = Box::leak(rel_path.into_boxed_str());
-                        let bytes: &'static [u8] = Box::leak(data.into_boxed_slice());
-                        exts.push(installer_core::BundledExtension {
-                            rel_path: rel,
-                            data: bytes,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    // daw-bridge → UserPlugins/ (directly, rename lib prefix to reaper_ for REAPER to load it)
-    let bridge_dir = bundle.join("daw-bridge");
-    if bridge_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&bridge_dir) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    // Rename libreaper_* → reaper_* (REAPER expects reaper_ prefix)
-                    let name = if let Some(rest) = name.strip_prefix("lib") {
-                        rest.to_string()
-                    } else {
-                        name
-                    };
-                    if let Ok(data) = std::fs::read(entry.path()) {
-                        let rel_path = format!("UserPlugins/{name}");
-                        let rel: &'static str = Box::leak(rel_path.into_boxed_str());
-                        let bytes: &'static [u8] = Box::leak(data.into_boxed_slice());
-                        exts.push(installer_core::BundledExtension {
-                            rel_path: rel,
-                            data: bytes,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    exts
+/// A fresh temp working directory for this run.
+fn tempfile_dir() -> eyre::Result<PathBuf> {
+    let dir = std::env::temp_dir().join(format!("fts-installer-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).wrap_err_with(|| format!("creating {}", dir.display()))?;
+    Ok(dir)
 }
