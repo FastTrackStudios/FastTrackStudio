@@ -84,13 +84,13 @@ fn lp_phase_delay(d: f64, w: f64) -> f64 {
 /// so that partial 1 lands exactly on f0 and partial k lands on the stiff-
 /// string target k·f0·√(1+B·k²). Uses exact allpass/LP phase delays — no
 /// empirical trims.
-struct LoopDesign {
-    n: usize,
-    tune_a: f32,
-    disp_a: f32,
+pub struct LoopDesign {
+    pub n: usize,
+    pub tune_a: f32,
+    pub disp_a: f32,
 }
 
-fn design_loop(f0: f64, b: f64, m: usize, d: f64, sr: f64) -> LoopDesign {
+pub fn design_loop(f0: f64, b: f64, m: usize, d: f64, sr: f64) -> LoopDesign {
     let w0 = std::f64::consts::TAU * f0 / sr;
     // measurement partial: high enough to see stiffness, below ~0.4·sr
     let k = ((0.4 * sr / f0).floor() as usize).clamp(2, 12) as f64;
@@ -184,9 +184,13 @@ impl StringWaveguide {
     /// → brighter — the velocity→brightness curve comes out of the ODE, not
     /// a pulse-shape heuristic.
     pub fn strike(&mut self, vel01: f32, strike_pos: f32) {
-        // SI-ish constants for a mid-keyboard hammer
-        let m = 0.009f32; // hammer mass, kg
-        let k = 1.5e9f32; // felt stiffness coefficient
+        // Hammers are graded along the keyboard: bass = heavy + soft felt,
+        // treble = light + hard (Conklin; Pianoteq's "hammer hardness").
+        // Scale mass and stiffness from the string's fundamental.
+        let f0_est = self.sr / self.n as f32;
+        let g = (f0_est / 220.0).clamp(0.1, 20.0); // 1.0 at A3
+        let m = (0.009 * g.powf(-0.3)).clamp(0.004, 0.014); // kg
+        let k = (1.5e9 * g.powf(1.5)).clamp(1e7, 1e11); // felt stiffness
         let p_exp = 2.8f32; // felt stiffness exponent
         let two_r = 10.0f32; // 2× string wave impedance, kg/s
         let dt = 1.0 / self.sr;

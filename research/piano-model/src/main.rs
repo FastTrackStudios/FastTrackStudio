@@ -16,6 +16,7 @@ mod synth;
 mod table;
 mod validate;
 mod waveguide;
+mod wgtable;
 
 use model::ModelConfig;
 
@@ -181,6 +182,31 @@ enum Cmd {
         #[arg(long)]
         body_ref: Option<PathBuf>,
     },
+    /// Generate the per-note waveguide parameter table from the reference
+    /// library: f0 (stretch tuning), B, n_disp, t60, zb inverted from the
+    /// measured decays, optional LSD-refined brightness. Prints cross-note
+    /// correlation trends and writes JSON.
+    WgTable {
+        #[arg(long, default_value = DEFAULT_LIB)]
+        lib: PathBuf,
+        /// Velocity layer to extract physics from (nearest sampled is used).
+        #[arg(long, default_value_t = 94)]
+        vel: u8,
+        /// Seconds analyzed per note.
+        #[arg(long, default_value_t = 10.0)]
+        dur: f32,
+        /// Refine brightness per note by LSD scoring (slower).
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
+        refine: bool,
+        #[arg(long, default_value_t = 3)]
+        strings: usize,
+        #[arg(long, default_value_t = 0.3)]
+        detune: f32,
+        #[arg(long, default_value_t = 0.08)]
+        strike: f32,
+        #[arg(long, default_value = "out/wg-table.json")]
+        out: PathBuf,
+    },
     /// Validation harness: render the waveguide engine for a grid of
     /// (note, velocity) cells, score each against the nearest reference
     /// sample (tuning, B, two-stage decay, brightness, LSD, envelope corr)
@@ -197,6 +223,10 @@ enum Cmd {
         /// Tolerance level: strict | default | relaxed.
         #[arg(long, default_value = "default")]
         level: String,
+        /// Per-note parameter table (from `pm wg-table`); overrides the
+        /// global engine params below for notes it covers.
+        #[arg(long)]
+        wg_table: Option<PathBuf>,
         /// Seconds of audio to compare per cell.
         #[arg(long, default_value_t = 10.0)]
         dur: f32,
@@ -364,11 +394,14 @@ fn main() -> Result<()> {
             attack_ms,
             outdir,
         } => cmd_decompose(lib, note, vel, attack_ms, outdir),
+        Cmd::WgTable { lib, vel, dur, refine, strings, detune, strike, out } => {
+            cmd_wg_table(lib, vel, dur, refine, strings, detune, strike, out)
+        }
         Cmd::Validate {
-            lib, notes, vels, level, dur, t60, zb, brightness, inharm, n_disp,
+            lib, notes, vels, level, wg_table, dur, t60, zb, brightness, inharm, n_disp,
             strike, strings, detune, report,
         } => cmd_validate(
-            lib, notes, vels, level, dur,
+            lib, notes, vels, level, wg_table, dur,
             waveguide::StringParams { f0: 0.0, t60, brightness, inharmonicity: inharm, n_disp },
             strike, strings, detune, zb, report,
         ),
@@ -826,12 +859,182 @@ fn cmd_wg(
     Ok(())
 }
 
+/// Render one waveguide cell (shared by validate / wg-table refine).
+fn render_wg_cell(
+    p: &waveguide::StringParams,
+    sr: u32,
+    strings: usize,
+    detune: f32,
+    zb: f32,
+    vel: u8,
+    strike: f32,
+    n: usize,
+) -> Vec<f32> {
+    let mut cs = waveguide::CoupledStrings::new(p, sr, strings, detune, zb);
+    cs.strike(vel as f32 / 127.0, strike);
+    let mut model = vec![0.0f32; n];
+    for x in model.iter_mut() {
+        *x = cs.process();
+    }
+    synth::normalize(&mut model, 0.9);
+    model
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_wg_table(
+    lib: PathBuf,
+    vel: u8,
+    dur: f32,
+    refine: bool,
+    strings: usize,
+    detune: f32,
+    strike: f32,
+    out: PathBuf,
+) -> Result<()> {
+    use rayon::prelude::*;
+
+    let (samples, _) = sample::scan(&lib);
+    let mut notes: Vec<u8> = samples
+        .iter()
+        .filter(|s| s.artic == sample::Artic::PedalUp)
+        .filter_map(|s| s.note)
+        .collect();
+    notes.sort_unstable();
+    notes.dedup();
+    println!("extracting per-note params for {} notes (vel layer ≈{vel}, refine={refine})…", notes.len());
+
+    let mut rows: Vec<wgtable::WgNote> = notes
+        .par_iter()
+        .filter_map(|&note| {
+            let s = samples
+                .iter()
+                .filter(|s| s.artic == sample::Artic::PedalUp && s.note == Some(note))
+                .min_by_key(|s| (s.vel.unwrap_or(0) as i32 - vel as i32).abs())?;
+            let real = audio::load_any(&s.path).ok()?;
+            let sr = real.sr;
+            let n = ((dur * sr as f32) as usize).min(real.samples.len());
+            let r = analyze::analyze_note(&real.samples[..n], sr, analyze::midi_hz(note), 24);
+            let f0 = if r.f0 > 10.0 { r.f0 } else { analyze::midi_hz(note) };
+            let b = r.inharmonicity_b.clamp(1e-6, 5e-2);
+
+            // two-stage decay of the first partial → t60 (aftersound) + zb (prompt)
+            let (prompt, after) = r
+                .modal
+                .first()
+                .map(|p| {
+                    let f = if p.decay_fast > 0.0 { 6.908 / p.decay_fast } else { 2.0 };
+                    let sl = if p.decay_slow > 0.0 { 6.908 / p.decay_slow } else { 20.0 };
+                    (f, sl)
+                })
+                .unwrap_or((2.0, 20.0));
+            let t60 = after.clamp(2.0, 120.0);
+            let zb = wgtable::invert_zb(f0, prompt, t60, strings as f32);
+
+            // reference brightness (for the record + correlation)
+            let mag = analyze::avg_mag(&real.samples[..n], sr, 3.0);
+            let bin_hz = sr as f32 / (mag.len() as f32 * 2.0);
+            let (mut lo, mut hi) = (0.0f64, 0.0f64);
+            for (i, p) in r.modal.iter().enumerate() {
+                let bidx = (p.freq / bin_hz).round() as usize;
+                let e = mag.get(bidx).map(|&m| (m as f64).powi(2)).unwrap_or(0.0);
+                if i < 5 { lo += e } else { hi += e }
+            }
+            let bright_ref = (hi / lo.max(1e-12)) as f32;
+
+            // brightness: refined to match the brightness FEATURE (partials>5
+            // / first-5 energy), not LSD — LSD is biased bright because an
+            // over-bright model "fills in" the recording's noise floor. The
+            // feature compares energy at the partials only.
+            let mut brightness = 0.9;
+            let ref_vel = s.vel.unwrap_or(vel);
+            let n_disp = wgtable::pick_n_disp(f0, b, brightness, sr);
+            // above ~note 84 partials 6+ are near/past Nyquist — the feature
+            // is 0/0 noise; keep the default rather than matching garbage
+            if refine && f0 * 6.0 < 0.4 * sr as f32 {
+                let nr = n.min((6.0 * sr as f32) as usize);
+                let mut best = f32::INFINITY;
+                for cand in [0.25f32, 0.45, 0.65, 0.8, 0.9, 0.96] {
+                    let p = waveguide::StringParams {
+                        f0, t60, brightness: cand, inharmonicity: b, n_disp,
+                    };
+                    let model = render_wg_cell(&p, sr, strings, detune, zb, ref_vel, strike, nr);
+                    let am = analyze::analyze_note(&model, sr, f0, 24);
+                    let magm = analyze::avg_mag(&model, sr, 3.0);
+                    let (mut lo2, mut hi2) = (0.0f64, 0.0f64);
+                    for (i, p) in am.modal.iter().enumerate() {
+                        let bidx = (p.freq / bin_hz).round() as usize;
+                        let e = magm.get(bidx).map(|&m| (m as f64).powi(2)).unwrap_or(0.0);
+                        if i < 5 { lo2 += e } else { hi2 += e }
+                    }
+                    let bm = (hi2 / lo2.max(1e-12)) as f32;
+                    let err = (bm.max(1e-4).ln() - bright_ref.max(1e-4).ln()).abs();
+                    if err < best {
+                        best = err;
+                        brightness = cand;
+                    }
+                }
+            }
+
+            Some(wgtable::WgNote {
+                note,
+                f0,
+                b,
+                n_disp: wgtable::pick_n_disp(f0, b, brightness, sr),
+                t60,
+                zb,
+                brightness,
+                strike,
+                detune,
+                prompt_ref: prompt,
+                after_ref: after,
+                bright_ref,
+                cents_vs_et: 1200.0 * (f0 / analyze::midi_hz(note)).log2(),
+            })
+        })
+        .collect();
+    rows.sort_by_key(|r| r.note);
+    wgtable::smooth(&mut rows, 44100);
+
+    // correlation view: is each param a smooth function of note number?
+    println!("\nnote   f0(Hz)   ¢vs ET      B     n_disp  t60(s)    zb     bright  promptRef");
+    for r in &rows {
+        println!(
+            "{:4} {:8.2} {:+7.1} {:9.2e} {:5} {:7.1} {:8.0}   {:.2}    {:6.2}",
+            r.note, r.f0, r.cents_vs_et, r.b, r.n_disp, r.t60, r.zb, r.brightness, r.prompt_ref
+        );
+    }
+    // simple log-domain trend of B vs note (the classic exponential curve)
+    if rows.len() > 8 {
+        let pts: Vec<(f32, f32)> = rows.iter().map(|r| (r.note as f32, r.b.ln())).collect();
+        let nn = pts.len() as f32;
+        let sx: f32 = pts.iter().map(|p| p.0).sum();
+        let sy: f32 = pts.iter().map(|p| p.1).sum();
+        let sxx: f32 = pts.iter().map(|p| p.0 * p.0).sum();
+        let sxy: f32 = pts.iter().map(|p| p.0 * p.1).sum();
+        let slope = (nn * sxy - sx * sy) / (nn * sxx - sx * sx);
+        let icept = (sy - slope * sx) / nn;
+        println!(
+            "\ntrend: ln(B) ≈ {icept:.3} + {slope:.4}·note  (B doubles every {:.1} semitones)",
+            std::f32::consts::LN_2 / slope.abs()
+        );
+    }
+
+    let table = wgtable::WgTable {
+        library: lib.display().to_string(),
+        notes: rows,
+    };
+    table.save(&out)?;
+    println!("table ({} notes) → {}", table.notes.len(), out.display());
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_validate(
     lib: PathBuf,
     notes: String,
     vels: String,
     level: String,
+    wg_table: Option<PathBuf>,
     dur: f32,
     base: waveguide::StringParams,
     strike: f32,
@@ -845,6 +1048,10 @@ fn cmd_validate(
     let want_notes: Vec<u8> = notes.split(',').filter_map(|s| s.trim().parse().ok()).collect();
     let want_vels: Vec<u8> = vels.split(',').filter_map(|s| s.trim().parse().ok()).collect();
     let tol = validate::Tolerances::by_name(&level);
+    let table = match &wg_table {
+        Some(p) => Some(wgtable::WgTable::load(p)?),
+        None => None,
+    };
     let (samples, _) = sample::scan(&lib);
 
     // per requested cell: the pedal-up sample with the nearest velocity layer
@@ -870,14 +1077,16 @@ fn cmd_validate(
             let real = audio::load_any(path).ok()?;
             let sr = real.sr;
             let n = ((dur * sr as f32) as usize).min(real.samples.len());
-            let p = waveguide::StringParams { f0: analyze::midi_hz(*note), ..base };
-            let mut cs = waveguide::CoupledStrings::new(&p, sr, strings, detune, zb);
-            cs.strike(*vel as f32 / 127.0, strike);
-            let mut model = vec![0.0f32; n];
-            for x in model.iter_mut() {
-                *x = cs.process();
-            }
-            synth::normalize(&mut model, 0.9);
+            // per-note table entry wins over the global params
+            let entry = table.as_ref().and_then(|t| t.get(*note));
+            let (p, strike_c, detune_c, zb_c) = match entry {
+                Some(e) => (wgtable::WgTable::params(e), e.strike, e.detune, e.zb),
+                None => (
+                    waveguide::StringParams { f0: analyze::midi_hz(*note), ..base },
+                    strike, detune, zb,
+                ),
+            };
+            let model = render_wg_cell(&p, sr, strings, detune_c, zb_c, *vel, strike_c, n);
             Some(validate::validate_cell(*note, *vel, &model, &real.samples[..n], sr, &tol))
         })
         .collect();
