@@ -186,6 +186,10 @@ enum Cmd {
         /// engine params above for this note.
         #[arg(long)]
         table: Option<PathBuf>,
+        /// Match output loudness to this reference file (onset-aligned 1 s
+        /// RMS) instead of peak-normalizing — honest A/B levels.
+        #[arg(long)]
+        match_ref: Option<PathBuf>,
     },
     /// Generate the per-note waveguide parameter table from the reference
     /// library: f0 (stretch tuning), B, n_disp, t60, zb inverted from the
@@ -329,6 +333,16 @@ enum Cmd {
         /// MIDI note — enables the strict per-partial + envelope metrics.
         #[arg(long)]
         note: Option<u8>,
+    },
+    /// Side-by-side spectrogram HTML of two audio files (loudness-normalized,
+    /// shared color scale) — see exactly how the model differs from the ref.
+    Spec {
+        #[arg(long)]
+        a: PathBuf,
+        #[arg(long)]
+        b: PathBuf,
+        #[arg(long, default_value = "out/spec.html")]
+        out: PathBuf,
     },
     /// Probe an arbitrary WAV (e.g. a Pianoteq render): measured f0, inharmonicity,
     /// two-stage decay, high/low partial balance (brightness), and broadband body.
@@ -494,6 +508,19 @@ fn main() -> Result<()> {
             waveguide::StringParams { f0: 0.0, t60, brightness, inharmonicity: inharm, n_disp },
             strike, strings, detune, zb, report,
         ),
+        Cmd::Spec { a, b, out } => {
+            let aa = audio::load_any(&a)?;
+            let bb = audio::load_any(&b)?;
+            let an = a.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let bn = b.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let html = validate::spectrogram_html("model vs reference", &an, &aa.samples, &bn, &bb.samples, aa.sr);
+            if let Some(par) = out.parent() {
+                std::fs::create_dir_all(par)?;
+            }
+            std::fs::write(&out, html)?;
+            println!("spectrogram A/B → {}", out.display());
+            Ok(())
+        }
         Cmd::Lsd { a, b, note } => {
             let aa = audio::load_any(&a)?;
             let bb = audio::load_any(&b)?;
@@ -508,8 +535,8 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Wg { note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref, table } => {
-            cmd_wg(note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref, table)
+        Cmd::Wg { note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref, table, match_ref } => {
+            cmd_wg(note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref, table, match_ref)
         }
         Cmd::Probe { path, note, partials } => cmd_probe(path, note, partials),
         Cmd::TrainSet {
@@ -927,6 +954,7 @@ fn cmd_wg(
     out: PathBuf,
     body_ref: Option<PathBuf>,
     table: Option<PathBuf>,
+    match_ref: Option<PathBuf>,
 ) -> Result<()> {
     let sr = 44100u32;
     let entry = match &table {
@@ -976,7 +1004,22 @@ fn cmd_wg(
         buf = body::apply_fir(&buf, &fir);
         println!("body FIR designed from {} (512 taps)", rp.display());
     }
-    synth::normalize(&mut buf, 0.9);
+    match &match_ref {
+        Some(rp) => {
+            // scale to the reference's onset RMS (first 1 s) — honest A/B
+            let real = audio::load_any(rp)?;
+            let rms = |x: &[f32]| {
+                let on = analyze::onset(x).min(x.len().saturating_sub(1));
+                let n1 = (x.len() - on).min(sr as usize);
+                (x[on..on + n1].iter().map(|v| v * v).sum::<f32>() / n1.max(1) as f32).sqrt()
+            };
+            let g = rms(&real.samples) / rms(&buf).max(1e-9);
+            for x in &mut buf {
+                *x = (*x * g).clamp(-1.0, 1.0);
+            }
+        }
+        None => synth::normalize(&mut buf, 0.9),
+    }
     if let Some(par) = out.parent() {
         std::fs::create_dir_all(par)?;
     }
@@ -1488,7 +1531,14 @@ fn cmd_wg_fit(
                 for (rv, real, track, ref_sig) in &refs {
                     let m = render_wg_cell(&p, sr, strings, x[3], x[1], *rv, x[5], x[4], hammer, n, None);
                     let pe = track.rmse_vs(&m, sr);
-                    let env = validate::envelope_rmse_db(&m, real, sr);
+                    // envelope: full length AND the first 2.5 s emphasized —
+                    // the prompt-decay region is what the ear tracks hardest,
+                    // and the tail-averaged term alone let a 0.4 s-prompt
+                    // reference fit as a 6 s single slope (user-audible)
+                    let np = ((2.5 * sr as f32) as usize).min(m.len()).min(real.len());
+                    let env_full = validate::envelope_rmse_db(&m, real, sr);
+                    let env_prompt = validate::envelope_rmse_db(&m[..np], &real[..np], sr);
+                    let env = 0.5 * env_full + 0.5 * env_prompt;
                     // attack thump/tone balance — only EXCESS model broadband
                     // is penalized (a model cleaner than the recording is fine)
                     let sig = validate::attack_signature(&m, sr, row.f0);
@@ -1502,7 +1552,7 @@ fn cmd_wg_fit(
                     let pe = if pe.is_finite() { pe } else { 60.0 };
                     let env = if env.is_finite() { env } else { 60.0 };
                     let atk = if atk.is_finite() { atk } else { 60.0 };
-                    total += 0.55 * pe + 0.25 * env + 0.2 * atk;
+                    total += 0.45 * pe + 0.4 * env + 0.15 * atk;
                 }
                 total / refs.len() as f32
             };

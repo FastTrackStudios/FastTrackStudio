@@ -506,3 +506,85 @@ td.bad{{background:#3a1414}}
     h.push_str("</table></body></html>\n");
     h
 }
+
+/// Side-by-side spectrogram HTML (canvas-rendered, shared dB color scale) —
+/// the "they'd look different on a spectrogram" debugging eye.
+pub fn spectrogram_html(
+    title: &str,
+    a_name: &str,
+    a: &[f32],
+    b_name: &str,
+    b: &[f32],
+    sr: u32,
+) -> String {
+    use rustfft::{num_complex::Complex, FftPlanner};
+    const FFT: usize = 2048;
+    const HOP: usize = 512;
+    let max_frames = (10.0 * sr as f32 / HOP as f32) as usize;
+    let max_bin = (12_000.0 * FFT as f32 / sr as f32) as usize; // to 12 kHz
+
+    let spec = |x: &[f32]| -> Vec<Vec<i16>> {
+        let on = analyze::onset(x).min(x.len());
+        let x = &x[on..];
+        let peak = x.iter().fold(0.0f32, |m, v| m.max(v.abs())).max(1e-9);
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft_forward(FFT);
+        let frames = ((x.len().saturating_sub(FFT)) / HOP).min(max_frames);
+        let mut out = Vec::with_capacity(frames);
+        let mut buf = vec![Complex::new(0.0f32, 0.0); FFT];
+        for fr in 0..frames {
+            let off = fr * HOP;
+            for i in 0..FFT {
+                let w = 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT as f32).cos();
+                buf[i] = Complex::new(x[off + i] / peak * w, 0.0);
+            }
+            fft.process(&mut buf);
+            out.push(
+                buf[..max_bin.min(FFT / 2)]
+                    .iter()
+                    .map(|c| (20.0 * c.norm().max(1e-6).log10()).clamp(-100.0, 0.0) as i16)
+                    .collect(),
+            );
+        }
+        out
+    };
+    let sa = spec(a);
+    let sb = spec(b);
+    let js = |s: &[Vec<i16>]| {
+        let rows: Vec<String> = s
+            .iter()
+            .map(|r| {
+                let v: Vec<String> = r.iter().map(|x| x.to_string()).collect();
+                format!("[{}]", v.join(","))
+            })
+            .collect();
+        format!("[{}]", rows.join(","))
+    };
+    format!(
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><title>{title}</title>
+<style>body{{background:#111;color:#ddd;font-family:system-ui;margin:1rem}}
+h2{{font-size:1rem;margin:0.6rem 0 0.2rem}}canvas{{width:100%;image-rendering:pixelated;border:1px solid #333}}</style>
+</head><body><h1 style="font-size:1.1rem">{title}</h1>
+<h2>{a_name}</h2><canvas id="ca"></canvas>
+<h2>{b_name}</h2><canvas id="cb"></canvas>
+<p style="color:#888">x = time ({hop_ms:.0} ms/px, 10 s max) · y = 0–12 kHz · color = dBFS (−100..0), shared scale</p>
+<script>
+const A={ja}, B={jb};
+function draw(id, S) {{
+  const c=document.getElementById(id); if(!S.length) return;
+  c.width=S.length; c.height=S[0].length;
+  const g=c.getContext('2d'); const im=g.createImageData(S.length,S[0].length);
+  for(let t=0;t<S.length;t++) for(let f=0;f<S[0].length;f++) {{
+    const v=(S[t][f]+100)/100; const y=S[0].length-1-f;
+    const i=4*(y*S.length+t);
+    im.data[i]=Math.min(255,v*v*580); im.data[i+1]=v*v*255; im.data[i+2]=v*60+v*v*160; im.data[i+3]=255;
+  }}
+  g.putImageData(im,0,0);
+}}
+draw('ca',A); draw('cb',B);
+</script></body></html>"#,
+        hop_ms = HOP as f32 / sr as f32 * 1000.0,
+        ja = js(&sa),
+        jb = js(&sb),
+    )
+}
