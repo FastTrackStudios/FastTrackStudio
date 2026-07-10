@@ -9,13 +9,16 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
 
 ## Live state on this machine
 
-- The **live guitar rig** runs the monorepo `target/debug/signal-engine`
-  (detached via setsid, log `~/.config/signal/engine.log`, cut over
-  2026-07-09; the old signal/ dir is deleted). It serves ws + the web
-  remote at http://<host>:4040/ and its iroh id (also in
-  `~/.config/signal/iroh-endpoint-id`). Restart:
-  `cargo build -p signal-engine && just signal-web-sync`, kill by pid,
-  relaunch. Rig config: `~/.config/signal/rig` is a SYMLINK into the
+- The **live guitar rig** is a systemd user service (`signal-engine`,
+  release build at ~/.local/lib/fts, deployed by `just rig-install`;
+  logs: `journalctl --user -u signal-engine -f`). Hardened + drilled
+  2026-07-10: kill -9 → serving in 1.45s with last patch/song/tempo
+  restored; pipewire daemon death → detected → self-restart, back in
+  ~15s; USB device re-link watchdog; plugin panics bypass the block;
+  MIDI hot-plug; poison-tolerant locks throughout. STILL PENDING: `sudo
+  loginctl enable-linger cody` (user must run — boot-start without
+  login). It serves ws + the web remote at http://<host>:4040/ and its
+  iroh id (`~/.config/signal/iroh-endpoint-id`). Rig config: `~/.config/signal/rig` is a SYMLINK into the
   repo (`features/rigs/guitar/default-config/`, set up by `just
   rig-link`; old dir kept as rig.bak-*) — live edits (editor or the
   rig's auto-save, which stores NAM paths rig-dir-relative) are
@@ -132,6 +135,15 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    Rig/AudioSettings/RigStream locally. Perf notes: heaviest rig
    WaveNet ~3.9x realtime native scalar; try +simd128 on wasm, and a
    set_slimmable_size knob on PureNamModel is a small follow-up.
+
+14. **Single-binary consolidation (APPROVED, next up)**: fold
+   apps/signal-engine into apps/fasttrackstudio — `fasttrackstudio`
+   = desktop app, `fasttrackstudio --engine` = headless engine; web
+   bundle EMBEDDED in the binary (two-stage: dx web build → native
+   build embeds; kills SIGNAL_WEB_DIST + signal-web-sync); Engines
+   panel spawns current_exe() --engine; apps/signal-web retires (the
+   fts web build supersedes it); systemd unit + rig-install shrink to
+   one artifact. Process split stays a runtime property.
 
 ## Gotchas that will bite again
 
