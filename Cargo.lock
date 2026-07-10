@@ -4725,6 +4725,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-reaper-xtask"
+version = "0.1.0"
+dependencies = [
+ "daw",
+]
+
+[[package]]
 name = "daw-standalone"
 version = "0.1.0"
 dependencies = [

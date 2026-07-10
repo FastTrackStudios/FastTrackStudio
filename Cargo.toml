@@ -224,6 +224,8 @@ members = [
     "apps/extensions/reaper-fts-extensions",
     "apps/extensions/reaper-fts-extensions/actions",
     "apps/extensions/reaper-fts-extensions/xtask",
+    # daw-domain REAPER integration-test runner (`just daw-reaper-test`)
+    "features/reaper/daw-reaper/xtask",
     # ── libs/fts-ui extras ────────────────────────────────────────────
     "libs/fts-ui/ui-snapshot",
 ]
