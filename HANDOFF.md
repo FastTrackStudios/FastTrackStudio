@@ -9,14 +9,15 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
 
 ## Live state on this machine
 
-- The **live guitar rig** still runs a PRE-restructure binary out of
-  the stray gitignored `signal/target/` dir (kept alive on purpose).
-  Next restart: `cargo build -p signal-engine && ./target/debug/signal-engine`
-  (or `fts signal engine`), then delete the leftover `signal/` dir.
-  Rig config: `~/.config/signal/rig/*.styx` (profile, songs, setlists,
-  keymap, midi map — all text, reload with the ↻ header button).
-- Web remote serves from `target/dx/signal-web/...` via
-  `python3 -m http.server 8093` (see root Justfile).
+- The **live guitar rig** runs the monorepo `target/debug/signal-engine`
+  (detached via setsid, log `~/.config/signal/engine.log`, cut over
+  2026-07-09; the old signal/ dir is deleted). It serves ws + the web
+  remote at http://<host>:4040/ and its iroh id (also in
+  `~/.config/signal/iroh-endpoint-id`). Restart:
+  `cargo build -p signal-engine && just signal-web-sync`, kill by pid,
+  relaunch. Rig config: `~/.config/signal/rig/*.styx` (profile, songs,
+  setlists, keymap, midi map — all text, reload with the ↻ header
+  button).
 - **Voyager (mac)** still has the OLD multi-repo clones + bootstrap
   script (~/voyager-bootstrap.sh) — must be re-pointed: fresh clone of
   the monorepo, `nix develop`, `cargo build --release -p signal-engine`,
