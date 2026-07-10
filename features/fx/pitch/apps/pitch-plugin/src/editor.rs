@@ -145,7 +145,7 @@ pub fn App() -> Element {
                     SegmentButton { label: "Granular", selected: algo == 2, on_click: algo_setter(2) }
                     SegmentButton { label: "PSOLA", selected: algo == 3, on_click: algo_setter(3) }
                     SegmentButton { label: "WSOLA", selected: algo == 4, on_click: algo_setter(4) }
-                    SegmentButton { label: "Signalsmith", selected: algo == 5, on_click: algo_setter(5) }
+                    SegmentButton { label: "WSOLA", selected: algo == 5, on_click: algo_setter(5) }
                     SegmentButton { label: "Rubberband", selected: algo == 6, on_click: algo_setter(6) }
                     SegmentButton { label: "Allpass", selected: algo == 7, on_click: algo_setter(7) }
                 }

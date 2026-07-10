@@ -399,7 +399,7 @@ comp = { path = "features/fx/comp/comp" }
 reverb = { path = "features/fx/reverb/reverb" }
 delay = { path = "features/fx/delay/delay" }
 pitch = { path = "features/fx/pitch/pitch" }
-pitch-dsp = { path = "features/fx/pitch/pitch-dsp", default-features = false }
+pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
 modulation = { path = "features/fx/modulation/modulation" }
 # Internal DSP cores (behind the facades).
 eq-dsp = { path = "features/fx/eq/eq-dsp" }

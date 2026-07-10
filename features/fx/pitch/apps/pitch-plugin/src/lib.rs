@@ -90,7 +90,7 @@ impl Default for FtsPitchParams {
                     2 => "Granular".to_string(),
                     3 => "PSOLA".to_string(),
                     4 => "WSOLA".to_string(),
-                    5 => "Signalsmith".to_string(),
+                    5 => "WSOLA".to_string(),
                     6 => "Rubberband".to_string(),
                     7 => "Allpass".to_string(),
                     8 => "POG".to_string(),
@@ -102,7 +102,7 @@ impl Default for FtsPitchParams {
                     "granular" | "grain" | "2" => Some(2),
                     "psola" | "3" => Some(3),
                     "wsola" | "4" => Some(4),
-                    "signalsmith" | "5" => Some(5),
+                    "wsola" | "5" => Some(5),
                     "rubberband" | "rubber" | "6" => Some(6),
                     "allpass" | "7" => Some(7),
                     "pog" | "polyoctave" | "poly" | "8" => Some(8),
@@ -223,11 +223,11 @@ impl FtsPitch {
             2 => Algorithm::Granular,
             3 => Algorithm::Psola,
             4 => Algorithm::Wsola,
-            5 => Algorithm::Signalsmith,
+            5 => Algorithm::Wsola,
             6 => Algorithm::Rubberband,
             7 => Algorithm::Allpass,
             8 => Algorithm::PolyOctave,
-            _ => Algorithm::Signalsmith,
+            _ => Algorithm::Wsola,
         };
         self.chain.semitones =
             self.params.pitch.value() as f64 + self.params.fine_tune.value() as f64 / 100.0;
