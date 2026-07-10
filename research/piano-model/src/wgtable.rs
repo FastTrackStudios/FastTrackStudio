@@ -44,6 +44,12 @@ pub struct WgNote {
     pub brightness: f32,
     pub strike: f32,
     pub detune: f32,
+    /// Body/radiation EQ breakpoints (freq Hz, linear gain): the reference's
+    /// partial amplitudes ÷ the raw bridge output's, sampled AT the partials.
+    /// This is the commuted-synthesis body — the piece a bridge-velocity
+    /// output can't supply. None = flat.
+    #[serde(default)]
+    pub body: Option<Vec<(f32, f32)>>,
     // measured context, kept for correlation studies
     pub prompt_ref: f32,
     pub after_ref: f32,

@@ -831,7 +831,8 @@ fn lsd_at(a: &[f32], b: &[f32], sr: u32, fft_size: usize) -> f32 {
     }
     let mut fa = vec![0.0f32; fft_size];
     let mut fb = vec![0.0f32; fft_size];
-    let (mut acc, mut n) = (0.0f64, 0.0f64);
+    let mut las: Vec<f32> = Vec::new();
+    let mut lbs: Vec<f32> = Vec::new();
     for f in 0..frames {
         let off = f * hop;
         for i in 0..fft_size {
@@ -841,15 +842,29 @@ fn lsd_at(a: &[f32], b: &[f32], sr: u32, fft_size: usize) -> f32 {
         let ma = mag_spectrum(&fft, &fa);
         let mb = mag_spectrum(&fft, &fb);
         for k in 0..ma.len() {
-            // clamp log-magnitude to an -80 dB floor (relative to the frame's
-            // peak-normalized scale) so near-silent bins don't blow up to
-            // -140 dB and dominate the distance.
-            let la = (20.0 * (ma[k] as f64).log10()).max(-80.0);
-            let lb = (20.0 * (mb[k] as f64).log10()).max(-80.0);
-            let d = la - lb;
-            acc += d * d;
-            n += 1.0;
+            las.push(20.0 * ma[k].max(1e-12).log10());
+            lbs.push(20.0 * mb[k].max(1e-12).log10());
         }
+    }
+    if lbs.is_empty() {
+        return 0.0;
+    }
+    // Floor at the REFERENCE's own noise floor: a recording carries mic/room
+    // noise the model rightly does not reproduce (Pianoteq's broadband is
+    // ~100× below Keyscape's — see the handoff §2.2). Grade only what is
+    // above the recording's noise: floor = the 20th percentile of the ref's
+    // log-magnitudes (a decaying note spends its tail near the noise floor,
+    // so a low percentile tracks it), clamped to [-80, -35] dB.
+    let mut sorted = lbs.clone();
+    sorted.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    let floor = (sorted[sorted.len() / 5] as f64).clamp(-80.0, -35.0);
+    let (mut acc, mut n) = (0.0f64, 0.0f64);
+    for (la, lb) in las.iter().zip(lbs.iter()) {
+        let la = (*la as f64).max(floor);
+        let lb = (*lb as f64).max(floor);
+        let d = la - lb;
+        acc += d * d;
+        n += 1.0;
     }
     if n > 0.0 {
         (acc / n).sqrt() as f32

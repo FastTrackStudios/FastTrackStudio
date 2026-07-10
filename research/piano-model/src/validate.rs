@@ -198,13 +198,17 @@ pub fn validate_cell(
             tol.b_rel * 100.0
         ));
     }
-    if rel_err(prompt_m, prompt_r) > tol.prompt_rel {
+    // decay gates only apply when the reference's own two-stage fit is sane —
+    // a collapsed fit (prompt ≈ after) or absurd values are metric noise, not
+    // model error, and must not produce false FAILs
+    let ref_fit_ok = after_r > prompt_r * 1.2 && prompt_r > 0.05 && after_r < 150.0;
+    if ref_fit_ok && rel_err(prompt_m, prompt_r) > tol.prompt_rel {
         failures.push(format!(
             "prompt {prompt_m:.1}s vs {prompt_r:.1}s (>{:.0}%)",
             tol.prompt_rel * 100.0
         ));
     }
-    if rel_err(after_m, after_r) > tol.after_rel {
+    if ref_fit_ok && rel_err(after_m, after_r) > tol.after_rel {
         failures.push(format!(
             "after {after_m:.1}s vs {after_r:.1}s (>{:.0}%)",
             tol.after_rel * 100.0

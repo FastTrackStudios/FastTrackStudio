@@ -59,6 +59,57 @@ pub fn design_fir(model: &[f32], real: &[f32], sr: u32, taps: usize) -> Vec<f32>
     fir
 }
 
+/// FIR from (freq, gain) breakpoints — log-domain linear interpolation between
+/// breakpoints, constant extension outside, zero-phase design, Hann-windowed.
+/// Used for the per-note body EQ sampled AT the partials (the envelope-smoothed
+/// variant averages across partial peaks and does nothing useful).
+pub fn design_fir_from_breakpoints(bps: &[(f32, f32)], sr: u32, taps: usize) -> Vec<f32> {
+    let n = (taps.next_power_of_two() * 4).max(2048);
+    let mut pts: Vec<(f32, f32)> = bps
+        .iter()
+        .filter(|(f, g)| *f > 0.0 && *g > 0.0)
+        .map(|&(f, g)| (f, g.ln()))
+        .collect();
+    pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    if pts.is_empty() {
+        let mut fir = vec![0.0; taps];
+        fir[taps / 2] = 1.0;
+        return fir;
+    }
+    let gain_at = |f: f32| -> f32 {
+        if f <= pts[0].0 {
+            return pts[0].1.exp();
+        }
+        if f >= pts[pts.len() - 1].0 {
+            return pts[pts.len() - 1].1.exp();
+        }
+        let i = pts.partition_point(|p| p.0 < f).max(1);
+        let (f0, g0) = pts[i - 1];
+        let (f1, g1) = pts[i];
+        let t = (f - f0) / (f1 - f0).max(1e-6);
+        (g0 + t * (g1 - g0)).exp()
+    };
+
+    let mut spec = vec![Complex::new(0.0f32, 0.0); n];
+    for (k, s) in spec.iter_mut().enumerate().take(n / 2 + 1) {
+        let f = k as f32 * sr as f32 / n as f32;
+        *s = Complex::new(gain_at(f), 0.0);
+    }
+    for k in 1..n / 2 {
+        spec[n - k] = spec[k].conj();
+    }
+    let mut planner = FftPlanner::new();
+    planner.plan_fft_inverse(n).process(&mut spec);
+    let mut fir = vec![0.0f32; taps];
+    let half = taps / 2;
+    for (i, fv) in fir.iter_mut().enumerate() {
+        let src = (i + n - half) % n;
+        let w = 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / taps as f32).cos();
+        *fv = spec[src].re / n as f32 * w;
+    }
+    fir
+}
+
 /// Convolve (direct form — offline tool use; the realtime voice will use a
 /// partitioned/biquad version).
 pub fn apply_fir(x: &[f32], fir: &[f32]) -> Vec<f32> {

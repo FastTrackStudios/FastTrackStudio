@@ -181,6 +181,10 @@ enum Cmd {
         /// spectral-envelope ratio (ref ÷ raw bridge) and apply it post-bridge.
         #[arg(long)]
         body_ref: Option<PathBuf>,
+        /// Per-note parameter table (`pm wg-table` output) — overrides the
+        /// engine params above for this note.
+        #[arg(long)]
+        table: Option<PathBuf>,
     },
     /// Generate the per-note waveguide parameter table from the reference
     /// library: f0 (stretch tuning), B, n_disp, t60, zb inverted from the
@@ -413,8 +417,8 @@ fn main() -> Result<()> {
             println!("ACCURACY LSD {lsd:.2} dB  ({} vs {})", a.display(), b.display());
             Ok(())
         }
-        Cmd::Wg { note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref } => {
-            cmd_wg(note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref)
+        Cmd::Wg { note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref, table } => {
+            cmd_wg(note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref, table)
         }
         Cmd::Probe { path, note, partials } => cmd_probe(path, note, partials),
         Cmd::TrainSet {
@@ -831,10 +835,29 @@ fn cmd_wg(
     zb: f32,
     out: PathBuf,
     body_ref: Option<PathBuf>,
+    table: Option<PathBuf>,
 ) -> Result<()> {
     let sr = 44100u32;
-    let f0 = analyze::midi_hz(note);
-    let p = waveguide::StringParams { f0, t60, brightness, inharmonicity: inharm, n_disp };
+    let entry = match &table {
+        Some(tp) => wgtable::WgTable::load(tp)?.get(note).cloned(),
+        None => None,
+    };
+    let (p, strike, detune, zb) = match &entry {
+        Some(e) => {
+            println!(
+                "table params: f0 {:.2} Hz  B {:.2e}  n_disp {}  t60 {:.1}s  zb {:.0}  bright {:.2}",
+                e.f0, e.b, e.n_disp, e.t60, e.zb, e.brightness
+            );
+            (wgtable::WgTable::params(e), e.strike, e.detune, e.zb)
+        }
+        None => (
+            waveguide::StringParams {
+                f0: analyze::midi_hz(note), t60, brightness, inharmonicity: inharm, n_disp,
+            },
+            strike, detune, zb,
+        ),
+    };
+    let f0 = p.f0;
     let vel01 = (vel as f32 / 127.0).clamp(0.0, 1.0);
     let n = (dur * sr as f32) as usize;
     let mut buf = vec![0.0f32; n];
@@ -842,6 +865,10 @@ fn cmd_wg(
     cs.strike(vel01, strike);
     for x in buf.iter_mut() {
         *x = cs.process();
+    }
+    if let Some(bps) = entry.as_ref().and_then(|e| e.body.as_deref()) {
+        let fir = body::design_fir_from_breakpoints(bps, sr, 512);
+        buf = body::apply_fir(&buf, &fir);
     }
     if let Some(rp) = &body_ref {
         let real = audio::load_any(rp)?;
@@ -860,6 +887,7 @@ fn cmd_wg(
 }
 
 /// Render one waveguide cell (shared by validate / wg-table refine).
+/// `body`: per-note radiation-EQ breakpoints, applied post-bridge.
 fn render_wg_cell(
     p: &waveguide::StringParams,
     sr: u32,
@@ -869,12 +897,17 @@ fn render_wg_cell(
     vel: u8,
     strike: f32,
     n: usize,
+    body_bps: Option<&[(f32, f32)]>,
 ) -> Vec<f32> {
     let mut cs = waveguide::CoupledStrings::new(p, sr, strings, detune, zb);
     cs.strike(vel as f32 / 127.0, strike);
     let mut model = vec![0.0f32; n];
     for x in model.iter_mut() {
         *x = cs.process();
+    }
+    if let Some(bps) = body_bps {
+        let fir = body::design_fir_from_breakpoints(bps, sr, 512);
+        model = body::apply_fir(&model, &fir);
     }
     synth::normalize(&mut model, 0.9);
     model
@@ -906,27 +939,66 @@ fn cmd_wg_table(
     let mut rows: Vec<wgtable::WgNote> = notes
         .par_iter()
         .filter_map(|&note| {
-            let s = samples
+            // ALL pedal-up layers for this note, by velocity
+            let mut layers: Vec<&sample::Sample> = samples
                 .iter()
                 .filter(|s| s.artic == sample::Artic::PedalUp && s.note == Some(note))
-                .min_by_key(|s| (s.vel.unwrap_or(0) as i32 - vel as i32).abs())?;
+                .collect();
+            layers.sort_by_key(|s| s.vel.unwrap_or(0));
+            let s = layers
+                .iter()
+                .min_by_key(|s| (s.vel.unwrap_or(0) as i32 - vel as i32).abs())
+                .copied()?;
             let real = audio::load_any(&s.path).ok()?;
             let sr = real.sr;
             let n = ((dur * sr as f32) as usize).min(real.samples.len());
             let r = analyze::analyze_note(&real.samples[..n], sr, analyze::midi_hz(note), 24);
-            let f0 = if r.f0 > 10.0 { r.f0 } else { analyze::midi_hz(note) };
-            let b = r.inharmonicity_b.clamp(1e-6, 5e-2);
 
-            // two-stage decay of the first partial → t60 (aftersound) + zb (prompt)
-            let (prompt, after) = r
-                .modal
-                .first()
-                .map(|p| {
-                    let f = if p.decay_fast > 0.0 { 6.908 / p.decay_fast } else { 2.0 };
-                    let sl = if p.decay_slow > 0.0 { 6.908 / p.decay_slow } else { 20.0 };
-                    (f, sl)
-                })
-                .unwrap_or((2.0, 20.0));
+            // the physics (f0, B, decays) doesn't depend on velocity — extract
+            // from up to 5 layers spread across the range and take medians,
+            // because any SINGLE recording's fit can collapse
+            let picks: Vec<&sample::Sample> = if layers.len() <= 5 {
+                layers.clone()
+            } else {
+                (0..5).map(|i| layers[i * (layers.len() - 1) / 4]).collect()
+            };
+            let (mut cents_v, mut b_v, mut prompt_v, mut after_v) =
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            for lay in &picks {
+                let Ok(a) = audio::load_any(&lay.path) else { continue };
+                let nn = ((dur * a.sr as f32) as usize).min(a.samples.len());
+                let ra = analyze::analyze_note(&a.samples[..nn], a.sr, analyze::midi_hz(note), 24);
+                if ra.f0 > 10.0 {
+                    cents_v.push(1200.0 * (ra.f0 / analyze::midi_hz(note)).log2());
+                }
+                if ra.inharmonicity_b > 2e-6 && ra.inharmonicity_b < 2e-2 {
+                    b_v.push(ra.inharmonicity_b);
+                }
+                if let Some(p) = ra.modal.first() {
+                    if p.decay_fast > 0.0 && p.decay_slow > 0.0 {
+                        let f = 6.908 / p.decay_fast;
+                        let sl = 6.908 / p.decay_slow;
+                        // keep only non-collapsed two-stage fits
+                        if sl > f * 1.2 && sl < 150.0 {
+                            prompt_v.push(f);
+                            after_v.push(sl);
+                        }
+                    }
+                }
+            }
+            let med = |v: &mut Vec<f32>, fallback: f32| -> f32 {
+                if v.is_empty() {
+                    fallback
+                } else {
+                    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    v[v.len() / 2]
+                }
+            };
+            let cents = med(&mut cents_v, 0.0);
+            let f0 = analyze::midi_hz(note) * 2f32.powf(cents / 1200.0);
+            let b = med(&mut b_v, 1e-4).clamp(1e-6, 5e-2);
+            let prompt = med(&mut prompt_v, 2.0);
+            let after = med(&mut after_v, 20.0);
             let t60 = after.clamp(2.0, 120.0);
             let zb = wgtable::invert_zb(f0, prompt, t60, strings as f32);
 
@@ -957,7 +1029,7 @@ fn cmd_wg_table(
                     let p = waveguide::StringParams {
                         f0, t60, brightness: cand, inharmonicity: b, n_disp,
                     };
-                    let model = render_wg_cell(&p, sr, strings, detune, zb, ref_vel, strike, nr);
+                    let model = render_wg_cell(&p, sr, strings, detune, zb, ref_vel, strike, nr, None);
                     let am = analyze::analyze_note(&model, sr, f0, 24);
                     let magm = analyze::avg_mag(&model, sr, 3.0);
                     let (mut lo2, mut hi2) = (0.0f64, 0.0f64);
@@ -975,16 +1047,53 @@ fn cmd_wg_table(
                 }
             }
 
+            // body EQ: reference partial amps ÷ raw-bridge partial amps,
+            // sampled at the reference's partial frequencies. Median-normalized
+            // (the EQ shapes, overall gain stays unity) and clamped ±24 dB.
+            let n_disp_final = wgtable::pick_n_disp(f0, b, brightness, sr);
+            // measured A/B: the per-partial EQ HURT (amp estimates too noisy
+            // to EQ from — LSD +1, pass count 4→2), so it's opt-in until the
+            // partial-amp extraction is more robust
+            let body = if std::env::var_os("WG_BODY").is_none() {
+                None
+            } else {
+                let pfin = waveguide::StringParams {
+                    f0, t60, brightness, inharmonicity: b, n_disp: n_disp_final,
+                };
+                let nr = n.min((6.0 * sr as f32) as usize);
+                let model = render_wg_cell(&pfin, sr, strings, detune, zb, ref_vel, strike, nr, None);
+                let am = analyze::analyze_note(&model, sr, f0, 24);
+                let mut bps: Vec<(f32, f32)> = r
+                    .modal
+                    .iter()
+                    .zip(am.modal.iter())
+                    .filter(|(pr, pm)| pr.amp > 1e-6 && pm.amp > 1e-6)
+                    .map(|(pr, pm)| (pr.freq, (pr.amp / pm.amp).clamp(1.0 / 16.0, 16.0)))
+                    .collect();
+                if bps.len() >= 3 {
+                    let mut gains: Vec<f32> = bps.iter().map(|b| b.1).collect();
+                    gains.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let med = gains[gains.len() / 2];
+                    for b in &mut bps {
+                        b.1 /= med;
+                    }
+                    Some(bps)
+                } else {
+                    None
+                }
+            };
+
             Some(wgtable::WgNote {
                 note,
                 f0,
                 b,
-                n_disp: wgtable::pick_n_disp(f0, b, brightness, sr),
+                n_disp: n_disp_final,
                 t60,
                 zb,
                 brightness,
                 strike,
                 detune,
+                body,
                 prompt_ref: prompt,
                 after_ref: after,
                 bright_ref,
@@ -1086,7 +1195,8 @@ fn cmd_validate(
                     strike, detune, zb,
                 ),
             };
-            let model = render_wg_cell(&p, sr, strings, detune_c, zb_c, *vel, strike_c, n);
+            let body_bps = entry.and_then(|e| e.body.as_deref());
+            let model = render_wg_cell(&p, sr, strings, detune_c, zb_c, *vel, strike_c, n, body_bps);
             Some(validate::validate_cell(*note, *vel, &model, &real.samples[..n], sr, &tol))
         })
         .collect();
