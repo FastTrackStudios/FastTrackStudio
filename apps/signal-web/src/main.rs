@@ -166,16 +166,15 @@ impl Target {
 
 type Clients = (RigClient, RigStreamClient, AudioSettingsClient);
 
-/// Establish one typed client over a fresh lane on `link`. Every transport
-/// (WebSocket today, iroh p2p once its wasm port lands) funnels through this
-/// single `initiator_on` flow — hand it a [`vox::Link`], get a typed client.
-async fn establish_on<C, L>(link: L) -> Option<C>
-where
-    C: vox_core::FromVoxLane,
-    L: vox::Link + 'static,
-    L::Tx: vox::MaybeSend + vox::MaybeSync + 'static,
-    L::Rx: vox::MaybeSend + 'static,
-{
+/// Establish one typed client over its own WebSocket. Per-transport
+/// dial+establish (rather than a generic link parameter) so the link
+/// type stays inferred — WsLink is generic on native and the vox
+/// builder's Send bounds differ per platform.
+async fn establish_ws<C: vox_core::FromVoxLane>(url: &str) -> Option<C> {
+    let link = vox_websocket::WsLink::connect(url)
+        .await
+        .map_err(|e| tracing::error!("ws connect {url}: {e:?}"))
+        .ok()?;
     vox_core::initiator_on(link)
         .establish::<C>()
         .await
@@ -183,20 +182,13 @@ where
         .ok()
 }
 
-async fn dial_ws(url: &str) -> Option<vox_websocket::WsLink> {
-    vox_websocket::WsLink::connect(url)
-        .await
-        .map_err(|e| tracing::error!("ws connect {url}: {e:?}"))
-        .ok()
-}
-
 /// One WebSocket connect attempt for all three clients — one link per typed
 /// client (a vox caller is service-bound once constructed, so sibling
 /// services don't share one).
 async fn connect_ws(url: &str) -> Option<Clients> {
-    let rig: RigClient = establish_on(dial_ws(url).await?).await?;
-    let stream: RigStreamClient = establish_on(dial_ws(url).await?).await?;
-    let settings: AudioSettingsClient = establish_on(dial_ws(url).await?).await?;
+    let rig: RigClient = establish_ws(url).await?;
+    let stream: RigStreamClient = establish_ws(url).await?;
+    let settings: AudioSettingsClient = establish_ws(url).await?;
     Some((rig, stream, settings))
 }
 
@@ -229,13 +221,19 @@ async fn app_endpoint() -> Option<iroh::Endpoint> {
     Some(CELL.get_or_init(|| ep).clone())
 }
 
-async fn dial_iroh(
+/// Establish one typed client over its own iroh bi-stream.
+async fn establish_iroh<C: vox_core::FromVoxLane>(
     ep: &iroh::Endpoint,
     id: iroh::EndpointId,
-) -> Option<architect::iroh_link::IrohLink> {
-    architect::iroh_link::connect(ep, id)
+) -> Option<C> {
+    let link = architect::iroh_link::connect(ep, id)
         .await
         .map_err(|e| tracing::error!("iroh connect {id}: {e:?}"))
+        .ok()?;
+    vox_core::initiator_on(link)
+        .establish::<C>()
+        .await
+        .map_err(|e| tracing::error!("vox handshake (iroh): {e:?}"))
         .ok()
 }
 
@@ -248,9 +246,9 @@ async fn connect_iroh(id: &str) -> Option<Clients> {
         .map_err(|e| tracing::error!("bad rig key: {e}"))
         .ok()?;
     let ep = app_endpoint().await?;
-    let rig: RigClient = establish_on(dial_iroh(&ep, id).await?).await?;
-    let stream: RigStreamClient = establish_on(dial_iroh(&ep, id).await?).await?;
-    let settings: AudioSettingsClient = establish_on(dial_iroh(&ep, id).await?).await?;
+    let rig: RigClient = establish_iroh(&ep, id).await?;
+    let stream: RigStreamClient = establish_iroh(&ep, id).await?;
+    let settings: AudioSettingsClient = establish_iroh(&ep, id).await?;
     Some((rig, stream, settings))
 }
 
