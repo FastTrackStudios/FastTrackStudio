@@ -34,6 +34,8 @@ pub struct Tolerances {
     pub env_corr_min: f32,
     /// Max sample-by-sample RMS error of the dB envelopes (sustain/dropoff).
     pub env_rmse_db: f32,
+    /// Max energy-weighted per-partial envelope RMSE (THE strict gate).
+    pub partial_env_db: f32,
 }
 
 impl Tolerances {
@@ -47,6 +49,7 @@ impl Tolerances {
             lsd_db: 12.0,
             env_corr_min: 0.98,
             env_rmse_db: 2.0,
+            partial_env_db: 5.0,
         }
     }
     pub fn default_level() -> Self {
@@ -59,6 +62,7 @@ impl Tolerances {
             lsd_db: 18.0,
             env_corr_min: 0.95,
             env_rmse_db: 4.0,
+            partial_env_db: 7.5,
         }
     }
     pub fn relaxed() -> Self {
@@ -71,6 +75,7 @@ impl Tolerances {
             lsd_db: 26.0,
             env_corr_min: 0.85,
             env_rmse_db: 7.0,
+            partial_env_db: 11.0,
         }
     }
     pub fn by_name(name: &str) -> Self {
@@ -99,6 +104,7 @@ pub struct CellReport {
     pub lsd_db: f32,
     pub env_corr: f32,
     pub env_rmse: f32,
+    pub partial_env: f32,
     pub passed: bool,
     pub failures: Vec<String>,
 }
@@ -147,6 +153,117 @@ pub fn envelope_rmse_db(model: &[f32], real: &[f32], sr: u32) -> f32 {
         acc += d * d;
     }
     (acc / n as f64).sqrt() as f32
+}
+
+/// STRICTEST comparison: the **per-partial envelope matrix**. Track each of
+/// the reference's first K partials' dB trajectories over time (STFT bin
+/// magnitude at the partial frequency) and compare the model's trajectory at
+/// the SAME frequencies, frame by frame, energy-weighted.
+///
+/// This catches what every averaged metric smears over: a partial that's the
+/// right average level but decays wrong, a partial that's too strong from the
+/// start, a missing two-stage knee in ONE partial. Both matrices are
+/// normalized by their own global peak (so relative partial balance is graded
+/// too) and floored at the reference's per-partial noise floor.
+pub fn partial_env_rmse_db(model: &[f32], real: &[f32], sr: u32, f0: f32) -> f32 {
+    match RefTrack::build(real, sr, f0) {
+        Some(rt) => rt.rmse_vs(model, sr),
+        None => f32::NAN,
+    }
+}
+
+const PT_K: usize = 12;
+const PT_FFT: usize = 8192;
+const PT_HOP: usize = 2048;
+
+fn pt_track(x: &[f32], sr: u32, freqs: &[f32], frames: usize) -> Vec<Vec<f32>> {
+    use rustfft::{num_complex::Complex, FftPlanner};
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(PT_FFT);
+    let win: Vec<f32> = (0..PT_FFT)
+        .map(|i| {
+            let w = std::f32::consts::PI * i as f32 / (PT_FFT as f32 - 1.0);
+            w.sin() * w.sin()
+        })
+        .collect();
+    let bin_of = |f: f32| ((f * PT_FFT as f32 / sr as f32).round() as usize).min(PT_FFT / 2 - 2);
+    let mut out = vec![Vec::with_capacity(frames); freqs.len()];
+    let mut buf = vec![Complex::new(0.0f32, 0.0); PT_FFT];
+    for fr in 0..frames {
+        let off = fr * PT_HOP;
+        for i in 0..PT_FFT {
+            buf[i] = Complex::new(x[off + i] * win[i], 0.0);
+        }
+        fft.process(&mut buf);
+        for (k, f) in freqs.iter().enumerate() {
+            let b = bin_of(*f);
+            // peak over ±1 bin (detune/beating wander)
+            let m = buf[b - 1].norm().max(buf[b].norm()).max(buf[b + 1].norm());
+            out[k].push(20.0 * m.max(1e-9).log10());
+        }
+    }
+    out
+}
+
+/// Cached reference side of the per-partial metric — build once per
+/// (note, layer), score many candidate renders against it cheaply.
+pub struct RefTrack {
+    freqs: Vec<f32>,
+    mat: Vec<Vec<f32>>,
+    peak: f32,
+    frames: usize,
+    len: usize,
+}
+
+impl RefTrack {
+    pub fn build(real: &[f32], sr: u32, f0: f32) -> Option<Self> {
+        let r0 = analyze::onset(real).min(real.len());
+        let real = &real[r0..];
+        if real.len() < PT_FFT * 2 {
+            return None;
+        }
+        let ar = analyze::analyze_note(real, sr, f0, PT_K);
+        let freqs: Vec<f32> = ar.partials.iter().copied().take(PT_K).collect();
+        if freqs.is_empty() {
+            return None;
+        }
+        let frames = (real.len() - PT_FFT) / PT_HOP;
+        let mat = pt_track(real, sr, &freqs, frames);
+        let peak = mat.iter().flat_map(|r| r.iter().copied()).fold(f32::MIN, f32::max);
+        Some(Self { freqs, mat, peak, frames, len: real.len() })
+    }
+
+    pub fn rmse_vs(&self, model: &[f32], sr: u32) -> f32 {
+        let m0 = analyze::onset(model).min(model.len());
+        let model = &model[m0..];
+        let len = model.len().min(self.len);
+        if len < PT_FFT * 2 {
+            return f32::NAN;
+        }
+        let frames = ((len - PT_FFT) / PT_HOP).min(self.frames);
+        let tm = pt_track(model, sr, &self.freqs, frames);
+        let pm = tm.iter().flat_map(|r| r.iter().copied()).fold(f32::MIN, f32::max);
+        let (mut acc, mut wsum) = (0.0f64, 0.0f64);
+        for k in 0..self.freqs.len() {
+            let floor = self.mat[k].iter().cloned().fold(f32::MAX, f32::min) - self.peak + 3.0;
+            // weight: the partial's peak level (linear) — loud partials matter more
+            let w = 10f64.powf(
+                (self.mat[k].iter().cloned().fold(f32::MIN, f32::max) - self.peak) as f64 / 20.0,
+            );
+            for i in 0..frames.min(tm[k].len()).min(self.mat[k].len()) {
+                let a = (tm[k][i] - pm).max(floor);
+                let b = (self.mat[k][i] - self.peak).max(floor);
+                let d = (a - b) as f64;
+                acc += w * d * d;
+                wsum += w;
+            }
+        }
+        if wsum > 0.0 {
+            (acc / wsum).sqrt() as f32
+        } else {
+            f32::NAN
+        }
+    }
 }
 
 pub fn pearson(a: &[f32], b: &[f32]) -> f32 {
@@ -223,6 +340,7 @@ pub fn validate_cell(
     let lsd_db = analyze::accuracy_lsd(model, real, sr);
     let env_corr = pearson(&envelope_db(model, sr), &envelope_db(real, sr));
     let env_rmse = envelope_rmse_db(model, real, sr);
+    let partial_env = partial_env_rmse_db(model, real, sr, expected);
 
     let mut failures = Vec::new();
     if tune_cents.abs() > tol.tune_cents {
@@ -236,22 +354,10 @@ pub fn validate_cell(
             tol.b_rel * 100.0
         ));
     }
-    // decay gates only apply when the reference's own two-stage fit is sane —
-    // a collapsed fit (prompt ≈ after) or absurd values are metric noise, not
-    // model error, and must not produce false FAILs
-    let ref_fit_ok = after_r > prompt_r * 1.2 && prompt_r > 0.05 && after_r < 150.0;
-    if ref_fit_ok && rel_err(prompt_m, prompt_r) > tol.prompt_rel {
-        failures.push(format!(
-            "prompt {prompt_m:.1}s vs {prompt_r:.1}s (>{:.0}%)",
-            tol.prompt_rel * 100.0
-        ));
-    }
-    if ref_fit_ok && rel_err(after_m, after_r) > tol.after_rel {
-        failures.push(format!(
-            "after {after_m:.1}s vs {after_r:.1}s (>{:.0}%)",
-            tol.after_rel * 100.0
-        ));
-    }
+    // NOTE: the old prompt/after gates (k1 two-stage fit comparison) are
+    // retired — the sample-by-sample envelope and per-partial trajectory
+    // gates below measure decay directly and far more strictly; the k1
+    // numbers remain in the report for reference.
     if rel_err(bright_m, bright_r) > tol.bright_rel {
         failures.push(format!(
             "brightness {bright_m:.3} vs {bright_r:.3} (>{:.0}%)",
@@ -266,6 +372,12 @@ pub fn validate_cell(
     }
     if env_rmse > tol.env_rmse_db {
         failures.push(format!("env RMSE {env_rmse:.1} dB > {:.1} dB", tol.env_rmse_db));
+    }
+    if partial_env.is_finite() && partial_env > tol.partial_env_db {
+        failures.push(format!(
+            "partial-env {partial_env:.1} dB > {:.1} dB",
+            tol.partial_env_db
+        ));
     }
 
     CellReport {
@@ -283,6 +395,7 @@ pub fn validate_cell(
         lsd_db,
         env_corr,
         env_rmse,
+        partial_env,
         passed: failures.is_empty(),
         failures,
     }
@@ -310,7 +423,7 @@ td.bad{{background:#3a1414}}
 <p class="sub">tolerance level: <b>{level}</b> — {passed}/{n} cells passed</p>
 <table><tr><th>note</th><th>vel</th><th>status</th><th>tune ¢</th>
 <th>B model</th><th>B ref</th><th>prompt m/r (s)</th><th>after m/r (s)</th>
-<th>bright m/r</th><th>LSD dB</th><th>env corr</th><th>env RMSE</th><th class="failures">failures</th></tr>
+<th>bright m/r</th><th>LSD dB</th><th>env corr</th><th>env RMSE</th><th>part-env</th><th class="failures">failures</th></tr>
 "#,
         n = cells.len()
     );
@@ -322,7 +435,7 @@ td.bad{{background:#3a1414}}
             "<tr class=\"{cls}\"><td>{}</td><td>{}</td><td class=\"status\">{status}</td>\
              <td>{:+.1}</td><td>{:.2e}</td><td>{:.2e}</td>\
              <td>{:.1} / {:.1}</td><td>{:.1} / {:.1}</td>\
-             <td>{:.3} / {:.3}</td><td>{:.1}</td><td>{:.3}</td><td>{:.1}</td>\
+             <td>{:.3} / {:.3}</td><td>{:.1}</td><td>{:.3}</td><td>{:.1}</td><td>{:.1}</td>\
              <td class=\"failures\">{}</td></tr>\n",
             c.note,
             c.vel,
@@ -338,6 +451,7 @@ td.bad{{background:#3a1414}}
             c.lsd_db,
             c.env_corr,
             c.env_rmse,
+            c.partial_env,
             c.failures.join("; "),
         );
     }

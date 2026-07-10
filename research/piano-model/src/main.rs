@@ -211,6 +211,29 @@ enum Cmd {
         #[arg(long, default_value = "out/wg-table.json")]
         out: PathBuf,
     },
+    /// DEEP per-note fit: start from the wg-table and random-coordinate-
+    /// descend ALL engine params (t60, zb, brightness, detune, skew, strike,
+    /// B) against the STRICT loss — energy-weighted per-partial envelope RMSE
+    /// + total envelope RMSE — at two velocity layers. All cores.
+    WgFit {
+        #[arg(long, default_value = DEFAULT_LIB)]
+        lib: PathBuf,
+        #[arg(long, default_value = "out/wg-table.json")]
+        table: PathBuf,
+        #[arg(long, default_value = "out/wg-table.json")]
+        out: PathBuf,
+        /// Loss evaluations per note.
+        #[arg(long, default_value_t = 300)]
+        evals: usize,
+        /// Seconds compared.
+        #[arg(long, default_value_t = 8.0)]
+        dur: f32,
+        /// Velocity layers to fit against (comma-separated).
+        #[arg(long, default_value = "60,105")]
+        vels: String,
+        #[arg(long, default_value_t = 3)]
+        strings: usize,
+    },
     /// Validation harness: render the waveguide engine for a grid of
     /// (note, velocity) cells, score each against the nearest reference
     /// sample (tuning, B, two-stage decay, brightness, LSD, envelope corr)
@@ -263,6 +286,9 @@ enum Cmd {
         /// Reference (sample / Pianoteq render).
         #[arg(long)]
         b: PathBuf,
+        /// MIDI note — enables the strict per-partial + envelope metrics.
+        #[arg(long)]
+        note: Option<u8>,
     },
     /// Probe an arbitrary WAV (e.g. a Pianoteq render): measured f0, inharmonicity,
     /// two-stage decay, high/low partial balance (brightness), and broadband body.
@@ -401,6 +427,9 @@ fn main() -> Result<()> {
         Cmd::WgTable { lib, vel, dur, refine, strings, detune, strike, out } => {
             cmd_wg_table(lib, vel, dur, refine, strings, detune, strike, out)
         }
+        Cmd::WgFit { lib, table, out, evals, dur, vels, strings } => {
+            cmd_wg_fit(lib, table, out, evals, dur, vels, strings)
+        }
         Cmd::Validate {
             lib, notes, vels, level, wg_table, dur, t60, zb, brightness, inharm, n_disp,
             strike, strings, detune, report,
@@ -409,12 +438,18 @@ fn main() -> Result<()> {
             waveguide::StringParams { f0: 0.0, t60, brightness, inharmonicity: inharm, n_disp },
             strike, strings, detune, zb, report,
         ),
-        Cmd::Lsd { a, b } => {
+        Cmd::Lsd { a, b, note } => {
             let aa = audio::load_any(&a)?;
             let bb = audio::load_any(&b)?;
             anyhow::ensure!(aa.sr == bb.sr, "sample rates differ ({} vs {})", aa.sr, bb.sr);
             let lsd = analyze::accuracy_lsd(&aa.samples, &bb.samples, aa.sr);
             println!("ACCURACY LSD {lsd:.2} dB  ({} vs {})", a.display(), b.display());
+            if let Some(n) = note {
+                let f0 = analyze::midi_hz(n);
+                let env = validate::envelope_rmse_db(&aa.samples, &bb.samples, aa.sr);
+                let pe = validate::partial_env_rmse_db(&aa.samples, &bb.samples, aa.sr, f0);
+                println!("STRICT env RMSE {env:.2} dB   partial-env RMSE {pe:.2} dB");
+            }
             Ok(())
         }
         Cmd::Wg { note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref, table } => {
@@ -1206,6 +1241,126 @@ fn cmd_wg_table(
     };
     table.save(&out)?;
     println!("table ({} notes) → {}", table.notes.len(), out.display());
+    Ok(())
+}
+
+/// Simple deterministic LCG for the fit proposals.
+fn lcg(state: &mut u64) -> f32 {
+    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    ((*state >> 33) as f32) / (u32::MAX >> 1) as f32 // 0..2
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_wg_fit(
+    lib: PathBuf,
+    table_path: PathBuf,
+    out: PathBuf,
+    evals: usize,
+    dur: f32,
+    vels: String,
+    strings: usize,
+) -> Result<()> {
+    use rayon::prelude::*;
+
+    let want_vels: Vec<u8> = vels.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let mut table = wgtable::WgTable::load(&table_path)?;
+    let (samples, _) = sample::scan(&lib);
+    println!(
+        "deep-fitting {} notes × {} evals against vels {:?} (strict per-partial loss)…",
+        table.notes.len(),
+        evals,
+        want_vels
+    );
+
+    let fitted: Vec<(u8, wgtable::WgNote, f32, f32)> = table
+        .notes
+        .par_iter()
+        .filter_map(|row| {
+            let note = row.note;
+            // reference layers + cached strict tracks
+            let mut refs: Vec<(u8, Vec<f32>, validate::RefTrack)> = Vec::new();
+            for &wv in &want_vels {
+                let s = samples
+                    .iter()
+                    .filter(|s| s.artic == sample::Artic::PedalUp && s.note == Some(note))
+                    .min_by_key(|s| (s.vel.unwrap_or(0) as i32 - wv as i32).abs())?;
+                let a = audio::load_any(&s.path).ok()?;
+                let n = ((dur * a.sr as f32) as usize).min(a.samples.len());
+                let track = validate::RefTrack::build(&a.samples[..n], a.sr, row.f0)?;
+                refs.push((s.vel.unwrap_or(wv), a.samples[..n].to_vec(), track));
+            }
+            let sr = 44_100u32;
+            let n = (dur * sr as f32) as usize;
+
+            // param vector: [t60, zb, brightness, detune, skew, strike, b]
+            let mut x = [row.t60, row.zb, row.brightness, row.detune, row.skew, row.strike, row.b];
+            let lo = [2.0, 20.0, 0.05, 0.05, 0.02, 0.03, row.b * 0.5];
+            let hi = [150.0, 20_000.0, 0.98, 2.0, 0.8, 0.22, row.b * 2.0];
+
+            let loss = |x: &[f32; 7]| -> f32 {
+                let n_disp = wgtable::pick_n_disp(row.f0, x[6], x[2], sr);
+                let p = waveguide::StringParams {
+                    f0: row.f0,
+                    t60: x[0],
+                    brightness: x[2],
+                    inharmonicity: x[6],
+                    n_disp,
+                };
+                let mut total = 0.0f32;
+                for (rv, real, track) in &refs {
+                    let m = render_wg_cell(&p, sr, strings, x[3], x[1], *rv, x[5], x[4], n, None);
+                    let pe = track.rmse_vs(&m, sr);
+                    let env = validate::envelope_rmse_db(&m, real, sr);
+                    let pe = if pe.is_finite() { pe } else { 60.0 };
+                    let env = if env.is_finite() { env } else { 60.0 };
+                    total += 0.7 * pe + 0.3 * env;
+                }
+                total / refs.len() as f32
+            };
+
+            let mut best = loss(&x);
+            let start = best;
+            let mut rng = 0x9E3779B97F4A7C15u64 ^ (note as u64) << 32;
+            for e in 0..evals {
+                // shrink step size over the run: ×2 range → ×1.1
+                let scale = 2.0f32 * (0.55f32).powf(4.0 * e as f32 / evals as f32) + 1.05;
+                let i = (lcg(&mut rng) * 3.5) as usize % 7;
+                let step = scale.powf(lcg(&mut rng) - 1.0); // log-uniform in [1/scale, scale]
+                let mut cand = x;
+                cand[i] = (cand[i] * step).clamp(lo[i], hi[i]);
+                let l = loss(&cand);
+                if l < best {
+                    best = l;
+                    x = cand;
+                }
+            }
+
+            let mut new_row = row.clone();
+            new_row.t60 = x[0];
+            new_row.zb = x[1];
+            new_row.brightness = x[2];
+            new_row.detune = x[3];
+            new_row.skew = x[4];
+            new_row.strike = x[5];
+            new_row.b = x[6];
+            new_row.n_disp = wgtable::pick_n_disp(row.f0, x[6], x[2], sr);
+            Some((note, new_row, start, best))
+        })
+        .collect();
+
+    let mut improved = 0usize;
+    for (note, row, start, best) in fitted {
+        println!("  n{note:3}  strict loss {start:5.2} → {best:5.2} dB");
+        if best < start {
+            improved += 1;
+        }
+        if let Some(r) = table.notes.iter_mut().find(|r| r.note == note) {
+            *r = row;
+        }
+    }
+    println!("{improved}/{} notes improved", table.notes.len());
+    table.save(&out)?;
+    println!("table → {}", out.display());
     Ok(())
 }
 
