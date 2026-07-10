@@ -15,9 +15,11 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
   remote at http://<host>:4040/ and its iroh id (also in
   `~/.config/signal/iroh-endpoint-id`). Restart:
   `cargo build -p signal-engine && just signal-web-sync`, kill by pid,
-  relaunch. Rig config: `~/.config/signal/rig/*.styx` (profile, songs,
-  setlists, keymap, midi map — all text, reload with the ↻ header
-  button).
+  relaunch. Rig config: `~/.config/signal/rig` is a SYMLINK into the
+  repo (`features/rigs/guitar/default-config/`, set up by `just
+  rig-link`; old dir kept as rig.bak-*) — live edits (editor or the
+  rig's auto-save, which stores NAM paths rig-dir-relative) are
+  working-tree diffs to commit. Reload with the ↻ header button.
 - **Voyager (mac)** still has the OLD multi-repo clones + bootstrap
   script (~/voyager-bootstrap.sh) — must be re-pointed: fresh clone of
   the monorepo, `nix develop`, `cargo build --release -p signal-engine`,
