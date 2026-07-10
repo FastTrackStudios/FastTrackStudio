@@ -1446,7 +1446,7 @@ fn cmd_wg_fit(
         .filter_map(|row| {
             let note = row.note;
             // reference layers + cached strict tracks
-            let mut refs: Vec<(u8, Vec<f32>, validate::RefTrack)> = Vec::new();
+            let mut refs: Vec<(u8, Vec<f32>, validate::RefTrack, [f32; 4])> = Vec::new();
             for &wv in &want_vels {
                 let s = samples
                     .iter()
@@ -1455,7 +1455,8 @@ fn cmd_wg_fit(
                 let a = audio::load_any(&s.path).ok()?;
                 let n = ((dur * a.sr as f32) as usize).min(a.samples.len());
                 let track = validate::RefTrack::build(&a.samples[..n], a.sr, row.f0)?;
-                refs.push((s.vel.unwrap_or(wv), a.samples[..n].to_vec(), track));
+                let sig = validate::attack_signature(&a.samples[..n], a.sr, row.f0);
+                refs.push((s.vel.unwrap_or(wv), a.samples[..n].to_vec(), track, sig));
             }
             let sr = 44_100u32;
             let n = (dur * sr as f32) as usize;
@@ -1484,13 +1485,24 @@ fn cmd_wg_fit(
                 };
                 let hammer = waveguide::HammerParams { k_scale: x[7], p_exp: x[8], v_scale: x[9] };
                 let mut total = 0.0f32;
-                for (rv, real, track) in &refs {
+                for (rv, real, track, ref_sig) in &refs {
                     let m = render_wg_cell(&p, sr, strings, x[3], x[1], *rv, x[5], x[4], hammer, n, None);
                     let pe = track.rmse_vs(&m, sr);
                     let env = validate::envelope_rmse_db(&m, real, sr);
+                    // attack thump/tone balance — only EXCESS model broadband
+                    // is penalized (a model cleaner than the recording is fine)
+                    let sig = validate::attack_signature(&m, sr, row.f0);
+                    let atk = sig
+                        .iter()
+                        .zip(ref_sig.iter())
+                        .map(|(m, r)| (m - r).max(0.0).powi(2))
+                        .sum::<f32>()
+                        .sqrt()
+                        / 2.0;
                     let pe = if pe.is_finite() { pe } else { 60.0 };
                     let env = if env.is_finite() { env } else { 60.0 };
-                    total += 0.7 * pe + 0.3 * env;
+                    let atk = if atk.is_finite() { atk } else { 60.0 };
+                    total += 0.55 * pe + 0.25 * env + 0.2 * atk;
                 }
                 total / refs.len() as f32
             };

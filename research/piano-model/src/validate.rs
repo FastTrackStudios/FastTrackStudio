@@ -205,6 +205,50 @@ fn pt_track(x: &[f32], sr: u32, freqs: &[f32], frames: usize) -> Vec<Vec<f32>> {
     out
 }
 
+/// Attack signature: broadband band energies in the first 50 ms, expressed
+/// RELATIVE to the fundamental partial's level in the same window (so it is
+/// normalization-invariant). This is what the per-partial matrix cannot see —
+/// a model whose attack is a thump 20 dB above its tone scores identically on
+/// partials, and sounds like an impulse, not a piano.
+pub fn attack_signature(x: &[f32], sr: u32, f0: f32) -> [f32; 4] {
+    use rustfft::{num_complex::Complex, FftPlanner};
+    const N: usize = 4096;
+    let on = analyze::onset(x).min(x.len());
+    let x = &x[on..];
+    let mut buf = vec![Complex::new(0.0f32, 0.0); N];
+    for i in 0..N.min(x.len()) {
+        let w = 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / N as f32).cos();
+        buf[i] = Complex::new(x[i] * w, 0.0);
+    }
+    FftPlanner::new().plan_fft_forward(N).process(&mut buf);
+    let mag: Vec<f32> = buf[..N / 2].iter().map(|c| c.norm()).collect();
+    let bin = |f: f32| ((f * N as f32 / sr as f32) as usize).clamp(1, N / 2 - 2);
+    // fundamental level (peak over ±2 bins)
+    let fb = bin(f0);
+    let tone = mag[fb.saturating_sub(2)..(fb + 3).min(N / 2)]
+        .iter()
+        .cloned()
+        .fold(1e-9f32, f32::max);
+    // band mean energies, skipping bins within ±3 of any partial
+    let bands = [(150.0, 800.0), (800.0, 1800.0), (2300.0, 4000.0), (4500.0, 9000.0)];
+    let mut out = [0.0f32; 4];
+    for (bi, (lo, hi)) in bands.iter().enumerate() {
+        let (mut acc, mut n) = (0.0f64, 0usize);
+        for b in bin(*lo)..bin(*hi) {
+            let f = b as f32 * sr as f32 / N as f32;
+            let k = (f / f0).round().max(1.0);
+            if (f - k * f0).abs() < 3.0 * sr as f32 / N as f32 {
+                continue; // partial bin — the matrix already grades those
+            }
+            acc += (mag[b] as f64).powi(2);
+            n += 1;
+        }
+        let rms = if n > 0 { (acc / n as f64).sqrt() as f32 } else { 1e-9 };
+        out[bi] = 20.0 * (rms.max(1e-9) / tone).log10(); // dB rel tone
+    }
+    out
+}
+
 /// Cached reference side of the per-partial metric — build once per
 /// (note, layer), score many candidate renders against it cheaply.
 pub struct RefTrack {
