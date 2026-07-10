@@ -19,9 +19,12 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
   `python3 -m http.server 8093` (see root Justfile).
 - **Voyager (mac)** still has the OLD multi-repo clones + bootstrap
   script (~/voyager-bootstrap.sh) — must be re-pointed: fresh clone of
-  the monorepo, `cargo build --release -p signal-engine`, re-sync the
-  web bundle. Its rig config/NAM paths were already migrated to
-  /Users/codywright.
+  the monorepo, `nix develop`, `cargo build --release -p signal-engine`,
+  re-sync the web bundle. Its rig config/NAM paths were already migrated
+  to /Users/codywright. The flake is darwin-ready (apple-sdk_15 branch)
+  and signal-engine's PipeWire backend is now Linux-gated (plain cpal →
+  CoreAudio elsewhere) — darwin build is UNTESTED, first `cargo build`
+  on voyager will tell.
 
 ## Outstanding work (rough priority)
 
@@ -61,11 +64,64 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
 8. **Legacy folder**: /run/media/Development/FastTrackStudio-legacy
    holds old checkouts + unrelated side projects (better-auth, sea-orm
    forks, etc.). Audit before deleting; nothing in-tree depends on it.
-9. **fasttrackstudio app polish**: Rig tab embeds GuitarRigRemote (works);
-   Session tab plays the demo setlist with the guide clicking. Next:
-   real setlists from ~/.config/signal styx into the session engine,
-   guide TTS cue bank wiring in-app, engine log surfacing in the
-   Engines panel.
+9. **fasttrackstudio app polish**: Home landing page (Session / Signal /
+   Charts cards) → Signal is a rig picker (Guitar live, rest of the
+   swarm listed as coming) → GuitarRigRemote (works); Session tab plays
+   the demo setlist with the guide clicking. Next: real setlists from
+   ~/.config/signal styx into the session engine, guide TTS cue bank
+   wiring in-app, engine log surfacing in the Engines panel.
+10. **One UI, every surface**: apps/fasttrackstudio is dual-platform —
+   the desktop binary (dioxus desktop) and `dx build --platform web
+   --no-default-features --features signal` are the SAME app; no
+   desktop-only pages. Prefs go through src/prefs.rs (~/.config/fts
+   files natively, localStorage `fts.*` on web); engines supervisor +
+   updater are native-only; web derives the engine ws URL from the
+   page origin (served by the engine = connected to it). Session on
+   web needs the session engine served over the network (it's
+   in-process native-only today) — that's the next architectural step.
+   Wasm builds of iroh-consuming crates need getrandom `wasm_js` (see
+   apps/fasttrackstudio Cargo.toml wasm table) and ring needs unwrapped
+   clang env vars (see the flake notes / agent report in git history).
+11. **iroh p2p transport** (`architect::iroh_link`, feature `iroh`):
+   vox Link over iroh 1.0 QUIC bi-streams (u32-BE framing, ALPN
+   `architect/vox/1`). signal-engine serves it beside ws by default —
+   device key `~/.config/signal/iroh.key`, id logged + written to
+   `~/.config/signal/iroh-endpoint-id`. The app dials it via
+   `SIGNAL_ENGINE_IROH_ID` or the connect-screen form (saved to
+   `~/.config/fts/signal-engine-iroh-id`; app device key
+   `~/.config/fts/iroh.key`). iroh is wired in the BROWSER too:
+   signal-web + the fts web build dial by rig key (device key in
+   localStorage `fts.iroh-key`, relay-only in the sandbox). The engine
+   serves the web remote itself (tower-http ServeDir; `SIGNAL_WEB_DIST`
+   → `<exe>/signal-web` → target/dx/...; `just signal-web-sync`).
+   Loopback vox handshake tested (`cargo test -p architect --features
+   iroh`); real cross-network dial via n0 discovery/relays UNTESTED —
+   browser iroh dial also untested end-to-end. Next: engine id
+   QR/pairing UX, per-device key roster, public fasttrackstudio.app
+   deploy of the fts web bundle.
+
+12. **Default rig config lives in-repo**:
+   `features/rigs/guitar/default-config/` — snapshot of the live worship
+   rig (6 styx files + 11 NAM captures, 3.2 MB), embedded into
+   signal-guitar via include_str!/include_bytes!. First run seeds
+   `<rig_dir>` (files + models/) and NAM paths in the seed are
+   rig-dir-relative (`models/<file>.nam`, resolved at library load;
+   absolute paths pass through). Verified: fresh SIGNAL_RIG_DIR →
+   "profile loaded (13 patches)". NOTE: the NAM captures are
+   third-party (ToneHunt-style downloads) — check redistribution
+   licensing before making the repo public. To refresh the defaults,
+   re-copy ~/.config/signal/rig and re-run the path rewrite.
+13. **Rig-in-the-browser (WebAudio) roadmap** (scouted 2026-07-09):
+   UI already wasm; eq/comp/audiocore-dsp/daw-audio-graph already
+   compile for wasm32. Blockers: neural-amp-modeler is C++/Eigen via cc
+   (needs emscripten/wasm-clang port or pure-Rust NAM inference — the
+   critical path), reverb→pitch pulls signalsmith-stretch (C++), and
+   GuitarRigBackend entangles pipewire/midir/fs (needs a wasm-safe
+   control core split; proto traits are the clean seam). Prior art:
+   daw-standalone has a working wasm AudioWorklet renderer
+   (`src/audio_engine/web.rs` + examples/web_worklet/processor.js).
+   PoC order: NAM-on-wasm → nam_load_from_bytes → GuitarWorklet adapter
+   → getUserMedia glue → local param stub.
 
 ## Gotchas that will bite again
 
