@@ -8,6 +8,7 @@ mod analyze;
 mod audio;
 mod body;
 mod ddsp;
+mod ingest;
 mod model;
 mod realtime;
 mod sample;
@@ -21,7 +22,7 @@ mod wgtable;
 use model::ModelConfig;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -193,6 +194,9 @@ enum Cmd {
     WgTable {
         #[arg(long, default_value = DEFAULT_LIB)]
         lib: PathBuf,
+        /// Generic ingest manifest (pm ingest) — overrides the Keyscape scan.
+        #[arg(long)]
+        manifest: Option<PathBuf>,
         /// Velocity layer to extract physics from (nearest sampled is used).
         #[arg(long, default_value_t = 94)]
         vel: u8,
@@ -211,6 +215,36 @@ enum Cmd {
         #[arg(long, default_value = "out/wg-table.json")]
         out: PathBuf,
     },
+    /// Scan ANY piano sample library folder into a tuning manifest:
+    /// note from filename or detected f0, velocity from numbers / dynamic
+    /// tags / loudness ranking. The entry point for non-Keyscape libraries.
+    Ingest {
+        #[arg(long)]
+        lib: PathBuf,
+        /// Only include paths containing this substring (mic/articulation pick).
+        #[arg(long)]
+        include: Option<String>,
+        /// Verify/recover notes by f0 detection (slower, robust).
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
+        verify: bool,
+        #[arg(long, default_value = "out/manifest.json")]
+        out: PathBuf,
+    },
+    /// The whole preset pipeline for ANY library: ingest → per-note table →
+    /// deep fit → validate → install to ~/.config/signal/pianos/<name>.json.
+    /// The engine stays 100% physical — a preset is only parameters.
+    Preset {
+        #[arg(long)]
+        lib: PathBuf,
+        /// Preset name (file + engine selection via CITY_GRAND_PRESET).
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        include: Option<String>,
+        /// Deep-fit evaluations per note.
+        #[arg(long, default_value_t = 600)]
+        evals: usize,
+    },
     /// DEEP per-note fit: start from the wg-table and random-coordinate-
     /// descend ALL engine params (t60, zb, brightness, detune, skew, strike,
     /// B) against the STRICT loss — energy-weighted per-partial envelope RMSE
@@ -218,6 +252,9 @@ enum Cmd {
     WgFit {
         #[arg(long, default_value = DEFAULT_LIB)]
         lib: PathBuf,
+        /// Generic ingest manifest (pm ingest) — overrides the Keyscape scan.
+        #[arg(long)]
+        manifest: Option<PathBuf>,
         #[arg(long, default_value = "out/wg-table.json")]
         table: PathBuf,
         #[arg(long, default_value = "out/wg-table.json")]
@@ -241,6 +278,9 @@ enum Cmd {
     Validate {
         #[arg(long, default_value = DEFAULT_LIB)]
         lib: PathBuf,
+        /// Generic ingest manifest (pm ingest) — overrides the Keyscape scan.
+        #[arg(long)]
+        manifest: Option<PathBuf>,
         /// MIDI notes, comma-separated.
         #[arg(long, default_value = "45,50,57,60,64,69")]
         notes: String,
@@ -424,17 +464,33 @@ fn main() -> Result<()> {
             attack_ms,
             outdir,
         } => cmd_decompose(lib, note, vel, attack_ms, outdir),
-        Cmd::WgTable { lib, vel, dur, refine, strings, detune, strike, out } => {
-            cmd_wg_table(lib, vel, dur, refine, strings, detune, strike, out)
+        Cmd::WgTable { lib, manifest, vel, dur, refine, strings, detune, strike, out } => {
+            cmd_wg_table(lib, manifest, vel, dur, refine, strings, detune, strike, out)
         }
-        Cmd::WgFit { lib, table, out, evals, dur, vels, strings } => {
-            cmd_wg_fit(lib, table, out, evals, dur, vels, strings)
+        Cmd::WgFit { lib, manifest, table, out, evals, dur, vels, strings } => {
+            cmd_wg_fit(lib, manifest, table, out, evals, dur, vels, strings)
         }
+        Cmd::Ingest { lib, include, verify, out } => {
+            let m = ingest::scan(&lib, include.as_deref(), verify)?;
+            let notes: std::collections::BTreeSet<u8> =
+                m.entries.iter().map(|e| e.note).collect();
+            println!(
+                "{} samples, {} notes ({}..{})",
+                m.entries.len(),
+                notes.len(),
+                notes.iter().next().unwrap_or(&0),
+                notes.iter().last().unwrap_or(&0)
+            );
+            m.save(&out)?;
+            println!("manifest → {}", out.display());
+            Ok(())
+        }
+        Cmd::Preset { lib, name, include, evals } => cmd_preset(lib, name, include, evals),
         Cmd::Validate {
-            lib, notes, vels, level, wg_table, dur, t60, zb, brightness, inharm, n_disp,
+            lib, manifest, notes, vels, level, wg_table, dur, t60, zb, brightness, inharm, n_disp,
             strike, strings, detune, report,
         } => cmd_validate(
-            lib, notes, vels, level, wg_table, dur,
+            lib, manifest, notes, vels, level, wg_table, dur,
             waveguide::StringParams { f0: 0.0, t60, brightness, inharmonicity: inharm, n_disp },
             strike, strings, detune, zb, report,
         ),
@@ -957,6 +1013,7 @@ fn render_wg_cell(
 #[allow(clippy::too_many_arguments)]
 fn cmd_wg_table(
     lib: PathBuf,
+    manifest: Option<PathBuf>,
     vel: u8,
     dur: f32,
     refine: bool,
@@ -967,7 +1024,7 @@ fn cmd_wg_table(
 ) -> Result<()> {
     use rayon::prelude::*;
 
-    let (samples, _) = sample::scan(&lib);
+    let samples = load_tuning_samples(&lib, manifest.as_deref())?;
     let mut notes: Vec<u8> = samples
         .iter()
         .filter(|s| s.artic == sample::Artic::PedalUp)
@@ -1244,6 +1301,103 @@ fn cmd_wg_table(
     Ok(())
 }
 
+/// The full preset pipeline: ingest → wg-table → wg-fit → validate →
+/// install. A preset is ONLY engine parameters — the model stays physical.
+fn cmd_preset(lib: PathBuf, name: String, include: Option<String>, evals: usize) -> Result<()> {
+    let work = PathBuf::from(format!("out/presets/{name}"));
+    std::fs::create_dir_all(&work)?;
+    let manifest_path = work.join("manifest.json");
+    let table_path = work.join("table.json");
+    let report_path = work.join("validate.html");
+
+    println!("== [1/5] ingest {}", lib.display());
+    let m = ingest::scan(&lib, include.as_deref(), true)?;
+    anyhow::ensure!(!m.entries.is_empty(), "no usable samples found");
+    let notes: std::collections::BTreeSet<u8> = m.entries.iter().map(|e| e.note).collect();
+    println!(
+        "   {} samples, {} notes ({}..{})",
+        m.entries.len(),
+        notes.len(),
+        notes.iter().next().unwrap(),
+        notes.iter().last().unwrap()
+    );
+    m.save(&manifest_path)?;
+
+    println!("== [2/5] per-note physics extraction");
+    cmd_wg_table(
+        lib.clone(),
+        Some(manifest_path.clone()),
+        94,
+        10.0,
+        true,
+        3,
+        0.3,
+        0.08,
+        table_path.clone(),
+    )?;
+
+    println!("== [3/5] deep fit ({evals} evals/note, strict loss)");
+    cmd_wg_fit(
+        lib.clone(),
+        Some(manifest_path.clone()),
+        table_path.clone(),
+        table_path.clone(),
+        evals,
+        8.0,
+        "60,105".into(),
+        3,
+    )?;
+
+    println!("== [4/5] validate");
+    let mid: Vec<u8> = notes.iter().copied().collect();
+    let pick: Vec<String> = mid
+        .iter()
+        .step_by((mid.len() / 6).max(1))
+        .take(6)
+        .map(|n| n.to_string())
+        .collect();
+    cmd_validate(
+        lib,
+        Some(manifest_path),
+        pick.join(","),
+        "32,64,94,110".into(),
+        "relaxed".into(),
+        Some(table_path.clone()),
+        10.0,
+        waveguide::StringParams {
+            f0: 0.0,
+            t60: 60.0,
+            brightness: 0.92,
+            inharmonicity: 2.745e-4,
+            n_disp: 8,
+        },
+        0.08,
+        3,
+        0.3,
+        550.0,
+        report_path,
+    )?;
+
+    println!("== [5/5] install");
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let dest = home.join(format!(".config/signal/pianos/{name}.json"));
+    if let Some(par) = dest.parent() {
+        std::fs::create_dir_all(par)?;
+    }
+    std::fs::copy(&table_path, &dest)?;
+    println!("preset installed → {}  (play: CITY_GRAND_PRESET={name} just piano)", dest.display());
+    Ok(())
+}
+
+/// Samples for tuning: a generic ingest manifest when given, else the
+/// Keyscape-convention scan of `lib`.
+fn load_tuning_samples(lib: &Path, manifest: Option<&Path>) -> Result<Vec<sample::Sample>> {
+    match manifest {
+        Some(m) => Ok(ingest::to_samples(&ingest::Manifest::load(m)?)),
+        None => Ok(sample::scan(lib).0),
+    }
+}
+
 /// Simple deterministic LCG for the fit proposals.
 fn lcg(state: &mut u64) -> f32 {
     *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -1253,6 +1407,7 @@ fn lcg(state: &mut u64) -> f32 {
 #[allow(clippy::too_many_arguments)]
 fn cmd_wg_fit(
     lib: PathBuf,
+    manifest: Option<PathBuf>,
     table_path: PathBuf,
     out: PathBuf,
     evals: usize,
@@ -1264,7 +1419,7 @@ fn cmd_wg_fit(
 
     let want_vels: Vec<u8> = vels.split(',').filter_map(|s| s.trim().parse().ok()).collect();
     let mut table = wgtable::WgTable::load(&table_path)?;
-    let (samples, _) = sample::scan(&lib);
+    let samples = load_tuning_samples(&lib, manifest.as_deref())?;
     println!(
         "deep-fitting {} notes × {} evals against vels {:?} (strict per-partial loss)…",
         table.notes.len(),
@@ -1367,6 +1522,7 @@ fn cmd_wg_fit(
 #[allow(clippy::too_many_arguments)]
 fn cmd_validate(
     lib: PathBuf,
+    manifest: Option<PathBuf>,
     notes: String,
     vels: String,
     level: String,
@@ -1388,7 +1544,7 @@ fn cmd_validate(
         Some(p) => Some(wgtable::WgTable::load(p)?),
         None => None,
     };
-    let (samples, _) = sample::scan(&lib);
+    let samples = load_tuning_samples(&lib, manifest.as_deref())?;
 
     // per requested cell: the pedal-up sample with the nearest velocity layer
     let mut cells: Vec<(u8, u8, PathBuf)> = Vec::new();
