@@ -201,6 +201,7 @@ members = [
     "features/rigs/orchestra",
     "features/rigs/drums",
     "features/rigs/synth",
+    "features/rigs/wurli/openwurli-dsp",
     "features/sampler/signal-sampler",
     "features/sampler/signal-sampler-clap",
     "features/nam",
@@ -381,6 +382,7 @@ signal-guitar = { path = "features/rigs/guitar" }
 signal-guitar-proto = { path = "features/rigs/guitar/proto" }
 signal-guitar-ui = { path = "features/rigs/guitar/ui" }
 signal-keys = { path = "features/rigs/keys" }
+openwurli-dsp = { path = "features/rigs/wurli/openwurli-dsp" }
 signal-orchestra = { path = "features/rigs/orchestra" }
 signal-drums = { path = "features/rigs/drums" }
 signal-synth = { path = "features/rigs/synth" }

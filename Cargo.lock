@@ -14473,6 +14473,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "openwurli-dsp"
+version = "0.5.2"
+dependencies = [
+ "hound",
+ "midly",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18459,8 +18467,11 @@ dependencies = [
  "memmap2",
  "midicore",
  "neural-amp-modeler",
+ "openwurli-dsp",
  "ratatui",
  "rayon",
+ "serde",
+ "serde_json",
  "sha2 0.10.9",
  "signal-fx",
  "signal-plugin-host",
