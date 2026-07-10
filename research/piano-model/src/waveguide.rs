@@ -155,9 +155,16 @@ impl StringWaveguide {
         );
         let disp: Vec<Allpass> = (0..m).map(|_| Allpass::new(des.disp_a)).collect();
 
-        // per-loop gain for the target T60: gain^(f0·t60) = 1e-3
+        // per-loop gain for the target T60: gain^(f0·t60) = 1e-3 — COMPENSATED
+        // for the loss LP's own attenuation at f0. |H_lp(ω0)| < 1 adds decay
+        // the naive formula ignores; negligible in bass (ω0 small) but it
+        // dominates in the treble (−96 dB/s at note 84 with a dark filter —
+        // the "high notes are plucks" bug). Stability bound: |H_lp| peaks at
+        // DC = 1, so loop_gain itself must stay < 1.
+        let w0 = TAU * p.f0 / sr;
+        let hlp = (1.0 - d) / (1.0 - 2.0 * d * w0.cos() + d * d).sqrt();
         let loops = (p.f0 * p.t60).max(1.0);
-        let loop_gain = 10f32.powf(-3.0 / loops);
+        let loop_gain = (10f32.powf(-3.0 / loops) / hlp.max(1e-3)).min(0.99995);
 
         Self {
             buf: vec![0.0; des.n.max(2)],
@@ -300,6 +307,9 @@ pub struct CoupledStrings {
     strings: Vec<StringWaveguide>,
     g: f32, // junction gain 2/(N + zb)
     outs: Vec<f32>,
+    /// Hammer force skew across the unisons (± fraction). Seeds the
+    /// antisymmetric modes → sets the aftersound level = the envelope knee.
+    pub skew: f32,
 }
 
 impl CoupledStrings {
@@ -323,7 +333,7 @@ impl CoupledStrings {
             })
             .collect();
         let g = 2.0 / (n as f32 + zb.max(0.0));
-        Self { strings, g, outs: vec![0.0; n] }
+        Self { strings, g, outs: vec![0.0; n], skew: 0.15 }
     }
 
     /// Strike all unison strings — with a slight amp + timing skew per string.
@@ -336,7 +346,7 @@ impl CoupledStrings {
         for (i, s) in self.strings.iter_mut().enumerate() {
             s.strike(vel01, strike_pos);
             let frac = if n > 1 { i as f32 / (n as f32 - 1.0) - 0.5 } else { 0.0 };
-            s.scale_exc(1.0 + 0.15 * frac); // ±7.5% force skew
+            s.scale_exc(1.0 + self.skew * frac); // hammer force skew
             let skew = (0.0003 * i as f32 * s.sr) as usize; // 0.3 ms contact stagger
             s.delay_exc(skew);
         }

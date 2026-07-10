@@ -862,6 +862,9 @@ fn cmd_wg(
     let n = (dur * sr as f32) as usize;
     let mut buf = vec![0.0f32; n];
     let mut cs = waveguide::CoupledStrings::new(&p, sr, strings, detune, zb);
+    if let Some(e) = &entry {
+        cs.skew = e.skew;
+    }
     cs.strike(vel01, strike);
     for x in buf.iter_mut() {
         *x = cs.process();
@@ -888,6 +891,7 @@ fn cmd_wg(
 
 /// Render one waveguide cell (shared by validate / wg-table refine).
 /// `body`: per-note radiation-EQ breakpoints, applied post-bridge.
+#[allow(clippy::too_many_arguments)]
 fn render_wg_cell(
     p: &waveguide::StringParams,
     sr: u32,
@@ -896,10 +900,12 @@ fn render_wg_cell(
     zb: f32,
     vel: u8,
     strike: f32,
+    skew: f32,
     n: usize,
     body_bps: Option<&[(f32, f32)]>,
 ) -> Vec<f32> {
     let mut cs = waveguide::CoupledStrings::new(p, sr, strings, detune, zb);
+    cs.skew = skew;
     cs.strike(vel as f32 / 127.0, strike);
     let mut model = vec![0.0f32; n];
     for x in model.iter_mut() {
@@ -1013,6 +1019,9 @@ fn cmd_wg_table(
             }
             let bright_ref = (hi / lo.max(1e-12)) as f32;
 
+            let mut dt_fit = detune;
+            let mut sk_fit = 0.15f32;
+
             // brightness: refined to match the brightness FEATURE (partials>5
             // / first-5 energy), not LSD — LSD is biased bright because an
             // over-bright model "fills in" the recording's noise floor. The
@@ -1022,14 +1031,16 @@ fn cmd_wg_table(
             let n_disp = wgtable::pick_n_disp(f0, b, brightness, sr);
             // above ~note 84 partials 6+ are near/past Nyquist — the feature
             // is 0/0 noise; keep the default rather than matching garbage
-            if refine && f0 * 6.0 < 0.4 * sr as f32 {
+            // (bright_ref ≈ 0 = unmeasurable up high → matching it just picks
+            // the darkest filter; keep the default instead)
+            if refine && f0 * 6.0 < 0.4 * sr as f32 && bright_ref > 1e-3 {
                 let nr = n.min((6.0 * sr as f32) as usize);
                 let mut best = f32::INFINITY;
                 for cand in [0.25f32, 0.45, 0.65, 0.8, 0.9, 0.96] {
                     let p = waveguide::StringParams {
                         f0, t60, brightness: cand, inharmonicity: b, n_disp,
                     };
-                    let model = render_wg_cell(&p, sr, strings, detune, zb, ref_vel, strike, nr, None);
+                    let model = render_wg_cell(&p, sr, strings, detune, zb, ref_vel, strike, 0.15, nr, None);
                     let am = analyze::analyze_note(&model, sr, f0, 24);
                     let magm = analyze::avg_mag(&model, sr, 3.0);
                     let (mut lo2, mut hi2) = (0.0f64, 0.0f64);
@@ -1062,15 +1073,15 @@ fn cmd_wg_table(
                 let nd = wgtable::pick_n_disp(f0, b, brightness, sr);
                 let nr = n.min((8.0 * sr as f32) as usize);
                 let ref_vel_e = s.vel.unwrap_or(vel);
-                let eval = |t: f32, z: f32| -> f32 {
+                let eval = |t: f32, z: f32, dt: f32, sk: f32| -> f32 {
                     let p = waveguide::StringParams {
                         f0, t60: t, brightness, inharmonicity: b, n_disp: nd,
                     };
                     let model =
-                        render_wg_cell(&p, sr, strings, detune, z, ref_vel_e, strike, nr, None);
+                        render_wg_cell(&p, sr, strings, dt, z, ref_vel_e, strike, sk, nr, None);
                     validate::envelope_rmse_db(&model, &real.samples[..nr], sr)
                 };
-                let mut best = eval(t60, zb);
+                let mut best = eval(t60, zb, dt_fit, sk_fit);
                 for steps in [
                     [0.4f32, 0.63, 1.6, 2.5], // coarse
                     [0.4f32, 0.63, 1.6, 2.5],
@@ -1079,7 +1090,7 @@ fn cmd_wg_table(
                 ] {
                     for mt in steps {
                         let t = (t60 * mt).clamp(2.0, 150.0);
-                        let e = eval(t, zb);
+                        let e = eval(t, zb, dt_fit, sk_fit);
                         if e < best {
                             best = e;
                             t60 = t;
@@ -1087,10 +1098,25 @@ fn cmd_wg_table(
                     }
                     for mz in steps {
                         let z = (zb * mz).clamp(20.0, 20_000.0);
-                        let e = eval(t60, z);
+                        let e = eval(t60, z, dt_fit, sk_fit);
                         if e < best {
                             best = e;
                             zb = z;
+                        }
+                    }
+                    // knee shape: aftersound seeding (skew) + unison beating (detune)
+                    for sk in [0.08f32, 0.15, 0.25, 0.4, 0.6] {
+                        let e = eval(t60, zb, dt_fit, sk);
+                        if e < best {
+                            best = e;
+                            sk_fit = sk;
+                        }
+                    }
+                    for dt in [0.15f32, 0.3, 0.6, 1.0] {
+                        let e = eval(t60, zb, dt, sk_fit);
+                        if e < best {
+                            best = e;
+                            dt_fit = dt;
                         }
                     }
                 }
@@ -1106,7 +1132,7 @@ fn cmd_wg_table(
                     f0, t60, brightness, inharmonicity: b, n_disp: n_disp_final,
                 };
                 let nr = n.min((6.0 * sr as f32) as usize);
-                let model = render_wg_cell(&pfin, sr, strings, detune, zb, ref_vel, strike, nr, None);
+                let model = render_wg_cell(&pfin, sr, strings, dt_fit, zb, ref_vel, strike, sk_fit, nr, None);
                 let am = analyze::analyze_note(&model, sr, f0, 24);
                 let mut bps: Vec<(f32, f32)> = r
                     .modal
@@ -1137,7 +1163,8 @@ fn cmd_wg_table(
                 zb,
                 brightness,
                 strike,
-                detune,
+                detune: dt_fit,
+                skew: sk_fit,
                 body,
                 prompt_ref: prompt,
                 after_ref: after,
@@ -1241,7 +1268,9 @@ fn cmd_validate(
                 ),
             };
             let body_bps = entry.and_then(|e| e.body.as_deref());
-            let model = render_wg_cell(&p, sr, strings, detune_c, zb_c, *vel, strike_c, n, body_bps);
+            let skew_c = entry.map(|e| e.skew).unwrap_or(0.15);
+            let model =
+                render_wg_cell(&p, sr, strings, detune_c, zb_c, *vel, strike_c, skew_c, n, body_bps);
             Some(validate::validate_cell(*note, *vel, &model, &real.samples[..n], sr, &tol))
         })
         .collect();

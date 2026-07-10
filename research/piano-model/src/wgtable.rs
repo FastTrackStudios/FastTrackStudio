@@ -44,6 +44,10 @@ pub struct WgNote {
     pub brightness: f32,
     pub strike: f32,
     pub detune: f32,
+    /// Hammer force skew across the unisons — seeds the antisymmetric modes,
+    /// i.e. the aftersound level / envelope knee. Fit per note.
+    #[serde(default = "default_skew")]
+    pub skew: f32,
     /// Body/radiation EQ breakpoints (freq Hz, linear gain): the reference's
     /// partial amplitudes ÷ the raw bridge output's, sampled AT the partials.
     /// This is the commuted-synthesis body — the piece a bridge-velocity
@@ -55,6 +59,10 @@ pub struct WgNote {
     pub after_ref: f32,
     pub bright_ref: f32,
     pub cents_vs_et: f32,
+}
+
+fn default_skew() -> f32 {
+    0.15
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
