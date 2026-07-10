@@ -713,3 +713,34 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# `package."*"` covers DEPENDENCIES only — workspace members stay at the
+# base opt-level. The audio path is ours, so the hot crates get full opt
+# even in dev builds: a debug rig must never xrun. (Launch paths default
+# to --release regardless; this is the safety net for dev runs.)
+[profile.dev.package.audiocore-dsp]
+opt-level = 3
+[profile.dev.package.daw-audio-graph]
+opt-level = 3
+[profile.dev.package.daw-audio-io]
+opt-level = 3
+[profile.dev.package.daw-standalone]
+opt-level = 3
+[profile.dev.package.neural-amp-modeler]
+opt-level = 3
+[profile.dev.package.signal-sampler]
+opt-level = 3
+[profile.dev.package.signal-guitar]
+opt-level = 3
+[profile.dev.package.signal-fx]
+opt-level = 3
+[profile.dev.package.eq-dsp]
+opt-level = 3
+[profile.dev.package.comp-dsp]
+opt-level = 3
+[profile.dev.package.reverb-dsp]
+opt-level = 3
+[profile.dev.package.delay-dsp]
+opt-level = 3
+[profile.dev.package.pitch-dsp]
+opt-level = 3

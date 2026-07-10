@@ -160,7 +160,7 @@ fn signal_engine(addr: Option<String>, foreground: bool) -> Result<()> {
     };
     match &spawned.source {
         LaunchSource::Binary(path) => eprintln!("spawned {}", path.display()),
-        LaunchSource::Cargo => eprintln!("no fasttrackstudio binary found — `cargo run -p fasttrackstudio -- --engine` (dev fallback)"),
+        LaunchSource::Cargo => eprintln!("no fasttrackstudio binary found — `cargo run --release -p fasttrackstudio -- --engine` (dev fallback)"),
     }
 
     if foreground {
