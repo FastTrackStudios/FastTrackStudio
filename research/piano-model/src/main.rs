@@ -6,6 +6,7 @@
 
 mod analyze;
 mod audio;
+mod body;
 mod ddsp;
 mod model;
 mod realtime;
@@ -168,10 +169,26 @@ enum Cmd {
         strings: usize,
         #[arg(long, default_value_t = 0.6)]
         detune: f32,
-        #[arg(long, default_value_t = 0.03)]
-        coupling: f32,
+        /// Bridge/string impedance ratio (bridge junction). Large = rigid =
+        /// long prompt decay; prompt T60 ≈ 6.908/(f0·−ln((zb−N)/(zb+N))).
+        #[arg(long, default_value_t = 400.0)]
+        zb: f32,
         #[arg(long, default_value = "out/wg.wav")]
         out: PathBuf,
+        /// Reference recording: design a soundboard/body FIR from the smoothed
+        /// spectral-envelope ratio (ref ÷ raw bridge) and apply it post-bridge.
+        #[arg(long)]
+        body_ref: Option<PathBuf>,
+    },
+    /// THE accuracy metric between any two audio files (multi-res log-spectral
+    /// distance, dB; 0 = perfect null, single digits = perceptually close).
+    Lsd {
+        /// Model / candidate render.
+        #[arg(long)]
+        a: PathBuf,
+        /// Reference (sample / Pianoteq render).
+        #[arg(long)]
+        b: PathBuf,
     },
     /// Probe an arbitrary WAV (e.g. a Pianoteq render): measured f0, inharmonicity,
     /// two-stage decay, high/low partial balance (brightness), and broadband body.
@@ -307,8 +324,16 @@ fn main() -> Result<()> {
             attack_ms,
             outdir,
         } => cmd_decompose(lib, note, vel, attack_ms, outdir),
-        Cmd::Wg { note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, coupling, out } => {
-            cmd_wg(note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, coupling, out)
+        Cmd::Lsd { a, b } => {
+            let aa = audio::load_any(&a)?;
+            let bb = audio::load_any(&b)?;
+            anyhow::ensure!(aa.sr == bb.sr, "sample rates differ ({} vs {})", aa.sr, bb.sr);
+            let lsd = analyze::accuracy_lsd(&aa.samples, &bb.samples, aa.sr);
+            println!("ACCURACY LSD {lsd:.2} dB  ({} vs {})", a.display(), b.display());
+            Ok(())
+        }
+        Cmd::Wg { note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref } => {
+            cmd_wg(note, vel, dur, t60, brightness, inharm, n_disp, strike, strings, detune, zb, out, body_ref)
         }
         Cmd::Probe { path, note, partials } => cmd_probe(path, note, partials),
         Cmd::TrainSet {
@@ -722,8 +747,9 @@ fn cmd_wg(
     strike: f32,
     strings: usize,
     detune: f32,
-    coupling: f32,
+    zb: f32,
     out: PathBuf,
+    body_ref: Option<PathBuf>,
 ) -> Result<()> {
     let sr = 44100u32;
     let f0 = analyze::midi_hz(note);
@@ -731,10 +757,17 @@ fn cmd_wg(
     let vel01 = (vel as f32 / 127.0).clamp(0.0, 1.0);
     let n = (dur * sr as f32) as usize;
     let mut buf = vec![0.0f32; n];
-    let mut cs = waveguide::CoupledStrings::new(&p, sr, strings, detune, coupling);
+    let mut cs = waveguide::CoupledStrings::new(&p, sr, strings, detune, zb);
     cs.strike(vel01, strike);
     for x in buf.iter_mut() {
         *x = cs.process();
+    }
+    if let Some(rp) = &body_ref {
+        let real = audio::load_any(rp)?;
+        anyhow::ensure!(real.sr == sr, "body ref sample rate {} != {sr}", real.sr);
+        let fir = body::design_fir(&buf, &real.samples, sr, 512);
+        buf = body::apply_fir(&buf, &fir);
+        println!("body FIR designed from {} (512 taps)", rp.display());
     }
     synth::normalize(&mut buf, 0.9);
     if let Some(par) = out.parent() {

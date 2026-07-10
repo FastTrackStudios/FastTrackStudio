@@ -183,33 +183,69 @@ inharmonicity (B 2.2e-4 vs 3e-4 target, via `n_disp`), physical decay (11 s),
 clean spectrum (0.006, like Pianoteq), and **velocity→brightness emerges**
 (soft 0.000 → loud 0.008). Beating from detuned coupled strings works.
 
-**Not yet working / the next tasks (in order):**
-1. **Bridge admittance (the two-stage decay).** Current coupling is a crude
-   scalar gain → doesn't cleanly split prompt/aftersound and goes UNSTABLE at
-   coupling ≥ 0.1. Replace with a proper **bridge filter/resonator** (the string
-   termination reflection depends on a bridge admittance) + stability guards.
-   This is where the piano's signature bloom comes from. Ref: Weinreich 1977;
-   Smith PASP (string-bridge coupling); Bensa 2003.
-2. **Dispersion filter design + per-note tuning.** Getting B=3e-4 needs ~40
-   allpasses (heavy). Use the proper **Rauhala-Välimäki dispersion filter design**
-   (target B → few optimized allpass coeffs). Fix per-note tuning precisely
-   (current +7.5 c constant offset is trimmed empirically with `-0.14`; proper
-   fix = precise allpass group-delay accounting per note — Smith PASP).
-3. **Hammer nonlinearity** — replace the contact-pulse heuristic with a proper
-   nonlinear felt model (force = k·compression^p, hysteretic). Ref: Stulov 1995;
-   Chaigne & Askenfelt 1994. This is the biggest perceptual lever (the measured
-   4.6–8× velocity→brightness).
-4. **Sympathetic + duplex** — all undamped strings ring through the bridge
+**DONE (2026-07-10 session):**
+1. ~~**Bridge admittance**~~ — `CoupledStrings` is now a proper **parallel
+   waveguide junction** (Smith PASP): v_J = g·Σ(filtered outgoing waves),
+   g = 2/(N+zb), reflection = own − v_J. Reflection matrix I − g·11ᵀ →
+   symmetric eigenvalue (zb−N)/(zb+N) (prompt), antisymmetric 1 (aftersound).
+   **Unconditionally passive/stable for any zb ≥ 0.** CRITICAL LESSON: v_J
+   must be computed from the *filtered* waves (`reflect()`/`commit()` two-phase
+   API) — mixing raw delay taps with filtered feedback breaks passivity and
+   blows up slowly. Hammer amp (±7.5%) + timing (0.3 ms) skew across unisons
+   seeds the antisymmetric modes (else aftersound starts at −50 dB). Output tap
+   = v_J. Measured A3: prompt 1.0–1.3 s / after ~20 s, mix 0.88 — Keyscape A3
+   measures prompt 1.3 s / after 22.7 s, mix 0.88. CLI: `--zb` (≈400–550).
+2. ~~**Dispersion design + per-note tuning**~~ — `design_loop()` numerically
+   solves (bisection + exact allpass/LP phase delays) the dispersion coeff,
+   integer delay and tuning coeff so partial 1 = f0 exactly and partial k hits
+   k·f0·√(1+Bk²). B 2.9e-4 with only **8 allpasses** (was 1.7e-4 at 80);
+   tuning −0.1 c, empirical trims deleted.
+3. ~~**Hammer nonlinearity**~~ — strike() now integrates the Chaigne–Askenfelt
+   felt ODE at note-on (m·ẍ=−F, F=k·u^2.8, ẏs=F/2R; k=1.5e9, v0=1.2+4.3·vel01).
+   Velocity→brightness matches Keyscape A3: vel32→0.002 (exact), vel110→0.017
+   (KS 0.012), smooth monotonic curve.
+4. **Body filter first cut** — `body.rs`: FIR from 1/6-oct-smoothed spectral
+   envelope ratio (ref ÷ bridge), ±18 dB clamp; `pm wg --body-ref <wav>`.
+   Did NOT move LSD yet (see below) — needs work or a different form.
+5. **`pm lsd --a x --b y`** — the metric on any two files. Calibration:
+   same file = 0.0; same note, vel 94 vs 110 Keyscape = **8.8 dB**. So single
+   digits ≡ "same instrument, different take". Waveguide A3 vs Keyscape A3
+   currently **25.1 dB** (hand params; untrained additive was 25.8, DDSP-trained
+   additive 21.3). Best hand params A3: t60 60, zb 550, brightness 0.92,
+   strike 0.08, detune 0.3, n_disp 8, inharm 2.745e-4.
+
+**Next tasks (in order):**
+1. **Close the LSD gap with per-partial control.** Coordinate descent over the
+   scalar params saturates at 25.1 — the remaining distance is per-partial
+   amplitude/decay detail. Levers: strike-point comb (exact overtone nulls from
+   `pm analyze`), hammer spectrum, a finer body filter (the current smoothing
+   averages across partial peaks — consider sampling the ratio AT partial
+   frequencies and interpolating between them), and possibly per-string loss
+   detail. Use the DDSP/candle machinery to gradient-tune the waveguide's
+   analytically-designed init.
+2. **Sympathetic + duplex** — all undamped strings ring through the bridge
    (pedal/CC64 gated). Tonal, not noise. (An additive `SympatheticBank` exists
-   in `native/modal.rs` as a first cut.)
-5. **Soundboard coupling filter** — impedance magnitude (sustain) + cutoff +
-   slope (a 3-param bridge admittance), tuned from `pm analyze`'s decay-vs-freq.
-6. **Tune the whole thing per library** — `pm analyze` gives B (→string length),
-   decay-vs-freq (→impedance), overtone nulls (→strike point), brightness-vs-vel
-   (→hammer hardness) analytically; a gradient-free/GPU-loss pass refines the
-   rest. Validate with `accuracy_lsd` vs the library AND vs Pianoteq renders.
-7. **Port** to `no_std`+alloc (per CLAUDE.md processing-core rules: no heap on
+   in `native/modal.rs` as a first cut.) The junction makes this natural: add
+   the other notes' strings to the same bridge sum.
+3. **Soundboard coupling filter** — make zb frequency-dependent (the bridge
+   filter slot is ready: filter the sum before distributing v_J), tuned from
+   `pm analyze`'s decay-vs-freq. Fold body.rs radiation into the realtime path
+   (partitioned FIR or biquad fit).
+4. **Tune the whole thing per library** — 88 notes × params via analyze-driven
+   init + LSD-validated refinement (the train-set pattern).
+5. **Port** to `no_std`+alloc (per CLAUDE.md processing-core rules: no heap on
    hot path, no threads) → a `features/fx` voice → signal-engine → WASM.
+   Watch: strike() currently allocs (pulse Vec) — preallocate at reset().
+
+**Melange note (2026-07-10):** studied hal0zer0/melange (openwurli's DSP lib) —
+it's an analog *circuit* compiler (SPICE MNA → DK method → codegen'd Rust), not
+mechanical modeling; orthogonal to the piano engine. Reusable: its
+validate-against-reference harness pattern (`melange-validate/src/comparison.rs`
+— RMS/corr/THD tolerance gates, HTML diff reports) transfers to our
+engine-vs-sample-library regression suite; `melange-primitives` (TPT filters,
+polyphase oversampling, NR solvers, no-heap) is solid reference for the realtime
+voice; it could compile a Wurli 200A preamp/tone/tremolo stage from a netlist
+for the electric-piano path. GPL-3 — reimplement, don't link.
 
 **How to test each step:** render with `pm wg …`, then `pm probe --path out/wg.wav
 --note N` to check f0/B/decay/brightness; A/B against a matched Pianoteq render
