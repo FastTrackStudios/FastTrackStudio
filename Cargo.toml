@@ -423,7 +423,9 @@ vox-phon = { version = "0.10.0-rc.5" }
 vox-stream = { version = "0.10.0-rc.5" }
 vox-core = { version = "0.10.0-rc.5" }
 vox-websocket = { version = "0.10.0-rc.5" }
+iroh = { version = "1" }
 axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs"] }
 
 # ── Architect framework — in-tree at libs/architect (subtree import) ──
 architect = { path = "libs/architect/architect" }
