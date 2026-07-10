@@ -811,7 +811,7 @@ pub fn envelope(samples: &[f32], sr: u32) -> Vec<f32> {
 }
 
 /// Onset index: first sample exceeding 1% of peak.
-fn onset(samples: &[f32]) -> usize {
+pub fn onset(samples: &[f32]) -> usize {
     let peak = samples.iter().cloned().fold(0.0f32, |m, x| m.max(x.abs()));
     let thr = peak * 0.01;
     samples.iter().position(|x| x.abs() > thr).unwrap_or(0)

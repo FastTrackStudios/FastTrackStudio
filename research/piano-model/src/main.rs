@@ -999,8 +999,8 @@ fn cmd_wg_table(
             let b = med(&mut b_v, 1e-4).clamp(1e-6, 5e-2);
             let prompt = med(&mut prompt_v, 2.0);
             let after = med(&mut after_v, 20.0);
-            let t60 = after.clamp(2.0, 120.0);
-            let zb = wgtable::invert_zb(f0, prompt, t60, strings as f32);
+            let mut t60 = after.clamp(2.0, 120.0);
+            let mut zb = wgtable::invert_zb(f0, prompt, t60, strings as f32);
 
             // reference brightness (for the record + correlation)
             let mag = analyze::avg_mag(&real.samples[..n], sr, 3.0);
@@ -1051,6 +1051,51 @@ fn cmd_wg_table(
             // sampled at the reference's partial frequencies. Median-normalized
             // (the EQ shapes, overall gain stays unity) and clamped ±24 dB.
             let n_disp_final = wgtable::pick_n_disp(f0, b, brightness, sr);
+            // ENVELOPE FIT: descend (t60, zb) on the sample-by-sample dB
+            // envelope RMSE against the reference — the k1 two-stage fit is
+            // noisy analysis, but the loudness envelope is ground truth the
+            // ear tracks directly (the sustain/dropoff curve). MUST run at
+            // the FINAL brightness: the loss filter shapes the early
+            // envelope, and a fit at the wrong brightness lands off by
+            // several dB (measured).
+            {
+                let nd = wgtable::pick_n_disp(f0, b, brightness, sr);
+                let nr = n.min((8.0 * sr as f32) as usize);
+                let ref_vel_e = s.vel.unwrap_or(vel);
+                let eval = |t: f32, z: f32| -> f32 {
+                    let p = waveguide::StringParams {
+                        f0, t60: t, brightness, inharmonicity: b, n_disp: nd,
+                    };
+                    let model =
+                        render_wg_cell(&p, sr, strings, detune, z, ref_vel_e, strike, nr, None);
+                    validate::envelope_rmse_db(&model, &real.samples[..nr], sr)
+                };
+                let mut best = eval(t60, zb);
+                for steps in [
+                    [0.4f32, 0.63, 1.6, 2.5], // coarse
+                    [0.4f32, 0.63, 1.6, 2.5],
+                    [0.8f32, 0.9, 1.11, 1.25], // fine
+                    [0.9f32, 0.95, 1.05, 1.11],
+                ] {
+                    for mt in steps {
+                        let t = (t60 * mt).clamp(2.0, 150.0);
+                        let e = eval(t, zb);
+                        if e < best {
+                            best = e;
+                            t60 = t;
+                        }
+                    }
+                    for mz in steps {
+                        let z = (zb * mz).clamp(20.0, 20_000.0);
+                        let e = eval(t60, z);
+                        if e < best {
+                            best = e;
+                            zb = z;
+                        }
+                    }
+                }
+            }
+
             // measured A/B: the per-partial EQ HURT (amp estimates too noisy
             // to EQ from — LSD +1, pass count 4→2), so it's opt-in until the
             // partial-amp extraction is more robust

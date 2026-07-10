@@ -32,6 +32,8 @@ pub struct Tolerances {
     pub lsd_db: f32,
     /// Minimum Pearson correlation of the dB loudness envelopes.
     pub env_corr_min: f32,
+    /// Max sample-by-sample RMS error of the dB envelopes (sustain/dropoff).
+    pub env_rmse_db: f32,
 }
 
 impl Tolerances {
@@ -44,6 +46,7 @@ impl Tolerances {
             bright_rel: 0.30,
             lsd_db: 12.0,
             env_corr_min: 0.98,
+            env_rmse_db: 2.0,
         }
     }
     pub fn default_level() -> Self {
@@ -55,6 +58,7 @@ impl Tolerances {
             bright_rel: 0.60,
             lsd_db: 18.0,
             env_corr_min: 0.95,
+            env_rmse_db: 4.0,
         }
     }
     pub fn relaxed() -> Self {
@@ -66,6 +70,7 @@ impl Tolerances {
             bright_rel: 1.50,
             lsd_db: 26.0,
             env_corr_min: 0.85,
+            env_rmse_db: 7.0,
         }
     }
     pub fn by_name(name: &str) -> Self {
@@ -93,6 +98,7 @@ pub struct CellReport {
     pub bright_ref: f32,
     pub lsd_db: f32,
     pub env_corr: f32,
+    pub env_rmse: f32,
     pub passed: bool,
     pub failures: Vec<String>,
 }
@@ -110,6 +116,37 @@ pub fn envelope_db(x: &[f32], sr: u32) -> Vec<f32> {
             20.0 * rms.max(3.16e-5).log10()
         })
         .collect()
+}
+
+/// Sample-by-sample RMS error between two dB envelopes. This is THE sustain/
+/// dropoff metric — melange-style sample-exact comparison, applied in the
+/// envelope domain where a physical model CAN null a recording (raw waveforms
+/// can't: phases differ).
+///
+/// Fairness rules (each was a measured failure mode, not a guess):
+/// - onset-align both signals first (samples carry leading silence);
+/// - peak-align both to 0 dB;
+/// - floor BOTH at the reference's noise floor (its minimum frame + 3 dB) —
+///   the recording's tail flattens at mic-noise level while the model decays
+///   to silence, and grading that difference is grading hiss reproduction.
+pub fn envelope_rmse_db(model: &[f32], real: &[f32], sr: u32) -> f32 {
+    let em = envelope_db(&model[analyze::onset(model).min(model.len())..], sr);
+    let er = envelope_db(&real[analyze::onset(real).min(real.len())..], sr);
+    let n = em.len().min(er.len());
+    if n == 0 {
+        return f32::NAN;
+    }
+    let pm = em.iter().cloned().fold(f32::MIN, f32::max);
+    let pr = er.iter().cloned().fold(f32::MIN, f32::max);
+    let floor = er.iter().cloned().fold(f32::MAX, f32::min) - pr + 3.0;
+    let mut acc = 0.0f64;
+    for i in 0..n {
+        let a = (em[i] - pm).max(floor);
+        let b = (er[i] - pr).max(floor);
+        let d = (a - b) as f64;
+        acc += d * d;
+    }
+    (acc / n as f64).sqrt() as f32
 }
 
 pub fn pearson(a: &[f32], b: &[f32]) -> f32 {
@@ -185,6 +222,7 @@ pub fn validate_cell(
     let bright_r = brightness(&ar, real, sr);
     let lsd_db = analyze::accuracy_lsd(model, real, sr);
     let env_corr = pearson(&envelope_db(model, sr), &envelope_db(real, sr));
+    let env_rmse = envelope_rmse_db(model, real, sr);
 
     let mut failures = Vec::new();
     if tune_cents.abs() > tol.tune_cents {
@@ -226,6 +264,9 @@ pub fn validate_cell(
     if env_corr < tol.env_corr_min {
         failures.push(format!("env corr {env_corr:.3} < {:.3}", tol.env_corr_min));
     }
+    if env_rmse > tol.env_rmse_db {
+        failures.push(format!("env RMSE {env_rmse:.1} dB > {:.1} dB", tol.env_rmse_db));
+    }
 
     CellReport {
         note,
@@ -241,6 +282,7 @@ pub fn validate_cell(
         bright_ref: bright_r,
         lsd_db,
         env_corr,
+        env_rmse,
         passed: failures.is_empty(),
         failures,
     }
@@ -268,7 +310,7 @@ td.bad{{background:#3a1414}}
 <p class="sub">tolerance level: <b>{level}</b> — {passed}/{n} cells passed</p>
 <table><tr><th>note</th><th>vel</th><th>status</th><th>tune ¢</th>
 <th>B model</th><th>B ref</th><th>prompt m/r (s)</th><th>after m/r (s)</th>
-<th>bright m/r</th><th>LSD dB</th><th>env corr</th><th class="failures">failures</th></tr>
+<th>bright m/r</th><th>LSD dB</th><th>env corr</th><th>env RMSE</th><th class="failures">failures</th></tr>
 "#,
         n = cells.len()
     );
@@ -280,7 +322,7 @@ td.bad{{background:#3a1414}}
             "<tr class=\"{cls}\"><td>{}</td><td>{}</td><td class=\"status\">{status}</td>\
              <td>{:+.1}</td><td>{:.2e}</td><td>{:.2e}</td>\
              <td>{:.1} / {:.1}</td><td>{:.1} / {:.1}</td>\
-             <td>{:.3} / {:.3}</td><td>{:.1}</td><td>{:.3}</td>\
+             <td>{:.3} / {:.3}</td><td>{:.1}</td><td>{:.3}</td><td>{:.1}</td>\
              <td class=\"failures\">{}</td></tr>\n",
             c.note,
             c.vel,
@@ -295,6 +337,7 @@ td.bad{{background:#3a1414}}
             c.bright_ref,
             c.lsd_db,
             c.env_corr,
+            c.env_rmse,
             c.failures.join("; "),
         );
     }

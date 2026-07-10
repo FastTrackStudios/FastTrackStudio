@@ -145,20 +145,18 @@ pub fn smooth(rows: &mut [WgNote], sr: u32) {
     let bad_b: Vec<bool> = rows.iter().map(|r| r.b <= 2e-6 || r.b >= 2e-2).collect();
     let lnb_s = median_filter(&lnb, &bad_b, 3);
 
-    // t60 / zb in log domain; collapsed fits (prompt≈after or zb at clamp) missing
+    // t60 / zb in log domain. These come from the envelope fit (not the noisy
+    // two-stage ref fit), so only clamp-saturated values count as missing;
+    // a light r=1 median keeps genuine per-note variation.
     let lnt: Vec<f32> = rows.iter().map(|r| r.t60.ln()).collect();
-    let bad_t: Vec<bool> = rows
-        .iter()
-        .map(|r| (r.prompt_ref - r.after_ref).abs() < 0.05 * r.after_ref || r.t60 >= 119.0)
-        .collect();
-    let lnt_s = median_filter(&lnt, &bad_t, 3);
+    let bad_t: Vec<bool> = rows.iter().map(|r| r.t60 >= 119.0 || r.t60 <= 2.1).collect();
+    let lnt_s = median_filter(&lnt, &bad_t, 1);
     let lnz: Vec<f32> = rows.iter().map(|r| r.zb.ln()).collect();
     let bad_z: Vec<bool> = rows
         .iter()
-        .zip(&bad_t)
-        .map(|(r, &bt)| bt || r.zb >= 49_000.0 || r.zb <= 11.0)
+        .map(|r| r.zb >= 19_000.0 || r.zb <= 21.0)
         .collect();
-    let lnz_s = median_filter(&lnz, &bad_z, 3);
+    let lnz_s = median_filter(&lnz, &bad_z, 1);
 
     for (i, r) in rows.iter_mut().enumerate() {
         r.cents_vs_et = cents_s[i];
