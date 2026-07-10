@@ -33,6 +33,17 @@ for b in fasttrackstudio fts; do
 done
 [ -f "$here/VERSION" ] && install -m 644 "$here/VERSION" "$lib/VERSION"
 
+# REAPER extension: only when a REAPER install is present (its resource
+# dir exists); silently skipped otherwise.
+if [ -d "$PREFIX/.config/REAPER" ] && [ -f "$here/reaper_fts_extensions.so" ]; then
+    mkdir -p "$PREFIX/.config/REAPER/UserPlugins"
+    install -m 755 "$here/reaper_fts_extensions.so" \
+        "$PREFIX/.config/REAPER/UserPlugins/reaper_fts_extensions.so.new"
+    mv -f "$PREFIX/.config/REAPER/UserPlugins/reaper_fts_extensions.so.new" \
+        "$PREFIX/.config/REAPER/UserPlugins/reaper_fts_extensions.so"
+    echo "REAPER extension installed -> $PREFIX/.config/REAPER/UserPlugins/"
+fi
+
 # systemd user unit (installed but NOT enabled).
 mkdir -p "$PREFIX/.config/systemd/user"
 install -m 644 "$here/signal-engine.service" "$PREFIX/.config/systemd/user/"

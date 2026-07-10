@@ -17,6 +17,7 @@ if [ "$PREFIX" = "$HOME" ] && command -v systemctl >/dev/null 2>&1; then
     systemctl --user daemon-reload 2>/dev/null || true
 fi
 
+rm -f "$PREFIX/.config/REAPER/UserPlugins/reaper_fts_extensions.so"
 rm -f "$PREFIX/.local/bin/fasttrackstudio" "$PREFIX/.local/bin/fts"
 rm -rf "$PREFIX/.local/lib/fts"
 rm -f "$PREFIX/.local/share/applications/fasttrackstudio.desktop"
