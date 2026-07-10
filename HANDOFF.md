@@ -163,6 +163,22 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    split stays a runtime property. (dx note: wasm-opt SIGABRTs in this
    shell — dx continues with unoptimized wasm; bundle works.)
 
+15. **v0.0.1-alpha PUBLISHED** (codeberg release, prerelease): tarball +
+   fts-installer + SHA256SUMS. fts-installer resolves latest incl.
+   prereleases, verifies sums, installs/updates/uninstalls
+   (`just release-package` builds dist/; binaries patchelf'd + stripped
+   for stock distros — need webkit2gtk4.1/gtk3/alsa/pipewire/openssl3).
+   NOTE: org asset quota is 1.5GiB (Snowflake) — cleaned 141 stale Task
+   container versions to make room; a truncated upload serves a
+   truncated asset silently, so verify sizes after upload.
+16. **fts-extensions vendoring — PLANNED, not executed**: land at
+   apps/extensions/reaper-fts-extensions (USER DECISION — the
+   apps/extensions/<host>-fts-extensions convention for future
+   ableton/logic outputs). Full plan (dep repoint map, reaper-input +
+   fts-launcher also missing from the monorepo, risks) in the scout
+   report in git history / session notes. B compiles standalone; same
+   reaper-rs fork+branch as A, facet/vox pins identical.
+
 ## Gotchas that will bite again
 
 - Dead-repo `[patch]` tables only resolve with a cached git db /
