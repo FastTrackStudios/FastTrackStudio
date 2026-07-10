@@ -14,6 +14,7 @@ use axum::Router;
 use architect::axum_ws;
 use signal_guitar::GuitarRigBackend;
 use signal_guitar::proto::rig::Rig as _;
+use tower_http::services::{ServeDir, ServeFile};
 
 /// Default bind address; override with `SIGNAL_ENGINE_ADDR` (or the legacy
 /// `RIGD_ADDR`, still honored so existing live setups keep working).
@@ -25,6 +26,44 @@ fn bind_addr() -> String {
     std::env::var("SIGNAL_ENGINE_ADDR")
         .or_else(|_| std::env::var("RIGD_ADDR"))
         .unwrap_or_else(|_| DEFAULT_ADDR.to_string())
+}
+
+/// Locate the built signal-web bundle (the browser remote) so the engine can
+/// serve it itself — any device on the LAN opens `http://<host>:4040/` and
+/// gets the control UI. First match wins:
+///
+/// 1. `SIGNAL_WEB_DIST` env var (explicit override)
+/// 2. `<exe_dir>/signal-web` (deployed layout — the bundle sits next to the
+///    binary; `just signal-web-sync` puts it there)
+/// 3. dx dev build output relative to the workspace `target/` the engine was
+///    built into: `target/dx/signal-web/{release,debug}/web/public`
+///
+/// A candidate only counts if it contains an `index.html`. Returns `None`
+/// when no bundle exists — the engine runs fine headless (embedded case),
+/// serving only `/health` + `/vox`.
+fn web_dist_dir() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("SIGNAL_WEB_DIST") {
+        let p = std::path::PathBuf::from(&dir);
+        if p.join("index.html").is_file() {
+            return Some(p);
+        }
+        tracing::warn!("SIGNAL_WEB_DIST={dir} has no index.html — ignoring");
+    }
+
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))?;
+    let candidates = [
+        // Deployed: bundle beside the binary.
+        exe_dir.join("signal-web"),
+        // Dev: exe lives in target/{debug,release}; dx output is a sibling
+        // under target/dx/.
+        exe_dir.join("../dx/signal-web/release/web/public"),
+        exe_dir.join("../dx/signal-web/debug/web/public"),
+    ];
+    candidates
+        .into_iter()
+        .find(|p| p.join("index.html").is_file())
 }
 
 #[derive(Clone)]
@@ -46,6 +85,45 @@ async fn vox_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Res
     .into_response()
 }
 
+/// Serve the same router over an iroh p2p endpoint — remotes dial the
+/// engine by bare endpoint id from any network, no port forwarding. The
+/// endpoint's secret key persists at `<config>/iroh.key` so the id is
+/// stable across restarts; the id itself is logged and written to
+/// `<config>/iroh-endpoint-id` for other devices/agents to read.
+#[cfg(feature = "iroh")]
+async fn serve_iroh(router: architect::LayerRouter) {
+    use architect::iroh_link;
+
+    let config_dir = signal_sampler::rig_prefs::signal_config_dir();
+    let secret_key = match iroh_link::load_or_create_secret_key(&config_dir.join("iroh.key")) {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::error!(error = %e, "iroh secret key unavailable; p2p transport disabled");
+            return;
+        }
+    };
+    let endpoint = match iroh_link::bind_endpoint(secret_key).await {
+        Ok(ep) => ep,
+        Err(e) => {
+            tracing::error!(error = %e, "iroh endpoint bind failed; p2p transport disabled");
+            return;
+        }
+    };
+    tracing::info!("iroh endpoint id: {}", endpoint.id());
+    if let Err(e) = std::fs::write(
+        config_dir.join("iroh-endpoint-id"),
+        format!("{}\n", endpoint.id()),
+    ) {
+        tracing::warn!(error = %e, "could not write iroh-endpoint-id");
+    }
+
+    let acceptor = iroh_link::lane_acceptor_fn(move |_req, connection| {
+        connection.handle_with(router.clone());
+        Ok(())
+    });
+    iroh_link::serve_endpoint(&endpoint, acceptor).await;
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -63,15 +141,39 @@ async fn main() {
     let state = AppState {
         router: backend.router(),
     };
-    let app = Router::new()
+
+    #[cfg(feature = "iroh")]
+    tokio::spawn(serve_iroh(state.router.clone()));
+
+    let mut app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/vox", get(vox_handler))
         .with_state(state);
 
     let addr = bind_addr();
+
+    // Serve the browser remote (signal-web) as static files from the same
+    // router, with an index.html fallback so client-side routes deep-link.
+    let web_dist = web_dist_dir();
+    match &web_dist {
+        Some(dist) => {
+            let serve = ServeDir::new(dist).fallback(ServeFile::new(dist.join("index.html")));
+            app = app.fallback_service(serve);
+        }
+        None => {
+            tracing::warn!(
+                "signal-web bundle not found (SIGNAL_WEB_DIST, <exe_dir>/signal-web, \
+                 target/dx/signal-web) — serving /health + /vox only"
+            );
+        }
+    }
+
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("bind {addr}: {e}"));
     tracing::info!("signal-engine serving ws://{addr}/vox");
+    if let Some(dist) = &web_dist {
+        tracing::info!("web remote: http://{addr}/ (bundle: {})", dist.display());
+    }
     axum::serve(listener, app).await.expect("axum serve");
 }

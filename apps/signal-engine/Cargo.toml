@@ -12,10 +12,23 @@ authors.workspace = true
 
 [dependencies]
 signal-guitar.workspace = true
-# Enables the native PipeWire duplex backend on the shared sampler core.
-signal-sampler = { workspace = true, features = ["pipewire"] }
+signal-sampler.workspace = true
 architect = { workspace = true, features = ["vox", "server-axum"] }
 axum.workspace = true
+tower-http.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# The native PipeWire duplex backend is Linux-only (cpal's pipewire host);
+# on macOS/other platforms the sampler core falls back to plain cpal
+# (CoreAudio), keeping the engine buildable on darwin (voyager).
+[target.'cfg(target_os = "linux")'.dependencies]
+signal-sampler = { workspace = true, features = ["pipewire"] }
+
+[features]
+# p2p transport: serve the same vox router over an iroh endpoint, dialable
+# by bare EndpointId from anywhere (endpoint id logged at startup and
+# written to ~/.config/signal/iroh-endpoint-id).
+default = ["iroh"]
+iroh = ["architect/iroh"]
