@@ -1,0 +1,28 @@
+# FastTrackStudio signal engine — supervised for live use.
+# Installed by `just rig-install` to ~/.config/systemd/user/; the binary
+# and web bundle live in ~/.local/lib/fts/ (decoupled from the dev
+# target/ dir so builds can't disturb the running service).
+#
+#   systemctl --user status signal-engine     # health
+#   journalctl --user -u signal-engine -f     # logs
+#   just rig-install                           # build + deploy + restart
+
+[Unit]
+Description=FastTrackStudio signal engine (guitar rig core)
+# PipeWire is a user service; the engine reconnects if it bounces.
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+ExecStart=%h/.local/lib/fts/signal-engine
+Environment=SIGNAL_WEB_DIST=%h/.local/lib/fts/signal-web
+Environment=RUST_BACKTRACE=1
+# Crash-only: whatever happens, be back in ~1s.
+Restart=always
+RestartSec=1
+# A hung engine is worse than a dead one on a Sunday — if stop ever
+# hangs, kill hard and let Restart bring it back.
+TimeoutStopSec=5
+
+[Install]
+WantedBy=default.target

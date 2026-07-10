@@ -133,6 +133,21 @@ async fn main() {
         )
         .init();
 
+    // Log every panic loudly (thread name + backtrace) before the default
+    // hook runs. Panics stay unwinding — control-plane panics are caught
+    // and survived (the rig's meter pump self-heals; audio keeps playing)
+    // — but none may die silently mid-service.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        tracing::error!(
+            thread = thread.name().unwrap_or("<unnamed>"),
+            "panic: {info}\n{backtrace}"
+        );
+        default_hook(info);
+    }));
+
     // The headless core: open the audio device + load the profile off-thread,
     // exactly like the desktop app's auto-start.
     let backend = GuitarRigBackend::new();
