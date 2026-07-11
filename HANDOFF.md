@@ -70,7 +70,16 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    `libs/installer-core` already has retry/progress/download/extract
    primitives — build the real thing on those. Then rebuild
    `apps/installer` as a thin fasttrackstudio-downloader (README in
-   place).
+   place). NEW (2026-07-10): `fts-installer reaper` sets up the whole
+   REAPER environment on a fresh machine — downloads latest REAPER
+   (official reaper.fm; unredistributable), SWS, ReaPack, creates the
+   three rigs (~/fasttrackstudio, ~/fts-tracks, ~/fts-dev) with
+   launch.json + desktop entries, idempotent. Verified end-to-end
+   against a scratch --prefix (REAPER 7.77). Remaining: themes/library
+   content (fts-library release) + installing reaper_fts_extensions.so
+   from the app tarball into the rigs; installer-core's mac-era steps
+   (DMG, .app wrappers, 9-profile list) are still the old world — fold
+   them into this path when the mac installer returns.
 2. **Deploys not run**: apps/docs-site (fly app `fts-docs`,
    docs.fasttrackstudio.app; 188 pages, 0 broken links — build green,
    never deployed) + keyflow.fasttrackstudio.app → /keyflow/ redirect;

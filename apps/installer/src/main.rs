@@ -19,6 +19,7 @@
 mod codeberg;
 mod fetch;
 mod layout;
+mod reaper_env;
 
 use std::path::PathBuf;
 
@@ -38,8 +39,14 @@ pub fn platform_suffix() -> eyre::Result<&'static str> {
     }
 }
 
+// No auto --version flag: it would collide with the flattened default-
+// command `install --version <TAG>` (clap debug-asserts on this).
 #[derive(Parser)]
-#[command(name = "fts-installer", version, about = "Download and install FastTrackStudio")]
+#[command(
+    name = "fts-installer",
+    disable_version_flag = true,
+    about = "Download and install FastTrackStudio"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -63,6 +70,16 @@ enum Cmd {
     /// ~/.config/fts and ~/.config/signal).
     Uninstall {
         /// Uninstall from this directory instead of $HOME.
+        #[arg(long, value_name = "DIR")]
+        prefix: Option<PathBuf>,
+    },
+    /// Set up the complete REAPER environment: download REAPER + SWS +
+    /// ReaPack (official sources) and create the three FTS rigs
+    /// (fts-reaper, fts-tracks, fts-dev) with launch.json + desktop
+    /// entries. Safe to re-run; never clobbers an existing reaper.ini.
+    Reaper {
+        /// Install under this directory instead of $HOME (test installs;
+        /// skips desktop entries).
         #[arg(long, value_name = "DIR")]
         prefix: Option<PathBuf>,
     },
@@ -91,6 +108,7 @@ async fn main() {
         Some(Cmd::Install(args)) => install(args).await,
         Some(Cmd::Update { prefix }) => update(prefix).await,
         Some(Cmd::Uninstall { prefix }) => Layout::new(prefix).and_then(|l| l.uninstall()),
+        Some(Cmd::Reaper { prefix }) => reaper_env::setup(prefix).await,
     };
     if let Err(e) = result {
         eprintln!("error: {e:#}");

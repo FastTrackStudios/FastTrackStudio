@@ -8,6 +8,7 @@ fts-installer                     # = install (latest release)
 fts-installer install [--version vX.Y.Z] [--prefix DIR] [--url TARBALL_URL]
 fts-installer update  [--prefix DIR]
 fts-installer uninstall [--prefix DIR]
+fts-installer reaper    [--prefix DIR]   # REAPER + SWS + ReaPack + the 3 rigs
 ```
 
 - Releases are resolved via the codeberg (Gitea/Forgejo) API
@@ -47,6 +48,31 @@ patchelf'd to the standard `/lib64` loader, plus unit/desktop/icon
 templates and `install.sh`/`uninstall.sh`), the standalone
 `fts-installer-x86_64-linux` binary, and `SHA256SUMS` covering both.
 
-Everything the installer used to do beyond this — REAPER setup,
-extensions, presets — belongs to the app itself post-install (engine
-supervisor + auto-update in `apps/fasttrackstudio`).
+## `fts-installer reaper` — one-shot REAPER environment
+
+Sets up the complete REAPER stack on a fresh machine so nobody
+downloads 80 things by hand:
+
+```text
+fts-installer reaper [--prefix DIR]
+```
+
+- Downloads the **latest REAPER** (resolved from cockos.com, official
+  reaper.fm tarball — REAPER's license forbids us redistributing it)
+  into a portable install at `~/.local/lib/fts/reaper/`.
+- Downloads **SWS** (sws-extension.org) and **ReaPack** (cfillion's
+  GitHub release).
+- Creates THE three rigs — `~/fasttrackstudio` (fts-reaper, main
+  recording), `~/fts-tracks` (live tracks playback), `~/fts-dev`
+  (dev/testing) — each with SWS + ReaPack in `UserPlugins/`, the SWS
+  python scripts, and a minimal `reaper.ini` (only written when
+  missing; re-runs never clobber a configured rig).
+- Writes the `launch.json` files the fts launchers use
+  (`~/fasttrackstudio/FastTrackStudio/launch.json` +
+  `~/fts-dev/launch.json`) and `fts-{reaper,tracks,dev}.desktop`
+  entries (skipped with a non-home `--prefix`).
+- Idempotent: an already-current REAPER version is not re-downloaded.
+
+Still TODO here: themes/library content (ColorThemes, FXChains,
+TrackTemplates from an fts-library release) and installing
+`reaper_fts_extensions.so` from the app tarball into the rigs.
