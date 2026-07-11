@@ -107,6 +107,11 @@ jobs:
           if [ ! -d "$CARGO_HOME/git/db" ]; then
             echo "::warning::CARGO_HOME git db is empty — locked git deps will fetch from the network (github egress is unreliable on this host; re-seed from ~cody/.cargo)"
           fi
+          # Root the dev shell so nix GC can't take paths the shell's env
+          # vars point at (run 6 died because AR_wasm32_unknown_unknown's
+          # llvm-binutils wrapper had been collected — env-var store paths
+          # are only alive while something roots the shell derivation).
+          nix develop --profile "$FTS_CI/devshell" -c true
 
       - name: cargo check --workspace
         run: nix develop -c cargo check --workspace --exclude vox-discover
