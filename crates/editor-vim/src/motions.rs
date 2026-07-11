@@ -39,6 +39,17 @@ pub enum Motion {
     EndPrevWord,   // ge
 }
 
+/// How a motion combines with an operator. vim's `:help
+/// exclusive` — an exclusive motion's target char is NOT part of
+/// the operated range, an inclusive one's is, and a linewise
+/// motion snaps the range to whole lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MotionKind {
+    Exclusive,
+    Inclusive,
+    Linewise,
+}
+
 impl Motion {
     #[must_use]
     pub fn from_char(ch: char) -> Option<Self> {
@@ -68,10 +79,26 @@ impl Motion {
             '%' => Self::MatchBracket,
             'n' => Self::SearchNext,
             'N' => Self::SearchPrev,
-            // `gg` and `ge` need a two-char lookahead; the
-            // dispatcher handles those as a follow-up. Not in v1.
+            // `gg` and `ge` are two-char commands; the dispatcher
+            // resolves them via `pending_g` and passes `DocStart`
+            // / `EndPrevWord` directly.
             _ => return None,
         })
+    }
+
+    /// Operator-combination kind. vim ref: `:help inclusive`.
+    #[must_use]
+    pub fn kind(self) -> MotionKind {
+        match self {
+            Self::WordEnd
+            | Self::WORDEnd
+            | Self::EndPrevWord
+            | Self::FindForward
+            | Self::TillForward
+            | Self::MatchBracket => MotionKind::Inclusive,
+            Self::Up | Self::Down | Self::DocStart | Self::DocEnd => MotionKind::Linewise,
+            _ => MotionKind::Exclusive,
+        }
     }
 }
 
@@ -82,8 +109,8 @@ pub fn apply(state: &EditorState, motion: Motion, count: usize) -> usize {
     match motion {
         Motion::Left => left(state, pos, count),
         Motion::Right => right(state, pos, count),
-        Motion::Up => up(state, pos, count),
-        Motion::Down => down(state, pos, count),
+        Motion::Up => vertical(state, pos, count, false, None).0,
+        Motion::Down => vertical(state, pos, count, true, None).0,
         Motion::WordForward => word_forward(state, pos, count),
         Motion::WordBackward => word_backward(state, pos, count),
         Motion::WordEnd => word_end(state, pos, count),
@@ -93,8 +120,8 @@ pub fn apply(state: &EditorState, motion: Motion, count: usize) -> usize {
         Motion::LineStart => line_start(state, pos),
         Motion::LineEnd => line_end_n(state, pos, count),
         Motion::FirstNonblank => line_first_nonblank(state, pos),
-        Motion::DocStart => 0,
-        Motion::DocEnd => state.doc.len(),
+        Motion::DocStart => nth_line_first_nonblank(state, 0),
+        Motion::DocEnd => last_line_first_nonblank(state),
         Motion::ParaForward => para_forward(state, pos, count),
         Motion::ParaBackward => para_backward(state, pos, count),
         // Sentences: treat as paragraph for v1 (cheap, good
@@ -103,7 +130,7 @@ pub fn apply(state: &EditorState, motion: Motion, count: usize) -> usize {
         Motion::SentBackward => para_backward(state, pos, count),
         Motion::MatchBracket => match_bracket(state, pos).unwrap_or(pos),
         Motion::SearchNext | Motion::SearchPrev => pos, // v1: no search
-        Motion::EndPrevWord => word_backward(state, pos, count), // approximation
+        Motion::EndPrevWord => end_prev_word(state, pos, count),
         // f/F/t/T are handled via pending-input — never reached here.
         Motion::FindForward | Motion::FindBackward | Motion::TillForward | Motion::TillBackward => {
             pos
@@ -111,6 +138,8 @@ pub fn apply(state: &EditorState, motion: Motion, count: usize) -> usize {
     }
 }
 
+/// `f`/`F`/`t`/`T`. Line-local (vim never crosses lines here) and
+/// char-correct — `ch` may be any Unicode scalar.
 #[must_use]
 pub fn find_char(
     state: &EditorState,
@@ -120,38 +149,80 @@ pub fn find_char(
     count: usize,
 ) -> Option<usize> {
     let doc = state.doc.to_string();
-    let bytes = doc.as_bytes();
     let forward = matches!(input, MotionInput::FindForward | MotionInput::TillForward);
     let till = matches!(input, MotionInput::TillForward | MotionInput::TillBackward);
-    let target_byte = ch as u32;
-    if target_byte > 0x7f {
-        return None; // ASCII-only fast path; v1.
-    }
-    let target = target_byte as u8;
+    let lo = line_start(state, pos);
+    let hi = line_end(state, pos);
     let mut hits = 0;
     if forward {
-        let start = (pos + 1).min(bytes.len());
-        // Need the index `i` for the saturating-1 return shape.
-        #[allow(clippy::needless_range_loop)]
-        for i in start..bytes.len() {
-            if bytes[i] == target {
+        let start = next_char_boundary(doc.as_bytes(), pos).min(hi);
+        for (off, c) in doc[start..hi].char_indices() {
+            if c == ch {
                 hits += 1;
                 if hits == count {
-                    return Some(if till { i.saturating_sub(1) } else { i });
+                    let at = start + off;
+                    return Some(if till {
+                        prev_char_boundary(doc.as_bytes(), at).max(lo)
+                    } else {
+                        at
+                    });
                 }
             }
         }
     } else {
-        for i in (0..pos).rev() {
-            if bytes[i] == target {
+        let upto = pos.min(hi);
+        for (off, c) in doc[lo..upto].char_indices().rev() {
+            if c == ch {
                 hits += 1;
                 if hits == count {
-                    return Some(if till { i + 1 } else { i });
+                    let at = lo + off;
+                    return Some(if till { at + c.len_utf8() } else { at });
                 }
             }
         }
     }
     None
+}
+
+// --- char boundary helpers --------------------------------------
+
+/// Byte offset of the char boundary strictly before `p` (or 0).
+#[must_use]
+pub fn prev_char_boundary(bytes: &[u8], p: usize) -> usize {
+    let mut q = p.min(bytes.len()).saturating_sub(1);
+    while q > 0 && (bytes[q] & 0xC0) == 0x80 {
+        q -= 1;
+    }
+    q
+}
+
+/// Byte offset of the char boundary strictly after `p` (clamped
+/// to `bytes.len()`).
+#[must_use]
+pub fn next_char_boundary(bytes: &[u8], p: usize) -> usize {
+    let mut q = (p + 1).min(bytes.len());
+    while q < bytes.len() && (bytes[q] & 0xC0) == 0x80 {
+        q += 1;
+    }
+    q
+}
+
+/// Clamp a normal-mode caret: vim never parks the block cursor on
+/// the newline (or past EOF) — it sits on the line's last char
+/// instead. Insert/visual modes are exempt; callers apply this
+/// only where vim would (`:help 'virtualedit'` default).
+#[must_use]
+pub fn clamp_normal(state: &EditorState, pos: usize) -> usize {
+    let s = state.doc.to_string();
+    let bytes = s.as_bytes();
+    let mut p = pos.min(bytes.len());
+    if p == bytes.len() || bytes[p] == b'\n' {
+        let ls = line_start(state, p);
+        if p > ls {
+            p = prev_char_boundary(bytes, p).max(ls);
+        }
+    }
+    p
 }
 
 // --- horizontal/vertical ---------------------------------------
@@ -165,11 +236,7 @@ fn left(state: &EditorState, pos: usize, n: usize) -> usize {
         if p <= line_lo {
             break;
         }
-        p -= 1;
-        // step back to char boundary
-        while p > line_lo && (bytes[p] & 0xC0) == 0x80 {
-            p -= 1;
-        }
+        p = prev_char_boundary(bytes, p).max(line_lo);
     }
     p
 }
@@ -183,54 +250,69 @@ fn right(state: &EditorState, pos: usize, n: usize) -> usize {
         if p >= line_hi {
             break;
         }
-        p += 1;
-        while p < line_hi && (bytes[p] & 0xC0) == 0x80 {
-            p += 1;
-        }
+        p = next_char_boundary(bytes, p).min(line_hi);
     }
     p
 }
 
-fn up(state: &EditorState, pos: usize, n: usize) -> usize {
-    let col = pos - line_start(state, pos);
-    let mut start = line_start(state, pos);
+/// Vertical movement by logical lines, char-column based (UTF-8
+/// safe). `goal` is the sticky column (in chars) from a previous
+/// `j`/`k` — vim keeps the column you started from even across
+/// shorter lines. Returns `(new_pos, goal_col)` so the caller can
+/// stash the column back into its state.
+#[must_use]
+pub fn vertical(
+    state: &EditorState,
+    pos: usize,
+    n: usize,
+    down: bool,
+    goal: Option<usize>,
+) -> (usize, usize) {
     let s = state.doc.to_string();
     let bytes = s.as_bytes();
-    for _ in 0..n {
-        if start == 0 {
-            break;
+    let len = bytes.len();
+    let ls = line_start(state, pos);
+    let cur_col = s[ls..pos].chars().count();
+    let col = goal.unwrap_or(cur_col);
+    let mut start = ls;
+    if down {
+        for _ in 0..n {
+            let nl = match next_newline(state, start) {
+                Some(i) => i,
+                None => break,
+            };
+            if nl >= len {
+                break;
+            }
+            start = nl + 1;
         }
-        // step back over the `\n` before this line, then to that
-        // line's start.
-        let prev_nl_end = start - 1; // index of '\n'
-        let mut prev_start = prev_nl_end;
-        while prev_start > 0 && bytes[prev_start - 1] != b'\n' {
-            prev_start -= 1;
+    } else {
+        for _ in 0..n {
+            if start == 0 {
+                break;
+            }
+            let prev_nl = start - 1;
+            let mut prev_start = prev_nl;
+            while prev_start > 0 && bytes[prev_start - 1] != b'\n' {
+                prev_start -= 1;
+            }
+            start = prev_start;
         }
-        start = prev_start;
-    }
-    let line_hi = next_newline(state, start).unwrap_or(state.doc.len());
-    (start + col).min(line_hi)
-}
-
-fn down(state: &EditorState, pos: usize, n: usize) -> usize {
-    let col = pos - line_start(state, pos);
-    let mut start = line_start(state, pos);
-    let len = state.doc.len();
-    for _ in 0..n {
-        let nl = next_newline(state, start).unwrap_or(len);
-        if nl == len {
-            break;
-        }
-        start = nl + 1;
     }
     let line_hi = next_newline(state, start).unwrap_or(len);
-    (start + col).min(line_hi)
+    let mut p = start;
+    for ch in s[start..line_hi].chars().take(col) {
+        p += ch.len_utf8();
+    }
+    (p, col)
 }
 
 // --- word motions ----------------------------------------------
 
 fn is_word(b: u8) -> bool {
+    // Continuation bytes of multi-byte chars land in the `3`
+    // (punct) class below, so a multi-byte run groups as one
+    // "word" of punct class. ASCII-classing is v1-good-enough.
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
@@ -246,144 +328,167 @@ fn classify(b: u8) -> u8 {
     }
 }
 
-fn word_forward(state: &EditorState, pos: usize, n: usize) -> usize {
-    let s = state.doc.to_string();
-    let bytes = s.as_bytes();
+/// `W`-family classifier: everything non-whitespace is one class.
+fn classify_big(b: u8) -> u8 {
+    match classify(b) {
+        0 => 0,
+        2 => 2,
+        _ => 1,
+    }
+}
+
+/// Skip whitespace forward, crossing newlines the way vim's word
+/// motions do: an *empty* line is itself a word target, so stop
+/// on it. Returns the new position.
+fn skip_ws_forward(bytes: &[u8], mut p: usize) -> usize {
+    while p < bytes.len() {
+        match bytes[p] {
+            b' ' | b'\t' | b'\r' => p += 1,
+            b'\n' => {
+                // Peek: if the next line is empty, it's a stop.
+                if p + 1 < bytes.len() && bytes[p + 1] == b'\n' {
+                    return p + 1;
+                }
+                p += 1;
+            }
+            _ => break,
+        }
+    }
+    p
+}
+
+fn word_forward_impl(bytes: &[u8], pos: usize, n: usize, class: fn(u8) -> u8) -> usize {
     let mut p = pos;
     for _ in 0..n {
         if p >= bytes.len() {
             break;
         }
-        let start_class = classify(bytes[p]);
-        // skip the current run
-        while p < bytes.len() && classify(bytes[p]) == start_class {
+        let c = class(bytes[p]);
+        if c == 2 {
+            // On an (empty-line) newline: step over it.
             p += 1;
+        } else if c != 0 {
+            // Skip the current word/punct run.
+            while p < bytes.len() && class(bytes[p]) == c {
+                p += 1;
+            }
         }
-        // skip trailing whitespace (but stop at newlines for v1
-        // simplicity; vim crosses lines but tests don't require it)
-        while p < bytes.len() && classify(bytes[p]) == 0 {
-            p += 1;
+        p = skip_ws_forward(bytes, p);
+    }
+    p
+}
+
+fn word_backward_impl(bytes: &[u8], pos: usize, n: usize, class: fn(u8) -> u8) -> usize {
+    let mut p = pos.min(bytes.len());
+    for _ in 0..n {
+        if p == 0 {
+            break;
+        }
+        p -= 1;
+        // Skip whitespace going left, stopping on empty lines.
+        while p > 0 {
+            match bytes[p] {
+                b' ' | b'\t' | b'\r' => p -= 1,
+                b'\n' => {
+                    if bytes[p - 1] == b'\n' {
+                        break; // empty line is a word target
+                    }
+                    p -= 1;
+                }
+                _ => break,
+            }
+        }
+        let c = class(bytes[p]);
+        if c == 2 || c == 0 {
+            continue;
+        }
+        while p > 0 && class(bytes[p - 1]) == c {
+            p -= 1;
         }
     }
     p
+}
+
+fn word_end_impl(bytes: &[u8], pos: usize, n: usize, class: fn(u8) -> u8) -> usize {
+    let mut p = pos;
+    for _ in 0..n {
+        if p + 1 >= bytes.len() {
+            break;
+        }
+        p += 1;
+        // Skip whitespace (newlines included — `e` sails past
+        // empty lines, unlike `w`).
+        while p < bytes.len() && matches!(class(bytes[p]), 0 | 2) {
+            p += 1;
+        }
+        if p >= bytes.len() {
+            p = prev_char_boundary(bytes, bytes.len());
+            break;
+        }
+        let c = class(bytes[p]);
+        while p + 1 < bytes.len() && class(bytes[p + 1]) == c {
+            p += 1;
+        }
+    }
+    let mut p = p.min(bytes.len().saturating_sub(1));
+    // Classes are byte-wise, so a multi-byte char's run can end on
+    // a continuation byte — snap back to the char's lead byte.
+    while p > 0 && (bytes[p] & 0xC0) == 0x80 {
+        p -= 1;
+    }
+    p
+}
+
+fn word_forward(state: &EditorState, pos: usize, n: usize) -> usize {
+    word_forward_impl(state.doc.to_string().as_bytes(), pos, n, classify)
 }
 
 fn word_backward(state: &EditorState, pos: usize, n: usize) -> usize {
-    let s = state.doc.to_string();
-    let bytes = s.as_bytes();
-    let mut p = pos;
-    for _ in 0..n {
-        if p == 0 {
-            break;
-        }
-        p -= 1;
-        // skip whitespace going left
-        while p > 0 && classify(bytes[p]) == 0 {
-            p -= 1;
-        }
-        let cls = classify(bytes[p]);
-        while p > 0 && classify(bytes[p - 1]) == cls {
-            p -= 1;
-        }
-    }
-    p
+    word_backward_impl(state.doc.to_string().as_bytes(), pos, n, classify)
 }
 
 fn word_end(state: &EditorState, pos: usize, n: usize) -> usize {
-    let s = state.doc.to_string();
-    let bytes = s.as_bytes();
-    let mut p = pos;
-    for _ in 0..n {
-        if p + 1 >= bytes.len() {
-            p = bytes.len();
-            break;
-        }
-        p += 1;
-        while p < bytes.len() && classify(bytes[p]) == 0 {
-            p += 1;
-        }
-        if p >= bytes.len() {
-            break;
-        }
-        let cls = classify(bytes[p]);
-        while p + 1 < bytes.len() && classify(bytes[p + 1]) == cls {
-            p += 1;
-        }
-    }
-    p
-}
-
-// --- WORD motions ----------------------------------------------
-//
-// A "WORD" (uppercase in :help WORD) is any maximal run of
-// non-whitespace bytes. Only ASCII space / tab / newline count
-// as whitespace here — punctuation is part of the WORD.
-
-fn is_ws(b: u8) -> bool {
-    matches!(b, b' ' | b'\t' | b'\n')
+    word_end_impl(state.doc.to_string().as_bytes(), pos, n, classify)
 }
 
 fn big_word_forward(state: &EditorState, pos: usize, n: usize) -> usize {
-    let s = state.doc.to_string();
-    let bytes = s.as_bytes();
-    let mut p = pos;
-    for _ in 0..n {
-        if p >= bytes.len() {
-            break;
-        }
-        // Skip the current run of non-whitespace.
-        while p < bytes.len() && !is_ws(bytes[p]) {
-            p += 1;
-        }
-        // Skip the whitespace gap.
-        while p < bytes.len() && is_ws(bytes[p]) {
-            p += 1;
-        }
-    }
-    p
+    word_forward_impl(state.doc.to_string().as_bytes(), pos, n, classify_big)
 }
 
 fn big_word_backward(state: &EditorState, pos: usize, n: usize) -> usize {
+    word_backward_impl(state.doc.to_string().as_bytes(), pos, n, classify_big)
+}
+
+fn big_word_end(state: &EditorState, pos: usize, n: usize) -> usize {
+    word_end_impl(state.doc.to_string().as_bytes(), pos, n, classify_big)
+}
+
+/// `ge` — end of the previous word, inclusive.
+fn end_prev_word(state: &EditorState, pos: usize, n: usize) -> usize {
     let s = state.doc.to_string();
     let bytes = s.as_bytes();
-    let mut p = pos;
+    let mut p = pos.min(bytes.len());
     for _ in 0..n {
         if p == 0 {
             break;
         }
+        let started_on = if p < bytes.len() { classify(bytes[p]) } else { 0 };
         p -= 1;
-        // Skip whitespace going left.
-        while p > 0 && is_ws(bytes[p]) {
+        // If we're still inside the word we started in, back out
+        // of it first.
+        if p > 0 && classify(bytes[p]) == started_on && matches!(started_on, 1 | 3) {
+            let c = started_on;
+            while p > 0 && classify(bytes[p - 1]) == c {
+                p -= 1;
+            }
+            if p == 0 {
+                break;
+            }
             p -= 1;
         }
-        // Walk to the start of the current non-whitespace run.
-        while p > 0 && !is_ws(bytes[p - 1]) {
+        // Skip whitespace (incl. newlines) going left.
+        while p > 0 && matches!(classify(bytes[p]), 0 | 2) {
             p -= 1;
-        }
-    }
-    p
-}
-
-fn big_word_end(state: &EditorState, pos: usize, n: usize) -> usize {
-    let s = state.doc.to_string();
-    let bytes = s.as_bytes();
-    let mut p = pos;
-    for _ in 0..n {
-        if p + 1 >= bytes.len() {
-            p = bytes.len();
-            break;
-        }
-        p += 1;
-        // Skip whitespace forward.
-        while p < bytes.len() && is_ws(bytes[p]) {
-            p += 1;
-        }
-        if p >= bytes.len() {
-            break;
-        }
-        // Walk to the last byte of the current non-whitespace run.
-        while p + 1 < bytes.len() && !is_ws(bytes[p + 1]) {
-            p += 1;
         }
     }
     p
@@ -436,11 +541,17 @@ pub fn nth_line_first_nonblank(state: &EditorState, n: usize) -> usize {
             p += off + 1;
             line += 1;
         } else {
-            p = bytes.len();
             break;
         }
     }
     line_first_nonblank(state, p)
+}
+
+/// First non-blank of the last line — `G` without a count.
+#[must_use]
+pub fn last_line_first_nonblank(state: &EditorState) -> usize {
+    let len = state.doc.len();
+    line_first_nonblank(state, line_start(state, len))
 }
 
 #[must_use]
@@ -518,7 +629,17 @@ fn match_bracket(state: &EditorState, pos: usize) -> Option<usize> {
     if pos >= bytes.len() {
         return None;
     }
-    let (open, close, forward) = match bytes[pos] {
+    // vim `%`: if the caret isn't on a bracket, scan forward on
+    // the current line for the first one.
+    let line_hi = line_end(state, pos);
+    let mut at = pos;
+    while at < line_hi && !matches!(bytes[at], b'(' | b'[' | b'{' | b')' | b']' | b'}') {
+        at += 1;
+    }
+    if at >= line_hi {
+        return None;
+    }
+    let (open, close, forward) = match bytes[at] {
         b'(' => (b'(', b')', true),
         b'[' => (b'[', b']', true),
         b'{' => (b'{', b'}', true),
@@ -530,7 +651,7 @@ fn match_bracket(state: &EditorState, pos: usize) -> Option<usize> {
     let mut depth = 0i32;
     if forward {
         #[allow(clippy::needless_range_loop)]
-        for i in pos..bytes.len() {
+        for i in at..bytes.len() {
             if bytes[i] == open {
                 depth += 1;
             } else if bytes[i] == close {
@@ -541,7 +662,7 @@ fn match_bracket(state: &EditorState, pos: usize) -> Option<usize> {
             }
         }
     } else {
-        for i in (0..=pos).rev() {
+        for i in (0..=at).rev() {
             if bytes[i] == close {
                 depth += 1;
             } else if bytes[i] == open {

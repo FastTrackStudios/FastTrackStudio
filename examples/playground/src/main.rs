@@ -7,6 +7,9 @@ use editor::{
     bracket_match, commands, editor_view, markdown, DecoratedRange, Editor, EditorState, Keymap,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+mod lsp;
+
 /// Combined decoration source — markdown live-preview plus
 /// bracket-pair highlighting. Wrapped via
 /// `DecorationSource::ptr` (the stateless fn-pointer shape) so
@@ -449,6 +452,91 @@ fn App() -> Element {
     let vim = use_signal(editor::editor_vim::VimState::new);
     let vim_enabled = !read_query_flag("novim");
 
+    // ── LSP (desktop/native only) ────────────────────────────
+    //
+    // Set `EDITOR_LSP_CMD` to enable, e.g.
+    //   EDITOR_LSP_CMD="python3 tools/demo_ls.py" cargo run -p playground
+    // Diagnostics arrive as decorations in `lsp_decos`; edits are
+    // forwarded to the client thread via the `on_transaction` sink.
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut lsp_decos = use_signal(Vec::<DecoratedRange>::new);
+    #[cfg(not(target_arch = "wasm32"))]
+    let lsp_bridge = use_hook(|| {
+        std::rc::Rc::new(std::cell::RefCell::new(lsp::start(
+            state.peek().doc.clone(),
+        )))
+    });
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let bridge = lsp_bridge.clone();
+        use_future(move || {
+            let rx = bridge
+                .borrow_mut()
+                .as_mut()
+                .and_then(|b| b.decorations.take());
+            async move {
+                let Some(mut rx) = rx else { return };
+                while let Some(d) = rx.recv().await {
+                    let ranges: Vec<(usize, usize)> = d.iter().map(|r| (r.from, r.to)).collect();
+                    tracing::debug!(count = d.len(), ?ranges, "lsp: decorations received on UI");
+                    lsp_decos.set(d);
+                }
+            }
+        });
+    }
+
+    // Transaction sink: handles vim's `:w`/`:q` events and feeds
+    // the LSP thread. (`:w` writes to target/playground-saved.md —
+    // the playground has no real file; an app host saves to its
+    // vault instead.)
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_tx = {
+        let events = lsp_bridge.borrow().as_ref().map(|b| b.events.clone());
+        Callback::new(move |ev: editor::TransactionEvent| {
+            match ev.user_event.as_deref() {
+                Some("save") | Some("save-quit") => {
+                    let path = std::path::Path::new("target/playground-saved.md");
+                    match std::fs::write(path, ev.doc_after.to_string()) {
+                        Ok(()) => tracing::info!("vim :w — saved to {}", path.display()),
+                        Err(e) => tracing::error!("vim :w failed: {e}"),
+                    }
+                    if ev.user_event.as_deref() == Some("save-quit") {
+                        std::process::exit(0);
+                    }
+                }
+                Some("quit") => std::process::exit(0),
+                _ => {}
+            }
+            if let Some(tx) = &events {
+                let _ = tx.send(ev);
+            }
+        })
+    };
+    #[cfg(target_arch = "wasm32")]
+    let on_tx = Callback::new(move |ev: editor::TransactionEvent| {
+        if let Some(kind) = ev.user_event.as_deref() {
+            tracing::info!("vim ex event: {kind} (no filesystem on web)");
+        }
+    });
+
+    // Decoration source — created once (Rc identity is the
+    // prop-diff contract for stateful sources). Splices the LSP
+    // squiggles in after the markdown/bracket decorations.
+    let deco_source = use_hook(|| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            editor_view::DecorationSource::new(move |s: &EditorState| {
+                let mut v = combined_decorations(s);
+                v.extend(lsp_decos.read().iter().cloned());
+                v
+            })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            editor_view::DecorationSource::ptr(combined_decorations)
+        }
+    });
+
     // Slash-command palette. The Editor refreshes this on every
     // doc change via `detect_slash`; the `SlashMenu` component
     // renders the popup directly inside the editor frame.
@@ -482,19 +570,19 @@ fn App() -> Element {
                                 keymap: keymap.clone(),
                                 vim: if vim_enabled { Some(vim) } else { None },
                                 slash: Some(slash),
+                                on_transaction: on_tx,
                             }
                         } else {
                             Editor {
                                 state,
                                 keymap: keymap.clone(),
-                                decorations: editor_view::DecorationSource::ptr(
-                                    combined_decorations,
-                                ),
+                                decorations: deco_source.clone(),
                                 vim: if vim_enabled { Some(vim) } else { None },
                                 slash: Some(slash),
                                 completion: editor_view::trigger::CompletionSource::ptr(
                                     demo_completion,
                                 ),
+                                on_transaction: on_tx,
                             }
                         }
                         editor::editor_view::slash::SlashMenu { state, slash }
@@ -535,9 +623,18 @@ fn VimStatus(vim: Signal<editor::editor_vim::VimState>) -> Element {
             .map(|op| format!("{op:?}").chars().next().unwrap().to_string())
             .unwrap_or_default(),
     );
+    // Live `:`/`/`/`?` buffer — what a vim user sees at the
+    // bottom of the screen while typing an ex command or search.
+    let cmdline = v
+        .command_line
+        .as_ref()
+        .map(|c| format!("{}{}", c.kind.prompt(), c.buffer));
     rsx! {
         div { class: "vim-status",
             span { class: "vim-mode {mode_class}", "{mode_label}" }
+            if let Some(c) = cmdline {
+                span { class: "vim-cmdline", "{c}" }
+            }
             span { class: "vim-pending", "{pending}" }
         }
     }

@@ -129,6 +129,25 @@ impl Registers {
         );
     }
 
+    /// Read the full [`Register`] entry (text + linewise flag),
+    /// defaulting to the unnamed register. Clipboard reads come
+    /// back charwise unless the payload ends in `\n`.
+    #[must_use]
+    pub fn read_full(&self, key: Option<RegisterKey>) -> Option<Register> {
+        let key = key.unwrap_or(RegisterKey::Unnamed);
+        match key {
+            RegisterKey::SystemPlus | RegisterKey::SystemStar => self
+                .clipboard
+                .as_ref()
+                .and_then(|cb| cb(ClipboardOp::Read))
+                .map(|text| Register {
+                    linewise: text.ends_with('\n'),
+                    text,
+                }),
+            _ => self.map.get(&key).cloned(),
+        }
+    }
+
     /// Read from `key`, defaulting to the unnamed register.
     #[must_use]
     pub fn read(&self, key: Option<RegisterKey>) -> Option<String> {

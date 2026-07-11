@@ -11,6 +11,7 @@ members = [
     "crates/editor-keyflow-lang",
     "crates/editor",
     "crates/editor-crdt",
+    "crates/editor-lsp",
     "examples/playground",
 ]
 

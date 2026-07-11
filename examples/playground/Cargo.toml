@@ -34,6 +34,11 @@ optional = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
+# LSP wiring (desktop/native only — spawns a child process). The
+# client runs on its own thread with a dedicated tokio runtime, so
+# it works under any renderer (dioxus-desktop or Blitz).
+editor-lsp = { path = "../../crates/editor-lsp" }
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 
 # Switch platforms with --no-default-features --features web|desktop.
 #

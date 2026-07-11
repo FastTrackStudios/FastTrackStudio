@@ -943,6 +943,47 @@ section h2 {
     color: var(--text-dim);
     min-width: 4ch;
 }
+.vim-cmdline {
+    color: #ffcb6b;
+    font-weight: 600;
+}
+
+/* ── LSP diagnostics (squiggles) ──────────────────────────── */
+/* `editor-lsp::to_decorations` emits mark decorations classed
+   `cm-lsp-diagnostic cm-lsp-{error,warning,info,hint}` with the
+   message in `data-lsp-message`. Wavy underline per severity. */
+.editor-root .cm-lsp-diagnostic {
+    text-decoration-line: underline;
+    text-decoration-style: wavy;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    /* Blitz (native) doesn't draw text-decoration yet — the tint
+       + bottom border below carry the signal there; on web the
+       wavy underline dominates visually. */
+    border-bottom: 1px dotted;
+}
+.editor-root .cm-lsp-error {
+    text-decoration-color: #ff5370;
+    border-bottom-color: #ff5370;
+    background: rgba(255, 83, 112, 0.13);
+    color: #ff8a97;
+}
+.editor-root .cm-lsp-warning {
+    text-decoration-color: #ffcb6b;
+    border-bottom-color: #ffcb6b;
+    background: rgba(255, 203, 107, 0.13);
+    color: #ffd98f;
+}
+.editor-root .cm-lsp-info {
+    text-decoration-color: #79b8ff;
+    border-bottom-color: #79b8ff;
+    background: rgba(121, 184, 255, 0.13);
+}
+.editor-root .cm-lsp-hint {
+    text-decoration-color: #7f8ca6;
+    border-bottom-color: #7f8ca6;
+    background: rgba(127, 140, 166, 0.13);
+}
 
 .editor-root .md-bracket-match {
     background: #2f3a55;

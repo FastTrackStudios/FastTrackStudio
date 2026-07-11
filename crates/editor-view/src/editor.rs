@@ -294,6 +294,11 @@ pub fn Editor(
     // the whole doc even when we `stopPropagation` in capture
     // phase on the editor root.
     let widget_focus = use_signal(|| false);
+    // Undo/redo history. Provided as context so `apply_tx` (the
+    // single transaction choke point) can record every edit and
+    // resolve the `"undo"`/`"redo"`-tagged specs vim and keymaps
+    // emit — without threading a parameter through 25 call sites.
+    use_context_provider(|| Signal::new(editor_state::History::new()));
     // True while the editor root (or a descendant) holds DOM focus.
     // Gates the painted modal caret — like the native caret, it must
     // not render on an unfocused editor.
@@ -2026,10 +2031,23 @@ pub fn Editor(
             return;
         }
         let mods = evt.modifiers();
-        let key_str = match evt.key() {
+        let mut key_str = match evt.key() {
             Key::Character(c) => c,
             other => other.to_string(),
         };
+        // Some key sources (notably the Blitz/native event path)
+        // report the *unshifted* character with the shift modifier
+        // set — vim then sees `o` instead of `O` and opens the
+        // line below. Normalize: shift + single lowercase letter
+        // becomes the uppercase letter. (No-op where the platform
+        // already applied shift.)
+        if mods.shift() && key_str.chars().count() == 1 {
+            if let Some(c) = key_str.chars().next() {
+                if c.is_lowercase() {
+                    key_str = c.to_uppercase().to_string();
+                }
+            }
+        }
         let press = KeySpec {
             key: key_str,
             ctrl: mods.ctrl(),
@@ -2225,7 +2243,17 @@ pub fn Editor(
                 let pre = cur.selection.primary().head;
                 let doc_str = cur.doc.to_string();
                 if let Some(fm) = editor_state::markdown::parse_frontmatter(&doc_str) {
-                    if pre >= fm.outer.start && pre < fm.outer.end && !fm.props.is_empty() {
+                    // Only hijack keys when the caret is on an
+                    // actual property row. On the opener/closer
+                    // `---` lines the keys fall through to vim —
+                    // otherwise `i` on line 1 flips to Insert,
+                    // focuses nothing, and the caret appears to
+                    // jump into the properties widget.
+                    let on_prop_row = fm
+                        .props
+                        .iter()
+                        .any(|p| pre >= p.range.start && pre < p.range.end);
+                    if pre >= fm.outer.start && pre < fm.outer.end && on_prop_row {
                         let key = press.key.as_str();
                         if key == "j" || key == "k" {
                             let cur_idx = fm
@@ -2283,6 +2311,36 @@ pub fn Editor(
                 }
             }
 
+            // `/` in Normal mode opens the slash palette when the
+            // host wired one (Obsidian UX) — it must win over
+            // vim's `/` search, so check BEFORE handle_key. Hosts
+            // without a slash source get vim search on `/`;
+            // `?` (backward search) is always vim's.
+            if !press.ctrl
+                && !press.alt
+                && !press.meta
+                && press.key == "/"
+                && slash_for_keys.is_some()
+                && matches!(vim_sig.peek().mode, editor_vim::Mode::Normal)
+                && vim_sig.peek().pending_operator.is_none()
+            {
+                let head = cur.selection.primary().head;
+                let mut next_vim = vim_sig.peek().clone();
+                next_vim.mode = editor_vim::Mode::Insert;
+                vim_sig.set(next_vim);
+                crate::event::apply_tx(
+                    state,
+                    &cur,
+                    TransactionSpec::new()
+                        .changes(Changes::insert(head, "/"))
+                        .selection(Selection::caret(head + 1))
+                        .annotate("origin", "slash-trigger"),
+                    sink_for_keys,
+                );
+                evt.prevent_default();
+                return;
+            }
+
             let mut vim_state = vim_sig.peek().clone();
             let spec = editor_vim::handle_key(&cur, &mut vim_state, &press);
             vim_sig.set(vim_state);
@@ -2293,36 +2351,6 @@ pub fn Editor(
                 return;
             }
             if !vim_sig.peek().is_inserting() {
-                // `/` in Normal mode should still open the
-                // slash palette — vim doesn't claim it (we
-                // don't ship `/` search), and otherwise the
-                // unconditional preventDefault below would
-                // swallow the key before the contenteditable
-                // sees it. Insert `/` as a Rust transaction
-                // and let the slash-state `use_effect` pick up
-                // the trigger.
-                if !press.ctrl
-                    && !press.alt
-                    && !press.meta
-                    && press.key == "/"
-                    && slash_for_keys.is_some()
-                {
-                    let head = cur.selection.primary().head;
-                    let mut next_vim = vim_sig.peek().clone();
-                    next_vim.mode = editor_vim::Mode::Insert;
-                    vim_sig.set(next_vim);
-                    crate::event::apply_tx(
-                        state,
-                        &cur,
-                        TransactionSpec::new()
-                            .changes(Changes::insert(head, "/"))
-                            .selection(Selection::caret(head + 1))
-                            .annotate("origin", "slash-trigger"),
-                        sink_for_keys,
-                    );
-                    evt.prevent_default();
-                    return;
-                }
                 // Native renderer: there's no contenteditable to move the
                 // caret on Arrow/Home/End in Normal mode, so drive it from
                 // state before the blanket swallow. (Vim already had its
@@ -2341,7 +2369,6 @@ pub fn Editor(
                 evt.prevent_default();
                 tracing::debug!(?press, "editor.keymap.fire");
                 crate::event::apply_tx(state, &cur, spec, sink_for_keys);
-                return;
             }
         }
         // ── Native default-input fallthrough ─────────────────────────
@@ -2428,11 +2455,10 @@ pub fn Editor(
             let prev = comp_sig.peek().clone();
             match (detected, prev) {
                 (Some((kind, start, q)), Some(prev))
-                    if prev.kind == kind && prev.trigger_start == start =>
-                {
+                    if prev.kind == kind && prev.trigger_start == start
                     // Same trigger, query updated. Re-fetch and clamp
                     // the highlighted row to the new candidate count.
-                    if prev.query != q {
+                    && prev.query != q => {
                         let candidates = source.run(&q, kind);
                         let selected = prev.selected.min(candidates.len().saturating_sub(1));
                         comp_sig.set(Some(crate::trigger::CompletionState {
@@ -2443,7 +2469,6 @@ pub fn Editor(
                             candidates,
                         }));
                     }
-                }
                 (Some((kind, start, q)), _) => {
                     let candidates = source.run(&q, kind);
                     comp_sig.set(Some(crate::trigger::CompletionState {

@@ -90,6 +90,33 @@ pub(crate) fn apply_tx(
     spec: TransactionSpec,
     sink: Option<Callback<TransactionEvent>>,
 ) {
+    let mut spec = spec;
+    // History integration. The `<Editor>` component provides a
+    // `Signal<History>` via context; every edit is recorded, and
+    // the empty `"undo"`/`"redo"`-tagged specs (emitted by vim's
+    // `u`/`Ctrl-r` or a host keymap) are swapped for the real
+    // inverse transaction from the history. Missing context (unit
+    // tests, headless callers) degrades to no history.
+    if let Some(mut hist) = try_consume_context::<Signal<editor_state::History>>() {
+        match spec.user_event.as_deref() {
+            Some("undo") if spec.changes.is_empty() => {
+                let Some(inverse) = hist.write().undo(cur) else {
+                    return;
+                };
+                spec = inverse;
+            }
+            Some("redo") if spec.changes.is_empty() => {
+                let Some(inverse) = hist.write().redo(cur) else {
+                    return;
+                };
+                spec = inverse;
+            }
+            _ => {}
+        }
+        // `record` self-ignores undo/redo-tagged specs, so feeding
+        // the swapped spec back through is safe.
+        hist.write().record(cur, &spec);
+    }
     let Some(cb) = sink else {
         // No sink registered — plain apply, no event bookkeeping.
         state.set(cur.update(spec));

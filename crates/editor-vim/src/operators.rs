@@ -8,6 +8,7 @@
 
 use editor_state::{Changes, EditorState, Selection, TransactionSpec};
 
+use crate::motions;
 use crate::state::VimState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,9 +57,23 @@ pub fn apply_range(
             // No edit, caret returns to start of range.
             TransactionSpec::new().selection(Selection::caret(lo))
         }
-        Operator::Delete => TransactionSpec::new()
-            .changes(Changes::delete(lo..hi))
-            .selection(Selection::caret(lo)),
+        Operator::Delete => {
+            // Post-delete the caret sits at `lo`; if that's now
+            // past the line's last char, clamp back one (vim
+            // never parks a normal-mode caret on the newline).
+            let s = state.doc.to_string();
+            let bytes = s.as_bytes();
+            let at_eol_after = hi >= bytes.len() || bytes[hi] == b'\n';
+            let ls = motions::line_start(state, lo);
+            let caret = if at_eol_after && lo > ls {
+                motions::prev_char_boundary(bytes, lo).max(ls)
+            } else {
+                lo
+            };
+            TransactionSpec::new()
+                .changes(Changes::delete(lo..hi))
+                .selection(Selection::caret(caret))
+        }
         Operator::Change => {
             vim.mode = crate::state::Mode::Insert;
             TransactionSpec::new()
@@ -93,16 +108,51 @@ pub fn apply_linewise(
     let reg = vim.pending_register.take();
     vim.registers.write(reg, &text);
     vim.clear_pending();
+    let s = state.doc.to_string();
+    let bytes = s.as_bytes();
     match op {
         Operator::Yank => TransactionSpec::new().selection(Selection::caret(lo)),
-        Operator::Delete => TransactionSpec::new()
-            .changes(Changes::delete(lo..hi))
-            .selection(Selection::caret(lo)),
-        Operator::Change => {
-            vim.mode = crate::state::Mode::Insert;
+        Operator::Delete => {
+            // Caret lands on the first non-blank of the line that
+            // moves up into the hole (or the previous line when
+            // the deleted lines were the last ones).
+            let caret = if hi < bytes.len() {
+                let next_line_nb = motions::line_first_nonblank(state, hi);
+                lo + (next_line_nb - hi)
+            } else if lo > 0 {
+                // Deleted through EOF — also eat the newline that
+                // used to precede the deleted block, so the doc
+                // doesn't keep a dangling blank last line.
+                motions::line_first_nonblank(state, lo - 1)
+            } else {
+                0
+            };
+            let (lo, hi) = if hi >= bytes.len() && lo > 0 {
+                (lo - 1, hi)
+            } else {
+                (lo, hi)
+            };
             TransactionSpec::new()
                 .changes(Changes::delete(lo..hi))
-                .selection(Selection::caret(lo))
+                .selection(Selection::caret(caret))
+        }
+        Operator::Change => {
+            // `cc`/`S`: clear the line's content but KEEP the
+            // trailing newline (vim doesn't merge lines here) and
+            // the leading indent (autoindent behavior).
+            vim.mode = crate::state::Mode::Insert;
+            let content_hi = if hi > lo && bytes.get(hi - 1) == Some(&b'\n') {
+                hi - 1
+            } else {
+                hi
+            };
+            let mut ind = lo;
+            while ind < content_hi && (bytes[ind] == b' ' || bytes[ind] == b'\t') {
+                ind += 1;
+            }
+            TransactionSpec::new()
+                .changes(Changes::delete(ind..content_hi))
+                .selection(Selection::caret(ind))
         }
         Operator::Indent => indent_range(state, lo, hi, false),
         Operator::Outdent => indent_range(state, lo, hi, true),
@@ -116,7 +166,10 @@ fn indent_range(state: &EditorState, lo: usize, hi: usize, outdent: bool) -> Tra
     let bytes = s.as_bytes();
     let mut changes = Vec::new();
     let mut p = crate::motions::line_start(state, lo);
-    while p <= hi && p < bytes.len() {
+    // A linewise range's `hi` includes the trailing newline —
+    // don't let that pull the *next* line into the indent.
+    let limit = if hi > lo { hi - 1 } else { hi };
+    while p <= limit && p < bytes.len() {
         if outdent {
             let mut strip = 0;
             for i in 0..4 {
@@ -143,5 +196,7 @@ fn indent_range(state: &EditorState, lo: usize, hi: usize, outdent: bool) -> Tra
     }
     TransactionSpec::new()
         .changes(Changes::from_sorted(changes))
-        .selection(Selection::caret(lo))
+        .selection(Selection::caret(crate::motions::line_first_nonblank(
+            state, lo,
+        )))
 }

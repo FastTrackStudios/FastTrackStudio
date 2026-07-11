@@ -73,13 +73,22 @@
 //! callback that the host injects — `editor-state` has no DOM
 //! dep and this crate honors that.
 //!
-//! # What's stubbed in v1
+//! # Caret discipline
+//!
+//! Normal-mode carets never sit on a `\n` or past EOF — motions
+//! and delete commands clamp via [`motions::clamp_normal`], and
+//! `<Esc>` out of insert steps one char left, matching vim.
+//! `j`/`k` keep a sticky goal column (chars, UTF-8 safe) across
+//! shorter lines.
+//!
+//! # What's stubbed
 //!
 //! - `Mode::Command` (`:`) — accepted, no-op body.
-//! - `.` repeat — `last_change` is recorded but `apply_last_change`
-//!   only handles operator-motion replays for now; insert-mode
+//! - `.` repeat covers operator+motion, operator+text-object,
+//!   linewise (`dd`/`cc`) and operator+find (`df<c>`); insert-mode
 //!   text replay is a follow-up.
-//! - Marks, search (`/`/`?`), macros (`q`/`@`) — none in v1.
+//! - Marks, `/`/`?` search, macros (`q`/`@`), real visual-block
+//!   (columnar) editing — none yet.
 
 pub mod command_line;
 pub mod macros;
@@ -89,10 +98,11 @@ pub mod registers;
 pub mod state;
 pub mod text_objects;
 
+pub use command_line::{CmdKind, CommandLineState};
 pub use motions::Motion;
 pub use operators::Operator;
 pub use registers::{Register, RegisterKey, Registers};
-pub use state::{Mode, VimState};
+pub use state::{Mode, Search, VimState};
 pub use text_objects::TextObject;
 
 use editor_state::{EditorState, KeySpec, TransactionSpec};

@@ -146,6 +146,37 @@ impl Changes {
         out
     }
 
+    /// Invert this change set against the document it was applied
+    /// *to* (the pre-change doc). The result is a change set valid
+    /// on the *post*-change document; applying it restores `doc`.
+    ///
+    /// Mirrors `ChangeSet.invert` in `@codemirror/state` — the
+    /// history stores inverted change sets so undo is just "apply".
+    ///
+    /// Each change `{from, to, inserted}` becomes
+    /// `{from', from' + inserted.len(), doc[from..to]}` where
+    /// `from'` is `from` shifted by the cumulative delta of the
+    /// changes before it. Sortedness and non-overlap are preserved.
+    #[must_use]
+    pub fn invert(&self, doc: &Doc) -> Changes {
+        let mut shift: isize = 0;
+        let inverted = self
+            .inner
+            .iter()
+            .map(|c| {
+                let from = (c.from as isize + shift) as usize;
+                let inv = Change {
+                    from,
+                    to: from + c.inserted.len(),
+                    inserted: doc.slice(c.from..c.to),
+                };
+                shift += c.delta();
+                inv
+            })
+            .collect();
+        Changes::from_sorted(inverted)
+    }
+
     /// Map a byte offset through this change set. Used by
     /// selections and decorations to stay anchored across edits.
     ///
@@ -246,6 +277,62 @@ mod tests {
             Change::replace(6..11, "WORLD"),
         ]);
         assert_eq!(cs.apply(&d).to_string(), "HELLO WORLD");
+    }
+
+    #[test]
+    fn invert_insert_round_trips() {
+        let d = Doc::from_str("hello");
+        let cs = Changes::insert(5, " world");
+        let after = cs.apply(&d);
+        let inv = cs.invert(&d);
+        assert_eq!(inv, Changes::delete(5..11));
+        assert_eq!(inv.apply(&after).to_string(), "hello");
+    }
+
+    #[test]
+    fn invert_delete_round_trips() {
+        let d = Doc::from_str("hello world");
+        let cs = Changes::delete(5..11);
+        let after = cs.apply(&d);
+        let inv = cs.invert(&d);
+        assert_eq!(inv, Changes::insert(5, " world"));
+        assert_eq!(inv.apply(&after).to_string(), "hello world");
+    }
+
+    #[test]
+    fn invert_replace_round_trips() {
+        let d = Doc::from_str("hello world");
+        let cs = Changes::replace(6..11, "rust");
+        let after = cs.apply(&d);
+        assert_eq!(after.to_string(), "hello rust");
+        let inv = cs.invert(&d);
+        assert_eq!(inv, Changes::replace(6..10, "world"));
+        assert_eq!(inv.apply(&after).to_string(), "hello world");
+    }
+
+    #[test]
+    fn invert_multi_change_round_trips() {
+        let d = Doc::from_str("hello world");
+        let cs = Changes::from_sorted(vec![
+            Change::replace(0..5, "HI"),
+            Change::insert(6, "big "),
+            Change::delete(6..11),
+        ]);
+        let after = cs.apply(&d);
+        assert_eq!(after.to_string(), "HI big ");
+        let inv = cs.invert(&d);
+        assert_eq!(inv.apply(&after).to_string(), "hello world");
+    }
+
+    #[test]
+    fn invert_utf8_round_trips() {
+        let d = Doc::from_str("héllo wörld");
+        // Replace the multibyte "ö" (bytes 8..10) with "o".
+        let cs = Changes::replace(8..10, "o");
+        let after = cs.apply(&d);
+        assert_eq!(after.to_string(), "héllo world");
+        let inv = cs.invert(&d);
+        assert_eq!(inv.apply(&after).to_string(), "héllo wörld");
     }
 
     #[test]

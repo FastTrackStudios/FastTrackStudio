@@ -12,6 +12,7 @@ pub mod command;
 pub mod commands;
 pub mod decoration;
 pub mod doc;
+pub mod history;
 pub mod hover;
 pub mod markdown;
 pub mod selection;
@@ -25,6 +26,7 @@ pub use decoration::{
     set_deco_phase,
 };
 pub use doc::Doc;
+pub use history::History;
 pub use hover::{HoverSource, HoverTooltip};
 pub use selection::{Range, Selection};
 pub use state::EditorState;
