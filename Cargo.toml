@@ -71,6 +71,7 @@ members = [
     "crates/midicore/midicore-proto",
     "crates/midicore/midicore-midir",
     "crates/input/actions-proto",
+    "crates/input/input-config-proto",
     "crates/input/actions-registry",
     "crates/input/actions-keybindings",
     "crates/input/actions-standalone",
@@ -285,6 +286,7 @@ midicore = { path = "crates/midicore/midicore", default-features = false }
 midicore-proto = { path = "crates/midicore/midicore-proto" }
 midicore-midir = { path = "crates/midicore/midicore-midir" }
 actions-proto = { path = "crates/input/actions-proto" }
+input-config-proto = { path = "crates/input/input-config-proto" }
 actions-registry = { path = "crates/input/actions-registry" }
 actions-keybindings = { path = "crates/input/actions-keybindings" }
 actions-standalone = { path = "crates/input/actions-standalone" }
@@ -684,6 +686,11 @@ moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7
 moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
+# Vendored one-line fix: quote scalars containing `<`/`>` — upstream
+# (facet-rs/facet) styx-format emits them bare but styx-parse rejects
+# them, so serialized keybind configs (`keys "<C-s>"`) could not be
+# re-parsed. Drop the vendor once upstream fixes can_be_bare.
+styx-format = { path = "libs/vendor/styx-format" }
 moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }

@@ -305,6 +305,47 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    /<owner>/<repo>/actions/runs/<run_number>/jobs/<idx>/attempt/1
    with {"logCursors":[{"step":N,"cursor":null,"expanded":true}]}
    (token auth works; empty logCursors returns the step list).
+20. **Input/workflow sharing platform (STARTED 2026-07-10)** — the
+   vision: an "input" section of fasttrackstudio.app where people make
+   and share keybind/workflow configurations — searchable, with
+   images/gifs and the *reasoning* behind shortcuts; tutorial pages
+   that render against YOUR current keyboard config; try/adopt/edit
+   other people's profiles on the site; we dogfood it to maintain our
+   own REAPER configs; generalizes into a workflow/resource database.
+   FOUNDATION LAID: `crates/input/input-config-proto` — wasm-clean
+   wire contract holding the keybind config data model (extracted from
+   reaper-input's keybind_config/types.rs + the two portable context
+   enums, re-exported at their old paths) and the `InputConfigService`
+   vox trait (profiles/sections/overlays/workflows CRUD). Filesystem
+   host: reaper-input `keybind_config::host::InputConfigHost` (serves
+   a config dir, snapshot-undo on write, path-traversal guarded,
+   round-trip verified before persisting; unit tests green).
+   TWO BUGS FIXED under it: (a) all Option fields in the config types
+   now carry `#[facet(skip_serializing_if = Option::is_none)]` — the
+   old editor serialized `None` as `@` which the parser REJECTED, so
+   every SectionEditor/WorkflowCreator save produced unparseable files;
+   (b) styx-format is VENDORED at libs/vendor/styx-format (patch.crates-io)
+   with a one-line can_be_bare fix quoting `<`/`>` — upstream
+   (facet-rs/facet) emits `keys <C-s>` bare, which styx-parse rejects.
+   Drop the vendor when upstream fixes it.
+   NEXT STEPS (design agreed from the two exploration reports, see git
+   log): (1) mount InputConfigHost — in the fts-extensions extension
+   (edit the live rig config, hot-reload picks it up) and in
+   `fasttrackstudio` app / standalone editor; (2) port the existing
+   Dioxus keybind editor (reaper-input ui/keyboard — already
+   dual-context via source.rs) to dioxus-web talking InputConfigService
+   over vox ws; (3) NEW `apps/hub` — hosted axum + architect server for
+   the community side: architect-auth (accounts/sessions/RBAC — already
+   built in libs/architect/auth), content entities
+   (`#[derive(architect::Entity)]` WorkflowPost/ProfileShare/etc. with
+   filterable/sortable/fulltext), blob storage for images/gifs (the one
+   genuinely missing piece — vox is typed RPC, not an upload channel;
+   add an axum multipart route beside the ws), SQLite FTS5 or Postgres
+   for search; (4) site /input section (apps/site is pure static wasm
+   today, never deployed) — browse/search posts, render keyboard
+   visualizer (input-dioxus InputVisualizer) against viewer's own
+   config, tutorial pages driven by the same data; (5) import/adopt
+   flow: hub profile → InputConfigService write into the local rig.
 
 ## Gotchas that will bite again
 
