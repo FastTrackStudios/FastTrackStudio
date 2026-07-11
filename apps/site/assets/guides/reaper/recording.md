@@ -15,27 +15,27 @@ Activate the Record mode workflow to use these bindings — they layer over the 
 
 While a take plays back, tap a number to rank it — the marker lands two seconds behind the play position, right where the phrase you just heard lives:
 
-- `1` — Rank :) at the play position.
-- `2` — Rank :)) at the play position.
-- `3` — Rank :))) at the play position.
-- `0` — Down-rank at the play position.
+- `kbd:@_FTS_SESSION_TAKE_RANK_PLAYPOS_1` — Rank :) at the play position.
+- `kbd:@_FTS_SESSION_TAKE_RANK_PLAYPOS_2` — Rank :)) at the play position.
+- `kbd:@_FTS_SESSION_TAKE_RANK_PLAYPOS_3` — Rank :))) at the play position.
+- `kbd:@_FTS_SESSION_TAKE_RANK_PLAYPOS_DOWN` — Down-rank at the play position.
 
 Hold Shift to rank the whole take instead of a moment — the marker sits at the item start:
 
-- `<S-1>` — Rank :) item-wide (likewise `<S-2>`, `<S-3>`, `<S-0>`).
+- `kbd:@_FTS_SESSION_TAKE_RANK_ITEM_1` — Rank :) item-wide (likewise `kbd:<S-2>`, `kbd:<S-3>`, `kbd:<S-0>`).
 
 Point, don't select — rank the take under the mouse cursor:
 
-- `f` — Favorite the take at the mouse.
-- `b` — Down-rank the take at the mouse.
+- `kbd:@_FTS_SESSION_TAKE_RANK_MOUSE_1` — Favorite the take at the mouse.
+- `kbd:@_FTS_SESSION_TAKE_RANK_MOUSE_DOWN` — Down-rank the take at the mouse.
 
 ## Tracking controls
 
-- `r` — Record (the base transport binding, unchanged).
-- `<A-r>` — Toggle record-arm on the selected tracks.
-- `i` — Toggle input monitoring on/off.
-- `<S-i>` — Switch monitoring auto/tape and off.
-- `p` — Toggle pre-roll on record.
-- `e` — Restart recording: delete the bad take and roll again in one press.
+- `kbd:@1013` — Record (the base transport binding, unchanged).
+- `kbd:@9` — Toggle record-arm on the selected tracks.
+- `kbd:@_FTS_SESSION_MONITOR_TOGGLE_ON_OFF` — Toggle input monitoring on/off.
+- `kbd:@_FTS_SESSION_MONITOR_TOGGLE_TAPE_OFF` — Switch monitoring auto/tape and off.
+- `kbd:@41819` — Toggle pre-roll on record.
+- `kbd:@_FTS_SESSION_RECORD_RESTART` — Restart recording: delete the bad take and roll again in one press.
 
-The base [[Transport]] keys keep working underneath — `<space>` still stops, `,` and `.` still hop markers.
+The base [[Transport]] keys keep working underneath — `kbd:@40044` still stops, `kbd:@40172` and `kbd:@40173` still hop markers.

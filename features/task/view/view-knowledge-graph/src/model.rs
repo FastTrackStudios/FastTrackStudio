@@ -210,6 +210,45 @@ pub fn community_text_class(community: u32) -> &'static str {
     stem_text_class(community_stem(community))
 }
 
+/// Concrete hex color (Tailwind 400-stop) for a palette stem — for SVG
+/// fills that must render identically in every host app. The
+/// class-based variants above depend on the host's Tailwind scanner
+/// having seen this crate's sources; a consumer that doesn't scan us
+/// (e.g. another app's tailwind pipeline) would silently render black.
+/// These hues sit at the 400 stop, muted enough for a dark background
+/// and saturated enough for a light one.
+pub fn stem_color(stem: &str) -> &'static str {
+    match stem {
+        "blue" => "#60a5fa",
+        "purple" => "#c084fc",
+        "orange" => "#fb923c",
+        "green" => "#4ade80",
+        "red" => "#f87171",
+        "yellow" => "#facc15",
+        "teal" => "#2dd4bf",
+        "fuchsia" => "#e879f9",
+        "rose" => "#fb7185",
+        "emerald" => "#34d399",
+        "pink" => "#f472b6",
+        "violet" => "#a78bfa",
+        "sky" => "#38bdf8",
+        "amber" => "#fbbf24",
+        "cyan" => "#22d3ee",
+        "lime" => "#a3e635",
+        _ => "#94a3b8", // slate-400
+    }
+}
+
+/// Hex node color for a wiki `kind`.
+pub fn kind_color(kind: &str) -> &'static str {
+    stem_color(stem_for_kind(kind))
+}
+
+/// Hex node color for a community id.
+pub fn community_color(community: u32) -> &'static str {
+    stem_color(community_stem(community))
+}
+
 /// Tailwind background-color class (`bg-<stem>-400`) for a palette stem,
 /// returned as a literal (same scanner requirement as
 /// [`stem_text_class`]). Used for legend swatches.

@@ -26,7 +26,7 @@ use dioxus_elements::geometry::WheelDelta;
 use fts_ui::lucide_dioxus::{Maximize, ZoomIn, ZoomOut};
 
 use crate::layout::{LayoutConfig, Position, bounds, layout, node_radius};
-use crate::model::{ColorMode, WikiGraph, community_text_class, kind_text_class};
+use crate::model::{ColorMode, WikiGraph, community_color, kind_color};
 
 /// Density score (degree ratio × 4 × zoom) above which a node's label
 /// renders. At zoom 1 a node needs ≥ a quarter-ish of the biggest
@@ -53,6 +53,11 @@ pub struct KnowledgeGraphViewProps {
     /// precedence over hover dimming.
     #[props(default)]
     pub highlighted: Vec<String>,
+    /// The "current" node (e.g. the note open next to the graph) —
+    /// drawn in the theme accent, slightly larger, always labeled.
+    /// Unlike `highlighted` it does NOT dim the rest of the graph.
+    #[props(default)]
+    pub active: Option<String>,
     /// Fired with the node id when a node is clicked.
     pub on_node_click: EventHandler<String>,
 }
@@ -197,21 +202,23 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                     zoom.with_mut(|z| *z = (*z * factor).clamp(0.2, 8.0));
                 },
 
-                // Edges first (drawn under nodes).
+                // Edges first (drawn under nodes) — thin hairlines in
+                // the theme border color, dimmed hard when a
+                // hover/highlight set is active and they're outside it.
                 for (i, edge) in graph.edges.iter().enumerate() {
                     match (pmap.get(&edge.source), pmap.get(&edge.target)) {
                         (Some(a), Some(b)) => {
                             let nw = (edge.weight / max_weight).clamp(0.0, 1.0);
-                            let width = (0.5 + nw * 3.5) * edge_unit;
+                            let width = (0.4 + nw * 1.2) * edge_unit;
                             let edge_active = active
                                 .as_ref()
                                 .is_none_or(|s| s.contains(&edge.source) && s.contains(&edge.target));
-                            let opacity = if !has_active || edge_active { 0.5 } else { 0.06 };
+                            let opacity = if !has_active || edge_active { 0.35 } else { 0.06 };
                             rsx! {
                                 line {
                                     key: "e{i}",
                                     x1: "{a.x}", y1: "{a.y}", x2: "{b.x}", y2: "{b.y}",
-                                    class: "stroke-current text-muted-foreground",
+                                    style: "stroke: var(--border, #52525b);",
                                     stroke_width: "{width}",
                                     stroke_opacity: "{opacity}",
                                 }
@@ -221,41 +228,73 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                     }
                 }
 
-                // Nodes.
+                // Nodes — concrete palette hues (theme classes would
+                // depend on the host app's Tailwind scanner and render
+                // black where the utilities are missing); the current
+                // note (`active` prop) takes the theme accent instead.
                 for node in graph.nodes.iter() {
                     match pmap.get(&node.id) {
                         Some(p) => {
-                            let r = node_radius(node.link_count, max_links, graph.nodes.len(), node_scale)
+                            let is_current = props.active.as_deref() == Some(node.id.as_str());
+                            let is_hovered = hov.as_deref() == Some(node.id.as_str());
+                            let mut r = node_radius(node.link_count, max_links, graph.nodes.len(), node_scale)
                                 * radius_unit;
-                            let color_class = match color_mode {
-                                ColorMode::Kind => kind_text_class(&node.kind),
-                                ColorMode::Community => community_text_class(node.community),
+                            // The current note reads bigger; hover grows
+                            // the node under the pointer (quartz-style).
+                            if is_current {
+                                r *= 1.35;
+                            }
+                            if is_hovered {
+                                r *= 1.25;
+                            }
+                            let fill_style = if is_current {
+                                "fill: var(--primary, #a78bfa);".to_string()
+                            } else {
+                                let hue = match color_mode {
+                                    ColorMode::Kind => kind_color(&node.kind),
+                                    ColorMode::Community => community_color(node.community),
+                                };
+                                format!("fill: {hue}; fill-opacity: 0.85;")
                             };
                             let is_active = active.as_ref().is_none_or(|s| s.contains(&node.id));
-                            let dim_class = if has_active && !is_active { "opacity-20" } else { "opacity-100" };
+                            let dim_class = if has_active && !is_active && !is_current {
+                                "opacity-20"
+                            } else {
+                                "opacity-100"
+                            };
                             // Zoom-aware label density: a node's score is its
                             // degree relative to the biggest hub, boosted by
                             // the current zoom. Zoomed out only the top hubs
                             // pass the threshold; zooming in raises every
-                            // score until the leaves label too. Hover and
-                            // search highlights always label.
-                            let is_hovered = hov.as_deref() == Some(node.id.as_str());
+                            // score until the leaves label too. Hover, search
+                            // highlights, and the current note always label.
                             let is_highlight = !props.highlighted.is_empty() && is_active;
                             let density = (node.link_count.max(1) as f32 * 4.0 * z)
                                 / max_links.max(1) as f32;
-                            let show_label = is_active && (is_hovered || is_highlight || density >= LABEL_THRESHOLD);
+                            let show_label = is_current
+                                || is_hovered
+                                || (is_active && (is_highlight || density >= LABEL_THRESHOLD));
                             // Fade labels in as they cross the threshold so a
                             // zoom doesn't pop a wall of text at once.
-                            let label_opacity = if is_hovered || is_highlight {
+                            let label_opacity = if is_hovered || is_highlight || is_current {
                                 1.0
                             } else {
                                 ((density - LABEL_THRESHOLD) / LABEL_FADE_BAND).clamp(0.35, 1.0)
                             };
-                            let label_size = (r * 0.9).max(edge_unit * 6.0);
-                            let label_y = p.y - r - label_size * 0.3;
+                            let label_size = if is_hovered {
+                                (r * 0.95).max(edge_unit * 7.0)
+                            } else {
+                                (r * 0.8).max(edge_unit * 6.0)
+                            };
+                            // Labels sit UNDER their node.
+                            let label_y = p.y + r + label_size * 1.05;
+                            let label_style = if is_hovered || is_current {
+                                "fill: var(--foreground, #e4e4e7);"
+                            } else {
+                                "fill: var(--muted-foreground, #a1a1aa);"
+                            };
                             let id_click = node.id.clone();
                             let id_enter = node.id.clone();
-                            let fill_class = format!("fill-current {color_class}");
                             let on_click = props.on_node_click;
                             rsx! {
                                 g {
@@ -265,10 +304,10 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                                     onclick: move |_| on_click.call(id_click.clone()),
                                     circle {
                                         cx: "{p.x}", cy: "{p.y}", r: "{r}",
-                                        class: "{fill_class}",
-                                        stroke: "white",
-                                        stroke_width: "{edge_unit}",
-                                        stroke_opacity: "0.4",
+                                        style: "{fill_style}",
+                                        stroke: if is_current { "var(--primary, #a78bfa)" } else { "var(--background, #0e0f12)" },
+                                        stroke_width: if is_current { "{edge_unit * 1.5}" } else { "{edge_unit}" },
+                                        stroke_opacity: if is_current { "0.5" } else { "0.6" },
                                     }
                                     if show_label {
                                         text {
@@ -276,7 +315,8 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                                             text_anchor: "middle",
                                             font_size: "{label_size}",
                                             opacity: "{label_opacity}",
-                                            class: "fill-current text-foreground pointer-events-none",
+                                            style: "{label_style}",
+                                            class: "pointer-events-none",
                                             "{node.label}"
                                         }
                                     }

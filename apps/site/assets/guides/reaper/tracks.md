@@ -11,32 +11,32 @@ Track work is where the which-key layer shines: one plain chord for the raw inse
 
 ## The raw insert
 
-- `<C-t>` — Insert a new empty track below the selection, exactly like stock REAPER.
+- `kbd:@40001` — Insert a new empty track below the selection, exactly like stock REAPER.
 
-## The track manager (`n` menu)
+## The track manager (`kbd:n` menu)
 
-Press `n` to open the Track Manager menu. The overlay lists every follow-up key — each letter is mnemonic for the entity being added.
+Press `kbd:n` to open the Track Manager menu. The overlay lists every follow-up key — each letter is mnemonic for the entity being added.
 
-- `n n` — New blank track.
-- `n d` — Duplicate the selected tracks.
-- `n a` — Add an arrangement.
-- `n c` — Add a channel.
-- `n l` — Add a layer.
-- `n m` — Add a multi-mic group.
-- `n p` — Add a performer.
+- `kbd:n n` — New blank track.
+- `kbd:@40702` — Duplicate the selected tracks.
+- `kbd:@_FTS_SESSION_TRACK_MANAGER_ADD_ARRANGEMENT` — Add an arrangement.
+- `kbd:@_FTS_SESSION_TRACK_MANAGER_ADD_CHANNEL` — Add a channel.
+- `kbd:@_FTS_SESSION_TRACK_MANAGER_ADD_LAYER` — Add a layer.
+- `kbd:@_FTS_SESSION_TRACK_MANAGER_ADD_MULTI_MIC` — Add a multi-mic group.
+- `kbd:@_FTS_SESSION_TRACK_MANAGER_ADD_PERFORMER` — Add a performer.
 
-## Create categorized tracks (`<S-n>` menu)
+## Create categorized tracks (`kbd:<S-n>` menu)
 
-Press `<S-n>` to create fully-configured session tracks — named, routed, and colored for their role. Keep Shift held and tap letters to create several in a row.
+Press `kbd:<S-n>` to create fully-configured session tracks — named, routed, and colored for their role. Keep Shift held and tap letters to create several in a row.
 
-- `<S-n> d` — Drum kit.
-- `<S-n> l` — Lead vocals.
-- `<S-n> g` — Electric guitar.
-- `<S-n> b` — Bass guitar.
-- `<S-n> p` — Piano.
+- `kbd:@_FTS_SESSION_CREATE_NEW_DRUM_KIT` — Drum kit.
+- `kbd:@_FTS_SESSION_CREATE_NEW_LEAD_VOCALS` — Lead vocals.
+- `kbd:@_FTS_SESSION_CREATE_NEW_ELECTRIC_GUITAR` — Electric guitar.
+- `kbd:@_FTS_SESSION_CREATE_NEW_BASS_GUITAR` — Bass guitar.
+- `kbd:@_FTS_SESSION_CREATE_NEW_PIANO` — Piano.
 
-Branches nest: `<S-n> s` opens a synth submenu — arp, bass, lead, pad:
+Branches nest: `kbd:<S-n> s` opens a synth submenu — arp, bass, lead, pad:
 
-- `<S-n> s a` — Synth arp.
+- `kbd:@_FTS_SESSION_CREATE_NEW_SYNTH_ARP` — Synth arp.
 
 Next: get a take down with [[Transport]] and comp it in [[Recording]].

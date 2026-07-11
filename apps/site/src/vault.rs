@@ -200,17 +200,81 @@ struct SiteVaultIndex {
 
 impl SiteVaultIndex {
     fn body_preview(content: &str) -> String {
-        let fm = view_knowledge_graph::parse::frontmatter(content);
-        let body = if fm.is_empty() {
-            content
-        } else {
-            // Skip the fenced frontmatter block.
-            content
-                .strip_prefix("---\n")
-                .and_then(|r| r.find("\n---").map(|i| &r[i + 4..]))
-                .unwrap_or(content)
-        };
-        body.trim_start().chars().take(280).collect()
+        body_without_frontmatter(content)
+            .trim_start()
+            .chars()
+            .take(280)
+            .collect()
+    }
+}
+
+/// The note body with its yaml frontmatter block stripped — the
+/// metadata renders as chips, not as a properties panel.
+pub fn body_without_frontmatter(content: &str) -> &str {
+    if view_knowledge_graph::parse::frontmatter(content).is_empty() {
+        return content;
+    }
+    content
+        .strip_prefix("---\n")
+        .and_then(|r| r.find("\n---").map(|i| r[i + 4..].trim_start_matches('\n')))
+        .unwrap_or(content)
+}
+
+/// `kbd:@action` resolver: action id → the keys currently bound to it
+/// in the embedded fasttrackstudio profile (bindings + which-key leaf
+/// sequences), plus the shared mode/workflow layers.
+pub(crate) struct SiteKbdIndex(std::collections::HashMap<String, String>);
+
+impl SiteKbdIndex {
+    pub(crate) fn build() -> Self {
+        use crate::components::input_tutorial::embedded::PROFILES;
+
+        fn walk_leaves(
+            prefix: &str,
+            entries: &[input_config_proto::WhichKeyEntryDef],
+            map: &mut std::collections::HashMap<String, String>,
+        ) {
+            for e in entries {
+                let seq = format!("{prefix} {}", e.key);
+                if let Some(action) = &e.action {
+                    map.entry(action.clone()).or_insert_with(|| seq.clone());
+                }
+                if let Some(children) = &e.children {
+                    walk_leaves(&seq, children, map);
+                }
+            }
+        }
+
+        let mut map = std::collections::HashMap::new();
+        if let Some(profile) = PROFILES.iter().find(|p| p.id == "fasttrackstudio") {
+            for s in profile.sections {
+                let config: input_config_proto::SectionConfig = match facet_styx::from_str(s.styx)
+                {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                for b in config.bindings() {
+                    map.entry(b.action.clone()).or_insert_with(|| b.keys.clone());
+                }
+                for tree in config.which_key() {
+                    walk_leaves(&tree.prefix, &tree.entries, &mut map);
+                }
+            }
+        }
+        // Mode/workflow layers, so notes about modal bindings
+        // (take-ranking etc.) resolve too.
+        for m in crate::components::modes::load_modes() {
+            for b in &m.bindings {
+                map.entry(b.action.clone()).or_insert_with(|| b.keys.clone());
+            }
+        }
+        Self(map)
+    }
+}
+
+impl markdown::KbdLookup for SiteKbdIndex {
+    fn keys_for_action(&self, action: &str) -> Option<String> {
+        self.0.get(action).cloned()
     }
 }
 
@@ -349,10 +413,15 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
 
     // Read-only editor state, reseeded whenever the note (or its
     // live-fetched content) changes. reading_mode keeps every source
-    // marker hidden regardless of caret.
+    // marker hidden regardless of caret. The frontmatter block is
+    // stripped — its metadata renders as chips above the note, not as
+    // a properties panel.
     let mut state = use_signal(|| EditorState::new(String::new()));
     {
-        let content = current.as_ref().map(|n| n.content.clone()).unwrap_or_default();
+        let content = current
+            .as_ref()
+            .map(|n| body_without_frontmatter(&n.content).to_string())
+            .unwrap_or_default();
         use_effect(use_reactive!(|(content,)| {
             if state.peek().doc.to_string() != content {
                 let mut s = EditorState::new(content);
@@ -364,7 +433,9 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
 
     // Vault-aware live-preview decorations. The source captures the
     // signal (stable Rc identity across renders); the index inside is
-    // swapped whenever the vault loads.
+    // swapped whenever the vault loads. The kbd resolver (for
+    // `kbd:@action` shortcut refs) is static — built once from the
+    // embedded profile + mode layers.
     let mut lookup = use_signal(|| None::<Rc<SiteVaultIndex>>);
     {
         let notes = notes.clone();
@@ -372,11 +443,16 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
             lookup.set(Some(Rc::new(SiteVaultIndex { notes })));
         }));
     }
-    let decorations = use_hook(|| {
+    let kbd_index = use_hook(|| Rc::new(SiteKbdIndex::build()));
+    let decorations = use_hook(move || {
         DecorationSource::new(move |s: &EditorState| {
             let l = lookup.read();
             let vault_ref = l.as_ref().map(|rc| rc.as_ref() as &dyn markdown::VaultLookup);
-            markdown::live_preview_with(s, vault_ref)
+            markdown::live_preview_with_lookups(
+                s,
+                vault_ref,
+                Some(kbd_index.as_ref() as &dyn markdown::KbdLookup),
+            )
         })
     });
 
@@ -455,13 +531,13 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
                     div { class: "rounded-xl border border-border/60 bg-card/40 overflow-hidden h-72",
                         KnowledgeGraphView {
                             graph,
-                            highlighted: current_stem.clone().into_iter().collect::<Vec<_>>(),
+                            active: current_stem.clone(),
                             on_node_click,
                         }
                     }
                     if !title.is_empty() {
                         p { class: "mt-2 text-[0.65rem] text-muted-foreground",
-                            "Click a node to open its note. Highlighted: {title}."
+                            "Click a node to open its note \u{00b7} drag to pan \u{00b7} scroll to zoom. Current: {title}."
                         }
                     }
                 }
@@ -645,12 +721,20 @@ mod tests {
         }
     }
 
-    /// Drift guard: every key-looking inline code span in a
-    /// `kind: input` note must exist in the fasttrackstudio profile
-    /// (bindings + which-key sequences/prefixes) or, when the note
-    /// declares a `mode:`, in that mode's layered bindings.
+    /// Drift guard, two halves:
+    ///
+    /// - every `kbd:@action` ref anywhere in the vault must resolve
+    ///   through [`SiteKbdIndex`] (base profile + which-key leaves +
+    ///   mode layers) — an unresolved ref means the guide points at
+    ///   an action nothing is bound to;
+    /// - every key-LITERAL shortcut (`kbd:<C-s>`, `kbd:n d`, or a
+    ///   bare key-looking code span) in a `kind: input` note must
+    ///   exist in the fasttrackstudio profile (bindings + which-key
+    ///   sequences/prefixes) or the note's declared `mode:` layer.
     #[test]
     fn input_note_shortcuts_exist_in_configs() {
+        use editor::markdown::KbdLookup as _;
+
         let profile = PROFILES
             .iter()
             .find(|p| p.id == "fasttrackstudio")
@@ -671,12 +755,13 @@ mod tests {
         }
         assert!(!base.is_empty(), "profile produced no key sequences");
 
-        let mut checked = 0;
+        let kbd_index = SiteKbdIndex::build();
+
+        let mut refs_checked = 0;
+        let mut literals_checked = 0;
         let mut mode_checked = 0;
         for note in embedded_vault() {
-            if fm_field(&note.content, "kind").as_deref() != Some("input") {
-                continue;
-            }
+            let is_input = fm_field(&note.content, "kind").as_deref() == Some("input");
             let mode_keys: HashSet<String> = fm_field(&note.content, "mode")
                 .map(|mid| {
                     let m = crate::components::modes::find_mode(&mid).unwrap_or_else(|| {
@@ -687,24 +772,45 @@ mod tests {
                 .unwrap_or_default();
 
             for span in code_spans(&note.content) {
-                if !looks_like_keys(&span) {
+                // Action refs must resolve in EVERY note.
+                if let Some(action) = span.strip_prefix("kbd:@") {
+                    refs_checked += 1;
+                    assert!(
+                        kbd_index.keys_for_action(action.trim()).is_some(),
+                        "{}: `kbd:@{action}` resolves to no binding in the \
+                         fasttrackstudio profile or any mode layer — update \
+                         the note or the config",
+                        note.path,
+                    );
                     continue;
                 }
-                checked += 1;
-                if mode_keys.contains(&span) {
+                // Literals only guard input notes.
+                if !is_input {
+                    continue;
+                }
+                let literal = span.strip_prefix("kbd:").unwrap_or(&span).trim().to_string();
+                if !looks_like_keys(&literal) {
+                    continue;
+                }
+                literals_checked += 1;
+                if mode_keys.contains(&literal) {
                     mode_checked += 1;
                     continue;
                 }
                 assert!(
-                    base.contains(&span),
-                    "{}: shortcut `{span}` does not exist in the fasttrackstudio \
+                    base.contains(&literal),
+                    "{}: shortcut `{literal}` does not exist in the fasttrackstudio \
                      profile{} — update the note or the config",
                     note.path,
                     if mode_keys.is_empty() { "" } else { " or its mode's overlays" },
                 );
             }
         }
-        assert!(checked > 10, "suspiciously few shortcuts checked ({checked})");
-        assert!(mode_checked > 0, "no mode-layered shortcuts were exercised");
+        assert!(refs_checked > 15, "suspiciously few @refs checked ({refs_checked})");
+        assert!(
+            literals_checked > 3,
+            "suspiciously few literals checked ({literals_checked})"
+        );
+        assert!(mode_checked > 0, "no mode-layered literal was exercised");
     }
 }
