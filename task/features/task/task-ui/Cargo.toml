@@ -1,0 +1,47 @@
+[package]
+name = "task-ui"
+description = "Dioxus UI for the `task` feature — list / kanban / quick-add. Dumb components (no fs / no CRDT); consumers feed `TaskInfo` rows in via props and handle `TaskMutation` callbacks. Mirrors the TaskNotes (callumalpass/tasknotes) field shape so wiring to the file-backed `task` crate later is mechanical."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["router"] }
+fts-ui = { workspace = true }
+chrono = { workspace = true, features = ["clock", "std", "wasmbind", "serde"] }
+serde = { workspace = true, features = ["derive"] }
+# Best-effort preview of `Activity::payload` (opaque JSON) in
+# the session-history feed.
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4", "js", "serde"] }
+# Full persistence model for the detail-page family
+# (`TaskDetailFull` + sections). The list / kanban / quick-edit
+# sheet keep the local wasm mirror (`crate::model::TaskInfo`);
+# the detail components consume `task::TaskInfo` +
+# `WorkflowAttrs` directly so the page layer can hand its
+# authoritative rows straight in. Components stay dumb — only
+# the model / service types are used, no RPC from this crate.
+# (`default-features = false` is aspirational: the workspace dep
+# doesn't set default-features, so vox rides along for now —
+# same pre-existing idiom as task → vault-proto.)
+task = { workspace = true, default-features = false }
+# Status -> StateGroup resolution (`project::states`) — progress
+# classification ("is this done?") routes through canonical
+# state groups so custom status names classify correctly. The
+# UI keeps its local `Status` enum for pills / columns; groups
+# only decide progress. Wasm-clean (model/states modules only).
+project = { workspace = true, default-features = false }
+# Transition / Activity / AgentRef for the session-history feed
+# + assignee chips.
+workflows-proto = { workspace = true }
+# Markdown → rsx for the task `details` body. Already a
+# workspace dep (wasm-clean, no simd); we render the event
+# stream natively rather than via `dangerously_set_inner_html`
+# so raw HTML in task bodies stays inert.
+pulldown-cmark = { workspace = true }
+
+[lints]
+workspace = true

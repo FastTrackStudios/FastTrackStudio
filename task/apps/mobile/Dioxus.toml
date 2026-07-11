@@ -1,0 +1,3 @@
+[application]
+name = "task-app-mobile"
+default_platform = "android"

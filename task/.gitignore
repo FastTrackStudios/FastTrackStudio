@@ -1,0 +1,37 @@
+# Build artifacts
+target/
+result
+result-*
+.direnv/
+.cache
+
+# Node / vendored builds
+node_modules/
+dist/
+
+# Databases / SQLite runtime files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+.dolt/
+
+# Local-only env overrides (`.envrc` itself is tracked — see architect's
+# pattern; `.envrc.local` is the per-machine escape hatch)
+.envrc.local
+.env
+
+# Local-only tool state — beads issue DB, wt worktree config,
+# tracey config — these are per-machine, never shared.
+.beads/
+.config/tracey/
+.config/wt.toml
+
+# IDE / agent scratch
+.claude/worktrees/
+examples/vault/.obsidian/
+.claude/
+
+# deploy: staged image artifacts (see deploy/docker/*.Dockerfile)
+deploy/docker/web-public/
+deploy/docker/ui-lab-dist/

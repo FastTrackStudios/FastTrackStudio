@@ -1,0 +1,174 @@
+[package]
+name = "task-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "task"
+path = "src/main.rs"
+
+[dependencies]
+vox = { workspace = true, features = ["transport-websocket", "transport-websocket-tls"] }
+vox-core = { workspace = true }
+# vox-websocket's wss:// path needs a process-level rustls
+# CryptoProvider. This binary's graph unifies BOTH providers
+# (`ring` via octocrab/reqwest, `aws-lc-rs` via vox-websocket's
+# tls feature), so rustls cannot pick one automatically — main()
+# installs ring explicitly before any TLS connect.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+tokio = { workspace = true }
+# Embedded mode (`TASK_EMBED=1`): the CLI hosts the backend in-process
+# over architect's `LocalServer` and establishes the same service
+# clients with no running `task-server`. Pulls the full server stack.
+task-server = { path = "../server" }
+architect = { workspace = true, features = ["local"] }
+chrono.workspace = true
+eyre.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+serde.workspace = true
+serde_json.workspace = true
+# Parse `project set-states --from` registry files (YAML, a JSON superset).
+serde_yaml.workspace = true
+uuid.workspace = true
+# `task-cli vault …` subcommands operate on a filesystem vault
+# via vault-obsidian's parsed helpers (outline / tasks / props /
+# base-query) and vault-live's wire types (refs::Ref, bases::*).
+vault.workspace = true
+vault-proto.workspace = true
+vault-live = { workspace = true }
+vault-obsidian = { workspace = true }
+# `task-cli task …` subcommands — first-party task feature
+# (RPC client; vox feature enabled to import `TaskServiceClient`).
+task = { workspace = true, features = ["vox"] }
+# `task-cli issue …` — surfaces the Linear-style workflow
+# attributes on `TaskInfo`. `AgentRef` + friends live here.
+workflows-proto = { workspace = true }
+# `task run` — the autonomous loop runner (sessions + iteration engine).
+workflows-orchestrator = { workspace = true }
+# `task-cli issue push/pull/sync …` — bidirectional sync between
+# TaskInfo and a forge issue tracker (Forgejo today; GitHub when
+# git-github's todo!() stubs are filled in).
+git-proto = { workspace = true }
+git-config = { workspace = true }
+git-forgejo = { workspace = true }
+git-github = { workspace = true }
+label-proto = { workspace = true }
+# `task setup forge` registers webhooks via the forge REST API
+# directly (both forges' hook endpoints are near-identical).
+reqwest = { workspace = true }
+# `task-cli milestone …` — project-scoped checkpoints.
+milestone = { workspace = true, features = ["vox"] }
+# `task workstream …` — the parent-with-swarm construct (lead +
+# members + derived rollup) replacing the 'epic' tag.
+workstream = { workspace = true, features = ["vox"] }
+# Entity-CRUD over RPC for the four file-backed services
+# mounted by the server alongside project / goal / task /
+# milestone. Each provides a `task <verb> …` surface.
+locations = { workspace = true, features = ["vox"] }
+inbox-proto = { workspace = true, features = ["vox"] }
+threads = { workspace = true, features = ["vox"] }
+cookbook = { workspace = true, features = ["vox"] }
+# `task recipe import <url>` — fetch/extract/synthesize pipeline; the
+# CLI only shells data between it and the CookbookService client.
+recipe-import = { workspace = true }
+mealplan = { workspace = true, features = ["vox"] }
+pantry = { workspace = true, features = ["vox"] }
+# `task recipe create|update` validate cooklang before saving and
+# render parse errors with line context via the parser's report
+# (same parser config as `cookbook::parse`).
+cooklang = { workspace = true }
+# `task plan|next|brief` and `task meal schedule` — day-plan /
+# template / cal-event / booking clients over per-org vox routing.
+scheduling-proto = { workspace = true, features = ["vox"] }
+# Fitness suite — body metrics, exercise library, workout
+# routines+sessions, food intake. RPC clients only.
+body = { workspace = true, features = ["vox"] }
+exercises = { workspace = true, features = ["vox"] }
+workouts = { workspace = true, features = ["vox"] }
+intake = { workspace = true, features = ["vox"] }
+# `task-cli agent …` subcommands — drives `codex app-server`
+# via agent-codex (vendored CodexMonitor control plane).
+agent-codex.workspace = true
+agent-proto.workspace = true
+# `task-cli wiki ingest` — agent-driven two-step CoT ingest
+# of source files into `<vault>/Wiki/`.
+agent-wiki.workspace = true
+# `task-cli inbox process` — agent-driven daily processing pass
+# (open inbox items → task/note/skip proposals for review).
+agent-inbox.workspace = true
+wiki-live.workspace = true
+# `task-cli wiki graph|gaps` — pure-computation graph layer
+# (no LLM).
+wiki-graph.workspace = true
+# `task-cli wiki context --links` — overlay typed-link-store
+# edges onto the context subgraph.
+links.workspace = true
+wiki-proto.workspace = true
+wiki-search.workspace = true
+# `task-cli wiki archive <url|file>` — URL router + content
+# extractors + bookmark importers feeding the unchanged
+# raw→ingest pipeline over the wiki-proto RPC surface.
+# `pdf` = pdfium-render's dynamic-binding path (same feature
+# shape as wiki-extract): no C build, nothing bundled —
+# libpdfium is looked up at runtime (TASK_PDFIUM dir, then
+# the system path) and the extractor falls back to
+# `pdftotext -layout` when it's absent. Cheap enough to keep
+# always-on for the CLI.
+wiki-archive = { workspace = true, features = ["pdf"] }
+# `task-cli timer …` — local time tracking against a sqlite
+# db. No server needed; the same `timer::Store` the server
+# mounts works fine for a single-user CLI session.
+timer-proto = { workspace = true, features = ["server", "vox"] }
+timer = { workspace = true }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+# `task-cli auth …` — local-sqlite ArchitectAuth flow. Same
+# auth.sqlite the server opens (matched by XDG path). Remote
+# vox-client sign-in lands in a follow-up.
+architect-auth = { workspace = true, features = ["full"] }
+sha2 = "0.10"
+base64 = { workspace = true }
+# Project lookup for timer's project-defaults resolver +
+# `task project list|get` via `ProjectServiceClient`.
+project = { workspace = true, features = ["vox"] }
+# `task goal list|get` via `GoalServiceClient` + cycle id
+# resolution against the local generator.
+goal = { workspace = true, features = ["vox"] }
+# Org-root layout (Phase 1 of plans/federated-task-platform.md).
+# Owns `task org init|list` + the `DataRoot` / `OrgRoot` path
+# resolvers. Existing auth/timer/finance paths keep working at
+# their XDG locations until PR 2 migrates them through OrgRoot.
+org-proto = { workspace = true }
+# Mount registry — `task mount add|list|rm` reads/writes
+# `mounts.toml` and resolves project-id → local path.
+mount = { workspace = true }
+# Cyclic life-calendar — `task cycle current|list` reads
+# from the pure-function generator.
+cycle = { workspace = true }
+# Sync orchestrator on top of `vault_proto::VaultSync`.
+vault-sync-client = { workspace = true }
+# Finance — reports + invoice build. CLI shells out to the
+# `task-pdf-render` binary (libs/pdf) for the actual PDF
+# render; pulling fulgur into the CLI's compile graph hits a
+# stylo recursion-limit issue we can't easily patch around.
+finance-proto = { workspace = true, features = ["server"] }
+finance-db = { workspace = true }
+finance = { workspace = true }
+walkdir = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+# Pull TASK_SERVER (and friends) from a `.env` file in CWD or any
+# parent dir, so a user can `task list` instead of typing
+# `--server ws://...` every time.
+dotenvy = "0.15"
+
+[features]
+# Local whisper transcription for `task wiki archive`
+# podcast routes. Off by default: enabling it compiles
+# whisper.cpp (cmake + C++) and first use downloads a model
+# (~466 MB for `small`). The feed transcript-tag fast path
+# and the Groq backfill work without it.
+whisper = ["wiki-archive/whisper"]
+
+[lints]
+workspace = true

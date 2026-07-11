@@ -1,0 +1,13 @@
+@import "tailwindcss";
+@import "../../../FastTrackStudio/fts-ui/crates/showcase/assets/fts-theme.css";
+
+@source "./src/**/*.{rs,html,css}";
+@source "../../crates/task-ui/src/**/*.rs";
+@source "../../../FastTrackStudio/fts-ui/crates/fts-ui/src/**/*.rs";
+@source "../../../FastTrackStudio/fts-ui/features/core/src/**/*.rs";
+
+@layer base {
+    html {
+        color-scheme: dark;
+    }
+}

@@ -1,0 +1,1080 @@
+[workspace]
+# Vertical-slice reset: tasks + projects remain; auth is provided by architect-auth.
+members = [
+    "apps/*",
+    "crates/*",
+    "features/*/*",
+# `features/*/tests/native` glob — gone since `features/project/tests/`
+# was deleted alongside the project crates. Re-add if a feature
+# grows native integration tests again.
+#    "features/*/tests/native",
+    "xtask",
+    # CodeMirror-style editor — now its own repo at ../Editor
+    # (github.com/.../Editor). Task depends on its crates via the
+    # `[workspace.dependencies]` path entries below + the
+    # mermaid-rs-renderer patch; nothing editor-related lives under
+    # `features/editor/` anymore.
+    # Email feature harness — same pattern as the editor
+    # playground: standalone Dioxus binary that exercises the
+    # email-* crates without pulling in the full task-ui shell.
+    "features/email/examples/email-client",
+    # Parked: legacy Logseq-style shell. Kept buildable so we can
+    # mine pieces (virt-folder, properties pane, tasks-kanban) into
+    # the new editor + vault stack on demand.
+]
+exclude = [
+    # The `features/*/*` glob would otherwise try to parse
+    # `features/email/examples/` and `features/email/plans/`
+    # as crate manifests.
+    "features/email/examples",
+    "features/email/plans",
+    # `crates/legacy/` parks older shells we want to keep readable
+    # without forcing them into the workspace member glob.
+    "crates/legacy",
+]
+resolver = "2"
+
+[workspace.metadata.crane]
+name = "task"
+
+# Clippy lint adjustments shared across the workspace.
+# `capn pre-push` runs `cargo clippy --workspace -- -D warnings`,
+# which would otherwise flag many false positives:
+#
+# - `clone_on_copy` — Dioxus `Callback<T>` is `Copy`, but the
+#   `event_handler.clone()` pattern used throughout the editor +
+#   view-gantt + view-calendar ports reads more clearly when
+#   uniform. Auto-deref + lints fight the port's style.
+# - `should_implement_trait` — several types (`task::TaskInfo`,
+#   `Status`, `Priority`, `WikiContext`, ...) carry inherent
+#   `from_str` constructors that don't quite fit the `FromStr`
+#   trait shape (they're infallible or take additional args
+#   in some impls). Keep the inherent name.
+# - `redundant_closure` / `redundant_locals` — Dioxus signal
+#   patterns (`let on_event = on_event.clone();` before a
+#   `use_callback` closure) intentionally re-bind to capture by
+#   move; clippy can't see the closure boundary.
+# - `doc_lazy_continuation` / `doc_overindented_list_items` —
+#   purely cosmetic markdown nits in doc comments. Worth
+#   fixing eventually, but not on the path to a clean push.
+[workspace.lints.clippy]
+# Default-level (correctness / suspicious / style /
+# complexity / perf) runs under `-D warnings` already.
+# Pedantic adds another ~150 lints aimed at idiomatic Rust.
+# We opt in workspace-wide at deny level; the allows below
+# are scoped pedantic carve-outs where the lint is high-
+# volume and low-signal for this codebase.
+pedantic = { level = "deny", priority = -1 }
+
+# ── Pedantic carve-outs ───────────────────────────────────
+# `missing_errors_doc` / `missing_panics_doc` —
+#   would require `# Errors` / `# Panics` blocks on every
+#   public fn that returns Result or might panic. Long
+#   tail across the workspace; revisit when we add a
+#   docs-pass requirement.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# `must_use_candidate` — fires on every plain `pub fn ->
+#   T`. We can't `#[must_use]` everything blindly; revisit
+#   when we have a usage audit.
+must_use_candidate = "allow"
+# `doc_markdown` — flags every CamelCase / snake_case ident
+#   in doc comments that isn't in backticks. Mostly noise
+#   around prose like "the WikiBackend handle".
+doc_markdown = "allow"
+# `cast_*` — explicit `as` casts in math + index code.
+#   Switching to `try_into()` everywhere fights ergonomics
+#   for known-safe casts; we'll add per-site asserts
+#   where overflow really matters.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+# `too_many_lines` — pedantic's 100-line cap fires on
+#   the few real workhorse functions (ingest bridge,
+#   markdown live preview, etc.). Splitting them solely
+#   to satisfy the lint hurts readability.
+too_many_lines = "allow"
+# `module_name_repetitions` — fires on names like
+#   `WikiBackend` inside `wiki_live`. The repetition is
+#   what makes the cross-crate name unambiguous.
+module_name_repetitions = "allow"
+# `similar_names` — `req` vs `res`, `from` vs `to` etc.
+#   The 1-char similarity threshold is too aggressive.
+similar_names = "allow"
+# `unsafe_derive_deserialize` — flags any `Deserialize`
+#   on a type with an unsafe-trait impl elsewhere. Our
+#   `Facet` derives transitively trip this; revisit if
+#   we ever actually hit a soundness issue.
+unsafe_derive_deserialize = "allow"
+# `manual_let_else` — would require rewriting `match`
+#   blocks to `let ... else` form in ~15 spots. Cosmetic.
+manual_let_else = "allow"
+# `redundant_closure_for_method_calls` — `.map(|x|
+#   x.clone())` → `.map(Foo::clone)`. Mostly cosmetic;
+#   the closure form reads more locally.
+redundant_closure_for_method_calls = "allow"
+# `default_trait_access` — `Vec::default()` vs
+#   `Default::default()`. Both are idiomatic; the
+#   inferred form is fine when the context disambiguates.
+default_trait_access = "allow"
+# `format_push_string` — `s.push_str(&format!(…))` vs
+#   `write!(s, …)`. The format-into-push form is a few
+#   bytes of extra alloc; converting every call site is
+#   churn that adds an awkward `unwrap()` per write.
+format_push_string = "allow"
+# `unnecessary_wraps` — our editor commands have a
+#   uniform `fn(&EditorState) -> Option<TransactionSpec>`
+#   signature where `None` = "do nothing this keystroke".
+#   Some commands always produce a transaction; the
+#   Option is part of the trait shape, not dead code.
+unnecessary_wraps = "allow"
+# `struct_excessive_bools` — config / state structs
+#   genuinely accumulate flags; the alternative is a
+#   bitfield wrapper that hurts readability.
+struct_excessive_bools = "allow"
+# `unused_async` — async functions that don't `.await`
+#   anything are normal in trait impls where the trait
+#   signature is async; sync bodies are valid impls.
+unused_async = "allow"
+# `redundant_closure` — `.map(|x| f(x))` vs `.map(f)`.
+#   Cosmetic; closure form is sometimes clearer at the
+#   call site.
+redundant_closure = "allow"
+# `assigning_clones` — `x = y.clone()` vs
+#   `x.clone_from(&y)`. The latter shaves an allocation
+#   only when both sides own enough capacity. Not worth
+#   the churn workspace-wide.
+assigning_clones = "allow"
+# `items_after_statements` — `use` mid-function is
+#   sometimes the clearest place for a local-scope
+#   import; lifting it to the top of the fn isn't
+#   always better.
+items_after_statements = "allow"
+# `match_same_arms` — match arms with identical bodies
+#   often encode "all of these mean X" where the variant
+#   names themselves are the documentation. Collapsing
+#   loses that signal.
+match_same_arms = "allow"
+# `needless_pass_by_value` — borrow-or-own decisions in
+#   public APIs depend on call-site ergonomics, not just
+#   body usage. Per-site `&` rewrites would change
+#   surface signatures.
+needless_pass_by_value = "allow"
+# `trivially_copy_pass_by_ref` — flip side of the
+#   above; pass-by-ref is sometimes the consistent
+#   choice for an API even when the type is Copy.
+trivially_copy_pass_by_ref = "allow"
+# `unused_self` — methods that don't read `self` are
+#   sometimes intentional placeholders or part of a
+#   trait-implementing impl block.
+unused_self = "allow"
+# `needless_continue` — `continue;` at the end of a
+#   long branch is sometimes clearer than relying on
+#   fall-through.
+needless_continue = "allow"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+authors = ["Cody Wright"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Codys-Wright/Task"
+
+[workspace.dependencies]
+async-trait = "0.1"
+chrono = "0.4"
+keybindings = "0.0.2"
+editor-types = "0.0.2"
+vim = { path = "crates/vim" }
+eyre = "0.6"
+futures = "0.3"
+rrule = "0.11"
+thiserror = "2.0"
+tracing = "0.1"
+# `project` feature crates (project, project-proto, project-crdt,
+# project-db) deleted along with the Loro entity layer. Tasks +
+# projects are now plain markdown pages under the vault. The legacy
+# `project-ui` shell is parked.
+project-ui = { path = "crates/legacy/project-ui" }
+# `knowledge` feature deleted. File-backed `vault` is now the
+# only storage path. Pieces of the old stack survive as legacy
+# parks under `crates/legacy/` (knowledge-ui shell,
+# editor-outliner Logseq port, publish-core static-site engine);
+# kept readable so we can mine them later, not in the workspace
+# member glob.
+knowledge-ui = { path = "crates/legacy/knowledge-ui" }
+publish-core = { path = "crates/legacy/publish-core" }
+editor-outliner = { path = "crates/legacy/editor-outliner" }
+
+vault-obsidian = { path = "features/vault/vault-obsidian" }
+# `wiki` feature — Task's port of Karpathy's LLM-Wiki pattern
+# (see nashsu/llm_wiki). `wiki-proto` is the wire contract; a
+# `wiki-live` backend, agent-driven ingest glue, and the
+# `Wiki/` directory layout under each vault all stack on top.
+# See `plans/wiki-feature.md` for the design + slice plan.
+wiki-proto = { path = "features/wiki/wiki-proto" }
+wiki-live = { path = "features/wiki/wiki-live" }
+wiki-graph = { path = "features/wiki/wiki-graph" }
+wiki-search = { path = "features/wiki/wiki-search" }
+wiki-extract = { path = "features/wiki/wiki-extract" }
+# `task wiki archive <url>` — URL router + content extractors
+# (readability articles, Google Docs export, yt-dlp video
+# transcripts) + bookmark-service importers (Readwise,
+# Karakeep, Pocket, Netscape HTML). Pure extraction layer:
+# URL/file → provenance frontmatter + markdown body; the CLI
+# glues the output into the unchanged raw→ingest pipeline
+# over the `wiki-proto` RPC surface.
+# See `plans/wiki-archive.md` (phase 1 = tracked issue 32e7b28f).
+wiki-archive = { path = "features/wiki/wiki-archive" }
+# `agent` feature — LLM-agent integration. `agent-proto` is
+# the wire contract (sessions, messages, tools, kanban,
+# approvals, streaming events). Backends live in sibling
+# crates (`agent-hermes` for in-process Hermes,
+# `agent-codex` for the Codex CLI monitor, etc.).
+# Binding crates layer per-feature prompts/parsers on top
+# (`agent-wiki` drives `wiki-proto`, future `agent-task`
+# drives the task feature, etc.).
+# See `plans/agent-feature.md`.
+agent-proto = { path = "features/agent/agent-proto" }
+agent-wiki = { path = "features/agent/agent-wiki" }
+agent-inbox = { path = "features/agent/agent-inbox" }
+agent-codex = { path = "features/agent/agent-codex" }
+# Server-side SQLite-backed impl of `agent-proto::service::tasks::AgentTaskQueue`.
+# Owns the queue DB files + `Running`-status claim semantics. The
+# `agent-dispatch` crate (slice 2) layers task-note ↔ agent-task
+# bridging on top.
+agent-tasks = { path = "features/agent/agent-tasks" }
+
+# Cross-domain workflow primitives — WorkSession / Transition /
+# Activity / Handoff entities + AgentRef. Per-domain workflows
+# (coding, writing, music, …) depend on this for the shared
+# state-machine + audit-log shape. See `plans/workflows-orchestrator.md`.
+workflows-proto = { path = "features/workflows/workflows-proto" }
+# Concrete coding-workflow runtime over workflows-proto — sessions,
+# audit log, ResumeContext assembly, and the `task run` loop engine.
+workflows-orchestrator = { path = "features/workflows/workflows-orchestrator" }
+
+# Linear-style work primitives.
+#
+# - `label-proto` — colored tag scoped to a workspace/project.
+#
+# NOTE: there is no separate "Linear Project" type. The existing
+# org-level `project` crate IS the Linear-sense Project — it has
+# status/lead/parent_id, tasks roll up via TaskInfo.project_id,
+# milestones roll up to it, and repos bind via RepoBinding. We
+# added target_date + progress_percent to it rather than fork a
+# second type. See `plans/issue-tracker-integration.md`.
+label-proto = { path = "features/label/label-proto" }
+# Tagging (plans/tagging-and-icons.md): `tag-proto` is the wasm-clean
+# wire contract (TagIcon + Tag + TagService); `tag` is the native
+# vault-backed registry backend the server mounts.
+tag-proto = { path = "features/tag/tag-proto" }
+tag = { path = "features/tag/tag" }
+# Bridge between task notes (file-backed) and agent-tasks (DB-backed).
+# Writes both sides of the dispatch link on create; folds the agent
+# result back into the source task note on completion.
+agent-dispatch = { path = "features/agent/agent-dispatch" }
+# First-party task feature. Tasks = markdown pages with
+# TaskNotes-shape frontmatter (mirrors callumalpass/tasknotes
+# so existing vaults round-trip without conversion). Lives at
+# `features/task/task/`.
+task = { path = "features/task/task" }
+task-ui = { path = "features/task/task-ui" }
+# First-party project feature. Projects = markdown pages under
+# `Projects/*.md` with frontmatter carrying the stable `id:`,
+# billing knobs (client, currency, default rate), and agent
+# defaults. The markdown file is the source of truth; the
+# `timer` and `finances` crates FK against the frontmatter
+# `id:` UUID, not the file path.
+project = { path = "features/project/project" }
+org-proto = { path = "features/org/org-proto" }
+# Server-native git snapshot engine over the data root — the
+# in-process replacement for the chart's CronJob git script.
+# Same detached-git-dir layout (`<data_root>/.gitstate/`) the
+# script established, so production histories continue.
+org-snapshot = { path = "features/org/org-snapshot" }
+# Timer feature — billable time tracking modeled on SolidTime.
+# `timer-proto` is the wire contract (Client / WorkSession /
+# Tag / Rate entities, `TimerService` slim trait for active-
+# timer atomics). `timer` is the server-side SeaORM-backed
+# impl. Sessions reference projects by the project note's
+# frontmatter `id:` UUID; the project crate is the source of
+# truth for the project metadata.
+timer-proto = { path = "features/timer/timer-proto" }
+timer = { path = "features/timer/timer" }
+# Threads feature — universal conversation primitive (topics +
+# messages anchored to any entity via (entity_type, entity_id)),
+# SeaORM-backed so the DB is swappable.
+threads-proto = { path = "features/threads/threads-proto" }
+threads-db = { path = "features/threads/threads-db" }
+threads = { path = "features/threads/threads" }
+threads-ui = { path = "features/threads/threads-ui" }
+# Prefs feature — per-user app preferences (default landing page,
+# task-board filter defaults, last "I'm at" location). `prefs-proto`
+# is the wire contract (`UserPrefs` entity + slim `PrefsService`
+# get/set); `prefs` is the server-side SeaORM-backed impl. One row
+# per user; org scoping is the per-org `prefs.sqlite`.
+prefs-proto = { path = "features/prefs/prefs-proto" }
+prefs = { path = "features/prefs/prefs" }
+# Finance feature — double-entry ledger + invoicing + expenses.
+# `finance-proto` is the wire contract (Book/Account/Transaction/
+# Split/Party/Invoice/Payment/Expense entities, plus the
+# Invoicing + Ledger workflow traits). `finance-db` owns SeaORM
+# migrations + storage. `finance` is the facade that adds the
+# one-way markdown export into `Records/Finance/`. `finance-ui`
+# is the dumb Dioxus component set.
+finance-proto = { path = "features/finance/finance-proto" }
+finance-db = { path = "features/finance/finance-db" }
+finance = { path = "features/finance/finance" }
+finance-ui = { path = "features/finance/finance-ui" }
+# `pdf` is intentionally OUTSIDE this workspace (see
+# `libs/pdf/Cargo.toml`). Fulgur's transitive stylo dep
+# hits a rustc trait-solver recursion limit whenever the
+# fulgur tree enters the larger workspace compile graph
+# (cause unknown — likely feature-unification with
+# something else in the workspace's giant dep set).
+# Quarantining keeps `cargo check --workspace` clean. The
+# `task-pdf-render` bin in libs/pdf/ is the interop point;
+# `task-cli`'s `finance invoice` shells out to it over
+# stdin/stdout.
+# File-backed vault layer. Modeled on `vault-obsidian` (clean
+# small modules, native-only `cfg`, walker / watcher / mutate)
+# but adds block-id awareness: a `BlockIndex` maps every
+# `id:: <uuid>` line in the vault to its containing page +
+# anchor offset.
+vault = { path = "features/vault/vault" }
+vault-live = { path = "features/vault/vault-live" }
+vault-proto = { path = "features/vault/vault-proto" }
+# Vault-file ⇄ CRDT reconciliation: per-file Loro docs over
+# architect's DocRegistry, server write-behind into put_file,
+# inbound merge of external writes. Native-only; mounted by
+# `task-server` next to the plain `VaultSync` service.
+vault-collab = { path = "features/vault/vault-collab" }
+# Pull/push/sync orchestration on top of `vault_proto::VaultSync`.
+# Inspired by `cooklang/cooklang-sync`'s indexer + syncer split
+# (without content-defined chunking — full-file transfer is the
+# simpler starting point for markdown-heavy vaults).
+vault-sync-client = { path = "features/vault/vault-sync-client" }
+# Mount feature — per-machine project content registry.
+# `mount-proto` ships the `Mount` entity + `ContentBackend`
+# trait; `mount` provides the canonical `Filesystem` impl +
+# `~/.config/task/mounts.toml` registry. See
+# `plans/federated-task-platform.md` Phase 2.
+mount-proto = { path = "features/mount/mount-proto" }
+mount = { path = "features/mount/mount" }
+# Goal feature — long-term aspirations + their decomposition.
+# Distinct from `project::ProjectInfo` because goals carry a
+# `target_date` and a cyclic-calendar `kind`. See
+# `plans/cyclic-life-calendar.md`.
+goal = { path = "features/goal/goal" }
+# Project-scoped milestones — GitHub-Projects-style checkpoints
+# tasks roll up to. Maps cleanly to Forgejo / GitHub milestone
+# API for the future sync.
+milestone = { path = "features/milestone/milestone" }
+# `milestone-proto` is wasm-clean (the web UI binds to it
+# directly); the `milestone` crate owns the vault-backed
+# parse / write / backend side.
+milestone-proto = { path = "features/milestone/milestone-proto", default-features = false }
+# Workstreams — the parent-with-swarm construct (lead + members +
+# status + dates) replacing the 'epic' tag. Tasks attach via
+# `workflow.workstream`; progress is a derived rollup.
+workstream = { path = "features/workstream/workstream" }
+# `workstream-proto` is wasm-clean (the web UI binds to it
+# directly); the `workstream` crate owns the vault-backed
+# parse / write / rollup / backend side.
+workstream-proto = { path = "features/workstream/workstream-proto", default-features = false }
+# Cyclic life-calendar primitives — Cycle + Quarter entities
+# + pure-function date generator. See
+# `plans/cyclic-life-calendar.md`.
+cycle = { path = "features/cycle/cycle" }
+# Email feature — wire contract + backends. Same shape as
+# `vault-proto`: one `#[architect::rpc] trait EmailSync` proto
+# crate, sibling backend crates (`email-imap`, `email-jmap`,
+# `email-maildir`, `email-nextcloud`) impl it, and
+# `email-store` caches behind the same surface.
+email-proto = { path = "features/email/email-proto" }
+email-imap = { path = "features/email/email-imap" }
+email-smtp = { path = "features/email/email-smtp" }
+email-jmap = { path = "features/email/email-jmap" }
+email-maildir = { path = "features/email/email-maildir" }
+email-nextcloud = { path = "features/email/email-nextcloud" }
+email-store = { path = "features/email/email-store" }
+email-secret = { path = "features/email/email-secret" }
+email-config = { path = "features/email/email-config" }
+email-autoconfig = { path = "features/email/email-autoconfig" }
+# Per-account sync engine — wraps any EmailSync backend in a
+# periodic reconciliation loop and broadcasts merged events.
+# Mirrors pimalaya's neverest+mirador split out of himalaya.
+email-sync = { path = "features/email/email-sync" }
+# Cross-entity link layer — connects emails to tasks / projects /
+# notes / people via a many-to-many index. Used by other
+# features to record "this email is about this project."
+email-link = { path = "features/email/email-link" }
+# CodeMirror-style editor — its own repo at ../Editor. `editor`
+# is the umbrella crate that re-exports the others — apps consume
+# that. These crates are members of the Editor workspace; Cargo
+# builds them as path dependencies and resolves their own
+# `workspace = true` deps against Editor's manifest.
+editor-state = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-syntax = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-view = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-vim = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-typst = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-mermaid = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor-keyflow = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+# Byte-offset `Changes` ⇄ scalar `TextOp` adapter for the CRDT
+# host (the vault page's collaborative editing path). Wasm-clean.
+editor-crdt = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+editor = { git = "https://codeberg.org/FastTrackStudios/Editor.git", rev = "413b08fb42c1a97b27bdd6488542a660718f3cce" }
+
+# Keyflow's engraver, CPU-only `svg` tier (no wgpu/vello/PDF) — the
+# editor renders ```kf``` fences to inline SVG client-side. The `svg`
+# feature is selected per-consumer in `editor-keyflow`.
+engraver = { git = "https://codeberg.org/FastTrackStudios/keyflow.git", rev = "b45a62025d4369381d43ceaac074916966bd3cc2", default-features = false }
+
+# Deps the editor's inner crates inherit via `workspace = true`.
+# `serde`, `serde_json` are already declared elsewhere in the
+# workspace deps block — only the editor-specific ones go here.
+ropey = "1.6"
+# Tree-sitter syntax highlighting — same versions as the editor
+# subtree's original workspace, kept default-features-off so we
+# don't drag in everything by default.
+arborium = { version = "2.16.0", default-features = false }
+arborium-theme = "2.16.0"
+arborium-tree-sitter = "2.16.0"
+attachments-proto = { path = "features/attachments/attachments-proto" }
+# `locations` — typed view of place pages (`type: location`)
+# in a `vault::Vault`. Studios / rooms / storage / venues
+# carry a stable `id` so other features reference them by
+# uuid through renames.
+locations = { path = "features/locations/locations" }
+# `locations-proto` is wasm-clean (the web UI binds to it
+# directly); the `locations` crate owns the vault-backed
+# parse / write / store side.
+locations-proto = { path = "features/locations/locations-proto", default-features = false }
+# `inventory` — typed view of gear/equipment pages
+# (`type: item`). References locations by `location_id`;
+# rides on top of `vault` like `task` does.
+inventory = { path = "features/inventory/inventory" }
+# `inventory-proto` is wasm-clean (the web UI binds the
+# `InventoryService` client + `Item` model directly); the native
+# `inventory` crate owns the vault-backed parse / write / scan /
+# store side and re-exports it. Mirrors the `locations-proto` split.
+inventory-proto = { path = "features/inventory/inventory-proto", default-features = false }
+# `scripture` — read-only Bible spine. `scripture-proto` is
+# wasm-clean (verse addressing: 66-book canon + `VerseId` OSIS /
+# `BBCCCVVV` keys + reference parsing); the native `scripture`
+# crate owns USFM ingest + the in-memory `Bible` store. Bible
+# text is never user-editable — notes / wiki / cross-refs link
+# in by stable verse id. See `plans/bible-study.md`.
+scripture-proto = { path = "features/scripture/scripture-proto", default-features = false }
+scripture = { path = "features/scripture/scripture" }
+# `links` — generalized typed-link primitive (verse↔verse, note↔verse,
+# idea↔wiki entry) with confidence + visibility for quality filtering and
+# private-vs-public publishing. `links-proto` is wasm-clean; the `links`
+# crate owns the backing store. See plans/knowledge-primitives.md.
+links-proto = { path = "features/links/links-proto", default-features = false }
+links = { path = "features/links/links" }
+# `resources` — Resource Library + annotations. Read-only primary sources
+# (songs, PDFs, books, videos) annotated + linked into without editing;
+# the anchor string keys the link graph, geometry lives in a per-resource
+# `<slug>.annotations.json` sidecar (Logseq's two-layer model). See
+# plans/resource-annotations.md.
+resources = { path = "features/resources/resources" }
+# `resources-proto` is wasm-clean (the watch/reader UI binds to it for
+# transcripts); the `resources` crate owns the file-reading backend.
+resources-proto = { path = "features/resources/resources-proto", default-features = false }
+# `mealplan` slice — vault-superset trio for food/cooking.
+# `cookbook` owns cooklang `.cook` files under `<vault>/Cookbook/`
+# (single file per recipe, no sidecar; ingredient names ARE
+# wikilinks resolved by the wiki layer). `pantry` rides on
+# `inventory` (`type: item` + `tags: [pantry]`) with food extras
+# (qty / unit / expiry / nutrition). `mealplan` is the facade
+# crate — meal pages on a calendar that reference recipes by
+# vault-relative path and deduct from pantry on cook. The
+# `fitness` feature depends on `mealplan` for nutrition data.
+# See `plans/cooklang-migration.md`.
+cookbook = { path = "features/mealplan/cookbook" }
+# `recipe-import` — `task recipe import <url>`: webpage → NormalizedRecipe
+# (cooklang-import's JSON-LD/microdata/HTML-class extractors) → `.cook`
+# (LLM-primary synthesis with parser validation, heuristic fallback for
+# `--offline`). CLI-only, native-only; saving goes through the existing
+# `CookbookService` create/update RPC, never raw fs.
+recipe-import = { path = "features/mealplan/recipe-import" }
+# `cookbook-proto` is wasm-clean — holds the `Nutrition` macro
+# shape so `fitness-proto` (and the web UI) can bind to it
+# without pulling the vault-backed `cookbook` crate. The
+# `cookbook` crate re-exports it so `cookbook::Nutrition` keeps
+# working.
+cookbook-proto = { path = "features/mealplan/cookbook/cookbook-proto", default-features = false }
+pantry = { path = "features/mealplan/pantry" }
+# `pantry-proto` is wasm-clean (the web UI binds the `PantryService`
+# client directly); the native `pantry` crate re-exports it. The
+# `native` feature (off by default) adds the `inventory::Item`
+# interop so wasm builds never pull the vault-backed `inventory`
+# crate. Mirrors the `cookbook-proto` split.
+pantry-proto = { path = "features/mealplan/pantry/pantry-proto", default-features = false }
+mealplan = { path = "features/mealplan/mealplan" }
+# `mealplan-proto` is wasm-clean — holds the `Meal` model +
+# `MealplanService` trait (and the `Fulfillment` wire types) so the
+# web UI binds the client directly. The native `mealplan` crate
+# re-exports it + keeps the cook/fulfillment domain logic.
+mealplan-proto = { path = "features/mealplan/mealplan/mealplan-proto", default-features = false }
+
+# Cooklang recipe format parser (https://cooklang.org).
+# Native parser + scaling + unit conversion + aisle.conf.
+# Used by `cookbook` as the canonical recipe model.
+cooklang = "0.18"
+# `fitness` slice — exercises + workouts + body + intake +
+# facade. Models ported from wger (read-only checkout at
+# `~/Development/research/wger`). `intake` depends on
+# `mealplan` for nutrition lookup; the `fitness` facade
+# composes a `DailySummary` from all four sub-crates.
+exercises = { path = "features/fitness/exercises" }
+workouts = { path = "features/fitness/workouts" }
+body = { path = "features/fitness/body" }
+intake = { path = "features/fitness/intake" }
+fitness = { path = "features/fitness/fitness" }
+# `fitness-proto` is wasm-clean (the web UI binds to the four
+# fitness service clients directly); the native `body` /
+# `exercises` / `workouts` / `intake` crates own the
+# vault-backed parse / write / store side and re-export this
+# proto. Mirrors the `locations-proto` split.
+fitness-proto = { path = "features/fitness/fitness-proto", default-features = false }
+view = { path = "features/view/view" }
+view-gantt = { path = "features/view/view-gantt" }
+view-kanban = { path = "features/view/view-kanban" }
+view-calendar = { path = "features/view/view-calendar" }
+view-table = { path = "features/view/view-table" }
+view-heatmap = { path = "features/view/view-heatmap" }
+view-knowledge-graph = { path = "features/view/view-knowledge-graph" }
+# Scheduling — personal day-templates + cal.com-style bookable
+# event types, sync over CalDAV (future). Trio + facade follow the
+# vault pattern; `scheduling-proto` is wasm-clean.
+scheduling = { path = "features/scheduling/scheduling" }
+scheduling-proto = { path = "features/scheduling/scheduling-proto", default-features = false }
+scheduling-ui = { path = "features/scheduling/scheduling-ui" }
+# Inbox — the FLAP capture queue. Trio follows the vault pattern;
+# `inbox-proto` is wasm-clean (the UI binds to it directly).
+inbox = { path = "features/inbox/inbox" }
+inbox-proto = { path = "features/inbox/inbox-proto", default-features = false }
+# General app-state persistence. Capability sub-traits
+# (`KvStore` / `LogStore`) so any feature can mount any backend.
+store-proto = { path = "crates/store-proto", default-features = false }
+architect-auth = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf" }
+# Wire contract for architect-auth — `AuthServiceClient` + the session
+# bundle types. wasm-clean with just the `vox` feature (uuid `js` flows
+# from architect), so the web UI drives the real sign-in flow over the
+# per-org endpoint.
+auth-proto = { git = "https://codeberg.org/FastTrackStudios/architect.git", rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf", default-features = false }
+
+# Git feature — issue + PR workflow on top of forges
+# (GitHub now, Forgejo next). `git-proto` is the wire
+# contract: three `#[architect::rpc]` traits — `RepoCatalog`,
+# `IssueTracker`, `ReviewSurface`. Backends in sibling crates
+# impl whichever traits the forge supports. `git-config` owns
+# `RepoBinding` + `IssueLink` persistence. See
+# `plans/git-feature.md`.
+git-proto = { path = "features/git/git-proto" }
+git-github = { path = "features/git/git-github" }
+# Forgejo (Gitea-compatible) backend — same three-trait surface
+# as `git-github`, talks to a self-hosted server via REST
+# (`reqwest` + `serde_json`). PAT auth, polling-based event
+# stream stubbed until Phase 2.
+git-forgejo = { path = "features/git/git-forgejo" }
+git-config = { path = "features/git/git-config" }
+octocrab = "0.46"
+
+# Filesystem walker — used by knowledge-sync to crawl Obsidian vault
+# directories. Server-only dep; never reaches wasm.
+walkdir = "2"
+# Parallel file IO for the vault scanner.
+rayon = "1"
+
+# Fuzzy matcher used by the knowledge live-preview editor pickers
+# (wikilink/blockref/tag/slash-command). Same crate used internally by
+# helix and other rust TUIs — fast prefix-friendly bonuses + Unicode
+# normalization. Wasm-clean.
+nucleo-matcher = "0.3"
+# `core` (default in fts-ui) is now feature-gated — it backs `fts_ui::prelude`
+# + `lucide_dioxus`. The `crates/* -> features/*` refactor moved fts-ui-core
+# behind this flag, so `default-features = false` alone strips the whole
+# design system. Opt `core` back in explicitly.
+fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", rev = "d27fe12bc69f1e0f3b058df843797a637abaef69", default-features = false, features = ["core"] }
+
+# Ordered-map for round-trippable frontmatter key preservation
+# (needed by knowledge-proto's obsidian helpers).
+indexmap = "2"
+
+# Regex engine — knowledge-proto uses it for link/embed/tag scanning.
+regex = "1"
+
+# YAML parsing/serialization for Obsidian frontmatter round-trip.
+serde_yaml = "0.9"
+
+[workspace.dependencies.facet]
+version = "0.46"
+features = [
+    "reflect",
+    "chrono",
+    "uuid",
+]
+
+[workspace.dependencies.facet-core]
+version = "0.46"
+
+[workspace.dependencies.facet-json]
+version = "0.46"
+
+[workspace.dependencies.facet-pretty]
+version = "0.46"
+
+[workspace.dependencies.facet-reflect]
+version = "0.46"
+
+[workspace.dependencies.facet-yaml]
+version = "0.46"
+
+[workspace.dependencies.keyflow]
+git = "https://codeberg.org/FastTrackStudios/keyflow.git"
+rev = "b45a62025d4369381d43ceaac074916966bd3cc2"
+
+[workspace.dependencies.lumen-blocks]
+git = "https://github.com/Leaf-Computer/lumen-blocks.git"
+tag = "v0.2.0"
+
+[workspace.dependencies.moire]
+git = "https://codeberg.org/FastTrackStudios/moire"
+rev = "7a2f1dc"
+
+# Loro — CRDT engine, source of truth for every feature's data.
+# SeaORM stores the doc's snapshot + update log as opaque bytes.
+[workspace.dependencies.loro]
+version = "1.12"
+default-features = false
+
+# Loro internals — needed for `EphemeralStore` (awareness/cursor
+# sync) which the public `loro` crate doesn't re-export. Pinned
+# to the same minor as `loro` so the type identities line up.
+[workspace.dependencies.loro-internal]
+version = "1.12"
+default-features = false
+
+# CalDAV/CardDAV/WebDAV-Sync client (RFC 4791 + RFC 6352 + RFC 6578).
+# Picked over `kitchen-fridge` because it actually implements VEVENT
+# (kitchen-fridge's upstream is VTODO-first with VEVENT support
+# documented as "fairly trivial but not yet"), supports sync-token
+# incremental fetches, and ships HTTP/2 + connection pooling. We
+# wrap it in a Loro-backed bridge — the architect `calendar` CRDT
+# is our local source of truth, so kitchen-fridge's bundled Cache /
+# Provider abstractions would be redundant.
+[workspace.dependencies.fast-dav-rs]
+version = "0.4"
+
+# iCalendar parser / builder. Used by `caldav-sync` to map between
+# raw `BEGIN:VEVENT…` text and `calendar_proto::CalendarEvent`
+# (and the inverse for push). Active maintenance, dual-licensed,
+# uses the same `rrule` crate we have at the workspace level.
+[workspace.dependencies.icalendar]
+version = "0.17"
+
+# Markdown parser used by `chat-ui/src/ai/markdown.rs` to render
+# assistant message bodies. `default-features = false` drops the
+# `simd` + `gen-tests` optional deps so the crate stays wasm-clean.
+[workspace.dependencies.pulldown-cmark]
+version = "0.10"
+default-features = false
+
+# Dioxus — UI lib. Single workspace dep; per-crate `[features]`
+# enable the platform target. Pattern lifted from dioxus-flake's
+# packages/web/desktop/mobile setup so `cargo check --workspace`
+# works inside the nix dev shell.
+[workspace.dependencies.dioxus]
+version = "0.7.9"
+default-features = false
+features = ["lib"]
+
+[workspace.dependencies.dioxus-router]
+version = "0.7.9"
+default-features = false
+
+# Icon foundation (plans/tagging-and-icons.md): dioxus-icons is the
+# default set (Lucide as components, tree-shaken). dioxus-free-icons is
+# added on demand for any icon Lucide lacks.
+[workspace.dependencies.dioxus-icons]
+version = "0.1"
+
+[workspace.dependencies.dioxus-ssr]
+version = "0.7.9"
+
+# Web-sys / wasm-bindgen — wired only in crates that use them and
+# always behind `#[cfg(target_arch = "wasm32")]` source gates. They
+# do compile on native (stub wrappers in wasm-bindgen-shared) so
+# leaving them on a native-buildable crate's Cargo.toml is fine.
+[workspace.dependencies.web-sys]
+version = "0.3.98"
+
+[workspace.dependencies.wasm-bindgen]
+version = "0.2"
+
+[workspace.dependencies.wasm-bindgen-futures]
+version = "0.4"
+
+[workspace.dependencies.js-sys]
+version = "0.3"
+
+[workspace.dependencies.gloo-timers]
+version = "0.3"
+features = ["futures"]
+
+[workspace.dependencies.indexed_db_futures]
+version = "0.6"
+features = ["serde", "cursors", "indices", "typed-arrays", "async-upgrade", "tx-done", "version-change"]
+
+[workspace.dependencies.futures-channel]
+version = "0.3"
+
+[workspace.dependencies.futures-util]
+version = "0.3"
+default-features = false
+features = ["std"]
+
+[workspace.dependencies.ui]
+path = "crates/ui"
+
+# CRDT lib + SeaORM persistence — path deps pointing at architect's
+# in-repo libs. Same rev as the architect/macros/architect dep below.
+[workspace.dependencies.crdt]
+git = "https://codeberg.org/FastTrackStudios/architect.git"
+rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
+
+[workspace.dependencies.crdt-seaorm]
+git = "https://codeberg.org/FastTrackStudios/architect.git"
+rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
+
+[workspace.dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[workspace.dependencies.serde_json]
+version = "1"
+
+[workspace.dependencies.shm-primitives]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.tokio]
+version = "1"
+features = ["full"]
+
+[workspace.dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter"]
+
+# Used by the editor playground (and any future binary that
+# wants a structured log file alongside stdout).
+[workspace.dependencies.tracing-appender]
+version = "0.2"
+
+[workspace.dependencies.uuid]
+version = "1"
+features = [
+    "v4",
+    "v5",
+    "v7",
+]
+
+[workspace.dependencies.vox]
+# Wasm-clean baseline: just `runtime` (vox-core, gives #[vox::service]
+# + generated <Trait>Client). Server crates that own a vox server
+# add `features = ["transport-websocket"]` explicitly on their dep
+# line. Pattern lifted from architect's workspace + vox's own
+# rust/wasm-browser-tests crate.
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+default-features = false
+features = ["runtime"]
+
+[workspace.dependencies.vox-core]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.vox-codegen]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.vox-inprocess]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.vox-local]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.vox-schema]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.vox-stream]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.vox-types]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.vox-websocket]
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
+
+[workspace.dependencies.sea-orm]
+git = "https://github.com/FastTrackStudios/sea-orm"
+rev = "5075dcaa5a3d0a6d7fba46abc00cb93cf916dd30"
+features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-chrono", "with-uuid", "with-json", "facet"]
+
+[workspace.dependencies.sea-orm-migration]
+git = "https://github.com/FastTrackStudios/sea-orm"
+rev = "5075dcaa5a3d0a6d7fba46abc00cb93cf916dd30"
+
+[workspace.dependencies.crudcrate]
+git = "https://github.com/FastTrackStudios/crudcrate"
+rev = "f666e52018cfa3b2c58518a01645735cddf774f9"
+features = ["derive"]
+
+[workspace.dependencies.argon2]
+version = "0.5"
+
+[workspace.dependencies.proc-macro2]
+version = "1.0.103"
+
+[workspace.dependencies.quote]
+version = "1.0.41"
+
+[workspace.dependencies.syn]
+version = "2.0.108"
+features = ["full", "derive", "parsing", "printing", "clone-impls", "proc-macro"]
+
+[workspace.dependencies.axum]
+version = "0.8"
+
+[workspace.dependencies.axum-helmet]
+version = "0.2.0"
+
+[workspace.dependencies.base64]
+version = "0.22"
+
+[workspace.dependencies.cookie]
+version = "0.18"
+
+[workspace.dependencies.convert_case]
+version = "0.8.0"
+
+[workspace.dependencies.criterion]
+version = "0.7.0"
+
+[workspace.dependencies.heck]
+version = "0.5.0"
+default-features = false
+
+[workspace.dependencies.hyper]
+version = "1.7.0"
+features = ["full"]
+
+[workspace.dependencies.jsonwebtoken]
+version = "9"
+
+[workspace.dependencies.rand]
+version = "0.8"
+
+[workspace.dependencies.redis]
+version = "0.27"
+
+[workspace.dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["json", "rustls-tls"]
+
+[workspace.dependencies.rust_decimal]
+version = "1.39.0"
+
+[workspace.dependencies.serde_with]
+version = "3.15.1"
+
+[workspace.dependencies.sqlx]
+version = "0.8"
+features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"]
+
+[workspace.dependencies.spring]
+version = "0.4.3"
+
+[workspace.dependencies.spring-web]
+version = "0.4.3"
+
+[workspace.dependencies.tower]
+version = "0.5"
+
+[workspace.dependencies.tower-http]
+version = "0.6"
+
+[workspace.dependencies.tower_governor]
+version = "0.8.0"
+
+[workspace.dependencies.url]
+version = "2"
+
+[workspace.dependencies.url-escape]
+version = "0.1.1"
+
+[workspace.dependencies.utoipa]
+version = "5.4.0"
+
+[workspace.dependencies.utoipa-axum]
+version = "0.2.0"
+
+[workspace.dependencies.utoipa-scalar]
+version = "0.3.0"
+features = ["axum"]
+
+[workspace.dependencies.validator]
+version = "0.19"
+features = ["derive"]
+
+[workspace.dependencies.sha2]
+version = "0.10"
+
+[workspace.dependencies.aes-gcm]
+version = "0.10"
+
+[workspace.dependencies.hkdf]
+version = "0.12"
+
+[workspace.dependencies.hmac]
+version = "0.12"
+
+[workspace.dependencies.totp-rs]
+version = "5"
+features = ["gen_secret", "otpauth"]
+
+[profile.wasm-dev]
+opt-level = 1
+inherits = "dev"
+# Drop debuginfo so the wasm bundle stays small (~26MB instead of
+# ~500MB). The dev `inherits = "dev"` default is debug=2 which
+# dominates wasm size and freezes browsers loading the page.
+debug = false
+strip = "debuginfo"
+
+# keyflow @ b45a620 requests actions-proto from codeberg input_actions.git on
+# `branch=main`, whose tip pins a vox rev that splits the graph. Cargo forbids
+# patching a source to the SAME source, so we redirect to the FTS-owned GitHub
+# mirror at the rev whose workspace targets vox @ 30ef2ffe. Same content, the
+# only rev unification cargo will accept for a same-repo transitive pin.
+[patch."https://codeberg.org/FastTrackStudios/input_actions.git"]
+actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", rev = "8018e6d514ae1b4e5cac673273290dac92a73a10" }
+
+# Unify vox onto a single source. `architect` (../architect) pins vox at
+# the codeberg fork (rev 30ef2ffe — matching architect's current pin, which
+# carries the Uuid/chrono opaque-scalar serialization fix and rustls TLS
+# for native vox-websocket, so wss:// servers are reachable), while the
+# workspace deps point at bearcove/vox. Two identical-content vox copies
+# means architect's generated `Handler` impls don't unify across them and
+# every proto's dispatcher fails the trait bound. Redirect bearcove/vox
+# at the published codeberg rev so the graph carries exactly one
+# `vox-types` — the same source+rev architect already uses (no local path
+# dep, so this is portable to fresh clones / CI).
+[patch."https://github.com/bearcove/vox"]
+vox                = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-core           = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-codegen        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-jit            = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-jit-abi        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-jit-cal        = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-macros-core    = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-macros-parse   = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-postcard       = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-schema         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-service-macros = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-types          = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+vox-websocket      = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+facet-cbor         = { git = "https://codeberg.org/FastTrackStudios/vox.git", rev = "30ef2ffe6fd8681eac9e2bf97602e38bba8f688a" }
+
+# keyflow @ b45a620 pulls daw-proto (for its timing primitives) from codeberg
+# daw.git on `branch=main`, whose tip pins a vox rev that splits the graph.
+# Cargo forbids patching a source to the SAME source, so redirect to the
+# FTS-owned GitHub mirror at the daw rev (f2902b9) whose workspace targets
+# vox @ 30ef2ffe. This also gives daw-proto its runtime-only (wasm-friendly)
+# vox profile — otherwise an unpinned daw-proto requests vox's full
+# (tokio-net) features and the editor's wasm build can't link mio.
+[patch."https://codeberg.org/FastTrackStudios/daw.git"]
+daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", rev = "f2902b98527755609797437d2a3f93ea95341f3b" }
+
+# keyflow still declares color-palette / music-catalog from the starcommand
+# dynamic-template host (branch = main). Redirect that source to the codeberg
+# mirror — the canonical migrated repo (its main is vox-fork-aligned) — so the
+# graph carries no starcommand sources. (The clean fix is keyflow's own
+# Cargo.toml lines 102-103; this patch migrates Task's view in the meantime.)
+[patch."https://git.starcommand.live/FastTrackStudios/dynamic-template.git"]
+color-palette = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+music-catalog = { git = "https://codeberg.org/FastTrackStudios/dynamic-template.git", branch = "main" }
+
+# Redirect every transitive bearcove/moire reference (vox's
+# moire-runtime / moire-tokio / moire-types, etc.) to the codywright
+# fork at the same rev as the workspace dep above. Without this,
+# vox + architect end up with two parallel moire compilations.
+
+[patch."https://github.com/bearcove/moire"]
+moire             = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-macros      = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-runtime     = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-tokio       = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-types       = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-wasm        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+moire-wire        = { git = "https://codeberg.org/FastTrackStudios/moire", rev = "7a2f1dc" }
+
+[workspace.dependencies.architect]
+git = "https://codeberg.org/FastTrackStudios/architect.git"
+rev = "6610c53bf8f99cf6c7c967fce80ed0378a58d5bf"
+
+[workspace.dependencies.printpdf]
+version = "0.7"
+default-features = false
+
+[workspace.dependencies.fake]
+version = "4"
+features = ["derive", "uuid", "chrono"]
+
+# architect's `architect` crate (path dep above) depends on
+# `sea-orm = { workspace = true }` resolved against architect's own
+# workspace, which uses crates.io sea-orm 1.x. Task uses the
+# FastTrackStudios sea-orm fork — without these patches we'd get two
+# parallel sea-orm crates in the graph and every architect-emitted
+# RepoStorage type would be incompatible with our DatabaseConnection.
+[patch.crates-io.sea-orm]
+git = "https://github.com/FastTrackStudios/sea-orm"
+rev = "5075dcaa5a3d0a6d7fba46abc00cb93cf916dd30"
+
+[patch.crates-io.sea-orm-migration]
+git = "https://github.com/FastTrackStudios/sea-orm"
+rev = "5075dcaa5a3d0a6d7fba46abc00cb93cf916dd30"
+
+# Fork of `mermaid-rs-renderer` 0.2.2 — the upstream crate calls
+# `std::time::Instant::now()` unconditionally from its layout
+# pipeline, which panics on `wasm32-unknown-unknown`. Our fork swaps
+# that for `web_time::Instant` so editor-mermaid can render diagrams
+# in the browser.
+#
+# Extracted to its own repo (was `Editor/vendor/mermaid-rs-renderer`,
+# a NON-member subdir of Editor.git). Regular `cargo build` could
+# locate the package inside Editor by name, but crane's offline
+# vendoring cannot resolve a `[patch]` git source that isn't a real
+# workspace member — so it lives standalone now. The crate is fully
+# self-contained (no path deps), so this is a clean lift.
+[patch.crates-io.mermaid-rs-renderer]
+git = "https://codeberg.org/FastTrackStudios/mermaid-rs-renderer.git"
+rev = "6033d0a05b90875bde3d55ab9278bbc2ec54ca8d"
