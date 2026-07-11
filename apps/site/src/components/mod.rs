@@ -8,6 +8,7 @@ pub(crate) mod input_tutorial;
 mod chart_renderer;
 mod keyboard;
 mod live_editor;
+pub(crate) mod modes;
 
 pub use input_tutorial::InputTutorial;
 pub use chart_editor::{ExportButton, HighlightedEditor, PreviewMode, StaticChartRenderer};

@@ -303,11 +303,17 @@ pub type KeyboardBinding = (String, KeybindDef);
 /// clicking a key filters the binding list rendered below the keyboard.
 /// `on_select_category` is fired by the legend row (color dot + name)
 /// under the board in the "All" view.
+///
+/// `mode_id` marks the active mode/workflow: entries whose category id
+/// equals it are mode-layered bindings — their keys get a ring/glow in
+/// the mode's color (on top of the normal category fill), and the mode
+/// id is kept out of the category legend (the mode picker owns it).
 #[component]
 pub fn KeyboardMap(
     bindings: Vec<KeyboardBinding>,
     filter: Signal<Option<KeyFilter>>,
     on_select_category: Option<EventHandler<String>>,
+    mode_id: Option<String>,
 ) -> Element {
     let mut mods = use_signal(Mods::default);
     let mut hovered = use_signal(|| None::<&'static str>);
@@ -320,10 +326,11 @@ pub fn KeyboardMap(
         }
     }
 
-    // Distinct categories in feed order — drives the legend row.
+    // Distinct categories in feed order — drives the legend row. The
+    // active mode is not a category; its picker row owns that color.
     let mut categories: Vec<String> = Vec::new();
     for (c, _) in &bindings {
-        if !categories.contains(c) {
+        if !categories.contains(c) && mode_id.as_deref() != Some(c.as_str()) {
             categories.push(c.clone());
         }
     }
@@ -331,6 +338,7 @@ pub fn KeyboardMap(
     let m = mods();
     let hov = hovered();
     let active_filter = filter();
+    let mode = mode_id.clone();
 
     // Render one non-modifier key (main block or arrow pad).
     let render_key = |id: &'static str,
@@ -360,9 +368,18 @@ pub fn KeyboardMap(
         };
         let accent = dominant.map(category_color);
 
+        // Does the active mode add/override a binding on this key? Those
+        // keys get a ring/glow in the mode's color on top of the fill.
+        let mode_hit: Option<&'static str> = mode.as_deref().and_then(|mid| {
+            binds
+                .iter()
+                .any(|&i| bindings[i].0 == mid)
+                .then(|| category_color(mid))
+        });
+
         let base = "relative w-full h-9 sm:h-10 rounded-md border text-[0.65rem] sm:text-xs font-medium flex flex-col items-center justify-center transition-colors select-none";
         // Category-colored fills: intensity steps with binding count.
-        let (tone, color_style) = match (is_filtered, accent, count) {
+        let (tone, mut color_style) = match (is_filtered, accent, count) {
             (true, Some(c), _) => (
                 "shadow-lg cursor-pointer",
                 format!("background-color: {c}; border-color: {c}; color: #0c0a12;"),
@@ -381,6 +398,11 @@ pub fn KeyboardMap(
             ),
             _ => ("bg-muted/20 border-border/40 text-muted-foreground/40", String::new()),
         };
+        if let (Some(mc), false) = (mode_hit, is_filtered) {
+            color_style.push_str(&format!(
+                " box-shadow: 0 0 0 1.5px {mc}, 0 0 10px {mc}66;"
+            ));
+        }
 
         // With Shift toggled, show the shifted legend as the primary one.
         let (main_label, sub_label) = if m.shift && shifted.is_some() {

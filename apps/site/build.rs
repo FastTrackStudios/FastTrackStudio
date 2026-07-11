@@ -76,6 +76,37 @@ fn main() {
     }
     out.push_str("];\n");
 
+    // Workflows ("modes") and overlays are SHARED across profiles — they
+    // live in config/workflows/*.styx and config/overlays/*.styx and layer
+    // on whatever profile is active.
+    out.push_str(
+        "/// One embedded shared config file (workflow or overlay).\n\
+         pub struct EmbeddedNamed {\n\
+             pub id: &'static str,\n\
+             pub styx: &'static str,\n\
+         }\n",
+    );
+    for (dir_name, static_name) in [("workflows", "WORKFLOWS"), ("overlays", "OVERLAYS")] {
+        writeln!(out, "pub static {static_name}: &[EmbeddedNamed] = &[").unwrap();
+        let mut files: Vec<_> = std::fs::read_dir(config_root.join(dir_name))
+            .expect("read shared config dir")
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "styx"))
+            .collect();
+        files.sort();
+        for file in files {
+            let id = file.file_stem().unwrap().to_str().unwrap().to_string();
+            writeln!(
+                out,
+                "    EmbeddedNamed {{ id: {id:?}, styx: include_str!({:?}) }},",
+                file.display().to_string(),
+            )
+            .unwrap();
+        }
+        out.push_str("];\n");
+    }
+
     let dest = Path::new(&std::env::var("OUT_DIR").unwrap()).join("input_profiles.rs");
     std::fs::write(dest, out).expect("write generated profiles");
 }

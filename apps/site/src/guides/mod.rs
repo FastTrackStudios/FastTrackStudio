@@ -18,6 +18,7 @@ use fts_ui::prelude::*;
 use crate::Route;
 use crate::components::colors::category_color;
 use crate::components::input_tutorial::pretty_keys;
+use crate::components::modes::{find_mode, mode_color};
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -76,19 +77,32 @@ pub struct GuideSection {
     pub kind: SectionKind,
     pub id: &'static str,
     pub title: &'static str,
+    /// Workflow id (`mode-record`, `quick-edit`, …) when this section's
+    /// bindings only exist with that mode active. Rendered as a colored
+    /// "Mode: …" chip in the header, TOC, and overview card.
+    pub mode: Option<&'static str>,
     pub body: Vec<GuideBlock>,
 }
 
 impl GuideSection {
-    /// The section accent: Input sections whose id matches a workflow
-    /// category (transport, tracks, …) take that category's color, so the
-    /// guide speaks the same color language as /input; other kinds use
-    /// their kind accent.
+    /// The section accent: mode-specific sections take their mode's
+    /// color; Input sections whose id matches a workflow category
+    /// (transport, tracks, …) take that category's color, so the guide
+    /// speaks the same color language as /input; other kinds use their
+    /// kind accent.
     pub fn accent(&self) -> &'static str {
+        if let Some(m) = self.mode {
+            return mode_color(m);
+        }
         match self.kind {
             SectionKind::Input => category_color(self.id),
             kind => kind.accent(),
         }
+    }
+
+    /// Display name of the section's mode, if any.
+    pub fn mode_name(&self) -> Option<String> {
+        self.mode.and_then(|id| find_mode(id)).map(|m| m.name)
     }
 }
 
@@ -244,6 +258,9 @@ pub fn GuideOverviewView(guide: Guide) -> Element {
                                 h3 { class: "text-lg font-semibold mb-1 transition-colors group-hover:[color:var(--gs-accent)]",
                                     "{s.title}"
                                 }
+                                if let Some(mid) = s.mode {
+                                    div { class: "mb-1", ModeBadge { mode_id: mid } }
+                                }
                                 p { class: "text-sm text-muted-foreground leading-relaxed line-clamp-3",
                                     "{excerpt}"
                                 }
@@ -391,7 +408,32 @@ fn TocEntry(guide_id: &'static str, section: GuideSection, active: bool) -> Elem
                 style: "color: {accent}; background-color: {accent}1a;",
                 {section.kind.icon()}
             }
-            "{section.title}"
+            span { class: "min-w-0 flex-1 truncate", "{section.title}" }
+            if let Some(name) = section.mode_name() {
+                span {
+                    class: "shrink-0 text-[0.6rem] px-1.5 py-px rounded-full font-medium",
+                    style: "color: {accent}; background-color: {accent}1a; border: 1px solid {accent}40;",
+                    "{name}"
+                }
+            }
+        }
+    }
+}
+
+/// A "Mode: <name>" chip in the mode's color.
+#[component]
+fn ModeBadge(mode_id: &'static str) -> Element {
+    let color = mode_color(mode_id);
+    let name = find_mode(mode_id).map(|m| m.name).unwrap_or_else(|| mode_id.to_string());
+    rsx! {
+        span {
+            class: "inline-flex items-center gap-1.5 text-[0.65rem] px-2 py-0.5 rounded-full font-medium",
+            style: "color: {color}; background-color: {color}1a; border: 1px solid {color}40;",
+            span {
+                class: "inline-block w-1.5 h-1.5 rounded-full",
+                style: "background-color: {color};",
+            }
+            "Mode: {name}"
         }
     }
 }
@@ -420,7 +462,19 @@ fn GuideSectionView(section: GuideSection) -> Element {
                         style: "color: {accent};",
                         {section.kind.label()}
                     }
-                    h2 { class: "text-2xl font-semibold leading-tight", "{section.title}" }
+                    h2 { class: "text-2xl font-semibold leading-tight flex items-center gap-2 flex-wrap",
+                        "{section.title}"
+                        if let Some(mid) = section.mode {
+                            ModeBadge { mode_id: mid }
+                        }
+                    }
+                }
+            }
+
+            // Standard explainer for mode-gated sections.
+            if let Some(name) = section.mode_name() {
+                p { class: "text-xs mb-3 -mt-1", style: "color: {accent};",
+                    "Activate the {name} mode workflow to use these bindings."
                 }
             }
 
