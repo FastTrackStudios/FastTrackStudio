@@ -437,13 +437,16 @@ async fn save_file(
             .await
         {
             Ok(ack) => Ok(ack.sha256),
-            Err(VoxError::User(VaultSyncError::Conflict {
-                server_sha,
-                server_bytes,
-            })) => Err(SaveError::Conflict {
-                server_sha,
-                server_text: String::from_utf8_lossy(&server_bytes).into_owned(),
-            }),
+            Err(VoxError::User(user)) => match *user {
+                VaultSyncError::Conflict {
+                    server_sha,
+                    server_bytes,
+                } => Err(SaveError::Conflict {
+                    server_sha,
+                    server_text: String::from_utf8_lossy(&server_bytes).into_owned(),
+                }),
+                other => Err(SaveError::Other(format!("{other:?}"))),
+            },
             Err(e) => Err(SaveError::Other(format!("{e:?}"))),
         }
     }
