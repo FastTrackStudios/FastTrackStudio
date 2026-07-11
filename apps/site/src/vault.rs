@@ -498,37 +498,42 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
         document::Link { rel: "stylesheet", href: editor::EDITOR_STYLE }
         document::Style { {VAULT_STYLE} }
 
-        div { class: "guides-vault max-w-7xl mx-auto px-4 lg:px-8 py-10",
-            div { class: "flex gap-8 items-start",
+        // A roomier canvas than the rest of the site: wide container,
+        // sidebars pushed out to the edges, and the note itself capped
+        // at a comfortable prose measure (~82ch) centered between them.
+        div { class: "guides-vault max-w-[96rem] mx-auto px-4 lg:px-10 py-10",
+            div { class: "flex gap-8 xl:gap-14 items-start",
 
                 // ── Note explorer ─────────────────────────────
-                nav { class: "hidden lg:block w-56 shrink-0 sticky top-24",
+                nav { class: "hidden lg:block w-60 shrink-0 sticky top-24",
                     div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "Guides vault" }
                     VaultExplorer { notes: notes.clone(), current: current_path.clone() }
                 }
 
                 // ── The note ──────────────────────────────────
-                div { class: "flex-1 min-w-0",
-                    if let Some(note) = current.as_ref() {
-                        div { class: "mb-4", NoteChips { content: note.content.clone() } }
-                        Editor {
-                            state,
-                            decorations: decorations.clone(),
-                            editable: false,
-                            on_link_click,
-                        }
-                    } else {
-                        div { class: "py-16 text-center",
-                            p { class: "text-muted-foreground mb-4", "That note doesn't exist in the guides vault." }
-                            Link { to: Route::GuidesPage {}, class: "text-primary hover:underline", "Back to the guides" }
+                div { class: "flex-1 min-w-0 flex justify-center",
+                    div { class: "w-full max-w-[82ch] min-w-0",
+                        if let Some(note) = current.as_ref() {
+                            div { class: "mb-4", NoteChips { content: note.content.clone() } }
+                            Editor {
+                                state,
+                                decorations: decorations.clone(),
+                                editable: false,
+                                on_link_click,
+                            }
+                        } else {
+                            div { class: "py-16 text-center",
+                                p { class: "text-muted-foreground mb-4", "That note doesn't exist in the guides vault." }
+                                Link { to: Route::GuidesPage {}, class: "text-primary hover:underline", "Back to the guides" }
+                            }
                         }
                     }
                 }
 
                 // ── Graph ─────────────────────────────────────
-                aside { class: "hidden xl:block w-80 shrink-0 sticky top-24",
+                aside { class: "hidden xl:block w-96 shrink-0 sticky top-24",
                     div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "Connections" }
-                    div { class: "rounded-xl border border-border/60 bg-card/40 overflow-hidden h-72",
+                    div { class: "rounded-xl border border-border/60 bg-card/40 overflow-hidden h-80",
                         KnowledgeGraphView {
                             graph,
                             active: current_stem.clone(),
@@ -693,8 +698,8 @@ mod tests {
             .find(|n| n.path == "keyflow/chords.md")
             .expect("chords chapter");
         assert!(
-            chords.content.contains("```kf\nCmaj7 | F#m7b5 | Bbmaj9 | G7b9\n```"),
-            "chords chapter lost its kf fence"
+            chords.content.contains("```kf+\nCmaj7 | F#m7b5 | Bbmaj9 | G7b9\n```"),
+            "chords chapter lost its kf+ fence (source + chart together)"
         );
     }
 

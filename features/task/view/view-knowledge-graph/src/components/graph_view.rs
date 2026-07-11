@@ -202,18 +202,20 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                     zoom.with_mut(|z| *z = (*z * factor).clamp(0.2, 8.0));
                 },
 
-                // Edges first (drawn under nodes) — thin hairlines in
-                // the theme border color, dimmed hard when a
-                // hover/highlight set is active and they're outside it.
+                // Edges first (drawn under nodes) — clearly visible
+                // strands in the theme border color (the nodes are
+                // deliberately small, so the edges carry the shape of
+                // the graph), dimmed hard when a hover/highlight set
+                // is active and they're outside it.
                 for (i, edge) in graph.edges.iter().enumerate() {
                     match (pmap.get(&edge.source), pmap.get(&edge.target)) {
                         (Some(a), Some(b)) => {
                             let nw = (edge.weight / max_weight).clamp(0.0, 1.0);
-                            let width = (0.4 + nw * 1.2) * edge_unit;
+                            let width = (1.0 + nw * 2.0) * edge_unit;
                             let edge_active = active
                                 .as_ref()
                                 .is_none_or(|s| s.contains(&edge.source) && s.contains(&edge.target));
-                            let opacity = if !has_active || edge_active { 0.35 } else { 0.06 };
+                            let opacity = if !has_active || edge_active { 0.5 } else { 0.08 };
                             rsx! {
                                 line {
                                     key: "e{i}",

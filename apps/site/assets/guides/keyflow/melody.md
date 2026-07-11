@@ -20,7 +20,7 @@ m{ C D E F }
 
 A melody paired with its chords, engraved:
 
-```kf
+```kf+
 VS
 <<
 C | F | G | C ;

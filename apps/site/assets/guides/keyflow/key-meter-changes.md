@@ -26,7 +26,7 @@ VS 8
 
 A key change mid-chart (to G at bar 3), engraved:
 
-```kf
+```kf+
 4/4 #C
 1 | 5 | #G 1 | 5
 ```

@@ -20,7 +20,7 @@ Songs loop. Rather than write the same bars again, Keyflow has a few ways to say
 
 `%` replays the previous bar — engraved, bar 3 repeats the 4:
 
-```kf
+```kf+
 1 | 4 | % | 5
 ```
 

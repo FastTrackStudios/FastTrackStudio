@@ -19,7 +19,7 @@ Gm Bb F Ab
 
 Engraved, a small chart with a header and one section looks like this:
 
-```kf
+```kf+
 Vienna - Billy Joel
 4/4 140bpm #Gm
 

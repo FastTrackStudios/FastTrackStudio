@@ -55,17 +55,17 @@ chord just fills its bar.
   Nashville numbers (`1`, `4`), and Roman numerals (`I`, `IV`) are all
   first-class, for both chords and melody. Pick the one that fits the chart.
 
-## Chapters
+## Charts in these notes
 
-1. [[structure|Structure]]
-2. [[sections|Sections]]
-3. [[chords|Chords]]
-4. [[notation-systems|Notation Systems]]
-5. [[rhythm|Rhythm]]
-6. [[melody|Melody]]
-7. [[lyrics|Lyrics]]
-8. [[key-meter-changes|Key & Meter Changes]]
-9. [[annotations|Annotations & Expression]]
-10. [[repeats|Repeats & Endings]]
+Keyflow snippets in a note are ordinary fenced code blocks; the fence's info
+string says how the snippet renders:
+
+- `kf` — the engraved chart only (the everyday choice).
+- `kf+` — the source text and the engraved chart together, side by side.
+  The chapters here use it because the source is the lesson.
+- `kf-src` — the source only, as plain code (no engraving).
+
+Every engraved chart also has a small `</>` button (top-right, on hover) that
+flips its source open or closed while you read.
 
 Back to all [[guides|Guides]].

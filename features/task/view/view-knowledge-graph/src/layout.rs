@@ -203,9 +203,13 @@ pub fn bounds<S: std::hash::BuildHasher>(
 }
 
 // --- Node sizing (port of `nodeSize` / `graphDensityScale`) ---
+//
+// Deliberately smaller than the llm_wiki original (3..11): compact
+// nodes keep labels readable at fit-zoom; the edges carry the extra
+// visual weight instead (see the stroke widths in graph_view).
 
-const BASE_NODE_SIZE: f32 = 3.0;
-const MAX_NODE_SIZE: f32 = 11.0;
+const BASE_NODE_SIZE: f32 = 2.0;
+const MAX_NODE_SIZE: f32 = 7.0;
 
 fn density_scale(node_count: usize) -> f32 {
     if node_count <= 150 {

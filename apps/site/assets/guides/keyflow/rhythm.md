@@ -18,7 +18,7 @@ C  F  G  Am
 
 Slashes mark the beats — engraved, a mix of held and strummed bars:
 
-```kf
+```kf+
 C //// | F //// | G / / / | C
 ```
 

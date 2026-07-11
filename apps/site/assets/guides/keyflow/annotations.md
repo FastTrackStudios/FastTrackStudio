@@ -24,7 +24,7 @@ _"rit. ...."           below the staff
 
 Staff text and a dynamic alongside the chords, engraved:
 
-```kf
+```kf+
 ^"Swell"
 dyn mf
 1 | 4 | 5 | 1

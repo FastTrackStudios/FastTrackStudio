@@ -21,7 +21,7 @@ F  C  G  Am
 
 Two named sections with their bar lengths, engraved:
 
-```kf
+```kf+
 VS 4
 C | F | G | Am
 

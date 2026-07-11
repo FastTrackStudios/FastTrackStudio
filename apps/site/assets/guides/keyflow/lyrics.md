@@ -18,7 +18,7 @@ C  C  F  C
 
 Words under the chords, engraved:
 
-```kf
+```kf+
 VS 4
 C | C | F | C
 [lyrics] Twinkle twinkle little star

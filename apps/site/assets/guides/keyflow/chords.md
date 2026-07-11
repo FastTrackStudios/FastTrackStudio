@@ -19,7 +19,7 @@ C        F#m7       Bbmaj9       G7b9       Dm7b5/F
 
 A bar of varied chord qualities, engraved:
 
-```kf
+```kf+
 Cmaj7 | F#m7b5 | Bbmaj9 | G7b9
 ```
 
