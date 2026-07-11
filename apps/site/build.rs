@@ -107,6 +107,82 @@ fn main() {
         out.push_str("];\n");
     }
 
+    // The guides vault: docs/guides/**/*.md, embedded for release/wasm
+    // builds. Ids are vault-relative paths with forward slashes
+    // ("reaper/transport.md"). Dev builds on wasm fetch the same files
+    // live from the dx dev server instead (see apps/site/src/vault.rs) —
+    // the embedded copy is the file LIST either way.
+    let vault_root = Path::new(&manifest).join("../../docs/guides");
+    let vault_root = vault_root.canonicalize().expect("docs/guides vault dir");
+    println!("cargo::rerun-if-changed={}", vault_root.display());
+    let mut notes: Vec<std::path::PathBuf> = Vec::new();
+    collect_md(&vault_root, &mut notes);
+    notes.sort();
+    out.push_str("pub static VAULT: &[EmbeddedNamed] = &[\n");
+    for file in &notes {
+        let rel = file
+            .strip_prefix(&vault_root)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/");
+        writeln!(
+            out,
+            "    EmbeddedNamed {{ id: {rel:?}, styx: include_str!({:?}) }},",
+            file.display().to_string(),
+        )
+        .unwrap();
+    }
+    out.push_str("];\n");
+
+    // Dev-on-wasm live reload: each note as a SINGLE-FILE `asset!` —
+    // dx hot-reloads individual assets in place (same served URL, no
+    // rebuild), which folder assets don't get (a folder change causes
+    // a full rebuild under a new hash). The vault content lives
+    // physically at apps/site/assets/guides (docs/guides symlinks to
+    // it) so manganis accepts the paths.
+    out.push_str(
+        "#[cfg(all(target_arch = \"wasm32\", debug_assertions))]\n\
+         mod vault_assets {\n\
+             use dioxus::prelude::*;\n\
+             pub static VAULT_ASSETS: &[(&str, Asset)] = &[\n",
+    );
+    for file in &notes {
+        let rel = file
+            .strip_prefix(&vault_root)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/");
+        writeln!(
+            out,
+            "        ({rel:?}, asset!({:?})),",
+            format!("/assets/guides/{rel}"),
+        )
+        .unwrap();
+    }
+    out.push_str(
+        "    ];\n\
+         }\n\
+         #[cfg(all(target_arch = \"wasm32\", debug_assertions))]\n\
+         pub use vault_assets::VAULT_ASSETS;\n",
+    );
+
     let dest = Path::new(&std::env::var("OUT_DIR").unwrap()).join("input_profiles.rs");
     std::fs::write(dest, out).expect("write generated profiles");
+}
+
+/// Recursively collect every `.md` under `dir`.
+fn collect_md(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_md(&path, out);
+        } else if path.extension().is_some_and(|x| x == "md") {
+            out.push(path);
+        }
+    }
 }

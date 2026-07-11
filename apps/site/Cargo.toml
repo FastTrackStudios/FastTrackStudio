@@ -37,6 +37,9 @@ editor-keyflow-lang = { workspace = true }
 # FTS design system (components, layout, typography, theme tokens)
 fts-ui = { workspace = true }
 
+# /guides vault — knowledge graph of the markdown notes (wasm-clean SVG view)
+view-knowledge-graph = { workspace = true }
+
 # Color type used by the engraver's SVG export config
 peniko = { workspace = true }
 
@@ -101,6 +104,10 @@ web-sys = { version = "0.3", features = [
     "HtmlAnchorElement",
     # SVG fallback rendering
     "HtmlImageElement",
+    # Dev-mode guides-vault fetch (live markdown from the dx server)
+    "Request",
+    "RequestInit",
+    "Response",
 ] }
 
 # Async runtime for WASM — deliberately NOT the workspace tokio (that one is

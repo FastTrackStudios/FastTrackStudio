@@ -4,8 +4,8 @@
 //! Test patterns are displayed as interactive examples using WebGPU.
 
 mod components;
-mod guides;
 mod renderer;
+mod vault;
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{FileCode, Github, Music};
@@ -28,10 +28,8 @@ pub enum Route {
     InputPage { category: String },
     #[route("/guides")]
     GuidesPage {},
-    #[route("/guides/reaper")]
-    ReaperGuidePage {},
-    #[route("/guides/reaper/:section")]
-    ReaperGuideSectionPage { section: String },
+    #[route("/guides/:..path")]
+    GuideNotePage { path: Vec<String> },
     #[route("/test/render")]
     TestRender {},
 }
@@ -184,7 +182,7 @@ fn Layout() -> Element {
                         // Guides tab
                         Link {
                             to: Route::GuidesPage {},
-                            class: if matches!(route, Route::GuidesPage {} | Route::ReaperGuidePage {} | Route::ReaperGuideSectionPage { .. }) {
+                            class: if matches!(route, Route::GuidesPage {} | Route::GuideNotePage { .. }) {
                                 "px-3 py-1.5 rounded-lg text-sm font-medium text-foreground bg-accent/60 transition-colors"
                             } else {
                                 "px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
@@ -421,36 +419,26 @@ fn InputPage(category: String) -> Element {
     }
 }
 
-/// `/guides` — the guides landing page.
+/// `/guides` — the guides wiki vault (index note).
 #[component]
 fn GuidesPage() -> Element {
     rsx! {
         document::Title { "Guides — FastTrackStudio" }
-        document::Meta { name: "description", content: "Hands-on walkthroughs of FastTrackStudio workflows — starting with driving REAPER through the FastTrackStudio input layer." }
+        document::Meta { name: "description", content: "Hands-on walkthroughs of FastTrackStudio workflows — a cross-linked markdown vault, starting with the REAPER guide." }
 
-        guides::GuidesLanding {}
+        vault::GuidesVault { path: Vec::<String>::new() }
     }
 }
 
-/// `/guides/reaper` — the REAPER guide overview (intro + section cards).
+/// `/guides/<path…>` — one vault note (folder notes collapse to their
+/// folder URL, e.g. /guides/reaper).
 #[component]
-fn ReaperGuidePage() -> Element {
+fn GuideNotePage(path: Vec<String>) -> Element {
     rsx! {
-        document::Title { "REAPER Guide — FastTrackStudio" }
-        document::Meta { name: "description", content: "Drive REAPER the FastTrackStudio way — the input layer, transport essentials, and track workflows, with the real shortcuts from the fasttrackstudio profile." }
+        document::Title { "Guides — FastTrackStudio" }
+        document::Meta { name: "description", content: "Hands-on walkthroughs of FastTrackStudio workflows — a cross-linked markdown vault, starting with the REAPER guide." }
 
-        guides::GuideOverviewView { guide: guides::reaper_guide() }
-    }
-}
-
-/// `/guides/reaper/:section` — one REAPER guide section per page.
-#[component]
-fn ReaperGuideSectionPage(section: String) -> Element {
-    rsx! {
-        document::Title { "REAPER Guide — FastTrackStudio" }
-        document::Meta { name: "description", content: "Drive REAPER the FastTrackStudio way — the input layer, transport essentials, and track workflows, with the real shortcuts from the fasttrackstudio profile." }
-
-        guides::GuideSectionPageView { guide: guides::reaper_guide(), section }
+        vault::GuidesVault { path }
     }
 }
 

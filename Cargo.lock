@@ -10158,6 +10158,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-wasm",
  "uuid 1.23.4",
+ "view-knowledge-graph",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
