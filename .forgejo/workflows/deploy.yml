@@ -1,0 +1,195 @@
+# Deploys — pure-Nix OCI images pushed to the in-cluster registry,
+# rolled out by ArgoCD + argocd-image-updater (digest strategy on the
+# channel tag). Runs on the self-hosted org runner (nix-host).
+#
+#   task  -> registry.starcommand.live:30050/task-{server,web,ui-lab}
+#   site  -> registry.starcommand.live:30050/fts-site
+#
+# CHANGE-GATED: a push only deploys an app when files that feed that
+# app's images actually changed (diff of the pushed range; see the
+# `changes` job). workflow_dispatch can force either app.
+#
+# The monorepo only has main, so main pushes both channel tags
+# (`latest` AND `dev`) — the dev/prod split returns when a dev branch
+# exists. Verify-live: a green run means the deployment SERVES this
+# commit (version endpoints must report the pushed sha), not just
+# "images pushed".
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_task:
+        description: "Deploy task images even without changes"
+        required: false
+        default: "false"
+      force_site:
+        description: "Deploy fts-site even without changes"
+        required: false
+        default: "false"
+
+# Never cancel a deploy mid-push; queue instead.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: registry.starcommand.live:30050
+  # Newer skopeo rejects the host's v1 registries.conf; we name the
+  # registry explicitly everywhere, so use an empty (valid) config.
+  CONTAINERS_REGISTRIES_CONF: /dev/null
+  FTS_LOCAL_REPO: /run/media/Development/FastTrackStudio
+
+jobs:
+  changes:
+    runs-on: nix-host
+    outputs:
+      task: ${{ steps.filter.outputs.task }}
+      site: ${{ steps.filter.outputs.site }}
+    steps:
+      - name: Checkout (local-first, full history for the diff)
+        run: |
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$FTS_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
+          git clone --quiet "$FTS_LOCAL_REPO" . \
+            || git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git fetch --quiet origin "$sha" 2>/dev/null || true
+          git checkout --quiet --detach "$sha"
+
+      - name: Detect changed apps
+        id: filter
+        run: |
+          base="${{ github.event.before }}"
+          # First push / force-push / dispatch: fall back to one commit.
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null \
+              || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-parse HEAD~1)"
+          fi
+          git diff --name-only "$base" HEAD > /tmp/changed
+          echo "diff ${base}..HEAD: $(wc -l < /tmp/changed) files"
+
+          task_paths='^apps/task/|^crates/task/|^features/task/|^libs/architect/|^libs/editor/|^flake\.(nix|lock)$|^\.forgejo/workflows/deploy\.yml$'
+          site_paths='^apps/site/|^libs/editor/|^libs/fts-ui/|^crates/keyflow/|^features/engraver/|^crates/input/input-config-proto/|^features/reaper/reaper-input/config/|^flake\.(nix|lock)$|^\.forgejo/workflows/deploy\.yml$'
+
+          task=false; site=false
+          grep -qE "$task_paths" /tmp/changed && task=true
+          grep -qE "$site_paths" /tmp/changed && site=true
+          [ "${{ inputs.force_task }}" = "true" ] && task=true
+          [ "${{ inputs.force_site }}" = "true" ] && site=true
+          echo "task=$task" >> "$GITHUB_OUTPUT"
+          echo "site=$site" >> "$GITHUB_OUTPUT"
+          echo "deploy: task=$task site=$site"
+
+  deploy-task:
+    runs-on: nix-host
+    needs: changes
+    if: needs.changes.outputs.task == 'true'
+    steps:
+      - name: Checkout (local-first)
+        run: |
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$FTS_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
+          git clone --quiet "$FTS_LOCAL_REPO" . \
+            || git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git fetch --quiet origin "$sha" 2>/dev/null || true
+          git checkout --quiet --detach "$sha"
+
+      - name: Compute tags
+        id: tags
+        run: |
+          echo "sha=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Push task images
+        run: |
+          set -euo pipefail
+          for img in task-server task-web task-ui-lab; do
+            echo "── $img ──"
+            streamer="$(nix build .#${img}-image --no-link --print-out-paths)"
+            "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
+              --dest-tls-verify=false --dest-no-creds docker-archive:/dev/stdin \
+              "docker://${REGISTRY}/${img}:latest"
+            for tag in dev "${{ steps.tags.outputs.sha }}"; do
+              nix run nixpkgs#skopeo -- --insecure-policy copy \
+                --src-tls-verify=false --src-no-creds --dest-tls-verify=false --dest-no-creds \
+                "docker://${REGISTRY}/${img}:latest" \
+                "docker://${REGISTRY}/${img}:${tag}"
+            done
+          done
+
+      - name: Verify live
+        run: |
+          url="https://task.starcommand.live"
+          want="${GITHUB_SHA}"
+          echo "waiting for $url to serve $want"
+          for i in $(seq 1 60); do
+            web="$(curl -sf --max-time 10 "$url/version.json" | sed -n 's/.*"rev":"\([^"]*\)".*/\1/p' || true)"
+            srv="$(curl -sf --max-time 10 "$url/.well-known/task-server.json" | sed -n 's/.*"build":"\([^"]*\)".*/\1/p' || true)"
+            echo "  poll $i: web=${web:-?} server=${srv:-?}"
+            if [ "$web" = "$want" ] && [ "$srv" = "$want" ]; then
+              echo "LIVE: $url serves $want"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "TIMED OUT: $url never served $want — check argocd-image-updater / rollouts"
+          exit 1
+
+  deploy-site:
+    runs-on: nix-host
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
+    steps:
+      - name: Checkout (local-first)
+        run: |
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$FTS_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
+          git clone --quiet "$FTS_LOCAL_REPO" . \
+            || git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
+          git fetch --quiet origin "$sha" 2>/dev/null || true
+          git checkout --quiet --detach "$sha"
+
+      - name: Compute tags
+        id: tags
+        run: |
+          echo "sha=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Push fts-site image
+        run: |
+          set -euo pipefail
+          streamer="$(nix build .#fts-site-image --no-link --print-out-paths)"
+          "$streamer" | nix run nixpkgs#skopeo -- --insecure-policy copy \
+            --dest-tls-verify=false --dest-no-creds docker-archive:/dev/stdin \
+            "docker://${REGISTRY}/fts-site:latest"
+          nix run nixpkgs#skopeo -- --insecure-policy copy \
+            --src-tls-verify=false --src-no-creds --dest-tls-verify=false --dest-no-creds \
+            "docker://${REGISTRY}/fts-site:latest" \
+            "docker://${REGISTRY}/fts-site:${{ steps.tags.outputs.sha }}"
+
+      - name: Verify live
+        run: |
+          url="https://fts.starcommand.live"
+          want="${GITHUB_SHA}"
+          echo "waiting for $url to serve $want"
+          for i in $(seq 1 60); do
+            rev="$(curl -sf --max-time 10 "$url/version.json" | sed -n 's/.*"rev":"\([^"]*\)".*/\1/p' || true)"
+            echo "  poll $i: rev=${rev:-?}"
+            if [ "$rev" = "$want" ]; then
+              echo "LIVE: $url serves $want"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "TIMED OUT: $url never served $want — check argocd-image-updater / ingress for fts.starcommand.live"
+          exit 1

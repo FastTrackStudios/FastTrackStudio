@@ -1,0 +1,35 @@
+# fts-site — static site, one container, no state.
+#
+# CI (deploy.yml, pure-Nix image build) pushes
+#   registry.starcommand.live:30050/fts-site:latest + :sha-<short>
+# on every main push that touches the site; argocd-image-updater
+# (digest strategy on :latest) rolls the Deployment.
+
+image:
+  registry: registry.starcommand.live:30050
+  repository: fts-site
+  # Empty = chart appVersion ("latest").
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  # Every host in the list serves the same bundle. fasttrackstudio.app
+  # needs external DNS pointed at the cluster edge; the starcommand.live
+  # host rides the existing wildcard and is what CI's verify-live polls.
+  hosts:
+    - fasttrackstudio.app
+    - fts.starcommand.live
+  # e.g. tls: [{ secretName: fts-site-tls, hosts: [fasttrackstudio.app] }]
+  tls: []
