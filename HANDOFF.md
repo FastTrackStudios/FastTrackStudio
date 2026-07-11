@@ -9,14 +9,26 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
 
 ## Live state on this machine
 
-- **REAPER rig layout (2026-07-10)**: `~/fts-dev` is the developer
-  REAPER copy for live iteration (launch.json, `just ext-install`
-  target); `~/fasttrackstudio` is the REAL install (canonical
-  resources, 1.3GB, what `daw::test::runner::fts_reaper_resources()`
-  and the `fts daw` profiles resolve). The old hidden paths are compat
-  SYMLINKS to these (`~/.fts-dev` → `~/fts-dev`,
-  `~/.config/FastTrackStudio/Reaper` → `~/fasttrackstudio`) — safe to
-  drop once nothing external references them.
+- **REAPER rig layout (2026-07-10)**: THREE options, nothing else —
+  `fts-reaper` (main DAW for recording, resources `~/fasttrackstudio`,
+  the real install), `fts-tracks` (live tracks playback, own resources
+  `~/fts-tracks`), `fts-dev` (dev/testing copy, `~/fts-dev`, the
+  `just ext-install` target). The per-instrument REAPER signal rigs
+  (fts-keys/drums/bass/guitar/vocals) are GONE — instrument rigs come
+  from the signal engine now. Same three everywhere: `daw_profiles()`
+  in crates/daw/daw/src/cli/mod.rs (legacy ids fasttrackstudio /
+  fts-signal / sandbox alias-resolve), and the system launchers +
+  desktop entries from fts-reaper-flake (legacy checkout at
+  FastTrackStudio-legacy/fts-reaper-flake, pushed to codeberg AND the
+  github mirror ~/.flake pins; `fts-setup` writes
+  ~/fasttrackstudio/FastTrackStudio/launch.json). reaper-launcher
+  still builds from the old github:FastTrackStudios/daw pin — crane
+  can't vendor the monorepo (dead [patch] URLs); the monorepo copy at
+  features/reaper/reaper-launcher is the same code. The old hidden
+  paths are compat SYMLINKS (`~/.fts-dev` → `~/fts-dev`,
+  `~/.config/FastTrackStudio/Reaper` → `~/fasttrackstudio`);
+  `~/.fasttrackstudio/Reaper` (pre-layout config with the old 6-rig
+  launch.json) is now orphaned — audit and delete.
 - **Network (fixed 2026-07-10)**: dhcpcd used to double-manage the 10G
   Dante NIC (enp12s0) and install `default via 10.10.10.1` at metric
   1003, beating the house LAN — that's what made github.com
