@@ -1,76 +1,198 @@
-# FastTrackStudio heavy CI — SELF-HOSTED runner required.
+# FastTrackStudio heavy CI — self-hosted org runner (THEBATTLESHIP).
 #
-# Codeberg's shared runners cap at 4cpu/8GB/10min (see ci.yml), which
-# cannot cold-build this workspace. These stages need a self-hosted
-# forgejo-runner registered with label `fts-selfhosted` on a machine
-# that has the repo's toolchain (rust 1.94 pin via `nix develop`, or a
-# host rustup toolchain + clang for the wasm stage).
+# Runs on the FastTrackStudios ORG-scoped forgejo-runner on THEBATTLESHIP
+# (NixOS service `gitea-runner-codeberg-org`, defined in ~/.flake
+# hosts/THEBATTLESHIP/THEBATTLESHIP.nix). Label used here:
 #
-# Trigger: workflow_dispatch only. On-push would leave jobs queued
-# forever while no runner is registered — dispatch keeps the workflow
-# correct-but-pending instead of dishonestly red/stuck.
+#   nix-host — HOST mode: jobs run directly on the host as user
+#   `gitea-runner` (home /var/lib/gitea-runner), nix + git + node on
+#   PATH, no container. Same label Task's images.yml uses.
 #
-# The REAPER stage additionally needs a REAPER install on the runner:
-# REAPER's license does NOT permit redistribution, so it can never run
-# on shared/public runners or from a container image we publish. Keep
-# it self-hosted-only, on a machine where REAPER is licensed.
+# Toolchain comes from the repo flake: every build step runs under
+# `nix develop -c` (rust 1.94 pin, wasm target, clang env for ring,
+# native headers). First run cold-builds the dev shell + workspace;
+# later runs reuse the persistent caches below.
+#
+# Persistent caches (OUTSIDE the checkout, owned by gitea-runner —
+# never shared with the dev tree's target/):
+#   /var/lib/gitea-runner/codeberg-org/fts-ci/target      CARGO_TARGET_DIR
+#   /var/lib/gitea-runner/codeberg-org/fts-ci/cargo-home  CARGO_HOME
+#   /var/lib/gitea-runner/codeberg-org/fts-ci/reaper*     REAPER bits (below)
+#
+# REAPER stage: REAPER's license does NOT permit redistribution, so the
+# suites can only run self-hosted where REAPER is licensed. The job
+# resolves the same REAPER 7.75 store path the dev machine uses (pinned
+# via gcroot; nixpkgs fallback) and runs both harnesses fully isolated:
+# daw-reaper builds its own rig under <checkout>/target/fts-reaper-test,
+# fts-extensions gets a CI-owned resources dir under fts-ci/. Nothing
+# touches ~/.config/signal or port 4040 (different user, Dummy audio,
+# unix sockets only).
 
 name: ci-heavy
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-    inputs:
-      run_reaper:
-        description: "Also run the REAPER integration suites (needs REAPER installed on the runner)"
-        required: false
-        default: "false"
+
+concurrency:
+  group: ci-heavy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FTS_CI: /var/lib/gitea-runner/codeberg-org/fts-ci
+  CARGO_TARGET_DIR: /var/lib/gitea-runner/codeberg-org/fts-ci/target
+  CARGO_HOME: /var/lib/gitea-runner/codeberg-org/fts-ci/cargo-home
+  # Local working copy on the runner host — offline, instant checkout
+  # when it already has the triggering commit (Task's images.yml
+  # pattern; codeberg git transfers intermittently reset).
+  FTS_LOCAL_REPO: /run/media/Development/FastTrackStudio
 
 jobs:
-  workspace-check:
-    runs-on: fts-selfhosted
+  # Workspace check + fast test suites + wasm check, sequential in one
+  # job so they share one warm CARGO_TARGET_DIR without lock contention.
+  build-and-test:
+    runs-on: nix-host
     steps:
-      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: Checkout (local-first)
+        run: |
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          branch="${GITHUB_REF_NAME:-main}"
+          sha="${GITHUB_SHA:-}"
+          # The local repo is owned by a different user than the runner —
+          # trust it (worktree AND gitdir) or git's dubious-ownership
+          # guard silently degrades this to a forge clone.
+          if [ -n "$FTS_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
+          if [ -n "$FTS_LOCAL_REPO" ] && [ -d "$FTS_LOCAL_REPO/.git" ] \
+              && [ -n "$sha" ] \
+              && git -C "$FTS_LOCAL_REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "local checkout @ ${sha} (from $FTS_LOCAL_REPO)"
+            git clone --quiet "$FTS_LOCAL_REPO" .
+            git checkout --quiet --detach "$sha"
+          else
+            attempt=1
+            until git clone --depth 1 --no-tags --branch "$branch" "$url" .; do
+              [ "$attempt" -ge 8 ] && { echo "clone failed after 8 attempts"; exit 1; }
+              echo "clone attempt $attempt failed — retrying in 15s"
+              find . -mindepth 1 -delete 2>/dev/null || true
+              attempt=$((attempt + 1)); sleep 15
+            done
+            if [ -n "$sha" ] && [ "$(git rev-parse HEAD)" != "$sha" ]; then
+              attempt=1
+              until git fetch --depth 1 --no-tags origin "$sha"; do
+                [ "$attempt" -ge 8 ] && { echo "fetch sha failed"; exit 1; }
+                echo "fetch attempt $attempt failed — retrying in 15s"
+                attempt=$((attempt + 1)); sleep 15
+              done
+              git checkout --detach "$sha"
+            fi
+          fi
+          echo "checked out $(git rev-parse --short HEAD)"
+
+      - name: Prepare persistent caches
+        run: mkdir -p "$CARGO_TARGET_DIR" "$CARGO_HOME"
+
       - name: cargo check --workspace
-        run: cargo check --workspace --exclude vox-discover
+        run: nix develop -c cargo check --workspace --exclude vox-discover
 
-  fast-tests:
-    runs-on: fts-selfhosted
-    steps:
-      - uses: https://code.forgejo.org/actions/checkout@v4
-      - name: signal-guitar
-        run: cargo test -p signal-guitar
-      - name: daw-standalone (audio)
-        run: cargo test -p daw-standalone --features audio
-      - name: neural-amp-modeler
-        run: cargo test -p neural-amp-modeler
-      - name: architect (iroh)
-        run: cargo test -p architect --features iroh
-      - name: pitch-dsp
-        run: cargo test -p pitch-dsp
+      - name: test signal-guitar
+        run: nix develop -c cargo test -p signal-guitar
 
-  # Browser-remote build of THE app. Needs the wasm32 target and clang
-  # (ring's build script) — provided by the repo flake's dev shell; a
-  # bare rustup toolchain also works if clang is on PATH.
-  wasm-check:
-    runs-on: fts-selfhosted
-    steps:
-      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: test daw-standalone (audio)
+        run: nix develop -c cargo test -p daw-standalone --features audio
+
+      - name: test neural-amp-modeler (incl. NAM parity)
+        run: nix develop -c cargo test -p neural-amp-modeler
+
+      - name: test architect (iroh)
+        run: nix develop -c cargo test -p architect --features iroh
+
+      - name: test pitch-dsp
+        run: nix develop -c cargo test -p pitch-dsp
+
+      # Browser-remote build of THE app. wasm32 target + ring's clang
+      # env come from the flake dev shell.
       - name: wasm check (fasttrackstudio, signal feature)
         run: |
-          rustup target add wasm32-unknown-unknown || true
-          cargo check -p fasttrackstudio --target wasm32-unknown-unknown \
+          nix develop -c cargo check -p fasttrackstudio \
+            --target wasm32-unknown-unknown \
             --no-default-features --features signal
 
-  # REAPER integration suites — the vendored extension stack and the daw
-  # domain, exercised through a real headless REAPER (daw::test harness,
-  # Dummy audio). Requires REAPER on the runner (unredistributable), so
-  # this stage is opt-in even on the self-hosted runner.
+  # REAPER integration suites — vendored extension stack + daw domain
+  # against a real headless REAPER (Dummy audio, isolated rigs).
+  # Serialized after build-and-test so it reuses the warm cache.
   reaper-integration:
-    runs-on: fts-selfhosted
-    if: ${{ inputs.run_reaper == 'true' }}
+    runs-on: nix-host
+    needs: build-and-test
     steps:
-      - uses: https://code.forgejo.org/actions/checkout@v4
-      - name: extension suite (fts-extensions)
-        run: just reaper-integration-test
+      - name: Checkout (local-first)
+        run: |
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          branch="${GITHUB_REF_NAME:-main}"
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$FTS_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
+          if [ -n "$FTS_LOCAL_REPO" ] && [ -d "$FTS_LOCAL_REPO/.git" ] \
+              && [ -n "$sha" ] \
+              && git -C "$FTS_LOCAL_REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            git clone --quiet "$FTS_LOCAL_REPO" .
+            git checkout --quiet --detach "$sha"
+          else
+            attempt=1
+            until git clone --depth 1 --no-tags --branch "$branch" "$url" .; do
+              [ "$attempt" -ge 8 ] && { echo "clone failed after 8 attempts"; exit 1; }
+              find . -mindepth 1 -delete 2>/dev/null || true
+              attempt=$((attempt + 1)); sleep 15
+            done
+            if [ -n "$sha" ] && [ "$(git rev-parse HEAD)" != "$sha" ]; then
+              git fetch --depth 1 --no-tags origin "$sha" && git checkout --detach "$sha"
+            fi
+          fi
+          echo "checked out $(git rev-parse --short HEAD)"
+
+      # Resolve REAPER. Preferred: the exact 7.75 store path the dev
+      # machine's rig uses (built from FastTrackStudios/reaper-flake) —
+      # pinned with an indirect gcroot so GC can't take it. Fallback:
+      # nixpkgs reaper from the repo flake's pin (7.67; version drift
+      # possible — the daw-reaper skip list is tuned against 7.75).
+      - name: Resolve REAPER
+        run: |
+          mkdir -p "$FTS_CI"
+          PIN=/nix/store/ky0r08mnqbhrs1r6prvkfv4lv41yyhz8-reaper-7.75
+          if [ -x "$PIN/bin/reaper" ]; then
+            nix-store --add-root "$FTS_CI/reaper" --indirect -r "$PIN" > /dev/null
+          else
+            echo "pinned REAPER 7.75 missing — building nixpkgs reaper (flake pin)"
+            NIXPKGS_ALLOW_UNFREE=1 nix build --impure --inputs-from . \
+              nixpkgs#reaper -o "$FTS_CI/reaper"
+          fi
+          echo "REAPER: $(readlink -f "$FTS_CI/reaper")"
+
+      # daw domain suite (95 tests): builds its own isolated rig under
+      # <checkout>/target/fts-reaper-test — fresh every run, never the
+      # dev rig, never ~/.config/signal.
       - name: daw suite (daw-reaper)
-        run: just daw-reaper-test
+        run: |
+          FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
+            nix develop -c cargo run -p daw-reaper-xtask
+
+      # Extension suite (13 tests): CI-owned REAPER resources dir
+      # (persistent — keeps the [nag] prewarm token between runs),
+      # seeded with the same Dummy-audio ini the daw harness uses.
+      - name: extension suite (fts-extensions)
+        run: |
+          RIG="$FTS_CI/reaper-rig"
+          mkdir -p "$RIG/UserPlugins"
+          if [ ! -f "$RIG/reaper.ini" ]; then
+            printf '[REAPER]\naudiodriver=2\nlinux_audio_mode=2\nautosaveint=0\n[reaper_explorer]\nlastdir=/tmp\n' \
+              > "$RIG/reaper.ini"
+          fi
+          FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
+          FTS_REAPER_RESOURCES="$RIG" \
+            nix develop -c cargo run -p fts-extensions-xtask

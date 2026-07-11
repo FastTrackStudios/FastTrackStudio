@@ -218,12 +218,28 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    (codeberg-tiny/small/medium), which cannot cold-build this
    workspace, so the shared stage is only `cargo metadata --locked`
    (manifest + lockfile gate; the tree is NOT rustfmt-clean, so no fmt
-   gate). `.forgejo/workflows/ci-heavy.yml` (workspace check, fast
-   crate test suites, wasm check, REAPER integration) needs a
-   SELF-HOSTED runner labeled `fts-selfhosted` and is
-   workflow_dispatch-only until one is registered — REAPER's license
-   forbids redistribution, so the REAPER stage can only ever run
-   self-hosted, opt-in via the run_reaper input.
+   gate). `.forgejo/workflows/ci-heavy.yml` runs on push/PR/dispatch on
+   the SELF-HOSTED runner: "THEBATTLESHIP", registered ORG-WIDE to
+   FastTrackStudios (covers Task too — do not touch its registration),
+   NixOS service `gitea-runner-codeberg-org` on this machine, defined
+   in ~/.flake/hosts/THEBATTLESHIP/THEBATTLESHIP.nix. Labels: `nix-host`
+   (HOST mode, user gitea-runner, nix on PATH — what ci-heavy targets),
+   `docker` / `ubuntu-latest` (podman, /nix/store ro). Pipeline (all
+   steps under `nix develop -c`): local-first checkout (clones from
+   /run/media/Development/FastTrackStudio when it has the commit —
+   Task's images.yml pattern), workspace check (--exclude vox-discover),
+   test suites (signal-guitar, daw-standalone --features audio,
+   neural-amp-modeler incl. NAM parity, architect --features iroh,
+   pitch-dsp), wasm check of fasttrackstudio, then a REAPER job
+   (daw-reaper-xtask 95 tests + fts-extensions-xtask 13 tests) against
+   the pinned REAPER 7.75 store path (gcroot'd; nixpkgs 7.67 fallback),
+   isolated rigs only — never ~/.config/signal, never port 4040.
+   Persistent caches (gitea-runner-owned, NEVER the dev tree's target/):
+   /var/lib/gitea-runner/codeberg-org/fts-ci/{target,cargo-home,reaper,
+   reaper-rig}. daw::test::runner now honors CARGO_TARGET_DIR when
+   locating built .so artifacts (was hardcoded <workspace>/target).
+   REAPER's license forbids redistribution, so the REAPER stage can
+   only ever run self-hosted.
 
 ## Gotchas that will bite again
 

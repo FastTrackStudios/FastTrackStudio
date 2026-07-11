@@ -5,15 +5,13 @@
 #   codeberg-small (2cpu/4GB/5min) and codeberg-medium (4cpu/8GB/10min).
 #   A ~160-crate workspace does not cold-build inside 10 minutes, so the
 #   shared runners only carry the cheap, honest stage below. Every
-#   compile-heavy stage lives in ci-heavy.yml and runs on a SELF-HOSTED
-#   runner (label `fts-selfhosted`); until such a runner is registered
-#   those stages are workflow_dispatch-only — visibly absent from push
-#   CI, never silently green.
-#
-# Register a self-hosted runner (machine with the nix dev shell + cargo):
-#   forgejo-runner register --instance https://codeberg.org \
-#     --token <Settings > Actions > Runners token> \
-#     --labels fts-selfhosted
+#   compile-heavy stage lives in ci-heavy.yml and runs on the SELF-HOSTED
+#   org runner "THEBATTLESHIP" (registered org-wide to FastTrackStudios,
+#   NixOS service gitea-runner-codeberg-org, defined in ~/.flake
+#   hosts/THEBATTLESHIP). Its labels:
+#     nix-host      — HOST mode, user gitea-runner, nix on PATH
+#     docker        — podman container (node:lts, /nix/store ro)
+#     ubuntu-latest — podman container (catthehacker act image)
 
 name: ci
 
