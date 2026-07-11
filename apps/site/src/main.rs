@@ -4,6 +4,7 @@
 //! Test patterns are displayed as interactive examples using WebGPU.
 
 mod components;
+mod guides;
 mod renderer;
 
 use dioxus::prelude::*;
@@ -23,8 +24,12 @@ pub enum Route {
     Home {},
     #[route("/editor")]
     KeyflowEditorPage {},
-    #[route("/input")]
-    InputPage {},
+    #[route("/input?:category")]
+    InputPage { category: String },
+    #[route("/guides")]
+    GuidesPage {},
+    #[route("/guides/reaper")]
+    ReaperGuidePage {},
     #[route("/test/render")]
     TestRender {},
 }
@@ -165,13 +170,24 @@ fn Layout() -> Element {
 
                         // Input tutorial tab
                         Link {
-                            to: Route::InputPage {},
-                            class: if matches!(route, Route::InputPage {}) {
+                            to: Route::InputPage { category: String::new() },
+                            class: if matches!(route, Route::InputPage { .. }) {
                                 "px-3 py-1.5 rounded-lg text-sm font-medium text-foreground bg-accent/60 transition-colors"
                             } else {
                                 "px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
                             },
                             "Input"
+                        }
+
+                        // Guides tab
+                        Link {
+                            to: Route::GuidesPage {},
+                            class: if matches!(route, Route::GuidesPage {} | Route::ReaperGuidePage {}) {
+                                "px-3 py-1.5 rounded-lg text-sm font-medium text-foreground bg-accent/60 transition-colors"
+                            } else {
+                                "px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+                            },
+                            "Guides"
                         }
 
                         // Keyflow Editor tab
@@ -392,13 +408,36 @@ fn KeyflowEditorPage() -> Element {
 }
 
 /// The input & shortcuts tutorial — keybind profiles by category.
+/// `category` (query param) preselects a category in the sidebar.
 #[component]
-fn InputPage() -> Element {
+fn InputPage(category: String) -> Element {
     rsx! {
         document::Title { "Input & Shortcuts — FastTrackStudio" }
         document::Meta { name: "description", content: "Every FastTrackStudio shortcut, organized by category — transport, navigation, editing and more — across the FastTrackStudio, Logic, Pro Tools, REAPER and Ableton profiles." }
 
-        components::InputTutorial {}
+        components::InputTutorial { initial_category: category }
+    }
+}
+
+/// `/guides` — the guides landing page.
+#[component]
+fn GuidesPage() -> Element {
+    rsx! {
+        document::Title { "Guides — FastTrackStudio" }
+        document::Meta { name: "description", content: "Hands-on walkthroughs of FastTrackStudio workflows — starting with driving REAPER through the FastTrackStudio input layer." }
+
+        guides::GuidesLanding {}
+    }
+}
+
+/// `/guides/reaper` — the REAPER workflow guide.
+#[component]
+fn ReaperGuidePage() -> Element {
+    rsx! {
+        document::Title { "REAPER Guide — FastTrackStudio" }
+        document::Meta { name: "description", content: "Drive REAPER the FastTrackStudio way — the input layer, transport essentials, and track workflows, with the real shortcuts from the fasttrackstudio profile." }
+
+        guides::GuideView { guide: guides::reaper_guide() }
     }
 }
 

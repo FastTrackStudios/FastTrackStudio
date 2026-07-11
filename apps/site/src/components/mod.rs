@@ -3,8 +3,9 @@
 //! Reusable UI components for the FastTrackStudio web app.
 
 mod chart_editor;
-mod input_tutorial;
+pub(crate) mod input_tutorial;
 mod chart_renderer;
+mod keyboard;
 mod live_editor;
 
 pub use input_tutorial::InputTutorial;

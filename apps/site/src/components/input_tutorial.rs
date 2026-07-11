@@ -18,10 +18,12 @@ use input_config_proto::{
     KeybindContext, KeybindDef, ProfileConfig, SectionConfig, WheelBindDef, kebab_to_title,
 };
 
-mod embedded {
+pub(crate) mod embedded {
     include!(concat!(env!("OUT_DIR"), "/input_profiles.rs"));
 }
 use embedded::{EmbeddedProfile, PROFILES};
+
+use super::keyboard::{KeyFilter, KeyboardMap, binding_matches};
 
 /// A parsed category (one section file) of the active profile.
 struct Category {
@@ -74,12 +76,12 @@ fn load_categories(profile: &EmbeddedProfile) -> (String, Vec<Category>) {
 
 /// Split a key-sequence string (`"g g"`, `"<C-S-space>"`, `"r"`) into
 /// display tokens, one per pressed chord.
-fn pretty_keys(keys: &str) -> Vec<Vec<String>> {
+pub(crate) fn pretty_keys(keys: &str) -> Vec<Vec<String>> {
     keys.split_whitespace().map(pretty_chord).collect()
 }
 
 /// `"<C-S-space>"` → ["Ctrl", "Shift", "Space"]; `"r"` → ["R"].
-fn pretty_chord(token: &str) -> Vec<String> {
+pub(crate) fn pretty_chord(token: &str) -> Vec<String> {
     let inner = token
         .strip_prefix('<')
         .and_then(|t| t.strip_suffix('>'))
@@ -137,11 +139,13 @@ fn context_label(ctx: Option<KeybindContext>) -> Option<&'static str> {
     }
 }
 
-/// The /input tutorial page.
+/// The /input tutorial page. `initial_category` preselects a category
+/// sidebar entry (used by guide deep-links like `/input?category=transport`).
 #[component]
-pub fn InputTutorial() -> Element {
+pub fn InputTutorial(#[props(default)] initial_category: String) -> Element {
     let mut active_profile = use_signal(|| "fasttrackstudio".to_string());
-    let mut active_category = use_signal(String::new);
+    let mut active_category = use_signal(|| initial_category.clone());
+    let mut key_filter = use_signal(|| None::<KeyFilter>);
 
     let profile = PROFILES
         .iter()
@@ -152,12 +156,30 @@ pub fn InputTutorial() -> Element {
     };
     let (display_name, categories) = load_categories(profile);
 
-    let current = active_category();
+    // Fall back to "All" when the selected category doesn't exist in this
+    // profile (e.g. a stale deep-link query).
+    let mut current = active_category();
+    if !current.is_empty() && !categories.iter().any(|c| c.id == current) {
+        current = String::new();
+    }
     let shown: Vec<&Category> = if current.is_empty() {
         categories.iter().collect()
     } else {
         categories.iter().filter(|c| c.id == current).collect()
     };
+
+    // Everything the keyboard map highlights: the bindings of the active
+    // selection, tagged with their category title.
+    let keyboard_bindings: Vec<(String, KeybindDef)> = shown
+        .iter()
+        .flat_map(|c| {
+            c.config
+                .bindings()
+                .iter()
+                .map(|b| (c.title.clone(), b.clone()))
+        })
+        .collect();
+    let filter = key_filter();
 
     rsx! {
         div { class: "max-w-7xl mx-auto px-4 lg:px-8 py-10",
@@ -191,9 +213,27 @@ pub fn InputTutorial() -> Element {
                             move |_| {
                                 active_profile.set(id.clone());
                                 active_category.set(String::new());
+                                key_filter.set(None);
                             }
                         },
                         {kebab_to_title(p.id)}
+                    }
+                }
+            }
+
+            // Interactive keyboard map — highlights the keys bound in the
+            // active profile + category selection.
+            KeyboardMap { bindings: keyboard_bindings, filter: key_filter }
+
+            // Active key filter chip (set by clicking a key above).
+            if let Some(f) = filter.clone() {
+                div { class: "flex items-center gap-2 mb-6 -mt-4",
+                    span { class: "text-sm text-muted-foreground", "Filtered by" }
+                    button {
+                        class: "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-primary/20 border border-primary/40 text-foreground hover:bg-primary/30 transition-colors",
+                        onclick: move |_| key_filter.set(None),
+                        "{f.label()}"
+                        span { class: "text-muted-foreground", "\u{00D7}" }
                     }
                 }
             }
@@ -209,7 +249,10 @@ pub fn InputTutorial() -> Element {
                         } else {
                             "block w-full text-left px-2 py-1 rounded text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30"
                         },
-                        onclick: move |_| active_category.set(String::new()),
+                        onclick: move |_| {
+                            active_category.set(String::new());
+                            key_filter.set(None);
+                        },
                         "All"
                     }
                     for c in categories.iter() {
@@ -222,7 +265,10 @@ pub fn InputTutorial() -> Element {
                             },
                             onclick: {
                                 let id = c.id.clone();
-                                move |_| active_category.set(id.clone())
+                                move |_| {
+                                    active_category.set(id.clone());
+                                    key_filter.set(None);
+                                }
                             },
                             "{c.title}"
                             span { class: "ml-1 text-xs text-muted-foreground/70",
@@ -235,7 +281,13 @@ pub fn InputTutorial() -> Element {
                 // Category sections
                 div { class: "flex-1 min-w-0 space-y-10",
                     for c in shown {
-                        CategorySection { key: "{profile.id}/{c.id}", category_id: c.id.clone(), title: c.title.clone(), config: c.config.clone() }
+                        CategorySection {
+                            key: "{profile.id}/{c.id}",
+                            category_id: c.id.clone(),
+                            title: c.title.clone(),
+                            config: c.config.clone(),
+                            filter: filter.clone(),
+                        }
                     }
                 }
             }
@@ -244,21 +296,46 @@ pub fn InputTutorial() -> Element {
 }
 
 #[component]
-fn CategorySection(category_id: String, title: String, config: SectionConfig) -> Element {
+fn CategorySection(
+    category_id: String,
+    title: String,
+    config: SectionConfig,
+    #[props(default)] filter: Option<KeyFilter>,
+) -> Element {
+    // With a key filter active, show only the bindings whose first chord
+    // lands on the filtered key (wheel bindings are keyboard-less — hide).
+    let bindings: Vec<KeybindDef> = config
+        .bindings()
+        .iter()
+        .filter(|b| {
+            filter
+                .as_ref()
+                .is_none_or(|f| binding_matches(&b.keys, f))
+        })
+        .cloned()
+        .collect();
+    let show_wheel = filter.is_none();
+
+    if bindings.is_empty() && (!show_wheel || config.wheel().is_empty()) {
+        return rsx! {};
+    }
+
     rsx! {
         section { id: "{category_id}",
             h2 { class: "text-xl font-semibold mb-3 flex items-center gap-2",
                 "{title}"
                 span { class: "text-xs font-normal text-muted-foreground",
-                    "{config.bindings().len()} shortcuts"
+                    "{bindings.len()} shortcuts"
                 }
             }
             div { class: "rounded-xl border border-border/60 bg-card/40 overflow-hidden",
-                for (i, b) in config.bindings().iter().enumerate() {
+                for (i, b) in bindings.iter().enumerate() {
                     BindingRow { key: "{i}", binding: b.clone(), zebra: i % 2 == 1 }
                 }
-                for (i, w) in config.wheel().iter().enumerate() {
-                    WheelRow { key: "w{i}", bind: w.clone(), zebra: (config.bindings().len() + i) % 2 == 1 }
+                if show_wheel {
+                    for (i, w) in config.wheel().iter().enumerate() {
+                        WheelRow { key: "w{i}", bind: w.clone(), zebra: (bindings.len() + i) % 2 == 1 }
+                    }
                 }
             }
         }
