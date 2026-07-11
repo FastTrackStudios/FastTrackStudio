@@ -1,17 +1,12 @@
 # FastTrackStudio CI — Forgejo Actions (Codeberg)
 #
-# Runner reality check (2026-07, codeberg.org/actions/meta):
-#   Codeberg's shared runners are codeberg-tiny (1cpu/2GB/2min),
-#   codeberg-small (2cpu/4GB/5min) and codeberg-medium (4cpu/8GB/10min).
-#   A ~160-crate workspace does not cold-build inside 10 minutes, so the
-#   shared runners only carry the cheap, honest stage below. Every
-#   compile-heavy stage lives in ci-heavy.yml and runs on the SELF-HOSTED
-#   org runner "THEBATTLESHIP" (registered org-wide to FastTrackStudios,
-#   NixOS service gitea-runner-codeberg-org, defined in ~/.flake
-#   hosts/THEBATTLESHIP). Its labels:
-#     nix-host      — HOST mode, user gitea-runner, nix on PATH
-#     docker        — podman container (node:lts, /nix/store ro)
-#     ubuntu-latest — podman container (catthehacker act image)
+# The cheap early gate. It USED to target codeberg's shared runners
+# (codeberg-medium) — but no shared runner ever picked the job up, so
+# every run sat "waiting" forever. It now runs on the same self-hosted
+# org runner as ci-heavy ("THEBATTLESHIP", NixOS service
+# gitea-runner-codeberg-org, defined in ~/.flake hosts/THEBATTLESHIP;
+# labels: nix-host = HOST mode with nix on PATH, docker / ubuntu-latest
+# = podman containers). With warm caches this gate is seconds.
 
 name: ci
 
@@ -20,16 +15,42 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TARGET_DIR: /var/lib/gitea-runner/codeberg-org/fts-ci/target
+  CARGO_HOME: /var/lib/gitea-runner/codeberg-org/fts-ci/cargo-home
+  FTS_LOCAL_REPO: /run/media/Development/FastTrackStudio
+
 jobs:
   # Workspace manifest + lockfile gate: every member manifest parses,
   # the dependency graph resolves, and Cargo.lock is in sync (--locked
-  # fails on drift). No compilation — fits the shared runner's cap.
+  # fails on drift). No compilation — seconds on the warm runner.
   # (cargo fmt --check is NOT here: the tree is not fmt-clean today.)
   manifest:
-    runs-on: codeberg-medium
-    container:
-      image: docker.io/library/rust:1.90-bookworm
+    runs-on: nix-host
     steps:
-      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: Checkout (local-first)
+        run: |
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          branch="${GITHUB_REF_NAME:-main}"
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$FTS_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
+          if [ -n "$FTS_LOCAL_REPO" ] && [ -d "$FTS_LOCAL_REPO/.git" ] \
+              && [ -n "$sha" ] \
+              && git -C "$FTS_LOCAL_REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            git clone --quiet "$FTS_LOCAL_REPO" .
+            git checkout --quiet --detach "$sha"
+          else
+            git clone --depth 1 --no-tags --branch "$branch" "$url" .
+            if [ -n "$sha" ] && [ "$(git rev-parse HEAD)" != "$sha" ]; then
+              git fetch --depth 1 --no-tags origin "$sha" && git checkout --detach "$sha"
+            fi
+          fi
       - name: cargo metadata --locked (manifest + lockfile sanity)
-        run: cargo metadata --locked --format-version 1 > /dev/null
+        run: nix develop -c cargo metadata --locked --format-version 1 > /dev/null
