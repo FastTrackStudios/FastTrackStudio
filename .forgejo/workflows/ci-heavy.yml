@@ -93,8 +93,20 @@ jobs:
           fi
           echo "checked out $(git rev-parse --short HEAD)"
 
+      # CARGO_HOME's git/ + registry/ are SEEDED from the dev user's
+      # ~/.cargo (one-time rsync, chown gitea-runner) — this host's
+      # egress to github.com is unreliable, and a fresh CARGO_HOME
+      # would have to re-fetch every locked git dep from there. With
+      # the seeded git db, `--locked` resolution needs no github at
+      # all. If this cache is ever wiped, re-seed it:
+      #   sudo rsync -a ~cody/.cargo/{git,registry} $FTS_CI/cargo-home/
+      #   sudo chown -R gitea-runner:gitea-runner $FTS_CI/cargo-home
       - name: Prepare persistent caches
-        run: mkdir -p "$CARGO_TARGET_DIR" "$CARGO_HOME"
+        run: |
+          mkdir -p "$CARGO_TARGET_DIR" "$CARGO_HOME"
+          if [ ! -d "$CARGO_HOME/git/db" ]; then
+            echo "::warning::CARGO_HOME git db is empty — locked git deps will fetch from the network (github egress is unreliable on this host; re-seed from ~cody/.cargo)"
+          fi
 
       - name: cargo check --workspace
         run: nix develop -c cargo check --workspace --exclude vox-discover
