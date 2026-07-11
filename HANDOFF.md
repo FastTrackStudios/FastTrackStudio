@@ -242,10 +242,29 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    (`rsync -a ~cody/.cargo/git/db/ .../fts-ci/cargo-home/git/db/`).
    Persistent caches (gitea-runner-owned, NEVER the dev tree's target/):
    /var/lib/gitea-runner/codeberg-org/fts-ci/{target,cargo-home,reaper,
-   reaper-rig}. daw::test::runner now honors CARGO_TARGET_DIR when
-   locating built .so artifacts (was hardcoded <workspace>/target).
+   reaper-rig,devshell}. daw::test::runner now honors CARGO_TARGET_DIR
+   when locating built .so artifacts (was hardcoded <workspace>/target).
    REAPER's license forbids redistribution, so the REAPER stage can
    only ever run self-hosted.
+   **FULLY GREEN as of 2eb89862** (run 10: build-and-test 5m, reaper
+   job 8m30s — daw suite 3m05s, extension suite 5m23s). Three
+   environment classes were fixed to get there, all of the
+   works-on-the-dev-box-only kind: (a) fresh CARGO_HOME + dead github
+   egress → seeded git db (above); (b) flake's
+   AR_wasm32_unknown_unknown pointed at bintools-WRAPPER/bin/llvm-ar,
+   which doesn't exist (wrapper exposes unprefixed `ar` only; a warm
+   dev target/ never re-ran ring's build script so it never bit) →
+   bintools-unwrapped, plus ci-heavy gcroots the dev shell
+   (`nix develop --profile $FTS_CI/devshell`) because the wrapper path
+   had ALSO been GC'd; (c) cross-user /tmp collisions — the harness's
+   /tmp/fts-daw-reaper.log and /tmp/reaper-tests/ created by dev runs
+   are unwritable for gitea-runner → REAPER log lives in the rig and
+   per-test logs in log_dir() (FTS_TEST_LOG_DIR →
+   <FTS_REAPER_RESOURCES>/test-logs → legacy /tmp path).
+   Reading step logs on codeberg (REST API has none): POST
+   /<owner>/<repo>/actions/runs/<run_number>/jobs/<idx>/attempt/1
+   with {"logCursors":[{"step":N,"cursor":null,"expanded":true}]}
+   (token auth works; empty logCursors returns the step list).
 
 ## Gotchas that will bite again
 
