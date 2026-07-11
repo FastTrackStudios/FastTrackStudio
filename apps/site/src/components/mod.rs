@@ -3,6 +3,7 @@
 //! Reusable UI components for the FastTrackStudio web app.
 
 mod chart_editor;
+pub(crate) mod colors;
 pub(crate) mod input_tutorial;
 mod chart_renderer;
 mod keyboard;

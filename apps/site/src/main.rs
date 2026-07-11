@@ -30,6 +30,8 @@ pub enum Route {
     GuidesPage {},
     #[route("/guides/reaper")]
     ReaperGuidePage {},
+    #[route("/guides/reaper/:section")]
+    ReaperGuideSectionPage { section: String },
     #[route("/test/render")]
     TestRender {},
 }
@@ -182,7 +184,7 @@ fn Layout() -> Element {
                         // Guides tab
                         Link {
                             to: Route::GuidesPage {},
-                            class: if matches!(route, Route::GuidesPage {} | Route::ReaperGuidePage {}) {
+                            class: if matches!(route, Route::GuidesPage {} | Route::ReaperGuidePage {} | Route::ReaperGuideSectionPage { .. }) {
                                 "px-3 py-1.5 rounded-lg text-sm font-medium text-foreground bg-accent/60 transition-colors"
                             } else {
                                 "px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
@@ -430,14 +432,25 @@ fn GuidesPage() -> Element {
     }
 }
 
-/// `/guides/reaper` — the REAPER workflow guide.
+/// `/guides/reaper` — the REAPER guide overview (intro + section cards).
 #[component]
 fn ReaperGuidePage() -> Element {
     rsx! {
         document::Title { "REAPER Guide — FastTrackStudio" }
         document::Meta { name: "description", content: "Drive REAPER the FastTrackStudio way — the input layer, transport essentials, and track workflows, with the real shortcuts from the fasttrackstudio profile." }
 
-        guides::GuideView { guide: guides::reaper_guide() }
+        guides::GuideOverviewView { guide: guides::reaper_guide() }
+    }
+}
+
+/// `/guides/reaper/:section` — one REAPER guide section per page.
+#[component]
+fn ReaperGuideSectionPage(section: String) -> Element {
+    rsx! {
+        document::Title { "REAPER Guide — FastTrackStudio" }
+        document::Meta { name: "description", content: "Drive REAPER the FastTrackStudio way — the input layer, transport essentials, and track workflows, with the real shortcuts from the fasttrackstudio profile." }
+
+        guides::GuideSectionPageView { guide: guides::reaper_guide(), section }
     }
 }
 

@@ -16,8 +16,9 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use input_config_proto::KeybindDef;
+use input_config_proto::{KeybindDef, kebab_to_title};
 
+use super::colors::category_color;
 use super::input_tutorial::pretty_keys;
 
 // ---------------------------------------------------------------------------
@@ -293,13 +294,21 @@ fn layout() -> Vec<Vec<KeySpec>> {
 // Component
 // ---------------------------------------------------------------------------
 
-/// One binding entry fed to the keyboard: (category title, binding).
+/// One binding entry fed to the keyboard: (category ID — the section file
+/// stem, e.g. `"transport"` — and the binding). The category id drives the
+/// key's highlight color via [`category_color`].
 pub type KeyboardBinding = (String, KeybindDef);
 
 /// The interactive keyboard map. `filter` is shared with the page so that
 /// clicking a key filters the binding list rendered below the keyboard.
+/// `on_select_category` is fired by the legend row (color dot + name)
+/// under the board in the "All" view.
 #[component]
-pub fn KeyboardMap(bindings: Vec<KeyboardBinding>, filter: Signal<Option<KeyFilter>>) -> Element {
+pub fn KeyboardMap(
+    bindings: Vec<KeyboardBinding>,
+    filter: Signal<Option<KeyFilter>>,
+    on_select_category: Option<EventHandler<String>>,
+) -> Element {
     let mut mods = use_signal(Mods::default);
     let mut hovered = use_signal(|| None::<&'static str>);
 
@@ -308,6 +317,14 @@ pub fn KeyboardMap(bindings: Vec<KeyboardBinding>, filter: Signal<Option<KeyFilt
     for (i, (_, b)) in bindings.iter().enumerate() {
         if let Some(chord) = first_chord(&b.keys) {
             lookup.entry(chord).or_default().push(i);
+        }
+    }
+
+    // Distinct categories in feed order — drives the legend row.
+    let mut categories: Vec<String> = Vec::new();
+    for (c, _) in &bindings {
+        if !categories.contains(c) {
+            categories.push(c.clone());
         }
     }
 
@@ -327,17 +344,42 @@ pub fn KeyboardMap(bindings: Vec<KeyboardBinding>, filter: Signal<Option<KeyFilt
             .as_ref()
             .is_some_and(|f| f.mods == m && f.key == id);
 
+        // Dominant category = the one with the most bindings on this key
+        // (ties break on feed order, which follows the profile's section
+        // order). Its color paints the key.
+        let dominant: Option<&str> = {
+            let mut counts: Vec<(&str, usize)> = Vec::new();
+            for &i in &binds {
+                let cat = bindings[i].0.as_str();
+                match counts.iter_mut().find(|(c, _)| *c == cat) {
+                    Some((_, n)) => *n += 1,
+                    None => counts.push((cat, 1)),
+                }
+            }
+            counts.iter().max_by_key(|(_, n)| *n).map(|(c, _)| *c)
+        };
+        let accent = dominant.map(category_color);
+
         let base = "relative w-full h-9 sm:h-10 rounded-md border text-[0.65rem] sm:text-xs font-medium flex flex-col items-center justify-center transition-colors select-none";
-        let tone = if is_filtered {
-            "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/30"
-        } else if count >= 3 {
-            "bg-primary/60 border-primary/70 text-foreground cursor-pointer hover:bg-primary/70"
-        } else if count == 2 {
-            "bg-primary/40 border-primary/60 text-foreground cursor-pointer hover:bg-primary/55"
-        } else if count == 1 {
-            "bg-primary/20 border-primary/40 text-foreground cursor-pointer hover:bg-primary/35"
-        } else {
-            "bg-muted/20 border-border/40 text-muted-foreground/40"
+        // Category-colored fills: intensity steps with binding count.
+        let (tone, color_style) = match (is_filtered, accent, count) {
+            (true, Some(c), _) => (
+                "shadow-lg cursor-pointer",
+                format!("background-color: {c}; border-color: {c}; color: #0c0a12;"),
+            ),
+            (false, Some(c), n) if n >= 3 => (
+                "text-foreground cursor-pointer hover:brightness-125",
+                format!("background-color: {c}59; border-color: {c}99;"),
+            ),
+            (false, Some(c), 2) => (
+                "text-foreground cursor-pointer hover:brightness-125",
+                format!("background-color: {c}40; border-color: {c}80;"),
+            ),
+            (false, Some(c), _) => (
+                "text-foreground cursor-pointer hover:brightness-125",
+                format!("background-color: {c}26; border-color: {c}59;"),
+            ),
+            _ => ("bg-muted/20 border-border/40 text-muted-foreground/40", String::new()),
         };
 
         // With Shift toggled, show the shifted legend as the primary one.
@@ -357,6 +399,7 @@ pub fn KeyboardMap(bindings: Vec<KeyboardBinding>, filter: Signal<Option<KeyFilt
                 style: "{style}",
                 button {
                     class: "{base} {tone}",
+                    style: "{color_style}",
                     onmouseenter: move |_| hovered.set(Some(id)),
                     onmouseleave: move |_| hovered.set(None),
                     onclick: move |_| {
@@ -504,6 +547,35 @@ pub fn KeyboardMap(bindings: Vec<KeyboardBinding>, filter: Signal<Option<KeyFilt
                     }
                 }
             }
+
+            // Legend — one dot per category in the feed ("All" view only;
+            // a single selected category paints the whole board anyway).
+            if categories.len() > 1 {
+                div { class: "flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-3 pt-3 border-t border-border/40",
+                    for cat in categories.iter() {
+                        {
+                            let color = category_color(cat);
+                            let id = cat.clone();
+                            rsx! {
+                                button {
+                                    key: "{cat}",
+                                    class: "inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer",
+                                    onclick: move |_| {
+                                        if let Some(cb) = &on_select_category {
+                                            cb.call(id.clone());
+                                        }
+                                    },
+                                    span {
+                                        class: "inline-block w-2 h-2 rounded-full",
+                                        style: "background-color: {color};",
+                                    }
+                                    {kebab_to_title(cat)}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -537,7 +609,20 @@ fn KeyTooltip(entries: Vec<KeyboardBinding>) -> Element {
                         div { class: "text-xs text-foreground leading-snug",
                             {b.desc.clone().unwrap_or_default()}
                         }
-                        div { class: "text-[0.65rem] text-muted-foreground", "{category}" }
+                        {
+                            let color = category_color(category);
+                            rsx! {
+                                span {
+                                    class: "inline-flex items-center gap-1 mt-0.5 px-1.5 py-px rounded-full text-[0.6rem]",
+                                    style: "color: {color}; background-color: {color}1a;",
+                                    span {
+                                        class: "inline-block w-1.5 h-1.5 rounded-full",
+                                        style: "background-color: {color};",
+                                    }
+                                    {kebab_to_title(category)}
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -23,6 +23,7 @@ pub(crate) mod embedded {
 }
 use embedded::{EmbeddedProfile, PROFILES};
 
+use super::colors::category_color;
 use super::keyboard::{KeyFilter, KeyboardMap, binding_matches};
 
 /// A parsed category (one section file) of the active profile.
@@ -169,14 +170,14 @@ pub fn InputTutorial(#[props(default)] initial_category: String) -> Element {
     };
 
     // Everything the keyboard map highlights: the bindings of the active
-    // selection, tagged with their category title.
+    // selection, tagged with their category id (drives the key colors).
     let keyboard_bindings: Vec<(String, KeybindDef)> = shown
         .iter()
         .flat_map(|c| {
             c.config
                 .bindings()
                 .iter()
-                .map(|b| (c.title.clone(), b.clone()))
+                .map(|b| (c.id.clone(), b.clone()))
         })
         .collect();
     let filter = key_filter();
@@ -222,8 +223,15 @@ pub fn InputTutorial(#[props(default)] initial_category: String) -> Element {
             }
 
             // Interactive keyboard map — highlights the keys bound in the
-            // active profile + category selection.
-            KeyboardMap { bindings: keyboard_bindings, filter: key_filter }
+            // active profile + category selection, colored per category.
+            KeyboardMap {
+                bindings: keyboard_bindings,
+                filter: key_filter,
+                on_select_category: move |id: String| {
+                    active_category.set(id);
+                    key_filter.set(None);
+                },
+            }
 
             // Active key filter chip (set by clicking a key above).
             if let Some(f) = filter.clone() {
@@ -259,9 +267,9 @@ pub fn InputTutorial(#[props(default)] initial_category: String) -> Element {
                         button {
                             key: "{c.id}",
                             class: if current == c.id {
-                                "block w-full text-left px-2 py-1 rounded text-sm bg-accent/60 text-foreground"
+                                "flex w-full items-center text-left px-2 py-1 rounded text-sm bg-accent/60 text-foreground"
                             } else {
-                                "block w-full text-left px-2 py-1 rounded text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                                "flex w-full items-center text-left px-2 py-1 rounded text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30"
                             },
                             onclick: {
                                 let id = c.id.clone();
@@ -270,6 +278,10 @@ pub fn InputTutorial(#[props(default)] initial_category: String) -> Element {
                                     key_filter.set(None);
                                 }
                             },
+                            span {
+                                class: "inline-block w-2 h-2 rounded-full mr-1.5 shrink-0",
+                                style: "background-color: {category_color(&c.id)};",
+                            }
                             "{c.title}"
                             span { class: "ml-1 text-xs text-muted-foreground/70",
                                 "{c.config.bindings().len() + c.config.wheel().len()}"
@@ -320,9 +332,15 @@ fn CategorySection(
         return rsx! {};
     }
 
+    let accent = category_color(&category_id);
+
     rsx! {
         section { id: "{category_id}",
             h2 { class: "text-xl font-semibold mb-3 flex items-center gap-2",
+                span {
+                    class: "inline-block w-2.5 h-2.5 rounded-full shrink-0",
+                    style: "background-color: {accent};",
+                }
                 "{title}"
                 span { class: "text-xs font-normal text-muted-foreground",
                     "{bindings.len()} shortcuts"
