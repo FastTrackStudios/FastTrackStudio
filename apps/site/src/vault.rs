@@ -645,6 +645,59 @@ mod tests {
         );
     }
 
+    /// The ported Keyflow guide: folder note + 10 chapters, sane
+    /// frontmatter conversion (title, kind: concept, numeric order
+    /// from the docs-site weights), and its ```kf fences intact.
+    #[test]
+    fn keyflow_guide_ported() {
+        let notes = embedded_vault();
+        let keyflow: Vec<&VaultNote> = notes
+            .iter()
+            .filter(|n| n.path.starts_with("keyflow/"))
+            .collect();
+        assert_eq!(keyflow.len(), 11, "keyflow guide should be 11 notes");
+
+        assert!(
+            resolve_route(&notes, &["keyflow".into()]).is_some(),
+            "keyflow folder note missing"
+        );
+        assert!(
+            resolve_route(&notes, &["keyflow".into(), "chords".into()]).is_some(),
+            "/guides/keyflow/chords must resolve"
+        );
+
+        let mut orders = Vec::new();
+        for n in &keyflow {
+            assert_eq!(
+                fm_field(&n.content, "kind").as_deref(),
+                Some("concept"),
+                "{}: keyflow notes are concept notes",
+                n.path
+            );
+            let order: u32 = fm_field(&n.content, "order")
+                .unwrap_or_else(|| panic!("{}: missing order", n.path))
+                .parse()
+                .unwrap_or_else(|_| panic!("{}: non-numeric order", n.path));
+            orders.push(order);
+        }
+        orders.sort_unstable();
+        assert_eq!(
+            orders,
+            (0..=10).collect::<Vec<u32>>(),
+            "chapter order should be the contiguous docs-site weights"
+        );
+
+        // The engraved-chart fences survived the conversion.
+        let chords = keyflow
+            .iter()
+            .find(|n| n.path == "keyflow/chords.md")
+            .expect("chords chapter");
+        assert!(
+            chords.content.contains("```kf\nCmaj7 | F#m7b5 | Bbmaj9 | G7b9\n```"),
+            "chords chapter lost its kf fence"
+        );
+    }
+
     #[test]
     fn every_wikilink_resolves() {
         let notes = embedded_vault();

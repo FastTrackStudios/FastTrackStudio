@@ -11,8 +11,9 @@ Hands-on walkthroughs of FastTrackStudio workflows — the narrative companion t
 ## Available guides
 
 - [[reaper|REAPER Guide]] — drive REAPER the FastTrackStudio way: the input layer, transport essentials, track workflows, and Record-mode tracking.
+- [[keyflow|Keyflow Guide]] — learn the `.kf` chart format one concept at a time: structure, sections, chords, rhythm, melody, lyrics, and more — with charts engraved inline.
 
-More are coming: Session setlists, the Signal rig, and Keyflow charting are next.
+More are coming: Session setlists and the Signal rig are next.
 
 ## How to read these
 
