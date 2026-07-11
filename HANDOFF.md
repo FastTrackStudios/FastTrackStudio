@@ -371,6 +371,29 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    old checkout at /run/media/Development/Task — migrate the org data
    dir when switching daily driving to the monorepo.
 
+22. **DEPLOYS LIVE (2026-07-11)**: fasttrackstudio.app + Task deploy
+   from this repo via `.forgejo/workflows/deploy.yml` — CHANGE-GATED
+   (a push only deploys an app whose input paths changed; dispatch can
+   force). Chain: root-flake OCI images (task-server/task-web/
+   task-ui-lab/fts-site, pure-nix streamLayeredImage) → skopeo → the
+   in-cluster registry (10.10.10.1:30050) → argocd-image-updater
+   (digest on :latest) rolls pods → verify-live requires the public
+   URL to serve the pushed sha. The gitops control plane is
+   ~/.starcommand → FastTrackStudios/starcommand.git gitops/prod
+   (NOT ~/.flake/k8s — that parallel tree is inert; my edits there
+   were reverted). Both ArgoCD Applications watch THIS repo's charts
+   (apps/task/deploy/chart/task, apps/site/deploy/chart/fts-site).
+   HARD-WON RULES: (a) the cluster's Ingress objects are routing-INERT
+   — Caddy is the ingress and its routes are declared in nix
+   (`starcommand.cluster.routes` in the service module; Ingresses only
+   feed external-dns); (b) ArgoCD refuses a repo containing
+   out-of-bounds symlinks — never commit /nix/store links (two were
+   removed from features/fx/eq/eq-dsp); (c) image-updater write-back
+   puts the FULL registry path in image.repository — charts must use
+   it verbatim when it contains "/" (both charts do); (d) the dead
+   Codys-Wright/baseview.git lock pin is vendored around in the flake
+   via the fork network — re-home it. Monorepo main pushes BOTH
+   :latest and :dev channels until a dev branch exists.
 ## Gotchas that will bite again
 
 - Dead-repo `[patch]` tables only resolve with a cached git db /
