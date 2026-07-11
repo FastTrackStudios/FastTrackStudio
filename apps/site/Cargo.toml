@@ -25,9 +25,9 @@ keyflow = { workspace = true, features = ["engraver", "text", "highlighting"] }
 
 # Live contenteditable editor + keyflow language bindings (homepage demo).
 # External repo — kept as a git dep; NOT an intra-tree crate.
-editor = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
-editor-keyflow = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
-editor-keyflow-lang = { git = "https://codeberg.org/FastTrackStudios/Editor.git", branch = "main" }
+editor = { workspace = true }
+editor-keyflow = { workspace = true }
+editor-keyflow-lang = { workspace = true }
 
 # FTS design system (components, layout, typography, theme tokens)
 fts-ui = { workspace = true }

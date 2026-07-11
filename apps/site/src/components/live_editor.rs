@@ -209,7 +209,7 @@ pub fn LiveEditor() -> Element {
                         Editor {
                             state,
                             keymap: keymap.clone(),
-                            decorations: keyflow_decorations as editor_view::DecorationSource,
+                            decorations: editor_view::DecorationSource::ptr(keyflow_decorations),
                             hover: keyflow_hover as editor::HoverSource,
                             vim: Some(vim),
                             slash: Some(slash),

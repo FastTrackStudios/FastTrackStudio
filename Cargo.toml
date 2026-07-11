@@ -72,6 +72,18 @@ members = [
     "crates/midicore/midicore-midir",
     "crates/input/actions-proto",
     "crates/input/input-config-proto",
+    "libs/editor/crates/editor",
+    "libs/editor/crates/editor-crdt",
+    "libs/editor/crates/editor-keyflow",
+    "libs/editor/crates/editor-keyflow-lang",
+    "libs/editor/crates/editor-lsp",
+    "libs/editor/crates/editor-mermaid",
+    "libs/editor/crates/editor-state",
+    "libs/editor/crates/editor-syntax",
+    "libs/editor/crates/editor-typst",
+    "libs/editor/crates/editor-view",
+    "libs/editor/crates/editor-vim",
+    "libs/editor/examples/playground",
     "crates/input/actions-registry",
     "crates/input/actions-keybindings",
     "crates/input/actions-standalone",
@@ -287,6 +299,23 @@ midicore-proto = { path = "crates/midicore/midicore-proto" }
 midicore-midir = { path = "crates/midicore/midicore-midir" }
 actions-proto = { path = "crates/input/actions-proto" }
 input-config-proto = { path = "crates/input/input-config-proto" }
+# Editor (subtree-imported from FastTrackStudios/Editor — the text/
+# markdown/keyflow editor stack used by apps/site and Task)
+editor = { path = "libs/editor/crates/editor" }
+editor-crdt = { path = "libs/editor/crates/editor-crdt" }
+editor-keyflow = { path = "libs/editor/crates/editor-keyflow" }
+editor-keyflow-lang = { path = "libs/editor/crates/editor-keyflow-lang" }
+editor-lsp = { path = "libs/editor/crates/editor-lsp" }
+editor-mermaid = { path = "libs/editor/crates/editor-mermaid" }
+editor-state = { path = "libs/editor/crates/editor-state" }
+editor-syntax = { path = "libs/editor/crates/editor-syntax" }
+editor-typst = { path = "libs/editor/crates/editor-typst" }
+editor-view = { path = "libs/editor/crates/editor-view" }
+editor-vim = { path = "libs/editor/crates/editor-vim" }
+arborium = { version = "2.16.0", default-features = false }
+arborium-theme = "2.16.0"
+arborium-tree-sitter = "2.16.0"
+ropey = "1.6"
 actions-registry = { path = "crates/input/actions-registry" }
 actions-keybindings = { path = "crates/input/actions-keybindings" }
 actions-standalone = { path = "crates/input/actions-standalone" }
@@ -651,21 +680,6 @@ cpal = "0.18"
 # thing that still referenced the dead daw.git repo) is subtree-imported at
 # features/dynamic-template/ and consumes the in-tree daw crates directly.
 
-# keyflow.git: Editor.git (and older git-dep graphs) reference keyflow.git;
-# fold those onto this workspace's crates so one keyflow exists graph-wide.
-# (Carried over from the dissolved keyflow workspace's self-patch.)
-[patch."https://codeberg.org/FastTrackStudios/keyflow.git"]
-keyflow = { path = "crates/keyflow/keyflow" }
-keyflow-proto = { path = "crates/keyflow/keyflow-proto" }
-keyflow-text = { path = "crates/keyflow/keyflow-text" }
-keyflow-midi = { path = "crates/keyflow/keyflow-midi" }
-keyflow-syntax = { path = "crates/keyflow/keyflow-syntax" }
-keyflow-chordpro = { path = "crates/keyflow/keyflow-chordpro" }
-keyflow-daw-analysis = { path = "crates/keyflow/keyflow-daw-analysis" }
-keyflow-ui = { path = "crates/keyflow/keyflow-ui" }
-engraver = { path = "features/engraver/engraver" }
-engraver-proto = { path = "features/engraver/proto" }
-
 # Some transitive deps still reference input_actions by its old github URL;
 # fold those onto the in-tree copy. (From the dissolved keyflow workspace.)
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
@@ -691,6 +705,9 @@ moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7
 # them, so serialized keybind configs (`keys "<C-s>"`) could not be
 # re-parsed. Drop the vendor once upstream fixes can_be_bare.
 styx-format = { path = "libs/vendor/styx-format" }
+# Editor's vendored mermaid-rs-renderer fork (web_time::Instant so the
+# layouter works on wasm32) — see libs/editor/vendor/.
+mermaid-rs-renderer = { path = "libs/editor/vendor/mermaid-rs-renderer" }
 moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
