@@ -105,8 +105,8 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    worked, but see apps/site notes if `stdarg.h not found` appears).
 7. **Architect wishlist** (framework now in-tree at libs/architect):
    parameterized `#[subscribe]` (daw streams currently filter
-   client-side by project); the `task` project should repoint its
-   architect dep to this repo's git URL.
+   client-side by project). (Task's architect git dep is GONE — Task
+   itself is in-tree now, see item 21.)
 8. **Legacy folder**: /run/media/Development/FastTrackStudio-legacy
    holds old checkouts + unrelated side projects (better-auth, sea-orm
    forks, etc.). Audit before deleting; nothing in-tree depends on it.
@@ -347,12 +347,36 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    config, tutorial pages driven by the same data; (5) import/adopt
    flow: hub profile → InputConfigService write into the local rig.
 
+21. **Task + Editor IMPORTED (2026-07-10, subtree, history preserved)**:
+   Editor lives at libs/editor (state/view/vim/syntax/typst/mermaid/
+   keyflow/keyflow-lang/crdt/lsp + playground); apps/site consumes it
+   as path deps (fixed for the newer DecorationSource API) and the
+   keyflow.git dead-patch chain is deleted. Task is dissolved into the
+   standard layout: apps/task/{cli,desktop,mobile,server,web} (+ the
+   product home: docs, deploy, skills, its .forgejo workflows PARKED
+   UNWIRED at apps/task/.forgejo), crates/task/{persistence-sqlite,
+   store-proto,ui,vim,xtask} (legacy excluded), features/task/* (~28
+   slices). Task's architect/Editor/keyflow git deps are workspace path
+   deps now; its seven [patch] tables dropped; root pins won everywhere
+   (facet 0.50-rc.5, vox rc.5, sea-orm crates.io) with small code ports
+   (FromVoxSession→FromVoxLane, lane_acceptor_fn, connect_lane).
+   Follow-ups: (a) wire Task's CI (container images, releases) into
+   root .forgejo/workflows with path filters — the parked workflows
+   reference the old repo; (b) task-app-web wasm needs the
+   getrandom wasm_js rustflags from apps/task/.cargo/config.toml wired
+   into a root .cargo/config.toml before that target joins CI; (c) the
+   external Task/Editor repos on codeberg are now MIRRORS — development
+   happens here; archive or set up subtree-push before they drift;
+   (d) Task's own working tools (task CLI, .beads) still point at the
+   old checkout at /run/media/Development/Task — migrate the org data
+   dir when switching daily driving to the monorepo.
+
 ## Gotchas that will bite again
 
 - Dead-repo `[patch]` tables only resolve with a cached git db /
   committed lockfile (cargo fetches patched sources on fresh resolve).
-  Keep `Cargo.lock` committed. Remaining such table: keyflow.git
-  (Editor.git references it).
+  Keep `Cargo.lock` committed. (The keyflow.git table died with the
+  Editor import — no dead-repo patch tables remain.)
 - `pkill -f <pattern>` kills your own shell if the pattern appears in
   the command line (exit 144). Use narrowed patterns — and note the
   engine process is now `fasttrackstudio --engine` (the old deploy was
