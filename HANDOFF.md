@@ -13,7 +13,7 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
   `fts-reaper` (main DAW for recording, resources `~/fasttrackstudio`,
   the real install), `fts-tracks` (live tracks playback, own resources
   `~/fts-tracks`), `fts-dev` (dev/testing copy, `~/fts-dev`, the
-  `just ext-install` target). The per-instrument REAPER signal rigs
+  `just reaper install` target). The per-instrument REAPER signal rigs
   (fts-keys/drums/bass/guitar/vocals) are GONE — instrument rigs come
   from the signal engine now. Same three everywhere: `daw_profiles()`
   in crates/daw/daw/src/cli/mod.rs (legacy ids fasttrackstudio /
@@ -208,8 +208,8 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    truncated asset silently, so verify sizes after upload.
 16. **fts-extensions vendoring — DONE + integration tests GREEN**:
    lives at apps/extensions/reaper-fts-extensions (cdylib
-   `reaper_fts_extensions.so`, `just ext-install` symlinks it into
-   ~/fts-dev/UserPlugins). `just reaper-integration-test` boots a
+   `reaper_fts_extensions.so`, `just reaper install` symlinks it into
+   ~/fts-dev/UserPlugins). `just reaper integration-test` boots a
    headless REAPER (Dummy audio) with the extension loaded and runs
    apps/extensions/reaper-fts-extensions/tests/extension_loads.rs —
    13/13 green (~11s): action-surface inventory, action-list presence,
@@ -226,7 +226,7 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    ActionRegistration methods were stubs since the architect::rpc
    port — execute_named_action / execute_command / execute_action /
    list_actions / set_toggle_state / unregister are now real.
-18. **daw REAPER suite — `just daw-reaper-test` GREEN (95 tests)**:
+18. **daw REAPER suite — `just reaper daw-test` GREEN (95 tests)**:
    daw-reaper-xtask (features/reaper/daw-reaper/xtask) builds an
    isolated rig at target/fts-reaper-test (only daw-bridge in
    UserPlugins), boots headless REAPER, runs
