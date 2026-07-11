@@ -19,7 +19,14 @@ spec:
     spec:
       containers:
         - name: site
+          {{- /* A repository containing "/" is used verbatim — that's what
+               argocd-image-updater writes back (full registry path); a bare
+               name gets image.registry prepended. */}}
+          {{- if contains "/" .Values.image.repository }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- else }}
           image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
