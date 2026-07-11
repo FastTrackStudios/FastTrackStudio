@@ -9,6 +9,20 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
 
 ## Live state on this machine
 
+- **REAPER rig layout (2026-07-10)**: `~/fts-dev` is the developer
+  REAPER copy for live iteration (launch.json, `just ext-install`
+  target); `~/fasttrackstudio` is the REAL install (canonical
+  resources, 1.3GB, what `daw::test::runner::fts_reaper_resources()`
+  and the `fts daw` profiles resolve). The old hidden paths are compat
+  SYMLINKS to these (`~/.fts-dev` → `~/fts-dev`,
+  `~/.config/FastTrackStudio/Reaper` → `~/fasttrackstudio`) — safe to
+  drop once nothing external references them.
+- **Network (fixed 2026-07-10)**: dhcpcd used to double-manage the 10G
+  Dante NIC (enp12s0) and install `default via 10.10.10.1` at metric
+  1003, beating the house LAN — that's what made github.com
+  unreachable. ~/.flake's network-10g fix (NM never-default + dhcpcd
+  denyinterfaces) is now ACTIVE via `just switch`; if github times out
+  again check `ip route show default` first.
 - The **live guitar rig** is a systemd user service (`signal-engine`,
   release build at ~/.local/lib/fts, deployed by `just rig-install`;
   logs: `journalctl --user -u signal-engine -f`). NOTE: after the
@@ -174,7 +188,7 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
 16. **fts-extensions vendoring — DONE + integration tests GREEN**:
    lives at apps/extensions/reaper-fts-extensions (cdylib
    `reaper_fts_extensions.so`, `just ext-install` symlinks it into
-   ~/.fts-dev/UserPlugins). `just reaper-integration-test` boots a
+   ~/fts-dev/UserPlugins). `just reaper-integration-test` boots a
    headless REAPER (Dummy audio) with the extension loaded and runs
    apps/extensions/reaper-fts-extensions/tests/extension_loads.rs —
    13/13 green (~11s): action-surface inventory, action-list presence,
@@ -234,12 +248,17 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    (daw-reaper-xtask 95 tests + fts-extensions-xtask 13 tests) against
    the pinned REAPER 7.75 store path (gcroot'd; nixpkgs 7.67 fallback),
    isolated rigs only — never ~/.config/signal, never port 4040.
-   github.com egress is UNRELIABLE from this network (connects time
-   out; codeberg/crates.io are fine), so the CI cargo-home git db is
-   SEEDED from ~cody/.cargo/git/db (3GB rsync, chown gitea-runner) —
-   with the committed lockfile cargo then never fetches github. If a
-   new github git dep lands in Cargo.lock, re-seed the same way
-   (`rsync -a ~cody/.cargo/git/db/ .../fts-ci/cargo-home/git/db/`).
+   github.com egress was broken by a ROUTE-PRIORITY bug, since FIXED
+   (2026-07-10): dhcpcd double-managed enp12s0 (the 10G Dante/cluster
+   NIC) and installed `default via 10.10.10.1` at metric 1003, beating
+   the house LAN (1004) — internet traffic went into the audio net.
+   ~/.flake's network-10g aspect already carried the fix
+   (NM never-default + dhcpcd denyinterfaces, commit 6aa3fade); the
+   running generation just predated it. `just switch` applied it;
+   verified github 200 as both cody and gitea-runner. The CI
+   cargo-home git db stays SEEDED from ~cody/.cargo/git/db anyway
+   (offline `--locked` resolution — belt and braces; re-seed with
+   `rsync -a ~cody/.cargo/git/db/ .../fts-ci/cargo-home/git/db/`).
    Persistent caches (gitea-runner-owned, NEVER the dev tree's target/):
    /var/lib/gitea-runner/codeberg-org/fts-ci/{target,cargo-home,reaper,
    reaper-rig,devshell}. daw::test::runner now honors CARGO_TARGET_DIR
