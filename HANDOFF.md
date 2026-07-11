@@ -234,6 +234,12 @@ tailwind/site/docs recipes. Read CLAUDE.md (rules) and LAYOUT.md
    (daw-reaper-xtask 95 tests + fts-extensions-xtask 13 tests) against
    the pinned REAPER 7.75 store path (gcroot'd; nixpkgs 7.67 fallback),
    isolated rigs only — never ~/.config/signal, never port 4040.
+   github.com egress is UNRELIABLE from this network (connects time
+   out; codeberg/crates.io are fine), so the CI cargo-home git db is
+   SEEDED from ~cody/.cargo/git/db (3GB rsync, chown gitea-runner) —
+   with the committed lockfile cargo then never fetches github. If a
+   new github git dep lands in Cargo.lock, re-seed the same way
+   (`rsync -a ~cody/.cargo/git/db/ .../fts-ci/cargo-home/git/db/`).
    Persistent caches (gitea-runner-owned, NEVER the dev tree's target/):
    /var/lib/gitea-runner/codeberg-org/fts-ci/{target,cargo-home,reaper,
    reaper-rig}. daw::test::runner now honors CARGO_TARGET_DIR when
