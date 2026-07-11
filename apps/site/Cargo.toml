@@ -23,6 +23,11 @@ lucide-dioxus = { workspace = true }
 # Chart parsing and layout
 keyflow = { workspace = true, features = ["engraver", "text", "highlighting"] }
 
+# /input tutorial — the keybind config data model + styx parsing (the
+# canonical profiles are embedded by build.rs).
+input-config-proto = { workspace = true }
+facet-styx = { workspace = true }
+
 # Live contenteditable editor + keyflow language bindings (homepage demo).
 # External repo — kept as a git dep; NOT an intra-tree crate.
 editor = { workspace = true }

@@ -23,6 +23,8 @@ pub enum Route {
     Home {},
     #[route("/editor")]
     KeyflowEditorPage {},
+    #[route("/input")]
+    InputPage {},
     #[route("/test/render")]
     TestRender {},
 }
@@ -160,6 +162,17 @@ fn Layout() -> Element {
                     // Right side actions
                     div {
                         class: "flex items-center gap-2",
+
+                        // Input tutorial tab
+                        Link {
+                            to: Route::InputPage {},
+                            class: if matches!(route, Route::InputPage {}) {
+                                "px-3 py-1.5 rounded-lg text-sm font-medium text-foreground bg-accent/60 transition-colors"
+                            } else {
+                                "px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+                            },
+                            "Input"
+                        }
 
                         // Keyflow Editor tab
                         Link {
@@ -375,6 +388,17 @@ fn KeyflowEditorPage() -> Element {
         document::Meta { name: "description", content: "Keyflow Editor — an open, plain-text chart format that compiles into real lead sheets, with real-time engraving and PDF export." }
 
         components::LiveEditor {}
+    }
+}
+
+/// The input & shortcuts tutorial — keybind profiles by category.
+#[component]
+fn InputPage() -> Element {
+    rsx! {
+        document::Title { "Input & Shortcuts — FastTrackStudio" }
+        document::Meta { name: "description", content: "Every FastTrackStudio shortcut, organized by category — transport, navigation, editing and more — across the FastTrackStudio, Logic, Pro Tools, REAPER and Ableton profiles." }
+
+        components::InputTutorial {}
     }
 }
 
