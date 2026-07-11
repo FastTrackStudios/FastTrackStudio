@@ -241,6 +241,36 @@ members = [
     "features/reaper/daw-reaper/xtask",
     # ── libs/fts-ui extras ────────────────────────────────────────────
     "libs/fts-ui/ui-snapshot",
+    # ── Task (subtree-imported, workspace dissolved into the root) ────
+    #    apps/task/ is the product home (cli / desktop / mobile /
+    #    server / web + docs, deploy, plans, skills, …); crates/task/
+    #    carries the small shared crates; features/task/ the feature
+    #    trios (vault / wiki / agent / email / task / view / …).
+    #    apps/task is listed explicitly — the dir also holds non-crate
+    #    product files (docs/, plans/, Justfile, …) a glob would trip on.
+    "apps/task/cli",
+    "apps/task/desktop",
+    "apps/task/mobile",
+    "apps/task/server",
+    "apps/task/web",
+    "crates/task/*",
+    "features/task/*/*",
+    # Email feature harness — standalone Dioxus binary exercising the
+    # email-* crates without the full task-ui shell.
+    "features/task/email/examples/email-client",
+]
+exclude = [
+    # features/task/*/* would otherwise parse examples/ and plans/ dirs
+    # as crate manifests.
+    "features/task/email/examples",
+    "features/task/email/plans",
+    # Parked legacy shells (knowledge-ui, project-ui, publish-core,
+    # editor-outliner) — kept readable, not workspace members.
+    "crates/task/legacy",
+    # Quarantined pdf renderer (fulgur/stylo trips a rustc trait-solver
+    # recursion limit inside the big workspace graph); it keeps its own
+    # [workspace]. `task-pdf-render` is the stdin/stdout interop point.
+    "apps/task/libs",
 ]
 
 [workspace.package]
@@ -674,6 +704,151 @@ midir = "0.11"
 # pipewire host (via daw-audio-io); the `pipewire`/`jack` backends are
 # feature-gated per consumer.
 cpal = "0.18"
+
+# ── Task (subtree-imported; workspace dissolved into the root) ────────
+# Internal Task path deps, declared once. `-proto` crates that ship a
+# wasm-clean surface keep `default-features = false` (the consumer opts
+# into `vox`/`server`/`native`), mirroring Task's original table.
+# crates/task/
+ui = { path = "crates/task/ui" }
+vim = { path = "crates/task/vim" }
+store-proto = { path = "crates/task/store-proto", default-features = false }
+# features/task/vault — file-backed vault layer + CRDT reconciliation
+vault = { path = "features/task/vault/vault" }
+vault-proto = { path = "features/task/vault/vault-proto", default-features = false }
+vault-live = { path = "features/task/vault/vault-live" }
+vault-obsidian = { path = "features/task/vault/vault-obsidian" }
+vault-collab = { path = "features/task/vault/vault-collab" }
+vault-sync-client = { path = "features/task/vault/vault-sync-client" }
+# features/task/wiki — LLM-wiki (proto / live backend / graph / search)
+wiki-proto = { path = "features/task/wiki/wiki-proto" }
+wiki-live = { path = "features/task/wiki/wiki-live" }
+wiki-graph = { path = "features/task/wiki/wiki-graph" }
+wiki-search = { path = "features/task/wiki/wiki-search" }
+wiki-extract = { path = "features/task/wiki/wiki-extract" }
+wiki-archive = { path = "features/task/wiki/wiki-archive" }
+# features/task/agent — LLM-agent integration
+agent-proto = { path = "features/task/agent/agent-proto" }
+agent-wiki = { path = "features/task/agent/agent-wiki" }
+agent-inbox = { path = "features/task/agent/agent-inbox" }
+agent-codex = { path = "features/task/agent/agent-codex" }
+agent-tasks = { path = "features/task/agent/agent-tasks" }
+agent-dispatch = { path = "features/task/agent/agent-dispatch" }
+# features/task/workflows — WorkSession / Transition / Handoff
+workflows-proto = { path = "features/task/workflows/workflows-proto" }
+workflows-orchestrator = { path = "features/task/workflows/workflows-orchestrator" }
+# features/task — work primitives (task / project / org / labels / tags)
+label-proto = { path = "features/task/label/label-proto" }
+tag-proto = { path = "features/task/tag/tag-proto" }
+tag = { path = "features/task/tag/tag" }
+task = { path = "features/task/task/task", default-features = false }
+task-ui = { path = "features/task/task/task-ui" }
+project = { path = "features/task/project/project", default-features = false }
+org-proto = { path = "features/task/org/org-proto" }
+org-snapshot = { path = "features/task/org/org-snapshot" }
+timer-proto = { path = "features/task/timer/timer-proto", default-features = false }
+timer = { path = "features/task/timer/timer" }
+threads-proto = { path = "features/task/threads/threads-proto", default-features = false }
+threads-db = { path = "features/task/threads/threads-db" }
+threads = { path = "features/task/threads/threads" }
+threads-ui = { path = "features/task/threads/threads-ui" }
+prefs-proto = { path = "features/task/prefs/prefs-proto" }
+prefs = { path = "features/task/prefs/prefs" }
+finance-proto = { path = "features/task/finance/finance-proto", default-features = false }
+finance-db = { path = "features/task/finance/finance-db" }
+finance = { path = "features/task/finance/finance" }
+finance-ui = { path = "features/task/finance/finance-ui" }
+mount-proto = { path = "features/task/mount/mount-proto" }
+mount = { path = "features/task/mount/mount" }
+goal = { path = "features/task/goal/goal" }
+milestone = { path = "features/task/milestone/milestone" }
+milestone-proto = { path = "features/task/milestone/milestone-proto", default-features = false }
+workstream = { path = "features/task/workstream/workstream" }
+workstream-proto = { path = "features/task/workstream/workstream-proto", default-features = false }
+cycle = { path = "features/task/cycle/cycle", default-features = false }
+# features/task/email — EmailSync proto + backends
+email-proto = { path = "features/task/email/email-proto" }
+email-imap = { path = "features/task/email/email-imap" }
+email-smtp = { path = "features/task/email/email-smtp" }
+email-jmap = { path = "features/task/email/email-jmap" }
+email-maildir = { path = "features/task/email/email-maildir" }
+email-nextcloud = { path = "features/task/email/email-nextcloud" }
+email-store = { path = "features/task/email/email-store" }
+email-secret = { path = "features/task/email/email-secret" }
+email-config = { path = "features/task/email/email-config" }
+email-autoconfig = { path = "features/task/email/email-autoconfig" }
+email-sync = { path = "features/task/email/email-sync" }
+email-link = { path = "features/task/email/email-link" }
+# features/task — vault-superset slices
+attachments-proto = { path = "features/task/attachments/attachments-proto" }
+locations = { path = "features/task/locations/locations" }
+locations-proto = { path = "features/task/locations/locations-proto", default-features = false }
+inventory = { path = "features/task/inventory/inventory" }
+inventory-proto = { path = "features/task/inventory/inventory-proto", default-features = false }
+scripture = { path = "features/task/scripture/scripture" }
+scripture-proto = { path = "features/task/scripture/scripture-proto", default-features = false }
+links = { path = "features/task/links/links" }
+links-proto = { path = "features/task/links/links-proto", default-features = false }
+resources = { path = "features/task/resources/resources" }
+resources-proto = { path = "features/task/resources/resources-proto", default-features = false }
+cookbook = { path = "features/task/mealplan/cookbook" }
+cookbook-proto = { path = "features/task/mealplan/cookbook/cookbook-proto", default-features = false }
+recipe-import = { path = "features/task/mealplan/recipe-import" }
+pantry = { path = "features/task/mealplan/pantry" }
+pantry-proto = { path = "features/task/mealplan/pantry/pantry-proto", default-features = false }
+mealplan = { path = "features/task/mealplan/mealplan" }
+mealplan-proto = { path = "features/task/mealplan/mealplan/mealplan-proto", default-features = false }
+exercises = { path = "features/task/fitness/exercises" }
+workouts = { path = "features/task/fitness/workouts" }
+body = { path = "features/task/fitness/body" }
+intake = { path = "features/task/fitness/intake" }
+fitness = { path = "features/task/fitness/fitness" }
+fitness-proto = { path = "features/task/fitness/fitness-proto", default-features = false }
+# features/task/view — view components
+view = { path = "features/task/view/view" }
+view-gantt = { path = "features/task/view/view-gantt" }
+view-kanban = { path = "features/task/view/view-kanban" }
+view-calendar = { path = "features/task/view/view-calendar" }
+view-table = { path = "features/task/view/view-table" }
+view-heatmap = { path = "features/task/view/view-heatmap" }
+view-knowledge-graph = { path = "features/task/view/view-knowledge-graph" }
+scheduling = { path = "features/task/scheduling/scheduling" }
+scheduling-proto = { path = "features/task/scheduling/scheduling-proto", default-features = false }
+scheduling-ui = { path = "features/task/scheduling/scheduling-ui" }
+inbox = { path = "features/task/inbox/inbox" }
+inbox-proto = { path = "features/task/inbox/inbox-proto", default-features = false }
+# features/task/git — forge integration (GitHub / Forgejo)
+git-proto = { path = "features/task/git/git-proto" }
+git-github = { path = "features/task/git/git-github" }
+git-forgejo = { path = "features/task/git/git-forgejo" }
+git-config = { path = "features/task/git/git-config" }
+
+# Task's externals not already pinned above (root pins win everywhere
+# a key already existed — dioxus, serde, tokio, facet/vox rc.5 fleet,
+# sea-orm crates.io 1.x, loro, moire via [patch]).
+keybindings = "0.0.2"
+editor-types = "0.0.2"
+rrule = "0.11"
+octocrab = "0.46"
+walkdir = "2"
+indexmap = "2"
+regex = "1"
+serde_yaml = "0.9"
+cooklang = "0.18"
+pulldown-cmark = { version = "0.10", default-features = false }
+dioxus-router = { version = "0.7.9", default-features = false }
+dioxus-icons = "0.1"
+web-sys = "0.3.98"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
+futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rust_decimal = "1.39"
+# `cargo xtask` TS-type generation (crates/task/xtask).
+vox-codegen = "0.10.0-rc.5"
 
 # ── Patches ───────────────────────────────────────────────────────────
 # NOTE: the old daw.git patch table is gone — dynamic-template (the only
