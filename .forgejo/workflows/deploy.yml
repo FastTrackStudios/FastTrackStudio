@@ -179,7 +179,7 @@ jobs:
 
       - name: Verify live
         run: |
-          url="https://fts.starcommand.live"
+          url="https://fasttrackstudio.app"
           want="${GITHUB_SHA}"
           echo "waiting for $url to serve $want"
           for i in $(seq 1 60); do
@@ -191,5 +191,5 @@ jobs:
             fi
             sleep 15
           done
-          echo "TIMED OUT: $url never served $want — check argocd-image-updater / ingress for fts.starcommand.live"
+          echo "TIMED OUT: $url never served $want — check argocd-image-updater / the fasttrackstudio-site Application"
           exit 1
