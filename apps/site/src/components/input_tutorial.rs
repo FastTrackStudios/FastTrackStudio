@@ -609,7 +609,22 @@ fn BindingRow(
                     }
                 }
             }
-            div { class: "flex-1 text-sm", "{desc}" }
+            div { class: "flex-1 text-sm",
+                "{desc}"
+                if let Some(m) = binding.mnemonic.as_ref() {
+                    span { class: "ml-2 text-xs italic text-muted-foreground/80",
+                        "“{m}”"
+                    }
+                }
+                if let Some(w) = binding.why.as_ref() {
+                    details { class: "mt-0.5",
+                        summary { class: "text-xs text-muted-foreground/70 cursor-pointer select-none hover:text-foreground",
+                            "why this key?"
+                        }
+                        p { class: "text-xs text-muted-foreground mt-1 max-w-xl", "{w}" }
+                    }
+                }
+            }
             if let Some((label, color)) = tag.as_ref() {
                 span {
                     class: "shrink-0 text-[0.65rem] px-2 py-0.5 rounded-full font-medium",
