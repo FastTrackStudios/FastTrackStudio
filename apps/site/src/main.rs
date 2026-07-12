@@ -14,6 +14,10 @@ use fts_ui::prelude::*;
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+/// Bundled typography: Inter (reading) + JetBrains Mono (code) via
+/// @font-face, published as `--font-sans` / `--font-mono` for both the
+/// site chrome and the editor stylesheet.
+const FONTS_CSS: Asset = asset!("/assets/main.css");
 
 /// Application routes
 #[derive(Debug, Clone, Routable, PartialEq)]
@@ -80,6 +84,7 @@ fn App() -> Element {
 
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
+        document::Link { rel: "stylesheet", href: FONTS_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
 
         // Site-wide SEO / social metadata. Per-page <title> is set via

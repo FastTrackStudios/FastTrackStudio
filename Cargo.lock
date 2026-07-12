@@ -7857,6 +7857,7 @@ name = "editor-keyflow"
 version = "0.1.0"
 dependencies = [
  "engraver",
+ "keyflow-text",
  "thiserror 2.0.18",
  "tracing",
 ]

@@ -393,6 +393,10 @@ fn NoteChips(content: String) -> Element {
 const VAULT_STYLE: &str = "
 .guides-vault .editor-root { background: transparent; border: none; padding: 0; min-height: 12rem; }
 .guides-vault .editor-frame { background: transparent; border: none; box-shadow: none; padding: 0; }
+/* Reading measure for the read-only doc view — roomier than the
+   editable 14px/1.6 default, which stays untouched for Task/editing
+   contexts. */
+.guides-vault .editor-root { font-size: 16px; line-height: 1.7; }
 ";
 
 /// `/guides` and `/guides/:..path` — the vault view: note explorer,

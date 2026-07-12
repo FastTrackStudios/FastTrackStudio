@@ -41,16 +41,17 @@ const LIVE_EDITOR_STYLE: Asset = asset!("/assets/live-editor.css");
 
 /// Seed chart shown on first load — Nashville number system in the key of C
 /// so the resolved-chord overlays (1 → C, 5 → G, 6m → Am, …) are visible.
-const SEED: &str = "FastTrackStudio Demo\n\
-                    4/4 120bpm #C\n\
+const SEED: &str = "Song Title - Artist\n\
+                    4/4 120bpm #E\n\
                     \n\
+                    Count 2\n\
                     VS\n\
-                    1 | 5 | 6m | 4\n\
-                    1 | 5 | 4 1 | 1\n\
+                    1 5 6m 4\n\
+                    1 5 (4 1) 1\n\
                     \n\
                     CH\n\
-                    4 | 5 | 1 | 6m\n\
-                    4 | 5 | 1 | 1\n";
+                    4 5 1 6m\n\
+                    4 5 1 1\n";
 
 /// One engraved page: real point dimensions (converted to CSS px for
 /// display) plus its SVG markup.

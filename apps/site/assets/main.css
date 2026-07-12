@@ -1,72 +1,66 @@
-/* App-wide styling */
+/* Site typography — bundled reading + code fonts.
+ *
+ * Inter (variable, SIL OFL) is the reading face for prose and UI;
+ * JetBrains Mono (SIL OFL) is the code face. Both ship as woff2 next
+ * to this file (assets/fonts/, licenses alongside). The dx asset
+ * pipeline follows these relative url()s and bundles the files.
+ *
+ * The `--font-sans` / `--font-mono` variables are the contract the
+ * rest of the stack reads: the editor stylesheet resolves
+ * `--ed-font: var(--font-sans, …)` and `--ed-mono: var(--font-mono, …)`
+ * from them, so the vault notes pick up the same faces as the site
+ * chrome.
+ *
+ * (This file used to be the unlinked starter-template stylesheet; it
+ * is now linked from the app root and owns fonts only.)
+ */
+
+@font-face {
+    font-family: "InterVariable";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("fonts/InterVariable.woff2") format("woff2");
+}
+@font-face {
+    font-family: "InterVariable";
+    font-style: italic;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("fonts/InterVariable-Italic.woff2") format("woff2");
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+    src: url("fonts/JetBrainsMono-Italic.woff2") format("woff2");
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("fonts/JetBrainsMono-Bold.woff2") format("woff2");
+}
+
+:root {
+    --font-sans: "InterVariable", ui-sans-serif, system-ui, -apple-system,
+        "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono",
+        Menlo, Consolas, "Liberation Mono", monospace;
+    font-family: var(--font-sans);
+    /* Inter's contextual alternates + case punctuation. */
+    font-feature-settings: "calt" 1, "case" 1;
+}
+
 body {
-    background-color: #0f1116;
-    color: #ffffff;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    margin: 20px;
+    font-family: var(--font-sans);
 }
-
-#hero {
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-}
-
-#links {
-    width: 400px;
-    text-align: left;
-    font-size: x-large;
-    color: white;
-    display: flex;
-    flex-direction: column;
-}
-
-#links a {
-    color: white;
-    text-decoration: none;
-    margin-top: 20px;
-    margin: 10px 0px;
-    border: white 1px solid;
-    border-radius: 5px;
-    padding: 10px;
-}
-
-#links a:hover {
-    background-color: #1f1f1f;
-    cursor: pointer;
-}
-
-#header {
-    max-width: 1200px;
-}
-
-/* Navbar */
-#navbar {
-    display: flex;
-    flex-direction: row;
-  }
-  
-#navbar a {
-    color: #ffffff;
-    margin-right: 20px;
-    text-decoration: none;
-    transition: color 0.2s ease;
-}
-
-#navbar a:hover {
-    cursor: pointer;
-    color: #91a4d2;
-}
-
-/* Blog page */
-#blog {
-    margin-top: 50px;
-  }
-  
-#blog a {
-    color: #ffffff;
-    margin-top: 50px;
-}
-
