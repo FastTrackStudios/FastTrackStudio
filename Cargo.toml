@@ -70,6 +70,7 @@ members = [
     "crates/midicore/midicore",
     "crates/midicore/midicore-proto",
     "crates/midicore/midicore-midir",
+    "crates/midicore/midicore-ui",
     "crates/input/actions-proto",
     "crates/input/input-config-proto",
     "libs/editor/crates/editor",
@@ -329,6 +330,7 @@ meter-ui = { path = "crates/audiocore/meter-ui" }
 midicore = { path = "crates/midicore/midicore", default-features = false }
 midicore-proto = { path = "crates/midicore/midicore-proto" }
 midicore-midir = { path = "crates/midicore/midicore-midir" }
+midicore-ui = { path = "crates/midicore/midicore-ui" }
 actions-proto = { path = "crates/input/actions-proto" }
 input-config-proto = { path = "crates/input/input-config-proto" }
 # Editor (subtree-imported from FastTrackStudios/Editor — the text/
