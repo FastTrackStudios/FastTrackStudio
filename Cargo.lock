@@ -23338,6 +23338,8 @@ dependencies = [
  "kontrol",
  "midicore",
  "signal-drums-proto",
+ "signal-fx",
+ "signal-plugin-host",
  "signal-sampler",
  "tracing",
  "tracing-subscriber",
