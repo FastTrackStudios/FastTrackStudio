@@ -71,6 +71,7 @@ members = [
     "crates/midicore/midicore-proto",
     "crates/midicore/midicore-midir",
     "crates/midicore/midicore-ui",
+    "crates/kontrol/kontrol",
     "crates/input/actions-proto",
     "crates/input/input-config-proto",
     "libs/editor/crates/editor",
@@ -331,6 +332,8 @@ midicore = { path = "crates/midicore/midicore", default-features = false }
 midicore-proto = { path = "crates/midicore/midicore-proto" }
 midicore-midir = { path = "crates/midicore/midicore-midir" }
 midicore-ui = { path = "crates/midicore/midicore-ui" }
+# NI Komplete Kontrol keyboard driver (Light Guide / per-key RGB LEDs).
+kontrol = { path = "crates/kontrol/kontrol" }
 actions-proto = { path = "crates/input/actions-proto" }
 input-config-proto = { path = "crates/input/input-config-proto" }
 # Editor (subtree-imported from FastTrackStudios/Editor — the text/
@@ -706,6 +709,10 @@ enumflags2 = "0.7"
 fragile = "2"
 # Hardware MIDI I/O — 0.11 to share one alsa-sys across the stack.
 midir = "0.11"
+# libusb bindings for the NI Komplete Kontrol Light Guide (USB bulk transfer,
+# not MIDI). Bundles/builds libusb via its build script, so no system lib is
+# required. Used only by the `kontrol` crate.
+rusb = "0.9"
 # Audio I/O host abstraction — the signal rigs run on cpal's native
 # pipewire host (via daw-audio-io); the `pipewire`/`jack` backends are
 # feature-gated per consumer.
