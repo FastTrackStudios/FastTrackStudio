@@ -70,6 +70,7 @@ members = [
     "crates/midicore/midicore",
     "crates/midicore/midicore-proto",
     "crates/midicore/midicore-midir",
+    "crates/midicore/midicore-ui",
     "crates/input/actions-proto",
     "crates/input/input-config-proto",
     "libs/editor/crates/editor",
@@ -220,6 +221,8 @@ members = [
     "features/rigs/keys",
     "features/rigs/orchestra",
     "features/rigs/drums",
+    "features/rigs/drums/proto",
+    "features/rigs/drums/ui",
     "features/rigs/synth",
     "features/sampler/signal-sampler",
     "features/sampler/signal-sampler-clap",
@@ -327,6 +330,7 @@ meter-ui = { path = "crates/audiocore/meter-ui" }
 midicore = { path = "crates/midicore/midicore", default-features = false }
 midicore-proto = { path = "crates/midicore/midicore-proto" }
 midicore-midir = { path = "crates/midicore/midicore-midir" }
+midicore-ui = { path = "crates/midicore/midicore-ui" }
 actions-proto = { path = "crates/input/actions-proto" }
 input-config-proto = { path = "crates/input/input-config-proto" }
 # Editor (subtree-imported from FastTrackStudios/Editor — the text/
@@ -468,6 +472,8 @@ signal-guitar-ui = { path = "features/rigs/guitar/ui" }
 signal-keys = { path = "features/rigs/keys" }
 signal-orchestra = { path = "features/rigs/orchestra" }
 signal-drums = { path = "features/rigs/drums" }
+signal-drums-proto = { path = "features/rigs/drums/proto" }
+signal-drums-ui = { path = "features/rigs/drums/ui" }
 signal-synth = { path = "features/rigs/synth" }
 
 # ── features/fx — built-in FX (wave 4) ────────────────────────────────
