@@ -23314,6 +23314,7 @@ dependencies = [
  "midicore-proto",
  "midicore-ui",
  "signal-drums-proto",
+ "signal-ui",
 ]
 
 [[package]]
@@ -23667,6 +23668,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "fts-ui 0.1.0",
+ "getrandom 0.3.4",
  "lumen-blocks",
  "midicore",
  "nice-plug-dioxus",
@@ -23677,6 +23679,7 @@ dependencies = [
  "signal-grid-ui",
  "signal-guitar-proto",
  "signal-guitar-ui",
+ "signal-proto",
  "tokio",
  "tracing",
  "uuid 1.23.4",
