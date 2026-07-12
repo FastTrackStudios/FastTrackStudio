@@ -9391,6 +9391,9 @@ dependencies = [
  "session-guide",
  "session-proto",
  "session-ui",
+ "signal-drums",
+ "signal-drums-proto",
+ "signal-drums-ui",
  "signal-guitar",
  "signal-guitar-proto",
  "signal-guitar-ui",
@@ -23276,7 +23279,30 @@ dependencies = [
 name = "signal-drums"
 version = "0.1.0"
 dependencies = [
+ "architect",
+ "midicore",
+ "signal-drums-proto",
  "signal-sampler",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "signal-drums-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "vox",
+]
+
+[[package]]
+name = "signal-drums-ui"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "dioxus",
+ "signal-drums-proto",
 ]
 
 [[package]]

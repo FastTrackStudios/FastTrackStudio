@@ -220,6 +220,8 @@ members = [
     "features/rigs/keys",
     "features/rigs/orchestra",
     "features/rigs/drums",
+    "features/rigs/drums/proto",
+    "features/rigs/drums/ui",
     "features/rigs/synth",
     "features/sampler/signal-sampler",
     "features/sampler/signal-sampler-clap",
@@ -468,6 +470,8 @@ signal-guitar-ui = { path = "features/rigs/guitar/ui" }
 signal-keys = { path = "features/rigs/keys" }
 signal-orchestra = { path = "features/rigs/orchestra" }
 signal-drums = { path = "features/rigs/drums" }
+signal-drums-proto = { path = "features/rigs/drums/proto" }
+signal-drums-ui = { path = "features/rigs/drums/ui" }
 signal-synth = { path = "features/rigs/synth" }
 
 # ── features/fx — built-in FX (wave 4) ────────────────────────────────
