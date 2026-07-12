@@ -3330,7 +3330,7 @@ dependencies = [
  "half",
  "hf-hub",
  "hound",
- "ndarray 0.16.1",
+ "ndarray",
  "ort",
  "serde",
  "serde_json",
@@ -14168,7 +14168,7 @@ dependencies = [
  "flate2",
  "hound",
  "midly",
- "ndarray 0.17.2",
+ "ndarray",
  "ort",
  "rand 0.8.6",
  "serde_json",
@@ -14295,6 +14295,17 @@ name = "konst_macro_rules"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
+
+[[package]]
+name = "kontrol"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "midicore",
+ "midir",
+ "rusb",
+ "tracing",
+]
 
 [[package]]
 name = "kqueue"
@@ -14714,7 +14725,7 @@ dependencies = [
  "lance-tokenizer",
  "libm",
  "log",
- "ndarray 0.16.1",
+ "ndarray",
  "num-traits",
  "object_store 0.12.5",
  "prost",
@@ -15049,6 +15060,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
+name = "level"
+version = "0.1.0"
+dependencies = [
+ "level-dsp",
+]
+
+[[package]]
+name = "level-dsp"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "hound",
+]
+
+[[package]]
+name = "level-plugin"
+version = "0.1.0"
+dependencies = [
+ "level",
+ "nice-plug",
+]
+
+[[package]]
 name = "lexical-core"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15227,6 +15261,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
  "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
+name = "libusb1-sys"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da050ade7ac4ff1ba5379af847a10a10a8e284181e060105bf8d86960ce9ce0f"
+dependencies = [
+ "cc",
+ "libc",
  "pkg-config",
  "vcpkg",
 ]
@@ -17189,21 +17235,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ndarray"
-version = "0.17.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "520080814a7a6b4a6e9070823bb24b4531daac8c4627e08ba5de8c5ef2f2752d"
-dependencies = [
- "matrixmultiply",
- "num-complex",
- "num-integer",
- "num-traits",
- "portable-atomic",
- "portable-atomic-util",
- "rawpointer",
-]
-
-[[package]]
 name = "ndk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18823,7 +18854,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fa7e49bd669d32d7bc2a15ec540a527e7764aec722a45467814005725bcd721"
 dependencies = [
  "half",
- "ndarray 0.16.1",
+ "libloading 0.8.9",
+ "ndarray",
  "ort-sys",
  "smallvec 2.0.0-alpha.10",
  "tracing",
@@ -21935,6 +21967,16 @@ dependencies = [
  "num-integer",
  "num-traits",
  "realfft",
+]
+
+[[package]]
+name = "rusb"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab9f9ff05b63a786553a4c02943b74b34a988448671001e9a27e2f0565cc05a4"
+dependencies = [
+ "libc",
+ "libusb1-sys",
 ]
 
 [[package]]
@@ -26998,6 +27040,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
+]
+
+[[package]]
+name = "tune"
+version = "0.1.0"
+dependencies = [
+ "tune-dsp",
+]
+
+[[package]]
+name = "tune-dsp"
+version = "0.1.0"
+dependencies = [
+ "pitch-dsp",
+ "realfft",
+]
+
+[[package]]
+name = "tune-plugin"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "nice-plug",
+ "tune",
 ]
 
 [[package]]
