@@ -1,4 +1,4 @@
-/*! tailwindcss v4.2.2 | MIT License | https://tailwindcss.com */
+/*! tailwindcss v4.1.5 | MIT License | https://tailwindcss.com */
 @layer properties;
 @layer theme, base, components, utilities;
 @layer theme {
@@ -222,9 +222,6 @@
   ::-webkit-datetime-edit, ::-webkit-datetime-edit-year-field, ::-webkit-datetime-edit-month-field, ::-webkit-datetime-edit-day-field, ::-webkit-datetime-edit-hour-field, ::-webkit-datetime-edit-minute-field, ::-webkit-datetime-edit-second-field, ::-webkit-datetime-edit-millisecond-field, ::-webkit-datetime-edit-meridiem-field {
     padding-block: 0;
   }
-  ::-webkit-calendar-picker-indicator {
-    line-height: 1;
-  }
   :-moz-ui-invalid {
     box-shadow: none;
   }
@@ -258,7 +255,7 @@
     padding: 0;
     margin: -1px;
     overflow: hidden;
-    clip-path: inset(50%);
+    clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border-width: 0;
   }
@@ -289,12 +286,6 @@
   .inset-y-0 {
     inset-block: calc(var(--spacing) * 0);
   }
-  .start {
-    inset-inline-start: var(--spacing);
-  }
-  .end {
-    inset-inline-end: var(--spacing);
-  }
   .top-0 {
     top: calc(var(--spacing) * 0);
   }
@@ -302,7 +293,7 @@
     top: calc(var(--spacing) * 0.5);
   }
   .top-1\/2 {
-    top: calc(1 / 2 * 100%);
+    top: calc(1/2 * 100%);
   }
   .top-2 {
     top: calc(var(--spacing) * 2);
@@ -335,7 +326,7 @@
     left: calc(var(--spacing) * 0);
   }
   .left-1\/2 {
-    left: calc(1 / 2 * 100%);
+    left: calc(1/2 * 100%);
   }
   .left-2 {
     left: calc(var(--spacing) * 2);
@@ -559,7 +550,7 @@
     width: calc(var(--spacing) * 1.5);
   }
   .w-1\/3 {
-    width: calc(1 / 3 * 100%);
+    width: calc(1/3 * 100%);
   }
   .w-2 {
     width: calc(var(--spacing) * 2);
@@ -574,7 +565,7 @@
     width: calc(var(--spacing) * 3.5);
   }
   .w-3\/4 {
-    width: calc(3 / 4 * 100%);
+    width: calc(3/4 * 100%);
   }
   .w-4 {
     width: calc(var(--spacing) * 4);
@@ -700,13 +691,13 @@
     transform-origin: top;
   }
   .origin-top-left {
-    transform-origin: 0 0;
+    transform-origin: top left;
   }
   .origin-top-right {
-    transform-origin: 100% 0;
+    transform-origin: top right;
   }
   .-translate-x-1\/2 {
-    --tw-translate-x: calc(calc(1 / 2 * 100%) * -1);
+    --tw-translate-x: calc(calc(1/2 * 100%) * -1);
     translate: var(--tw-translate-x) var(--tw-translate-y);
   }
   .-translate-x-full {
@@ -726,7 +717,7 @@
     translate: var(--tw-translate-x) var(--tw-translate-y);
   }
   .-translate-y-1\/2 {
-    --tw-translate-y: calc(calc(1 / 2 * 100%) * -1);
+    --tw-translate-y: calc(calc(1/2 * 100%) * -1);
     translate: var(--tw-translate-x) var(--tw-translate-y);
   }
   .transform {
@@ -1667,7 +1658,7 @@
     backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);
   }
   .transition {
-    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events;
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, visibility, content-visibility, overlay, pointer-events;
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
