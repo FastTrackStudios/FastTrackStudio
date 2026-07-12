@@ -118,6 +118,23 @@ fn main() {
     let mut notes: Vec<std::path::PathBuf> = Vec::new();
     collect_md(&vault_root, &mut notes);
     notes.sort();
+
+    // The vault's ONE source of truth is docs/guides (portable, no
+    // symlink). manganis `asset!` (the dev live-reload path below) needs
+    // the files physically inside the crate, so mirror them into a
+    // build-generated, gitignored apps/site/assets/guides. Rewritten
+    // every build; `rerun-if-changed` on docs/guides above keeps it
+    // fresh when a note is edited.
+    let assets_guides = Path::new(&manifest).join("assets/guides");
+    let _ = std::fs::remove_dir_all(&assets_guides);
+    for file in &notes {
+        let rel = file.strip_prefix(&vault_root).unwrap();
+        let dst = assets_guides.join(rel);
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).expect("create assets/guides dir");
+        }
+        std::fs::copy(file, &dst).expect("mirror vault note into assets");
+    }
     out.push_str("pub static VAULT: &[EmbeddedNamed] = &[\n");
     for file in &notes {
         let rel = file
@@ -138,9 +155,9 @@ fn main() {
     // Dev-on-wasm live reload: each note as a SINGLE-FILE `asset!` —
     // dx hot-reloads individual assets in place (same served URL, no
     // rebuild), which folder assets don't get (a folder change causes
-    // a full rebuild under a new hash). The vault content lives
-    // physically at apps/site/assets/guides (docs/guides symlinks to
-    // it) so manganis accepts the paths.
+    // a full rebuild under a new hash). Reads from the build-mirrored
+    // apps/site/assets/guides (copied from docs/guides above) so
+    // manganis accepts the in-crate paths.
     out.push_str(
         "#[cfg(all(target_arch = \"wasm32\", debug_assertions))]\n\
          mod vault_assets {\n\

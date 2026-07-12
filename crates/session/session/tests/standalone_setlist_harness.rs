@@ -7,8 +7,9 @@
 //!   against a `Daw` client. Proves the build logic + the daw RPC path.
 //! * `setlist_service_over_vox` — mirrors the desktop exactly: hosts
 //!   `SetlistServiceImpl` behind a `LayerRouter` over vox, then drives it
-//!   through a `SetlistServiceClient` (`build_from_open_projects` + the
-//!   `subscribe(Tx<SetlistEvent>)` stream). This is the path the desktop uses.
+//!   through a `SetlistServiceClient` (`build_from_open_projects`, `setlist`,
+//!   `seek_to_section`, active-song queries). Live streaming rides the
+//!   `events` / `active_indices` `#[subscribe]` streams (architect PubSub).
 //!
 //! Run: cargo test -p session --test standalone_setlist_harness -- --nocapture
 
@@ -19,7 +20,7 @@ use daw_standalone::bootstrap::build_in_process_daw;
 use daw_standalone::sync::Standalone;
 use session::setlist_service::demo::stamp_demo_setlist_with;
 use session::{
-    SetlistBuilder, SetlistEvent, SetlistServiceClient, SetlistServiceImpl, serve_setlist_service,
+    SetlistBuilder, SetlistServiceClient, SetlistServiceImpl, serve_setlist_service,
     setlist_service_service_descriptor,
 };
 
@@ -120,9 +121,343 @@ async fn rich_setlist_ten_projects_one_song_each() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Structural contract for the demo setlist the desktop app plays: every
+/// song must carry sections with real, ordered, positive-duration timing
+/// (so the sidebar has sections to show and the player can seek into them),
+/// plus tempo + time signature (so measure lengths are derivable). Built
+/// through the same standalone → `SetlistBuilder` path the desktop uses —
+/// no global daw, no vox.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn demo_setlist_songs_have_sections_with_timing() -> eyre::Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let bundle = build_in_process_daw(seeded_stamped()).await?;
+    let setlist = SetlistBuilder::build_from_open_projects(&bundle.daw).await?;
+
+    println!("setlist '{}' — {} songs", setlist.name, setlist.songs.len());
+    assert!(!setlist.songs.is_empty(), "demo setlist has no songs");
+
+    for (si, song) in setlist.songs.iter().enumerate() {
+        println!(
+            "  song {si}: {:<28} {:>2} sections  tempo={:?} ts={:?}  {:.2}..{:.2}s",
+            song.name,
+            song.sections.len(),
+            song.tempo,
+            song.time_signature
+                .as_ref()
+                .map(|t| (t.numerator, t.denominator)),
+            song.start_seconds,
+            song.end_seconds,
+        );
+        assert!(
+            !song.sections.is_empty(),
+            "song '{}' has no sections",
+            song.name
+        );
+
+        let mut prev_end: Option<f64> = None;
+        for (ci, sec) in song.sections.iter().enumerate() {
+            println!(
+                "      [{ci}] {:<16} {:.2}..{:.2}s ({:.2}s)",
+                sec.display_name(),
+                sec.start_seconds,
+                sec.end_seconds,
+                sec.duration(),
+            );
+            assert!(
+                sec.duration() > 0.0,
+                "section '{}' in '{}' has non-positive duration ({:.3}s)",
+                sec.name,
+                song.name,
+                sec.duration(),
+            );
+            if let Some(pe) = prev_end {
+                assert!(
+                    sec.start_seconds + 0.01 >= pe,
+                    "sections in '{}' out of order at [{ci}] ({:.2} < prev end {:.2})",
+                    song.name,
+                    sec.start_seconds,
+                    pe,
+                );
+            }
+            prev_end = Some(sec.end_seconds);
+        }
+
+        assert!(
+            song.tempo.is_some_and(|t| t > 0.0),
+            "song '{}' has no positive tempo — measure length undefined",
+            song.name
+        );
+        assert!(
+            song.time_signature.is_some(),
+            "song '{}' has no time signature",
+            song.name
+        );
+    }
+    Ok(())
+}
+
+/// Section numbering resets per song: within each song, every repeated
+/// section type is numbered contiguously from 1 (Verse 1, Verse 2, …) rather
+/// than continuing across the whole project (the demo puts 3 songs on one
+/// timeline, so a global counter would render song 2's first verse as
+/// "Verse 4"). Single-occurrence types carry no number.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn section_numbering_resets_per_song() -> eyre::Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let bundle = build_in_process_daw(seeded_stamped()).await?;
+    let setlist = SetlistBuilder::build_from_open_projects(&bundle.daw).await?;
+    assert!(setlist.songs.len() >= 2, "need multiple songs to test per-song reset");
+
+    for song in &setlist.songs {
+        // Collect the trailing number of each numbered section, keyed by its
+        // base label ("VS 2" -> base "VS", n 2; "Intro" -> unnumbered).
+        let mut by_base: std::collections::BTreeMap<String, Vec<u32>> = Default::default();
+        for sec in &song.sections {
+            let name = sec.display_name();
+            if let Some((base, n)) = name
+                .rsplit_once(' ')
+                .and_then(|(b, n)| n.parse::<u32>().ok().map(|n| (b.to_string(), n)))
+            {
+                by_base.entry(base).or_default().push(n);
+            }
+        }
+        for (base, mut nums) in by_base {
+            nums.sort_unstable();
+            assert_eq!(
+                nums.first().copied(),
+                Some(1),
+                "song '{}' type '{}' numbering starts at {:?}, expected 1 (per-song reset)",
+                song.name,
+                base,
+                nums.first(),
+            );
+            for (i, n) in nums.iter().enumerate() {
+                assert_eq!(
+                    *n,
+                    i as u32 + 1,
+                    "song '{}' type '{}' numbering not contiguous from 1: {:?}",
+                    song.name,
+                    base,
+                    nums,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// End-to-end transport streaming, headless (no REAPER, no GUI): the
+/// standalone playhead must advance AND its position ticks must reach a
+/// consumer through the architect `daw.transport_events()` `#[subscribe]`
+/// stream — the exact path that drives the UI playhead. Regression guard for
+/// the transport→architect migration (no `SynchronizationEngine`, no poll
+/// fallback). If this passes but the UI playhead is frozen, the break is in
+/// the app's stream consumption, not the daw/session pipeline.
+#[test]
+fn transport_stream_delivers_advancing_position() -> eyre::Result<()> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_stack_size(16 * 1024 * 1024)
+        .enable_all()
+        .build()?;
+    rt.block_on(transport_stream_inner())
+}
+
+async fn transport_stream_inner() -> eyre::Result<()> {
+    use daw_proto::transport::TransportStreamEvent;
+
+    let _ = tracing_subscriber::fmt::try_init();
+
+    // Isolated: drive the daw handle from THIS build directly (no global
+    // `init_from_parts`) so parallel tests can't cross-wire the transport.
+    let bundle = build_in_process_daw(seeded_stamped()).await?;
+    let daw = bundle.daw.clone();
+
+    // Subscribe to the architect transport stream first.
+    let mut stream = daw.transport_events();
+
+    // Put the playhead at a known spot inside song 0 and start playback. This
+    // lazily creates the per-project transport engine (spawning the transport
+    // bridge that publishes onto the hub) and advances the soft-clock playhead.
+    let project = daw
+        .project("demo-proj".to_string())
+        .await
+        .map_err(|e| eyre::eyre!("project: {e:?}"))?;
+    project
+        .transport()
+        .set_position(4.0)
+        .await
+        .map_err(|e| eyre::eyre!("set_position: {e:?}"))?;
+    project
+        .transport()
+        .play()
+        .await
+        .map_err(|e| eyre::eyre!("play: {e:?}"))?;
+
+    // Collect position ticks for ~1.5s.
+    let mut ticks = 0usize;
+    let mut first_pos: Option<f64> = None;
+    let mut last_pos = 0.0f64;
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(1500);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(300), stream.recv()).await {
+            Ok(Ok(Some(ev))) => {
+                if let TransportStreamEvent::Position(tick) = ev.get() {
+                    let pos = tick.playhead.time.map(|t| t.as_seconds()).unwrap_or(0.0);
+                    ticks += 1;
+                    first_pos.get_or_insert(pos);
+                    last_pos = pos;
+                }
+            }
+            Ok(Ok(None)) | Ok(Err(_)) => break,
+            Err(_) => { /* idle tick; keep waiting */ }
+        }
+    }
+
+    let reported = project.transport().get_position().await.unwrap_or(-1.0);
+    println!("[transport] ticks={ticks} first={first_pos:?} last={last_pos} reported={reported:.3}");
+
+    assert!(
+        ticks > 3,
+        "no position ticks through daw.transport_events() (got {ticks}) — the playhead stream is not delivering"
+    );
+    assert!(
+        last_pos > first_pos.unwrap_or(0.0) + 0.01,
+        "playhead did not advance ({first_pos:?} -> {last_pos})"
+    );
+    Ok(())
+}
+
+/// Headless proof that the `SynchronizationEngine` is backend-agnostic:
+/// a mutation on a daw-standalone project must surface as a `SyncEvent`
+/// through the engine. The engine used to read `daw_reaper::event_hub()`
+/// directly (REAPER-only); after the migration it consumes the daw facade's
+/// architect event bus (`Daw::events()`), so it works against standalone too.
+#[test]
+fn sync_engine_backend_agnostic_over_standalone() -> eyre::Result<()> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_stack_size(16 * 1024 * 1024)
+        .enable_all()
+        .build()?;
+    rt.block_on(sync_engine_inner())
+}
+
+async fn sync_engine_inner() -> eyre::Result<()> {
+    use daw_synchronization::{SyncConfig, SyncDomain, SyncSession, SynchronizationEngine};
+
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let bundle = build_in_process_daw(seeded_stamped()).await?;
+    let daw = bundle.daw.clone();
+
+    let engine = SynchronizationEngine::new(
+        daw.clone(),
+        SyncSession {
+            session_id: "test-session".into(),
+            peer_id: "test-peer".into(),
+            display_name: "Test".into(),
+        },
+        SyncConfig::all(),
+    );
+    engine
+        .start()
+        .await
+        .map_err(|e| eyre::eyre!("engine start: {e:?}"))?;
+    let mut rx = engine.subscribe();
+
+    // Let the per-project bus forwarder finish its async subscribe.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Mutate the demo project via the facade — daw-standalone publishes these
+    // onto the event bus, which the (now backend-agnostic) engine forwards.
+    // Exercise three domains: Marker, Item (add + move), Routing (send).
+    let project = daw
+        .project("demo-proj".to_string())
+        .await
+        .map_err(|e| eyre::eyre!("project: {e:?}"))?;
+
+    project
+        .markers()
+        .add(2.5, "SyncMarker")
+        .await
+        .map_err(|e| eyre::eyre!("marker add: {e:?}"))?;
+
+    // Two tracks so we can add an item and a send between them.
+    let track_a = project
+        .tracks()
+        .add("A", None)
+        .await
+        .map_err(|e| eyre::eyre!("track A: {e:?}"))?;
+    let track_b = project
+        .tracks()
+        .add("B", None)
+        .await
+        .map_err(|e| eyre::eyre!("track B: {e:?}"))?;
+
+    // Item: add on track A, then MOVE it (fine ItemEvent::PositionChanged).
+    let item = track_a
+        .items()
+        .add(
+            daw_proto::PositionInSeconds::from_seconds(1.0),
+            daw_proto::Duration::from_seconds(2.0),
+        )
+        .await
+        .map_err(|e| eyre::eyre!("item add: {e:?}"))?;
+    item.set_position(daw_proto::PositionInSeconds::from_seconds(5.0))
+        .await
+        .map_err(|e| eyre::eyre!("item move: {e:?}"))?;
+
+    // Routing: send from A → B.
+    track_a
+        .sends()
+        .add_to(track_b.guid())
+        .await
+        .map_err(|e| eyre::eyre!("add send: {e:?}"))?;
+
+    let mut got_marker = false;
+    let mut got_item = false;
+    let mut got_routing = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(2000);
+    while tokio::time::Instant::now() < deadline {
+        if got_marker && got_item && got_routing {
+            break;
+        }
+        match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+            Ok(Ok(ev)) => {
+                println!("[sync] domain={:?}", std::mem::discriminant(&ev.domain));
+                match ev.domain {
+                    SyncDomain::Marker(_) => got_marker = true,
+                    SyncDomain::Item(_) => got_item = true,
+                    SyncDomain::Routing(_) => got_routing = true,
+                    _ => {}
+                }
+            }
+            Ok(Err(_)) => break,
+            Err(_) => { /* idle */ }
+        }
+    }
+
+    assert!(
+        got_marker,
+        "sync engine produced no Marker SyncEvent from a standalone mutation — it is not backend-agnostic"
+    );
+    assert!(
+        got_item,
+        "sync engine produced no Item SyncEvent — daw-standalone item events are not reaching the bus"
+    );
+    assert!(
+        got_routing,
+        "sync engine produced no Routing SyncEvent — daw-standalone routing events are not reaching the bus"
+    );
+    Ok(())
+}
+
 /// Full desktop path over vox, no REAPER: host SetlistService behind a
-/// LayerRouter, drive it through SetlistServiceClient — subscribe, build, and
-/// confirm the SetlistChanged push reaches the subscriber.
+/// LayerRouter, drive it through SetlistServiceClient — build, query the
+/// setlist, and confirm seeking selects the active song/section.
 #[test]
 fn setlist_service_over_vox() -> eyre::Result<()> {
     // Manual runtime instead of #[tokio::test]: vox 0.10's debug-build
@@ -211,67 +546,72 @@ async fn setlist_service_over_vox_inner() -> eyre::Result<()> {
         .map_err(|e| eyre::eyre!("build_from_open_projects: {e:?}"))?;
     println!("[v2] build_from_open_projects returned (service built over standalone)");
 
-    match client.setlist().await {
+    let expected_first_song = match client.setlist().await {
         Ok(sl) => {
             println!("[v2] setlist() query: {} songs", sl.songs.len());
             assert!(!sl.songs.is_empty(), "service built an empty setlist");
+            let first = &sl.songs[0];
+            assert!(
+                !first.sections.is_empty(),
+                "song 0 ('{}') built with no sections",
+                first.name
+            );
+            first.name.clone()
         }
         Err(e) => panic!("[v2] setlist() error: {e:?}"),
+    };
+
+    // ── Selecting an active song (the sidebar-expand path) ──────────────
+    //
+    // The desktop app opens with nothing playing, so the ONLY way the
+    // sidebar learns which song is active — and therefore which sections to
+    // show — is a seek publishing the cursor. Reproduce that here over the
+    // real vox path: song 0 must carry a measure grid, and seeking to it
+    // (while STOPPED) must make song 0 / section 0 the active selection.
+    //
+    // (Live cursor/setlist *delivery* now rides the `active_indices` /
+    // `events` `#[subscribe]` streams — exercised in-process by the app's
+    // SessionEventBridge — rather than the old `subscribe(Tx)` verb.)
+
+    let measures = client
+        .measures(0)
+        .await
+        .map_err(|e| eyre::eyre!("measures(0): {e:?}"))?;
+    println!("[v2] song 0 measures: {}", measures.len());
+    assert!(!measures.is_empty(), "song 0 reports no measures");
+
+    // Before the seek nothing is guaranteed active (demo cursor sits at the
+    // timeline end) — active_song() may legitimately error; just log.
+    match client.active_song().await {
+        Ok(s) => println!("[v2] active song before seek: '{}'", s.name),
+        Err(e) => println!("[v2] no active song before seek (expected): {e:?}"),
     }
 
-    // The subscribe handler runs its loop in-flight (never returns until the
-    // stream ends), so poll the receiver CONCURRENTLY with the subscribe future
-    // instead of awaiting subscribe() first. Reproduces the desktop/web-server
-    // client pattern exactly.
-    let (tx, mut rx) = vox::channel::<SetlistEvent>();
-    let mut sub = std::pin::pin!(client.subscribe(tx));
-    println!("[v2] subscribing (concurrent pump)");
+    client
+        .seek_to_section(0, 0)
+        .await
+        .map_err(|e| eyre::eyre!("seek_to_section(0,0): {e:?}"))?;
 
-    let mut got_songs = 0usize;
-    let mut stream_ended = false;
-    let end_at = tokio::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        if tokio::time::Instant::now() >= end_at {
-            break;
-        }
-        tokio::select! {
-            res = &mut sub => {
-                println!("[v2] subscribe() returned: {res:?} — stream ENDED");
-                stream_ended = true;
-                break;
-            }
-            ev = tokio::time::timeout(Duration::from_millis(400), rx.recv()) => {
-                match ev {
-                    Ok(Ok(Some(ev_ref))) => {
-                        if let SetlistEvent::SetlistChanged(sl) = ev_ref.get() {
-                            got_songs = sl.songs.len();
-                            println!("[v2] SetlistChanged: {got_songs} songs");
-                        }
-                    }
-                    Ok(Ok(None)) => {
-                        println!("[v2] rx closed — stream ENDED (reproduces spin)");
-                        stream_ended = true;
-                        break;
-                    }
-                    Ok(Err(e)) => {
-                        println!("[v2] rx error: {e:?}");
-                        stream_ended = true;
-                        break;
-                    }
-                    Err(_) => { /* idle tick; stream still open */ }
-                }
-            }
-        }
-    }
+    let active_song = client
+        .active_song()
+        .await
+        .map_err(|e| eyre::eyre!("active_song after seek: {e:?}"))?;
+    let active_section = client
+        .active_section()
+        .await
+        .map_err(|e| eyre::eyre!("active_section after seek: {e:?}"))?;
+    println!(
+        "[v2] after seek_to_section(0,0): active song='{}' section='{}'",
+        active_song.name, active_section.name
+    );
+    assert_eq!(
+        active_song.name, expected_first_song,
+        "seek_to_section(0,0) did not make song 0 ('{expected_first_song}') active — the sidebar would never expand it"
+    );
+    assert_eq!(
+        active_section.section_id, active_song.sections[0].section_id,
+        "seek_to_section(0,0) did not make section 0 active"
+    );
 
-    println!("[v2] delivered={got_songs} songs, stream_ended={stream_ended}");
-    assert!(
-        got_songs > 0,
-        "subscriber got no initial SetlistChanged snapshot"
-    );
-    assert!(
-        !stream_ended,
-        "subscription stream ended early — would cause the resubscribe spin"
-    );
     Ok(())
 }
