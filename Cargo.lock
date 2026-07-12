@@ -23335,6 +23335,7 @@ name = "signal-drums"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "kontrol",
  "midicore",
  "signal-drums-proto",
  "signal-sampler",
