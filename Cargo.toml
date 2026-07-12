@@ -713,6 +713,9 @@ midir = "0.11"
 # not MIDI). Bundles/builds libusb via its build script, so no system lib is
 # required. Used only by the `kontrol` crate.
 rusb = "0.9"
+# HID (hidraw) access for the NI Komplete Kontrol Light Guide — the LEDs are
+# HID output reports, not bulk USB. Bundles hidapi; coexists with usbhid.
+hidapi = "2"
 # Audio I/O host abstraction — the signal rigs run on cpal's native
 # pipewire host (via daw-audio-io); the `pipewire`/`jack` backends are
 # feature-gated per consumer.
