@@ -693,6 +693,9 @@ bitflags = "2.11"
 baseview = "0.1.1"
 raw-window-handle = "0.5"
 realfft = "3.0"
+# Pure-Rust ONNX inference (no C onnxruntime dep) — Basic Pitch polyphonic
+# note transcription in tune-dsp, behind the `basic-pitch` feature.
+tract-onnx = "0.21"
 approx = "0.5.1"
 crossbeam = "0.8"
 crossbeam-channel = "0.5"
