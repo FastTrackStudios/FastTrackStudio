@@ -23661,17 +23661,41 @@ dependencies = [
 name = "signal-keys"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "daw",
  "daw-audio-io",
  "eyre",
  "libc",
  "midicore",
  "ratatui",
+ "signal-keys-proto",
  "signal-plugin-host",
  "signal-sampler",
  "signal-synth",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "signal-keys-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "midicore-proto",
+ "vox",
+]
+
+[[package]]
+name = "signal-keys-ui"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "dioxus",
+ "midicore-proto",
+ "midicore-ui",
+ "signal-keys-proto",
+ "signal-ui",
 ]
 
 [[package]]
