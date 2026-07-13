@@ -209,6 +209,10 @@ members = [
     "features/fx/delay/delay-dsp",
     "features/fx/pitch/pitch",
     "features/fx/pitch/pitch-dsp",
+    "features/fx/tune/tune",
+    "features/fx/tune/tune-dsp",
+    "features/fx/level/level",
+    "features/fx/level/level-dsp",
     "features/fx/modulation/modulation",
     "features/fx/modulation/chorus-dsp",
     "features/fx/modulation/trem-dsp",
@@ -236,6 +240,9 @@ members = [
     "apps/installer",
     "apps/fts-cli",
     "apps/site",
+    # ── apps/plugins — CLAP/VST3 plugin shells (nice-plug cdylibs) ─────
+    "apps/plugins/level",
+    "apps/plugins/tune",
     # ── apps/extensions — DAW-host extension cdylibs ──────────────────
     #    (apps/extensions/<host>-fts-extensions; reaper is the first host)
     "apps/extensions/reaper-fts-extensions",
@@ -494,6 +501,10 @@ reverb = { path = "features/fx/reverb/reverb" }
 delay = { path = "features/fx/delay/delay" }
 pitch = { path = "features/fx/pitch/pitch" }
 pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
+tune = { path = "features/fx/tune/tune" }
+tune-dsp = { path = "features/fx/tune/tune-dsp" }
+level = { path = "features/fx/level/level" }
+level-dsp = { path = "features/fx/level/level-dsp" }
 modulation = { path = "features/fx/modulation/modulation" }
 # Internal DSP cores (behind the facades).
 eq-dsp = { path = "features/fx/eq/eq-dsp" }
@@ -682,6 +693,9 @@ bitflags = "2.11"
 baseview = "0.1.1"
 raw-window-handle = "0.5"
 realfft = "3.0"
+# Pure-Rust ONNX inference (no C onnxruntime dep) — Basic Pitch polyphonic
+# note transcription in tune-dsp, behind the `basic-pitch` feature.
+tract-onnx = "0.21"
 approx = "0.5.1"
 crossbeam = "0.8"
 crossbeam-channel = "0.5"
