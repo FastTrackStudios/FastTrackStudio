@@ -1,0 +1,18 @@
+# graphify: extra excludes for the knowledge graph (gitignore syntax).
+# graphify already honours .gitignore (target/, node_modules/, dist/, …).
+# This file additionally drops CHECKED-IN vendored third-party trees that add
+# huge graph mass but no understanding of the FastTrackStudio domain — so the
+# god-nodes/communities reflect OUR code, not Eigen internals.
+# Additive only: a .graphifyignore can exclude more, never re-include.
+# Rebuild after editing: `just graph` (runs `graphify update . --force`).
+
+# Vendored NAM upstream (Eigen + nlohmann C++ amp-modeler core). Keep the
+# first-party Rust wrapper in libs/neural-amp-modeler/src/ — only the vendored
+# C++ engine is dropped.
+libs/neural-amp-modeler/NeuralAmpModelerCore/
+
+# All vendored subtrees, wherever they sit: libs/vendor (styx-format),
+# libs/editor/vendor (mermaid renderer), apps/task/ui-lab/vendor (vox TS
+# runtime), features/task/agent/agent-codex/vendor. `vendor/` matches a
+# directory named vendor at any depth (gitignore semantics).
+vendor/

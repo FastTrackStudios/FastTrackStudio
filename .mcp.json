@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": ["--transport", "stdio", "--graph", "graphify-out/graph.json"],
+      "env": {}
+    }
+  }
+}
