@@ -226,6 +226,9 @@ members = [
     "features/rigs/keys",
     "features/rigs/keys/proto",
     "features/rigs/keys/ui",
+    "features/rigs/synth/proto",
+    "features/rigs/synth/ui",
+    "features/rigs/synth/rig",
     "features/rigs/orchestra",
     "features/rigs/drums",
     "features/rigs/drums/proto",
@@ -491,6 +494,9 @@ signal-drums = { path = "features/rigs/drums" }
 signal-drums-proto = { path = "features/rigs/drums/proto" }
 signal-drums-ui = { path = "features/rigs/drums/ui" }
 signal-synth = { path = "features/rigs/synth" }
+signal-synth-proto = { path = "features/rigs/synth/proto" }
+signal-synth-ui = { path = "features/rigs/synth/ui" }
+signal-synth-rig = { path = "features/rigs/synth/rig" }
 
 # ── features/fx — built-in FX (wave 4) ────────────────────────────────
 # Facade crates — the public FX deps (downstream uses these, not `*-dsp`).
