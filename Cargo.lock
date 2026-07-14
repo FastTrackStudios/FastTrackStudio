@@ -23907,6 +23907,7 @@ dependencies = [
  "daw",
  "daw-audio-io",
  "midicore",
+ "signal-browser",
  "signal-keys",
  "signal-plugin-host",
  "signal-sampler",
@@ -23923,6 +23924,7 @@ dependencies = [
  "dioxus",
  "midicore-proto",
  "midicore-ui",
+ "signal-proto",
  "signal-synth-proto",
  "signal-ui",
 ]
