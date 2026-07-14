@@ -36,15 +36,8 @@ struct AppState {
 /// One vox connection per WebSocket upgrade; the shared LayerRouter
 /// dispatches the setlist RPC + stream services by method id.
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| async move {
-        let router = state.router.clone();
-        let acceptor = architect::axum_ws::lane_acceptor_fn(move |_req, connection| {
-            connection.handle_with(router.clone());
-            Ok(())
-        });
-        architect::axum_ws::serve(socket, acceptor).await;
-    })
-    .into_response()
+    ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, state.router.clone()))
+        .into_response()
 }
 
 /// Build the engine and serve it. Blocks for the life of the process.
