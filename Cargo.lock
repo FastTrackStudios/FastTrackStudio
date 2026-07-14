@@ -23881,10 +23881,12 @@ name = "signal-synth"
 version = "0.1.0"
 dependencies = [
  "daw",
+ "facet-styx 5.0.0-rc.5",
  "signal-plugin-host",
  "signal-proto",
  "signal-sampler",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
