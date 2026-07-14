@@ -102,7 +102,6 @@ members = [
     # ── features/audio ────────────────────────────────────────────────
     "features/audio/daw-audio-graph",
     "features/audio/daw-audio-io",
-    "features/audio/daw-midi-io",
     "features/audio/daw-allocator",
     "features/audio/fts-audio-proto",
     "features/audio/audio-controls",
@@ -385,7 +384,6 @@ fts-devtools = { path = "libs/devtools/fts-devtools" }
 daw-test-macro = { path = "libs/devtools/daw-test-macro" }
 daw-audio-graph = { path = "features/audio/daw-audio-graph" }
 daw-audio-io = { path = "features/audio/daw-audio-io" }
-daw-midi-io = { path = "features/audio/daw-midi-io" }
 # RT-aware allocator — offloads RT deallocation to background thread
 daw-allocator = { path = "features/audio/daw-allocator" }
 fts-audio-proto = { path = "features/audio/fts-audio-proto" }

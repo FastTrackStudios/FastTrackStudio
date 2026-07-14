@@ -6002,17 +6002,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-midi-io"
-version = "0.1.0"
-dependencies = [
- "crossbeam-channel",
- "daw-proto",
- "eyre",
- "midir",
- "tracing",
-]
-
-[[package]]
 name = "daw-module"
 version = "0.1.0"
 dependencies = [
