@@ -1253,14 +1253,8 @@ async fn server_vox_handler(
     // snapshot verbs themselves pass the entry gate before closing
     // it — no self-deadlock.
     let router = crate::snapshot::GatedRouter::new(router, gate);
-    ws.on_upgrade(move |socket| async move {
-        let acceptor = architect::axum_ws::lane_acceptor_fn(move |_req, connection| {
-            connection.handle_with(router.clone());
-            Ok(())
-        });
-        architect::axum_ws::serve(socket, acceptor).await;
-    })
-    .into_response()
+    ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
+        .into_response()
 }
 
 /// `/vox` — legacy single-org alias. Dispatches into the
@@ -1708,12 +1702,6 @@ fn serve_org_vox(
     // entry — see `snapshot::GatedRouter`. Free when no snapshot is
     // running.
     let router = snapshot::GatedRouter::new(org_layer_router(&org), gate);
-    ws.on_upgrade(move |socket| async move {
-        let acceptor = architect::axum_ws::lane_acceptor_fn(move |_req, connection| {
-            connection.handle_with(router.clone());
-            Ok(())
-        });
-        architect::axum_ws::serve(socket, acceptor).await;
-    })
-    .into_response()
+    ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
+        .into_response()
 }
