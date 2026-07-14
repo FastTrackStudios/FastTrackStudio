@@ -9416,6 +9416,9 @@ dependencies = [
  "signal-keys-proto",
  "signal-keys-ui",
  "signal-sampler",
+ "signal-synth-proto",
+ "signal-synth-rig",
+ "signal-synth-ui",
  "tokio",
  "tower-http",
  "tracing",
@@ -23882,6 +23885,44 @@ dependencies = [
  "signal-proto",
  "signal-sampler",
  "tracing",
+]
+
+[[package]]
+name = "signal-synth-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "midicore-proto",
+ "vox",
+]
+
+[[package]]
+name = "signal-synth-rig"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "daw",
+ "daw-audio-io",
+ "midicore",
+ "signal-keys",
+ "signal-plugin-host",
+ "signal-sampler",
+ "signal-synth",
+ "signal-synth-proto",
+ "tracing",
+]
+
+[[package]]
+name = "signal-synth-ui"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "dioxus",
+ "midicore-proto",
+ "midicore-ui",
+ "signal-synth-proto",
+ "signal-ui",
 ]
 
 [[package]]
