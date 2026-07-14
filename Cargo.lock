@@ -23538,6 +23538,7 @@ dependencies = [
  "delay",
  "eq",
  "hound",
+ "level-dsp",
  "modulation",
  "reverb",
  "signal-plugin-host",
