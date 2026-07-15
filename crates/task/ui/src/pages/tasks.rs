@@ -21,11 +21,13 @@
 //! spatial. Idle (nothing running) renders no bar at all.
 
 use dioxus::prelude::*;
-use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
+use fts_ui::lucide_dioxus::{Plus, SlidersHorizontal};
+use task_ui::{QuickAdd, TaskInfo as UiTask, TaskMutation, TasksApp};
 
 use crate::chrome::use_second_tick;
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::prefs::PrefsCtx;
+use crate::shell::mobile::{BottomSheet, MobileActionBar};
 use crate::stores;
 
 /// The "I'm at:" choices — matched against `@<location>` gate
@@ -55,6 +57,11 @@ pub fn TasksView() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let prefs_ctx = use_context::<PrefsCtx>();
+
+    // Mobile sheets: filters + quick-add, opened from the sticky
+    // bottom action bar (thumb reach) below `md`.
+    let mut filters_open = use_signal(|| false);
+    let mut add_open = use_signal(|| false);
 
     // The list hooks drive the fetches; the derivation below reads the
     // backing stores directly (inside the memo) so it re-runs on data
@@ -167,8 +174,10 @@ pub fn TasksView() -> Element {
                 running,
             } = data;
             let location_value = at_location.clone();
+            // Inline chips are desktop chrome; on phones the same
+            // controls live in the Filters bottom sheet below.
             let chips = rsx! {
-                div { class: "flex items-center gap-1.5",
+                div { class: "hidden items-center gap-1.5 md:flex",
                     FilterChip {
                         label: "Active",
                         title: "Hide done/cancelled tasks",
@@ -198,8 +207,16 @@ pub fn TasksView() -> Element {
                     }
                 }
             };
+            // How many filters are narrowing the board — badged on the
+            // mobile Filters trigger so a filtered board is never a
+            // mystery on a phone.
+            let filter_count = usize::from(active_only)
+                + usize::from(relevant_only)
+                + usize::from(!at_location.is_empty());
+            let sheet_location = at_location.clone();
+            let sheet_projects = project_choices.clone();
             rsx! {
-                div { class: "flex h-full w-full flex-col",
+                div { class: "flex h-full w-full flex-col pb-14 md:pb-0",
                     if let Some(t) = running {
                         NowBar {
                             task: t,
@@ -224,6 +241,77 @@ pub fn TasksView() -> Element {
                             on_open_full: move |id| {
                                 nav.push(crate::routes::Route::TaskDetailRoute { id });
                             },
+                        }
+                    }
+                    // ── Mobile: sticky actions + sheets ────────────────
+                    MobileActionBar {
+                        button {
+                            r#type: "button",
+                            class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground active:bg-accent",
+                            onclick: move |_| filters_open.set(true),
+                            SlidersHorizontal { size: 16 }
+                            if filter_count > 0 { "Filters · {filter_count}" } else { "Filters" }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground active:bg-primary/85",
+                            onclick: move |_| add_open.set(true),
+                            Plus { size: 16 }
+                            "Add task"
+                        }
+                    }
+                    BottomSheet {
+                        open: filters_open(),
+                        title: "Filters".to_string(),
+                        on_close: move |()| filters_open.set(false),
+                        div { class: "flex flex-col gap-3 pb-2",
+                            SheetToggleRow {
+                                label: "Active",
+                                hint: "Hide done and cancelled tasks",
+                                on: active_only,
+                                on_toggle: move |on| prefs_ctx.update(|p| p.tasks_active = on),
+                            }
+                            SheetToggleRow {
+                                label: "Relevant",
+                                hint: "Only what matters right now",
+                                on: relevant_only,
+                                on_toggle: move |on| prefs_ctx.update(|p| p.tasks_relevant = on),
+                            }
+                            div { class: "flex flex-col gap-1.5",
+                                span { class: "px-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                                    "I'm at"
+                                }
+                                select {
+                                    class: "min-h-11 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50",
+                                    value: "{sheet_location}",
+                                    onchange: move |e| prefs_ctx.update(|p| p.location = e.value()),
+                                    option { value: "", selected: sheet_location.is_empty(), "anywhere" }
+                                    for loc in LOCATIONS {
+                                        option { key: "{loc}", value: "{loc}", selected: sheet_location == *loc, "@{loc}" }
+                                    }
+                                }
+                            }
+                            if hidden > 0 {
+                                span { class: "px-1 text-xs tabular-nums text-muted-foreground",
+                                    "{hidden} tasks hidden by these filters"
+                                }
+                            }
+                        }
+                    }
+                    BottomSheet {
+                        open: add_open(),
+                        title: "Add task".to_string(),
+                        on_close: move |()| add_open.set(false),
+                        div { class: "pb-2",
+                            QuickAdd {
+                                projects: sheet_projects,
+                                on_create: move |task: task_ui::TaskInfo| {
+                                    let create_slug =
+                                        crate::orgs::create_target(&selection.read(), &org_list.read());
+                                    muts.apply(&create_slug, TaskMutation::Create { task });
+                                    add_open.set(false);
+                                },
+                            }
                         }
                     }
                 }
@@ -268,6 +356,37 @@ fn NowBar(task: UiTask, on_complete: EventHandler<uuid::Uuid>) -> Element {
                 class: "ml-auto shrink-0 rounded-md border border-sky-500/40 px-2.5 py-0.5 text-xs font-medium text-sky-200 transition-colors hover:bg-sky-500/20",
                 onclick: move |_| on_complete.call(id),
                 "Complete"
+            }
+        }
+    }
+}
+
+/// Touch-sized on/off row for the mobile Filters sheet — the same
+/// toggles the desktop chips drive, at thumb size (≥44px), with a
+/// switch-style state indicator.
+#[component]
+fn SheetToggleRow(
+    label: &'static str,
+    hint: &'static str,
+    on: bool,
+    on_toggle: EventHandler<bool>,
+) -> Element {
+    let (track, knob) = if on {
+        ("bg-primary", "translate-x-4")
+    } else {
+        ("bg-muted", "translate-x-0")
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-border/60 bg-card/40 px-3 py-2 text-left active:bg-accent",
+            onclick: move |_| on_toggle.call(!on),
+            div { class: "flex min-w-0 flex-col",
+                span { class: "text-sm font-medium text-foreground", "{label}" }
+                span { class: "text-xs text-muted-foreground", "{hint}" }
+            }
+            span { class: "relative h-5 w-9 shrink-0 rounded-full transition-colors {track}",
+                span { class: "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow transition-transform {knob}" }
             }
         }
     }

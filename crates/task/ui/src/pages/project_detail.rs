@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use crate::orgs::OrgMeta;
 use crate::routes::Route;
+use crate::shell::mobile::{BottomSheet, MobileActionBar};
 use crate::stores::{self, to_ui};
 use crate::task_sort::{belongs, is_active_task};
 use threads::ui::ConversationsPanel;
@@ -32,6 +33,9 @@ use threads::ui::ConversationsPanel;
 pub fn ProjectDetailView(id: String) -> Element {
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let mut selected_thread = use_signal(|| Option::<Uuid>::None);
+    // Mobile add-task sheet — TasksApp hides its inline quick-add on
+    // phones; the sticky action bar opens this instead.
+    let mut add_open = use_signal(|| false);
 
     // The project itself: cache-first from the shared store (instant
     // after a /projects visit), else a per-org probe. Mutations (type
@@ -281,12 +285,12 @@ pub fn ProjectDetailView(id: String) -> Element {
                 // ── Header ──────────────────────────────────────────────
                 div { class: "flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-5",
                     div { class: "flex flex-wrap items-start justify-between gap-3",
-                        div { class: "flex flex-col gap-1",
-                            div { class: "flex items-center gap-2",
+                        div { class: "flex min-w-0 flex-col gap-1",
+                            div { class: "flex min-w-0 items-center gap-2",
                                 if !p.color.is_empty() {
                                     span { class: "h-3 w-3 shrink-0 rounded-full", style: "background:{p.color}" }
                                 }
-                                Heading { level: HeadingLevel::H1, "{p.title}" }
+                                Heading { level: HeadingLevel::H1, class: "min-w-0 break-words", "{p.title}" }
                             }
                             div { class: "flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground",
                                 span { class: "capitalize", "{p.priority} priority" }
@@ -585,6 +589,35 @@ pub fn ProjectDetailView(id: String) -> Element {
                         }
                     }
                 }
+
+                // ── Mobile: sticky add-task above the tab bar ───────
+                MobileActionBar {
+                    button {
+                        r#type: "button",
+                        class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground active:bg-primary/85",
+                        onclick: move |_| add_open.set(true),
+                        "Add task to {p.title}"
+                    }
+                }
+                BottomSheet {
+                    open: add_open(),
+                    title: "Add task".to_string(),
+                    on_close: move |()| add_open.set(false),
+                    div { class: "pb-2",
+                        task_ui::QuickAdd {
+                            // Creates here file under THIS project — same
+                            // scoped mutations the board uses.
+                            on_create: {
+                                let create_slug = forge_slug.clone();
+                                let scoped = task_muts.scoped_to(p.id);
+                                move |task: UiTask| {
+                                    scoped.apply(&create_slug, TaskMutation::Create { task });
+                                    add_open.set(false);
+                                }
+                            },
+                        }
+                    }
+                }
             }
         }
         (None, Some(e)) => rsx! {
@@ -598,7 +631,7 @@ pub fn ProjectDetailView(id: String) -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto w-full max-w-6xl flex flex-col gap-6 p-4 sm:p-6 lg:p-10", {body} }
+        div { class: "mx-auto w-full max-w-6xl flex flex-col gap-6 p-4 pb-14 sm:p-6 md:pb-6 lg:p-10", {body} }
     }
 }
 
@@ -995,7 +1028,7 @@ fn DetailRow(label: String, value: String) -> Element {
     rsx! {
         div { class: "flex items-baseline justify-between gap-3 text-sm",
             span { class: "shrink-0 text-muted-foreground", "{label}" }
-            span { class: "text-right font-medium", "{value}" }
+            span { class: "min-w-0 break-words text-right font-medium", "{value}" }
         }
     }
 }

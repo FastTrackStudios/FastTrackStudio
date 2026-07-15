@@ -21,6 +21,7 @@ use fts_ui::prelude::*;
 use inbox_proto::InboxItem;
 
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::shell::mobile::MobileActionBar;
 use crate::stores;
 
 const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
@@ -122,22 +123,27 @@ pub fn InboxView() -> Element {
     }
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-4 sm:p-6 lg:p-10",
+        div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-4 pb-14 sm:p-6 md:pb-6 lg:p-10",
             div { class: "flex items-center justify-between gap-3",
                 Heading { level: HeadingLevel::H1, "Inbox" }
                 if !due_open.is_empty() {
-                    Button {
-                        variant: ButtonVariant::Primary,
-                        size: ButtonSize::Small,
-                        on_click: {
-                            let q = due_open.clone();
-                            move |_| {
-                                queue.set(q.clone());
-                                processing.set(true);
-                            }
-                        },
-                        "Process {due_open.len()} →"
+                    // Desktop CTA — on phones the sticky bottom action
+                    // bar (thumb reach) carries the same action.
+                    div { class: "hidden md:block",
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Small,
+                            on_click: {
+                                let q = due_open.clone();
+                                move |_| {
+                                    queue.set(q.clone());
+                                    processing.set(true);
+                                }
+                            },
+                            "Process {due_open.len()} →"
+                        }
                     }
+                    span { class: "text-sm text-muted-foreground md:hidden", "{open_count} open" }
                 } else {
                     Text { variant: TextVariant::Muted, class: "text-sm", "{open_count} open" }
                 }
@@ -220,6 +226,23 @@ pub fn InboxView() -> Element {
                 }
             }
         }
+        // ── Mobile: sticky Process CTA above the tab bar ───────────
+        if !due_open.is_empty() {
+            MobileActionBar {
+                button {
+                    r#type: "button",
+                    class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground active:bg-primary/85",
+                    onclick: {
+                        let q = due_open.clone();
+                        move |_| {
+                            queue.set(q.clone());
+                            processing.set(true);
+                        }
+                    },
+                    "Process {due_open.len()} →"
+                }
+            }
+        }
     }
 }
 
@@ -274,7 +297,7 @@ fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, pending: bool) -> Eleme
     };
 
     rsx! {
-        div { class: "flex items-start gap-3 rounded-lg border px-3 py-2 {state_cls}",
+        div { class: "flex flex-col gap-2 rounded-lg border px-3 py-2.5 sm:flex-row sm:items-start sm:gap-3 sm:py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-1",
                 Text { class: "whitespace-pre-wrap break-words text-sm", "{body}" }
                 div { class: "flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground",
@@ -288,7 +311,7 @@ fn InboxRow(item: InboxItem, slug: Memo<Option<String>>, pending: bool) -> Eleme
                     }
                 }
             }
-            div { class: "flex shrink-0 items-center gap-1",
+            div { class: "flex shrink-0 items-center gap-1 self-end sm:self-auto",
                 if open {
                     Button {
                         variant: ButtonVariant::Secondary,
@@ -356,12 +379,12 @@ fn SuggestedRow(item: InboxItem, slug: Memo<Option<String>>, pending: bool) -> E
     };
 
     rsx! {
-        div { class: "flex items-start gap-3 rounded-lg border px-3 py-2 {state_cls}",
+        div { class: "flex flex-col gap-2 rounded-lg border px-3 py-2.5 sm:flex-row sm:items-start sm:gap-3 sm:py-2 {state_cls}",
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
                 Text { class: "whitespace-pre-wrap break-words text-sm", "{body}" }
                 span { class: "text-[11px] text-muted-foreground", "via {source}" }
             }
-            div { class: "flex shrink-0 items-center gap-1",
+            div { class: "flex shrink-0 items-center gap-1 self-end sm:self-auto",
                 Button {
                     variant: ButtonVariant::Primary,
                     size: ButtonSize::Small,
@@ -514,16 +537,34 @@ fn ProcessReview(
 
             // Decisions.
             Text { variant: TextVariant::Muted, class: "text-xs", "What should this become?" }
+            // Primary decisions stretch to equal thumb-sized thirds on
+            // phones; compact inline on desktop.
             div { class: "flex flex-wrap gap-2",
-                Button { variant: ButtonVariant::Primary, on_click: to_task, "→ Task" }
-                Button { variant: ButtonVariant::Secondary, on_click: to_note, "→ Note" }
-                Button { variant: ButtonVariant::Outline, on_click: mark_done, "Done" }
+                Button {
+                    variant: ButtonVariant::Primary,
+                    class: "min-h-11 flex-1 sm:min-h-0 sm:flex-none",
+                    on_click: to_task,
+                    "→ Task"
+                }
+                Button {
+                    variant: ButtonVariant::Secondary,
+                    class: "min-h-11 flex-1 sm:min-h-0 sm:flex-none",
+                    on_click: to_note,
+                    "→ Note"
+                }
+                Button {
+                    variant: ButtonVariant::Outline,
+                    class: "min-h-11 flex-1 sm:min-h-0 sm:flex-none",
+                    on_click: mark_done,
+                    "Done"
+                }
             }
             div { class: "flex flex-wrap items-center gap-2",
                 Text { variant: TextVariant::Muted, class: "text-xs", "Snooze:" }
                 Button {
                     variant: ButtonVariant::Ghost,
                     size: ButtonSize::Small,
+                    class: "min-h-11 sm:min-h-0",
                     on_click: {
                         let item = item.clone();
                         move |_| snooze_btn(item.clone(), cursor, 1)
@@ -533,6 +574,7 @@ fn ProcessReview(
                 Button {
                     variant: ButtonVariant::Ghost,
                     size: ButtonSize::Small,
+                    class: "min-h-11 sm:min-h-0",
                     on_click: {
                         let item = item.clone();
                         move |_| snooze_btn(item.clone(), cursor, 3)
@@ -542,6 +584,7 @@ fn ProcessReview(
                 Button {
                     variant: ButtonVariant::Ghost,
                     size: ButtonSize::Small,
+                    class: "min-h-11 sm:min-h-0",
                     on_click: {
                         let item = item.clone();
                         move |_| snooze_btn(item.clone(), cursor, 7)
@@ -552,12 +595,14 @@ fn ProcessReview(
                 Button {
                     variant: ButtonVariant::Ghost,
                     size: ButtonSize::Small,
+                    class: "min-h-11 sm:min-h-0",
                     on_click: move |_| cursor += 1,
                     "Skip"
                 }
                 Button {
                     variant: ButtonVariant::Destructive,
                     size: ButtonSize::Small,
+                    class: "min-h-11 sm:min-h-0",
                     on_click: delete,
                     "Delete"
                 }

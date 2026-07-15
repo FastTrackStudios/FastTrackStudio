@@ -95,10 +95,11 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                     for v in [ViewMode::List, ViewMode::Kanban] {
                         {
                             let active = v == view();
+                            // Touch-sized below `sm`, compact on desktop.
                             let cls = if active {
-                                "bg-background text-foreground shadow-sm font-medium px-2.5 py-0.5 rounded-md transition-colors"
+                                "bg-background text-foreground shadow-sm font-medium px-3 py-1.5 sm:px-2.5 sm:py-0.5 rounded-md transition-colors"
                             } else {
-                                "text-muted-foreground hover:text-foreground px-2.5 py-0.5 rounded-md transition-colors"
+                                "text-muted-foreground hover:text-foreground px-3 py-1.5 sm:px-2.5 sm:py-0.5 rounded-md transition-colors"
                             };
                             rsx! {
                                 button {
@@ -113,9 +114,14 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                     }
                 }
             }
-            QuickAdd {
-                projects: props.projects.clone(),
-                on_create: move |task: TaskInfo| props.on_event.call(TaskMutation::Create { task }),
+            // Hidden on phones: the page layer renders a sticky
+            // bottom action bar (thumb reach) that opens the same
+            // QuickAdd in a bottom sheet instead.
+            div { class: "hidden sm:block",
+                QuickAdd {
+                    projects: props.projects.clone(),
+                    on_create: move |task: TaskInfo| props.on_event.call(TaskMutation::Create { task }),
+                }
             }
             div { class: "flex-1 min-h-0 overflow-y-auto",
                 match view() {

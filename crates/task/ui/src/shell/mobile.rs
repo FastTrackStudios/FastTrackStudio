@@ -93,6 +93,25 @@ pub fn BottomSheet(
     }
 }
 
+// ── sticky page action bar ──────────────────────────────────────────
+
+/// Sticky mobile action bar — a page's primary actions, pinned just
+/// above the [`BottomTabBar`] so they're always in thumb reach.
+/// Fixed to the viewport (the tab bar is 56px + safe area), hidden at
+/// `md:` and up where the desktop chrome takes over. Pages that render
+/// one should add `pb-14 md:pb-0` to their container so the bar never
+/// covers the last row of content.
+#[component]
+pub fn MobileActionBar(children: Element) -> Element {
+    rsx! {
+        div {
+            class: "fixed inset-x-0 z-30 flex items-center gap-2 border-t border-border bg-background/95 px-3 py-2 backdrop-blur md:hidden",
+            style: "bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));",
+            {children}
+        }
+    }
+}
+
 // ── top app bar ─────────────────────────────────────────────────────
 
 #[component]

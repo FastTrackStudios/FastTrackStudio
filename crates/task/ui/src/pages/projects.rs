@@ -17,12 +17,13 @@
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    CalendarDays, Flag, FolderKanban, Layers, LayoutGrid, LayoutList, User,
+    CalendarDays, Flag, FolderKanban, Layers, LayoutGrid, LayoutList, Plus, User,
 };
 use fts_ui::prelude::*;
 use project::ProjectInfo;
 
 use crate::routes::Route;
+use crate::shell::mobile::{BottomSheet, MobileActionBar};
 use crate::task_sort::{priority_rank, status_rank};
 
 /// Page-scoped keyframes for the staggered card entrance. Injected once
@@ -81,6 +82,9 @@ pub fn ProjectsView() -> Element {
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
     let view_mode = use_signal(initial_view_mode);
+    // Mobile create sheet — the desktop header (and its quick-add) is
+    // hidden below `md`, so the sticky action bar owns creation there.
+    let mut new_open = use_signal(|| false);
 
     let derived = use_memo(move || {
         let rows: Vec<ProjectInfo> = store.list().into_iter().map(|r| r.project).collect();
@@ -123,8 +127,37 @@ pub fn ProjectsView() -> Element {
                 class: "pointer-events-none absolute inset-x-0 top-0 -z-10 h-72",
                 style: "background: radial-gradient(60% 120% at 50% -10%, color-mix(in oklch, var(--primary) 10%, transparent), transparent 70%);",
             }
-            div { class: "mx-auto w-full max-w-6xl flex flex-col gap-8 p-4 sm:p-6 lg:p-10",
+            div { class: "mx-auto w-full max-w-6xl flex flex-col gap-8 p-4 pb-14 sm:p-6 md:pb-6 lg:p-10",
                 {view}
+            }
+        }
+        // ── Mobile: sticky create above the tab bar ─────────────────
+        MobileActionBar {
+            button {
+                r#type: "button",
+                class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground active:bg-primary/85",
+                onclick: move |_| new_open.set(true),
+                Plus { size: 16 }
+                "New project"
+            }
+        }
+        BottomSheet {
+            open: new_open(),
+            title: "New project".to_string(),
+            on_close: move |()| new_open.set(false),
+            div { class: "pb-2",
+                ProjectQuickAdd {
+                    orgs: org_list
+                        .read()
+                        .iter()
+                        .map(|o| (o.slug.clone(), o.name.clone()))
+                        .collect::<Vec<_>>(),
+                    default_slug: crate::orgs::create_target(&selection.read(), &org_list.read()),
+                    on_create: move |(slug, title): (String, String)| {
+                        muts.create(slug, crate::stores::draft_project(title));
+                        new_open.set(false);
+                    },
+                }
             }
         }
     }

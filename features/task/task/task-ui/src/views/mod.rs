@@ -24,6 +24,7 @@ pub use session_history::{
     SessionEvent, SessionHistory, SessionHistoryProps, activity_label, merge_session_events,
     payload_preview,
 };
+pub use quick_add::{QuickAdd, QuickAddProps};
 pub use subtasks::{SubtasksBoard, SubtasksBoardProps, subtask_summary};
 pub use tasks_app::{TasksApp, TasksAppProps};
 pub use time::{

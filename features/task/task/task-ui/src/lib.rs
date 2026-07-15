@@ -27,7 +27,7 @@ pub use model::{Priority, Status, TaskInfo, TimeEntry, clock_label, duration_lab
 pub use mutation::TaskMutation;
 pub use store::{TaskState, apply};
 pub use views::{
-    CheckboxButton, ClaimState, LinkChips, LinkedTaskRef, SessionEvent, SessionHistory, SubtaskRow,
-    SubtasksBoard, TaskDetailFull, TaskDetailFullProps, TasksApp, TasksAppProps, TimeSection,
-    WorkflowSection,
+    CheckboxButton, ClaimState, LinkChips, LinkedTaskRef, QuickAdd, SessionEvent, SessionHistory,
+    SubtaskRow, SubtasksBoard, TaskDetailFull, TaskDetailFullProps, TasksApp, TasksAppProps,
+    TimeSection, WorkflowSection,
 };

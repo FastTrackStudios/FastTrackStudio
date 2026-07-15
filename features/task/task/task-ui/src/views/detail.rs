@@ -85,9 +85,9 @@ pub fn TaskDetail(props: TaskDetailProps) -> Element {
                         {
                             let active = s == current_status;
                             let cls = if active {
-                                "rounded-md border border-primary bg-primary/15 text-foreground px-2.5 py-1 text-xs font-medium"
+                                "rounded-md border border-primary bg-primary/15 text-foreground px-3 py-2 sm:px-2.5 sm:py-1 text-xs font-medium"
                             } else {
-                                "rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent px-2.5 py-1 text-xs"
+                                "rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent px-3 py-2 sm:px-2.5 sm:py-1 text-xs"
                             };
                             rsx! {
                                 button {
@@ -109,9 +109,9 @@ pub fn TaskDetail(props: TaskDetailProps) -> Element {
                         {
                             let active = p == current_priority;
                             let cls = if active {
-                                "rounded-md border border-primary bg-primary/15 text-foreground px-2.5 py-1 text-xs font-medium"
+                                "rounded-md border border-primary bg-primary/15 text-foreground px-3 py-2 sm:px-2.5 sm:py-1 text-xs font-medium"
                             } else {
-                                "rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent px-2.5 py-1 text-xs"
+                                "rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent px-3 py-2 sm:px-2.5 sm:py-1 text-xs"
                             };
                             rsx! {
                                 button {
@@ -166,14 +166,17 @@ pub fn TaskDetail(props: TaskDetailProps) -> Element {
                 }
             }
             SheetFooter { class: "border-t border-border pt-2 gap-2",
+                // Full-width, touch-sized on phones; compact on desktop.
                 Button {
                     variant: ButtonVariant::Ghost,
                     size: ButtonSize::Small,
+                    class: "flex-1 min-h-11 sm:flex-none sm:min-h-0",
                     on_click: move |_| props.on_close.call(()),
                     "Cancel"
                 }
                 Button {
                     size: ButtonSize::Small,
+                    class: "flex-1 min-h-11 sm:flex-none sm:min-h-0",
                     on_click: move |_| {
                         let mut next = initial.clone();
                         next.title = title.read().clone();

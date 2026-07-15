@@ -162,7 +162,7 @@ pub fn TaskDetailFull(props: TaskDetailFullProps) -> Element {
         article { class: "flex flex-col gap-5",
             // ---- Header -------------------------------------------------
             header { class: "flex flex-col gap-2",
-                h1 { class: "text-xl font-semibold text-foreground leading-tight", "{t.title}" }
+                h1 { class: "text-xl font-semibold text-foreground leading-tight break-words", "{t.title}" }
                 div { class: "flex flex-wrap items-center gap-1.5",
                     {
                         let (label, cls) = match status {

@@ -63,9 +63,9 @@ pub fn WorkflowSection(props: WorkflowSectionProps) -> Element {
                         {
                             let active = props.estimate == Some(size);
                             let cls = if active {
-                                "rounded-md border border-primary bg-primary/15 text-foreground px-2.5 py-1 text-xs font-medium"
+                                "rounded-md border border-primary bg-primary/15 text-foreground px-3 py-2 sm:px-2.5 sm:py-1 text-xs font-medium"
                             } else {
-                                "rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent px-2.5 py-1 text-xs"
+                                "rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent px-3 py-2 sm:px-2.5 sm:py-1 text-xs"
                             };
                             rsx! {
                                 button {
