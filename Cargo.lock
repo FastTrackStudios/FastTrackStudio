@@ -19800,8 +19800,6 @@ dependencies = [
 [[package]]
 name = "phon"
 version = "0.2.0-rc.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc1d35927f33d36721ccc0eec1a335b557673f6c412f0c650335a9d9fc45a033"
 dependencies = [
  "facet 0.50.0-rc.5",
  "facet-value 0.50.0-rc.5",
@@ -26043,6 +26041,7 @@ dependencies = [
  "timer",
  "timer-proto",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "uuid 1.23.4",
  "vault",
@@ -26812,6 +26811,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tungstenite 0.29.0",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

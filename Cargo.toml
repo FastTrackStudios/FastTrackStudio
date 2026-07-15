@@ -922,6 +922,12 @@ moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7
 # them, so serialized keybind configs (`keys "<C-s>"`) could not be
 # re-parsed. Drop the vendor once upstream fixes can_be_bare.
 styx-format = { path = "libs/vendor/styx-format" }
+# Vendored phon rc.5 + derive support for parse/display opaque scalars
+# (Uuid, chrono DateTime/NaiveDate, url, …). Upstream rc.5 PANICS (and the
+# reply path aborts the process) the first time a vox RPC reply contains
+# such a field — every task-server list/stats call died. Drop the vendor
+# once upstream phon derives these scalars.
+phon = { path = "libs/vendor/phon" }
 # Editor's vendored mermaid-rs-renderer fork (web_time::Instant so the
 # layouter works on wasm32) — see libs/editor/vendor/.
 mermaid-rs-renderer = { path = "libs/editor/vendor/mermaid-rs-renderer" }
