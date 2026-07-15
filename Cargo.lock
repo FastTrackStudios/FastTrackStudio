@@ -9383,6 +9383,7 @@ version = "0.0.1-alpha"
 dependencies = [
  "architect",
  "axum",
+ "base64 0.22.1",
  "daw",
  "daw-standalone",
  "daw-ui",
