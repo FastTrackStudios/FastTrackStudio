@@ -49,7 +49,7 @@ async fn boot_server() -> eyre::Result<(String, tempfile::TempDir)> {
 }
 
 async fn connect(url: &str) -> eyre::Result<VaultSyncClient> {
-    vox::connect(url)
+    vox::connect_lane(url)
         .establish()
         .await
         .map_err(|e| eyre::eyre!("vault-sync connect: {e:?}"))
@@ -160,13 +160,16 @@ async fn put_conflict_returns_server_bytes() {
         .await
         .unwrap_err();
     match err {
-        VoxError::User(VaultSyncError::Conflict {
-            server_sha,
-            server_bytes,
-        }) => {
-            assert!(!server_sha.is_empty());
-            assert_eq!(&server_bytes[..], b"first");
-        }
+        VoxError::User(boxed) => match *boxed {
+            VaultSyncError::Conflict {
+                server_sha,
+                server_bytes,
+            } => {
+                assert!(!server_sha.is_empty());
+                assert_eq!(&server_bytes[..], b"first");
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        },
         other => panic!("expected User(Conflict), got {other:?}"),
     }
 }

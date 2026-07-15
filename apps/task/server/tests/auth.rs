@@ -52,7 +52,7 @@ async fn signup_signin_current_session_roundtrip() -> eyre::Result<()> {
     let alice_user_id = bundle.user.id;
 
     // Sign in over vox.
-    let client: architect_auth::proto::AuthServiceClient = vox::connect(&url)
+    let client: architect_auth::proto::AuthServiceClient = vox::connect_lane(&url)
         .establish()
         .await
         .map_err(|e| eyre::eyre!("connect: {e:?}"))?;

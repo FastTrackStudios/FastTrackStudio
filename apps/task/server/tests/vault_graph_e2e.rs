@@ -51,8 +51,8 @@ async fn put(sync: &VaultSyncClient, path: &str, body: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn graph_queries_over_seeded_vault() {
     let (url, _tmp) = boot_server().await.unwrap();
-    let sync: VaultSyncClient = vox::connect(&url).establish().await.unwrap();
-    let graph: VaultGraphClient = vox::connect(&url).establish().await.unwrap();
+    let sync: VaultSyncClient = vox::connect_lane(&url).establish().await.unwrap();
+    let graph: VaultGraphClient = vox::connect_lane(&url).establish().await.unwrap();
 
     put(
         &sync,
