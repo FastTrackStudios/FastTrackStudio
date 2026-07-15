@@ -30,6 +30,12 @@ use crate::{AppState, AuthState, DEFAULT_AUTH_SECRET, build_org_state};
 #[derive(Clone, architect::HasDispatcher)]
 pub struct OrgManagementImpl {
     state: Arc<AppState>,
+    /// True when served over the in-process `LocalServer` (embedded
+    /// CLI): the caller already owns the data root on disk, so session
+    /// validation is skipped — same trust model as the per-org
+    /// embedded transport, which mounts the org router with no auth
+    /// gate at all.
+    local_trusted: bool,
 }
 
 impl OrgManagementImpl {
@@ -37,6 +43,17 @@ impl OrgManagementImpl {
     pub fn new(state: AppState) -> Self {
         Self {
             state: Arc::new(state),
+            local_trusted: false,
+        }
+    }
+
+    /// In-process transport constructor — skips session validation
+    /// (see `local_trusted`).
+    #[must_use]
+    pub fn new_local_trusted(state: AppState) -> Self {
+        Self {
+            state: Arc::new(state),
+            local_trusted: true,
         }
     }
 }
@@ -46,7 +63,7 @@ impl OrgManagementService for OrgManagementImpl {
         // Authorization. Bootstrap path is permissive; normal
         // mode requires a valid session token against the
         // home org's auth.sqlite.
-        if !self.state.is_bootstrap() {
+        if !self.local_trusted && !self.state.is_bootstrap() {
             let home_slug = self.state.home_slug().ok_or_else(|| {
                 OrgManagementError::Unauthorized(
                     "server has orgs but no home org — cannot validate".into(),

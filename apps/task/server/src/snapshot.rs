@@ -190,6 +190,11 @@ pub struct SnapshotImpl {
     /// supervisor restarts the server on the restored data. Tests
     /// turn this off via [`SnapshotImpl::new_without_exit`].
     exit_on_restore: bool,
+    /// True when served over the in-process `LocalServer` (embedded
+    /// CLI): the caller already owns the data root on disk, so
+    /// [`Self::authorize`] passes — same trust model as the per-org
+    /// embedded transport.
+    local_trusted: bool,
 }
 
 impl SnapshotImpl {
@@ -198,6 +203,7 @@ impl SnapshotImpl {
         Self {
             state: Arc::new(state),
             exit_on_restore: true,
+            local_trusted: false,
         }
     }
 
@@ -208,6 +214,19 @@ impl SnapshotImpl {
         Self {
             state: Arc::new(state),
             exit_on_restore: false,
+            local_trusted: false,
+        }
+    }
+
+    /// In-process transport constructor (embedded CLI): trusted (no
+    /// session validation) and no exit-on-restore — the CLI process
+    /// is ephemeral and exits after the verb anyway.
+    #[must_use]
+    pub fn new_local_trusted(state: AppState) -> Self {
+        Self {
+            state: Arc::new(state),
+            exit_on_restore: false,
+            local_trusted: true,
         }
     }
 
@@ -219,6 +238,9 @@ impl SnapshotImpl {
     /// - otherwise the token must be a valid session against the
     ///   home org.
     async fn authorize(&self, token: &str) -> Result<(), SnapshotError> {
+        if self.local_trusted {
+            return Ok(());
+        }
         if let Ok(expected) = std::env::var("TASK_BACKUP_GIT_TOKEN") {
             if !expected.is_empty() && token == expected {
                 return Ok(());

@@ -5011,6 +5011,35 @@ where
     }
 }
 
+/// Establish a typed client against the **server-management** endpoint
+/// (`/server/vox` — `OrgManagementService` / `SnapshotService`). The
+/// server-level counterpart of [`establish_client`]: no per-org slug.
+/// Embedded (`TASK_EMBED`) serves the same router in-process via
+/// [`task_server::AppState::server_local_server`]; otherwise it's a
+/// WebSocket to the resolved server URL. Returns the client plus the
+/// endpoint label for user-facing messages (`(embedded)` in-process).
+async fn establish_server_client<C>(server: Option<&str>) -> eyre::Result<(C, String)>
+where
+    C: vox_core::FromVoxLane,
+{
+    if embed_enabled() {
+        let emb = embedded().await?;
+        let client = emb
+            .state
+            .server_local_server(&emb.scope)
+            .establish()
+            .await
+            .map_err(|e| eyre::eyre!("embedded /server/vox establish: {e:?}"))?;
+        Ok((client, "(embedded)".into()))
+    } else {
+        let url = resolve_server_vox_url(server)?;
+        let client = Box::pin(vox::connect_lane(&url).establish())
+            .await
+            .map_err(|e| connect_error(&url, &e))?;
+        Ok((client, url))
+    }
+}
+
 /// Establish a typed client against the in-process [`LocalServer`] for
 /// `slug`. Shared by [`establish_client`] and [`establish_for_url`].
 async fn establish_embedded<C>(slug: &str) -> eyre::Result<C>
@@ -6282,14 +6311,11 @@ async fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
             home,
             server,
         } => {
-            let url = resolve_server_vox_url(server.as_deref())?;
             let token = session_store::load()?
                 .and_then(|s| s.servers.get(&s.active).map(|e| e.token.clone()))
                 .unwrap_or_default();
-            let client: org_proto::OrgManagementServiceClient =
-                Box::pin(vox::connect_lane(&url).establish())
-                    .await
-                    .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let (client, url): (org_proto::OrgManagementServiceClient, _) =
+                establish_server_client(server.as_deref()).await?;
             let manifest = client
                 .create_org(org_proto::CreateOrgRequest {
                     session_token: token,
@@ -6331,11 +6357,8 @@ async fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
             println!("\nNote: prefer `task org create` so the server is the source of truth.");
         }
         OrgCmd::List { server } => {
-            let url = resolve_server_vox_url(server.as_deref())?;
-            let client: org_proto::OrgManagementServiceClient =
-                Box::pin(vox::connect_lane(&url).establish())
-                    .await
-                    .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let (client, url): (org_proto::OrgManagementServiceClient, _) =
+                establish_server_client(server.as_deref()).await?;
             let orgs = client
                 .list_orgs()
                 .await
@@ -6366,7 +6389,6 @@ async fn run_admin(cmd: AdminCmd) -> eyre::Result<()> {
     async fn connect_snapshot(
         server: Option<&str>,
     ) -> eyre::Result<(org_proto::SnapshotServiceClient, String)> {
-        let url = resolve_server_vox_url(server)?;
         let token = std::env::var("TASK_BACKUP_GIT_TOKEN")
             .ok()
             .filter(|t| !t.is_empty())
@@ -6377,9 +6399,8 @@ async fn run_admin(cmd: AdminCmd) -> eyre::Result<()> {
                     .and_then(|s| s.servers.get(&s.active).map(|e| e.token.clone()))
             })
             .unwrap_or_default();
-        let client: org_proto::SnapshotServiceClient = Box::pin(vox::connect_lane(&url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+        let (client, _url): (org_proto::SnapshotServiceClient, _) =
+            establish_server_client(server).await?;
         Ok((client, token))
     }
 

@@ -307,6 +307,24 @@ impl AppState {
         ))
     }
 
+    /// Serve the **server-management** router (`/server/vox` —
+    /// `OrgManagementService` + `SnapshotService`) over an in-process
+    /// vox link, the server-level counterpart of [`Self::local_server`].
+    /// No per-org slug: this is the transport `task org create/list`
+    /// and `task admin *` speak. Embedded restores keep the process
+    /// alive (`SnapshotImpl::new_without_exit`) — the CLI is ephemeral
+    /// and exits after the verb anyway.
+    #[must_use]
+    pub fn server_local_server(
+        &self,
+        scope: &std::sync::Arc<architect::Scope>,
+    ) -> architect::LocalServer {
+        architect::LocalServer::serve(
+            server_layer_router(self, true),
+            std::sync::Arc::clone(scope),
+        )
+    }
+
     /// Slugs of every hosted org, sorted for deterministic
     /// `.well-known` output.
     #[must_use]
@@ -1237,17 +1255,7 @@ async fn server_vox_handler(
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
     let gate = state.write_gate.clone();
-    let mgmt = crate::server_mgmt::OrgManagementImpl::new(state.clone());
-    let snap = crate::snapshot::SnapshotImpl::new(state);
-    let router = architect::LayerRouter::new()
-        .with(
-            org_proto::org_management_descriptor(),
-            org_proto::serve_org_management(mgmt),
-        )
-        .with(
-            org_proto::snapshot_descriptor(),
-            org_proto::serve_snapshot(snap),
-        );
+    let router = server_layer_router(&state, false);
     // Gated like the per-org endpoints: `create_org` writes to the
     // data root, so it must quiesce during a snapshot too. The
     // snapshot verbs themselves pass the entry gate before closing
@@ -1255,6 +1263,40 @@ async fn server_vox_handler(
     let router = crate::snapshot::GatedRouter::new(router, gate);
     ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
         .into_response()
+}
+
+/// Build the server-management [`LayerRouter`] (`OrgManagementService`
+/// + `SnapshotService`) — the `/server/vox` service set. Shared by the
+/// WebSocket handler above (which additionally wraps it in the
+/// snapshot [`GatedRouter`](crate::snapshot::GatedRouter)) and the
+/// in-process transport ([`AppState::server_local_server`]).
+/// `local_trusted`: false for the network-facing WebSocket (session
+/// auth enforced, restore exits so the supervisor restarts on the
+/// restored data); true for the in-process transport (the caller
+/// already owns the data root — no session check, no exit-on-restore
+/// since the embedded CLI process is ephemeral).
+#[must_use]
+pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::LayerRouter {
+    let (mgmt, snap) = if local_trusted {
+        (
+            crate::server_mgmt::OrgManagementImpl::new_local_trusted(state.clone()),
+            crate::snapshot::SnapshotImpl::new_local_trusted(state.clone()),
+        )
+    } else {
+        (
+            crate::server_mgmt::OrgManagementImpl::new(state.clone()),
+            crate::snapshot::SnapshotImpl::new(state.clone()),
+        )
+    };
+    architect::LayerRouter::new()
+        .with(
+            org_proto::org_management_descriptor(),
+            org_proto::serve_org_management(mgmt),
+        )
+        .with(
+            org_proto::snapshot_descriptor(),
+            org_proto::serve_snapshot(snap),
+        )
 }
 
 /// `/vox` — legacy single-org alias. Dispatches into the
