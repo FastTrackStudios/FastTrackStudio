@@ -9398,6 +9398,9 @@ dependencies = [
  "session-guide",
  "session-proto",
  "session-ui",
+ "signal-bass",
+ "signal-bass-proto",
+ "signal-bass-ui",
  "signal-drums",
  "signal-drums-proto",
  "signal-drums-ui",
@@ -23452,6 +23455,43 @@ dependencies = [
  "tokio",
  "utils",
  "uuid 1.23.4",
+]
+
+[[package]]
+name = "signal-bass"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+ "midicore",
+ "signal-bass-proto",
+ "signal-proto",
+ "signal-sampler",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "signal-bass-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "midicore-proto",
+ "signal-proto",
+ "vox",
+]
+
+[[package]]
+name = "signal-bass-ui"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "dioxus",
+ "midicore-proto",
+ "midicore-ui",
+ "signal-bass-proto",
 ]
 
 [[package]]

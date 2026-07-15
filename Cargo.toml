@@ -220,6 +220,9 @@ members = [
     "features/fx/signal-fx",
     "features/fx/macromod",
     # ── features/rigs / sampler / nam / plugin-host (wave 4) ──────────
+    "features/rigs/bass",
+    "features/rigs/bass/proto",
+    "features/rigs/bass/ui",
     "features/rigs/guitar",
     "features/rigs/guitar/proto",
     "features/rigs/guitar/ui",
@@ -482,6 +485,9 @@ signal-extension = { path = "features/reaper/signal-extension" }
 signal-macromod = { path = "features/fx/macromod" }
 signal-plugin-host = { path = "features/plugin-host", default-features = false }
 signal-sampler = { path = "features/sampler/signal-sampler" }
+signal-bass = { path = "features/rigs/bass" }
+signal-bass-proto = { path = "features/rigs/bass/proto" }
+signal-bass-ui = { path = "features/rigs/bass/ui" }
 signal-guitar = { path = "features/rigs/guitar" }
 signal-guitar-proto = { path = "features/rigs/guitar/proto" }
 signal-guitar-ui = { path = "features/rigs/guitar/ui" }
