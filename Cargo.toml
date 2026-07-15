@@ -158,6 +158,7 @@ members = [
     "crates/keyflow/keyflow-live",
     "crates/keyflow/keyflow-lsp",
     "crates/keyflow/keyflow-musicxml",
+    "crates/keyflow/keyflow-musx",
     "crates/keyflow/keyflow-orchestra",
     "crates/keyflow/keyflow-sync",
     "crates/keyflow/keyflow-daw-analysis",
@@ -448,6 +449,7 @@ keyflow-chordpro = { path = "crates/keyflow/keyflow-chordpro" }
 keyflow-midi = { path = "crates/keyflow/keyflow-midi" }
 keyflow-live = { path = "crates/keyflow/keyflow-live" }
 keyflow-musicxml = { path = "crates/keyflow/keyflow-musicxml" }
+keyflow-musx = { path = "crates/keyflow/keyflow-musx" }
 keyflow-orchestra = { path = "crates/keyflow/keyflow-orchestra" }
 keyflow-sync = { path = "crates/keyflow/keyflow-sync" }
 keyflow-daw-analysis = { path = "crates/keyflow/keyflow-daw-analysis" }
