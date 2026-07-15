@@ -16,6 +16,10 @@ vox-core = { workspace = true }
 # tls feature), so rustls cannot pick one automatically — main()
 # installs ring explicitly before any TLS connect.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# vox-websocket never enables tokio-tungstenite's TLS features itself;
+# this direct dep exists solely so feature unification compiles wss://
+# support into the shared tokio-tungstenite instance.
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 tokio = { workspace = true }
 # Embedded mode (`TASK_EMBED=1`): the CLI hosts the backend in-process
 # over architect's `LocalServer` and establishes the same service
