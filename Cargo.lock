@@ -9404,6 +9404,7 @@ dependencies = [
  "signal-drums",
  "signal-drums-proto",
  "signal-drums-ui",
+ "signal-fx",
  "signal-guitar",
  "signal-guitar-proto",
  "signal-guitar-ui",
@@ -23590,6 +23591,7 @@ version = "0.1.0"
 dependencies = [
  "audiocore-dsp",
  "comp",
+ "daw",
  "delay",
  "eq",
  "hound",
