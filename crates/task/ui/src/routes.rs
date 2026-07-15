@@ -113,6 +113,11 @@ pub enum Route {
         #[route("/watch?:v&:node")]
         WatchRoute { v: String, node: String },
 
+        // Deep-link to one curated wiki page (wiki-root-relative
+        // path as a query value, like `VaultRoute`).
+        #[route("/wiki/page?:path")]
+        WikiPageRoute { path: String },
+
         #[route("/wiki/sources")]
         WikiSourcesRoute {},
 
@@ -277,6 +282,11 @@ fn ReposRoute() -> Element {
 #[component]
 fn WikiRoute() -> Element {
     rsx! { pages::wiki::WikiView {} }
+}
+
+#[component]
+fn WikiPageRoute(path: String) -> Element {
+    rsx! { pages::wiki_page::WikiPageView { path } }
 }
 
 #[component]

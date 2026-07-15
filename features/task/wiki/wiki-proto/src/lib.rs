@@ -72,6 +72,7 @@ pub mod ingest;
 pub mod lint;
 pub mod log;
 pub mod multimodal;
+pub mod pages;
 pub mod paths;
 pub mod raw;
 pub mod research;
@@ -95,6 +96,6 @@ pub use event::WikiEvent;
 // its own client + dispatcher + descriptor under the
 // `vox` feature.
 pub use service::{
-    Catalog, Events, Federation, Graph, Ingest, Lint, Multimodal, RawLayer, Research, Review,
-    Schema, Search, Watcher,
+    Catalog, Events, Federation, Graph, Ingest, Lint, Multimodal, Pages, RawLayer, Research,
+    Review, Schema, Search, Watcher,
 };

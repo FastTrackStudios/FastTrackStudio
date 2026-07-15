@@ -327,6 +327,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::ConnectionsRoute {} => "Connections",
         Route::BasesRoute {} => "Bases",
         Route::WatchRoute { .. } => "Watch",
+        Route::WikiPageRoute { .. } => "Wiki page",
         Route::WikiSourcesRoute {} => "Archived sources",
         Route::WikiSourceRoute { .. } => "Source",
         Route::AgentsRoute {} => "Agents",

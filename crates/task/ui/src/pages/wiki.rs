@@ -1,13 +1,26 @@
-//! `/wiki` — knowledge-graph view of the vault's `[[wikilink]]` web.
+//! `/wiki` — knowledge-graph view of the org's knowledge.
 //!
-//! Fetches the selected org's vault markdown via `VaultSyncClient`,
-//! builds a force-directed graph client-side with
-//! [`view_knowledge_graph::build_wiki_graph`], and renders it through
-//! the dumb [`KnowledgeGraphView`]. Clicking a node deep-links to the
-//! page in `/vault`; the [`GraphLegend`] overlay keys the node colors
-//! and double-clicking a legend row toggles that kind's visibility
-//! (page-owned [`GraphFilterState`]). This is the foundation the wiki
-//! feature will grow on (swap the data source from vault → wiki tree).
+//! Two data sources, toggled in the header:
+//!
+//! - **Wiki** (default): the curated wiki tree
+//!   (`<org>/wiki/Knowledge/`) through the `wiki_proto` Graph
+//!   service — the server-built 4-signal relevance graph +
+//!   Louvain clusters ([`crate::feeds::fetch_wiki_service_graph`]).
+//!   Clicking a node opens the page reader/editor
+//!   (`/wiki/page?:path`).
+//! - **Vault**: the raw vault's `[[wikilink]]` web, fetched via
+//!   `VaultSyncClient` and built client-side with
+//!   [`view_knowledge_graph::build_wiki_graph`]. Clicking a node
+//!   deep-links into `/vault`. Kept because the vault is a
+//!   different corpus (notes, not curated knowledge) — the wiki
+//!   view doesn't replace it.
+//!
+//! Both render through the dumb [`KnowledgeGraphView`]; the
+//! [`GraphLegend`] overlay keys the node colors and
+//! double-clicking a legend row toggles that kind's visibility
+//! (page-owned [`GraphFilterState`]). The graph is scoped to one
+//! org (the selected org, or the home org when viewing All), so
+//! the org switcher swaps wikis.
 
 use std::collections::HashMap;
 
@@ -19,30 +32,45 @@ use view_knowledge_graph::{
 
 use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
 
+/// Which corpus the graph shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GraphSource {
+    /// Curated wiki tree via the wiki Graph service.
+    Wiki,
+    /// Raw vault `[[wikilink]]` web via VaultSync.
+    Vault,
+}
+
 #[component]
 pub fn WikiView() -> Element {
     let nav = use_navigator();
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
 
+    let mut source = use_signal(|| GraphSource::Wiki);
+
     // Page-owned visibility filters, driven from the legend. Start
     // from everything-visible (not the crate default, which hides
-    // structural pages) so the page keeps showing the whole vault.
+    // structural pages) so the page keeps showing the whole corpus.
     let mut filters = use_signal(|| GraphFilterState {
         hide_structural: false,
         ..GraphFilterState::default()
     });
 
-    // Fetch + build once per (org) change. The graph is scoped to one
-    // org's vault (the selected org, or the home org when viewing All).
+    // Fetch + build once per (org, source) change.
     let graph = use_resource(move || async move {
         let slugs = selected_slugs(&selection.read(), &org_list.read());
         let slug = slugs
             .first()
             .cloned()
             .ok_or_else(|| "no organization selected".to_string())?;
-        let files = crate::feeds::fetch_wiki_files(&slug).await?;
-        Ok::<WikiGraph, String>(build_wiki_graph(&files))
+        match source() {
+            GraphSource::Wiki => crate::feeds::fetch_wiki_service_graph(&slug).await,
+            GraphSource::Vault => {
+                let files = crate::feeds::fetch_wiki_files(&slug).await?;
+                Ok::<WikiGraph, String>(build_wiki_graph(&files))
+            }
+        }
     });
 
     let discovering = org_list.read().is_empty();
@@ -50,7 +78,7 @@ pub fn WikiView() -> Element {
         render_loading()
     } else {
         match &*graph.read() {
-            Some(Ok(g)) if g.nodes.is_empty() => render_empty(),
+            Some(Ok(g)) if g.nodes.is_empty() => render_empty(source()),
             Some(Ok(g)) => {
                 // Apply the legend's kind toggles; communities stay
                 // from the full build so the legend keeps its counts.
@@ -60,7 +88,7 @@ pub fn WikiView() -> Element {
                     edges: filtered.edges,
                     communities: g.communities.clone(),
                 };
-                // node id → vault-relative path, for click navigation.
+                // node id → path, for click navigation.
                 let path_of: HashMap<String, String> = shown
                     .nodes
                     .iter()
@@ -68,6 +96,7 @@ pub fn WikiView() -> Element {
                     .collect();
                 let legend_nodes = g.nodes.clone();
                 let legend_comms = g.communities.clone();
+                let src = source();
                 rsx! {
                     div { class: "relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border/70 bg-card/30",
                         KnowledgeGraphView {
@@ -75,7 +104,15 @@ pub fn WikiView() -> Element {
                             spacing: 1.6,
                             on_node_click: move |id: String| {
                                 if let Some(path) = path_of.get(&id) {
-                                    nav.push(crate::routes::Route::VaultRoute { path: path.clone() });
+                                    let route = match src {
+                                        GraphSource::Wiki => crate::routes::Route::WikiPageRoute {
+                                            path: path.clone(),
+                                        },
+                                        GraphSource::Vault => crate::routes::Route::VaultRoute {
+                                            path: path.clone(),
+                                        },
+                                    };
+                                    nav.push(route);
                                 }
                             },
                         }
@@ -106,6 +143,13 @@ pub fn WikiView() -> Element {
         }
     };
 
+    let subtitle = match source() {
+        GraphSource::Wiki => "The curated wiki — pages are nodes, relevance signals are edges.",
+        GraphSource::Vault => {
+            "The wikilink web of your vault — pages are nodes, `[[links]]` are edges."
+        }
+    };
+
     rsx! {
         div { class: "mx-auto flex h-full w-full max-w-6xl flex-col gap-4 p-4 sm:p-6 lg:p-8",
             header { class: "flex flex-col gap-1",
@@ -113,20 +157,46 @@ pub fn WikiView() -> Element {
                     "Workspace"
                 }
                 div { class: "flex items-baseline justify-between gap-3",
-                    Heading { level: HeadingLevel::H1, class: "tracking-tight", "Knowledge graph" }
+                    div { class: "flex items-baseline gap-3",
+                        Heading { level: HeadingLevel::H1, class: "tracking-tight", "Knowledge graph" }
+                        div { class: "flex items-center gap-1 rounded-lg border border-border/70 bg-card/40 p-0.5 text-xs",
+                            {source_tab("Wiki", GraphSource::Wiki, source(), move |s| {
+                                source.set(s);
+                                filters.with_mut(|f| f.hidden_kinds.clear());
+                            })}
+                            {source_tab("Vault", GraphSource::Vault, source(), move |s| {
+                                source.set(s);
+                                filters.with_mut(|f| f.hidden_kinds.clear());
+                            })}
+                        }
+                    }
                     Link {
                         to: crate::routes::Route::WikiSourcesRoute {},
                         class: "shrink-0 text-xs text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground",
                         "Archived sources →"
                     }
                 }
-                Text {
-                    variant: TextVariant::Muted,
-                    "The wikilink web of your vault — pages are nodes, `[[links]]` are edges."
-                }
+                Text { variant: TextVariant::Muted, "{subtitle}" }
             }
             {body}
         }
+    }
+}
+
+fn source_tab(
+    label: &'static str,
+    value: GraphSource,
+    current: GraphSource,
+    mut on_pick: impl FnMut(GraphSource) + 'static,
+) -> Element {
+    let active = value == current;
+    let class = if active {
+        "rounded-md bg-accent px-2 py-0.5 font-medium text-foreground"
+    } else {
+        "rounded-md px-2 py-0.5 text-muted-foreground hover:text-foreground"
+    };
+    rsx! {
+        button { class, onclick: move |_| on_pick(value), "{label}" }
     }
 }
 
@@ -138,11 +208,21 @@ fn render_loading() -> Element {
     }
 }
 
-fn render_empty() -> Element {
+fn render_empty(source: GraphSource) -> Element {
+    let (title, hint) = match source {
+        GraphSource::Wiki => (
+            "The wiki is empty",
+            "Bootstrap it with `task wiki init`, then ingest a source — pages land in `wiki/Knowledge/` and show up here.",
+        ),
+        GraphSource::Vault => (
+            "Nothing to graph yet",
+            "Add some `[[wikilinks]]` between vault notes and they'll appear here.",
+        ),
+    };
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border/70 bg-card/40 py-16 text-center",
-            Heading { level: HeadingLevel::H3, "Nothing to graph yet" }
-            Text { variant: TextVariant::Muted, "Add some `[[wikilinks]]` between vault notes and they'll appear here." }
+            Heading { level: HeadingLevel::H3, "{title}" }
+            Text { variant: TextVariant::Muted, "{hint}" }
         }
     }
 }

@@ -22,8 +22,9 @@ use wiki_proto::raw::{ImportRawSource, RawSourceRef};
 use wiki_proto::review::ReviewItem;
 use wiki_proto::schema as stypes;
 use wiki_proto::search::{SearchHits, SearchOpts};
+use wiki_proto::pages as ptypes;
 use wiki_proto::service::{
-    Catalog, Graph, Ingest, Lint, Multimodal, RawLayer, Review, Schema, Search, Watcher,
+    Catalog, Graph, Ingest, Lint, Multimodal, Pages, RawLayer, Review, Schema, Search, Watcher,
 };
 
 use crate::WikiLive;
@@ -273,6 +274,176 @@ impl RawLayer for WikiBackend {
         }
         Ok(tasks)
     }
+}
+
+// ────────────────────── Pages ──────────────────────
+//
+// The curated page layer — every `.md` under the wiki root
+// except the `raw/`, `_state/` and `media/` subtrees. This is
+// the surface the wiki UI's reader/editor drives; writes are
+// sha-guarded so a stale editor can't clobber an agent's
+// concurrent rewrite.
+impl Pages for WikiBackend {
+    fn list_pages(&self, wiki_id: &str) -> Result<Vec<ptypes::PageInfo>, WikiError> {
+        let w = self.resolve(wiki_id)?;
+        let root = w.wiki_root();
+        let mut out = Vec::new();
+        if !root.is_dir() {
+            return Ok(out);
+        }
+        for entry in walkdir::WalkDir::new(&root)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            let p = entry.path();
+            if !p.is_file() || p.extension().and_then(|s| s.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(rel) = p.strip_prefix(&root) else {
+                continue;
+            };
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            if PAGE_SKIP_PREFIXES.iter().any(|pre| rel.starts_with(pre)) {
+                continue;
+            }
+            let Ok(body) = std::fs::read_to_string(p) else {
+                continue;
+            };
+            let (title, page_type) = page_title_and_type(&rel, &body);
+            out.push(ptypes::PageInfo {
+                path: rel,
+                title,
+                page_type,
+                size: body.len() as u64,
+                modified: mtime_utc(p),
+            });
+        }
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(out)
+    }
+
+    fn read_page(&self, wiki_id: &str, path: &str) -> Result<ptypes::WikiPageDoc, WikiError> {
+        let w = self.resolve(wiki_id)?;
+        let rel = sanitize_page_path(path)?;
+        let abs = w.wiki_root().join(&rel);
+        let markdown = std::fs::read_to_string(&abs)
+            .map_err(|_| WikiError::NotFound(rel.clone()))?;
+        Ok(ptypes::WikiPageDoc {
+            path: rel,
+            sha256: sha256_hex(markdown.as_bytes()),
+            modified: mtime_utc(&abs),
+            markdown,
+        })
+    }
+
+    fn write_page(
+        &self,
+        wiki_id: &str,
+        path: &str,
+        markdown: &str,
+        base_sha256: &str,
+    ) -> Result<ptypes::WikiPageDoc, WikiError> {
+        let w = self.resolve(wiki_id)?;
+        let rel = sanitize_page_path(path)?;
+        let abs = w.wiki_root().join(&rel);
+        if !base_sha256.is_empty() {
+            if let Ok(current) = std::fs::read(&abs) {
+                let current_sha = sha256_hex(&current);
+                if current_sha != base_sha256 {
+                    return Err(WikiError::IllegalState(format!(
+                        "conflict: `{rel}` changed since it was read (expected {base_sha256}, found {current_sha})"
+                    )));
+                }
+            }
+        }
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| WikiError::Io(format!("mkdir: {e}")))?;
+        }
+        std::fs::write(&abs, markdown)
+            .map_err(|e| WikiError::Io(format!("write {}: {e}", abs.display())))?;
+        Ok(ptypes::WikiPageDoc {
+            path: rel,
+            markdown: markdown.to_string(),
+            sha256: sha256_hex(markdown.as_bytes()),
+            modified: mtime_utc(&abs),
+        })
+    }
+}
+
+/// Subtrees that are not curated pages: the immutable raw
+/// layer, opaque agent state, and extracted media.
+const PAGE_SKIP_PREFIXES: &[&str] = &["raw/", "_state/", "media/", "."];
+
+/// Normalize + validate a wiki-root-relative page path: no
+/// absolute paths, no `..` escapes, `.md` only, never into the
+/// raw / state / media subtrees.
+fn sanitize_page_path(path: &str) -> Result<String, WikiError> {
+    let rel = path.trim().trim_start_matches("./").replace('\\', "/");
+    if rel.is_empty() || rel.starts_with('/') {
+        return Err(WikiError::IllegalState(format!("bad page path: `{path}`")));
+    }
+    if rel.split('/').any(|seg| seg == ".." || seg.is_empty()) {
+        return Err(WikiError::IllegalState(format!("bad page path: `{path}`")));
+    }
+    if !rel.ends_with(".md") {
+        return Err(WikiError::IllegalState(format!(
+            "not a markdown page: `{path}`"
+        )));
+    }
+    if PAGE_SKIP_PREFIXES.iter().any(|pre| rel.starts_with(pre)) {
+        return Err(WikiError::IllegalState(format!(
+            "not a curated page (raw/state/media): `{path}`"
+        )));
+    }
+    Ok(rel)
+}
+
+/// Frontmatter `title:` / `type:`, with the title falling back
+/// to the first `# heading`, then the file stem.
+fn page_title_and_type(rel_path: &str, body: &str) -> (String, String) {
+    let mut title = String::new();
+    let mut page_type = String::new();
+    if let Some(rest) = body.strip_prefix("---\n") {
+        if let Some(end) = rest.find("\n---") {
+            for line in rest[..end].lines() {
+                let Some((k, v)) = line.split_once(':') else {
+                    continue;
+                };
+                let v = v.trim().trim_matches('"').trim_matches('\'');
+                match k.trim() {
+                    "title" if title.is_empty() => title = v.to_string(),
+                    "type" if page_type.is_empty() => page_type = v.to_string(),
+                    _ => {}
+                }
+            }
+        }
+    }
+    if title.is_empty() {
+        title = body
+            .lines()
+            .find_map(|l| l.strip_prefix("# "))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+    }
+    if title.is_empty() {
+        title = std::path::Path::new(rel_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(rel_path)
+            .to_string();
+    }
+    (title, page_type)
+}
+
+/// Filesystem mtime as a `DateTime<Utc>`; epoch when
+/// unavailable.
+fn mtime_utc(path: &std::path::Path) -> chrono::DateTime<Utc> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(chrono::DateTime::<Utc>::from)
+        .unwrap_or_else(|| chrono::DateTime::<Utc>::UNIX_EPOCH)
 }
 
 // ────────────────────── Graph ──────────────────────

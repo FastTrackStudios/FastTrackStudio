@@ -1397,6 +1397,101 @@ pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::Wi
         .collect())
 }
 
+/// Fetch the **curated wiki** graph for one org — the server-built
+/// 4-signal relevance graph over `<org>/wiki/Knowledge/` (the
+/// `wiki_proto` Graph service), adapted to the renderer's
+/// [`view_knowledge_graph::WikiGraph`] model. Louvain clusters ride
+/// along as the legend's community summaries.
+pub async fn fetch_wiki_service_graph(
+    slug: &str,
+) -> Result<view_knowledge_graph::WikiGraph, String> {
+    use std::collections::HashMap;
+
+    use view_knowledge_graph as vkg;
+
+    let client =
+        crate::vox_clients::establish_for::<wiki_proto::service::graph::GraphClient>(slug).await?;
+    let opts = wiki_proto::graph::GraphOpts {
+        query: String::new(),
+        node_type: String::new(),
+        limit: 0,
+        weights: None,
+    };
+    let graph = client
+        .build_graph("default".to_owned(), opts)
+        .await
+        .map_err(|e| format!("build_graph: {e:?}"))?;
+    // Clusters are advisory (legend colors + summaries) — an error
+    // here degrades to an unclustered graph, not a failed page.
+    let clusters = client
+        .clusters("default".to_owned())
+        .await
+        .unwrap_or_default();
+
+    // Cluster membership → dense u32 community ids (0 = unclustered).
+    let mut community_of: HashMap<&str, u32> = HashMap::new();
+    for (i, c) in clusters.iter().enumerate() {
+        for m in &c.members {
+            community_of.insert(m.as_str(), (i + 1) as u32);
+        }
+    }
+
+    let nodes: Vec<vkg::GraphNode> = graph
+        .nodes
+        .iter()
+        .map(|n| vkg::GraphNode {
+            id: n.id.clone(),
+            label: n.label.clone(),
+            kind: {
+                let k = n.node_type.trim().to_ascii_lowercase();
+                if k.is_empty() { "other".to_owned() } else { k }
+            },
+            path: n.id.clone(),
+            link_count: n.link_count,
+            community: community_of.get(n.id.as_str()).copied().unwrap_or(0),
+        })
+        .collect();
+    let degree_of: HashMap<&str, u32> = graph
+        .nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n.link_count))
+        .collect();
+    let label_of: HashMap<&str, &str> = graph
+        .nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n.label.as_str()))
+        .collect();
+    let edges: Vec<vkg::GraphEdge> = graph
+        .edges
+        .iter()
+        .map(|e| vkg::GraphEdge::wikilink(e.source.clone(), e.target.clone(), e.weight))
+        .collect();
+    let communities: Vec<vkg::CommunityInfo> = clusters
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let mut members: Vec<&str> = c.members.iter().map(String::as_str).collect();
+            members.sort_by_key(|m| std::cmp::Reverse(degree_of.get(m).copied().unwrap_or(0)));
+            vkg::CommunityInfo {
+                id: (i + 1) as u32,
+                node_count: c.members.len(),
+                cohesion: c.cohesion,
+                top_nodes: members
+                    .into_iter()
+                    .take(5)
+                    .map(|m| label_of.get(m).copied().unwrap_or(m).to_owned())
+                    .collect(),
+            }
+        })
+        .collect();
+
+    Ok(vkg::WikiGraph {
+        nodes,
+        edges,
+        communities,
+    })
+}
+
 /// Locate a single project by id across the selected orgs, returning it
 /// together with the slug of the org that owns it. Used by the project
 /// detail page so it works regardless of which org is in view.

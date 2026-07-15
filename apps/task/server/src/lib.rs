@@ -1375,6 +1375,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         wiki_proto::service::catalog::catalog_rpc_service_descriptor(),
         wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor(),
         wiki_proto::service::graph::graph_rpc_service_descriptor(),
+        wiki_proto::service::pages::pages_rpc_service_descriptor(),
         wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
         wiki_proto::service::lint::lint_rpc_service_descriptor(),
         wiki_proto::service::search::search_rpc_service_descriptor(),
@@ -1540,6 +1541,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             wiki_proto::service::graph::graph_rpc_service_descriptor(),
             wiki_proto::service::graph::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::pages::pages_rpc_service_descriptor(),
+            wiki_proto::service::pages::serve(wiki.clone()),
         )
         .with(
             wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
