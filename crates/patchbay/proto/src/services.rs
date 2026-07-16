@@ -66,6 +66,25 @@ pub mod patchbay_service {
         /// Destroy a link by global id.
         async fn destroy_link(&self, link_id: u32) -> Result<(), PatchbayError>;
 
+        /// Bulk 1:1 wiring: link `output_node`'s output ports to
+        /// `input_node`'s input ports paired by numeric suffix
+        /// (`out7`/`playback_7` → channel 7). The direct-path tool —
+        /// plain links add zero latency, unlike loopback sinks.
+        /// Returns the number of links created.
+        async fn connect_one_to_one(
+            &self,
+            output_node: String,
+            input_node: String,
+        ) -> Result<u32, PatchbayError>;
+
+        /// Destroy every link running from `output_node` into
+        /// `input_node`. Returns the number destroyed.
+        async fn disconnect_nodes(
+            &self,
+            output_node: String,
+            input_node: String,
+        ) -> Result<u32, PatchbayError>;
+
         /// Every graph change, as it happens.
         #[subscribe]
         fn graph_events(&self) -> GraphEvent;

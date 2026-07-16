@@ -529,6 +529,7 @@ fn Inspector() -> Element {
                 current: node_alias,
             }
             LatencyRuleEditor { key: "lat-{node.name}", node_name: node.name.clone() }
+            BulkRouting { key: "bulk-{node.name}", node_name: node.name.clone() }
             ChanmapSync { node_name: node.name.clone() }
             h3 { style: "margin-top:12px;", "Channels" }
             div { class: "channel-list",
@@ -586,6 +587,82 @@ fn AliasEditor(target: String, placeholder: String, current: String) -> Element 
                 }
             },
             onblur: move |_| commit_blur(),
+        }
+    }
+}
+
+/// Bulk 1:1 wiring from the inspected node into a target node — the
+/// direct-path tool (plain links add zero latency; loopback sinks like
+/// `daw` buffer a full quantum). Pair REAPER straight to Inferno here,
+/// then save it as a preset.
+#[component]
+fn BulkRouting(node_name: String) -> Element {
+    let handle = state::use_patchbay();
+    let mut target = use_signal(String::new);
+    let mut result = use_signal(String::new);
+
+    // Candidate targets: any other node that has input ports.
+    let graph = GRAPH.read();
+    let mut targets: Vec<(String, String)> = graph
+        .nodes
+        .iter()
+        .filter(|n| n.name != node_name)
+        .filter(|n| {
+            graph.ports.iter().any(|p| {
+                p.node_id == n.id && p.direction == patchbay_proto::PortDirection::Input
+            })
+        })
+        .map(|n| (n.name.clone(), state::node_label(&n.name, &n.label)))
+        .collect();
+    drop(graph);
+    targets.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+
+    let run = |link: bool| {
+        let handle = handle.clone();
+        let node_name = node_name.clone();
+        move |_| {
+            let to = target.peek().clone();
+            if to.is_empty() {
+                result.set("pick a target node first".into());
+                return;
+            }
+            let handle = handle.clone();
+            let from = node_name.clone();
+            spawn(async move {
+                let res = if link {
+                    handle.0.connect_one_to_one(from, to).await
+                } else {
+                    handle.0.disconnect_nodes(from, to).await
+                };
+                match res {
+                    Ok(n) => result.set(format!(
+                        "{n} link(s) {}",
+                        if link { "created" } else { "removed" }
+                    )),
+                    Err(e) => result.set(format!("failed: {e}")),
+                }
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "bulk-routing",
+            span { class: "label", "bulk route (1:1 by channel) → " }
+            select {
+                class: "alias-input",
+                onchange: move |e| target.set(e.value()),
+                option { value: "", selected: target.read().is_empty(), "target node…" }
+                for (name, label) in targets {
+                    option { value: "{name}", selected: *target.read() == name, "{label}" }
+                }
+            }
+            div { class: "chanmap-buttons",
+                button { class: "chip", onclick: run(true), "link 1:1" }
+                button { class: "chip danger", onclick: run(false), "unlink all →" }
+            }
+            if !result.read().is_empty() {
+                div { class: "apply-report", "{result}" }
+            }
         }
     }
 }

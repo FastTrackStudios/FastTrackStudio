@@ -186,6 +186,87 @@ impl PatchbayService for PatchbayBackend {
             .map_err(PatchbayError::EngineUnavailable)
     }
 
+    async fn connect_one_to_one(
+        &self,
+        output_node: String,
+        input_node: String,
+    ) -> Result<u32, PatchbayError> {
+        // Pair by numeric suffix (out7 → playback_7). Non-numeric
+        // ports don't participate.
+        let pairs: Vec<(u32, u32)> = {
+            let store = self.inner.store.read();
+            let node_id = |name: &str| {
+                store
+                    .nodes
+                    .values()
+                    .find(|n| n.name == name)
+                    .map(|n| n.id)
+                    .ok_or_else(|| PatchbayError::not_found("node", name))
+            };
+            let out_id = node_id(&output_node)?;
+            let in_id = node_id(&input_node)?;
+            let by_channel = |node: u32, dir: patchbay_proto::PortDirection| {
+                let mut m = std::collections::BTreeMap::new();
+                for p in store.ports.values() {
+                    if p.node_id == node && p.direction == dir {
+                        if let Some(ch) = crate::chanmap::channel_of_port(&p.name) {
+                            m.entry(ch).or_insert(p.id);
+                        }
+                    }
+                }
+                m
+            };
+            let outs = by_channel(out_id, patchbay_proto::PortDirection::Output);
+            let ins = by_channel(in_id, patchbay_proto::PortDirection::Input);
+            outs.into_iter()
+                .filter_map(|(ch, out)| ins.get(&ch).map(|inp| (out, *inp)))
+                .collect()
+        };
+        if pairs.is_empty() {
+            return Err(PatchbayError::Internal(format!(
+                "no numeric-suffix port pairs between {output_node} and {input_node}"
+            )));
+        }
+        let mut created = 0;
+        for (out, inp) in pairs {
+            if self.create_link_inner(out, inp)? {
+                created += 1;
+            }
+        }
+        Ok(created)
+    }
+
+    async fn disconnect_nodes(
+        &self,
+        output_node: String,
+        input_node: String,
+    ) -> Result<u32, PatchbayError> {
+        let link_ids: Vec<u32> = {
+            let store = self.inner.store.read();
+            let node_id = |name: &str| store.nodes.values().find(|n| n.name == name).map(|n| n.id);
+            let (Some(out_id), Some(in_id)) = (node_id(&output_node), node_id(&input_node))
+            else {
+                return Err(PatchbayError::not_found(
+                    "node",
+                    format!("{output_node} or {input_node}"),
+                ));
+            };
+            store
+                .links
+                .values()
+                .filter(|l| l.output_node == out_id && l.input_node == in_id)
+                .map(|l| l.id)
+                .collect()
+        };
+        for id in &link_ids {
+            self.inner
+                .engine
+                .send(Command::DestroyLink { id: *id })
+                .map_err(PatchbayError::EngineUnavailable)?;
+        }
+        Ok(link_ids.len() as u32)
+    }
+
     async fn list_presets(&self) -> Result<Vec<RoutingPreset>, PatchbayError> {
         Ok(self.inner.presets.presets())
     }

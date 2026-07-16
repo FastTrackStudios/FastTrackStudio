@@ -138,6 +138,10 @@
 .latency-editor .label { width: 100%; color: #7a8494; font-size: 11px; }
 .rule-quantum { color: #7cc4ff; font-size: 12px; }
 .dim-note { color: #5c6673; font-size: 11px; margin-top: 4px; width: 100%; }
+.bulk-routing { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.bulk-routing .label { color: #7a8494; font-size: 11px; }
+.bulk-routing select { background: #10131a; }
+
 .clock-fields { display: flex; gap: 6px; margin: 6px 0; }
 .clock-field { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .clock-field .label { font-size: 10px; color: #7a8494; }
