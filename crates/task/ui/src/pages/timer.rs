@@ -25,15 +25,19 @@
 //! a real signed-in user through to the page.
 
 use architect::Id;
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use timer_proto::{StartTimerRequest, WorkSession};
+use timer_proto::{LogSessionRequest, StartTimerRequest, WorkSession};
 use uuid::Uuid;
 
 use crate::chrome::{fmt_hms, owner_id, resolve_org, use_second_tick};
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::stores;
+
+/// Shared input styling for the manual-log form.
+const FIELD: &str =
+    "rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/40";
 
 #[component]
 pub fn TimerView() -> Element {
@@ -224,6 +228,11 @@ pub fn TimerView() -> Element {
             } else {
                 {start_form(description, picked, candidates, start)}
             }
+            // Manual entry: log time you forgot to track, or work with no
+            // specific clock time (just a date + duration).
+            if let Some((slug, org_id)) = target() {
+                LogPastForm { slug, org_id }
+            }
             // Recent sessions (all selected orgs). Loading + service-error
             // are owned by the running-card/start-form block above; here we
             // only distinguish the empty list from a populated one.
@@ -319,6 +328,146 @@ fn paused_card(
                     variant: ButtonVariant::Ghost,
                     on_click: on_discard,
                     "Discard"
+                }
+            }
+        }
+    }
+}
+
+/// Manual/retro time entry — a collapsible form to log past work (a
+/// session you forgot to track, or work with no specific clock time).
+/// Fields: description, date, duration in hours, an optional project
+/// (which carries the rate), and billable. The clock time is
+/// synthesized (date @ 09:00 + duration) so "2 hours on the 14th" is
+/// one field, not a start/stop pair — matching how people actually
+/// remember past work.
+#[component]
+fn LogPastForm(slug: String, org_id: Uuid) -> Element {
+    let muts = stores::use_timer_mutations();
+    let projects = stores::use_project_list();
+    let mut open = use_signal(|| false);
+    let mut desc = use_signal(String::new);
+    let mut date = use_signal(|| Utc::now().date_naive().to_string());
+    let mut hours = use_signal(String::new);
+    let mut project_id = use_signal(|| None::<Uuid>);
+    let mut billable = use_signal(|| true);
+
+    let project_rows = projects.value().cloned().unwrap_or_default();
+    // Resolve the picked project's vault path for the request.
+    let picked_path = {
+        let pid = *project_id.read();
+        pid.and_then(|id| {
+            project_rows
+                .iter()
+                .map(|(_, p)| p)
+                .find(|p| p.project.id == id)
+                .map(|p| p.project.path.clone())
+        })
+        .unwrap_or_default()
+    };
+
+    let submit = {
+        let slug = slug.clone();
+        move |_| {
+            let h: f64 = hours.peek().trim().parse().unwrap_or(0.0);
+            if h <= 0.0 {
+                return;
+            }
+            let Ok(d) = chrono::NaiveDate::parse_from_str(date.peek().trim(), "%Y-%m-%d") else {
+                return;
+            };
+            let start = Utc.from_utc_datetime(&d.and_hms_opt(9, 0, 0).unwrap());
+            let end = start + chrono::Duration::seconds((h * 3600.0) as i64);
+            muts.log(
+                slug.clone(),
+                LogSessionRequest {
+                    user_id: owner_id(org_id),
+                    org_id,
+                    project_id: *project_id.peek(),
+                    project_path: picked_path.clone(),
+                    task_note_path: String::new(),
+                    description: desc.peek().trim().to_string(),
+                    start_time: start,
+                    end_time: end,
+                    billable_override: Some(*billable.peek()),
+                },
+            );
+            desc.set(String::new());
+            hours.set(String::new());
+        }
+    };
+
+    rsx! {
+        div { class: "rounded-2xl border border-border/60 bg-card/40",
+            button {
+                r#type: "button",
+                class: "flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+                onclick: move |_| {
+                    let v = *open.peek();
+                    open.set(!v);
+                },
+                fts_ui::lucide_dioxus::Plus { size: 14 }
+                "Log past time"
+            }
+            if open() {
+                div { class: "flex flex-col gap-3 border-t border-border/60 p-4",
+                    input {
+                        class: "{FIELD}",
+                        r#type: "text",
+                        placeholder: "What did you work on?",
+                        value: "{desc}",
+                        oninput: move |e| desc.set(e.value()),
+                    }
+                    div { class: "flex flex-col gap-2 sm:flex-row",
+                        label { class: "flex flex-1 flex-col gap-1 text-xs text-muted-foreground",
+                            "Date"
+                            input {
+                                class: "{FIELD}",
+                                r#type: "date",
+                                value: "{date}",
+                                oninput: move |e| date.set(e.value()),
+                            }
+                        }
+                        label { class: "flex flex-1 flex-col gap-1 text-xs text-muted-foreground",
+                            "Hours"
+                            input {
+                                class: "{FIELD}",
+                                r#type: "number",
+                                step: "0.25",
+                                min: "0",
+                                placeholder: "2.5",
+                                value: "{hours}",
+                                oninput: move |e| hours.set(e.value()),
+                            }
+                        }
+                    }
+                    label { class: "flex flex-col gap-1 text-xs text-muted-foreground",
+                        "Project (sets the rate)"
+                        select {
+                            class: "{FIELD}",
+                            onchange: move |e| {
+                                let v = e.value();
+                                project_id.set(Uuid::parse_str(&v).ok());
+                            },
+                            option { value: "", "— none —" }
+                            for (_ , p) in project_rows.iter() {
+                                option { key: "{p.project.id}", value: "{p.project.id}", "{p.project.title}" }
+                            }
+                        }
+                    }
+                    div { class: "flex items-center justify-between",
+                        Button {
+                            variant: if billable() { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                            size: ButtonSize::Small,
+                            on_click: move |_| billable.toggle(),
+                            if billable() { "Billable ✓" } else { "Non-billable" }
+                        }
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            on_click: submit,
+                            "Log entry"
+                        }
+                    }
                 }
             }
         }

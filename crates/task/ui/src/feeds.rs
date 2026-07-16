@@ -1030,6 +1030,20 @@ pub async fn switch_timer(
         .map_err(|e| format!("{slug}: switch timer: {e:?}"))
 }
 
+/// Retro-log a completed session (start + end in the past) — the "I
+/// forgot to start the timer" / manual-entry path. Skips the
+/// active-timer invariant, so it never disturbs a running timer.
+pub async fn log_session(
+    slug: &str,
+    req: timer_proto::LogSessionRequest,
+) -> Result<timer_proto::WorkSession, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .log_session(req)
+        .await
+        .map_err(|e| format!("{slug}: log session: {e:?}"))
+}
+
 /// Edit an existing session — only the `Some(_)` fields change. The
 /// backend re-snapshots the rate afterward.
 pub async fn update_session(

@@ -1661,6 +1661,38 @@ impl TimerMutations {
         );
     }
 
+    /// Retro-log a past, already-closed session (manual entry). It
+    /// appears in the list instantly, then reconciles to the server's
+    /// row (authoritative id + rate snapshot).
+    pub fn log(&self, slug: String, req: timer_proto::LogSessionRequest) {
+        let now = Utc::now();
+        let draft = OrgSession {
+            slug: slug.clone(),
+            session: WorkSession {
+                id: Uuid::nil(),
+                org_id: req.org_id,
+                user_id: req.user_id,
+                project_id: req.project_id,
+                project_path: req.project_path.clone(),
+                description: req.description.clone(),
+                start_time: req.start_time,
+                end_time: Some(req.end_time),
+                billable: req.billable_override.unwrap_or(false),
+                rate_cents: 0,
+                currency: String::new(),
+                task_note_path: req.task_note_path.clone(),
+                invoice_id: None,
+                created_at: now,
+                updated_at: now,
+            },
+        };
+        run_create(self.write, self.store, draft, move |_| async move {
+            crate::feeds::log_session(&slug, req)
+                .await
+                .map(|session| OrgSession { slug, session })
+        });
+    }
+
     /// Edit a session (description / billable), then reconcile.
     pub fn update(&self, slug: String, req: timer_proto::service::UpdateSessionRequest) {
         let id = req.id;
