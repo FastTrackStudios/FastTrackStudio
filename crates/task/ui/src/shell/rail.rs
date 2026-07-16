@@ -63,6 +63,13 @@ pub fn IconRail(current: Route) -> Element {
                     }
                 }
             }
+            // Bottom-left utility cluster: theme + org pickers, then
+            // the account avatar — the sidebar footer's old jobs as
+            // rail icons (their labels live in tooltips/popovers).
+            div { class: "mt-1 flex shrink-0 flex-col items-center gap-0.5 border-t border-border/60 pt-1.5",
+                crate::shell::org_switcher::OrgSwitcher { rail: true }
+                crate::auth::AccountSwitcher { rail: true }
+            }
         }
     }
 }

@@ -153,6 +153,9 @@ pub fn TopBar() -> Element {
             FleetingButton { compact: true }
             TimerWidget {}
 
+            // Who's here — avatar group opening the full roster.
+            crate::presence::PresenceAvatarBar {}
+
             button {
                 r#type: "button",
                 class: "ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground",

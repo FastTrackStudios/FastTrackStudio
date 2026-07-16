@@ -484,11 +484,13 @@ pub fn AccountSheetBody(on_done: EventHandler<()>) -> Element {
 
 // ── bottom-left account switcher ────────────────────────────────────
 
-/// Sidebar-footer account card: avatar + name + email + presence dot,
-/// opening a popover with the account roster (instant switch), the
-/// presence status section (Auto/Available/DND), and sign-out.
+/// Account switcher: avatar + presence dot opening a popover with the
+/// account roster (instant switch), the presence status section
+/// (Auto/Available/DND), and sign-out. Two skins: the full identity
+/// card (default), and `rail` — an icon-sized avatar button for the
+/// icon rail's foot, where name/email live inside the popover instead.
 #[component]
-pub fn AccountSwitcher() -> Element {
+pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
     let ctx = use_context::<AuthCtx>();
     let active = ctx.active;
     let error = ctx.error;
@@ -509,33 +511,61 @@ pub fn AccountSwitcher() -> Element {
     let status_options = STATUS_OPTIONS;
 
     rsx! {
-        div { class: "flex w-full flex-col gap-1",
+        div { class: if rail { "flex flex-col" } else { "flex w-full flex-col gap-1" },
             Dropdown {
                 open: open(),
                 on_open_change: move |o| open.set(o),
-                class: "w-full",
-                DropdownTrigger { class: "w-full",
-                    button {
-                        r#type: "button",
-                        class: "flex w-full items-center gap-2 rounded-xl border border-border bg-card px-2 py-1.5 text-left hover:bg-accent",
-                        title: "Account & status",
-                        span { class: "relative shrink-0",
-                            Avatar { name: name.clone(), email: email.clone(), size: 32 }
-                            // Presence status dot, Discord-style on the
-                            // avatar's corner.
-                            span { class: "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card {dot}",
-                                title: "{effective.label()}",
+                class: if rail { "" } else { "w-full" },
+                DropdownTrigger { class: if rail { "" } else { "w-full" },
+                    if rail {
+                        button {
+                            r#type: "button",
+                            class: "flex h-8 w-8 items-center justify-center rounded-lg hover:bg-accent/50",
+                            title: "Account & status — {name}",
+                            span { class: "relative shrink-0",
+                                Avatar { name: name.clone(), email: email.clone(), size: 26 }
+                                span { class: "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card {dot}",
+                                    title: "{effective.label()}",
+                                }
                             }
                         }
-                        span { class: "flex min-w-0 flex-col",
-                            span { class: "truncate text-xs font-semibold text-foreground", "{name}" }
-                            if !email.is_empty() {
-                                span { class: "truncate text-[11px] text-muted-foreground", "{email}" }
+                    } else {
+                        button {
+                            r#type: "button",
+                            class: "flex w-full items-center gap-2 rounded-xl border border-border bg-card px-2 py-1.5 text-left hover:bg-accent",
+                            title: "Account & status",
+                            span { class: "relative shrink-0",
+                                Avatar { name: name.clone(), email: email.clone(), size: 32 }
+                                // Presence status dot, Discord-style on the
+                                // avatar's corner.
+                                span { class: "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card {dot}",
+                                    title: "{effective.label()}",
+                                }
+                            }
+                            span { class: "flex min-w-0 flex-col",
+                                span { class: "truncate text-xs font-semibold text-foreground", "{name}" }
+                                if !email.is_empty() {
+                                    span { class: "truncate text-[11px] text-muted-foreground", "{email}" }
+                                }
                             }
                         }
                     }
                 }
                 DropdownContent { side: "top", align: "start", width: "w-64",
+                    // Rail skin: the trigger is a bare avatar, so the
+                    // identity (name/email) heads the popover instead.
+                    if rail {
+                        div { class: "flex items-center gap-2 px-2 pb-1 pt-0.5",
+                            Avatar { name: name.clone(), email: email.clone(), size: 28 }
+                            span { class: "flex min-w-0 flex-col",
+                                span { class: "truncate text-xs font-semibold text-foreground", "{name}" }
+                                if !email.is_empty() {
+                                    span { class: "truncate text-[11px] text-muted-foreground", "{email}" }
+                                }
+                            }
+                        }
+                        DropdownSeparator {}
+                    }
                     DropdownLabel { "Account" }
                     for (idx, dev) in DEV_ACCOUNTS.into_iter().enumerate() {
                         DropdownItem {

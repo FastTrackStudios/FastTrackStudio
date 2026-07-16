@@ -143,13 +143,17 @@ pub fn VaultExplorer() -> Element {
         _ => None,
     });
 
-    // Collapsed folder basenames / tag paths. Only the leftover
-    // sections (Untagged / Unfiled) start collapsed — they exist to
-    // be ignorable; everything else starts expanded because hiding
+    // Collapsed folder basenames (folder mode) + the leftover
+    // sections (Untagged / Unfiled), which start collapsed — they
+    // exist to be ignorable. Folders start expanded because hiding
     // the vault by default hides the system.
     let collapsed = use_signal(|| {
         std::collections::HashSet::<String>::from(["untagged".to_string(), "unfiled".to_string()])
     });
+    // Tag mode is the opposite: tags are a flat forest of buckets, so
+    // everything starts COLLAPSED (an overview, not a wall) — this set
+    // holds the tag paths the user has opened.
+    let tag_expanded = use_signal(std::collections::HashSet::<String>::new);
     // Virtual-folder organization: folder/up properties by default,
     // tags on toggle. FUTURE: persist on the prefs entity.
     let mut mode = use_signal(|| ExplorerMode::Folders);
@@ -191,7 +195,7 @@ pub fn VaultExplorer() -> Element {
                         rsx! {
                             nav { class: "flex flex-col gap-px px-1.5",
                                 for (seg, node) in &root.children {
-                                    {tag_node(seg, node, String::new(), 0, collapsed, selected.clone(), &icons)}
+                                    {tag_node(seg, node, String::new(), 0, tag_expanded, selected.clone(), &icons)}
                                 }
                                 if !untagged.is_empty() {
                                     {loose_section("untagged", "Untagged", &untagged, collapsed, selected.clone())}
@@ -233,17 +237,9 @@ pub fn VaultExplorer() -> Element {
                     },
                 }
             }
-            // The sidebar footer keeps its old jobs: presence, account,
-            // org — the explorer is the main sidebar now.
-            div { class: "max-h-48 overflow-y-auto border-t border-border/60",
-                crate::presence::PresenceRoster {}
-            }
-            div { class: "border-t border-border/60 p-1.5",
-                crate::auth::AccountSwitcher {}
-            }
-            div { class: "px-1.5 pb-2",
-                crate::shell::org_switcher::OrgSwitcher { compact: true }
-            }
+            // Presence lives in the top bar (avatar group); account,
+            // theme, and org switching live at the rail's foot — the
+            // explorer is pure vault tree now.
         }
     }
 }
@@ -322,12 +318,14 @@ fn explorer_node(
 }
 
 /// One tag virtual folder row + its children (pages, then subtags).
+/// `expanded` is inverted relative to the folder tree's `collapsed`
+/// set: tag buckets start closed, opened paths are recorded.
 fn tag_node(
     seg: &str,
     node: &TagNode,
     prefix: String,
     depth: usize,
-    mut collapsed: Signal<std::collections::HashSet<String>>,
+    mut expanded: Signal<std::collections::HashSet<String>>,
     selected: String,
     icons: &std::collections::HashMap<String, String>,
 ) -> Element {
@@ -337,7 +335,7 @@ fn tag_node(
         format!("{prefix}/{seg}")
     };
     let key = format!("tag:{tag_path}");
-    let is_collapsed = collapsed.read().contains(&key);
+    let is_collapsed = !expanded.read().contains(&key);
     let indent = depth * 12;
     let count = node.pages.len();
     let chevron = if is_collapsed { "" } else { "rotate-90" };
@@ -352,7 +350,7 @@ fn tag_node(
                 class: "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[13px] text-muted-foreground hover:bg-accent/40 hover:text-foreground",
                 style: "padding-left: {indent + 6}px",
                 onclick: move |_| {
-                    let mut set = collapsed.write();
+                    let mut set = expanded.write();
                     if !set.remove(&toggle_key) {
                         set.insert(toggle_key.clone());
                     }
@@ -373,7 +371,7 @@ fn tag_node(
                     {page_row(page, depth + 1, selected.clone())}
                 }
                 for (child_seg, child) in &node.children {
-                    {tag_node(child_seg, child, tag_path.clone(), depth + 1, collapsed, selected.clone(), icons)}
+                    {tag_node(child_seg, child, tag_path.clone(), depth + 1, expanded, selected.clone(), icons)}
                 }
             }
         }

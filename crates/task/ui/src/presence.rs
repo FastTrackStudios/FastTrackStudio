@@ -453,10 +453,12 @@ pub fn ConnectionBadge() -> Element {
     }
 }
 
-/// Sidebar roster: live peers + derived agent/timer entries, humans
-/// first, with status dots and the current activity.
-#[component]
-pub fn PresenceRoster() -> Element {
+/// Live peers + derived agent/timer entries, deduped by name and
+/// sorted humans-first — the one roster derivation, shared by the
+/// sidebar roster, the mobile sheet, and the top-bar avatar group.
+/// A hook (owns a poll future + resource): call from component tops
+/// only.
+pub fn use_presence_entries() -> Vec<(String, PresenceEntry)> {
     let presence = crdt::use_presence();
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
@@ -491,6 +493,14 @@ pub fn PresenceRoster() -> Element {
         );
     }
     sort_entries(&mut entries);
+    entries
+}
+
+/// Sidebar roster: live peers + derived agent/timer entries, humans
+/// first, with status dots and the current activity.
+#[component]
+pub fn PresenceRoster() -> Element {
+    let entries = use_presence_entries();
     let count = entries.len();
 
     rsx! {
@@ -504,6 +514,72 @@ pub fn PresenceRoster() -> Element {
                 }
             }
             SidebarGroupContent {
+                if entries.is_empty() {
+                    div { class: "px-2 py-1 text-xs text-muted-foreground", "Nobody around right now" }
+                } else {
+                    for (row_key, entry) in entries {
+                        PresenceRow { key: "{row_key}", entry }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Top-bar avatar group: everyone here as overlapping avatars (+N
+/// spill), opening a dropdown with the full roster — status dots,
+/// activity lines, and the connection badge. The desktop home of
+/// presence; the sidebar no longer carries a roster section.
+#[component]
+pub fn PresenceAvatarBar() -> Element {
+    let entries = use_presence_entries();
+    let count = entries.len();
+    let mut open = use_signal(|| false);
+
+    // Overlap only a handful — the panel has the full list.
+    const SHOWN: usize = 4;
+    let shown: Vec<(String, PresenceEntry)> = entries.iter().take(SHOWN).cloned().collect();
+    let extra = count.saturating_sub(SHOWN);
+
+    rsx! {
+        Dropdown {
+            open: open(),
+            on_open_change: move |o| open.set(o),
+            DropdownTrigger {
+                button {
+                    r#type: "button",
+                    class: "flex h-7 items-center gap-1 rounded-full px-1.5 text-muted-foreground hover:bg-accent/50",
+                    title: "Who's here",
+                    if shown.is_empty() {
+                        fts_ui::lucide_dioxus::Users { size: 14 }
+                    } else {
+                        div { class: "flex -space-x-2",
+                            for (row_key, entry) in shown {
+                                {
+                                    let dot = entry.status.dot_class();
+                                    let email = entry.email.clone().unwrap_or_default();
+                                    rsx! {
+                                        span { key: "{row_key}", class: "relative rounded-full ring-2 ring-card",
+                                            crate::auth::Avatar { name: entry.name.clone(), email, size: 22 }
+                                            span { class: "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-card {dot}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if extra > 0 {
+                            span { class: "text-[11px] font-medium tabular-nums", "+{extra}" }
+                        }
+                    }
+                }
+            }
+            DropdownContent { side: "bottom", align: "end", width: "w-72",
+                div { class: "flex items-center justify-between px-2 pb-1 pt-0.5",
+                    span { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                        "Online — {count}"
+                    }
+                    ConnectionBadge {}
+                }
                 if entries.is_empty() {
                     div { class: "px-2 py-1 text-xs text-muted-foreground", "Nobody around right now" }
                 } else {

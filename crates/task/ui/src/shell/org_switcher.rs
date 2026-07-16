@@ -7,15 +7,21 @@
 //! per-org theme picker, unchanged.
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::Palette;
+use fts_ui::lucide_dioxus::{Building2, Palette};
 use fts_ui::prelude::*;
 use fts_ui::primitives::{ContentAlign, ContentSide};
 
 use crate::orgs::{OrgMeta, OrgSelection, home_slug};
 use crate::theming::{OrgThemeOverrides, state_from_preset_name};
 
+/// `rail`: icon-only skin for the icon rail's foot — a Building2
+/// button for the org menu and the Palette button below it, stacked;
+/// the selection label moves into the button tooltip.
 #[component]
-pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
+pub fn OrgSwitcher(
+    #[props(default = false)] compact: bool,
+    #[props(default = false)] rail: bool,
+) -> Element {
     let mut org_overrides = use_context::<OrgThemeOverrides>();
     // Data selection + discovered org list.
     let mut selection = use_context::<Signal<OrgSelection>>();
@@ -70,21 +76,37 @@ pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
     });
 
     rsx! {
-        HStack { class: if compact { "items-center gap-1" } else { "items-center gap-1 w-full" },
+        HStack {
+            class: if rail {
+                "flex-col items-center gap-0.5"
+            } else if compact {
+                "items-center gap-1"
+            } else {
+                "items-center gap-1 w-full"
+            },
             Dropdown {
                 open: open(),
                 on_open_change: move |o| open.set(o),
-                class: if compact { "" } else { "w-full flex-1" },
-                DropdownTrigger { class: if compact { "" } else { "w-full" },
-                    button {
-                        r#type: "button",
-                        class: "flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-accent",
-                        span { class: "max-w-[10rem] truncate", "{trigger_label}" }
+                class: if compact || rail { "" } else { "w-full flex-1" },
+                DropdownTrigger { class: if compact || rail { "" } else { "w-full" },
+                    if rail {
+                        button {
+                            r#type: "button",
+                            class: "flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                            title: "Organization — {trigger_label}",
+                            Building2 { size: 15 }
+                        }
+                    } else {
+                        button {
+                            r#type: "button",
+                            class: "flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-accent",
+                            span { class: "max-w-[10rem] truncate", "{trigger_label}" }
+                        }
                     }
                 }
                 DropdownContent {
                     side: if compact { "bottom" } else { "top" },
-                    align: "end",
+                    align: if rail { "start" } else { "end" },
                     width: "w-64",
                     DropdownLabel { "View organization" }
                     // All — the default aggregate view.
@@ -134,18 +156,22 @@ pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
                 PopoverTrigger { class: "inline-flex",
                     button {
                         r#type: "button",
-                        class: "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                        class: if rail {
+                            "flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                        } else {
+                            "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                        },
                         title: "Theme",
                         onclick: move |_| {
                             let v = !*theme_open.read();
                             theme_open.set(v);
                         },
-                        Palette { size: 14 }
+                        Palette { size: if rail { 15 } else { 14 } }
                     }
                 }
                 PopoverContent {
                     side: ContentSide::Top,
-                    align: ContentAlign::End,
+                    align: if rail { ContentAlign::Start } else { ContentAlign::End },
                     class: "w-[17rem] p-3 max-h-[70vh] overflow-y-auto",
                     div { class: "flex flex-col gap-2",
                         span { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
