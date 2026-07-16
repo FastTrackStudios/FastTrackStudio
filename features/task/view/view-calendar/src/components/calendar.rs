@@ -66,7 +66,26 @@ pub fn Calendar(props: CalendarProps) -> Element {
     use_context_provider(|| super::drag::BlockDragContext {
         drag: Signal::new(None),
     });
+    let touch_ctx = use_context_provider(|| super::drag::TouchContext {
+        coarse: Signal::new(false),
+    });
     use_hook(super::drag::install_drag_image_suppressor);
+    use_hook(super::drag::install_touch_capture_release);
+
+    // Coarse-pointer probe — one-shot at mount, same shape as the
+    // viewport probe below. Only ever flips *to* coarse, so a failed
+    // or absent probe leaves the mouse behavior intact.
+    use_hook(move || {
+        let mut coarse = touch_ctx.coarse;
+        spawn(async move {
+            let mut probe = dioxus::document::eval(
+                "dioxus.send(window.matchMedia('(pointer: coarse)').matches)",
+            );
+            if let Ok(true) = probe.recv::<bool>().await {
+                coarse.set(true);
+            }
+        });
+    });
 
     // Phones can't fit the 7-column week grid — start in Day view on
     // small screens. One-shot probe at mount that only ever switches
@@ -193,6 +212,32 @@ pub fn Calendar(props: CalendarProps) -> Element {
         drag_ctx.ghost.clone().set(None);
     };
 
+    // The browser fires pointercancel when it claims the gesture for
+    // itself (a pan/scroll won the race, the tab lost focus, …) — the
+    // drag can never complete, so drop it instead of leaving a stuck
+    // ghost + faded chip.
+    let mut cancel_block_ctx = block_ctx;
+    let on_pointer_cancel = move |_: Event<PointerData>| {
+        cancel_block_ctx.drag.set(None);
+        drag_ctx.state.clone().set(None);
+        drag_ctx.ghost.clone().set(None);
+    };
+
+    // While a drag is committed, eat touchmove so the browser can't
+    // start scrolling mid-drag. The grid keeps `touch-action: pan-y`
+    // (a moving finger scrolls); a *committed* drag only exists after
+    // a long-press or a resize-handle grab, and from then on the
+    // finger must track the event, not the viewport. preventDefault
+    // on a non-passive touchmove is the only way to flip that choice
+    // after the gesture has already started.
+    let on_touch_move = move |e: Event<TouchData>| {
+        let dragging = drag_ctx.state.peek().as_ref().is_some_and(|d| d.committed)
+            || block_ctx.drag.peek().as_ref().is_some_and(|d| d.committed);
+        if dragging {
+            e.prevent_default();
+        }
+    };
+
     rsx! {
         div {
             class: "flex flex-col h-full w-full outline-none",
@@ -200,6 +245,8 @@ pub fn Calendar(props: CalendarProps) -> Element {
             autofocus: true,
             onkeydown: on_keydown,
             onpointerup: on_pointer_up,
+            onpointercancel: on_pointer_cancel,
+            ontouchmove: on_touch_move,
             Toolbar {
                 anchor: *anchor.read(),
                 view: *view.read(),

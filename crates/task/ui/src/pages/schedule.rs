@@ -239,7 +239,12 @@ pub fn ScheduleView() -> Element {
     };
 
     rsx! {
-        div { class: "h-[calc(100vh-3.5rem)] lg:h-screen p-4 flex flex-col gap-3 overflow-hidden",
+        // Height: phones subtract the mobile chrome (sticky header ≈
+        // 3.5rem + fixed bottom tab bar ≈ 3.5rem + slack, `dvh` so the
+        // browser UI collapse doesn't hide the grid bottom); `md:` and
+        // up keep the desktop top-bar math. `overflow-hidden` stays —
+        // the calendar sizes its hour rows from this box.
+        div { class: "h-[calc(100dvh-8rem)] md:h-[calc(100vh-3.5rem)] lg:h-screen p-2 sm:p-4 flex flex-col gap-3 overflow-hidden",
             match &*templates.read_unchecked() {
                 Some(Err(e)) => rsx! {
                     div { class: "shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
@@ -268,8 +273,11 @@ pub fn ScheduleView() -> Element {
                 }
             }
             // Draggable tasks — drop one onto an allocatable block.
+            // HTML5 drag is mouse-only, so below `md` the strip is
+            // dead chrome eating calendar height — hide it (assign
+            // via the block editor instead).
             if !drag_tasks.is_empty() {
-                div { class: "flex shrink-0 items-center gap-2 overflow-x-auto pb-1",
+                div { class: "hidden md:flex shrink-0 items-center gap-2 overflow-x-auto pb-1",
                     span { class: "shrink-0 text-[0.7rem] uppercase tracking-wider text-muted-foreground",
                         "Drag onto a block:"
                     }
@@ -370,11 +378,14 @@ fn BlockEditor(
     let input_cls = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40";
 
     rsx! {
+        // Centered modal on desktop; below `sm` it docks to the
+        // bottom edge (bottom-sheet convention), capped + scrollable,
+        // safe-area padded.
         div {
-            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4",
+            class: "fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4",
             onclick: move |_| on_cancel.call(()),
             div {
-                class: "flex w-full max-w-sm flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-xl",
+                class: "flex max-h-[85dvh] w-full max-w-sm flex-col gap-3 overflow-y-auto rounded-t-xl border border-border bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-xl sm:rounded-xl sm:pb-5",
                 onclick: move |e| e.stop_propagation(),
                 Heading { level: HeadingLevel::H3, "Edit block" }
                 label { class: "flex flex-col gap-1 text-xs text-muted-foreground",

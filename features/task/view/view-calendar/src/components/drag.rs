@@ -58,6 +58,32 @@ pub struct DragState {
 /// Matches the gantt drag handling.
 pub(crate) const DRAG_THRESHOLD_PX: i64 = 4;
 
+/// Finger movement allowed while a long-press is pending. Wider than
+/// [`DRAG_THRESHOLD_PX`] because a resting fingertip jitters a few px
+/// on most digitizers — anything past this reads as scroll intent and
+/// cancels the pending drag.
+pub(crate) const TOUCH_SLOP_PX: f64 = 10.0;
+
+/// How long a touch must hold still on a chip / plan block before the
+/// press becomes a drag. Under this it's a tap (click → editor) or the
+/// start of a scroll. 400ms sits between iOS (~500) and Android (~300).
+pub(crate) const LONG_PRESS_MS: u64 = 400;
+
+/// Coarse-pointer flag — `true` when the primary input is a finger
+/// (`matchMedia('(pointer: coarse)')`, probed once at Calendar mount).
+/// Gates the touch affordances: long-press-to-drag, fatter resize
+/// handles, and month view's tap-a-day-to-zoom behavior. Defaults to
+/// `false` so mouse/desktop behavior is untouched when the probe
+/// can't run (native, tests).
+#[derive(Clone, Copy)]
+pub struct TouchContext {
+    pub coarse: Signal<bool>,
+}
+
+pub fn use_touch_context() -> TouchContext {
+    use_context::<TouchContext>()
+}
+
 /// Snapped preview of the drag's current target. Re-computed every
 /// `ondragover` tick by the column under the cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,6 +175,35 @@ pub(crate) fn install_drag_image_suppressor() {
                 const t = e.target;
                 if (t && t.closest && t.closest('[data-cal-drag]') && e.dataTransfer) {
                     e.dataTransfer.setDragImage(img, 0, 0);
+                }
+            }, true);
+        }
+        ",
+    );
+}
+
+/// Install (once) a document-level pointerdown listener that releases
+/// the *implicit pointer capture* touch pointers get on their
+/// pointerdown target (Pointer Events spec §implicit-capture).
+///
+/// Without this, every pointermove of a touch drag is delivered to
+/// the chip the finger went down on — never to the day-column surface
+/// underneath — so the snapped ghost + drop math (which live on the
+/// column) would see nothing. Releasing the capture restores
+/// mouse-style hit-testing: once the dragged chip flips itself to
+/// `pointer-events: none`, moves fall through to the column exactly
+/// like a mouse drag. Scoped to `[data-cal-grid]` so other widgets
+/// keep the spec behavior.
+pub(crate) fn install_touch_capture_release() {
+    let _ = dioxus::document::eval(
+        r"
+        if (!window.__dxCalTouchCapSetup) {
+            window.__dxCalTouchCapSetup = true;
+            document.addEventListener('pointerdown', (e) => {
+                if (e.pointerType !== 'touch') return;
+                const t = e.target;
+                if (t && t.closest && t.closest('[data-cal-grid]') && t.releasePointerCapture) {
+                    try { t.releasePointerCapture(e.pointerId); } catch (_) {}
                 }
             }, true);
         }

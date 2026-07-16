@@ -8,7 +8,9 @@ use dioxus::prelude::*;
 
 use crate::types::CalendarEvent;
 
-use super::drag::{DragKind, DragState, use_drag_context};
+use super::drag::{
+    DragKind, DragState, LONG_PRESS_MS, TOUCH_SLOP_PX, use_drag_context, use_touch_context,
+};
 use super::style::chip_palette;
 
 #[derive(Props, Clone, PartialEq)]
@@ -29,6 +31,13 @@ pub fn EventChip(props: EventChipProps) -> Element {
     let mut drag = ctx.state;
     let event = props.event.clone();
     let event_id = event.id;
+
+    // Pending touch long-press: `(page_x, page_y)` at pointerdown.
+    // `lp_gen` is a generation counter so a stale timer (fired after
+    // the finger already lifted or moved into a scroll) can tell it
+    // lost the race and do nothing.
+    let mut lp_pending: Signal<Option<(f64, f64)>> = use_signal(|| None);
+    let mut lp_gen: Signal<u32> = use_signal(|| 0);
 
     let palette = chip_palette(event.color);
     let is_dragging = drag
@@ -73,7 +82,7 @@ pub fn EventChip(props: EventChipProps) -> Element {
                 if props.readonly { return; }
                 e.stop_propagation();
                 let p = e.data().page_coordinates();
-                drag.set(Some(DragState {
+                let ds = DragState {
                     event: event_id,
                     kind: DragKind::Move,
                     orig_start: event.start,
@@ -83,8 +92,43 @@ pub fn EventChip(props: EventChipProps) -> Element {
                     start_page_x: p.x,
                     start_page_y: p.y,
                     committed: false,
-                }));
+                };
+                if e.data().pointer_type() == "touch" {
+                    // Touch: don't grab the event yet — a moving
+                    // finger means scroll (the grid is
+                    // `touch-action: pan-y`). Arm a long-press; if
+                    // the finger holds still past LONG_PRESS_MS the
+                    // drag starts already committed (the hold *is*
+                    // the intent — no extra movement threshold).
+                    let generation = *lp_gen.peek() + 1;
+                    lp_gen.set(generation);
+                    lp_pending.set(Some((p.x, p.y)));
+                    spawn(async move {
+                        dioxus_sdk_time::sleep(std::time::Duration::from_millis(LONG_PRESS_MS))
+                            .await;
+                        if *lp_gen.peek() == generation && lp_pending.peek().is_some() {
+                            lp_pending.set(None);
+                            drag.set(Some(DragState { committed: true, ..ds.clone() }));
+                        }
+                    });
+                } else {
+                    drag.set(Some(ds));
+                }
             },
+            // A finger that moves past the slop before the long-press
+            // fires is scrolling — cancel the pending drag and let the
+            // browser pan. Lift/cancel likewise disarms (a plain tap
+            // falls through to onclick → editor).
+            onpointermove: move |e: Event<PointerData>| {
+                let pending = { *lp_pending.peek() };
+                let Some((x, y)) = pending else { return };
+                let p = e.data().page_coordinates();
+                if (p.x - x).abs() > TOUCH_SLOP_PX || (p.y - y).abs() > TOUCH_SLOP_PX {
+                    lp_pending.set(None);
+                }
+            },
+            onpointerup: move |_| lp_pending.set(None),
+            onpointercancel: move |_| lp_pending.set(None),
             onclick: move |e: MouseEvent| {
                 e.stop_propagation();
                 on_click.call(());
@@ -143,6 +187,7 @@ struct ResizeHandleProps {
 fn ResizeHandle(props: ResizeHandleProps) -> Element {
     let ctx = use_drag_context();
     let mut drag = ctx.state;
+    let touch = use_touch_context();
     let event_id = props.event_id;
     let orig_start = props.orig_start;
     let orig_end = props.orig_end;
@@ -153,10 +198,17 @@ fn ResizeHandle(props: ResizeHandleProps) -> Element {
         ResizeEdge::Top => "top-0",
         ResizeEdge::Bottom => "bottom-0",
     };
+    // Coarse pointers get a fatter grab zone (6px is untouchable with
+    // a finger) and `touch-action: none` so grabbing the edge starts
+    // the resize immediately — the handle is an explicit affordance,
+    // no long-press needed, and the browser must not claim the
+    // gesture for scrolling.
+    let height = if *touch.coarse.read() { "h-4" } else { "h-1.5" };
 
     rsx! {
         div {
-            class: "absolute left-0 right-0 {position} h-1.5 cursor-ns-resize hover:bg-white/40 z-10",
+            class: "absolute left-0 right-0 {position} {height} cursor-ns-resize hover:bg-white/40 z-10",
+            style: "touch-action: none;",
             onpointerdown: move |e: Event<PointerData>| {
                 e.stop_propagation();
                 let p = e.data().page_coordinates();

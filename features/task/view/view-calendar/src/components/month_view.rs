@@ -23,7 +23,7 @@ use crate::store::CalendarMutation;
 use crate::time::{day_start_utc, month_grid, shift_days};
 use crate::types::{CalendarEvent, EventId};
 
-use super::drag::{DT_MIME, use_drag_context};
+use super::drag::{DT_MIME, use_drag_context, use_touch_context};
 use super::style::chip_palette;
 
 /// Cap of visible chip tracks per week row before the renderer
@@ -62,8 +62,10 @@ pub fn MonthView(props: MonthViewProps) -> Element {
                     div { key: "{label}", class: "px-2 py-1 text-center font-medium", "{label}" }
                 }
             }
-            // 6 week rows
-            div { class: "flex-1 min-h-0 grid grid-rows-6",
+            // 6 week rows. Scrolls when the rows' min-height exceeds
+            // the container (phone-height viewports — the cells keep
+            // their ≥6rem touch size instead of squashing).
+            div { class: "flex-1 min-h-0 grid grid-rows-6 overflow-y-auto",
                 for row in 0..6u8 {
                     {
                         let row_days = grid[row as usize];
@@ -106,6 +108,12 @@ struct WeekRowProps {
 #[component]
 fn WeekRow(props: WeekRowProps) -> Element {
     let border_b = if props.is_last_row { "" } else { "border-b" };
+    // Touch-first behavior: on a coarse pointer the whole day cell is
+    // the tap target (≥44px both ways) and a tap *navigates to that
+    // day's Day view* instead of creating an event — the Google
+    // mobile pattern. Chips are too small for finger-accurate taps in
+    // a month cell, so they fall through to the cell (see MonthChip).
+    let coarse = *use_touch_context().coarse.read();
 
     // Split chips into visible vs. overflow tracks. Overflow chips
     // never paint; they only bump a per-cell counter so we can
@@ -157,8 +165,13 @@ fn WeekRow(props: WeekRowProps) -> Element {
                         div {
                             key: "{date}",
                             class: "border-border/40 {bg} {cycle_tint} {border_r} flex flex-col p-1 min-h-[6rem] hover:bg-accent/30 transition-colors",
-                            // Click empty cell → create.
+                            // Click empty cell → create (mouse) /
+                            // zoom to that day's Day view (touch).
                             onclick: move |_| {
+                                if coarse {
+                                    props.on_zoom_to_day.call(date);
+                                    return;
+                                }
                                 if props.readonly { return; }
                                 let start = day_start_utc(date) + chrono::Duration::hours(9);
                                 let end = start + chrono::Duration::hours(1);
@@ -266,12 +279,20 @@ struct MonthChipProps {
 fn MonthChip(props: MonthChipProps) -> Element {
     let ctx = use_drag_context();
     let mut drag = ctx.state;
+    // Coarse pointers: a ~18px chip is not a finger target, and the
+    // HTML5 drag below is mouse-only anyway. Let the chip fall
+    // through (`pointer-events: none` stays from the overlay layer)
+    // so the tap hits the ≥44px day cell → Day view, where the chip
+    // is full-size and draggable. Mouse keeps click-to-edit +
+    // drag-to-reschedule.
+    let coarse = *use_touch_context().coarse.read();
     let p = props.placement.clone();
     let event = p.event.clone();
     let event_id = event.id;
     let palette = chip_palette(event.color);
     let is_dragging = drag.read().as_ref().is_some_and(|d| d.event == event_id);
     let drag_style = if is_dragging { "opacity: 0.4;" } else { "" };
+    let pe = if coarse { "" } else { "pointer-events-auto" };
 
     let track = p.track;
     let start_col = p.start_col;
@@ -300,9 +321,9 @@ fn MonthChip(props: MonthChipProps) -> Element {
 
     rsx! {
         div {
-            class: "truncate text-[11px] leading-4 font-semibold px-2 py-0.5 mx-px cursor-pointer select-none pointer-events-auto shadow-sm transition-colors {body} {hover} {rounded_l} {rounded_r}",
+            class: "truncate text-[11px] leading-4 font-semibold px-2 py-0.5 mx-px cursor-pointer select-none {pe} shadow-sm transition-colors {body} {hover} {rounded_l} {rounded_r}",
             style: "{style}",
-            draggable: !props.readonly,
+            draggable: !props.readonly && !coarse,
             "data-cal-drag": "true",
             ondragstart: move |e: Event<DragData>| {
                 if props.readonly { return; }
