@@ -27,6 +27,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::error::TimerError;
+use crate::rate::{OrgMemberRate, ProjectMemberRate};
 use crate::session::{WorkSession, WorkSessionFilter};
 
 #[architect::rpc]
@@ -94,6 +95,40 @@ pub trait TimerService {
     /// Permanently delete a session by id. Idempotent — deleting an
     /// already-gone id is `Ok(())`.
     async fn delete_session(&self, id: Uuid) -> Result<(), TimerError>;
+
+    /// Upsert the **org-level** hourly rate (cents) for a member
+    /// (cascade level 3). Returns the stored row. `currency` is ISO
+    /// 4217. New sessions logged for that member snapshot this rate.
+    async fn set_org_member_rate(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+        hourly_cents: i64,
+        currency: String,
+    ) -> Result<OrgMemberRate, TimerError>;
+
+    /// Upsert the **per-project** hourly rate (cents) for a member
+    /// (cascade level 1). This is what lets several members bill a
+    /// single project at *different* rates; currency inherits the
+    /// project. Returns the stored row.
+    async fn set_project_member_rate(
+        &self,
+        project_id: Uuid,
+        user_id: Uuid,
+        hourly_cents: i64,
+    ) -> Result<ProjectMemberRate, TimerError>;
+
+    /// Every org-level member rate configured for `org_id`.
+    async fn list_org_member_rates(
+        &self,
+        org_id: Uuid,
+    ) -> Result<Vec<OrgMemberRate>, TimerError>;
+
+    /// Every per-member rate set on `project_id`.
+    async fn list_project_member_rates(
+        &self,
+        project_id: Uuid,
+    ) -> Result<Vec<ProjectMemberRate>, TimerError>;
 }
 
 /// Args for [`TimerService::update_session`]. `id` selects the row;
