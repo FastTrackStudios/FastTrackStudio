@@ -38,6 +38,18 @@ pub fn EventEditor(props: EventEditorProps) -> Element {
         Sheet {
             open: props.open,
             on_close: move |()| on_close.call(()),
+            // Below `md` the side sheet becomes a bottom sheet (the
+            // app's mobile convention): full-width, pinned to the
+            // bottom edge, capped + scrollable, rounded top, safe-area
+            // padded. The overrides ride on fts-ui Sheet's `class`
+            // merge — `max-md:` wins over the base `inset-y-0 right-0
+            // w-3/4 h-full` at phone widths, and desktop is untouched.
+            class: "max-md:top-auto max-md:bottom-0 max-md:inset-x-0 max-md:h-auto \
+                    max-md:max-h-[85dvh] max-md:w-full max-md:max-w-none \
+                    max-md:overflow-y-auto max-md:rounded-t-2xl max-md:border-t \
+                    max-md:border-l-0 \
+                    max-md:pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
+                .to_string(),
             SheetHeader {
                 SheetTitle { "Edit event" }
                 SheetDescription { "Changes apply immediately." }

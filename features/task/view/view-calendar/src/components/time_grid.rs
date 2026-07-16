@@ -24,8 +24,8 @@ use crate::types::{CalendarEvent, EventId, TemplateBlock};
 
 use super::all_day_strip::AllDayStrip;
 use super::drag::{
-    BlockDrag, BlockDragKind, DRAG_THRESHOLD_PX, DragKind, Ghost, use_block_drag_context,
-    use_drag_context,
+    BlockDrag, BlockDragKind, DRAG_THRESHOLD_PX, DragKind, Ghost, LONG_PRESS_MS,
+    use_block_drag_context, use_drag_context, use_touch_context,
 };
 use super::event_chip::EventChip;
 use super::now_line::NowLine;
@@ -89,7 +89,11 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
         .partition(|ev| ev.all_day || is_effectively_all_day(ev));
 
     rsx! {
+        // `data-cal-grid` scopes the document-level touch-capture
+        // release (see `drag::install_touch_capture_release`) so touch
+        // drags hit-test like mouse drags inside the grid.
         div { class: "flex flex-col h-full w-full",
+            "data-cal-grid": "true",
             // Fixed header block (day strip + all-day row). Reserves
             // the same scrollbar gutter as the scrollable body below
             // (`scrollbar-gutter: stable` on an overflow-hidden box)
@@ -321,6 +325,27 @@ fn DayColumn(props: DayColumnProps) -> Element {
     };
     let mut sweep: Signal<Option<Sweep>> = use_signal(|| None);
 
+    // Commit the in-flight sweep as a Create (a bare click yields a
+    // 1-hour event at the clicked slot). Shared by pointerup (mouse:
+    // the sweep's mousedown fired *before* pointerup) and click
+    // (touch: the browser synthesizes mousedown/mouseup/click *after*
+    // pointerup, so the sweep the synthetic mousedown armed would
+    // otherwise linger as a stuck ghost — the trailing click commits
+    // it, making tap-to-create work).
+    let mut commit_sweep = move || {
+        let Some(s) = sweep.take() else { return };
+        let (start_min, end_min) = s.range();
+        let start = day_start_utc(date) + Duration::minutes(start_min);
+        let end = day_start_utc(date) + Duration::minutes(end_min);
+        let end = if (end - start).num_minutes() <= SNAP_MINUTES {
+            start + Duration::hours(1)
+        } else {
+            end
+        };
+        let event = CalendarEvent::new("New event", start, end);
+        on_event.call(CalendarMutation::Create { event });
+    };
+
     // Day-plan blocks for this column's date, pre-resolved to pixel
     // geometry. Faded, clickable placement guides.
     struct TplPlacement {
@@ -353,6 +378,12 @@ fn DayColumn(props: DayColumnProps) -> Element {
     let on_block_click = props.on_block_click;
     let on_block_edit = props.on_block_edit;
     let mut block_ctx = use_block_drag_context();
+    // Pending block long-presses arm through the shared TouchContext
+    // — disarm (slop / lift / cancel) lives at the Calendar root,
+    // which sees every bubbled pointer event no matter which element
+    // it hit-tests to (this column, a neighbor, or a chip).
+    let mut touch = use_touch_context();
+    let coarse = *touch.coarse.read();
     // The drag whose *target* day is this column (drives the ghost).
     let active_block = block_ctx
         .drag
@@ -438,9 +469,14 @@ fn DayColumn(props: DayColumnProps) -> Element {
             // while it is being dragged so subsequent pointermoves
             // fall through to this surface as the user drags
             // across.
+            // `pan-y` (not `none`): a finger on the empty grid scrolls
+            // it. Drags that must beat scrolling either start from a
+            // long-press / resize handle (committed → the Calendar
+            // root's touchmove guard preventDefaults the pan) or from
+            // a mouse, where touch-action is irrelevant.
             div {
                 class: "absolute inset-0",
-                style: "touch-action: none;",
+                style: "touch-action: pan-y;",
                 // Snap-preview during an active drag. The drag isn't
                 // "committed" until the pointer has moved past the
                 // threshold — a pure click leaves DragState in place
@@ -480,6 +516,16 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     if props.readonly { return; }
                     let drag_snapshot = ctx.state.peek().clone();
                     if let Some(ds) = drag_snapshot {
+                        // Committed but never moved — a touch
+                        // long-press lifted in place (mouse drags
+                        // can't get here: their commit happens inside
+                        // pointermove, which also sets the ghost).
+                        // Dropping "at the finger" would snap the
+                        // event's start to mid-chip, so leave it be.
+                        if ctx.ghost.peek().is_none() {
+                            ctx.state.set(None);
+                            return;
+                        }
                         let y = e.data().element_coordinates().y as i64;
                         let drop_min = snap_minutes(px_to_minutes(y, pph));
                         match ds.kind {
@@ -520,17 +566,14 @@ fn DayColumn(props: DayColumnProps) -> Element {
                         return;
                     }
                     // No drag in flight — commit sweep-to-create.
-                    let Some(s) = sweep.take() else { return };
-                    let (start_min, end_min) = s.range();
-                    let start = day_start_utc(date) + Duration::minutes(start_min);
-                    let end = day_start_utc(date) + Duration::minutes(end_min);
-                    let end = if (end - start).num_minutes() <= SNAP_MINUTES {
-                        start + Duration::hours(1)
-                    } else {
-                        end
-                    };
-                    let event = CalendarEvent::new("New event", start, end);
-                    on_event.call(CalendarMutation::Create { event });
+                    commit_sweep();
+                },
+                // Touch taps arm the sweep *after* pointerup (synthetic
+                // mouse ordering) — commit it here so the tap creates
+                // instead of leaving a stuck ghost.
+                onclick: move |_| {
+                    if props.readonly { return; }
+                    commit_sweep();
                 },
                 // Sweep to create — primary button only. Click
                 // without sweep falls through to the pointerup
@@ -639,13 +682,37 @@ fn DayColumn(props: DayColumnProps) -> Element {
                                     return;
                                 }
                                 let elem_y = e.data().element_coordinates().y as i64;
-                                let page_y = e.data().page_coordinates().y;
-                                block_ctx.drag.set(Some(mk_drag(
+                                let p = e.data().page_coordinates();
+                                let bd = mk_drag(
                                     BlockDragKind::Move,
                                     down_id.clone(),
                                     px_to_minutes(elem_y, pph),
-                                    page_y,
-                                )));
+                                    p.y,
+                                );
+                                if e.data().pointer_type() == "touch" {
+                                    // Long-press to drag — same dance as
+                                    // EventChip: a moving finger scrolls,
+                                    // a held one grabs the block
+                                    // (committed, so the root touchmove
+                                    // guard stops the pan). Disarm is the
+                                    // Calendar root's job.
+                                    let generation = touch.arm(p.x, p.y);
+                                    spawn(async move {
+                                        dioxus_sdk_time::sleep(
+                                            std::time::Duration::from_millis(LONG_PRESS_MS),
+                                        )
+                                        .await;
+                                        if touch.still_armed(generation) {
+                                            touch.disarm();
+                                            block_ctx.drag.set(Some(BlockDrag {
+                                                committed: true,
+                                                ..bd.clone()
+                                            }));
+                                        }
+                                    });
+                                } else {
+                                    block_ctx.drag.set(Some(bd));
+                                }
                             },
                             onclick: move |_| {
                                 if let Some(cb) = on_block_click {
@@ -653,32 +720,44 @@ fn DayColumn(props: DayColumnProps) -> Element {
                                 }
                             },
                             // Resize handles (top / bottom edges).
+                            // Coarse pointers get a fatter grab zone
+                            // + `touch-action: none` — an explicit
+                            // affordance starts the resize without a
+                            // long-press, and the browser must not
+                            // pan mid-resize.
                             if draggable_block {
-                                div {
-                                    class: "absolute inset-x-0 top-0 z-10 h-1.5 cursor-ns-resize",
-                                    onpointerdown: move |e: Event<PointerData>| {
-                                        e.stop_propagation();
-                                        let page_y = e.data().page_coordinates().y;
-                                        block_ctx.drag.set(Some(mk_drag(
-                                            BlockDragKind::ResizeStart,
-                                            rs_id.clone(),
-                                            0,
-                                            page_y,
-                                        )));
-                                    },
-                                }
-                                div {
-                                    class: "absolute inset-x-0 bottom-0 z-10 h-1.5 cursor-ns-resize",
-                                    onpointerdown: move |e: Event<PointerData>| {
-                                        e.stop_propagation();
-                                        let page_y = e.data().page_coordinates().y;
-                                        block_ctx.drag.set(Some(mk_drag(
-                                            BlockDragKind::ResizeEnd,
-                                            re_id.clone(),
-                                            0,
-                                            page_y,
-                                        )));
-                                    },
+                                {
+                                    let handle_h = if coarse { "h-4" } else { "h-1.5" };
+                                    rsx! {
+                                        div {
+                                            class: "absolute inset-x-0 top-0 z-10 {handle_h} cursor-ns-resize",
+                                            style: "touch-action: none;",
+                                            onpointerdown: move |e: Event<PointerData>| {
+                                                e.stop_propagation();
+                                                let page_y = e.data().page_coordinates().y;
+                                                block_ctx.drag.set(Some(mk_drag(
+                                                    BlockDragKind::ResizeStart,
+                                                    rs_id.clone(),
+                                                    0,
+                                                    page_y,
+                                                )));
+                                            },
+                                        }
+                                        div {
+                                            class: "absolute inset-x-0 bottom-0 z-10 {handle_h} cursor-ns-resize",
+                                            style: "touch-action: none;",
+                                            onpointerdown: move |e: Event<PointerData>| {
+                                                e.stop_propagation();
+                                                let page_y = e.data().page_coordinates().y;
+                                                block_ctx.drag.set(Some(mk_drag(
+                                                    BlockDragKind::ResizeEnd,
+                                                    re_id.clone(),
+                                                    0,
+                                                    page_y,
+                                                )));
+                                            },
+                                        }
+                                    }
                                 }
                             }
                             span {

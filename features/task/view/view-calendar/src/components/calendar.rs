@@ -65,7 +65,28 @@ pub fn Calendar(props: CalendarProps) -> Element {
     use_context_provider(|| super::drag::BlockDragContext {
         drag: Signal::new(None),
     });
+    let touch_ctx = use_context_provider(|| super::drag::TouchContext {
+        coarse: Signal::new(false),
+        lp_pending: Signal::new(None),
+        lp_gen: Signal::new(0),
+    });
     use_hook(super::drag::install_drag_image_suppressor);
+    use_hook(super::drag::install_touch_capture_release);
+
+    // Coarse-pointer probe — one-shot at mount, same shape as the
+    // viewport probe below. Only ever flips *to* coarse, so a failed
+    // or absent probe leaves the mouse behavior intact.
+    use_hook(move || {
+        let mut coarse = touch_ctx.coarse;
+        spawn(async move {
+            let mut probe = dioxus::document::eval(
+                "dioxus.send(window.matchMedia('(pointer: coarse)').matches)",
+            );
+            if let Ok(true) = probe.recv::<bool>().await {
+                coarse.set(true);
+            }
+        });
+    });
 
     // Phones can't fit the 7-column week grid — start in Day view on
     // small screens. One-shot probe at mount that only ever switches
@@ -158,17 +179,34 @@ pub fn Calendar(props: CalendarProps) -> Element {
     let mut block_ctx = super::drag::use_block_drag_context();
     let on_block_edit = props.on_block_edit;
     let on_event_up = on_event;
+    let mut lp_touch = touch_ctx;
     let on_pointer_up = move |_: Event<PointerData>| {
+        // Disarm any pending long-press FIRST. This is the backstop
+        // the arming chip/block can't provide: with implicit capture
+        // released, their own pointerup may hit-test to a different
+        // element entirely — only the root reliably sees the bubbled
+        // event. Without this a stale 400ms timer commits a drag for
+        // a finger that already lifted.
+        lp_touch.disarm();
         // Plan-block drag commit takes priority — it's a separate
         // gesture from event drags.
         let block_snap = block_ctx.drag.peek().clone();
         if let Some(bd) = block_snap {
             block_ctx.drag.set(None);
             if bd.committed {
+                // A long-press lifted in place never moved the block
+                // — cur_* still equal the origin. Don't persist a
+                // no-op edit (same guard the chip path has via its
+                // never-set ghost).
+                let unchanged = bd.date == bd.orig_date
+                    && bd.cur_start_min == bd.orig_start_min
+                    && bd.cur_end_min == bd.orig_end_min;
                 if let Some(cb) = on_block_edit {
-                    let s = bd.cur_start_min.clamp(0, 1440) as u16;
-                    let e = bd.cur_end_min.clamp(0, 1440) as u16;
-                    cb.call((bd.orig_date, bd.date, bd.block_id, s, e));
+                    if !unchanged {
+                        let s = bd.cur_start_min.clamp(0, 1440) as u16;
+                        let e = bd.cur_end_min.clamp(0, 1440) as u16;
+                        cb.call((bd.orig_date, bd.date, bd.block_id, s, e));
+                    }
                 }
                 return;
             }
@@ -195,6 +233,41 @@ pub fn Calendar(props: CalendarProps) -> Element {
         drag_ctx.ghost.clone().set(None);
     };
 
+    // The browser fires pointercancel when it claims the gesture for
+    // itself (a pan/scroll won the race, the tab lost focus, …) — the
+    // drag can never complete, so drop it instead of leaving a stuck
+    // ghost + faded chip.
+    let mut cancel_block_ctx = block_ctx;
+    let on_pointer_cancel = move |_: Event<PointerData>| {
+        lp_touch.disarm();
+        cancel_block_ctx.drag.set(None);
+        drag_ctx.state.clone().set(None);
+        drag_ctx.ghost.clone().set(None);
+    };
+
+    // Slop backstop for the pending long-press: once a scroll starts,
+    // the moves hit-test to whatever is under the finger — possibly
+    // never the arming chip/block — but they always bubble here.
+    let on_pointer_move = move |e: Event<PointerData>| {
+        let p = e.data().page_coordinates();
+        lp_touch.disarm_if_strayed(p.x, p.y);
+    };
+
+    // While a drag is committed, eat touchmove so the browser can't
+    // start scrolling mid-drag. The grid keeps `touch-action: pan-y`
+    // (a moving finger scrolls); a *committed* drag only exists after
+    // a long-press or a resize-handle grab, and from then on the
+    // finger must track the event, not the viewport. preventDefault
+    // on a non-passive touchmove is the only way to flip that choice
+    // after the gesture has already started.
+    let on_touch_move = move |e: Event<TouchData>| {
+        let dragging = drag_ctx.state.peek().as_ref().is_some_and(|d| d.committed)
+            || block_ctx.drag.peek().as_ref().is_some_and(|d| d.committed);
+        if dragging {
+            e.prevent_default();
+        }
+    };
+
     rsx! {
         div {
             class: "flex flex-col h-full w-full outline-none",
@@ -202,6 +275,9 @@ pub fn Calendar(props: CalendarProps) -> Element {
             autofocus: true,
             onkeydown: on_keydown,
             onpointerup: on_pointer_up,
+            onpointercancel: on_pointer_cancel,
+            onpointermove: on_pointer_move,
+            ontouchmove: on_touch_move,
             Toolbar {
                 anchor: *anchor.read(),
                 view: *view.read(),

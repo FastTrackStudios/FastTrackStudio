@@ -241,10 +241,11 @@ pub fn ScheduleView() -> Element {
 
     rsx! {
         // The calendar owns the single toolbar row; the page just
-        // hands it the full viewport (minus the mobile top bar and
-        // bottom tab bar) and surfaces load problems as compact,
-        // dismissable-by-fixing banners above it.
-        div { class: "flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden pb-14 md:pb-0 lg:h-screen",
+        // hands it the full viewport and surfaces load problems as
+        // compact banners above it. Phones subtract the mobile chrome
+        // with `dvh` (browser-UI collapse can't hide the grid bottom);
+        // `md:`+ keeps the desktop top-bar math.
+        div { class: "flex h-[calc(100dvh-8rem)] flex-col overflow-hidden pb-14 md:h-[calc(100vh-3.5rem)] md:pb-0 lg:h-screen",
             match &*templates.read_unchecked() {
                 Some(Err(e)) => rsx! {
                     div { class: "mx-3 mt-2 shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
@@ -328,13 +329,17 @@ fn BlockEditor(
     let input_cls = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40";
 
     rsx! {
+        // Centered modal on desktop; below `sm` it docks to the
+        // bottom edge (bottom-sheet convention), capped + scrollable,
+        // safe-area padded.
         div {
             // Centered dialog on desktop; bottom sheet on phones
-            // (matches the app's other mobile editors).
+            // (matches the app's other mobile editors); capped +
+            // scrollable so long forms never overflow the viewport.
             class: "fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4",
             onclick: move |_| on_cancel.call(()),
             div {
-                class: "flex w-full flex-col gap-3 rounded-t-2xl border border-border bg-card p-5 shadow-xl sm:max-w-sm sm:rounded-xl",
+                class: "flex max-h-[85dvh] w-full flex-col gap-3 overflow-y-auto rounded-t-2xl border border-border bg-card p-5 shadow-xl sm:max-w-sm sm:rounded-xl",
                 style: "padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));",
                 onclick: move |e| e.stop_propagation(),
                 Heading { level: HeadingLevel::H3, "Edit block" }

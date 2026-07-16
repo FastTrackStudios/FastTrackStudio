@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 
 use crate::types::CalendarEvent;
 
-use super::drag::{DragKind, DragState, use_drag_context};
+use super::drag::{DragKind, DragState, LONG_PRESS_MS, use_drag_context, use_touch_context};
 use super::style::chip_palette;
 
 #[derive(Props, Clone, PartialEq)]
@@ -29,6 +29,12 @@ pub fn EventChip(props: EventChipProps) -> Element {
     let mut drag = ctx.state;
     let event = props.event.clone();
     let event_id = event.id;
+
+    // Pending touch long-press — shared context, disarmed at the
+    // Calendar root (see `TouchContext` docs: with implicit capture
+    // released, the disarm events may never hit-test back to this
+    // chip, so chip-local handlers can't be trusted with it).
+    let mut touch = use_touch_context();
 
     let palette = chip_palette(event.color);
     let is_dragging = drag
@@ -73,7 +79,7 @@ pub fn EventChip(props: EventChipProps) -> Element {
                 if props.readonly { return; }
                 e.stop_propagation();
                 let p = e.data().page_coordinates();
-                drag.set(Some(DragState {
+                let ds = DragState {
                     event: event_id,
                     kind: DragKind::Move,
                     orig_start: event.start,
@@ -83,7 +89,29 @@ pub fn EventChip(props: EventChipProps) -> Element {
                     start_page_x: p.x,
                     start_page_y: p.y,
                     committed: false,
-                }));
+                };
+                if e.data().pointer_type() == "touch" {
+                    // Touch: don't grab the event yet — a moving
+                    // finger means scroll (the grid is
+                    // `touch-action: pan-y`). Arm a long-press; if
+                    // the finger holds still past LONG_PRESS_MS the
+                    // drag starts already committed (the hold *is*
+                    // the intent — no extra movement threshold).
+                    // Disarm (slop / lift / cancel) happens at the
+                    // Calendar root, which sees every bubbled
+                    // pointer event no matter where it hit-tests.
+                    let generation = touch.arm(p.x, p.y);
+                    spawn(async move {
+                        dioxus_sdk_time::sleep(std::time::Duration::from_millis(LONG_PRESS_MS))
+                            .await;
+                        if touch.still_armed(generation) {
+                            touch.disarm();
+                            drag.set(Some(DragState { committed: true, ..ds.clone() }));
+                        }
+                    });
+                } else {
+                    drag.set(Some(ds));
+                }
             },
             onclick: move |e: MouseEvent| {
                 e.stop_propagation();
@@ -143,6 +171,7 @@ struct ResizeHandleProps {
 fn ResizeHandle(props: ResizeHandleProps) -> Element {
     let ctx = use_drag_context();
     let mut drag = ctx.state;
+    let touch = use_touch_context();
     let event_id = props.event_id;
     let orig_start = props.orig_start;
     let orig_end = props.orig_end;
@@ -153,10 +182,17 @@ fn ResizeHandle(props: ResizeHandleProps) -> Element {
         ResizeEdge::Top => "top-0",
         ResizeEdge::Bottom => "bottom-0",
     };
+    // Coarse pointers get a fatter grab zone (6px is untouchable with
+    // a finger) and `touch-action: none` so grabbing the edge starts
+    // the resize immediately — the handle is an explicit affordance,
+    // no long-press needed, and the browser must not claim the
+    // gesture for scrolling.
+    let height = if *touch.coarse.read() { "h-4" } else { "h-1.5" };
 
     rsx! {
         div {
-            class: "absolute left-0 right-0 {position} h-1.5 cursor-ns-resize hover:bg-white/40 z-10",
+            class: "absolute left-0 right-0 {position} {height} cursor-ns-resize hover:bg-white/40 z-10",
+            style: "touch-action: none;",
             onpointerdown: move |e: Event<PointerData>| {
                 e.stop_propagation();
                 let p = e.data().page_coordinates();

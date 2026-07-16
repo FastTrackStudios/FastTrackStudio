@@ -58,6 +58,87 @@ pub struct DragState {
 /// Matches the gantt drag handling.
 pub(crate) const DRAG_THRESHOLD_PX: i64 = 4;
 
+/// Finger movement allowed while a long-press is pending. Wider than
+/// [`DRAG_THRESHOLD_PX`] because a resting fingertip jitters a few px
+/// on most digitizers — anything past this reads as scroll intent and
+/// cancels the pending drag.
+pub(crate) const TOUCH_SLOP_PX: f64 = 10.0;
+
+/// How long a touch must hold still on a chip / plan block before the
+/// press becomes a drag. Under this it's a tap (click → editor) or the
+/// start of a scroll. 400ms sits between iOS (~500) and Android (~300).
+pub(crate) const LONG_PRESS_MS: u64 = 400;
+
+/// Coarse-pointer flag + the armed long-press, shared calendar-wide.
+///
+/// `coarse` is `true` when the primary input is a finger
+/// (`matchMedia('(pointer: coarse)')`, probed once at Calendar mount).
+/// It gates the touch affordances: long-press-to-drag, fatter resize
+/// handles, and month view's tap-a-day-to-zoom behavior. Defaults to
+/// `false` so mouse/desktop behavior is untouched when the probe
+/// can't run (native, tests).
+///
+/// The pending long-press lives here — NOT on the chip/block that
+/// armed it — because the capture-release installer restores
+/// hit-testing: the disarm events (pointermove past slop, pointerup,
+/// pointercancel) land on whatever is under the finger, which during
+/// a scroll or after drifting off a short chip is *not* the arming
+/// element. Only the Calendar root sees every bubbled pointer event,
+/// so it owns the disarm; arming sites just call [`Self::arm`] and
+/// check [`Self::still_armed`] from their timer.
+#[derive(Clone, Copy)]
+pub struct TouchContext {
+    pub coarse: Signal<bool>,
+    /// Page `(x, y)` of the armed long-press; `None` = nothing pending.
+    pub lp_pending: Signal<Option<(f64, f64)>>,
+    /// Generation counter, bumped on every arm/disarm so a stale
+    /// timer can tell it lost the race to a newer press.
+    pub lp_gen: Signal<u32>,
+}
+
+impl TouchContext {
+    /// Arm a long-press at page `(x, y)`. Returns the generation the
+    /// caller's timer must present to [`Self::still_armed`].
+    pub(crate) fn arm(&mut self, x: f64, y: f64) -> u32 {
+        let generation = *self.lp_gen.peek() + 1;
+        self.lp_gen.set(generation);
+        self.lp_pending.set(Some((x, y)));
+        generation
+    }
+
+    /// Disarm the pending long-press (finger lifted, gesture
+    /// cancelled, or strayed into a scroll). Bumps the generation so
+    /// any timer still in flight loses.
+    pub(crate) fn disarm(&mut self) {
+        if self.lp_pending.peek().is_some() {
+            self.lp_pending.set(None);
+            let generation = *self.lp_gen.peek() + 1;
+            self.lp_gen.set(generation);
+        }
+    }
+
+    /// `true` while the press armed as `generation` is still live —
+    /// the timer's commit condition.
+    pub(crate) fn still_armed(&self, generation: u32) -> bool {
+        *self.lp_gen.peek() == generation && self.lp_pending.peek().is_some()
+    }
+
+    /// Disarm if the pointer strayed past the slop — a moving finger
+    /// is scrolling, not long-pressing.
+    pub(crate) fn disarm_if_strayed(&mut self, x: f64, y: f64) {
+        let pending = { *self.lp_pending.peek() };
+        if let Some((ox, oy)) = pending {
+            if (x - ox).abs() > TOUCH_SLOP_PX || (y - oy).abs() > TOUCH_SLOP_PX {
+                self.disarm();
+            }
+        }
+    }
+}
+
+pub fn use_touch_context() -> TouchContext {
+    use_context::<TouchContext>()
+}
+
 /// Snapped preview of the drag's current target. Re-computed every
 /// `ondragover` tick by the column under the cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,6 +230,47 @@ pub(crate) fn install_drag_image_suppressor() {
                 const t = e.target;
                 if (t && t.closest && t.closest('[data-cal-drag]') && e.dataTransfer) {
                     e.dataTransfer.setDragImage(img, 0, 0);
+                }
+            }, true);
+        }
+        ",
+    );
+}
+
+/// Install (once) a document-level pointerdown listener that releases
+/// the *implicit pointer capture* touch pointers get on their
+/// pointerdown target (Pointer Events spec §implicit-capture).
+///
+/// Without this, every pointermove of a touch drag is delivered to
+/// the chip the finger went down on — never to the day-column surface
+/// underneath — so the snapped ghost + drop math (which live on the
+/// column) would see nothing. Releasing the capture restores
+/// mouse-style hit-testing: once the dragged chip flips itself to
+/// `pointer-events: none`, moves fall through to the column exactly
+/// like a mouse drag. Scoped to `[data-cal-grid]` so other widgets
+/// keep the spec behavior.
+///
+/// Also suppresses non-mouse `contextmenu` inside the grid: Android
+/// Chrome fires it ~500ms into a hold — right on top of our
+/// long-press — and its follow-up pointercancel would kill the
+/// just-committed drag. Mouse right-click is left alone.
+pub(crate) fn install_touch_capture_release() {
+    let _ = dioxus::document::eval(
+        r"
+        if (!window.__dxCalTouchCapSetup) {
+            window.__dxCalTouchCapSetup = true;
+            document.addEventListener('pointerdown', (e) => {
+                if (e.pointerType !== 'touch') return;
+                const t = e.target;
+                if (t && t.closest && t.closest('[data-cal-grid]') && t.releasePointerCapture) {
+                    try { t.releasePointerCapture(e.pointerId); } catch (_) {}
+                }
+            }, true);
+            document.addEventListener('contextmenu', (e) => {
+                if (e.pointerType === 'mouse') return;
+                const t = e.target;
+                if (t && t.closest && t.closest('[data-cal-grid]')) {
+                    e.preventDefault();
                 }
             }, true);
         }
