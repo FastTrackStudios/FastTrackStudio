@@ -11,12 +11,11 @@ use fts_ui::lucide_dioxus::Palette;
 use fts_ui::prelude::*;
 use fts_ui::primitives::{ContentAlign, ContentSide};
 
-use crate::orgs::{OrgMeta, OrgSelection, home_slug};
-use crate::theming::{OrgThemeOverrides, state_from_preset_name};
+use crate::orgs::{OrgMeta, OrgSelection};
+use crate::theming::use_org_theme_switcher_state;
 
 #[component]
 pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
-    let mut org_overrides = use_context::<OrgThemeOverrides>();
     // Data selection + discovered org list.
     let mut selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
@@ -24,50 +23,13 @@ pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
     let mut open = use_signal(|| false);
     let mut theme_open = use_signal(|| false);
 
-    // Theme edits apply to the active org (the selected one, or home
-    // under "All"), keyed by slug in the overrides map.
-    let active_slug = use_memo(move || match &*selection.read() {
-        OrgSelection::One(slug) => slug.clone(),
-        OrgSelection::All => home_slug(&org_list.read()),
-    });
-
     let list = org_list();
     let current = selection();
     let trigger_label = current.label(&list);
 
-    // ── theme picker state (unchanged) ──────────────────────────────
-    let switcher_state = use_signal(|| {
-        let name = org_overrides
-            .map
-            .read()
-            .get(&active_slug())
-            .cloned()
-            .unwrap_or_default();
-        let mode = *org_overrides.mode.read();
-        state_from_preset_name(&name, mode)
-    });
-
-    use_effect(move || {
-        let name = switcher_state.read().preset.clone();
-        let slug = active_slug();
-        // Guard only — peek, so this effect doesn't subscribe to the
-        // map it writes (the `prev != name` check keeps it stable, but
-        // a subscription would still re-run it on every other slug's
-        // theme change).
-        let prev = org_overrides.map.peek().get(&slug).cloned();
-        if prev.as_deref() != Some(name.as_str()) {
-            let mut m = org_overrides.map.write();
-            m.insert(slug, name);
-        }
-    });
-
-    let mut org_mode = org_overrides.mode;
-    use_effect(move || {
-        let mode = switcher_state.read().mode;
-        if *org_mode.peek() != mode {
-            org_mode.set(mode);
-        }
-    });
+    // Theme picker state — the shared active-org ↔ overrides bridge
+    // (see `theming::use_org_theme_switcher_state`).
+    let switcher_state = use_org_theme_switcher_state();
 
     rsx! {
         HStack { class: if compact { "items-center gap-1" } else { "items-center gap-1 w-full" },
@@ -168,45 +130,11 @@ pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
 /// the same state bridge as [`OrgSwitcher`]'s Palette popover.
 #[component]
 pub fn RailThemeButton() -> Element {
-    let mut org_overrides = use_context::<OrgThemeOverrides>();
-    let selection = use_context::<Signal<OrgSelection>>();
-    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let mut theme_open = use_signal(|| false);
 
-    // Theme edits apply to the active org (the selected one, or home
-    // under "All"), keyed by slug in the overrides map.
-    let active_slug = use_memo(move || match &*selection.read() {
-        OrgSelection::One(slug) => slug.clone(),
-        OrgSelection::All => home_slug(&org_list.read()),
-    });
-    let switcher_state = use_signal(|| {
-        let name = org_overrides
-            .map
-            .read()
-            .get(&active_slug())
-            .cloned()
-            .unwrap_or_default();
-        let mode = *org_overrides.mode.read();
-        state_from_preset_name(&name, mode)
-    });
-    use_effect(move || {
-        let name = switcher_state.read().preset.clone();
-        let slug = active_slug();
-        // Guard only — peek, so this effect doesn't subscribe to the
-        // map it writes (see OrgSwitcher's twin effect).
-        let prev = org_overrides.map.peek().get(&slug).cloned();
-        if prev.as_deref() != Some(name.as_str()) {
-            let mut m = org_overrides.map.write();
-            m.insert(slug, name);
-        }
-    });
-    let mut org_mode = org_overrides.mode;
-    use_effect(move || {
-        let mode = switcher_state.read().mode;
-        if *org_mode.peek() != mode {
-            org_mode.set(mode);
-        }
-    });
+    // The shared active-org ↔ overrides bridge (see
+    // `theming::use_org_theme_switcher_state`).
+    let switcher_state = use_org_theme_switcher_state();
 
     rsx! {
         Popover {

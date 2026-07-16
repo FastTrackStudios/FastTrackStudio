@@ -147,6 +147,9 @@ pub fn App() -> Element {
     crate::auth::provide_auth();
     // Per-user prefs (server-backed) — after auth, which it watches.
     crate::prefs::provide_prefs();
+    // Theme persistence: seed the org-theme overrides above from prefs
+    // on boot, mirror picker changes back (localStorage + server).
+    crate::theming::use_theme_prefs_sync();
 
     // Org-wide presence: join the active org's `DocPresence` channel
     // over the shared connection above (the hook reads the

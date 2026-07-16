@@ -7,6 +7,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 
 use crate::prefs::PrefsCtx;
+use crate::theming::use_org_theme_switcher_state;
 
 /// The routes worth landing on. `""` = the app default (`/`).
 const PAGE_CHOICES: &[(&str, &str)] = &[
@@ -23,9 +24,22 @@ pub fn SettingsView() -> Element {
     let prefs_ctx = use_context::<PrefsCtx>();
     let prefs = prefs_ctx.prefs.read().clone();
 
+    // Same active-org ↔ overrides bridge as the shell's theme pickers;
+    // persistence rides the App-root `use_theme_prefs_sync` effect.
+    let theme_state = use_org_theme_switcher_state();
+
     rsx! {
         div { class: "mx-auto flex max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:p-10",
             Heading { level: HeadingLevel::H1, "Settings" }
+
+            section { class: "flex flex-col gap-3",
+                Heading { level: HeadingLevel::H3, "Appearance" }
+                Text {
+                    variant: TextVariant::Muted,
+                    "Theme preset and light/dark mode for the active organization. Follows your account on every device."
+                }
+                ThemeSwitcher { state: theme_state, class: "max-w-md" }
+            }
 
             section { class: "flex flex-col gap-3",
                 Heading { level: HeadingLevel::H3, "Start page" }
