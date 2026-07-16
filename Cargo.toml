@@ -567,9 +567,11 @@ tower-http = { version = "0.6", features = ["fs"] }
 # (apps/fasttrackstudio feature `embed-web`).
 include_dir = "0.7"
 # Dante/AoIP ARC control (FastTrackStudios/inferno-control workspace) —
-# discovery, channel lists, subscriptions. Pinned to the same rev as the
-# ~/.flake input so CLI and patchbay speak the identical protocol.
-inferno-net = { git = "https://github.com/FastTrackStudios/inferno-control", rev = "dff99421028a3d758f0ff3826b07da42fc949e8c" }
+# discovery, channel lists, subscriptions. Pinned to the
+# hardware-dante-fixes rev (parser guards + pagination + status
+# semantics, found by patchbay against the live network); bump the
+# ~/.flake input to match when it merges.
+inferno-net = { git = "https://github.com/FastTrackStudios/inferno-control", rev = "d3b048941df55dae12c7b9f8c4b776681b8679d3" }
 
 # ── Architect framework — in-tree at libs/architect (subtree import) ──
 architect = { path = "libs/architect/architect" }
