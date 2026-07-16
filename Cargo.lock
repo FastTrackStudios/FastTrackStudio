@@ -6265,7 +6265,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "eyre",
- "fts-ui 0.1.0",
+ "fts-ui",
  "tokio",
  "tracing",
  "wasm-bindgen",
@@ -8673,7 +8673,7 @@ dependencies = [
  "atomic_float",
  "audiocore-core",
  "eq-profiles",
- "fts-ui 0.1.0",
+ "fts-ui",
  "fts-ui-audio",
  "futures-timer",
  "nice-plug",
@@ -9613,7 +9613,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "finance-proto",
- "fts-ui 0.1.0",
+ "fts-ui",
  "rust_decimal",
  "serde",
  "timer-proto",
@@ -10075,7 +10075,7 @@ dependencies = [
  "fragile",
  "fts-extensions-actions",
  "fts-launcher",
- "fts-ui 0.1.0",
+ "fts-ui",
  "keyflow-orchestra",
  "reaper-config",
  "reaper-high",
@@ -10129,7 +10129,7 @@ dependencies = [
  "dioxus-native",
  "facet 0.50.0-rc.5",
  "facet-styx 5.0.0-rc.5",
- "fts-ui 0.1.0",
+ "fts-ui",
  "launcher-core",
  "launcher-ui",
  "providers",
@@ -10154,18 +10154,14 @@ name = "fts-patchbay"
 version = "0.1.0"
 dependencies = [
  "architect",
- "clap",
  "dioxus",
  "eyre",
  "patchbay",
  "patchbay-proto",
  "patchbay-ui",
- "serde_json",
  "tokio",
  "tracing",
  "vox",
- "vox-core",
- "vox-websocket",
 ]
 
 [[package]]
@@ -10189,7 +10185,7 @@ dependencies = [
  "editor-keyflow-lang",
  "facet-styx 5.0.0-rc.5",
  "fontique 0.2.0",
- "fts-ui 0.1.0",
+ "fts-ui",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "gloo-timers",
@@ -10222,19 +10218,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "fts-story-core"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main#079d9e0b14d5bb8b81cc68836e81d74831c5947d"
-dependencies = [
- "linkme",
-]
-
-[[package]]
 name = "fts-story-fuzz"
 version = "0.1.0"
 dependencies = [
- "fts-story-core 0.1.0",
- "fts-story-runtime 0.1.0",
+ "fts-story-core",
+ "fts-story-runtime",
  "fts-story-snapshots",
  "proptest",
 ]
@@ -10250,23 +10238,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "fts-story-macros"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main#079d9e0b14d5bb8b81cc68836e81d74831c5947d"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
 name = "fts-story-parity"
 version = "0.1.0"
 dependencies = [
  "dssim-core",
- "fts-story-core 0.1.0",
- "fts-story-runtime 0.1.0",
+ "fts-story-core",
+ "fts-story-runtime",
  "fts-story-snapshots",
  "png 0.17.16",
  "rgb",
@@ -10278,19 +10255,8 @@ name = "fts-story-runtime"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-story-core 0.1.0",
- "fts-story-macros 0.1.0",
- "linkme",
-]
-
-[[package]]
-name = "fts-story-runtime"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main#079d9e0b14d5bb8b81cc68836e81d74831c5947d"
-dependencies = [
- "dioxus",
- "fts-story-core 0.1.0 (git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main)",
- "fts-story-macros 0.1.0 (git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main)",
+ "fts-story-core",
+ "fts-story-macros",
  "linkme",
 ]
 
@@ -10299,8 +10265,8 @@ name = "fts-story-shell"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-story-core 0.1.0",
- "fts-story-runtime 0.1.0",
+ "fts-story-core",
+ "fts-story-runtime",
 ]
 
 [[package]]
@@ -10316,8 +10282,8 @@ dependencies = [
  "dioxus-native",
  "dioxus-native-dom",
  "dssim-core",
- "fts-story-core 0.1.0",
- "fts-story-runtime 0.1.0",
+ "fts-story-core",
+ "fts-story-runtime",
  "fts-story-shell",
  "futures-util",
  "peniko 0.6.1",
@@ -10342,27 +10308,8 @@ dependencies = [
  "dioxus",
  "dioxus-primitives 0.0.1 (git+https://github.com/DioxusLabs/components?rev=837c9d4c1c9f99b19de7a3f087d8af1b0538dcae)",
  "fts-story-parity",
- "fts-story-runtime 0.1.0",
+ "fts-story-runtime",
  "fts-story-snapshots",
- "linkme",
- "lucide-dioxus 2.26.0",
- "nucleo-matcher",
- "palette",
- "time",
- "tracing",
- "tw_merge",
-]
-
-[[package]]
-name = "fts-ui"
-version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/fts-ui.git?branch=main#065601046fee293319bd4c955dc6b7378da2dcda"
-dependencies = [
- "chrono",
- "clsx",
- "dioxus",
- "dioxus-primitives 0.0.1 (git+https://github.com/DioxusLabs/components?rev=837c9d4c1c9f99b19de7a3f087d8af1b0538dcae)",
- "fts-story-runtime 0.1.0 (git+https://codeberg.org/FastTrackStudios/fts-story.git?branch=main)",
  "linkme",
  "lucide-dioxus 2.26.0",
  "nucleo-matcher",
@@ -10377,7 +10324,7 @@ name = "fts-ui-audio"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "tracing",
 ]
 
@@ -10387,7 +10334,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
 ]
 
 [[package]]
@@ -14317,7 +14264,7 @@ dependencies = [
  "dioxus-native",
  "dock-dioxus",
  "dock-proto",
- "fts-ui 0.1.0",
+ "fts-ui",
  "keyflow",
  "kurbo 0.13.1",
  "lucide-dioxus 2.577.0",
@@ -15132,7 +15079,7 @@ version = "0.1.0"
 source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=main#23cc19406c07a9116b755901475a4ee9c21a3c76"
 dependencies = [
  "dioxus",
- "fts-ui 0.1.0 (git+https://codeberg.org/FastTrackStudios/fts-ui.git?branch=main)",
+ "fts-ui",
  "launcher-core",
  "lucide-dioxus 2.26.0",
  "tracing",
@@ -19439,8 +19386,6 @@ dependencies = [
  "patchbay-proto",
  "tokio",
  "tracing",
- "vox-core",
- "vox-websocket",
 ]
 
 [[package]]
@@ -21667,7 +21612,7 @@ dependencies = [
  "facet-json 0.50.0-rc.5",
  "facet-styx 5.0.0-rc.5",
  "figue",
- "fts-ui 0.1.0",
+ "fts-ui",
  "helgoboss-midi",
  "input",
  "input-config-proto",
@@ -22675,7 +22620,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "scheduling-proto",
  "serde",
  "tracing",
@@ -23506,7 +23451,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "eyre",
- "fts-ui 0.1.0",
+ "fts-ui",
  "lucide-dioxus 2.577.0",
  "session-proto",
  "tracing",
@@ -23760,7 +23705,7 @@ dependencies = [
  "architect",
  "audio-controls",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "lumen-blocks",
  "signal-grid",
  "signal-proto",
@@ -24135,7 +24080,7 @@ dependencies = [
  "dioxus",
  "dock-dioxus",
  "dock-proto",
- "fts-ui 0.1.0",
+ "fts-ui",
  "getrandom 0.3.4",
  "lumen-blocks",
  "midicore",
@@ -24657,7 +24602,7 @@ version = "0.1.0"
 dependencies = [
  "audiocore-core",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "fts-ui-audio",
  "nice-plug-dioxus",
  "spectrum-analyzer-dsp",
@@ -26347,7 +26292,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "project",
  "pulldown-cmark 0.10.3",
  "serde",
@@ -26651,7 +26596,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "serde",
  "threads-proto",
  "tracing",
@@ -28106,7 +28051,7 @@ dependencies = [
  "fake",
  "finance-proto",
  "fitness-proto",
- "fts-ui 0.1.0",
+ "fts-ui",
  "futures-channel",
  "futures-util",
  "git-proto",
@@ -28163,7 +28108,7 @@ dependencies = [
  "dify",
  "dioxus",
  "dioxus-native",
- "fts-ui 0.1.0",
+ "fts-ui",
  "image",
  "kurbo 0.13.1",
  "peniko 0.6.1",
@@ -29064,7 +29009,7 @@ dependencies = [
  "cycle",
  "dioxus",
  "dioxus-sdk-time",
- "fts-ui 0.1.0",
+ "fts-ui",
  "indexmap 2.14.0",
  "scheduling-proto",
  "serde",
@@ -29079,7 +29024,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "indexmap 2.14.0",
  "serde",
  "serde_json",
@@ -29093,7 +29038,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "serde",
  "serde_json",
  "tracing",
@@ -29104,7 +29049,7 @@ name = "view-kanban"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "indexmap 2.14.0",
  "serde",
  "serde_json",
@@ -29117,7 +29062,7 @@ name = "view-knowledge-graph"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "links-proto",
  "serde",
  "tracing",
@@ -29129,7 +29074,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
- "fts-ui 0.1.0",
+ "fts-ui",
  "indexmap 2.14.0",
  "serde",
  "serde_json",

@@ -926,6 +926,14 @@ vox-codegen = "0.10.0-rc.5"
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "crates/input/actions-proto" }
 
+# fts-ui lives IN THIS TREE (libs/fts-ui) — dioxus-launcher's
+# launcher-ui still git-deps it from the old standalone Codeberg repo,
+# which no longer exists, so every fresh CARGO_HOME (hosted CI) failed
+# to resolve the graph. Route it to the in-tree crate. (Also removes a
+# duplicate fts-ui package from the resolved graph.)
+[patch."https://codeberg.org/FastTrackStudios/fts-ui.git"]
+fts-ui = { path = "libs/fts-ui/fts-ui" }
+
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid duplicate
 # moire-runtime #[ctor] registrations (aligned with daw/session/signal).
