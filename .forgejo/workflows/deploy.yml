@@ -2,6 +2,13 @@
 # rolled out by ArgoCD + argocd-image-updater (digest strategy on the
 # channel tag). Runs on the self-hosted org runner (nix-host).
 #
+# NOTE (2026-07-16): GitHub is the canonical forge; this is the LAST
+# Forgejo workflow — it stays here because the in-cluster registry is
+# not reachable from GitHub-hosted runners. It triggers on pushes to
+# the Codeberg MIRROR, so keep mirroring main (origin has both push
+# URLs). Port to .github/workflows with a self-hosted runner label
+# once THEBATTLESHIP is registered with GitHub.
+#
 #   task  -> registry.starcommand.live:30050/task-{server,web,ui-lab}
 #   site  -> registry.starcommand.live:30050/fts-site
 #
