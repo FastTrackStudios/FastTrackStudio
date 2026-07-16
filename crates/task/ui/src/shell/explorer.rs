@@ -143,21 +143,18 @@ pub fn VaultExplorer() -> Element {
         _ => None,
     });
 
-    // Collapsed folder basenames (folder mode) + the leftover
-    // sections (Untagged / Unfiled), which start collapsed — they
-    // exist to be ignorable. Folders start expanded because hiding
-    // the vault by default hides the system.
+    // The leftover sections (Untagged / Unfiled) start collapsed —
+    // they exist to be ignorable.
     let collapsed = use_signal(|| {
         std::collections::HashSet::<String>::from(["untagged".to_string(), "unfiled".to_string()])
     });
-    // Tag mode is the opposite: tags are a flat forest of buckets, so
-    // everything starts COLLAPSED (an overview, not a wall) — this set
-    // holds the tag paths the user has opened.
+    // Folders and tag buckets both start COLLAPSED (an overview, not
+    // a wall) — these sets hold what the user has opened.
+    let folder_expanded = use_signal(std::collections::HashSet::<String>::new);
     let tag_expanded = use_signal(std::collections::HashSet::<String>::new);
-    // Tag buckets by default (counterintuitively — tags are the
-    // primary organization here); folder/up properties on toggle.
-    // FUTURE: persist on the prefs entity.
-    let mut mode = use_signal(|| ExplorerMode::Tags);
+    // Virtual-folder organization: folder/up properties by default,
+    // tags on toggle. FUTURE: persist on the prefs entity.
+    let mut mode = use_signal(|| ExplorerMode::Folders);
 
     // Selection = the current route's vault path.
     let route = use_route::<Route>();
@@ -219,7 +216,7 @@ pub fn VaultExplorer() -> Element {
                         rsx! {
                             nav { class: "flex flex-col gap-px px-1.5",
                                 for &root in folder_roots.iter() {
-                                    {explorer_node(nodes.clone(), root, 0, collapsed, selected.clone())}
+                                    {explorer_node(nodes.clone(), root, 0, folder_expanded, selected.clone())}
                                 }
                                 if !loose_pages.is_empty() {
                                     {loose_section("unfiled", "Unfiled", &loose_pages, collapsed, selected.clone())}
@@ -245,11 +242,13 @@ pub fn VaultExplorer() -> Element {
     }
 }
 
+/// `expanded` is inverted relative to the loose sections' `collapsed`
+/// set: folders start closed, opened basenames are recorded.
 fn explorer_node(
     nodes: Rc<Vec<TreeNode>>,
     idx: usize,
     depth: usize,
-    mut collapsed: Signal<std::collections::HashSet<String>>,
+    mut expanded: Signal<std::collections::HashSet<String>>,
     selected: String,
 ) -> Element {
     let node = nodes[idx].clone();
@@ -259,7 +258,7 @@ fn explorer_node(
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("base"));
     let key = node.meta.basename.to_lowercase();
-    let is_collapsed = collapsed.read().contains(&key);
+    let is_collapsed = !expanded.read().contains(&key);
     let is_selected = !selected.is_empty() && node.meta.path == selected;
     let indent = depth * 12;
 
@@ -281,7 +280,7 @@ fn explorer_node(
                 style: "padding-left: {indent + 6}px",
                 onclick: move |_| {
                     if is_folder {
-                        let mut set = collapsed.write();
+                        let mut set = expanded.write();
                         if !set.remove(&toggle_key) {
                             set.insert(toggle_key.clone());
                         }
@@ -311,7 +310,7 @@ fn explorer_node(
             }
             if is_folder && !is_collapsed {
                 for &child in node.children.iter() {
-                    {explorer_node(nodes.clone(), child, depth + 1, collapsed, selected.clone())}
+                    {explorer_node(nodes.clone(), child, depth + 1, expanded, selected.clone())}
                 }
             }
         }
