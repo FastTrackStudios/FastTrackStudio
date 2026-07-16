@@ -23810,6 +23810,7 @@ dependencies = [
  "eyre",
  "hound",
  "keyflow-orchestra",
+ "session-guide",
  "signal-sampler",
 ]
 
