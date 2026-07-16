@@ -48,6 +48,7 @@ use fts_ui::prelude::*;
 use vault_proto::{PageMeta, TagCount};
 
 use crate::document_session::{SaveStatus, use_document_session};
+use crate::shell::mobile::{BottomSheet, MobileActionBar};
 use crate::vault_lookup::{self, ClientVaultIndex};
 
 #[cfg(target_arch = "wasm32")]
@@ -126,6 +127,9 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
     let collapsed = use_signal(HashSet::<String>::new);
     let mut move_target = use_signal(|| None::<String>);
     let mut create_parent = use_signal(|| None::<String>);
+    // Mobile-only: the file tree lives in a bottom sheet once a note
+    // is open (inline full-width while nothing is selected).
+    let mut files_open = use_signal(|| false);
 
     // Editor extensions — same standard markdown setup as the
     // turnkey `editor::EditorApp`.
@@ -312,6 +316,7 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
     // Open a note through the session (fetch + seed + sha
     // bookkeeping).
     let on_open = use_callback(move |meta: FileMeta| {
+        files_open.set(false);
         session.open(meta.path, meta.sha256);
     });
 
@@ -508,78 +513,153 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
     let create_under = create_parent.read().clone();
     let panel_open = *backlinks_open.read();
 
+    // ── Tree pane content ─────────────────────────────────
+    // Shared between the inline mobile pane (no file open) and the
+    // "Files" bottom sheet (file open) — desktop uses the shell's
+    // persistent VaultExplorer instead.
+    let tree_content = rsx! {
+        div { class: "flex flex-col gap-2 px-3 py-3",
+            if let Some(parent) = create_under.clone() {
+                Text { variant: TextVariant::Muted, class: "text-xs",
+                    "New note will be filed under {parent}."
+                }
+            }
+            div { class: "flex items-center gap-2",
+                Input {
+                    value: new_name,
+                    placeholder: "New note…",
+                    on_change: move |_| {},
+                }
+                Button {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Small,
+                    on_click: move |_| create_file(),
+                    "Create"
+                }
+            }
+        }
+        // ── Move-to-folder picker ─────────────────
+        if let Some(path) = moving.clone() {
+            div { class: "mx-2 mb-2 rounded border border-border bg-background p-2",
+                div { class: "flex items-center justify-between gap-2 pb-1",
+                    Text { variant: TextVariant::Muted, class: "text-xs truncate", "Move to…" }
+                    button {
+                        class: "text-xs text-muted-foreground hover:text-foreground",
+                        onclick: move |_| move_target.set(None),
+                        "Cancel"
+                    }
+                }
+                div { class: "flex max-h-48 flex-col gap-0.5 overflow-y-auto",
+                    {
+                        let p = path.clone();
+                        rsx! {
+                            button {
+                                class: "rounded px-2 py-1 text-left text-sm hover:bg-accent/50",
+                                onclick: move |_| do_move.call((p.clone(), String::new(), None)),
+                                "(Root)"
+                            }
+                        }
+                    }
+                    for (base, title) in folder_targets.iter().cloned() {
+                        {
+                            let p = path.clone();
+                            let b = base.clone();
+                            rsx! {
+                                button {
+                                    key: "{base}",
+                                    class: "truncate rounded px-2 py-1 text-left text-sm hover:bg-accent/50",
+                                    onclick: move |_| do_move.call((p.clone(), String::new(), Some(b.clone()))),
+                                    "{title}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        {sidebar_body}
+    };
+
+    // ── Backlinks + verses content ────────────────────────
+    // Shared between the desktop right panel and the mobile bottom
+    // sheet (both driven by the shell's `RightPanelOpen`).
+    let backlinks_body = rsx! {
+        // Inline scripture reader: verses this note references.
+        if let Some(vs) = verse_list.as_ref().filter(|v| !v.is_empty()) {
+            div { class: "border-b border-border/60 px-3 py-3",
+                Heading { level: HeadingLevel::H3, class: "mb-2", "Referenced verses" }
+                div { class: "flex flex-col gap-2",
+                    for (osis, human, text) in vs.clone() {
+                        div { key: "{osis}", class: "rounded-md bg-background/60 p-2",
+                            span { class: "text-xs font-semibold text-primary", "{human}" }
+                            if let Some(t) = text {
+                                p { class: "mt-0.5 text-xs leading-snug text-muted-foreground", "{t}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        match &*backlinks.read_unchecked() {
+            Some(Ok(list)) if list.is_empty() => rsx! {
+                div { class: "px-3 py-2 text-sm text-muted-foreground",
+                    "No backlinks yet. Link to this note with [[{basename_of(&current)}]]."
+                }
+            },
+            Some(Ok(list)) => rsx! {
+                nav { class: "flex flex-col gap-0.5 px-2 pb-4",
+                    for path in list.iter().cloned() {
+                        {
+                            let (title, sha) = page_lookup
+                                .read()
+                                .get(&path)
+                                .cloned()
+                                .unwrap_or_else(|| (basename_of(&path).to_owned(), String::new()));
+                            let target = FileMeta { path: path.clone(), sha256: sha };
+                            rsx! {
+                                button {
+                                    key: "{path}",
+                                    class: "group flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-sm hover:bg-accent/50",
+                                    onclick: move |_| on_open.call(target.clone()),
+                                    span { class: "font-medium", "{title}" }
+                                    span { class: "text-xs text-muted-foreground", "{path}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            Some(Err(e)) => rsx! {
+                div { class: "px-3 py-2 text-sm text-destructive",
+                    "Couldn't load backlinks: {e}"
+                }
+            },
+            None => rsx! {
+                div { class: "flex flex-col gap-2 px-3 py-2",
+                    Skeleton { class: "h-4 w-3/4" }
+                    Skeleton { class: "h-4 w-1/2" }
+                    Skeleton { class: "h-4 w-2/3" }
+                }
+            },
+        }
+    };
+
     rsx! {
         div { class: "flex h-full min-h-[80vh]",
             // ── Virtual-folder tree ───────────────────────
-            // Mobile-only: the shell's persistent VaultExplorer owns
-            // the tree at md+ (Obsidian shell); this inline pane keeps
-            // phone browsing working.
-            aside { class: "flex w-72 shrink-0 flex-col overflow-y-auto border-r border-border bg-muted/30 md:hidden",
-                div { class: "flex flex-col gap-2 px-3 py-3",
-                    Heading { level: HeadingLevel::H3, "Vault" }
-                    if let Some(parent) = create_under.clone() {
-                        Text { variant: TextVariant::Muted, class: "text-xs",
-                            "New note will be filed under {parent}."
-                        }
-                    }
-                    div { class: "flex items-center gap-2",
-                        Input {
-                            value: new_name,
-                            placeholder: "New note…",
-                            on_change: move |_| {},
-                        }
-                        Button {
-                            variant: ButtonVariant::Secondary,
-                            size: ButtonSize::Small,
-                            on_click: move |_| create_file(),
-                            "Create"
-                        }
-                    }
-                }
-                // ── Move-to-folder picker ─────────────────
-                if let Some(path) = moving.clone() {
-                    div { class: "mx-2 mb-2 rounded border border-border bg-background p-2",
-                        div { class: "flex items-center justify-between gap-2 pb-1",
-                            Text { variant: TextVariant::Muted, class: "text-xs truncate", "Move to…" }
-                            button {
-                                class: "text-xs text-muted-foreground hover:text-foreground",
-                                onclick: move |_| move_target.set(None),
-                                "Cancel"
-                            }
-                        }
-                        div { class: "flex max-h-48 flex-col gap-0.5 overflow-y-auto",
-                            {
-                                let p = path.clone();
-                                rsx! {
-                                    button {
-                                        class: "rounded px-2 py-1 text-left text-sm hover:bg-accent/50",
-                                        onclick: move |_| do_move.call((p.clone(), String::new(), None)),
-                                        "(Root)"
-                                    }
-                                }
-                            }
-                            for (base, title) in folder_targets.iter().cloned() {
-                                {
-                                    let p = path.clone();
-                                    let b = base.clone();
-                                    rsx! {
-                                        button {
-                                            key: "{base}",
-                                            class: "truncate rounded px-2 py-1 text-left text-sm hover:bg-accent/50",
-                                            onclick: move |_| do_move.call((p.clone(), String::new(), Some(b.clone()))),
-                                            "{title}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                {sidebar_body}
+            // Mobile-only (md+ uses the shell VaultExplorer): inline
+            // full-width while no note is open; once a note is open the
+            // tree moves to the "Files" bottom sheet so the editor gets
+            // the whole viewport.
+            aside {
+                class: if has_file { "hidden" } else { "flex w-full flex-col overflow-y-auto pb-14 md:hidden" },
+                {tree_content.clone()}
             }
             // ── Editor pane ───────────────────────────────
+            // Hidden on phones while no note is open (the tree pane
+            // above owns the viewport then); always present at md+.
             div {
-                class: "flex min-w-0 flex-1 flex-col",
+                class: if has_file { "flex min-w-0 flex-1 flex-col" } else { "hidden min-w-0 flex-1 flex-col md:flex" },
                 onkeydown: move |evt: Event<KeyboardData>| {
                     let m = evt.modifiers();
                     if (m.ctrl() || m.meta()) && evt.key().to_string() == "s" {
@@ -595,8 +675,13 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                         div { class: "min-w-0 truncate text-sm font-medium",
                             if has_file { "{current}" } else { "No file selected" }
                         }
+                        // Mobile: the action cluster below is desktop-only,
+                        // so surface save/collab state inline here.
+                        if !status_msg.is_empty() {
+                            Text { variant: TextVariant::Muted, class: "shrink-0 text-xs md:hidden", "{status_msg}" }
+                        }
                     }
-                    div { class: "flex items-center gap-3",
+                    div { class: "hidden items-center gap-3 md:flex",
                         if let Some(cs) = collab_status() {
                             Text { variant: TextVariant::Muted, class: "text-xs", "{cs}" }
                         }
@@ -663,7 +748,9 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                     }
                 }
                 div { class: "flex min-h-0 flex-1",
-                    div { class: "flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto",
+                    // pb-14 keeps the last lines clear of the mobile
+                    // action bar (see `MobileActionBar` docs).
+                    div { class: "flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-14 md:pb-0",
                         if show_graph() {
                             // Whole-vault connections graph as a pane.
                             crate::pages::connections::ConnectionsView {}
@@ -712,25 +799,11 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                             }
                         }
                     }
-                    // ── Backlinks + verses panel ───────────
+                    // ── Backlinks + verses panel (md+) ─────
+                    // On phones the same content opens as a bottom
+                    // sheet (below) instead of squeezing the editor.
                     if has_file && panel_open {
-                        aside { class: "flex w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/30",
-                            // Inline scripture reader: verses this note references.
-                            if let Some(vs) = verse_list.as_ref().filter(|v| !v.is_empty()) {
-                                div { class: "border-b border-border/60 px-3 py-3",
-                                    Heading { level: HeadingLevel::H3, class: "mb-2", "Referenced verses" }
-                                    div { class: "flex flex-col gap-2",
-                                        for (osis, human, text) in vs.clone() {
-                                            div { key: "{osis}", class: "rounded-md bg-background/60 p-2",
-                                                span { class: "text-xs font-semibold text-primary", "{human}" }
-                                                if let Some(t) = text {
-                                                    p { class: "mt-0.5 text-xs leading-snug text-muted-foreground", "{t}" }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        aside { class: "hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/30 md:flex",
                             div { class: "flex items-center justify-between px-3 py-3",
                                 Heading { level: HeadingLevel::H3, "Backlinks" }
                                 button {
@@ -742,52 +815,56 @@ pub fn VaultView(#[props(default)] initial_path: String) -> Element {
                                     "Hide"
                                 }
                             }
-                            match &*backlinks.read_unchecked() {
-                                Some(Ok(list)) if list.is_empty() => rsx! {
-                                    div { class: "px-3 py-2 text-sm text-muted-foreground",
-                                        "No backlinks yet. Link to this note with [[{basename_of(&current)}]]."
-                                    }
-                                },
-                                Some(Ok(list)) => rsx! {
-                                    nav { class: "flex flex-col gap-0.5 px-2 pb-4",
-                                        for path in list.iter().cloned() {
-                                            {
-                                                let (title, sha) = page_lookup
-                                                    .read()
-                                                    .get(&path)
-                                                    .cloned()
-                                                    .unwrap_or_else(|| (basename_of(&path).to_owned(), String::new()));
-                                                let target = FileMeta { path: path.clone(), sha256: sha };
-                                                rsx! {
-                                                    button {
-                                                        key: "{path}",
-                                                        class: "group flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-sm hover:bg-accent/50",
-                                                        onclick: move |_| on_open.call(target.clone()),
-                                                        span { class: "font-medium", "{title}" }
-                                                        span { class: "text-xs text-muted-foreground", "{path}" }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                Some(Err(e)) => rsx! {
-                                    div { class: "px-3 py-2 text-sm text-destructive",
-                                        "Couldn't load backlinks: {e}"
-                                    }
-                                },
-                                None => rsx! {
-                                    div { class: "flex flex-col gap-2 px-3 py-2",
-                                        Skeleton { class: "h-4 w-3/4" }
-                                        Skeleton { class: "h-4 w-1/2" }
-                                        Skeleton { class: "h-4 w-2/3" }
-                                    }
-                                },
-                            }
+                            {backlinks_body.clone()}
                         }
                     }
                 }
             }
+        }
+        // ── Mobile chrome ─────────────────────────────────
+        // Sticky primary actions above the bottom tab bar, plus the
+        // file tree + backlinks as bottom sheets.
+        MobileActionBar {
+            button {
+                r#type: "button",
+                class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground active:bg-accent",
+                onclick: move |_| files_open.set(true),
+                Folder { size: 16 }
+                "Files"
+            }
+            button {
+                r#type: "button",
+                class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground active:bg-primary/85 disabled:opacity-50",
+                disabled: !has_file,
+                onclick: move |_| session.save(),
+                if is_dirty { "Save •" } else { "Save" }
+            }
+            button {
+                r#type: "button",
+                class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground active:bg-accent disabled:opacity-50",
+                disabled: !has_file,
+                onclick: move |_| {
+                    let mut o = shell_right;
+                    let cur = o.peek().0;
+                    o.set(crate::chrome::RightPanelOpen(!cur));
+                },
+                "Backlinks"
+            }
+        }
+        BottomSheet {
+            open: files_open(),
+            on_close: move |_| files_open.set(false),
+            title: "Vault",
+            {tree_content}
+        }
+        BottomSheet {
+            open: has_file && panel_open,
+            on_close: move |_| {
+                let mut o = shell_right;
+                o.set(crate::chrome::RightPanelOpen(false));
+            },
+            title: "Backlinks",
+            {backlinks_body}
         }
         // Keyed collab child: remount per doc id = fresh replica,
         // driven INTO the page-owned `handles` slots.
