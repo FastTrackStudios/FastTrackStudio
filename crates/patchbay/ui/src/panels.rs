@@ -52,6 +52,15 @@ pub fn Toolbar() -> Element {
                 },
                 "connected only"
             }
+            button {
+                class: if *state::HIDE_MONITORS.read() { "chip on" } else { "chip" },
+                title: "hide sinks' monitor taps (dimmed rows)",
+                onclick: move |_| {
+                    let cur = *state::HIDE_MONITORS.peek();
+                    *state::HIDE_MONITORS.write() = !cur;
+                },
+                "hide monitors"
+            }
         }
     }
 }

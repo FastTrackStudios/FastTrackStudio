@@ -61,6 +61,8 @@ pub static KIND_FILTER: GlobalSignal<Vec<MediaKind>> = Signal::global(|| {
     ]
 });
 pub static HIDE_UNCONNECTED: GlobalSignal<bool> = Signal::global(|| false);
+/// Drop sinks' monitor ports from the canvas entirely.
+pub static HIDE_MONITORS: GlobalSignal<bool> = Signal::global(|| false);
 /// Port-group expansion (`node.name/direction/prefix` → expanded).
 /// Groups default to collapsed — that's the whole point with 128-channel
 /// Inferno nodes.

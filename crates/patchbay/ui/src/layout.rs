@@ -16,8 +16,32 @@ pub const HEADER_H: f64 = 34.0;
 pub const CARD_GAP: f64 = 18.0;
 pub const COL_GAP: f64 = 200.0;
 pub const MARGIN: f64 = 24.0;
+/// Vertical space reserved for the column titles.
+pub const COL_HEADER_H: f64 = 34.0;
 /// Runs shorter than this never group.
 pub const GROUP_MIN: usize = 5;
+
+/// Column semantics: 0 = Inputs (capture devices/sources), 1 =
+/// Applications (streams + app clients), 2 = Outputs (sinks). Driven
+/// by `media.class`, not port shape — an `Audio/Sink` belongs on the
+/// right even though its monitor ports also produce audio.
+pub fn column_of(media_class: &str) -> usize {
+    if media_class.contains("/Sink") {
+        2
+    } else if media_class.contains("/Source") && !media_class.starts_with("Stream") {
+        0
+    } else {
+        1
+    }
+}
+
+pub const COLUMN_TITLES: [&str; 3] = ["Inputs", "Applications", "Outputs"];
+
+/// Monitor ports (a sink's loop-out taps) get tagged + dimmed so
+/// they're never mistaken for the sink's real playback inputs.
+pub fn is_monitor(port_name: &str) -> bool {
+    port_name.starts_with("monitor_") || port_name == "monitor"
+}
 
 /// One rendered row inside a card: a single port, or a collapsed group.
 pub struct PortRow {
@@ -28,6 +52,8 @@ pub struct PortRow {
     pub ports: Vec<u32>,
     /// Set when this row is a collapsible group (expansion key).
     pub group_key: Option<String>,
+    /// A sink's monitor tap (rendered dimmed + tagged).
+    pub monitor: bool,
     /// y offset of the row center, relative to the card top.
     pub y: f64,
 }
@@ -89,6 +115,7 @@ fn build_rows(
             kind: p.media_kind,
             ports: vec![p.id],
             group_key: None,
+            monitor: is_monitor(&p.name),
             y: 0.0,
         });
     };
@@ -101,6 +128,7 @@ fn build_rows(
         // (split by a named channel) independently expandable.
         let key = format!("{}/{}/{}{}", node.name, dir_str, prefix, first);
         let is_expanded = expanded.get(&key).copied().unwrap_or(false);
+        let monitor = is_monitor(&run[0].name);
         if is_expanded {
             rows.push(PortRow {
                 label: format!("{}{}–{}", prefix, first, last),
@@ -108,6 +136,7 @@ fn build_rows(
                 kind: run[0].media_kind,
                 ports: Vec::new(),
                 group_key: Some(key),
+                monitor,
                 y: 0.0,
             });
             for p in run {
@@ -120,6 +149,7 @@ fn build_rows(
                 kind: run[0].media_kind,
                 ports: run.iter().map(|p| p.id).collect(),
                 group_key: Some(key),
+                monitor,
                 y: 0.0,
             });
         }
@@ -192,6 +222,8 @@ pub struct Filters<'a> {
     /// search matches what the user sees, and aliased ports stay out
     /// of collapsed groups.
     pub aliases: &'a HashMap<String, String>,
+    /// Drop monitor ports entirely (cables through them disappear).
+    pub hide_monitors: bool,
 }
 
 pub fn compute_layout(
@@ -213,15 +245,18 @@ pub fn compute_layout(
                 continue;
             }
         }
+        let keep = |p: &&PwPort| !(filters.hide_monitors && is_monitor(&p.name));
         let mut ins: Vec<&PwPort> = graph
             .ports
             .iter()
             .filter(|p| p.node_id == node.id && p.direction == PortDirection::Input)
+            .filter(keep)
             .collect();
         let mut outs: Vec<&PwPort> = graph
             .ports
             .iter()
             .filter(|p| p.node_id == node.id && p.direction == PortDirection::Output)
+            .filter(keep)
             .collect();
         if ins.is_empty() && outs.is_empty() {
             continue; // metadata/factory nodes — nothing to patch
@@ -256,11 +291,7 @@ pub fn compute_layout(
         }
         let h = HEADER_H + rows.len() as f64 * ROW_H + 8.0;
 
-        let col = match (outs.is_empty(), ins.is_empty()) {
-            (false, true) => 0,  // pure source
-            (false, false) => 1, // duplex
-            _ => 2,              // pure sink
-        };
+        let col = column_of(&node.media_class);
         columns[col].push(CardLayout {
             node: node.clone(),
             x: MARGIN + col as f64 * (CARD_W + COL_GAP),
@@ -276,7 +307,7 @@ pub fn compute_layout(
     let mut height: f64 = 0.0;
     for col in &mut columns {
         col.sort_by(|a, b| a.node.label.to_lowercase().cmp(&b.node.label.to_lowercase()));
-        let mut y = MARGIN;
+        let mut y = MARGIN + COL_HEADER_H;
         for mut card in col.drain(..) {
             card.y = y;
             y += card.h + CARD_GAP;

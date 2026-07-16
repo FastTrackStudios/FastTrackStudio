@@ -3,10 +3,10 @@
 use dioxus::prelude::*;
 use patchbay_proto::{MediaKind, PortDirection};
 
-use crate::layout::{self, CARD_W, Filters, ROW_H};
+use crate::layout::{self, CARD_W, COL_GAP, COLUMN_TITLES, Filters, MARGIN, ROW_H};
 use crate::state::{
-    self, EXPANDED_GROUPS, GRAPH, HIDE_UNCONNECTED, KIND_FILTER, SEARCH, SELECTED_NODE,
-    SELECTED_OUTPUT,
+    self, EXPANDED_GROUPS, GRAPH, HIDE_MONITORS, HIDE_UNCONNECTED, KIND_FILTER, SEARCH,
+    SELECTED_NODE, SELECTED_OUTPUT,
 };
 
 fn kind_color(kind: MediaKind) -> &'static str {
@@ -30,6 +30,7 @@ pub fn GraphCanvas() -> Element {
         kinds: &kinds,
         hide_unconnected: *HIDE_UNCONNECTED.read(),
         aliases: &aliases,
+        hide_monitors: *HIDE_MONITORS.read(),
     };
     let lay = layout::compute_layout(&graph, &filters, &expanded);
 
@@ -70,6 +71,14 @@ pub fn GraphCanvas() -> Element {
             div {
                 class: "canvas-world",
                 style: "width:{world_w}px;height:{world_h}px;",
+                for (i, title) in COLUMN_TITLES.iter().enumerate() {
+                    div {
+                        key: "{title}",
+                        class: "col-header",
+                        style: "left:{MARGIN + i as f64 * (CARD_W + COL_GAP)}px;width:{CARD_W}px;",
+                        "{title}"
+                    }
+                }
                 svg {
                     class: "cable-layer",
                     width: "{world_w}",
@@ -105,6 +114,7 @@ pub fn GraphCanvas() -> Element {
                                     .contains_key(&format!("{}:{}", card.node.name, r.label)),
                                 label: state::port_label(&card.node.name, &r.label),
                                 raw_name: r.label.clone(),
+                                monitor: r.monitor,
                                 direction: r.direction,
                                 kind: r.kind,
                                 ports: r.ports.clone(),
@@ -128,6 +138,7 @@ struct RowProps {
     label: String,
     raw_name: String,
     aliased: bool,
+    monitor: bool,
     direction: PortDirection,
     kind: MediaKind,
     ports: Vec<u32>,
@@ -179,13 +190,20 @@ fn NodeCard(
                         && row.ports.len() == 1;
                     let side = if row.direction == PortDirection::Input { "row-in" } else { "row-out" };
                     let classes = format!(
-                        "port-row {side}{}{}{}{}",
+                        "port-row {side}{}{}{}{}{}",
                         if is_group { " group" } else { "" },
                         if armed { " armed" } else { "" },
                         if connectable { " connectable" } else { "" },
                         if row.aliased { " aliased" } else { "" },
+                        if row.monitor { " mon" } else { "" },
                     );
-                    let tooltip = if row.aliased { row.raw_name.clone() } else { String::new() };
+                    let tooltip = if row.monitor {
+                        format!("{} — monitor tap (a copy of what this sink plays)", row.raw_name)
+                    } else if row.aliased {
+                        row.raw_name.clone()
+                    } else {
+                        String::new()
+                    };
                     let dot = kind_color(row.kind);
                     rsx! {
                         div {
