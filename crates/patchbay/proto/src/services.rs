@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use vox::Tx;
 
 use crate::types::{
-    AliasEntry, ApplyReport, ClockInfo, DanteDevice, DanteStatus, GraphEvent, GraphSnapshot,
-    LatencyRule, RoutingPreset, ServiceAction, ServiceStatus,
+    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, DanteDevice, DanteStatus, GraphEvent,
+    GraphSnapshot, LatencyRule, RoutingPreset, ServiceAction, ServiceStatus,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -121,6 +121,15 @@ pub mod patchbay_service {
 
         /// Force the graph quantum (frames); `0` returns to automatic.
         async fn force_quantum(&self, frames: u32) -> Result<(), PatchbayError>;
+
+        /// The patchbay-owned clock-defaults drop-in (zeros = none).
+        async fn clock_defaults(&self) -> Result<ClockDefaults, PatchbayError>;
+
+        /// Write (all-zero = delete) the clock-defaults drop-in. Wins
+        /// over the flake's 50-quantum.conf by filename ordering;
+        /// applied on PipeWire restart (services panel).
+        async fn set_clock_defaults(&self, defaults: ClockDefaults)
+        -> Result<(), PatchbayError>;
 
         // ── Per-app latency rules ────────────────────────────────────
 

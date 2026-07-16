@@ -222,6 +222,72 @@ fn LatencyPanel() -> Element {
                 onclick: apply,
                 "apply now (restart WirePlumber)"
             }
+            ClockDefaultsEditor {}
+        }
+    }
+}
+
+/// Runtime clock defaults — the patchbay-owned override of the flake's
+/// 50-quantum.conf (idle/default quantum + the min/max clamp). Applies
+/// on PipeWire restart.
+#[component]
+fn ClockDefaultsEditor() -> Element {
+    let handle = state::use_patchbay();
+    let stored = *state::CLOCK_DEFAULTS.read();
+    let mut quantum = use_signal(|| stored.quantum);
+    let mut min_q = use_signal(|| stored.min_quantum);
+    let mut max_q = use_signal(|| stored.max_quantum);
+    use_effect(use_reactive!(|stored| {
+        quantum.set(stored.quantum);
+        min_q.set(stored.min_quantum);
+        max_q.set(stored.max_quantum);
+    }));
+
+    let save = {
+        let handle = handle.clone();
+        move |_| {
+            let handle = handle.clone();
+            let defaults = patchbay_proto::ClockDefaults {
+                quantum: *quantum.peek(),
+                min_quantum: *min_q.peek(),
+                max_quantum: *max_q.peek(),
+            };
+            spawn(async move {
+                if let Err(e) = handle.0.set_clock_defaults(defaults).await {
+                    tracing::warn!("set_clock_defaults failed: {e}");
+                }
+                state::refresh_meta(&handle).await;
+            });
+        }
+    };
+
+    let num_input = |label: &'static str, mut sig: Signal<u32>| {
+        rsx! {
+            label { class: "clock-field",
+                span { class: "label", "{label}" }
+                input {
+                    r#type: "number",
+                    class: "alias-input",
+                    value: "{sig}",
+                    oninput: move |e| sig.set(e.value().parse().unwrap_or(0)),
+                }
+            }
+        }
+    };
+
+    rsx! {
+        div { class: "clock-defaults",
+            h3 { style: "margin-top:12px;", "Clock defaults" }
+            div { class: "dim-note",
+                "Idle/default quantum + clamp — overrides the flake's 50-quantum.conf "
+                "(0 = don't set). Restart PipeWire (Services) to apply."
+            }
+            div { class: "clock-fields",
+                {num_input("default", quantum)}
+                {num_input("min", min_q)}
+                {num_input("max", max_q)}
+            }
+            button { class: "chip", onclick: save, "save defaults" }
         }
     }
 }

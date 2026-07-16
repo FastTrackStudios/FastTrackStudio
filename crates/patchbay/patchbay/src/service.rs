@@ -9,9 +9,9 @@ use patchbay_proto::services::patchbay_service::{
     PatchbayServiceStreamSource, patchbay_service_stream_service_descriptor, stream_serve,
 };
 use patchbay_proto::{
-    AliasEntry, ApplyReport, ClockInfo, DanteDevice, DanteStatus, GraphEvent, GraphSnapshot,
-    LatencyRule, PatchbayError, PatchbayService, PresetLink, RoutingPreset, ServiceAction,
-    ServiceStatus, patchbay_service_service_descriptor, serve_patchbay_service,
+    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, DanteDevice, DanteStatus, GraphEvent,
+    GraphSnapshot, LatencyRule, PatchbayError, PatchbayService, PresetLink, RoutingPreset,
+    ServiceAction, ServiceStatus, patchbay_service_service_descriptor, serve_patchbay_service,
 };
 
 use crate::engine::{self, Command, EngineHandle};
@@ -343,6 +343,19 @@ impl PatchbayService for PatchbayBackend {
         tokio::task::spawn_blocking(move || crate::clock::force_quantum(frames))
             .await
             .map_err(|e| PatchbayError::Internal(e.to_string()))
+    }
+
+    async fn clock_defaults(&self) -> Result<ClockDefaults, PatchbayError> {
+        Ok(tokio::task::spawn_blocking(crate::clock::clock_defaults)
+            .await
+            .map_err(|e| PatchbayError::Internal(e.to_string()))?)
+    }
+
+    async fn set_clock_defaults(&self, defaults: ClockDefaults) -> Result<(), PatchbayError> {
+        tokio::task::spawn_blocking(move || crate::clock::set_clock_defaults(defaults))
+            .await
+            .map_err(|e| PatchbayError::Internal(e.to_string()))?
+            .map_err(PatchbayError::Internal)
     }
 
     async fn latency_rules(&self) -> Result<Vec<LatencyRule>, PatchbayError> {

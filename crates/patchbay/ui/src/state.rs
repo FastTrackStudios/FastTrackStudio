@@ -28,6 +28,8 @@ pub static CLOCK: GlobalSignal<ClockInfo> = Signal::global(ClockInfo::default);
 pub static DANTE: GlobalSignal<DanteStatus> = Signal::global(DanteStatus::default);
 pub static SERVICES: GlobalSignal<Vec<ServiceStatus>> = Signal::global(Vec::new);
 pub static LATENCY_RULES: GlobalSignal<Vec<patchbay_proto::LatencyRule>> = Signal::global(Vec::new);
+pub static CLOCK_DEFAULTS: GlobalSignal<patchbay_proto::ClockDefaults> =
+    Signal::global(patchbay_proto::ClockDefaults::default);
 pub static DANTE_DEVICES: GlobalSignal<Vec<DanteDevice>> = Signal::global(Vec::new);
 /// Dante grid fetch in flight.
 pub static DANTE_LOADING: GlobalSignal<bool> = Signal::global(|| false);
@@ -128,6 +130,9 @@ pub async fn refresh_meta(handle: &PatchbayHandle) {
     }
     if let Ok(rules) = handle.0.latency_rules().await {
         *LATENCY_RULES.write() = rules;
+    }
+    if let Ok(defaults) = handle.0.clock_defaults().await {
+        *CLOCK_DEFAULTS.write() = defaults;
     }
 }
 

@@ -148,6 +148,17 @@ pub struct AliasEntry {
 
 // ─── Clock / latency ────────────────────────────────────────────────────
 
+/// Graph clock defaults, materialized as a PipeWire drop-in — the
+/// runtime-editable version of the flake's `50-quantum.conf`. Zero
+/// fields mean "not set here" (fall through to the flake/system
+/// config). Applied on PipeWire restart.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Facet)]
+pub struct ClockDefaults {
+    pub quantum: u32,
+    pub min_quantum: u32,
+    pub max_quantum: u32,
+}
+
 /// Per-app latency rule, materialized as a WirePlumber drop-in.
 ///
 /// While a matching node is running, the graph runs at `quantum`
