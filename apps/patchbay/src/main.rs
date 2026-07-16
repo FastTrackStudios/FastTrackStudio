@@ -95,7 +95,7 @@ fn main() {
     }
 
     let window = dioxus::desktop::WindowBuilder::new()
-        .with_title("FTS Patchbay")
+        .with_title("Patchbay")
         .with_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(1480.0, 940.0));
     dioxus::LaunchBuilder::new()
         .with_cfg(

@@ -21,7 +21,7 @@ pub fn PatchbayApp() -> Element {
         document::Style { {CSS} }
         div { class: "patchbay-root",
             div { class: "topbar",
-                span { class: "app-title", "FTS Patchbay" }
+                span { class: "app-title", "Patchbay" }
                 div { class: "view-tabs",
                     button {
                         class: if view == View::Patchbay { "tab on" } else { "tab" },
