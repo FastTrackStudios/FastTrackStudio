@@ -27,6 +27,7 @@ pub mod shell;
 pub mod shortcuts;
 pub mod states;
 pub mod stores;
+pub mod tabs;
 pub mod tag_icon;
 pub mod task_sort;
 pub mod theming;

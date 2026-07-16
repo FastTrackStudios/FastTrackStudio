@@ -178,13 +178,10 @@ pub fn TopBar() -> Element {
     };
 
     // Obsidian-shaped window bar: sidebar toggle at the far left,
-    // the tab strip in the middle (one live "tab" today — the open
-    // view; a real tab system arrives with vault-views slice 4),
+    // the tab strip in the middle (real route tabs — crate::tabs),
     // actions + the right-panel toggle at the far right.
     let mut explorer = use_context::<Signal<ExplorerOpen>>();
     let mut right_panel = use_context::<Signal<RightPanelOpen>>();
-    let route = use_route::<Route>();
-    let title = crate::nav::route_title(&route);
 
     rsx! {
         div {
@@ -199,12 +196,8 @@ pub fn TopBar() -> Element {
                 },
                 fts_ui::lucide_dioxus::PanelLeft { size: 15 }
             }
-            // The tab strip region — today the single open view.
-            div { class: "flex min-w-0 flex-1 items-center gap-1 px-1",
-                div { class: "flex max-w-56 items-center gap-2 rounded-md bg-accent/60 px-3 py-1 text-xs text-foreground",
-                    span { class: "truncate", "{title}" }
-                }
-            }
+            // The tab strip — Obsidian-style route tabs.
+            crate::tabs::TabStrip {}
 
             StatChip {
                 icon: rsx! { InboxIcon { size: 14 } },

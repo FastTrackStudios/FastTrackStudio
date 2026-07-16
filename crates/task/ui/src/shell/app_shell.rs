@@ -15,6 +15,9 @@ pub fn AppShell() -> Element {
     provide_chrome_contexts();
     // Ctrl+P command-palette visibility (same pattern as FleetingOpen).
     crate::palette::provide_palette_context();
+    // Obsidian-style route tabs (the strip lives in the TopBar) —
+    // restores the persisted strip and seeds it with the boot route.
+    crate::tabs::provide_tabs(current.clone());
     // Shell panel state: the vault explorer + the right (backlinks)
     // panel, toggled from the top bar (Obsidian-style).
     let explorer = use_context_provider(|| Signal::new(crate::chrome::ExplorerOpen(true)));
