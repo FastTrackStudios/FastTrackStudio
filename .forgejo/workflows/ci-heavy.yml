@@ -39,7 +39,7 @@ name: ci-heavy
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
   workflow_dispatch:
 
@@ -272,46 +272,46 @@ jobs:
           # vars point at (run 6 died because AR_wasm32_unknown_unknown's
           # llvm-binutils wrapper had been collected — env-var store paths
           # are only alive while something roots the shell derivation).
-          nix develop --profile "$FTS_CI/devshell" -c true
+          nix develop .#ci --profile "$FTS_CI/devshell-ci" -c true
 
       - name: cargo check --workspace
         if: needs.changes.outputs.workspace == 'true'
-        run: nix develop -c cargo check --workspace --exclude vox-discover
+        run: nix develop .#ci -c cargo check --workspace --exclude vox-discover
 
       # Patchbay is excluded from the full-workspace gate (leaf domain);
       # a patchbay-only change still gets its own compile check here.
       - name: cargo check patchbay (patchbay-only change)
         if: needs.changes.outputs.patchbay == 'true' && needs.changes.outputs.workspace != 'true'
         run: |
-          nix develop -c cargo check \
+          nix develop .#ci -c cargo check \
             -p patchbay -p patchbay-proto -p patchbay-ui -p fts-patchbay
 
       - name: test signal-guitar
         if: needs.changes.outputs.signal == 'true'
-        run: nix develop -c cargo test -p signal-guitar
+        run: nix develop .#ci -c cargo test -p signal-guitar
 
       - name: test daw-standalone (audio)
         if: needs.changes.outputs.signal == 'true'
-        run: nix develop -c cargo test -p daw-standalone --features audio
+        run: nix develop .#ci -c cargo test -p daw-standalone --features audio
 
       - name: test neural-amp-modeler (incl. NAM parity)
         if: needs.changes.outputs.signal == 'true'
-        run: nix develop -c cargo test -p neural-amp-modeler
+        run: nix develop .#ci -c cargo test -p neural-amp-modeler
 
       - name: test architect (iroh)
         if: needs.changes.outputs.signal == 'true'
-        run: nix develop -c cargo test -p architect --features iroh
+        run: nix develop .#ci -c cargo test -p architect --features iroh
 
       - name: test pitch-dsp
         if: needs.changes.outputs.signal == 'true'
-        run: nix develop -c cargo test -p pitch-dsp
+        run: nix develop .#ci -c cargo test -p pitch-dsp
 
       # Browser-remote build of THE app. wasm32 target + ring's clang
       # env come from the flake dev shell.
       - name: wasm check (fasttrackstudio, signal feature)
         if: needs.changes.outputs.signal == 'true'
         run: |
-          nix develop -c cargo check -p fasttrackstudio \
+          nix develop .#ci -c cargo check -p fasttrackstudio \
             --target wasm32-unknown-unknown \
             --no-default-features --features signal
 
@@ -378,7 +378,7 @@ jobs:
         if: needs.changes.outputs.reaper == 'true'
         run: |
           FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
-            nix develop -c cargo run -p daw-reaper-xtask
+            nix develop .#reaper-test -c cargo run -p daw-reaper-xtask
 
       # Extension suite (13 tests): CI-owned REAPER resources dir
       # (persistent — keeps the [nag] prewarm token between runs),
@@ -394,4 +394,4 @@ jobs:
           fi
           FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
           FTS_REAPER_RESOURCES="$RIG" \
-            nix develop -c cargo run -p fts-extensions-xtask
+            nix develop .#reaper-test -c cargo run -p fts-extensions-xtask
