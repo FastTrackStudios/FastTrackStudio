@@ -35,7 +35,14 @@ pub fn column_of(media_class: &str) -> usize {
     }
 }
 
-pub const COLUMN_TITLES: [&str; 3] = ["Inputs", "Applications", "Outputs"];
+/// Column titles per media tab.
+pub fn column_titles(tab: MediaKind) -> [&'static str; 3] {
+    match tab {
+        MediaKind::Midi => ["MIDI Inputs", "Applications", "MIDI Outputs"],
+        MediaKind::Video => ["Cameras / Sources", "Applications", "Outputs"],
+        _ => ["Inputs", "Applications", "Outputs"],
+    }
+}
 
 /// Monitor ports (a sink's loop-out taps) get tagged + dimmed so
 /// they're never mistaken for the sink's real playback inputs.
@@ -60,6 +67,9 @@ pub struct PortRow {
 
 pub struct CardLayout {
     pub node: PwNode,
+    /// Unique render key — a MIDI device split by direction yields two
+    /// cards from one node (`"<id>-out"` / `"<id>-in"`).
+    pub key: String,
     pub x: f64,
     pub y: f64,
     pub h: f64,
@@ -288,27 +298,57 @@ pub fn compute_layout(
         ins.sort_by_key(numeric_key);
         outs.sort_by_key(numeric_key);
 
-        let mut rows = build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
-        rows.extend(build_rows(
-            node,
-            &outs,
-            PortDirection::Output,
-            expanded,
-            filters.aliases,
-        ));
-        for (idx, row) in rows.iter_mut().enumerate() {
-            row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
-        }
-        let h = HEADER_H + rows.len() as f64 * ROW_H + 8.0;
+        let make_card = |rows: Vec<PortRow>, col: usize, key: String| {
+            let mut rows = rows;
+            for (idx, row) in rows.iter_mut().enumerate() {
+                row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
+            }
+            let h = HEADER_H + rows.len() as f64 * ROW_H + 8.0;
+            CardLayout {
+                node: node.clone(),
+                key,
+                x: MARGIN + col as f64 * (CARD_W + COL_GAP),
+                y: 0.0,
+                h,
+                rows,
+            }
+        };
 
-        let col = column_of(&node.media_class);
-        columns[col].push(CardLayout {
-            node: node.clone(),
-            x: MARGIN + col as f64 * (CARD_W + COL_GAP),
-            y: 0.0,
-            h,
-            rows,
-        });
+        // On the MIDI tab, pure-MIDI nodes (hardware bridges, midir
+        // ports) are DEVICES: split them by direction — their outputs
+        // (keyboards, control surfaces) go left, their inputs (synths,
+        // light guides) right. Applications — anything that also
+        // carries audio, or a stream — stay whole in the middle,
+        // since their MIDI mostly routes within themselves.
+        let is_app = graph
+            .ports
+            .iter()
+            .any(|p| p.node_id == node.id && p.media_kind == MediaKind::Audio)
+            || node.media_class.starts_with("Stream");
+        if filters.tab == MediaKind::Midi && !is_app {
+            if !outs.is_empty() {
+                let rows =
+                    build_rows(node, &outs, PortDirection::Output, expanded, filters.aliases);
+                columns[0].push(make_card(rows, 0, format!("{}-out", node.id)));
+            }
+            if !ins.is_empty() {
+                let rows =
+                    build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
+                columns[2].push(make_card(rows, 2, format!("{}-in", node.id)));
+            }
+        } else {
+            let mut rows =
+                build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
+            rows.extend(build_rows(
+                node,
+                &outs,
+                PortDirection::Output,
+                expanded,
+                filters.aliases,
+            ));
+            let col = column_of(&node.media_class);
+            columns[col].push(make_card(rows, col, node.id.to_string()));
+        }
     }
 
     // Stack each column; stable order by label keeps the layout calm

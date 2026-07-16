@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use patchbay_proto::{MediaKind, PortDirection};
 
-use crate::layout::{self, CARD_W, COL_GAP, COLUMN_TITLES, Filters, MARGIN, ROW_H};
+use crate::layout::{self, CARD_W, COL_GAP, Filters, MARGIN, ROW_H, column_titles};
 use crate::state::{
     self, EXPANDED_GROUPS, GRAPH, HIDE_MONITORS, HIDE_UNCONNECTED, MEDIA_TAB, PAN, SEARCH,
     SELECTED_NODE, SELECTED_OUTPUT, ZOOM,
@@ -130,7 +130,7 @@ pub fn GraphCanvas() -> Element {
                 style: "width:{world_w}px;height:{world_h}px;\
                         transform: translate({pan_x}px, {pan_y}px) scale({zoom});\
                         transform-origin: 0 0;",
-                for (i, title) in COLUMN_TITLES.iter().enumerate() {
+                for (i, title) in column_titles(*MEDIA_TAB.read()).iter().enumerate() {
                     div {
                         key: "{title}",
                         class: "col-header",
@@ -156,7 +156,7 @@ pub fn GraphCanvas() -> Element {
                 }
                 for card in &lay.cards {
                     NodeCard {
-                        key: "{card.node.id}",
+                        key: "{card.key}",
                         node_id: card.node.id,
                         node_name: card.node.name.clone(),
                         node_label: state::node_label(&card.node.name, &card.node.label),
