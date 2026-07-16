@@ -34,10 +34,45 @@ use crate::routes::Route;
 #[derive(Clone, Copy)]
 pub struct FleetingOpen(pub Signal<bool>);
 
+/// Zen mode: hide ALL desktop chrome (top bar, icon rail, explorer,
+/// status bar) so the open view gets the full viewport. Toggled by
+/// Ctrl+Shift+Z ([`crate::shortcuts`]) and exited from the hover
+/// hot-zone ([`ZenExitOverlay`]). Panel open/closed state is left
+/// untouched — exiting restores exactly what was showing. Desktop-only
+/// by construction: the chrome it hides is `md:`-gated, and mobile has
+/// no keyboard to trigger it.
+#[derive(Clone, Copy)]
+pub struct ZenMode(pub Signal<bool>);
+
 /// Install the chrome contexts. Call once in the app shell.
 pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
     use_context_provider(|| StatusBarInfo(Signal::new(None)));
+    use_context_provider(|| ZenMode(Signal::new(false)));
+}
+
+/// The only chrome visible in zen mode: an invisible ~24px hot-zone
+/// fixed to the top-left corner that reveals a small exit button on
+/// hover (pure CSS group-hover). Clicking it leaves zen; the tooltip
+/// names the keyboard toggle.
+#[component]
+pub fn ZenExitOverlay() -> Element {
+    let mut zen = use_context::<ZenMode>().0;
+    rsx! {
+        div {
+            // The hot-zone is larger than the button so a rough flick
+            // into the corner catches; only the button paints.
+            class: "group fixed left-0 top-0 z-50 hidden h-10 w-10 md:block",
+            button {
+                r#type: "button",
+                class: "m-1.5 flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card/90 text-muted-foreground opacity-0 shadow-md backdrop-blur transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                title: "Exit zen (Ctrl+Shift+Z)",
+                aria_label: "Exit zen mode",
+                onclick: move |_| zen.set(false),
+                fts_ui::lucide_dioxus::Minimize2 { size: 14 }
+            }
+        }
+    }
 }
 
 /// What the open document contributes to the bottom status bar —

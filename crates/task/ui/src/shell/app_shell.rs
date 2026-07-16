@@ -22,6 +22,12 @@ pub fn AppShell() -> Element {
     // panel, toggled from the top bar (Obsidian-style).
     let explorer = use_context_provider(|| Signal::new(crate::chrome::ExplorerOpen(true)));
     let _ = use_context_provider(|| Signal::new(crate::chrome::RightPanelOpen(true)));
+    // Zen mode (Ctrl+Shift+Z): render NO desktop chrome — the open
+    // view gets the whole viewport. Only the rendering is gated; the
+    // explorer/right-panel signals keep their values, so exiting zen
+    // restores exactly what was showing. Desktop-only: everything zen
+    // hides is `md:`-gated already, so mobile is unaffected.
+    let zen = use_context::<crate::chrome::ZenMode>().0;
 
     rsx! {
         // Publishes this client's presence entry (route activity, idle,
@@ -37,12 +43,16 @@ pub fn AppShell() -> Element {
         // where tabs will live), then icon rail → vault explorer →
         // the open view.
         div { class: "min-h-screen bg-background text-foreground md:flex md:h-screen md:flex-col md:overflow-hidden",
-            TopBar {}
-            div { class: "md:flex md:min-h-0 md:flex-1",
-            div { class: "hidden md:block",
-                crate::shell::rail::IconRail { current: current.clone() }
+            if !zen() {
+                TopBar {}
             }
-            if explorer.read().0 {
+            div { class: "md:flex md:min-h-0 md:flex-1",
+            if !zen() {
+                div { class: "hidden md:block",
+                    crate::shell::rail::IconRail { current: current.clone() }
+                }
+            }
+            if explorer.read().0 && !zen() {
                 div { class: "hidden w-[17rem] shrink-0 border-r border-border/60 md:flex md:min-h-0 md:flex-col md:overflow-hidden",
                     crate::shell::explorer::VaultExplorer {}
                 }
@@ -64,7 +74,14 @@ pub fn AppShell() -> Element {
             }
             // IDE-style bottom status line — document segments fed by
             // the open page via the `StatusBarInfo` context.
-            crate::chrome::StatusBar {}
+            if !zen() {
+                crate::chrome::StatusBar {}
+            }
+        }
+        // Zen's only chrome: the hover-revealed exit button in the
+        // top-left corner.
+        if zen() {
+            crate::chrome::ZenExitOverlay {}
         }
         // Single global capture modal, toggled from any fleeting button.
         FleetingModal {}

@@ -50,7 +50,8 @@
 //! - `Ctrl+Shift+Q` (quit, some platforms), `F11` (fullscreen on some)
 //!
 //! Combos that *are* deliverable but shadow a browser default (`Ctrl+P`
-//! print, `Ctrl+K` omnibox search, `Ctrl+Shift+B` bookmarks bar) are
+//! print, `Ctrl+K` omnibox search, `Ctrl+Shift+B` bookmarks bar,
+//! `Ctrl+Shift+Z` text-field redo) are
 //! flagged [`ShortcutDef::overrides_browser`]: they stay active while
 //! the **"prioritize app shortcuts"** pref (default on) is set, and are
 //! dropped from the compiled keymap when the user turns it off.
@@ -136,6 +137,20 @@ pub const SHORTCUTS: &[ShortcutDef] = &[
         overrides_browser: true,
     },
     ShortcutDef {
+        action: "zen.toggle",
+        description: "Toggle zen mode (hide all chrome)",
+        // Deliverable everywhere: Ctrl+Shift+Z is NOT browser-reserved
+        // (unlike Ctrl+Shift+N/T/W it reaches the page and
+        // preventDefault works). It only shadows "redo" inside text
+        // fields, so it's flagged as an override: the "prioritize app
+        // shortcuts" pref (default on) can hand it back to redo.
+        // Escape deliberately does NOT exit zen — it belongs to
+        // overlays; this chord toggles both ways.
+        canonical: "ctrl+shift+z",
+        web: None,
+        overrides_browser: true,
+    },
+    ShortcutDef {
         action: "nav.home",
         description: "Go to Home (dashboard)",
         canonical: "g h",
@@ -206,6 +221,7 @@ pub fn use_app_shortcuts() {
     let fleeting = use_context::<crate::chrome::FleetingOpen>().0;
     let explorer = use_context::<Signal<crate::chrome::ExplorerOpen>>();
     let right_panel = use_context::<Signal<crate::chrome::RightPanelOpen>>();
+    let zen = use_context::<crate::chrome::ZenMode>().0;
     let nav = use_navigator();
     let prefs = use_context::<crate::prefs::PrefsCtx>().prefs;
 
@@ -235,9 +251,9 @@ pub fn use_app_shortcuts() {
     }
 
     #[cfg(target_arch = "wasm32")]
-    install_dom_listeners(engine, palette, fleeting, explorer, right_panel, nav);
+    install_dom_listeners(engine, palette, fleeting, explorer, right_panel, zen, nav);
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = (engine, palette, fleeting, explorer, right_panel, nav);
+    let _ = (engine, palette, fleeting, explorer, right_panel, zen, nav);
 }
 
 // ── wasm wiring ─────────────────────────────────────────────────────
@@ -252,6 +268,7 @@ fn install_dom_listeners(
     mut fleeting: Signal<bool>,
     mut explorer: Signal<crate::chrome::ExplorerOpen>,
     mut right_panel: Signal<crate::chrome::RightPanelOpen>,
+    mut zen: Signal<bool>,
     nav: dioxus_router::Navigator,
 ) {
     use std::cell::Cell;
@@ -282,6 +299,10 @@ fn install_dom_listeners(
                     "panel.toggle" => {
                         let cur = right_panel.peek().0;
                         right_panel.set(crate::chrome::RightPanelOpen(!cur));
+                    }
+                    "zen.toggle" => {
+                        let cur = *zen.peek();
+                        zen.set(!cur);
                     }
                     "nav.home" => {
                         nav.push(Route::DashboardRoute {});
