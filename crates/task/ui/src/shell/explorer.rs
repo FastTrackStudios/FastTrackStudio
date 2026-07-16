@@ -154,9 +154,10 @@ pub fn VaultExplorer() -> Element {
     // everything starts COLLAPSED (an overview, not a wall) — this set
     // holds the tag paths the user has opened.
     let tag_expanded = use_signal(std::collections::HashSet::<String>::new);
-    // Virtual-folder organization: folder/up properties by default,
-    // tags on toggle. FUTURE: persist on the prefs entity.
-    let mut mode = use_signal(|| ExplorerMode::Folders);
+    // Tag buckets by default (counterintuitively — tags are the
+    // primary organization here); folder/up properties on toggle.
+    // FUTURE: persist on the prefs entity.
+    let mut mode = use_signal(|| ExplorerMode::Tags);
 
     // Selection = the current route's vault path.
     let route = use_route::<Route>();
