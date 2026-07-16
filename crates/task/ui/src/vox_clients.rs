@@ -45,6 +45,9 @@ where
     if url.is_empty() {
         return Err("no vox URL configured (set TASK_VOX_URL[_WEB])".to_owned());
     }
+    #[cfg(target_arch = "wasm32")]
+    let link = dial_ws(url).await?;
+    #[cfg(not(target_arch = "wasm32"))]
     let link = vox_websocket::WsLink::connect(url)
         .await
         .map_err(|e| format!("ws connect `{url}`: {e:?}"))?;
@@ -52,6 +55,120 @@ where
         .establish::<C>()
         .await
         .map_err(|e| format!("establish `{url}`: {e:?}"))
+}
+
+/// Cancel-safe browser WebSocket dial (wasm replacement for
+/// `vox_websocket::WsLink::connect`).
+///
+/// `WsLink::connect`'s dial phase is not cancel-safe: it attaches
+/// `onopen`/`onerror` wasm-bindgen closures to the connecting socket and
+/// only detaches them on the *success* path. On the error path — and,
+/// worse, when the connect **future is dropped mid-dial** (the app-root
+/// supervisor restarts the moment org discovery lands and its signal
+/// dependency fires) — the closures drop while still attached to a
+/// socket that hasn't finished failing. The browser then delivers the
+/// socket's `error`/`close` event into the freed closure, surfacing as
+/// an uncaught `closure invoked recursively or after being dropped`.
+///
+/// This dial keeps the connect-phase closures in a guard whose `Drop`
+/// **detaches them from the socket first** (and closes a socket we're
+/// abandoning), so no event can ever reach a dropped closure — drop
+/// order inside one synchronous Rust drop can't be interleaved with
+/// browser event dispatch. On success the guard detaches and hands the
+/// open socket to `WsLink::new`, which installs the steady-state
+/// handlers it owns.
+#[cfg(target_arch = "wasm32")]
+async fn dial_ws(url: &str) -> Result<vox_websocket::WsLink, String> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+
+    /// Connect-phase state: the socket plus its temporary handlers.
+    /// Detaches the handlers before the closure fields drop; closes the
+    /// socket unless the dial completed and ownership moved to `WsLink`.
+    struct Dial {
+        ws: web_sys::WebSocket,
+        _onopen: Closure<dyn FnMut()>,
+        _onerror: Closure<dyn FnMut(web_sys::Event)>,
+        _onclose: Closure<dyn FnMut(web_sys::CloseEvent)>,
+        keep_open: bool,
+    }
+    impl Drop for Dial {
+        fn drop(&mut self) {
+            // Detach FIRST — after these lines the browser holds no
+            // reference into the closures, so dropping them (field drop,
+            // right after this body) is always safe.
+            self.ws.set_onopen(None);
+            self.ws.set_onerror(None);
+            self.ws.set_onclose(None);
+            if !self.keep_open {
+                // Abandoned dial (error or caller cancellation): tear the
+                // socket down so it doesn't keep connecting in the void.
+                let _ = self.ws.close();
+            }
+        }
+    }
+
+    let ws = web_sys::WebSocket::new(url)
+        .map_err(|e| format!("WebSocket::new `{url}`: {e:?}"))?;
+    ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
+
+    let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+    let tx = Rc::new(RefCell::new(Some(tx)));
+
+    // FnMut (not `Closure::once`) so a stray double-fire can't trip
+    // wasm-bindgen's invoked-after-consumed check; the oneshot's
+    // take() makes later fires no-ops.
+    let tx_open = Rc::clone(&tx);
+    let onopen = Closure::wrap(Box::new(move || {
+        if let Some(tx) = tx_open.borrow_mut().take() {
+            let _ = tx.send(Ok(()));
+        }
+    }) as Box<dyn FnMut()>);
+    let tx_error = Rc::clone(&tx);
+    let err_url = url.to_owned();
+    let onerror = Closure::wrap(Box::new(move |_: web_sys::Event| {
+        if let Some(tx) = tx_error.borrow_mut().take() {
+            let _ = tx.send(Err(format!("WebSocket open failed: `{err_url}`")));
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    // `close` can arrive without a preceding `error` (clean rejection);
+    // without this handler such a dial would hang forever.
+    let tx_close = Rc::clone(&tx);
+    let close_url = url.to_owned();
+    let onclose = Closure::wrap(Box::new(move |e: web_sys::CloseEvent| {
+        if let Some(tx) = tx_close.borrow_mut().take() {
+            let _ = tx.send(Err(format!(
+                "WebSocket closed during open: `{close_url}` (code {})",
+                e.code()
+            )));
+        }
+    }) as Box<dyn FnMut(web_sys::CloseEvent)>);
+
+    ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+    ws.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+    ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
+
+    let mut dial = Dial {
+        ws,
+        _onopen: onopen,
+        _onerror: onerror,
+        _onclose: onclose,
+        keep_open: false,
+    };
+
+    // Cancellation-safe await: dropping this future drops `dial`, whose
+    // Drop detaches the handlers and closes the half-open socket.
+    rx.await.map_err(|_| "dial cancelled".to_owned())??;
+
+    // Success: keep the socket, detach the connect-phase handlers (the
+    // guard's Drop), and let WsLink install its own.
+    dial.keep_open = true;
+    let ws = dial.ws.clone();
+    drop(dial);
+    Ok(vox_websocket::WsLink::new(ws))
 }
 
 /// Untyped root lane — retains the raw [`vox_core::Caller`] plus the
@@ -78,14 +195,25 @@ impl vox_core::FromVoxLane for RootLane {
 }
 
 /// Per-org vox endpoint: the configured base retargeted at
-/// `/org/<slug>/vox`. Empty when no base is configured.
-fn org_ws_url(slug: &str) -> String {
+/// `/org/<slug>/vox`.
+///
+/// Errors on an **empty slug** rather than producing `/org//vox` — this
+/// is the choke point every org client funnels through, so no caller
+/// can dial before org discovery has resolved a real slug (the app-root
+/// supervisor and several hooks run with `home_slug` == "" until the
+/// well-known fetch lands; previously that raced into a doomed
+/// WebSocket to `/org//vox` plus a console error). Callers just retry /
+/// re-run when the org-list signal fires.
+fn org_ws_url(slug: &str) -> Result<String, String> {
+    if slug.is_empty() {
+        return Err("awaiting org discovery (no org slug yet)".to_owned());
+    }
     let base = vox_url();
     if base.is_empty() {
-        return String::new();
+        return Err("no vox URL configured (set TASK_VOX_URL[_WEB])".to_owned());
     }
     let trimmed = base.trim_end_matches("/vox").trim_end_matches('/');
-    format!("{trimmed}/org/{slug}/vox")
+    Ok(format!("{trimmed}/org/{slug}/vox"))
 }
 
 /// One shared [`vox_core::Caller`] per org — the handle every typed
@@ -130,7 +258,7 @@ pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
         }) {
             return Ok(caller);
         }
-        let root = establish_at::<RootLane>(&org_ws_url(slug)).await?;
+        let root = establish_at::<RootLane>(&org_ws_url(slug)?).await?;
         let caller = root.caller.clone();
         ROOTS.with(|m| m.borrow_mut().insert(slug.to_owned(), root));
         Ok(caller)
@@ -141,7 +269,7 @@ pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
         // root is returned through the caller it carries — callers that
         // need liveness across awaits should hold the typed client from
         // `establish_for` instead.
-        let root = establish_at::<RootLane>(&org_ws_url(slug)).await?;
+        let root = establish_at::<RootLane>(&org_ws_url(slug)?).await?;
         Ok(root.caller.clone())
     }
 }
@@ -161,7 +289,7 @@ where
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        establish_at::<C>(&org_ws_url(slug)).await
+        establish_at::<C>(&org_ws_url(slug)?).await
     }
 }
 
