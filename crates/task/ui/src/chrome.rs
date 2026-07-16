@@ -316,7 +316,7 @@ pub fn TopBar() -> Element {
 
             StatChip {
                 icon: rsx! { InboxIcon { size: 14 } },
-                label: "{inbox_count} to review",
+                label: "{inbox_count}",
                 route: Route::InboxRoute {},
             }
             StatChip {
@@ -529,6 +529,7 @@ pub fn TimerWidget() -> Element {
 
     let mut draft = use_signal(String::new);
     let mut switching = use_signal(|| false);
+    let mut menu_open = use_signal(|| false);
 
     // Fresh start from the idle input — clears any paused work.
     let mut start = move || {
@@ -551,9 +552,9 @@ pub fn TimerWidget() -> Element {
         );
     };
 
-    if target().is_none() {
+    let Some((cur_slug, cur_org)) = target() else {
         return rsx! {};
-    }
+    };
 
     match active.as_ref() {
         // ── Running ──────────────────────────────────────────────
@@ -625,9 +626,10 @@ pub fn TimerWidget() -> Element {
                         Square { size: 14 }
                     }
                     if switching() {
-                        TimerSwitchMenu {
+                        TimerMenu {
                             slug,
                             org_id,
+                            placeholder: "Switch to task…".to_string(),
                             on_pick: on_switch,
                             on_close: move |_| switching.set(false),
                         }
@@ -667,47 +669,117 @@ pub fn TimerWidget() -> Element {
                 }
             }
             // ── Idle ─────────────────────────────────────────────
-            None => rsx! {
-                div { class: "flex items-center gap-1 rounded-lg border border-border bg-card/40 py-1 pl-2.5 pr-1",
-                    input {
-                        class: "w-32 bg-transparent text-xs outline-none placeholder:text-muted-foreground focus:w-44 xl:w-40 xl:focus:w-56",
-                        placeholder: "Start a timer…",
-                        value: "{draft}",
-                        oninput: move |e| draft.set(e.value()),
-                        onkeydown: move |e| {
-                            if e.key() == Key::Enter {
-                                start();
-                            }
-                        },
+            None => {
+                let start_req = {
+                    let slug = cur_slug.clone();
+                    move |req: timer_proto::StartTimerRequest| {
+                        hint.set(None);
+                        menu_open.set(false);
+                        muts.start(slug.clone(), req);
                     }
-                    button {
-                        class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sky-500/15 hover:text-sky-300",
-                        title: "Start timer",
-                        onclick: move |_| start(),
-                        Play { size: 14 }
+                };
+                rsx! {
+                    div { class: "relative flex items-center gap-1 rounded-lg border border-border bg-card/40 py-1 pl-2.5 pr-1",
+                        input {
+                            class: "w-32 bg-transparent text-xs outline-none placeholder:text-muted-foreground focus:w-44 xl:w-40 xl:focus:w-56",
+                            placeholder: "Start a timer…",
+                            value: "{draft}",
+                            oninput: move |e| draft.set(e.value()),
+                            onkeydown: move |e| {
+                                if e.key() == Key::Enter {
+                                    start();
+                                }
+                            },
+                        }
+                        button {
+                            class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sky-500/15 hover:text-sky-300",
+                            title: "Pick a task or recent timer",
+                            onclick: move |_| {
+                                let cur = *menu_open.peek();
+                                menu_open.set(!cur);
+                            },
+                            ChevronDown { size: 14 }
+                        }
+                        button {
+                            class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sky-500/15 hover:text-sky-300",
+                            title: "Start timer",
+                            onclick: move |_| start(),
+                            Play { size: 14 }
+                        }
+                        if menu_open() {
+                            TimerMenu {
+                                slug: cur_slug.clone(),
+                                org_id: cur_org,
+                                placeholder: "Start a task…".to_string(),
+                                on_pick: start_req,
+                                on_close: move |_| menu_open.set(false),
+                            }
+                        }
                     }
                 }
-            },
+            }
         },
     }
 }
 
-/// Task-picker popover for switching the running timer to a different
-/// task. Fuzzy-searches the active org's open tasks; picking one emits
-/// a fully-formed [`StartTimerRequest`](timer_proto::StartTimerRequest)
-/// linked to that task's note + project.
+/// Task/timer picker popover — the launcher shown from the idle widget
+/// and the switch control on a running one. Lists today's **recent**
+/// timers (one-click resume) and fuzzy-searches the active org's
+/// **open tasks**; picking either emits a fully-formed
+/// [`StartTimerRequest`](timer_proto::StartTimerRequest) that the caller
+/// starts (idle) or switches to (running).
 #[component]
-fn TimerSwitchMenu(
+fn TimerMenu(
     slug: String,
     org_id: Uuid,
+    #[props(default = "Search tasks…".to_string())] placeholder: String,
     on_pick: EventHandler<timer_proto::StartTimerRequest>,
     on_close: EventHandler<()>,
 ) -> Element {
     let mut query = use_signal(String::new);
     let tasks = crate::stores::use_task_list();
     let projects = crate::stores::use_project_list();
+    let sessions = crate::stores::use_session_list();
 
-    let candidates: Vec<SwitchCandidate> = {
+    let searching = !query().trim().is_empty();
+
+    // Recent timers today (distinct by description + task), newest first
+    // — hidden while searching so the query only filters tasks.
+    let recents: Vec<TimerPick> = if searching {
+        Vec::new()
+    } else {
+        let owner = owner_id(org_id);
+        let today = Utc::now().date_naive();
+        let mut seen = std::collections::HashSet::new();
+        sessions
+            .value()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, r)| r)
+            .filter(|r| r.slug == slug && r.session.user_id == owner)
+            .filter(|r| r.session.start_time.date_naive() == today)
+            .filter_map(|r| {
+                let s = r.session;
+                let title = session_title(&s);
+                if !seen.insert((s.description.clone(), s.task_note_path.clone())) {
+                    return None;
+                }
+                Some(TimerPick {
+                    key: format!("recent-{}", s.id),
+                    title,
+                    task_note_path: s.task_note_path,
+                    project_id: s.project_id,
+                    project_path: s.project_path,
+                    project_title: None,
+                })
+            })
+            .take(5)
+            .collect()
+    };
+
+    // Open tasks: fuzzy-ranked while searching, else the first few.
+    let task_picks: Vec<TimerPick> = {
         let q = query();
         let q = q.trim();
         let project_rows = projects.value().cloned().unwrap_or_default();
@@ -739,16 +811,43 @@ fn TimerSwitchMenu(
                     .task
                     .project_id
                     .and_then(|pid| project_rows.iter().map(|(_, p)| p).find(|p| p.project.id == pid));
-                SwitchCandidate {
-                    id: row.task.id,
+                TimerPick {
+                    key: format!("task-{}", row.task.id),
                     title: row.task.title.clone(),
-                    path: row.task.path.clone(),
+                    task_note_path: row.task.path.clone(),
                     project_id: row.task.project_id,
                     project_path: project.map(|p| p.project.path.clone()).unwrap_or_default(),
                     project_title: project.map(|p| p.project.title.clone()),
                 }
             })
             .collect()
+    };
+
+    let empty = recents.is_empty() && task_picks.is_empty();
+    let row = move |p: TimerPick| {
+        rsx! {
+            button {
+                key: "{p.key}",
+                r#type: "button",
+                class: "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-accent",
+                onclick: move |_| {
+                    on_pick.call(timer_proto::StartTimerRequest {
+                        user_id: owner_id(org_id),
+                        org_id,
+                        project_id: p.project_id,
+                        project_path: p.project_path.clone(),
+                        task_note_path: p.task_note_path.clone(),
+                        description: p.title.clone(),
+                    });
+                },
+                span { class: "min-w-0 truncate text-foreground", "{p.title}" }
+                if let Some(project) = p.project_title.as_ref() {
+                    span { class: "shrink-0 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground",
+                        "#{project}"
+                    }
+                }
+            }
+        }
     };
 
     rsx! {
@@ -761,37 +860,26 @@ fn TimerSwitchMenu(
             div { class: "border-b border-border/60 p-2",
                 input {
                     class: "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-sky-500/40",
-                    placeholder: "Switch to task…",
+                    placeholder: "{placeholder}",
                     autofocus: true,
                     value: "{query}",
                     oninput: move |e| query.set(e.value()),
                 }
             }
-            if candidates.is_empty() {
+            if empty {
                 div { class: "px-3 py-3 text-xs text-muted-foreground", "No open tasks match." }
             } else {
-                div { class: "flex max-h-64 flex-col overflow-y-auto",
-                    for c in candidates {
-                        button {
-                            key: "{c.id}",
-                            r#type: "button",
-                            class: "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-accent",
-                            onclick: move |_| {
-                                on_pick.call(timer_proto::StartTimerRequest {
-                                    user_id: owner_id(org_id),
-                                    org_id,
-                                    project_id: c.project_id,
-                                    project_path: c.project_path.clone(),
-                                    task_note_path: c.path.clone(),
-                                    description: c.title.clone(),
-                                });
-                            },
-                            span { class: "min-w-0 truncate text-foreground", "{c.title}" }
-                            if let Some(project) = c.project_title.as_ref() {
-                                span { class: "shrink-0 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground",
-                                    "#{project}"
-                                }
-                            }
+                div { class: "flex max-h-72 flex-col overflow-y-auto",
+                    if !recents.is_empty() {
+                        div { class: "px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground", "Recent" }
+                        for p in recents.clone() {
+                            {row(p)}
+                        }
+                    }
+                    if !task_picks.is_empty() {
+                        div { class: "px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground", "Tasks" }
+                        for p in task_picks.clone() {
+                            {row(p)}
                         }
                     }
                 }
@@ -800,12 +888,12 @@ fn TimerSwitchMenu(
     }
 }
 
-/// One fuzzy-matched switch-menu row.
+/// One menu row — a recent timer or an open task, ready to (re)start.
 #[derive(Clone, PartialEq)]
-struct SwitchCandidate {
-    id: Uuid,
+struct TimerPick {
+    key: String,
     title: String,
-    path: String,
+    task_note_path: String,
     project_id: Option<Uuid>,
     project_path: String,
     project_title: Option<String>,
