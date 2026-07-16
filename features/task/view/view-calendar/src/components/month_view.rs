@@ -57,13 +57,15 @@ pub fn MonthView(props: MonthViewProps) -> Element {
     rsx! {
         div { class: "flex flex-col h-full w-full",
             // Weekday header strip
-            div { class: "grid grid-cols-7 border-b border-border/40 text-xs text-muted-foreground",
+            div { class: "grid grid-cols-7 border-b border-border/60 text-xs text-muted-foreground",
                 for label in weekday_labels {
                     div { key: "{label}", class: "px-2 py-1 text-center font-medium", "{label}" }
                 }
             }
             // 6 week rows
-            div { class: "flex-1 min-h-0 grid grid-rows-6",
+            // Rows have a min height (readable cells), so short
+            // viewports scroll instead of clipping the last weeks.
+            div { class: "flex-1 min-h-0 grid grid-rows-6 overflow-y-auto",
                 for row in 0..6u8 {
                     {
                         let row_days = grid[row as usize];

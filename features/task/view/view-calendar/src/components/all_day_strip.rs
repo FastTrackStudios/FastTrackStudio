@@ -44,7 +44,7 @@ pub fn AllDayStrip(props: AllDayStripProps) -> Element {
 
     rsx! {
         div {
-            class: "grid border-b border-border/40",
+            class: "grid border-b border-border/60",
             style: "grid-template-columns: 56px repeat({days_len}, 1fr);",
             // Left rail label
             div {
