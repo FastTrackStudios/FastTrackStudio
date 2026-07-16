@@ -256,7 +256,13 @@ fn NodeCard(
                         if row.aliased { " aliased" } else { "" },
                         if row.monitor { " mon" } else { "" },
                     );
-                    let tooltip = if row.monitor {
+                    let tooltip = if is_group {
+                        format!(
+                            "{} ports — click to {}",
+                            row.ports.len().max(1),
+                            if row.expanded { "collapse" } else { "expand" }
+                        )
+                    } else if row.monitor {
                         format!("{} — monitor tap (a copy of what this sink plays)", row.raw_name)
                     } else if row.aliased {
                         row.raw_name.clone()
