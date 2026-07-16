@@ -27,6 +27,13 @@
 # fts-extensions gets a CI-owned resources dir under fts-ci/. Nothing
 # touches ~/.config/signal or port 4040 (different user, Dummy audio,
 # unix sockets only).
+#
+# PATH FILTERING: a `changes` job (same pattern as deploy.yml) diffs the
+# push/PR range and decides which heavy work is needed. The heavy jobs
+# themselves ALWAYS run and ALWAYS report success — individual steps are
+# gated on the changes outputs — so branch protection that requires
+# these checks never leaves a PR pending (trigger-level `paths:` would).
+# If the diff cannot be computed the filter FAILS OPEN (everything runs).
 
 name: ci-heavy
 
@@ -50,12 +57,165 @@ env:
   FTS_LOCAL_REPO: /run/media/Development/FastTrackStudio
 
 jobs:
+  # Diff the triggering range and decide which heavy steps are needed.
+  # Path sets are derived from the actual dependency graph of what each
+  # step builds (see the comments inline); when in doubt a path belongs
+  # in MORE sets, not fewer — filters here only ever skip work whose
+  # inputs provably did not change.
+  changes:
+    runs-on: nix-host
+    outputs:
+      # cargo check --workspace (+ the targeted patchbay check when only
+      # patchbay changed).
+      workspace: ${{ steps.filter.outputs.workspace }}
+      patchbay: ${{ steps.filter.outputs.patchbay }}
+      # The audio/signal test suites + wasm check.
+      signal: ${{ steps.filter.outputs.signal }}
+      # The REAPER integration suites.
+      reaper: ${{ steps.filter.outputs.reaper }}
+    steps:
+      # Full-history checkout: the diff needs BOTH endpoints' ancestry.
+      # Local-first (offline, instant), but the local mirror can lag the
+      # forge — merge commits created forge-side (API merges, web-UI
+      # squash/rebase merges) and PR head commits may not exist in it.
+      # After a local-first clone `origin` IS the mirror, so any missing
+      # commit must be fetched from the FORGE URL explicitly.
+      - name: Checkout (local-first, full history for the diff)
+        run: |
+          set -eu
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$FTS_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
+          git clone --quiet "$FTS_LOCAL_REPO" . || git clone "$url" .
+          if [ -n "$sha" ] && ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "$sha not in the local mirror — fetching from the forge"
+            attempt=1
+            until git fetch --no-tags "$url" "$sha"; do
+              [ "$attempt" -ge 8 ] && { echo "fetch $sha from forge failed"; exit 1; }
+              echo "fetch attempt $attempt failed — retrying in 15s"
+              attempt=$((attempt + 1)); sleep 15
+            done
+          fi
+          git checkout --quiet --detach "$sha"
+          echo "checked out $(git rev-parse --short HEAD)"
+
+      - name: Detect changed areas
+        id: filter
+        run: |
+          set -u
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+
+          # Fail open: if we cannot compute an honest diff, run everything.
+          run_all() {
+            echo "path filter: $1 — running EVERYTHING (fail open)"
+            for o in workspace patchbay signal reaper; do
+              echo "$o=true" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          }
+
+          [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] && run_all "manual dispatch"
+
+          # Diff base:
+          #   pull_request — merge-base of the PR base branch and HEAD
+          #     (three-dot semantics: only the PR's own changes count,
+          #     not unrelated commits that landed on main since branch).
+          #   push — the previous tip (github.event.before).
+          if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
+            base_tip="${{ github.event.pull_request.base.sha }}"
+            if ! git cat-file -e "${base_tip}^{commit}" 2>/dev/null; then
+              git fetch --no-tags "$url" "$base_tip" 2>/dev/null || true
+            fi
+            base="$(git merge-base "$base_tip" HEAD 2>/dev/null)" \
+              || run_all "no merge-base for ${base_tip}"
+          else
+            base="${{ github.event.before }}"
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              base="$(git rev-parse HEAD~1 2>/dev/null)" || run_all "no parent commit"
+            elif ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              git fetch --no-tags "$url" "$base" 2>/dev/null || true
+              git cat-file -e "${base}^{commit}" 2>/dev/null \
+                || base="$(git rev-parse HEAD~1 2>/dev/null)" \
+                || run_all "push base unavailable"
+            fi
+          fi
+
+          git diff --name-only "$base" HEAD > /tmp/changed || run_all "diff failed"
+          echo "diff ${base}..HEAD: $(wc -l < /tmp/changed) files"
+
+          # SAFETY VALVE — anything that changes the build environment or
+          # the dependency graph for the WHOLE workspace runs everything:
+          # root manifests/lockfile, the flake (toolchain + dev shell),
+          # toolchain pins, and CI itself.
+          valve='^Cargo\.(toml|lock)$|^flake\.(nix|lock)$|^rust-toolchain|^\.forgejo/'
+          grep -qE "$valve" /tmp/changed && run_all "safety-valve path changed"
+
+          # Paths that no heavy step consumes: docs trees, markdown
+          # anywhere, repo housekeeping. A change is "docs-only" when
+          # EVERY file matches this set. Patchbay is also excluded from
+          # the full-workspace gate: it is a leaf domain (nothing else in
+          # the tree depends on crates/patchbay or apps/patchbay), so a
+          # patchbay-only change gets a cheap targeted check instead of
+          # the multi-hour full pipeline.
+          quiet='(^|/)[^/]*\.md$|^docs/|^\.gitignore$|^LICENSE|^crates/patchbay/|^apps/patchbay/'
+
+          workspace=false
+          grep -vE "$quiet" /tmp/changed | grep -q . && workspace=true
+
+          patchbay=false
+          grep -qE '^crates/patchbay/|^apps/patchbay/' /tmp/changed && patchbay=true
+
+          # Audio/signal test suites (signal-guitar, daw-standalone,
+          # neural-amp-modeler, architect, pitch-dsp, wasm check): the
+          # Task product slices are the one subtree with NO reverse edge
+          # into the audio stack (task depends on architect/editor, never
+          # the other way), so a task-only change skips these. libs/architect
+          # and libs/fts-ui are deliberately NOT in the task-only set —
+          # both are consumed on the audio side too.
+          task_only='^crates/task/|^features/task/|^apps/task/|^libs/editor/'
+          signal=false
+          grep -vE "$quiet|$task_only" /tmp/changed | grep -q . && signal=true
+
+          # REAPER suites — reverse-dependency set of daw-reaper-xtask +
+          # fts-extensions-xtask (path deps from the root manifest):
+          #   features/reaper/**        daw-reaper, extension runtime, reaper-config/-input, …
+          #   apps/extensions/**        fts-extensions + its actions/xtask
+          #   crates/daw/**             daw, daw-proto, daw-control, daw-module
+          #   crates/session/**         session (fts-extensions feature)
+          #   crates/keyflow/**         keyflow-orchestra (fts-extensions feature)
+          #   features/sync/**          daw-synchronization, daw-audio-sync
+          #   features/dawfile/**       dawfile-reaper & friends
+          #   features/dynamic-template/**, features/launcher/**  fts-extensions features
+          #   libs/architect/**, libs/fts-ui/**  shared foundations of both suites
+          reaper_paths='^features/reaper/|^apps/extensions/|^crates/daw/|^crates/session/|^crates/keyflow/|^features/sync/|^features/dawfile/|^features/dynamic-template/|^features/launcher/|^libs/architect/|^libs/fts-ui/'
+          reaper=false
+          grep -qE "$reaper_paths" /tmp/changed && reaper=true
+
+          {
+            echo "workspace=$workspace"
+            echo "patchbay=$patchbay"
+            echo "signal=$signal"
+            echo "reaper=$reaper"
+          } >> "$GITHUB_OUTPUT"
+          echo "filter: workspace=$workspace patchbay=$patchbay signal=$signal reaper=$reaper"
+
   # Workspace check + fast test suites + wasm check, sequential in one
   # job so they share one warm CARGO_TARGET_DIR without lock contention.
+  # (That shared-cache design is also why the task/signal split is done
+  # with step-level gates INSIDE this job rather than two parallel jobs —
+  # parallel jobs on one CARGO_TARGET_DIR clobber each other's
+  # fingerprints.) The job itself is NOT `if:`-gated: it always runs and
+  # reports success so required checks never sit pending; steps whose
+  # inputs did not change are skipped via the changes outputs.
   build-and-test:
     runs-on: nix-host
+    needs: changes
     steps:
       - name: Checkout (local-first)
+        if: needs.changes.outputs.workspace == 'true' || needs.changes.outputs.patchbay == 'true'
         run: |
           url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           branch="${GITHUB_REF_NAME:-main}"
@@ -102,6 +262,7 @@ jobs:
       #   sudo rsync -a ~cody/.cargo/{git,registry} $FTS_CI/cargo-home/
       #   sudo chown -R gitea-runner:gitea-runner $FTS_CI/cargo-home
       - name: Prepare persistent caches
+        if: needs.changes.outputs.workspace == 'true' || needs.changes.outputs.patchbay == 'true'
         run: |
           mkdir -p "$CARGO_TARGET_DIR" "$CARGO_HOME"
           if [ ! -d "$CARGO_HOME/git/db" ]; then
@@ -114,26 +275,41 @@ jobs:
           nix develop --profile "$FTS_CI/devshell" -c true
 
       - name: cargo check --workspace
+        if: needs.changes.outputs.workspace == 'true'
         run: nix develop -c cargo check --workspace --exclude vox-discover
 
+      # Patchbay is excluded from the full-workspace gate (leaf domain);
+      # a patchbay-only change still gets its own compile check here.
+      - name: cargo check patchbay (patchbay-only change)
+        if: needs.changes.outputs.patchbay == 'true' && needs.changes.outputs.workspace != 'true'
+        run: |
+          nix develop -c cargo check \
+            -p patchbay -p patchbay-proto -p patchbay-ui -p fts-patchbay
+
       - name: test signal-guitar
+        if: needs.changes.outputs.signal == 'true'
         run: nix develop -c cargo test -p signal-guitar
 
       - name: test daw-standalone (audio)
+        if: needs.changes.outputs.signal == 'true'
         run: nix develop -c cargo test -p daw-standalone --features audio
 
       - name: test neural-amp-modeler (incl. NAM parity)
+        if: needs.changes.outputs.signal == 'true'
         run: nix develop -c cargo test -p neural-amp-modeler
 
       - name: test architect (iroh)
+        if: needs.changes.outputs.signal == 'true'
         run: nix develop -c cargo test -p architect --features iroh
 
       - name: test pitch-dsp
+        if: needs.changes.outputs.signal == 'true'
         run: nix develop -c cargo test -p pitch-dsp
 
       # Browser-remote build of THE app. wasm32 target + ring's clang
       # env come from the flake dev shell.
       - name: wasm check (fasttrackstudio, signal feature)
+        if: needs.changes.outputs.signal == 'true'
         run: |
           nix develop -c cargo check -p fasttrackstudio \
             --target wasm32-unknown-unknown \
@@ -142,11 +318,14 @@ jobs:
   # REAPER integration suites — vendored extension stack + daw domain
   # against a real headless REAPER (Dummy audio, isolated rigs).
   # Serialized after build-and-test so it reuses the warm cache.
+  # Like build-and-test, the job always runs (required-check safe);
+  # every step is gated on the reaper changes output.
   reaper-integration:
     runs-on: nix-host
-    needs: build-and-test
+    needs: [changes, build-and-test]
     steps:
       - name: Checkout (local-first)
+        if: needs.changes.outputs.reaper == 'true'
         run: |
           url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           branch="${GITHUB_REF_NAME:-main}"
@@ -179,6 +358,7 @@ jobs:
       # nixpkgs reaper from the repo flake's pin (7.67; version drift
       # possible — the daw-reaper skip list is tuned against 7.75).
       - name: Resolve REAPER
+        if: needs.changes.outputs.reaper == 'true'
         run: |
           mkdir -p "$FTS_CI"
           PIN=/nix/store/ky0r08mnqbhrs1r6prvkfv4lv41yyhz8-reaper-7.75
@@ -195,6 +375,7 @@ jobs:
       # <checkout>/target/fts-reaper-test — fresh every run, never the
       # dev rig, never ~/.config/signal.
       - name: daw suite (daw-reaper)
+        if: needs.changes.outputs.reaper == 'true'
         run: |
           FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
             nix develop -c cargo run -p daw-reaper-xtask
@@ -203,6 +384,7 @@ jobs:
       # (persistent — keeps the [nag] prewarm token between runs),
       # seeded with the same Dummy-audio ini the daw harness uses.
       - name: extension suite (fts-extensions)
+        if: needs.changes.outputs.reaper == 'true'
         run: |
           RIG="$FTS_CI/reaper-rig"
           mkdir -p "$RIG/UserPlugins"
