@@ -18,6 +18,7 @@ pub mod gantt_adapt;
 pub mod nav;
 pub mod orgs;
 pub mod pages;
+pub mod palette;
 pub mod prefs;
 pub mod presence;
 pub mod routes;

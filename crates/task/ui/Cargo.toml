@@ -108,6 +108,11 @@ git-proto = { workspace = true, features = ["vox"] }
 auth-proto = { workspace = true, features = ["vox"] }
 prefs-proto = { workspace = true, features = ["vox"] }
 
+# Fuzzy ranking for the Ctrl+P command palette — same matcher the
+# fts-ui combobox filter uses, kept here so the palette can rank (not
+# just filter) results.
+nucleo-matcher.workspace = true
+
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 fake.workspace = true
@@ -134,6 +139,10 @@ web-sys = { workspace = true, features = [
     "Event",
     "CloseEvent",
     "ErrorEvent",
+    # Document-level Ctrl+P hotkey listener (src/palette.rs).
+    "Document",
+    "EventTarget",
+    "KeyboardEvent",
     "Storage",
     "console",
     "Response",

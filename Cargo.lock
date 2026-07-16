@@ -28095,6 +28095,7 @@ dependencies = [
  "locations-proto",
  "mealplan-proto",
  "milestone-proto",
+ "nucleo-matcher",
  "pantry-proto",
  "prefs-proto",
  "project",

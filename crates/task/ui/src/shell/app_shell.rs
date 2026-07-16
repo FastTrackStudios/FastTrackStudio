@@ -13,6 +13,8 @@ pub fn AppShell() -> Element {
 
     // Quick-capture + data-refresh signals for the persistent chrome.
     provide_chrome_contexts();
+    // Ctrl+P command-palette visibility (same pattern as FleetingOpen).
+    crate::palette::provide_palette_context();
     // Shell panel state: the vault explorer + the right (backlinks)
     // panel, toggled from the top bar (Obsidian-style).
     let explorer = use_context_provider(|| Signal::new(crate::chrome::ExplorerOpen(true)));
@@ -60,6 +62,9 @@ pub fn AppShell() -> Element {
         }
         // Single global capture modal, toggled from any fleeting button.
         FleetingModal {}
+        // Ctrl+P command palette — pages + vault notes, fuzzy-ranked.
+        // Mounts its own document-level hotkey listener.
+        crate::palette::CommandPalette {}
         // App-wide notice queue (architect::Notifications, provided by
         // `use_app_reactive` at the app root). Mutations + the vault
         // DocumentSession report failures here so they outlive the
