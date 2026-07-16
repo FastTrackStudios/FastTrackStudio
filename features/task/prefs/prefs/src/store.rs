@@ -43,6 +43,7 @@ impl Store {
             active.location = Set(prefs.location);
             active.theme_preset = Set(prefs.theme_preset);
             active.theme_mode = Set(prefs.theme_mode);
+            active.shortcuts_priority = Set(prefs.shortcuts_priority);
             active.update(&self.conn).await?
         } else {
             UserPrefsActive {
@@ -53,6 +54,7 @@ impl Store {
                 location: Set(prefs.location),
                 theme_preset: Set(prefs.theme_preset),
                 theme_mode: Set(prefs.theme_mode),
+                shortcuts_priority: Set(prefs.shortcuts_priority),
             }
             .insert(&self.conn)
             .await?
@@ -83,5 +85,6 @@ fn model_to_prefs(m: UserPrefsModel) -> UserPrefs {
         location: m.location,
         theme_preset: m.theme_preset,
         theme_mode: m.theme_mode,
+        shortcuts_priority: m.shortcuts_priority,
     }
 }

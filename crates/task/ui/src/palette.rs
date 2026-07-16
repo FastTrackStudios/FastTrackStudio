@@ -2,8 +2,12 @@
 //!
 //! One global overlay ([`CommandPalette`]), toggled by a
 //! [`PaletteOpen`] context signal the app shell provides (same shape
-//! as `chrome::FleetingOpen`). Ctrl+P / Cmd+P opens it from anywhere
-//! via a document-level keydown listener; Escape closes it.
+//! as `chrome::FleetingOpen`). Ctrl+P / Ctrl+K toggle it from anywhere
+//! via the app-wide shortcut engine ([`crate::shortcuts`]), which this
+//! component mounts (it's the app-long shell child with the palette /
+//! chrome contexts and the router in scope). Escape closes it from the
+//! palette input's own handler — the input autofocuses on open, so
+//! focus is always there.
 //!
 //! Results mix two sections, both nucleo-ranked (fzf-style, matching
 //! `fts_ui`'s combobox filter):
@@ -12,10 +16,6 @@
 //! - **Notes** — every vault note from the home org's folder index
 //!   (title → `Route::VaultRoute { path }`), fetched when the palette
 //!   opens.
-//!
-//! FUTURE: the hotkey moves to the `input` crate's keymap
-//! (`use_input_processor` + `KeymapConfig`) with the keyboard
-//! customizer subtask — this hand-rolled listener is the stopgap.
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{FileText, Search};
@@ -99,67 +99,6 @@ fn rank(query: &str, entries: Vec<PaletteEntry>) -> Vec<PaletteEntry> {
     pages.into_iter().chain(notes).collect()
 }
 
-// ── hotkey ──────────────────────────────────────────────────────────
-
-enum HotkeyMsg {
-    Toggle,
-    Close,
-}
-
-/// Document-level Ctrl+P / Cmd+P (toggle) + Escape (close) listener.
-/// The raw DOM closure runs outside the Dioxus runtime, so it bridges
-/// back through a channel a spawned task drains. Web-only; native
-/// desktop wiring arrives with the input-crate migration.
-fn use_palette_hotkey(open: Signal<bool>) {
-    #[cfg(target_arch = "wasm32")]
-    use_hook(move || {
-        use futures_util::StreamExt;
-        use wasm_bindgen::prelude::Closure;
-        use wasm_bindgen::JsCast;
-
-        let mut open = open;
-        let (tx, mut rx) = futures_channel::mpsc::unbounded::<HotkeyMsg>();
-        spawn(async move {
-            while let Some(msg) = rx.next().await {
-                match msg {
-                    HotkeyMsg::Toggle => {
-                        let cur = *open.peek();
-                        open.set(!cur);
-                    }
-                    HotkeyMsg::Close => {
-                        if *open.peek() {
-                            open.set(false);
-                        }
-                    }
-                }
-            }
-        });
-
-        let cb = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(
-            move |e: web_sys::KeyboardEvent| {
-                if (e.ctrl_key() || e.meta_key())
-                    && !e.alt_key()
-                    && !e.shift_key()
-                    && e.key().eq_ignore_ascii_case("p")
-                {
-                    // Swallow the browser's print dialog.
-                    e.prevent_default();
-                    let _ = tx.unbounded_send(HotkeyMsg::Toggle);
-                } else if e.key() == "Escape" {
-                    let _ = tx.unbounded_send(HotkeyMsg::Close);
-                }
-            },
-        );
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            let _ = doc.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
-        }
-        // The shell never unmounts — the listener lives app-long.
-        cb.forget();
-    });
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = open;
-}
-
 // ── overlay ─────────────────────────────────────────────────────────
 
 /// The global command palette. Render once (in the app shell).
@@ -168,7 +107,11 @@ fn use_palette_hotkey(open: Signal<bool>) {
 #[component]
 pub fn CommandPalette() -> Element {
     let mut open = use_palette_open();
-    use_palette_hotkey(open);
+    // The app-wide shortcut engine (Ctrl+P/Ctrl+K → this palette,
+    // capture, panel toggles, `g …` navigation) mounts here: the
+    // palette is the app-long shell child that owns this subtask's
+    // wiring and has every dispatch target in context.
+    crate::shortcuts::use_app_shortcuts();
 
     let nav = use_navigator();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();

@@ -37,6 +37,19 @@ pub struct UserPrefs {
     /// Light/dark choice: `"light"` / `"dark"`. Empty = never picked.
     #[serde(default)]
     pub theme_mode: String,
+
+    /// Keyboard: app shortcuts win over browser defaults they shadow
+    /// (Ctrl+P print, Ctrl+K omnibox, …). Default ON; turning it off
+    /// keeps only the non-conflicting shortcuts active. `serde` default
+    /// is `true` so pre-keyboard boot caches keep the on-by-default
+    /// behavior.
+    #[serde(default = "default_shortcuts_priority")]
+    pub shortcuts_priority: bool,
+}
+
+/// Serde default for [`UserPrefs::shortcuts_priority`] — on.
+fn default_shortcuts_priority() -> bool {
+    true
 }
 
 impl UserPrefs {
@@ -54,6 +67,7 @@ impl UserPrefs {
             location: String::new(),
             theme_preset: String::new(),
             theme_mode: String::new(),
+            shortcuts_priority: true,
         }
     }
 }

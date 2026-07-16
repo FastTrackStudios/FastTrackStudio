@@ -28089,6 +28089,7 @@ dependencies = [
  "gloo-timers",
  "goal",
  "inbox-proto",
+ "input",
  "inventory-proto",
  "js-sys",
  "links-proto",

@@ -23,6 +23,7 @@ async fn get_without_row_returns_defaults() {
     assert!(prefs.tasks_relevant, "tasks.relevant defaults on");
     assert_eq!(prefs.default_page, "");
     assert_eq!(prefs.location, "");
+    assert!(prefs.shortcuts_priority, "app shortcuts win by default");
 }
 
 #[tokio::test]
@@ -37,6 +38,7 @@ async fn set_then_get_round_trips() {
         location: "studio".into(),
         theme_preset: "rose-pine".into(),
         theme_mode: "dark".into(),
+        shortcuts_priority: false,
     };
     let stored = store.set(wanted.clone()).await.unwrap();
     assert_eq!(stored, wanted);
@@ -56,6 +58,7 @@ async fn second_set_upserts_in_place() {
         location: "home".into(),
         theme_preset: "nord".into(),
         theme_mode: "light".into(),
+        shortcuts_priority: true,
     };
     store.set(updated.clone()).await.unwrap();
     assert_eq!(store.get(user).await.unwrap(), updated);
@@ -73,6 +76,7 @@ async fn prefs_are_per_user() {
         location: "studio".into(),
         theme_preset: String::new(),
         theme_mode: String::new(),
+        shortcuts_priority: false,
     };
     store.set(a_prefs.clone()).await.unwrap();
     assert_eq!(store.get(a).await.unwrap(), a_prefs);

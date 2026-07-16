@@ -159,6 +159,12 @@ pub fn App() -> Element {
     // lives in the shell (`PresencePublisher`) — it needs the router.
     crate::presence::provide_org_presence();
 
+    // NOTE: the app-wide keyboard shortcut engine
+    // (`crate::shortcuts::use_app_shortcuts`) cannot mount here — it
+    // dispatches into the palette/chrome contexts and the router's
+    // `Navigator`, all of which only exist under the `AppShell` layout
+    // inside the `Router` below. It mounts from the shell's app-long
+    // `CommandPalette` instead (see `crate::shortcuts`).
     rsx! {
         style { dangerous_inner_html: MOBILE_BASELINE_CSS }
         ThemeProvider { state: theme_state,
