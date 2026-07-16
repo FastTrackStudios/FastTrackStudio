@@ -28,12 +28,18 @@
 # touches ~/.config/signal or port 4040 (different user, Dummy audio,
 # unix sockets only).
 #
-# PATH FILTERING: a `changes` job (same pattern as deploy.yml) diffs the
-# push/PR range and decides which heavy work is needed. The heavy jobs
-# themselves ALWAYS run and ALWAYS report success — individual steps are
-# gated on the changes outputs — so branch protection that requires
-# these checks never leaves a PR pending (trigger-level `paths:` would).
-# If the diff cannot be computed the filter FAILS OPEN (everything runs).
+# CHANGE SELECTION: a `changes` job asks `cargo rail plan` (the patched
+# flake build — see nix/modules/cargo-rail.nix) which workspace crates
+# the push/PR range actually affects, walking cargo's resolved reverse-
+# dependency graph instead of hand-maintained path regexes. Gates are
+# crate-membership checks against the plan's execution set. The heavy
+# jobs themselves ALWAYS run and ALWAYS report success — individual
+# steps are gated on the changes outputs — so branch protection that
+# requires these checks never leaves a PR pending (trigger-level
+# `paths:` would). If the base cannot be resolved, rail fails, or the
+# plan flags the infra surface (.forgejo/**, flake.*, nix/**, root
+# manifests — rail.toml [change-detection].infrastructure), the filter
+# FAILS OPEN (everything runs).
 
 name: ci-heavy
 
@@ -143,56 +149,55 @@ jobs:
             fi
           fi
 
-          git diff --name-only "$base" HEAD > /tmp/changed || run_all "diff failed"
-          echo "diff ${base}..HEAD: $(wc -l < /tmp/changed) files"
+          # Graph-aware selection: `cargo rail plan` maps the diff to
+          # owning crates and walks cargo's resolved reverse-dependency
+          # graph (package-ID-keyed — the resolve-graph patch in
+          # nix/modules/cargo-rail.nix). The execution set is every
+          # workspace crate whose build/test result the range can
+          # change; gates below are membership checks against it.
+          plan="$(nix develop .#ci -c cargo rail plan --quiet --from "$base" --to HEAD -f json)" \
+            || run_all "cargo rail plan failed"
 
-          # SAFETY VALVE — anything that changes the build environment or
-          # the dependency graph for the WHOLE workspace runs everything:
-          # root manifests/lockfile, the flake (toolchain + dev shell),
-          # toolchain pins, and CI itself.
-          valve='^Cargo\.(toml|lock)$|^flake\.(nix|lock)$|^rust-toolchain|^\.forgejo/'
-          grep -qE "$valve" /tmp/changed && run_all "safety-valve path changed"
+          eval "$(printf '%s' "$plan" | nix develop .#ci -c python3 -c '
+          import json, sys
 
-          # Paths that no heavy step consumes: docs trees, markdown
-          # anywhere, repo housekeeping. A change is "docs-only" when
-          # EVERY file matches this set. Patchbay is also excluded from
-          # the full-workspace gate: it is a leaf domain (nothing else in
-          # the tree depends on crates/patchbay or apps/patchbay), so a
-          # patchbay-only change gets a cheap targeted check instead of
-          # the multi-hour full pipeline.
-          quiet='(^|/)[^/]*\.md$|^docs/|^\.gitignore$|^LICENSE|^crates/patchbay/|^apps/patchbay/'
+          plan = json.load(sys.stdin)
 
-          workspace=false
-          grep -vE "$quiet" /tmp/changed | grep -q . && workspace=true
+          # Infra surface (rail.toml [change-detection].infrastructure:
+          # .forgejo/**, flake.*, nix/**, root manifests, justfile, …)
+          # or a failed/partial plan -> run everything.
+          surfaces = plan.get("surfaces", {})
+          infra = bool(surfaces.get("infra", {}).get("enabled"))
+          if plan.get("result") != "success":
+              infra = True
 
-          patchbay=false
-          grep -qE '^crates/patchbay/|^apps/patchbay/' /tmp/changed && patchbay=true
+          crates = set(plan.get("scope", {}).get("crates", []))
 
-          # Audio/signal test suites (signal-guitar, daw-standalone,
-          # neural-amp-modeler, architect, pitch-dsp, wasm check): the
-          # Task product slices are the one subtree with NO reverse edge
-          # into the audio stack (task depends on architect/editor, never
-          # the other way), so a task-only change skips these. libs/architect
-          # and libs/fts-ui are deliberately NOT in the task-only set —
-          # both are consumed on the audio side too.
-          task_only='^crates/task/|^features/task/|^apps/task/|^libs/editor/'
-          signal=false
-          grep -vE "$quiet|$task_only" /tmp/changed | grep -q . && signal=true
+          # Patchbay is a leaf domain: a patchbay-only change gets its
+          # cheap targeted check instead of the full pipeline.
+          PATCHBAY = {"patchbay", "patchbay-proto", "patchbay-ui", "fts-patchbay"}
+          # Crates the audio/signal steps build or test; rail already
+          # folded reverse deps into `crates`, so membership is enough.
+          SIGNAL = {"signal-guitar", "daw-standalone", "neural-amp-modeler",
+                    "architect", "pitch-dsp", "fasttrackstudio"}
+          # The two REAPER harness entry points.
+          REAPER = {"daw-reaper-xtask", "fts-extensions-xtask"}
 
-          # REAPER suites — reverse-dependency set of daw-reaper-xtask +
-          # fts-extensions-xtask (path deps from the root manifest):
-          #   features/reaper/**        daw-reaper, extension runtime, reaper-config/-input, …
-          #   apps/extensions/**        fts-extensions + its actions/xtask
-          #   crates/daw/**             daw, daw-proto, daw-control, daw-module
-          #   crates/session/**         session (fts-extensions feature)
-          #   crates/keyflow/**         keyflow-orchestra (fts-extensions feature)
-          #   features/sync/**          daw-synchronization, daw-audio-sync
-          #   features/dawfile/**       dawfile-reaper & friends
-          #   features/dynamic-template/**, features/launcher/**  fts-extensions features
-          #   libs/architect/**, libs/fts-ui/**  shared foundations of both suites
-          reaper_paths='^features/reaper/|^apps/extensions/|^crates/daw/|^crates/session/|^crates/keyflow/|^features/sync/|^features/dawfile/|^features/dynamic-template/|^features/launcher/|^libs/architect/|^libs/fts-ui/'
-          reaper=false
-          grep -qE "$reaper_paths" /tmp/changed && reaper=true
+          gates = {
+              "workspace": bool(crates - PATCHBAY),
+              "patchbay":  bool(crates & PATCHBAY),
+              "signal":    bool(crates & SIGNAL),
+              "reaper":    bool(crates & REAPER),
+          }
+          if infra:
+              gates = {k: True for k in gates}
+              print("run_all_reason=\"rail infra surface\"")
+          for k, v in gates.items():
+              print(f"{k}={str(v).lower()}")
+          print(f"n_crates={len(crates)}")
+          ')" || run_all "plan parse failed"
+
+          [ -n "${run_all_reason:-}" ] && run_all "$run_all_reason"
 
           {
             echo "workspace=$workspace"
@@ -200,7 +205,7 @@ jobs:
             echo "signal=$signal"
             echo "reaper=$reaper"
           } >> "$GITHUB_OUTPUT"
-          echo "filter: workspace=$workspace patchbay=$patchbay signal=$signal reaper=$reaper"
+          echo "rail plan: $n_crates affected crate(s) — workspace=$workspace patchbay=$patchbay signal=$signal reaper=$reaper"
 
   # Workspace check + fast test suites + wasm check, sequential in one
   # job so they share one warm CARGO_TARGET_DIR without lock contention.
