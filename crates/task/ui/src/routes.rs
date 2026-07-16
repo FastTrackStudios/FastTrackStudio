@@ -93,6 +93,9 @@ pub enum Route {
         #[route("/invoices")]
         InvoicesRoute {},
 
+        #[route("/members")]
+        MembersRoute {},
+
         #[route("/ledger")]
         LedgerRoute {},
 
@@ -267,6 +270,11 @@ fn FinancesRoute() -> Element {
 #[component]
 fn InvoicesRoute() -> Element {
     rsx! { pages::invoices::InvoicesView {} }
+}
+
+#[component]
+fn MembersRoute() -> Element {
+    rsx! { pages::members::MembersView {} }
 }
 
 #[component]

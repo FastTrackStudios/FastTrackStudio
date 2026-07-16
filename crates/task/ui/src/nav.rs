@@ -7,8 +7,8 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     BookOpen, Bot, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
     FolderKanban, GitBranch, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package,
-    ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Utensils, Wallet, Waypoints,
-    Youtube,
+    ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Users, Utensils, Wallet,
+    Waypoints, Youtube,
 };
 
 use crate::routes::Route;
@@ -74,6 +74,9 @@ fn icon_finances() -> Element {
 }
 fn icon_invoices() -> Element {
     rsx! { ReceiptText { size: 16 } }
+}
+fn icon_members() -> Element {
+    rsx! { Users { size: 16 } }
 }
 fn icon_ledger() -> Element {
     rsx! { Scale { size: 16 } }
@@ -205,6 +208,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             route: Route::InvoicesRoute {},
         },
         NavTab {
+            label: "Members",
+            icon: icon_members,
+            route: Route::MembersRoute {},
+        },
+        NavTab {
             label: "Ledger",
             icon: icon_ledger,
             route: Route::LedgerRoute {},
@@ -322,6 +330,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::TimerRoute {} => "Timer",
         Route::FinancesRoute {} => "Finances",
         Route::InvoicesRoute {} => "Invoices",
+        Route::MembersRoute {} => "Members",
         Route::LedgerRoute {} => "Ledger",
         Route::WikiRoute {} => "Wiki",
         Route::ConnectionsRoute {} => "Connections",

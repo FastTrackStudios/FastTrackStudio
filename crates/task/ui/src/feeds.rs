@@ -1066,6 +1066,76 @@ pub async fn delete_session(slug: &str, id: uuid::Uuid) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete session: {e:?}"))
 }
 
+// ── member rates ────────────────────────────────────────────────────
+
+/// Upsert an org-level member rate; returns the stored row.
+pub async fn set_org_member_rate(
+    slug: &str,
+    org_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    hourly_cents: i64,
+    currency: String,
+) -> Result<timer_proto::OrgMemberRate, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .set_org_member_rate(org_id, user_id, hourly_cents, currency)
+        .await
+        .map_err(|e| format!("{slug}: set org rate: {e:?}"))
+}
+
+/// Upsert a per-project member rate (lets members bill one project at
+/// different rates); returns the stored row.
+pub async fn set_project_member_rate(
+    slug: &str,
+    project_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    hourly_cents: i64,
+) -> Result<timer_proto::ProjectMemberRate, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .set_project_member_rate(project_id, user_id, hourly_cents)
+        .await
+        .map_err(|e| format!("{slug}: set project rate: {e:?}"))
+}
+
+/// Every org-level member rate configured for `org_id`.
+pub async fn fetch_org_member_rates(
+    slug: &str,
+    org_id: uuid::Uuid,
+) -> Result<Vec<timer_proto::OrgMemberRate>, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .list_org_member_rates(org_id)
+        .await
+        .map_err(|e| format!("{slug}: list org rates: {e:?}"))
+}
+
+/// Every per-member rate set on `project_id`.
+pub async fn fetch_project_member_rates(
+    slug: &str,
+    project_id: uuid::Uuid,
+) -> Result<Vec<timer_proto::ProjectMemberRate>, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .list_project_member_rates(project_id)
+        .await
+        .map_err(|e| format!("{slug}: list project rates: {e:?}"))
+}
+
+/// The org's members (name / email / role), for the current session's
+/// org. Requires a valid session `token` — the org is derived from it.
+pub async fn fetch_org_members(
+    slug: &str,
+    token: String,
+) -> Result<Vec<auth_proto::OrgMember>, String> {
+    let client =
+        crate::vox_clients::establish_for::<auth_proto::AuthServiceClient>(slug).await?;
+    client
+        .list_org_members(token)
+        .await
+        .map_err(|e| format!("{slug}: list members: {e:?}"))
+}
+
 // ── finance / invoicing ─────────────────────────────────────────────
 
 async fn invoicing(slug: &str) -> Result<finance_proto::InvoicingClient, String> {
