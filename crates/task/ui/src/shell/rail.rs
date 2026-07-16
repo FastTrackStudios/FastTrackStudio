@@ -14,6 +14,14 @@ use fts_ui::lucide_dioxus::Feather;
 use crate::nav::{nav_tabs, tabs_match};
 use crate::routes::Route;
 
+/// The rail is a shortlist, not a directory: core destinations only.
+/// Everything else is reachable by search (command palette) or links —
+/// most of those pages are vault notes anyway. Settings renders in the
+/// foot cluster, not here.
+const RAIL_TABS: &[&str] = &[
+    "Home", "Inbox", "Projects", "Tasks", "Vault", "Schedule", "Timer",
+];
+
 #[component]
 pub fn IconRail(current: Route) -> Element {
     let nav = use_navigator();
@@ -61,8 +69,7 @@ pub fn IconRail(current: Route) -> Element {
                 Feather { size: 15 }
             }
             div { class: "flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto",
-                // Settings moves to the foot cluster — skip it here.
-                for tab in tabs.iter().skip(1).filter(|t| t.label != "Settings") {
+                for tab in tabs.iter().skip(1).filter(|t| RAIL_TABS.contains(&t.label)) {
                     {tab_button(tab)}
                 }
             }
