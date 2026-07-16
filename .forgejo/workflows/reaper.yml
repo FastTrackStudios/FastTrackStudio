@@ -1,0 +1,120 @@
+# REAPER integration suites — INTENTIONALLY TRIGGERED ONLY, never on
+# push/PR (facet-style: the default gate is checks.yml; expensive
+# licensed-environment integration runs when a human or a release asks
+# for it).
+#
+# Triggers:
+#   workflow_dispatch — run it whenever you want a full pass.
+#   push tags v* / rc-* — release candidates and releases always get
+#     the full REAPER pass before anything ships.
+#
+# REAPER's license does NOT permit redistribution, so these suites can
+# only run self-hosted where REAPER is licensed (the org runner on
+# THEBATTLESHIP). The job resolves the same REAPER 7.75 store path the
+# dev machine uses (pinned via gcroot; nixpkgs fallback) and runs both
+# harnesses fully isolated: daw-reaper builds its own rig under
+# <checkout>/target/fts-reaper-test, fts-extensions gets a CI-owned
+# resources dir. Nothing touches ~/.config/signal or port 4040
+# (different user, Dummy audio, unix sockets only).
+#
+# Own CARGO_TARGET_DIR (target-reaper): this workflow can run
+# concurrently with checks.yml, and parallel cargo invocations on one
+# target dir clobber each other's fingerprints. First run is cold;
+# later runs reuse it.
+
+name: reaper-integration
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+      - "rc-*"
+
+concurrency:
+  group: reaper-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FTS_CI: /var/lib/gitea-runner/codeberg-org/fts-ci
+  CARGO_TARGET_DIR: /var/lib/gitea-runner/codeberg-org/fts-ci/target-reaper
+  CARGO_HOME: /var/lib/gitea-runner/codeberg-org/fts-ci/cargo-home
+  FTS_LOCAL_REPO: /run/media/Development/FastTrackStudio
+
+jobs:
+  reaper-integration:
+    runs-on: nix-host
+    steps:
+      - name: Checkout (local-first)
+        run: |
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          branch="${GITHUB_REF_NAME:-main}"
+          sha="${GITHUB_SHA:-}"
+          if [ -n "$FTS_LOCAL_REPO" ]; then
+            git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
+            git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
+          fi
+          if [ -n "$FTS_LOCAL_REPO" ] && [ -d "$FTS_LOCAL_REPO/.git" ] \
+              && [ -n "$sha" ] \
+              && git -C "$FTS_LOCAL_REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            git clone --quiet "$FTS_LOCAL_REPO" .
+            git checkout --quiet --detach "$sha"
+          else
+            attempt=1
+            until git clone --no-tags --branch "$branch" "$url" . 2>/dev/null \
+                || git clone "$url" .; do
+              [ "$attempt" -ge 8 ] && { echo "clone failed after 8 attempts"; exit 1; }
+              find . -mindepth 1 -delete 2>/dev/null || true
+              attempt=$((attempt + 1)); sleep 15
+            done
+            if [ -n "$sha" ] && [ "$(git rev-parse HEAD)" != "$sha" ]; then
+              git fetch --no-tags origin "$sha" && git checkout --detach "$sha"
+            fi
+          fi
+          echo "checked out $(git rev-parse --short HEAD)"
+
+      - name: Prepare persistent caches
+        run: |
+          mkdir -p "$CARGO_TARGET_DIR" "$CARGO_HOME"
+          nix develop .#reaper-test --profile "$FTS_CI/devshell-reaper" -c true
+
+      # Resolve REAPER. Preferred: the exact 7.75 store path the dev
+      # machine's rig uses (built from FastTrackStudios/reaper-flake) —
+      # pinned with an indirect gcroot so GC can't take it. Fallback:
+      # nixpkgs reaper from the repo flake's pin (7.67; version drift
+      # possible — the daw-reaper skip list is tuned against 7.75).
+      - name: Resolve REAPER
+        run: |
+          mkdir -p "$FTS_CI"
+          PIN=/nix/store/ky0r08mnqbhrs1r6prvkfv4lv41yyhz8-reaper-7.75
+          if [ -x "$PIN/bin/reaper" ]; then
+            nix-store --add-root "$FTS_CI/reaper" --indirect -r "$PIN" > /dev/null
+          else
+            echo "pinned REAPER 7.75 missing — building nixpkgs reaper (flake pin)"
+            NIXPKGS_ALLOW_UNFREE=1 nix build --impure --inputs-from . \
+              nixpkgs#reaper -o "$FTS_CI/reaper"
+          fi
+          echo "REAPER: $(readlink -f "$FTS_CI/reaper")"
+
+      # daw domain suite (95 tests): builds its own isolated rig under
+      # <checkout>/target/fts-reaper-test — fresh every run, never the
+      # dev rig, never ~/.config/signal.
+      - name: daw suite (daw-reaper)
+        run: |
+          FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
+            nix develop .#reaper-test -c cargo run -p daw-reaper-xtask
+
+      # Extension suite (13 tests): CI-owned REAPER resources dir
+      # (persistent — keeps the [nag] prewarm token between runs),
+      # seeded with the same Dummy-audio ini the daw harness uses.
+      - name: extension suite (fts-extensions)
+        run: |
+          RIG="$FTS_CI/reaper-rig"
+          mkdir -p "$RIG/UserPlugins"
+          if [ ! -f "$RIG/reaper.ini" ]; then
+            printf '[REAPER]\naudiodriver=2\nlinux_audio_mode=2\nautosaveint=0\n[reaper_explorer]\nlastdir=/tmp\n' \
+              > "$RIG/reaper.ini"
+          fi
+          FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
+          FTS_REAPER_RESOURCES="$RIG" \
+            nix develop .#reaper-test -c cargo run -p fts-extensions-xtask
