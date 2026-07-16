@@ -264,9 +264,14 @@ pub fn CommandPalette() -> Element {
                         placeholder: "Jump to a page or note…",
                         // `autofocus` only fires on initial page load, not
                         // when the modal is inserted dynamically — focus on
-                        // mount (same dance as the fleeting modal).
+                        // mount (same dance as the fleeting modal), and once
+                        // more a beat later: the editor's focus bookkeeping
+                        // can steal focus back in the same frame the palette
+                        // opens, which left the input unfocused in practice.
                         onmounted: move |e: Event<MountedData>| {
                             spawn(async move {
+                                let _ = e.data().set_focus(true).await;
+                                architect::sleep(architect::Duration::from_millis(80)).await;
                                 let _ = e.data().set_focus(true).await;
                             });
                         },
