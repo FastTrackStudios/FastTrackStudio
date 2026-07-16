@@ -12,7 +12,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 concurrency:
@@ -53,4 +53,4 @@ jobs:
             fi
           fi
       - name: cargo metadata --locked (manifest + lockfile sanity)
-        run: nix develop -c cargo metadata --locked --format-version 1 > /dev/null
+        run: nix develop .#ci -c cargo metadata --locked --format-version 1 > /dev/null
