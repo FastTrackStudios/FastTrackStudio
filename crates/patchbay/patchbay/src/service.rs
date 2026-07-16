@@ -10,8 +10,8 @@ use patchbay_proto::services::patchbay_service::{
 };
 use patchbay_proto::{
     AliasEntry, ApplyReport, ClockInfo, DanteDevice, DanteStatus, GraphEvent, GraphSnapshot,
-    PatchbayError, PatchbayService, PresetLink, RoutingPreset, ServiceAction, ServiceStatus,
-    patchbay_service_service_descriptor, serve_patchbay_service,
+    LatencyRule, PatchbayError, PatchbayService, PresetLink, RoutingPreset, ServiceAction,
+    ServiceStatus, patchbay_service_service_descriptor, serve_patchbay_service,
 };
 
 use crate::engine::{self, Command, EngineHandle};
@@ -144,6 +144,20 @@ impl PatchbayBackend {
         });
         out.dedup();
         out
+    }
+}
+
+impl PatchbayBackend {
+    /// Rewrite the WirePlumber drop-in from `rules` (blocking I/O +
+    /// a pw-metadata read for the graph rate → off the executor).
+    async fn write_latency_dropin(&self, rules: Vec<LatencyRule>) -> Result<(), PatchbayError> {
+        tokio::task::spawn_blocking(move || {
+            let rate = crate::clock::clock_info().rate;
+            crate::latency::write_dropin(&rules, rate)
+        })
+        .await
+        .map_err(|e| PatchbayError::Internal(e.to_string()))?
+        .map_err(PatchbayError::Internal)
     }
 }
 
@@ -329,6 +343,30 @@ impl PatchbayService for PatchbayBackend {
         tokio::task::spawn_blocking(move || crate::clock::force_quantum(frames))
             .await
             .map_err(|e| PatchbayError::Internal(e.to_string()))
+    }
+
+    async fn latency_rules(&self) -> Result<Vec<LatencyRule>, PatchbayError> {
+        Ok(self.inner.presets.latency_rules())
+    }
+
+    async fn set_latency_rule(&self, rule: LatencyRule) -> Result<(), PatchbayError> {
+        if !(16..=8192).contains(&rule.quantum) {
+            return Err(PatchbayError::Internal(format!(
+                "quantum {} out of range",
+                rule.quantum
+            )));
+        }
+        let rules = self.inner.presets.set_latency_rule(rule);
+        self.write_latency_dropin(rules).await
+    }
+
+    async fn remove_latency_rule(&self, pattern: String) -> Result<(), PatchbayError> {
+        let rules = self
+            .inner
+            .presets
+            .remove_latency_rule(&pattern)
+            .ok_or_else(|| PatchbayError::not_found("latency rule", &pattern))?;
+        self.write_latency_dropin(rules).await
     }
 
     async fn dante_status(&self) -> Result<DanteStatus, PatchbayError> {

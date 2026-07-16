@@ -37,6 +37,11 @@ pub struct PwNode {
     /// Raw `media.class` (e.g. `Audio/Sink`, `Stream/Output/Audio`).
     pub media_class: String,
     pub media_kind: MediaKind,
+    /// `application.name` when the node belongs to an app.
+    pub app_name: String,
+    /// The node's latency request (`node.latency`, e.g. `"64/48000"`),
+    /// empty when unset.
+    pub latency: String,
 }
 
 /// A port on a node.
@@ -142,6 +147,26 @@ pub struct AliasEntry {
 }
 
 // ─── Clock / latency ────────────────────────────────────────────────────
+
+/// Per-app latency rule, materialized as a WirePlumber drop-in.
+///
+/// While a matching node is running, the graph runs at `quantum`
+/// (`force` = `node.force-quantum`, a hard pin; otherwise
+/// `node.latency`, a request the driver honors as the minimum among
+/// running nodes). When the app closes, the graph returns to its idle
+/// default — that's how REAPER runs at 64 while everything
+/// non-critical idles at 1024. Applied when the node is created:
+/// restart the app or WirePlumber after changing rules.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct LatencyRule {
+    /// `node.name` to match; prefix with `~` for a regex
+    /// (WirePlumber match syntax).
+    pub pattern: String,
+    /// Quantum in frames (32…2048).
+    pub quantum: u32,
+    /// Hard pin (`node.force-quantum`) instead of a request.
+    pub force: bool,
+}
 
 /// Live graph clock settings (from `pw-metadata -n settings`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]

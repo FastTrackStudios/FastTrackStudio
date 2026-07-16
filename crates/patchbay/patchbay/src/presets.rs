@@ -16,6 +16,8 @@ struct FileFormat {
     presets: Vec<RoutingPreset>,
     #[serde(default)]
     aliases: Vec<AliasEntry>,
+    #[serde(default)]
+    latency_rules: Vec<patchbay_proto::LatencyRule>,
 }
 
 pub(crate) struct PresetStore {
@@ -96,6 +98,30 @@ impl PresetStore {
 
     pub fn aliases(&self) -> Vec<AliasEntry> {
         self.data.lock().aliases.clone()
+    }
+
+    pub fn latency_rules(&self) -> Vec<patchbay_proto::LatencyRule> {
+        self.data.lock().latency_rules.clone()
+    }
+
+    pub fn set_latency_rule(&self, rule: patchbay_proto::LatencyRule) -> Vec<patchbay_proto::LatencyRule> {
+        let mut data = self.data.lock();
+        data.latency_rules.retain(|r| r.pattern != rule.pattern);
+        data.latency_rules.push(rule);
+        data.latency_rules.sort_by(|a, b| a.pattern.cmp(&b.pattern));
+        self.persist(&data);
+        data.latency_rules.clone()
+    }
+
+    pub fn remove_latency_rule(&self, pattern: &str) -> Option<Vec<patchbay_proto::LatencyRule>> {
+        let mut data = self.data.lock();
+        let before = data.latency_rules.len();
+        data.latency_rules.retain(|r| r.pattern != pattern);
+        if data.latency_rules.len() == before {
+            return None;
+        }
+        self.persist(&data);
+        Some(data.latency_rules.clone())
     }
 
     /// Empty alias clears the entry.

@@ -11,7 +11,7 @@ use vox::Tx;
 
 use crate::types::{
     AliasEntry, ApplyReport, ClockInfo, DanteDevice, DanteStatus, GraphEvent, GraphSnapshot,
-    RoutingPreset, ServiceAction, ServiceStatus,
+    LatencyRule, RoutingPreset, ServiceAction, ServiceStatus,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -121,6 +121,18 @@ pub mod patchbay_service {
 
         /// Force the graph quantum (frames); `0` returns to automatic.
         async fn force_quantum(&self, frames: u32) -> Result<(), PatchbayError>;
+
+        // ── Per-app latency rules ────────────────────────────────────
+
+        async fn latency_rules(&self) -> Result<Vec<LatencyRule>, PatchbayError>;
+
+        /// Add or replace the rule for `rule.pattern` and rewrite the
+        /// WirePlumber drop-in. Takes effect when a matching node is
+        /// (re)created — restart the app or WirePlumber.
+        async fn set_latency_rule(&self, rule: LatencyRule) -> Result<(), PatchbayError>;
+
+        /// Remove the rule matching `pattern` and rewrite the drop-in.
+        async fn remove_latency_rule(&self, pattern: String) -> Result<(), PatchbayError>;
 
         // ── Dante / Inferno stack ────────────────────────────────────
 

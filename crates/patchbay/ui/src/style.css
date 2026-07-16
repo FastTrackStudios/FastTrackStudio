@@ -131,6 +131,14 @@
 .chanmap-sync { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .chanmap-buttons { display: flex; gap: 6px; }
 
+.latency-editor {
+  margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px;
+  align-items: center;
+}
+.latency-editor .label { width: 100%; color: #7a8494; font-size: 11px; }
+.rule-quantum { color: #7cc4ff; font-size: 12px; }
+.dim-note { color: #5c6673; font-size: 11px; margin-top: 4px; width: 100%; }
+
 /* ── status bar ──────────────────────────────────────────────────── */
 .statusbar {
   display: flex; align-items: center; gap: 6px;

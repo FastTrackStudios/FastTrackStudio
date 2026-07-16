@@ -109,11 +109,13 @@ pub fn StatusBar() -> Element {
             span { class: "spacer" }
             span { class: "label", "quantum:" }
             {quantum_btn(0)}
+            {quantum_btn(32)}
             {quantum_btn(64)}
             {quantum_btn(128)}
             {quantum_btn(256)}
             {quantum_btn(512)}
             {quantum_btn(1024)}
+            {quantum_btn(2048)}
             span { class: "spacer" }
             if dante.installed {
                 span {
@@ -143,8 +145,83 @@ pub fn SidePanel() -> Element {
     rsx! {
         div { class: "side-panel",
             ServicesPanel {}
+            LatencyPanel {}
             PresetsPanel {}
             Inspector {}
+        }
+    }
+}
+
+/// Per-app latency rules: which apps request/pin which quantum. The
+/// graph runs at the lowest request among RUNNING apps, so REAPER at 64
+/// only costs you 64 while REAPER is open — everything idles back to
+/// the 1024 default after. Rules apply when a node is created: restart
+/// the app, or hit apply (WirePlumber restart, brief blip).
+#[component]
+fn LatencyPanel() -> Element {
+    let handle = state::use_patchbay();
+    let rules = state::LATENCY_RULES.read().clone();
+
+    let remove = |pattern: String| {
+        let handle = handle.clone();
+        move |_| {
+            let handle = handle.clone();
+            let pattern = pattern.clone();
+            spawn(async move {
+                if let Err(e) = handle.0.remove_latency_rule(pattern).await {
+                    tracing::warn!("remove_latency_rule failed: {e}");
+                }
+                state::refresh_meta(&handle).await;
+            });
+        }
+    };
+    let apply = {
+        let handle = handle.clone();
+        move |_| {
+            let handle = handle.clone();
+            spawn(async move {
+                if let Err(e) = handle
+                    .0
+                    .service_action(
+                        "wireplumber.service".into(),
+                        patchbay_proto::ServiceAction::Restart,
+                    )
+                    .await
+                {
+                    tracing::warn!("wireplumber restart failed: {e}");
+                }
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "panel-section",
+            h3 { "App latency" }
+            if rules.is_empty() {
+                div { class: "dim-note",
+                    "No per-app rules. Select a node and set its quantum in the inspector — "
+                    "the graph follows the lowest request among running apps."
+                }
+            }
+            for rule in rules {
+                div { class: "service-row", key: "{rule.pattern}",
+                    span { class: "service-name", title: "{rule.pattern}",
+                        "{rule.pattern}"
+                    }
+                    span { class: "rule-quantum",
+                        "{rule.quantum}"
+                        if rule.force { span { class: "forced-tag", " pin" } }
+                    }
+                    button { class: "chip danger", onclick: remove(rule.pattern.clone()), "✕" }
+                }
+            }
+            button {
+                class: "chip",
+                style: "margin-top:6px;",
+                title: "restart WirePlumber so rules hit already-running apps (brief audio blip)",
+                onclick: apply,
+                "apply now (restart WirePlumber)"
+            }
         }
     }
 }
@@ -376,12 +453,16 @@ fn Inspector() -> Element {
             h3 { "Inspector" }
             div { class: "inspect-line", span { class: "label", "name " } "{node.name}" }
             div { class: "inspect-line", span { class: "label", "class " } "{node.media_class}" }
+            if !node.latency.is_empty() {
+                div { class: "inspect-line", span { class: "label", "latency " } "{node.latency}" }
+            }
             AliasEditor {
                 key: "{node.name}",
                 target: node.name.clone(),
                 placeholder: "node display name…".to_string(),
                 current: node_alias,
             }
+            LatencyRuleEditor { key: "lat-{node.name}", node_name: node.name.clone() }
             ChanmapSync { node_name: node.name.clone() }
             h3 { style: "margin-top:12px;", "Channels" }
             div { class: "channel-list",
@@ -439,6 +520,72 @@ fn AliasEditor(target: String, placeholder: String, current: String) -> Element 
                 }
             },
             onblur: move |_| commit_blur(),
+        }
+    }
+}
+
+/// Quantum rule for this node: pick a buffer size and whether it's a
+/// hard pin (`node.force-quantum`) or a request (`node.latency`).
+#[component]
+fn LatencyRuleEditor(node_name: String) -> Element {
+    let handle = state::use_patchbay();
+    let rule = state::LATENCY_RULES
+        .read()
+        .iter()
+        .find(|r| r.pattern == node_name)
+        .cloned();
+    let current = rule.as_ref().map(|r| r.quantum).unwrap_or(0);
+    let force = rule.as_ref().map(|r| r.force).unwrap_or(true);
+
+    let set = |quantum: u32, force: bool| {
+        let handle = handle.clone();
+        let node_name = node_name.clone();
+        move |_| {
+            let handle = handle.clone();
+            let node_name = node_name.clone();
+            spawn(async move {
+                let res = if quantum == 0 {
+                    handle.0.remove_latency_rule(node_name).await
+                } else {
+                    handle
+                        .0
+                        .set_latency_rule(patchbay_proto::LatencyRule {
+                            pattern: node_name,
+                            quantum,
+                            force,
+                        })
+                        .await
+                };
+                if let Err(e) = res {
+                    tracing::warn!("latency rule change failed: {e}");
+                }
+                state::refresh_meta(&handle).await;
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "latency-editor",
+            span { class: "label", "quantum rule " }
+            for q in [0u32, 32, 64, 128, 256, 512, 1024, 2048] {
+                button {
+                    key: "{q}",
+                    class: if q == current { "chip on" } else { "chip" },
+                    onclick: set(q, force),
+                    if q == 0 { "none" } else { "{q}" }
+                }
+            }
+            if current != 0 {
+                button {
+                    class: if force { "chip on" } else { "chip" },
+                    title: "pin: node.force-quantum (hard) vs request: node.latency (driver takes the min)",
+                    onclick: set(current, !force),
+                    if force { "pinned" } else { "request" }
+                }
+            }
+            div { class: "dim-note",
+                "applies when the app (re)starts, or apply now from the App latency panel"
+            }
         }
     }
 }
