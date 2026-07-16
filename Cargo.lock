@@ -1000,7 +1000,7 @@ dependencies = [
  "include_dir",
  "iroh",
  "moire",
- "rtrb 0.3.4",
+ "rtrb",
  "sea-orm",
  "thiserror 2.0.18",
  "tokio",
@@ -2178,8 +2178,6 @@ dependencies = [
  "nix 0.22.3",
  "objc",
  "raw-window-handle 0.6.2",
- "rtrb 0.2.3",
- "softbuffer",
  "uuid 0.8.2",
  "winapi",
  "x11",
@@ -2962,12 +2960,6 @@ name = "c_str_macro"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6d44951c469019e225e7667d799052f67fb8ea358d086878f3582b39f0de5e5"
-
-[[package]]
-name = "cache-padded"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "981520c98f422fcc584dc1a95c334e6953900b9106bc47a9839b81790009eb21"
 
 [[package]]
 name = "cairo-rs"
@@ -5899,7 +5891,7 @@ dependencies = [
  "facet 0.50.0-rc.5",
  "libspa",
  "pipewire",
- "rtrb 0.3.4",
+ "rtrb",
  "tracing",
 ]
 
@@ -6208,7 +6200,7 @@ dependencies = [
  "libloading 0.8.9",
  "memmap2",
  "moire",
- "rtrb 0.3.4",
+ "rtrb",
  "symphonia",
  "thiserror 2.0.18",
  "tokio",
@@ -10154,14 +10146,18 @@ name = "fts-patchbay"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "clap",
  "dioxus",
  "eyre",
  "patchbay",
  "patchbay-proto",
  "patchbay-ui",
+ "serde_json",
  "tokio",
  "tracing",
  "vox",
+ "vox-core",
+ "vox-websocket",
 ]
 
 [[package]]
@@ -17595,7 +17591,7 @@ dependencies = [
  "objc",
  "parking_lot",
  "raw-window-handle 0.5.2",
- "rtrb 0.3.4",
+ "rtrb",
  "serde_json",
  "vst3-sys",
  "widestring",
@@ -19386,6 +19382,8 @@ dependencies = [
  "patchbay-proto",
  "tokio",
  "tracing",
+ "vox-core",
+ "vox-websocket",
 ]
 
 [[package]]
@@ -22192,15 +22190,6 @@ dependencies = [
 
 [[package]]
 name = "rtrb"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99e704dd104faf2326a320140f70f0b736d607c1caa1b1748a6c568a79819109"
-dependencies = [
- "cache-padded",
-]
-
-[[package]]
-name = "rtrb"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ade083ccbb4bf536df69d1f6432cc23deb7acccff86b183f3923a6fd56a1153"
@@ -24593,7 +24582,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "realfft",
- "rtrb 0.3.4",
+ "rtrb",
 ]
 
 [[package]]
