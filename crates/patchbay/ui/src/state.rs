@@ -51,15 +51,13 @@ pub static SELECTED_OUTPUT: GlobalSignal<Option<u32>> = Signal::global(|| None);
 /// Node id whose inspector is open.
 pub static SELECTED_NODE: GlobalSignal<Option<u32>> = Signal::global(|| None);
 pub static SEARCH: GlobalSignal<String> = Signal::global(String::new);
-/// Media kinds currently visible.
-pub static KIND_FILTER: GlobalSignal<Vec<MediaKind>> = Signal::global(|| {
-    vec![
-        MediaKind::Audio,
-        MediaKind::Video,
-        MediaKind::Midi,
-        MediaKind::Other,
-    ]
-});
+/// Which media domain the graph shows (Audio | MIDI | Video tabs).
+/// `Other`-kind ports ride along in the Audio tab.
+pub static MEDIA_TAB: GlobalSignal<MediaKind> = Signal::global(|| MediaKind::Audio);
+/// Canvas zoom factor.
+pub static ZOOM: GlobalSignal<f64> = Signal::global(|| 1.0);
+/// Canvas pan offset (px, pre-zoom screen space).
+pub static PAN: GlobalSignal<(f64, f64)> = Signal::global(|| (0.0, 0.0));
 pub static HIDE_UNCONNECTED: GlobalSignal<bool> = Signal::global(|| false);
 /// Drop sinks' monitor ports from the canvas entirely.
 pub static HIDE_MONITORS: GlobalSignal<bool> = Signal::global(|| false);

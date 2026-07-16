@@ -213,10 +213,20 @@ fn build_rows(
     rows
 }
 
+/// Does a port belong on the given media tab? `Other` (control/dsp
+/// oddballs) rides with Audio so nothing is unreachable.
+pub fn kind_on_tab(kind: MediaKind, tab: MediaKind) -> bool {
+    match tab {
+        MediaKind::Audio => matches!(kind, MediaKind::Audio | MediaKind::Other),
+        other => kind == other,
+    }
+}
+
 /// Which nodes/ports survive the current filters.
 pub struct Filters<'a> {
     pub search: &'a str,
-    pub kinds: &'a [MediaKind],
+    /// Active media tab (Audio | Midi | Video).
+    pub tab: MediaKind,
     pub hide_unconnected: bool,
     /// The full alias map (`node.name` and `node.name:port.name` keys):
     /// search matches what the user sees, and aliased ports stay out
@@ -235,9 +245,6 @@ pub fn compute_layout(
     let mut columns: [Vec<CardLayout>; 3] = [Vec::new(), Vec::new(), Vec::new()];
 
     for node in &graph.nodes {
-        if !filters.kinds.contains(&node.media_kind) {
-            continue;
-        }
         if !search.is_empty() {
             let alias = filters.aliases.get(&node.name).map(String::as_str).unwrap_or("");
             let hay = format!("{} {} {}", node.name, node.label, alias).to_lowercase();
@@ -245,7 +252,10 @@ pub fn compute_layout(
                 continue;
             }
         }
-        let keep = |p: &&PwPort| !(filters.hide_monitors && is_monitor(&p.name));
+        let keep = |p: &&PwPort| {
+            kind_on_tab(p.media_kind, filters.tab)
+                && !(filters.hide_monitors && is_monitor(&p.name))
+        };
         let mut ins: Vec<&PwPort> = graph
             .ports
             .iter()

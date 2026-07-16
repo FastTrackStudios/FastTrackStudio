@@ -4,29 +4,21 @@ use dioxus::prelude::*;
 use patchbay_proto::MediaKind;
 
 use crate::state::{
-    self, ALIASES, CLOCK, DANTE, GRAPH, HIDE_UNCONNECTED, KIND_FILTER, LAST_REPORT, PRESETS,
+    self, ALIASES, CLOCK, DANTE, GRAPH, HIDE_UNCONNECTED, LAST_REPORT, MEDIA_TAB, PRESETS,
     SEARCH, SELECTED_NODE,
 };
 
 #[component]
 pub fn Toolbar() -> Element {
     let search = SEARCH.read().clone();
-    let kinds = KIND_FILTER.read().clone();
+    let tab = *MEDIA_TAB.read();
     let hide = *HIDE_UNCONNECTED.read();
 
-    let kind_chip = |kind: MediaKind, label: &'static str| {
-        let on = kinds.contains(&kind);
+    let media_tab = |kind: MediaKind, label: &'static str| {
         rsx! {
             button {
-                class: if on { "chip on" } else { "chip" },
-                onclick: move |_| {
-                    let mut k = KIND_FILTER.write();
-                    if k.contains(&kind) {
-                        k.retain(|x| *x != kind);
-                    } else {
-                        k.push(kind);
-                    }
-                },
+                class: if tab == kind { "tab on" } else { "tab" },
+                onclick: move |_| *MEDIA_TAB.write() = kind,
                 "{label}"
             }
         }
@@ -34,16 +26,17 @@ pub fn Toolbar() -> Element {
 
     rsx! {
         div { class: "toolbar",
+            div { class: "view-tabs",
+                {media_tab(MediaKind::Audio, "Audio")}
+                {media_tab(MediaKind::Midi, "MIDI")}
+                {media_tab(MediaKind::Video, "Video")}
+            }
             input {
                 class: "search",
                 placeholder: "filter nodes…",
                 value: "{search}",
                 oninput: move |e| *SEARCH.write() = e.value(),
             }
-            {kind_chip(MediaKind::Audio, "audio")}
-            {kind_chip(MediaKind::Midi, "midi")}
-            {kind_chip(MediaKind::Video, "video")}
-            {kind_chip(MediaKind::Other, "other")}
             button {
                 class: if hide { "chip on" } else { "chip" },
                 onclick: move |_| {
