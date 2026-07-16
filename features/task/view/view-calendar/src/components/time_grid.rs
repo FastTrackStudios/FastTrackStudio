@@ -24,7 +24,7 @@ use crate::types::{CalendarEvent, EventId, TemplateBlock};
 
 use super::all_day_strip::AllDayStrip;
 use super::drag::{
-    BlockDrag, BlockDragKind, DRAG_THRESHOLD_PX, DragKind, Ghost, LONG_PRESS_MS, TOUCH_SLOP_PX,
+    BlockDrag, BlockDragKind, DRAG_THRESHOLD_PX, DragKind, Ghost, LONG_PRESS_MS,
     use_block_drag_context, use_drag_context, use_touch_context,
 };
 use super::event_chip::EventChip;
@@ -386,14 +386,12 @@ fn DayColumn(props: DayColumnProps) -> Element {
     let on_block_drop = props.on_block_drop;
     let on_block_edit = props.on_block_edit;
     let mut block_ctx = use_block_drag_context();
-    let touch = use_touch_context();
+    // Pending block long-presses arm through the shared TouchContext
+    // — disarm (slop / lift / cancel) lives at the Calendar root,
+    // which sees every bubbled pointer event no matter which element
+    // it hit-tests to (this column, a neighbor, or a chip).
+    let mut touch = use_touch_context();
     let coarse = *touch.coarse.read();
-    // Pending touch long-press on a plan block — same shape as the
-    // chip's (see `EventChip`): position at pointerdown + a
-    // generation counter so a stale timer loses quietly. One signal
-    // per column is enough (we only track the primary pointer).
-    let mut blk_lp: Signal<Option<(f64, f64)>> = use_signal(|| None);
-    let mut blk_lp_gen: Signal<u32> = use_signal(|| 0);
     // The drag whose *target* day is this column (drives the ghost).
     let active_block = block_ctx
         .drag
@@ -416,15 +414,6 @@ fn DayColumn(props: DayColumnProps) -> Element {
             // Plan-block drag — handled at the column level so moves
             // bubble here regardless of which child the pointer is over.
             onpointermove: move |e: Event<PointerData>| {
-                // A finger past the slop before the block long-press
-                // fired is scrolling — disarm the pending drag.
-                let pending = { *blk_lp.peek() };
-                if let Some((x, y)) = pending {
-                    let p = e.data().page_coordinates();
-                    if (p.x - x).abs() > TOUCH_SLOP_PX || (p.y - y).abs() > TOUCH_SLOP_PX {
-                        blk_lp.set(None);
-                    }
-                }
                 let snap = block_ctx.drag.peek().clone();
                 let Some(mut bd) = snap else { return };
                 // Resize stays on the block's own day; only a Move roams
@@ -464,10 +453,6 @@ fn DayColumn(props: DayColumnProps) -> Element {
                 }
                 block_ctx.drag.set(Some(bd));
             },
-            // Lift/cancel disarms a pending block long-press (a plain
-            // tap falls through to the block's onclick → editor).
-            onpointerup: move |_| blk_lp.set(None),
-            onpointercancel: move |_| blk_lp.set(None),
             // Hour grid lines (solid).
             for h in 1..24u32 {
                 div {
@@ -710,17 +695,16 @@ fn DayColumn(props: DayColumnProps) -> Element {
                                     // EventChip: a moving finger scrolls,
                                     // a held one grabs the block
                                     // (committed, so the root touchmove
-                                    // guard stops the pan).
-                                    let generation = *blk_lp_gen.peek() + 1;
-                                    blk_lp_gen.set(generation);
-                                    blk_lp.set(Some((p.x, p.y)));
+                                    // guard stops the pan). Disarm is the
+                                    // Calendar root's job.
+                                    let generation = touch.arm(p.x, p.y);
                                     spawn(async move {
                                         dioxus_sdk_time::sleep(
                                             std::time::Duration::from_millis(LONG_PRESS_MS),
                                         )
                                         .await;
-                                        if *blk_lp_gen.peek() == generation && blk_lp.peek().is_some() {
-                                            blk_lp.set(None);
+                                        if touch.still_armed(generation) {
+                                            touch.disarm();
                                             block_ctx.drag.set(Some(BlockDrag {
                                                 committed: true,
                                                 ..bd.clone()

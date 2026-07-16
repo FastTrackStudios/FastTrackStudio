@@ -68,6 +68,8 @@ pub fn Calendar(props: CalendarProps) -> Element {
     });
     let touch_ctx = use_context_provider(|| super::drag::TouchContext {
         coarse: Signal::new(false),
+        lp_pending: Signal::new(None),
+        lp_gen: Signal::new(0),
     });
     use_hook(super::drag::install_drag_image_suppressor);
     use_hook(super::drag::install_touch_capture_release);
@@ -175,17 +177,34 @@ pub fn Calendar(props: CalendarProps) -> Element {
     let mut block_ctx = super::drag::use_block_drag_context();
     let on_block_edit = props.on_block_edit;
     let on_event_up = on_event;
+    let mut lp_touch = touch_ctx;
     let on_pointer_up = move |_: Event<PointerData>| {
+        // Disarm any pending long-press FIRST. This is the backstop
+        // the arming chip/block can't provide: with implicit capture
+        // released, their own pointerup may hit-test to a different
+        // element entirely — only the root reliably sees the bubbled
+        // event. Without this a stale 400ms timer commits a drag for
+        // a finger that already lifted.
+        lp_touch.disarm();
         // Plan-block drag commit takes priority — it's a separate
         // gesture from event drags.
         let block_snap = block_ctx.drag.peek().clone();
         if let Some(bd) = block_snap {
             block_ctx.drag.set(None);
             if bd.committed {
+                // A long-press lifted in place never moved the block
+                // — cur_* still equal the origin. Don't persist a
+                // no-op edit (same guard the chip path has via its
+                // never-set ghost).
+                let unchanged = bd.date == bd.orig_date
+                    && bd.cur_start_min == bd.orig_start_min
+                    && bd.cur_end_min == bd.orig_end_min;
                 if let Some(cb) = on_block_edit {
-                    let s = bd.cur_start_min.clamp(0, 1440) as u16;
-                    let e = bd.cur_end_min.clamp(0, 1440) as u16;
-                    cb.call((bd.orig_date, bd.date, bd.block_id, s, e));
+                    if !unchanged {
+                        let s = bd.cur_start_min.clamp(0, 1440) as u16;
+                        let e = bd.cur_end_min.clamp(0, 1440) as u16;
+                        cb.call((bd.orig_date, bd.date, bd.block_id, s, e));
+                    }
                 }
                 return;
             }
@@ -218,9 +237,18 @@ pub fn Calendar(props: CalendarProps) -> Element {
     // ghost + faded chip.
     let mut cancel_block_ctx = block_ctx;
     let on_pointer_cancel = move |_: Event<PointerData>| {
+        lp_touch.disarm();
         cancel_block_ctx.drag.set(None);
         drag_ctx.state.clone().set(None);
         drag_ctx.ghost.clone().set(None);
+    };
+
+    // Slop backstop for the pending long-press: once a scroll starts,
+    // the moves hit-test to whatever is under the finger — possibly
+    // never the arming chip/block — but they always bubble here.
+    let on_pointer_move = move |e: Event<PointerData>| {
+        let p = e.data().page_coordinates();
+        lp_touch.disarm_if_strayed(p.x, p.y);
     };
 
     // While a drag is committed, eat touchmove so the browser can't
@@ -246,6 +274,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
             onkeydown: on_keydown,
             onpointerup: on_pointer_up,
             onpointercancel: on_pointer_cancel,
+            onpointermove: on_pointer_move,
             ontouchmove: on_touch_move,
             Toolbar {
                 anchor: *anchor.read(),
