@@ -9,6 +9,7 @@
 //!
 //! Apps depend on this facade (or `patchbay-ui`), never on internals.
 
+pub mod chanmap;
 pub mod clock;
 pub mod dante;
 mod engine;

@@ -101,7 +101,10 @@ pub fn GraphCanvas() -> Element {
                             .rows
                             .iter()
                             .map(|r| RowProps {
+                                aliased: aliases
+                                    .contains_key(&format!("{}:{}", card.node.name, r.label)),
                                 label: state::port_label(&card.node.name, &r.label),
+                                raw_name: r.label.clone(),
                                 direction: r.direction,
                                 kind: r.kind,
                                 ports: r.ports.clone(),
@@ -123,6 +126,8 @@ pub fn GraphCanvas() -> Element {
 #[derive(Clone, PartialEq)]
 struct RowProps {
     label: String,
+    raw_name: String,
+    aliased: bool,
     direction: PortDirection,
     kind: MediaKind,
     ports: Vec<u32>,
@@ -174,17 +179,20 @@ fn NodeCard(
                         && row.ports.len() == 1;
                     let side = if row.direction == PortDirection::Input { "row-in" } else { "row-out" };
                     let classes = format!(
-                        "port-row {side}{}{}{}",
+                        "port-row {side}{}{}{}{}",
                         if is_group { " group" } else { "" },
                         if armed { " armed" } else { "" },
                         if connectable { " connectable" } else { "" },
+                        if row.aliased { " aliased" } else { "" },
                     );
+                    let tooltip = if row.aliased { row.raw_name.clone() } else { String::new() };
                     let dot = kind_color(row.kind);
                     rsx! {
                         div {
                             key: "{i}",
                             class: "{classes}",
                             style: "height:{ROW_H}px;",
+                            title: "{tooltip}",
                             onclick: move |_| {
                                 if let Some(key) = &row.group_key {
                                     let now = !row.expanded;

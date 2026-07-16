@@ -24,6 +24,11 @@ pub(crate) struct PresetStore {
 }
 
 fn config_path() -> PathBuf {
+    // Override for tests / scratch instances so smoke runs never touch
+    // the real config.
+    if let Ok(p) = std::env::var("PATCHBAY_CONFIG") {
+        return PathBuf::from(p);
+    }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("fts/patchbay/patchbay.json")

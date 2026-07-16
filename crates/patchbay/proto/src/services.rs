@@ -100,6 +100,20 @@ pub mod patchbay_service {
         /// An empty alias clears the entry.
         async fn set_alias(&self, target: String, alias: String) -> Result<(), PatchbayError>;
 
+        /// Pull channel names from a REAPER ChanMap (`nameN=Label`,
+        /// 0-based → channel N+1) into port aliases on `node`: every
+        /// port whose numeric suffix is N+1 (playback/capture/monitor)
+        /// gets the label. Empty `path` = the host's default chanmap
+        /// (`~/.fasttrackstudio/Reaper/ChanMaps/<hostname>.ReaperChanMap`).
+        /// Returns the number of aliases written.
+        async fn import_chanmap(&self, node: String, path: String) -> Result<u32, PatchbayError>;
+
+        /// Push `node`'s port aliases back into a REAPER ChanMap's
+        /// `nameN=` lines (other lines preserved; file created if
+        /// missing). Empty `path` = the host default. Returns the
+        /// number of channel names written.
+        async fn export_chanmap(&self, node: String, path: String) -> Result<u32, PatchbayError>;
+
         // ── Clock ────────────────────────────────────────────────────
 
         async fn clock(&self) -> Result<ClockInfo, PatchbayError>;

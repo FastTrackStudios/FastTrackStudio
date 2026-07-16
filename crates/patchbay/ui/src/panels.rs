@@ -243,7 +243,7 @@ fn PresetsPanel() -> Element {
 fn Inspector() -> Element {
     let Some(node_id) = *SELECTED_NODE.read() else {
         return rsx! {
-            div { class: "panel-section dim", "Select a node to inspect / rename." }
+            div { class: "panel-section dim", "Select a node to inspect / rename its channels." }
         };
     };
     let graph = GRAPH.read();
@@ -252,53 +252,161 @@ fn Inspector() -> Element {
             div { class: "panel-section dim", "Node vanished." }
         };
     };
+    // Numeric-aware sort so playback_10 follows playback_9.
+    let mut ports: Vec<_> = graph
+        .ports
+        .iter()
+        .filter(|p| p.node_id == node.id)
+        .cloned()
+        .collect();
     drop(graph);
+    ports.sort_by_key(|p| {
+        let digits = p.name.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 || digits == p.name.len() {
+            (p.name.clone(), 0u64)
+        } else {
+            let (prefix, num) = p.name.split_at(p.name.len() - digits);
+            (prefix.to_string(), num.parse().unwrap_or(0))
+        }
+    });
 
-    let handle = state::use_patchbay();
-    let alias = ALIASES.read().get(&node.name).cloned().unwrap_or_default();
-    let mut alias_draft = use_signal(|| alias.clone());
-    // Reset the draft when a different node is inspected.
-    use_effect(use_reactive!(|node_id| {
-        let _ = node_id;
-        let g = ALIASES.peek();
-        let node_name = GRAPH
-            .peek()
-            .nodes
-            .iter()
-            .find(|n| n.id == node_id)
-            .map(|n| n.name.clone())
-            .unwrap_or_default();
-        alias_draft.set(g.get(&node_name).cloned().unwrap_or_default());
-    }));
+    let aliases = ALIASES.read();
+    let node_alias = aliases.get(&node.name).cloned().unwrap_or_default();
+    let port_aliases: Vec<(String, String)> = ports
+        .iter()
+        .map(|p| {
+            let alias = aliases
+                .get(&format!("{}:{}", node.name, p.name))
+                .cloned()
+                .unwrap_or_default();
+            (p.name.clone(), alias)
+        })
+        .collect();
+    drop(aliases);
 
-    let target = node.name.clone();
     rsx! {
         div { class: "panel-section",
             h3 { "Inspector" }
             div { class: "inspect-line", span { class: "label", "name " } "{node.name}" }
             div { class: "inspect-line", span { class: "label", "class " } "{node.media_class}" }
-            div { class: "inspect-line", span { class: "label", "id " } "{node.id}" }
-            div { class: "preset-save",
-                input {
-                    placeholder: "display alias…",
-                    value: "{alias_draft}",
-                    oninput: move |e| alias_draft.set(e.value()),
+            AliasEditor {
+                key: "{node.name}",
+                target: node.name.clone(),
+                placeholder: "node display name…".to_string(),
+                current: node_alias,
+            }
+            ChanmapSync { node_name: node.name.clone() }
+            h3 { style: "margin-top:12px;", "Channels" }
+            div { class: "channel-list",
+                for (port_name, alias) in port_aliases {
+                    div { class: "channel-row", key: "{node.name}:{port_name}",
+                        span { class: "channel-port", title: "{port_name}", "{port_name}" }
+                        AliasEditor {
+                            target: format!("{}:{}", node.name, port_name),
+                            placeholder: String::new(),
+                            current: alias,
+                        }
+                    }
                 }
-                button {
-                    class: "chip",
-                    onclick: move |_| {
-                        let handle = handle.clone();
-                        let target = target.clone();
-                        let alias = alias_draft.peek().clone();
-                        spawn(async move {
-                            if let Err(e) = handle.0.set_alias(target, alias).await {
-                                tracing::warn!("set_alias failed: {e:?}");
-                            }
-                            state::refresh_meta(&handle).await;
-                        });
-                    },
-                    "set"
+            }
+        }
+    }
+}
+
+/// One alias input: commits on Enter or blur, empty clears.
+#[component]
+fn AliasEditor(target: String, placeholder: String, current: String) -> Element {
+    let handle = state::use_patchbay();
+    let mut draft = use_signal(|| current.clone());
+    // Follow external changes (chanmap import, another editor).
+    use_effect(use_reactive!(|current| draft.set(current)));
+
+    let commit = {
+        let target = target.clone();
+        move || {
+            let value = draft.peek().trim().to_string();
+            if value == current {
+                return;
+            }
+            let handle = handle.clone();
+            let target = target.clone();
+            spawn(async move {
+                if let Err(e) = handle.0.set_alias(target, value).await {
+                    tracing::warn!("set_alias failed: {e:?}");
                 }
+                state::refresh_meta(&handle).await;
+            });
+        }
+    };
+    let commit_blur = commit.clone();
+
+    rsx! {
+        input {
+            class: "alias-input",
+            placeholder: "{placeholder}",
+            value: "{draft}",
+            oninput: move |e| draft.set(e.value()),
+            onkeydown: move |e| {
+                if e.key() == Key::Enter {
+                    commit();
+                }
+            },
+            onblur: move |_| commit_blur(),
+        }
+    }
+}
+
+/// Import/export this node's channel names from/to the REAPER ChanMap
+/// (empty path = the host's default chanmap).
+#[component]
+fn ChanmapSync(node_name: String) -> Element {
+    let handle = state::use_patchbay();
+    let mut path = use_signal(String::new);
+    let mut result = use_signal(String::new);
+
+    let run = |import: bool| {
+        let handle = handle.clone();
+        let node_name = node_name.clone();
+        move |_| {
+            let handle = handle.clone();
+            let node_name = node_name.clone();
+            let path = path.peek().clone();
+            spawn(async move {
+                let res = if import {
+                    handle.0.import_chanmap(node_name, path).await
+                } else {
+                    handle.0.export_chanmap(node_name, path).await
+                };
+                match res {
+                    Ok(n) => {
+                        result.set(format!(
+                            "{} {n} channel names",
+                            if import { "imported" } else { "exported" }
+                        ));
+                        state::refresh_meta(&handle).await;
+                    }
+                    Err(e) => result.set(format!("chanmap failed: {e}")),
+                }
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "chanmap-sync",
+            input {
+                class: "alias-input",
+                placeholder: "chanmap path (empty = host default)",
+                value: "{path}",
+                oninput: move |e| path.set(e.value()),
+            }
+            div { class: "chanmap-buttons",
+                button { class: "chip", title: "ChanMap names → channel aliases",
+                    onclick: run(true), "import chanmap" }
+                button { class: "chip", title: "channel aliases → ChanMap nameN lines",
+                    onclick: run(false), "export chanmap" }
+            }
+            if !result.read().is_empty() {
+                div { class: "apply-report", "{result}" }
             }
         }
     }

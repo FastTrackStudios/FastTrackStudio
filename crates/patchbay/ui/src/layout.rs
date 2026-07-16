@@ -60,21 +60,85 @@ fn split_numeric(name: &str) -> Option<(&str, u64)> {
 }
 
 /// Group one direction's ports into rows. `expanded` keys are
-/// `"node.name/in|out/prefix"`.
+/// `"node.name/in|out/prefix<first>"`.
+///
+/// Alias interaction: a handful of named channels ("Guitar" on a
+/// 128-port Inferno node) split OUT of their group so they're always
+/// visible — the whole point of naming a channel is seeing it. But a
+/// bank where ≥ GROUP_MIN channels are named (a full chanmap import)
+/// stays grouped, or the card would explode back to 128 rows; the
+/// aliases show when the group is expanded.
 fn build_rows(
     node: &PwNode,
     ports: &[&PwPort],
     direction: PortDirection,
     expanded: &HashMap<String, bool>,
+    aliases: &HashMap<String, String>,
 ) -> Vec<PortRow> {
+    let aliased = |p: &PwPort| aliases.contains_key(&format!("{}:{}", node.name, p.name));
     let dir_str = match direction {
         PortDirection::Input => "in",
         PortDirection::Output => "out",
     };
     let mut rows = Vec::new();
+
+    let single = |rows: &mut Vec<PortRow>, p: &PwPort| {
+        rows.push(PortRow {
+            label: p.name.clone(),
+            direction,
+            kind: p.media_kind,
+            ports: vec![p.id],
+            group_key: None,
+            y: 0.0,
+        });
+    };
+    let group = |rows: &mut Vec<PortRow>, run: &[&PwPort]| {
+        let (prefix, first) = split_numeric(&run[0].name).unwrap_or(("", 0));
+        let last = split_numeric(&run[run.len() - 1].name)
+            .map(|(_, n)| n)
+            .unwrap_or(0);
+        // `first` in the key keeps two segments of the same prefix
+        // (split by a named channel) independently expandable.
+        let key = format!("{}/{}/{}{}", node.name, dir_str, prefix, first);
+        let is_expanded = expanded.get(&key).copied().unwrap_or(false);
+        if is_expanded {
+            rows.push(PortRow {
+                label: format!("{}{}–{}", prefix, first, last),
+                direction,
+                kind: run[0].media_kind,
+                ports: Vec::new(),
+                group_key: Some(key),
+                y: 0.0,
+            });
+            for p in run {
+                single(rows, p);
+            }
+        } else {
+            rows.push(PortRow {
+                label: format!("{}{}–{}", prefix, first, last),
+                direction,
+                kind: run[0].media_kind,
+                ports: run.iter().map(|p| p.id).collect(),
+                group_key: Some(key),
+                y: 0.0,
+            });
+        }
+    };
+    // A slice shorter than GROUP_MIN renders as singles.
+    let segment = |rows: &mut Vec<PortRow>, seg: &[&PwPort]| {
+        if seg.len() >= GROUP_MIN {
+            group(rows, seg);
+        } else {
+            for p in seg {
+                single(rows, p);
+            }
+        }
+    };
+
     let mut i = 0;
     while i < ports.len() {
-        // Extend a run of consecutive same-prefix numbered ports.
+        // Extend a run of consecutive same-prefix numbered ports
+        // (alias-blind — alias handling comes after).
         let run_end = match split_numeric(&ports[i].name) {
             None => i + 1,
             Some((prefix, mut num)) => {
@@ -92,57 +156,29 @@ fn build_rows(
             }
         };
         let run = &ports[i..run_end];
-        if run.len() >= GROUP_MIN {
-            let prefix = split_numeric(&run[0].name).map(|(p, _)| p).unwrap_or("");
-            let key = format!("{}/{}/{}", node.name, dir_str, prefix);
-            let is_expanded = expanded.get(&key).copied().unwrap_or(false);
-            if is_expanded {
-                // Group header row (collapse affordance), then every port.
-                rows.push(PortRow {
-                    label: format!("{}… ({})", prefix.trim_end_matches('_'), run.len()),
-                    direction,
-                    kind: run[0].media_kind,
-                    ports: Vec::new(),
-                    group_key: Some(key),
-                    y: 0.0,
-                });
-                for p in run {
-                    rows.push(PortRow {
-                        label: p.name.clone(),
-                        direction,
-                        kind: p.media_kind,
-                        ports: vec![p.id],
-                        group_key: None,
-                        y: 0.0,
-                    });
-                }
-            } else {
-                let first = split_numeric(&run[0].name).map(|(_, n)| n).unwrap_or(0);
-                let last = split_numeric(&run[run.len() - 1].name)
-                    .map(|(_, n)| n)
-                    .unwrap_or(0);
-                rows.push(PortRow {
-                    label: format!("{}{}–{}", prefix, first, last),
-                    direction,
-                    kind: run[0].media_kind,
-                    ports: run.iter().map(|p| p.id).collect(),
-                    group_key: Some(key),
-                    y: 0.0,
-                });
-            }
-        } else {
+        i = run_end;
+
+        if run.len() < GROUP_MIN {
             for p in run {
-                rows.push(PortRow {
-                    label: p.name.clone(),
-                    direction,
-                    kind: p.media_kind,
-                    ports: vec![p.id],
-                    group_key: None,
-                    y: 0.0,
-                });
+                single(&mut rows, p);
+            }
+            continue;
+        }
+        let aliased_count = run.iter().filter(|p| aliased(p)).count();
+        if aliased_count == 0 || aliased_count >= GROUP_MIN {
+            group(&mut rows, run);
+            continue;
+        }
+        // A few named channels: split them out, group the gaps.
+        let mut seg_start = 0;
+        for k in 0..run.len() {
+            if aliased(run[k]) {
+                segment(&mut rows, &run[seg_start..k]);
+                single(&mut rows, run[k]);
+                seg_start = k + 1;
             }
         }
-        i = run_end;
+        segment(&mut rows, &run[seg_start..]);
     }
     rows
 }
@@ -152,7 +188,9 @@ pub struct Filters<'a> {
     pub search: &'a str,
     pub kinds: &'a [MediaKind],
     pub hide_unconnected: bool,
-    /// `node.name → alias` so search matches what the user sees.
+    /// The full alias map (`node.name` and `node.name:port.name` keys):
+    /// search matches what the user sees, and aliased ports stay out
+    /// of collapsed groups.
     pub aliases: &'a HashMap<String, String>,
 }
 
@@ -205,8 +243,14 @@ pub fn compute_layout(
         ins.sort_by_key(numeric_key);
         outs.sort_by_key(numeric_key);
 
-        let mut rows = build_rows(node, &ins, PortDirection::Input, expanded);
-        rows.extend(build_rows(node, &outs, PortDirection::Output, expanded));
+        let mut rows = build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
+        rows.extend(build_rows(
+            node,
+            &outs,
+            PortDirection::Output,
+            expanded,
+            filters.aliases,
+        ));
         for (idx, row) in rows.iter_mut().enumerate() {
             row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
         }

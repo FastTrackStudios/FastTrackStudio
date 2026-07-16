@@ -109,6 +109,28 @@
 .inspect-line { font-size: 12px; padding: 2px 0; word-break: break-all; }
 .inspect-line .label { color: #7a8494; }
 
+.port-row.aliased .port-name { color: #ffd479; font-weight: 600; }
+
+.alias-input {
+  flex: 1; min-width: 0; width: 100%;
+  background: #10131a; color: #d7dde5;
+  border: 1px solid #2b323d; border-radius: 6px; padding: 3px 8px;
+  outline: none; font-size: 12px;
+}
+.alias-input:focus { border-color: #4a90d9; }
+.channel-list {
+  max-height: 340px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 3px;
+  border: 1px solid #232933; border-radius: 6px; padding: 6px;
+}
+.channel-row { display: flex; align-items: center; gap: 6px; }
+.channel-port {
+  flex: 0 0 92px; font-size: 11px; color: #7a8494;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chanmap-sync { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.chanmap-buttons { display: flex; gap: 6px; }
+
 /* ── status bar ──────────────────────────────────────────────────── */
 .statusbar {
   display: flex; align-items: center; gap: 6px;

@@ -262,6 +262,60 @@ impl PatchbayService for PatchbayBackend {
         Ok(())
     }
 
+    async fn import_chanmap(&self, node: String, path: String) -> Result<u32, PatchbayError> {
+        let names = crate::chanmap::read_names(&path).map_err(PatchbayError::Internal)?;
+        // Every port of `node` whose numeric suffix is a named channel
+        // gets the alias (playback + monitor + capture all match, so
+        // the name shows on whichever side you're patching).
+        let ports: Vec<String> = {
+            let store = self.inner.store.read();
+            let Some(n) = store.nodes.values().find(|n| n.name == node) else {
+                return Err(PatchbayError::not_found("node", &node));
+            };
+            store
+                .ports
+                .values()
+                .filter(|p| p.node_id == n.id)
+                .map(|p| p.name.clone())
+                .collect()
+        };
+        let mut written = 0;
+        for port in ports {
+            let Some(channel) = crate::chanmap::channel_of_port(&port) else {
+                continue;
+            };
+            if let Some(name) = names.get(&channel) {
+                self.inner
+                    .presets
+                    .set_alias(format!("{node}:{port}"), name.clone());
+                written += 1;
+            }
+        }
+        Ok(written)
+    }
+
+    async fn export_chanmap(&self, node: String, path: String) -> Result<u32, PatchbayError> {
+        // channel → alias, from this node's aliased ports. Multiple
+        // ports can share a channel (playback_5 + monitor_5) — first
+        // alias wins, they're the same name after an import anyway.
+        let prefix = format!("{node}:");
+        let mut names = std::collections::BTreeMap::new();
+        for entry in self.inner.presets.aliases() {
+            let Some(port) = entry.target.strip_prefix(&prefix) else {
+                continue;
+            };
+            let Some(channel) = crate::chanmap::channel_of_port(port) else {
+                continue;
+            };
+            names.entry(channel).or_insert(entry.alias);
+        }
+        if names.is_empty() {
+            return Err(PatchbayError::not_found("port aliases on node", &node));
+        }
+        crate::chanmap::write_names(&path, &names).map_err(PatchbayError::Internal)?;
+        Ok(names.len() as u32)
+    }
+
     async fn clock(&self) -> Result<ClockInfo, PatchbayError> {
         // Shells out — keep it off the async executor.
         Ok(tokio::task::spawn_blocking(crate::clock::clock_info)
