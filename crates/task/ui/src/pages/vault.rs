@@ -136,6 +136,10 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     // turnkey `editor::EditorApp`.
     let keymap = use_signal(editor::standard_markdown_keymap);
     let vim = use_signal(VimState::new);
+    // Vim is a physical-keyboard idiom — soft keyboards have no Esc,
+    // so Normal mode on a phone is a trap (letters become motions).
+    // Decide once at mount: coarse pointer → plain editing.
+    let vim = (!use_hook(editor::editor_view::coarse_pointer)).then_some(vim);
     let slash = use_signal(|| None::<SlashState>);
 
     // Cross-file lookup for the decoration pass: rebuild the
@@ -916,7 +920,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                                         state: session.state,
                                         keymap: keymap.read().clone(),
                                         decorations: decorations.clone(),
-                                        vim: Some(vim),
+                                        vim,
                                         slash: Some(slash),
                                         completion: completion.clone(),
                                         on_transaction,
