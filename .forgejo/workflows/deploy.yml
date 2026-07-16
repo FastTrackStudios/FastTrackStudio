@@ -50,25 +50,54 @@ jobs:
       task: ${{ steps.filter.outputs.task }}
       site: ${{ steps.filter.outputs.site }}
     steps:
+      # Local-first, but the local mirror can LAG the forge: merge
+      # commits created forge-side (API merges, web-UI squash/rebase
+      # merges) don't exist in the mirror until someone pulls. After a
+      # local-first clone `origin` IS the mirror, so the old
+      # `git fetch origin $sha` could never retrieve such commits — its
+      # failure was swallowed (`|| true`) and the checkout then died,
+      # failing this job and skipping every deploy. Fix: when the sha is
+      # missing locally, fetch it from the FORGE URL explicitly (with
+      # retries — codeberg transfers intermittently reset). The clone is
+      # full-depth, so a plain fetch brings the sha's complete ancestry:
+      # HEAD~1 and the diff base below always resolve.
       - name: Checkout (local-first, full history for the diff)
         run: |
+          set -eu
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           sha="${GITHUB_SHA:-}"
           if [ -n "$FTS_LOCAL_REPO" ]; then
             git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
             git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
           fi
-          git clone --quiet "$FTS_LOCAL_REPO" . \
-            || git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
-          git fetch --quiet origin "$sha" 2>/dev/null || true
+          git clone --quiet "$FTS_LOCAL_REPO" . || git clone "$url" .
+          if [ -n "$sha" ] && ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "$sha not in the local mirror — fetching from the forge"
+            attempt=1
+            until git fetch --no-tags "$url" "$sha"; do
+              [ "$attempt" -ge 8 ] && { echo "fetch $sha from forge failed"; exit 1; }
+              echo "fetch attempt $attempt failed — retrying in 15s"
+              attempt=$((attempt + 1)); sleep 15
+            done
+          fi
           git checkout --quiet --detach "$sha"
+          echo "checked out $(git rev-parse --short HEAD)"
 
       - name: Detect changed apps
         id: filter
         run: |
           base="${{ github.event.before }}"
-          # First push / force-push / dispatch: fall back to one commit.
-          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null \
-              || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+          # The previous tip can ALSO be a forge-only commit the mirror
+          # never saw — try fetching it from the forge before giving up.
+          if [ -n "$base" ] && [ "$base" != "0000000000000000000000000000000000000000" ] \
+              && ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            git fetch --no-tags "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "$base" 2>/dev/null || true
+          fi
+          # First push / force-push / dispatch / unfetchable base: fall
+          # back to one commit (HEAD~1 always exists — the checkout step
+          # guarantees full ancestry of HEAD).
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+              || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             base="$(git rev-parse HEAD~1)"
           fi
           git diff --name-only "$base" HEAD > /tmp/changed
@@ -91,17 +120,30 @@ jobs:
     needs: changes
     if: needs.changes.outputs.task == 'true'
     steps:
+      # Same forge-fallback as the changes job: the local mirror may not
+      # have forge-side merge commits; `origin` of a local-first clone is
+      # the mirror, so missing shas must be fetched from the forge URL.
       - name: Checkout (local-first)
         run: |
+          set -eu
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           sha="${GITHUB_SHA:-}"
           if [ -n "$FTS_LOCAL_REPO" ]; then
             git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
             git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
           fi
-          git clone --quiet "$FTS_LOCAL_REPO" . \
-            || git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
-          git fetch --quiet origin "$sha" 2>/dev/null || true
+          git clone --quiet "$FTS_LOCAL_REPO" . || git clone "$url" .
+          if [ -n "$sha" ] && ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "$sha not in the local mirror — fetching from the forge"
+            attempt=1
+            until git fetch --no-tags "$url" "$sha"; do
+              [ "$attempt" -ge 8 ] && { echo "fetch $sha from forge failed"; exit 1; }
+              echo "fetch attempt $attempt failed — retrying in 15s"
+              attempt=$((attempt + 1)); sleep 15
+            done
+          fi
           git checkout --quiet --detach "$sha"
+          echo "checked out $(git rev-parse --short HEAD)"
 
       - name: Compute tags
         id: tags
@@ -148,17 +190,30 @@ jobs:
     needs: changes
     if: needs.changes.outputs.site == 'true'
     steps:
+      # Same forge-fallback as the changes job: the local mirror may not
+      # have forge-side merge commits; `origin` of a local-first clone is
+      # the mirror, so missing shas must be fetched from the forge URL.
       - name: Checkout (local-first)
         run: |
+          set -eu
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           sha="${GITHUB_SHA:-}"
           if [ -n "$FTS_LOCAL_REPO" ]; then
             git config --global --add safe.directory "$FTS_LOCAL_REPO" 2>/dev/null || true
             git config --global --add safe.directory "$FTS_LOCAL_REPO/.git" 2>/dev/null || true
           fi
-          git clone --quiet "$FTS_LOCAL_REPO" . \
-            || git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" .
-          git fetch --quiet origin "$sha" 2>/dev/null || true
+          git clone --quiet "$FTS_LOCAL_REPO" . || git clone "$url" .
+          if [ -n "$sha" ] && ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "$sha not in the local mirror — fetching from the forge"
+            attempt=1
+            until git fetch --no-tags "$url" "$sha"; do
+              [ "$attempt" -ge 8 ] && { echo "fetch $sha from forge failed"; exit 1; }
+              echo "fetch attempt $attempt failed — retrying in 15s"
+              attempt=$((attempt + 1)); sleep 15
+            done
+          fi
           git checkout --quiet --detach "$sha"
+          echo "checked out $(git rev-parse --short HEAD)"
 
       - name: Compute tags
         id: tags
