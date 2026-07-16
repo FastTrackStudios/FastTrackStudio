@@ -1000,7 +1000,7 @@ dependencies = [
  "include_dir",
  "iroh",
  "moire",
- "rtrb",
+ "rtrb 0.3.4",
  "sea-orm",
  "thiserror 2.0.18",
  "tokio",
@@ -2171,7 +2171,6 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/Codys-Wright/baseview.git?branch=upgrade_rwh#00e438ff34f7e282776284e75b490a6fc36b16a7"
 dependencies = [
  "cocoa 0.24.1",
  "core-foundation 0.9.4",
@@ -2179,6 +2178,8 @@ dependencies = [
  "nix 0.22.3",
  "objc",
  "raw-window-handle 0.6.2",
+ "rtrb 0.2.3",
+ "softbuffer",
  "uuid 0.8.2",
  "winapi",
  "x11",
@@ -2961,6 +2962,12 @@ name = "c_str_macro"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6d44951c469019e225e7667d799052f67fb8ea358d086878f3582b39f0de5e5"
+
+[[package]]
+name = "cache-padded"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "981520c98f422fcc584dc1a95c334e6953900b9106bc47a9839b81790009eb21"
 
 [[package]]
 name = "cairo-rs"
@@ -3789,7 +3796,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3798,7 +3805,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5218,7 +5225,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -5892,7 +5899,7 @@ dependencies = [
  "facet 0.50.0-rc.5",
  "libspa",
  "pipewire",
- "rtrb",
+ "rtrb 0.3.4",
  "tracing",
 ]
 
@@ -6201,7 +6208,7 @@ dependencies = [
  "libloading 0.8.9",
  "memmap2",
  "moire",
- "rtrb",
+ "rtrb 0.3.4",
  "symphonia",
  "thiserror 2.0.18",
  "tokio",
@@ -10147,14 +10154,18 @@ name = "fts-patchbay"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "clap",
  "dioxus",
  "eyre",
  "patchbay",
  "patchbay-proto",
  "patchbay-ui",
+ "serde_json",
  "tokio",
  "tracing",
  "vox",
+ "vox-core",
+ "vox-websocket",
 ]
 
 [[package]]
@@ -10879,7 +10890,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.1.3",
+ "windows-link 0.2.1",
  "windows-result 0.4.1",
 ]
 
@@ -17637,7 +17648,7 @@ dependencies = [
  "objc",
  "parking_lot",
  "raw-window-handle 0.5.2",
- "rtrb",
+ "rtrb 0.3.4",
  "serde_json",
  "vst3-sys",
  "widestring",
@@ -19403,6 +19414,8 @@ dependencies = [
  "tokio",
  "tracing",
  "vox",
+ "vox-core",
+ "vox-websocket",
 ]
 
 [[package]]
@@ -19426,6 +19439,8 @@ dependencies = [
  "patchbay-proto",
  "tokio",
  "tracing",
+ "vox-core",
+ "vox-websocket",
 ]
 
 [[package]]
@@ -22232,6 +22247,15 @@ dependencies = [
 
 [[package]]
 name = "rtrb"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99e704dd104faf2326a320140f70f0b736d607c1caa1b1748a6c568a79819109"
+dependencies = [
+ "cache-padded",
+]
+
+[[package]]
+name = "rtrb"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ade083ccbb4bf536df69d1f6432cc23deb7acccff86b183f3923a6fd56a1153"
@@ -24624,7 +24648,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "realfft",
- "rtrb",
+ "rtrb 0.3.4",
 ]
 
 [[package]]
@@ -30586,7 +30610,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
