@@ -102,6 +102,16 @@ pub fn apply_graph_event(ev: &GraphEvent) {
     }
 }
 
+/// Replace the graph mirror wholesale (periodic reconcile — the event
+/// stream can drop under burst; the snapshot is always authoritative).
+/// Skips the signal write when nothing changed so it never causes
+/// re-renders on a quiet graph.
+pub fn replace_graph(snap: GraphSnapshot) {
+    if *GRAPH.peek() != snap {
+        *GRAPH.write() = snap;
+    }
+}
+
 /// Fetch everything renderable (initial mount + manual refresh).
 pub async fn refresh_all(handle: &PatchbayHandle) {
     match handle.0.graph().await {

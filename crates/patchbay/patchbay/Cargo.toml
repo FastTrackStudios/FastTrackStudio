@@ -28,3 +28,7 @@ doctest = false
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+vox-websocket.workspace = true
+vox-core.workspace = true
