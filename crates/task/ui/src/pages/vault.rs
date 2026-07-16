@@ -46,6 +46,7 @@ use editor::editor_vim::VimState;
 use fts_ui::lucide_dioxus::{ChevronRight, FileText, Folder};
 use fts_ui::prelude::*;
 use vault_proto::{PageMeta, TagCount};
+use view_knowledge_graph::{GraphEdge, GraphNode, KnowledgeGraphView, WikiGraph};
 
 use crate::document_session::{SaveStatus, use_document_session};
 use crate::shell::mobile::{BottomSheet, MobileActionBar};
@@ -756,8 +757,54 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                 }
             },
         }
-        // FUTURE(56cf3ac7): local graph canvas docks below the links —
-        // 1-hop neighbourhood from backlinks ∪ links, focal = this note.
+        // ── Local graph ───────────────────────────────────
+        // The open note + its 1-hop neighbourhood, assembled
+        // client-side from the data the two sections above already
+        // fetched (backlinks ∪ resolved outgoing links — no extra
+        // RPC), docked at the panel's bottom edge (`mt-auto`).
+        // Clicking a neighbour node opens that note through the same
+        // `on_open` flow as a backlink row.
+        if has_file {
+            div { class: "mt-auto border-t border-border/60 px-3 pb-1 pt-3",
+                Heading { level: HeadingLevel::H3, "Local graph" }
+            }
+            match (&*backlinks.read_unchecked(), &*outlinks.read_unchecked()) {
+                (Some(Ok(bl)), Some(Ok(ol))) => {
+                    let graph = build_local_graph(&current, bl, ol, &page_lookup.read());
+                    let cur = current.clone();
+                    rsx! {
+                        div { class: "mx-2 mb-3 h-64 shrink-0 overflow-hidden rounded-lg border border-border/70",
+                            KnowledgeGraphView {
+                                graph,
+                                // The default sizing model targets big
+                                // whole-vault graphs; a handful of nodes
+                                // in a ~h-64 dock reads better small.
+                                node_scale: 0.3,
+                                spacing: 1.5,
+                                active: Some(current.clone()),
+                                on_node_click: move |id: String| {
+                                    if id == cur {
+                                        return;
+                                    }
+                                    let (_, sha) = page_lookup.peek().get(&id).cloned().unwrap_or_default();
+                                    on_open.call(FileMeta { path: id, sha256: sha });
+                                },
+                            }
+                        }
+                    }
+                }
+                (Some(Err(e)), _) | (_, Some(Err(e))) => rsx! {
+                    div { class: "px-3 py-2 text-sm text-muted-foreground",
+                        "Couldn't build the local graph: {e}"
+                    }
+                },
+                _ => rsx! {
+                    div { class: "mx-2 mb-3",
+                        Skeleton { class: "h-64 w-full rounded-lg" }
+                    }
+                },
+            }
+        }
     };
 
     rsx! {
@@ -1176,6 +1223,82 @@ pub(crate) async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, St
     {
         let _ = client;
         Err("native client not wired yet".to_owned())
+    }
+}
+
+/// The open note + its 1-hop neighbourhood as a [`WikiGraph`], built
+/// client-side from what the right panel already fetched: backlink
+/// sources point AT `current`, resolved outgoing wikilinks point FROM
+/// it. Node ids are vault-relative paths, so a node click maps
+/// straight back onto the panel's `on_open` flow; labels come from the
+/// folder-index title lookup (basename fallback). Unresolved links are
+/// skipped — they have no note to open. Duplicate connections (a page
+/// that both links here and is linked from here) collapse to one edge.
+fn build_local_graph(
+    current: &str,
+    backlinks: &[String],
+    outlinks: &[vault_proto::GraphLink],
+    titles: &HashMap<String, (String, String)>,
+) -> WikiGraph {
+    // Edge list, deduped as unordered pairs (self-links dropped).
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut edges: Vec<(String, String)> = Vec::new();
+    let mut push = |source: String, target: String| {
+        if source == target {
+            return;
+        }
+        let key = if source < target {
+            (source.clone(), target.clone())
+        } else {
+            (target.clone(), source.clone())
+        };
+        if seen.insert(key) {
+            edges.push((source, target));
+        }
+    };
+    for b in backlinks {
+        push(b.clone(), current.to_owned());
+    }
+    for l in outlinks {
+        if let Some(t) = &l.resolved {
+            push(current.to_owned(), t.clone());
+        }
+    }
+
+    // Node set = focal + everything an edge touches; link_count is
+    // the in-graph degree (sizes the focal node as the hub).
+    let mut degree: HashMap<&str, u32> = HashMap::new();
+    for (s, t) in &edges {
+        *degree.entry(s.as_str()).or_default() += 1;
+        *degree.entry(t.as_str()).or_default() += 1;
+    }
+    let mut paths: Vec<&str> = std::iter::once(current)
+        .chain(edges.iter().flat_map(|(s, t)| [s.as_str(), t.as_str()]))
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+    let nodes = paths
+        .into_iter()
+        .map(|p| GraphNode {
+            id: p.to_owned(),
+            label: titles
+                .get(p)
+                .map(|(title, _)| title.clone())
+                .unwrap_or_else(|| basename_of(p).to_owned()),
+            kind: "other".to_owned(),
+            path: p.to_owned(),
+            link_count: degree.get(p).copied().unwrap_or(0),
+            community: 0,
+        })
+        .collect();
+    let edges = edges
+        .into_iter()
+        .map(|(s, t)| GraphEdge::wikilink(s, t, 1.0))
+        .collect();
+    WikiGraph {
+        nodes,
+        edges,
+        communities: Vec::new(),
     }
 }
 
