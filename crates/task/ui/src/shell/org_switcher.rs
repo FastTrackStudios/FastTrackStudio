@@ -11,12 +11,11 @@ use fts_ui::lucide_dioxus::Palette;
 use fts_ui::prelude::*;
 use fts_ui::primitives::{ContentAlign, ContentSide};
 
-use crate::orgs::{OrgMeta, OrgSelection, home_slug};
-use crate::theming::{OrgThemeOverrides, state_from_preset_name};
+use crate::orgs::{OrgMeta, OrgSelection};
+use crate::theming::use_org_theme_switcher_state;
 
 #[component]
 pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
-    let mut org_overrides = use_context::<OrgThemeOverrides>();
     // Data selection + discovered org list.
     let mut selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
@@ -24,50 +23,13 @@ pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
     let mut open = use_signal(|| false);
     let mut theme_open = use_signal(|| false);
 
-    // Theme edits apply to the active org (the selected one, or home
-    // under "All"), keyed by slug in the overrides map.
-    let active_slug = use_memo(move || match &*selection.read() {
-        OrgSelection::One(slug) => slug.clone(),
-        OrgSelection::All => home_slug(&org_list.read()),
-    });
-
     let list = org_list();
     let current = selection();
     let trigger_label = current.label(&list);
 
-    // ── theme picker state (unchanged) ──────────────────────────────
-    let switcher_state = use_signal(|| {
-        let name = org_overrides
-            .map
-            .read()
-            .get(&active_slug())
-            .cloned()
-            .unwrap_or_default();
-        let mode = *org_overrides.mode.read();
-        state_from_preset_name(&name, mode)
-    });
-
-    use_effect(move || {
-        let name = switcher_state.read().preset.clone();
-        let slug = active_slug();
-        // Guard only — peek, so this effect doesn't subscribe to the
-        // map it writes (the `prev != name` check keeps it stable, but
-        // a subscription would still re-run it on every other slug's
-        // theme change).
-        let prev = org_overrides.map.peek().get(&slug).cloned();
-        if prev.as_deref() != Some(name.as_str()) {
-            let mut m = org_overrides.map.write();
-            m.insert(slug, name);
-        }
-    });
-
-    let mut org_mode = org_overrides.mode;
-    use_effect(move || {
-        let mode = switcher_state.read().mode;
-        if *org_mode.peek() != mode {
-            org_mode.set(mode);
-        }
-    });
+    // Theme picker state — the shared active-org ↔ overrides bridge
+    // (see `theming::use_org_theme_switcher_state`).
+    let switcher_state = use_org_theme_switcher_state();
 
     rsx! {
         HStack { class: if compact { "items-center gap-1" } else { "items-center gap-1 w-full" },
@@ -152,6 +114,134 @@ pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
                             "Theme"
                         }
                         ThemeSwitcher { state: switcher_state }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── rail skins ──────────────────────────────────────────────────────
+//
+// The icon rail's foot carries the same jobs as icon-sized pieces,
+// split so the rail controls their order (theme / account / org).
+
+/// Rail theme button: Palette icon opening the per-org theme picker —
+/// the same state bridge as [`OrgSwitcher`]'s Palette popover.
+#[component]
+pub fn RailThemeButton() -> Element {
+    let mut theme_open = use_signal(|| false);
+
+    // The shared active-org ↔ overrides bridge (see
+    // `theming::use_org_theme_switcher_state`).
+    let switcher_state = use_org_theme_switcher_state();
+
+    rsx! {
+        Popover {
+            open: theme_open(),
+            is_modal: false,
+            on_open_change: move |o| theme_open.set(o),
+            PopoverTrigger { class: "inline-flex",
+                button {
+                    r#type: "button",
+                    class: "flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                    title: "Theme",
+                    onclick: move |_| {
+                        let v = !*theme_open.read();
+                        theme_open.set(v);
+                    },
+                    Palette { size: 15 }
+                }
+            }
+            PopoverContent {
+                side: ContentSide::Top,
+                align: ContentAlign::Start,
+                class: "w-[17rem] p-3 max-h-[70vh] overflow-y-auto",
+                div { class: "flex flex-col gap-2",
+                    span { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                        "Theme"
+                    }
+                    ThemeSwitcher { state: switcher_state }
+                }
+            }
+        }
+    }
+}
+
+/// Rail org button: the active org's initials as a chip (the rail's
+/// brand spot), opening the org selection menu.
+#[component]
+pub fn RailOrgButton() -> Element {
+    let mut selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let mut open = use_signal(|| false);
+
+    let list = org_list();
+    let current = selection();
+    let trigger_label = current.label(&list);
+    // Initials chip: "All" for the aggregate view, the org name's
+    // initials otherwise.
+    let chip = match &current {
+        OrgSelection::All => "All".to_string(),
+        OrgSelection::One(slug) => {
+            let name = list
+                .iter()
+                .find(|o| &o.slug == slug)
+                .map(|o| o.name.clone())
+                .unwrap_or_else(|| slug.clone());
+            crate::auth::initials(&name)
+        }
+    };
+
+    rsx! {
+        Dropdown {
+            open: open(),
+            on_open_change: move |o| open.set(o),
+            DropdownTrigger {
+                button {
+                    r#type: "button",
+                    class: "flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-[10px] font-bold uppercase tracking-wide text-primary hover:bg-primary/25",
+                    title: "Organization — {trigger_label}",
+                    "{chip}"
+                }
+            }
+            DropdownContent { side: "top", align: "start", width: "w-64",
+                DropdownLabel { "View organization" }
+                DropdownItem {
+                    value: "__all".to_string(),
+                    index: 0,
+                    on_select: move |_| {
+                        selection.set(OrgSelection::All);
+                        open.set(false);
+                    },
+                    div { class: "flex w-full items-center justify-between gap-2",
+                        span { "All organizations" }
+                        if current == OrgSelection::All {
+                            span { class: "text-xs text-primary", "●" }
+                        }
+                    }
+                }
+                for (idx, org) in list.iter().enumerate() {
+                    {
+                        let slug = org.slug.clone();
+                        let selected = current == OrgSelection::One(slug.clone());
+                        rsx! {
+                            DropdownItem {
+                                key: "{org.slug}",
+                                value: org.slug.clone(),
+                                index: idx + 1,
+                                on_select: move |_| {
+                                    selection.set(OrgSelection::One(slug.clone()));
+                                    open.set(false);
+                                },
+                                div { class: "flex w-full items-center justify-between gap-2",
+                                    span { class: "truncate", "{org.name}" }
+                                    if selected {
+                                        span { class: "text-xs text-primary", "●" }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

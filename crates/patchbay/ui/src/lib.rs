@@ -13,4 +13,4 @@ mod panels;
 mod state;
 
 pub use app::PatchbayApp;
-pub use state::{PatchbayHandle, apply_graph_event, refresh_all};
+pub use state::{PatchbayHandle, apply_graph_event, refresh_all, replace_graph};

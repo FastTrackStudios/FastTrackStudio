@@ -16,8 +16,39 @@ pub const HEADER_H: f64 = 34.0;
 pub const CARD_GAP: f64 = 18.0;
 pub const COL_GAP: f64 = 200.0;
 pub const MARGIN: f64 = 24.0;
+/// Vertical space reserved for the column titles.
+pub const COL_HEADER_H: f64 = 34.0;
 /// Runs shorter than this never group.
 pub const GROUP_MIN: usize = 5;
+
+/// Column semantics: 0 = Inputs (capture devices/sources), 1 =
+/// Applications (streams + app clients), 2 = Outputs (sinks). Driven
+/// by `media.class`, not port shape — an `Audio/Sink` belongs on the
+/// right even though its monitor ports also produce audio.
+pub fn column_of(media_class: &str) -> usize {
+    if media_class.contains("/Sink") {
+        2
+    } else if media_class.contains("/Source") && !media_class.starts_with("Stream") {
+        0
+    } else {
+        1
+    }
+}
+
+/// Column titles per media tab.
+pub fn column_titles(tab: MediaKind) -> [&'static str; 3] {
+    match tab {
+        MediaKind::Midi => ["MIDI Inputs", "Applications", "MIDI Outputs"],
+        MediaKind::Video => ["Cameras / Sources", "Applications", "Outputs"],
+        _ => ["Inputs", "Applications", "Outputs"],
+    }
+}
+
+/// Monitor ports (a sink's loop-out taps) get tagged + dimmed so
+/// they're never mistaken for the sink's real playback inputs.
+pub fn is_monitor(port_name: &str) -> bool {
+    port_name.starts_with("monitor_") || port_name == "monitor"
+}
 
 /// One rendered row inside a card: a single port, or a collapsed group.
 pub struct PortRow {
@@ -28,12 +59,17 @@ pub struct PortRow {
     pub ports: Vec<u32>,
     /// Set when this row is a collapsible group (expansion key).
     pub group_key: Option<String>,
+    /// A sink's monitor tap (rendered dimmed + tagged).
+    pub monitor: bool,
     /// y offset of the row center, relative to the card top.
     pub y: f64,
 }
 
 pub struct CardLayout {
     pub node: PwNode,
+    /// Unique render key — a MIDI device split by direction yields two
+    /// cards from one node (`"<id>-out"` / `"<id>-in"`).
+    pub key: String,
     pub x: f64,
     pub y: f64,
     pub h: f64,
@@ -89,6 +125,7 @@ fn build_rows(
             kind: p.media_kind,
             ports: vec![p.id],
             group_key: None,
+            monitor: is_monitor(&p.name),
             y: 0.0,
         });
     };
@@ -101,6 +138,7 @@ fn build_rows(
         // (split by a named channel) independently expandable.
         let key = format!("{}/{}/{}{}", node.name, dir_str, prefix, first);
         let is_expanded = expanded.get(&key).copied().unwrap_or(false);
+        let monitor = is_monitor(&run[0].name);
         if is_expanded {
             rows.push(PortRow {
                 label: format!("{}{}–{}", prefix, first, last),
@@ -108,6 +146,7 @@ fn build_rows(
                 kind: run[0].media_kind,
                 ports: Vec::new(),
                 group_key: Some(key),
+                monitor,
                 y: 0.0,
             });
             for p in run {
@@ -120,6 +159,7 @@ fn build_rows(
                 kind: run[0].media_kind,
                 ports: run.iter().map(|p| p.id).collect(),
                 group_key: Some(key),
+                monitor,
                 y: 0.0,
             });
         }
@@ -183,15 +223,27 @@ fn build_rows(
     rows
 }
 
+/// Does a port belong on the given media tab? `Other` (control/dsp
+/// oddballs) rides with Audio so nothing is unreachable.
+pub fn kind_on_tab(kind: MediaKind, tab: MediaKind) -> bool {
+    match tab {
+        MediaKind::Audio => matches!(kind, MediaKind::Audio | MediaKind::Other),
+        other => kind == other,
+    }
+}
+
 /// Which nodes/ports survive the current filters.
 pub struct Filters<'a> {
     pub search: &'a str,
-    pub kinds: &'a [MediaKind],
+    /// Active media tab (Audio | Midi | Video).
+    pub tab: MediaKind,
     pub hide_unconnected: bool,
     /// The full alias map (`node.name` and `node.name:port.name` keys):
     /// search matches what the user sees, and aliased ports stay out
     /// of collapsed groups.
     pub aliases: &'a HashMap<String, String>,
+    /// Drop monitor ports entirely (cables through them disappear).
+    pub hide_monitors: bool,
 }
 
 pub fn compute_layout(
@@ -203,9 +255,6 @@ pub fn compute_layout(
     let mut columns: [Vec<CardLayout>; 3] = [Vec::new(), Vec::new(), Vec::new()];
 
     for node in &graph.nodes {
-        if !filters.kinds.contains(&node.media_kind) {
-            continue;
-        }
         if !search.is_empty() {
             let alias = filters.aliases.get(&node.name).map(String::as_str).unwrap_or("");
             let hay = format!("{} {} {}", node.name, node.label, alias).to_lowercase();
@@ -213,15 +262,21 @@ pub fn compute_layout(
                 continue;
             }
         }
+        let keep = |p: &&PwPort| {
+            kind_on_tab(p.media_kind, filters.tab)
+                && !(filters.hide_monitors && is_monitor(&p.name))
+        };
         let mut ins: Vec<&PwPort> = graph
             .ports
             .iter()
             .filter(|p| p.node_id == node.id && p.direction == PortDirection::Input)
+            .filter(keep)
             .collect();
         let mut outs: Vec<&PwPort> = graph
             .ports
             .iter()
             .filter(|p| p.node_id == node.id && p.direction == PortDirection::Output)
+            .filter(keep)
             .collect();
         if ins.is_empty() && outs.is_empty() {
             continue; // metadata/factory nodes — nothing to patch
@@ -243,31 +298,57 @@ pub fn compute_layout(
         ins.sort_by_key(numeric_key);
         outs.sort_by_key(numeric_key);
 
-        let mut rows = build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
-        rows.extend(build_rows(
-            node,
-            &outs,
-            PortDirection::Output,
-            expanded,
-            filters.aliases,
-        ));
-        for (idx, row) in rows.iter_mut().enumerate() {
-            row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
-        }
-        let h = HEADER_H + rows.len() as f64 * ROW_H + 8.0;
-
-        let col = match (outs.is_empty(), ins.is_empty()) {
-            (false, true) => 0,  // pure source
-            (false, false) => 1, // duplex
-            _ => 2,              // pure sink
+        let make_card = |rows: Vec<PortRow>, col: usize, key: String| {
+            let mut rows = rows;
+            for (idx, row) in rows.iter_mut().enumerate() {
+                row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
+            }
+            let h = HEADER_H + rows.len() as f64 * ROW_H + 8.0;
+            CardLayout {
+                node: node.clone(),
+                key,
+                x: MARGIN + col as f64 * (CARD_W + COL_GAP),
+                y: 0.0,
+                h,
+                rows,
+            }
         };
-        columns[col].push(CardLayout {
-            node: node.clone(),
-            x: MARGIN + col as f64 * (CARD_W + COL_GAP),
-            y: 0.0,
-            h,
-            rows,
-        });
+
+        // On the MIDI tab, pure-MIDI nodes (hardware bridges, midir
+        // ports) are DEVICES: split them by direction — their outputs
+        // (keyboards, control surfaces) go left, their inputs (synths,
+        // light guides) right. Applications — anything that also
+        // carries audio, or a stream — stay whole in the middle,
+        // since their MIDI mostly routes within themselves.
+        let is_app = graph
+            .ports
+            .iter()
+            .any(|p| p.node_id == node.id && p.media_kind == MediaKind::Audio)
+            || node.media_class.starts_with("Stream");
+        if filters.tab == MediaKind::Midi && !is_app {
+            if !outs.is_empty() {
+                let rows =
+                    build_rows(node, &outs, PortDirection::Output, expanded, filters.aliases);
+                columns[0].push(make_card(rows, 0, format!("{}-out", node.id)));
+            }
+            if !ins.is_empty() {
+                let rows =
+                    build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
+                columns[2].push(make_card(rows, 2, format!("{}-in", node.id)));
+            }
+        } else {
+            let mut rows =
+                build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
+            rows.extend(build_rows(
+                node,
+                &outs,
+                PortDirection::Output,
+                expanded,
+                filters.aliases,
+            ));
+            let col = column_of(&node.media_class);
+            columns[col].push(make_card(rows, col, node.id.to_string()));
+        }
     }
 
     // Stack each column; stable order by label keeps the layout calm
@@ -276,7 +357,7 @@ pub fn compute_layout(
     let mut height: f64 = 0.0;
     for col in &mut columns {
         col.sort_by(|a, b| a.node.label.to_lowercase().cmp(&b.node.label.to_lowercase()));
-        let mut y = MARGIN;
+        let mut y = MARGIN + COL_HEADER_H;
         for mut card in col.drain(..) {
             card.y = y;
             y += card.h + CARD_GAP;

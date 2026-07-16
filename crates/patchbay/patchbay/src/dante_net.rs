@@ -11,8 +11,11 @@ use inferno_net::protocol::DanteClient;
 use parking_lot::Mutex;
 use patchbay_proto::{DanteChannel, DanteDevice, DanteSubscription, PatchbayError};
 
-const DISCOVER_TIMEOUT: Duration = Duration::from_secs(2);
-const ARC_TIMEOUT: Duration = Duration::from_secs(2);
+// Hardware Dante boxes (consoles, stageboxes) answer mDNS lazily — a
+// 2 s browse reliably finds only the local Inferno device; 8 s finds
+// the whole network (verified against Galaxy32 / Apollo / Yamahas).
+const DISCOVER_TIMEOUT: Duration = Duration::from_secs(8);
+const ARC_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Device-name → ARC endpoint, remembered from the last discovery so
 /// subscribe/unsubscribe don't need a fresh mDNS browse.

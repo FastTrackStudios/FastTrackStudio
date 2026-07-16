@@ -10,9 +10,10 @@
 //! [`stores::DayPlanMutations`] (optimistic write + reconcile-or-
 //! rollback, failures in the Notifications tray).
 //!
-//! Real calendar events are still in-memory (separate follow-up). Drag-
-//! to-move on the grid and drag-a-task-onto-a-block are planned polish
-//! (see `plans/day-by-day-scheduling.md`).
+//! Real calendar events load from + persist to the CalendarEvents
+//! service; blocks support drag-to-move/resize on the grid. Assigning
+//! a task or project into a block happens in the block editor (click
+//! a block → pick from the task/project lists).
 
 use std::collections::HashMap;
 
@@ -22,7 +23,7 @@ use fts_ui::prelude::*;
 use scheduling_proto::{BlockAssignment, BlockCategory, CalEvent};
 use view_calendar::{
     BlockEdit, Calendar, CalendarEvent, CalendarMutation, CalendarState, ColorTag, EventId,
-    TASK_DROP_MIME, TemplateBlock, ViewMode, apply,
+    TemplateBlock, ViewMode, apply,
 };
 
 use crate::orgs::{OrgMeta, OrgSelection};
@@ -193,12 +194,6 @@ pub fn ScheduleView() -> Element {
         editing.set(None);
     };
 
-    // Set just a block's assignment (used by drag-drop), then persist.
-    let assign_block = move |date: NaiveDate, id: String, assign: Option<Assign>| {
-        let Some(slug) = slug() else { return };
-        plan_muts.assign_block(slug, date, id, assign.map(to_assignment));
-    };
-
     // Move/retime a block from a grid drag, possibly across days, then
     // persist the affected day plan(s).
     let move_block = move |orig: NaiveDate, target: NaiveDate, id: String, s: u16, e: u16| {
@@ -212,9 +207,6 @@ pub fn ScheduleView() -> Element {
         plan_muts.reset_day(slug, date, &tpl_list().unwrap_or_default());
         editing.set(None);
     };
-
-    // Tasks to drag onto blocks (cap the strip).
-    let drag_tasks: PickList = tasks.iter().take(12).cloned().collect();
 
     // Allocatable-block usage across the visible range.
     let overview = {
@@ -238,82 +230,48 @@ pub fn ScheduleView() -> Element {
         (alloc_min.max(0) as f64 / 60.0, blocks, assigned)
     };
 
+    // One-line usage context, folded into the calendar toolbar on
+    // wide screens instead of costing the page its own row.
+    let summary = (overview.1 > 0).then(|| {
+        format!(
+            "{:.1}h allocatable · {}/{} assigned",
+            overview.0, overview.2, overview.1
+        )
+    });
+
     rsx! {
-        div { class: "h-[calc(100vh-3.5rem)] lg:h-screen p-4 flex flex-col gap-3 overflow-hidden",
+        // The calendar owns the single toolbar row; the page just
+        // hands it the full viewport (minus the mobile top bar and
+        // bottom tab bar) and surfaces load problems as compact,
+        // dismissable-by-fixing banners above it.
+        div { class: "flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden pb-14 md:pb-0 lg:h-screen",
             match &*templates.read_unchecked() {
                 Some(Err(e)) => rsx! {
-                    div { class: "shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                    div { class: "mx-3 mt-2 shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
                         "Couldn't load day-plan templates: {e}"
                     }
                 },
                 Some(Ok(t)) if t.is_empty() => rsx! {
-                    Text {
-                        variant: TextVariant::Muted,
-                        "No day-plan templates for this org under Projects/Scheduling/templates/ (weekday.md / weekend.md)."
+                    div { class: "mx-3 mt-2 shrink-0 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground",
+                        "No day-plan templates for this org under Projects/Scheduling/templates/ (weekday.md / weekend.md) — showing events only."
                     }
                 },
-                None => rsx! { Text { variant: TextVariant::Muted, "Loading schedule…" } },
                 _ => rsx! {},
             }
             if let Some(e) = plans_err {
-                div { class: "shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                div { class: "mx-3 mt-2 shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
                     "Couldn't load day plans: {e}"
-                }
-            }
-            // Allocatable usage for the visible range.
-            if overview.1 > 0 {
-                Text {
-                    variant: TextVariant::Muted,
-                    "{overview.0:.1}h allocatable across {overview.1} blocks · {overview.2} assigned"
-                }
-            }
-            // Draggable tasks — drop one onto an allocatable block.
-            if !drag_tasks.is_empty() {
-                div { class: "flex shrink-0 items-center gap-2 overflow-x-auto pb-1",
-                    span { class: "shrink-0 text-[0.7rem] uppercase tracking-wider text-muted-foreground",
-                        "Drag onto a block:"
-                    }
-                    for (id, title) in drag_tasks.iter() {
-                        {
-                            let payload = format!("{id}|{title}");
-                            rsx! {
-                                div {
-                                    key: "drag-{id}",
-                                    draggable: true,
-                                    "data-cal-drag": "true",
-                                    class: "shrink-0 cursor-grab rounded-full border border-border bg-card px-2.5 py-1 text-xs text-foreground hover:border-primary active:cursor-grabbing",
-                                    ondragstart: move |e: Event<DragData>| {
-                                        let _ = e.data().data_transfer().set_data(TASK_DROP_MIME, &payload);
-                                    },
-                                    "{title}"
-                                }
-                            }
-                        }
-                    }
                 }
             }
             Calendar {
                 events,
                 template_blocks,
                 initial_view: Some(ViewMode::Week),
+                summary,
                 on_range: move |(s, e)| range.set(Some((s, e))),
                 on_block_click: move |(date, id)| editing.set(Some((date, id))),
                 on_block_edit: move |(orig, target, id, s, e): BlockEdit| {
                     move_block(orig, target, id, s, e);
-                },
-                on_block_drop: move |(date, id, payload): (NaiveDate, String, String)| {
-                    let (rid, title) = payload
-                        .split_once('|')
-                        .unwrap_or(("", payload.as_str()));
-                    assign_block(
-                        date,
-                        id,
-                        Some((
-                            "task".to_string(),
-                            title.to_string(),
-                            (!rid.is_empty()).then(|| rid.to_string()),
-                        )),
-                    );
                 },
                 on_event: move |mu| on_event(mu),
             }
@@ -371,10 +329,13 @@ fn BlockEditor(
 
     rsx! {
         div {
-            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4",
+            // Centered dialog on desktop; bottom sheet on phones
+            // (matches the app's other mobile editors).
+            class: "fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4",
             onclick: move |_| on_cancel.call(()),
             div {
-                class: "flex w-full max-w-sm flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-xl",
+                class: "flex w-full flex-col gap-3 rounded-t-2xl border border-border bg-card p-5 shadow-xl sm:max-w-sm sm:rounded-xl",
+                style: "padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));",
                 onclick: move |e| e.stop_propagation(),
                 Heading { level: HeadingLevel::H3, "Edit block" }
                 label { class: "flex flex-col gap-1 text-xs text-muted-foreground",
@@ -463,7 +424,7 @@ fn BlockEditor(
                         }
                     }
                 }
-                div { class: "mt-1 flex items-center justify-between gap-2",
+                div { class: "mt-1 flex flex-wrap items-center justify-between gap-2",
                     Button {
                         variant: ButtonVariant::Outline,
                         size: ButtonSize::Small,

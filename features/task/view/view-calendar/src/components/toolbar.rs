@@ -19,6 +19,10 @@ pub struct ToolbarProps {
     pub on_today: EventHandler<()>,
     pub on_view_change: EventHandler<ViewMode>,
     pub on_create: EventHandler<()>,
+    /// Optional muted context line (e.g. "9h allocatable · 2/3
+    /// assigned") shown next to the range label on wide screens.
+    #[props(default)]
+    pub summary: Option<String>,
     #[props(default = false)]
     pub readonly: bool,
 }
@@ -32,7 +36,7 @@ pub fn Toolbar(props: ToolbarProps) -> Element {
         // Mobile: two stacked rows (nav + label on top, view switch on
         // its own full-width row for fat tap targets). `sm:` and up
         // collapses back to the original single row.
-        div { class: "flex flex-col gap-2 border-b border-border/40 px-3 py-2 sm:flex-row sm:items-center",
+        div { class: "flex flex-col gap-2 border-b border-border/60 px-3 py-2 sm:flex-row sm:items-center",
             // ── Nav + current range ──────────────────────────────
             div { class: "flex min-w-0 items-center gap-1.5 sm:gap-2",
                 Button {
@@ -55,10 +59,19 @@ pub fn Toolbar(props: ToolbarProps) -> Element {
                         ChevronRight { size: 18 }
                     }
                 }
-                div { class: "flex min-w-0 flex-col px-1 leading-tight sm:px-2",
-                    Heading { level: HeadingLevel::H2, class: "truncate text-base font-medium", "{label}" }
+                // Range + cycle position on one baseline — keeps the
+                // whole toolbar a single row on desktop. The cycle tag
+                // yields first when space runs out; extra context
+                // (allocatable summary) only appears on wide screens.
+                div { class: "flex min-w-0 items-baseline gap-2 px-1 sm:px-2",
+                    // The date range never truncates — the auxiliary
+                    // context (summary) yields first.
+                    Heading { level: HeadingLevel::H2, class: "shrink-0 whitespace-nowrap text-base font-medium", "{label}" }
                     if let Some(cl) = cycle_label.clone() {
-                        span { class: "truncate text-xs text-muted-foreground tabular-nums", "{cl}" }
+                        span { class: "hidden shrink-0 text-xs text-muted-foreground tabular-nums md:inline", "{cl}" }
+                    }
+                    if let Some(sm) = props.summary.clone() {
+                        span { class: "hidden truncate text-xs text-muted-foreground/80 xl:inline", "· {sm}" }
                     }
                 }
                 // Mobile-only icon button at the end of row one; the

@@ -13,18 +13,24 @@
 //! the org theme shows through.
 //!
 //! Both override stores are in-memory `Signal<HashMap<...>>` provided
-//! at `App` root via `use_context_provider`. v1 has no persistence —
-//! a page refresh resets to the org's static default.
+//! at `App` root via `use_context_provider`. The **home-org entry +
+//! mode** persist per-user through `UserPrefs` (`theme_preset` /
+//! `theme_mode` — see [`use_theme_prefs_sync`]): boot seeds the
+//! overrides from prefs once loaded; any picker change routes back
+//! through `PrefsCtx::update` (localStorage + server). Other orgs'
+//! entries stay in-memory.
 //!
 //! FUTURE: persist `ProjectThemeOverrides` to localStorage or to a
-//! per-project setting on the Project entity; persist
-//! `OrgThemeOverrides` per-user.
+//! per-project setting on the Project entity.
 
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
+
+use crate::orgs::{OrgMeta, OrgSelection, home_slug};
+use crate::prefs::PrefsCtx;
 
 /// User-picked preset for an organization. Keyed by `Organization::id`
 /// (which is currently `&'static str` in `crate::data`). Missing entry
@@ -95,6 +101,185 @@ pub fn state_from_preset_name(name: &str, mode: ThemeMode) -> ThemeState {
         }
     }
     state
+}
+
+/// `""`/unknown ⇒ `None` — an unset pref must not force a mode.
+fn mode_from_str(s: &str) -> Option<ThemeMode> {
+    match s {
+        "light" => Some(ThemeMode::Light),
+        "dark" => Some(ThemeMode::Dark),
+        _ => None,
+    }
+}
+
+/// Bridge a `ThemeSwitcher`'s `Signal<ThemeState>` to the active org's
+/// entry in [`OrgThemeOverrides`] — the shared state logic behind the
+/// org switcher's Palette popover, the rail theme button, and the
+/// settings page's Appearance section. Needs the `OrgSelection` /
+/// `Vec<OrgMeta>` / `OrgThemeOverrides` contexts (App root).
+///
+/// Two guarded effect pairs keep switcher and overrides converged
+/// without ping-pong (each writes only on an observed difference, and
+/// peeks what it writes):
+/// - overrides → state: an external write (another picker instance, the
+///   prefs boot seed) rebuilds this switcher's state, so a stale picker
+///   never clobbers it back. Rebuilds only on preset-name/mode change —
+///   local token tweaks (radius/spacing/font) survive.
+/// - state → overrides: the picked preset name lands in `map[slug]`,
+///   the picked mode in the global `mode`.
+#[must_use]
+pub fn use_org_theme_switcher_state() -> Signal<ThemeState> {
+    let mut org_overrides = use_org_theme_overrides();
+    let selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+
+    // Theme edits apply to the active org (the selected one, or home
+    // under "All"), keyed by slug in the overrides map.
+    let active_slug = use_memo(move || match &*selection.read() {
+        OrgSelection::One(slug) => slug.clone(),
+        OrgSelection::All => home_slug(&org_list.read()),
+    });
+
+    let mut switcher_state = use_signal(|| {
+        let name = org_overrides
+            .map
+            .read()
+            .get(&active_slug())
+            .cloned()
+            .unwrap_or_default();
+        let mode = *org_overrides.mode.read();
+        state_from_preset_name(&name, mode)
+    });
+
+    // overrides → state. Ordered before the reverse bridge so on any
+    // simultaneous first run the external value wins.
+    use_effect(move || {
+        let name = org_overrides
+            .map
+            .read()
+            .get(&active_slug())
+            .cloned()
+            .unwrap_or_default();
+        let mode = *org_overrides.mode.read();
+        // Resolve through the preset table so ""/unknown names compare
+        // as "default" — what `state_from_preset_name` yields.
+        let resolved = theme_preset(&name).unwrap_or_else(default_theme_preset).name;
+        let differs = {
+            let state = switcher_state.peek();
+            state.preset != resolved || state.mode != mode
+        };
+        if differs {
+            switcher_state.set(state_from_preset_name(&name, mode));
+        }
+    });
+
+    // state → overrides (preset name).
+    use_effect(move || {
+        let name = switcher_state.read().preset.clone();
+        let slug = active_slug();
+        // Guard only — peek, so this effect doesn't subscribe to the
+        // map it writes (the `prev != name` check keeps it stable, but
+        // a subscription would still re-run it on every other slug's
+        // theme change).
+        let prev = org_overrides.map.peek().get(&slug).cloned();
+        if prev.as_deref() != Some(name.as_str()) {
+            let mut m = org_overrides.map.write();
+            m.insert(slug, name);
+        }
+    });
+
+    // state → overrides (mode — intentionally global, see the struct
+    // doc above).
+    let mut org_mode = org_overrides.mode;
+    use_effect(move || {
+        let mode = switcher_state.read().mode;
+        if *org_mode.peek() != mode {
+            org_mode.set(mode);
+        }
+    });
+
+    switcher_state
+}
+
+/// Persist the home-org theme choice through `UserPrefs`. Call once at
+/// the `App` root, after [`crate::prefs::provide_prefs`].
+///
+/// - **boot → seed**: once prefs carry a real user (post-load) and a
+///   non-empty `theme_preset`/`theme_mode`, the values land in the
+///   overrides (home-org entry + global mode). Runs again on server
+///   reconcile / account switch; guarded writes keep it idempotent.
+/// - **change → save**: any picker writes the overrides (see
+///   [`use_org_theme_switcher_state`]); this effect mirrors the
+///   home-org entry + mode into prefs via `PrefsCtx::update`
+///   (optimistic signal → localStorage → server). It *peeks* prefs
+///   (no ping-pong) and normalizes never-persisted prefs (`""`) to the
+///   app defaults (`"default"` preset, dark mode) so boot noise —
+///   pickers inserting "default" at mount — never upserts a row.
+pub fn use_theme_prefs_sync() {
+    let org_overrides = use_org_theme_overrides();
+    let prefs_ctx = use_context::<PrefsCtx>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let home = use_memo(move || home_slug(&org_list.read()));
+
+    // boot → seed (subscribes prefs + home; peeks the overrides).
+    use_effect(move || {
+        let prefs = prefs_ctx.prefs.read().clone();
+        let slug = home();
+        if prefs.user_id.is_nil() || slug.is_empty() {
+            return; // prefs not loaded / discovery pending
+        }
+        if !prefs.theme_preset.is_empty() {
+            let mut map = org_overrides.map;
+            let prev = map.peek().get(&slug).cloned();
+            if prev.as_deref() != Some(prefs.theme_preset.as_str()) {
+                map.write().insert(slug, prefs.theme_preset.clone());
+            }
+        }
+        if let Some(mode) = mode_from_str(&prefs.theme_mode) {
+            let mut org_mode = org_overrides.mode;
+            if *org_mode.peek() != mode {
+                org_mode.set(mode);
+            }
+        }
+    });
+
+    // change → save (subscribes the overrides + home; peeks prefs).
+    use_effect(move || {
+        let slug = home();
+        let name = org_overrides.map.read().get(&slug).cloned();
+        let mode = *org_overrides.mode.read();
+        let (user_id, prefs_name, prefs_mode) = {
+            let prefs = prefs_ctx.prefs.peek();
+            (
+                prefs.user_id,
+                prefs.theme_preset.clone(),
+                prefs.theme_mode.clone(),
+            )
+        };
+        if user_id.is_nil() || slug.is_empty() {
+            return;
+        }
+        let Some(name) = name else { return };
+        let mode_str = mode.as_str();
+        // "" ⇒ the app defaults, so a never-persisted account isn't
+        // upserted just because a picker mounted.
+        let prefs_name = if prefs_name.is_empty() {
+            "default"
+        } else {
+            prefs_name.as_str()
+        };
+        let prefs_mode = if prefs_mode.is_empty() {
+            ThemeMode::Dark.as_str()
+        } else {
+            prefs_mode.as_str()
+        };
+        if prefs_name != name || prefs_mode != mode_str {
+            prefs_ctx.update(|p| {
+                p.theme_preset = name;
+                p.theme_mode = mode_str.to_string();
+            });
+        }
+    });
 }
 
 /// Wraps `children` in a `ThemeScope` when the project has an override,

@@ -3,10 +3,10 @@
 use dioxus::prelude::*;
 use patchbay_proto::{MediaKind, PortDirection};
 
-use crate::layout::{self, CARD_W, Filters, ROW_H};
+use crate::layout::{self, CARD_W, COL_GAP, Filters, MARGIN, ROW_H, column_titles};
 use crate::state::{
-    self, EXPANDED_GROUPS, GRAPH, HIDE_UNCONNECTED, KIND_FILTER, SEARCH, SELECTED_NODE,
-    SELECTED_OUTPUT,
+    self, EXPANDED_GROUPS, GRAPH, HIDE_MONITORS, HIDE_UNCONNECTED, MEDIA_TAB, PAN, SEARCH,
+    SELECTED_NODE, SELECTED_OUTPUT, ZOOM,
 };
 
 fn kind_color(kind: MediaKind) -> &'static str {
@@ -23,13 +23,13 @@ pub fn GraphCanvas() -> Element {
     let graph = GRAPH.read();
     let aliases = state::ALIASES.read();
     let search = SEARCH.read();
-    let kinds = KIND_FILTER.read();
     let expanded = EXPANDED_GROUPS.read();
     let filters = Filters {
         search: &search,
-        kinds: &kinds,
+        tab: *MEDIA_TAB.read(),
         hide_unconnected: *HIDE_UNCONNECTED.read(),
         aliases: &aliases,
+        hide_monitors: *HIDE_MONITORS.read(),
     };
     let lay = layout::compute_layout(&graph, &filters, &expanded);
 
@@ -65,11 +65,79 @@ pub fn GraphCanvas() -> Element {
     let world_w = lay.width;
     let world_h = lay.height.max(400.0);
 
+    let zoom = *ZOOM.read();
+    let (pan_x, pan_y) = *PAN.read();
+    // Middle-drag pan state: last pointer position in client coords.
+    let mut drag_last = use_signal(|| None::<(f64, f64)>);
+
     rsx! {
         div { class: "canvas-scroll",
+            // Wheel = zoom toward the cursor; middle-drag = pan.
+            onwheel: move |e: Event<WheelData>| {
+                e.prevent_default();
+                let dy = match e.delta() {
+                    dioxus::html::geometry::WheelDelta::Pixels(v) => v.y,
+                    dioxus::html::geometry::WheelDelta::Lines(v) => v.y * 40.0,
+                    dioxus::html::geometry::WheelDelta::Pages(v) => v.y * 400.0,
+                };
+                let old = *ZOOM.peek();
+                let new = (old * (1.0 - dy * 0.0015)).clamp(0.15, 3.0);
+                // Keep the point under the cursor fixed while zooming.
+                let cur = e.element_coordinates();
+                let (px, py) = *PAN.peek();
+                let scale = new / old;
+                *PAN.write() = (
+                    cur.x - (cur.x - px) * scale,
+                    cur.y - (cur.y - py) * scale,
+                );
+                *ZOOM.write() = new;
+            },
+            onmousedown: move |e: Event<MouseData>| {
+                if e.trigger_button() == Some(dioxus::html::input_data::MouseButton::Auxiliary) {
+                    e.prevent_default();
+                    let c = e.client_coordinates();
+                    drag_last.set(Some((c.x, c.y)));
+                }
+            },
+            onmousemove: move |e: Event<MouseData>| {
+                let last = *drag_last.peek();
+                if let Some((lx, ly)) = last {
+                    let c = e.client_coordinates();
+                    let (px, py) = *PAN.peek();
+                    *PAN.write() = (px + (c.x - lx), py + (c.y - ly));
+                    drag_last.set(Some((c.x, c.y)));
+                }
+            },
+            onmouseup: move |_| drag_last.set(None),
+            onmouseleave: move |_| drag_last.set(None),
+            div { class: "canvas-tools",
+                button { class: "chip", title: "zoom out",
+                    onclick: move |_| { let z = *ZOOM.peek(); *ZOOM.write() = (z / 1.25).max(0.15); },
+                    "−"
+                }
+                span { class: "zoom-pct", "{(zoom * 100.0) as i32}%" }
+                button { class: "chip", title: "zoom in",
+                    onclick: move |_| { let z = *ZOOM.peek(); *ZOOM.write() = (z * 1.25).min(3.0); },
+                    "+"
+                }
+                button { class: "chip", title: "reset view",
+                    onclick: move |_| { *ZOOM.write() = 1.0; *PAN.write() = (0.0, 0.0); },
+                    "reset"
+                }
+            }
             div {
                 class: "canvas-world",
-                style: "width:{world_w}px;height:{world_h}px;",
+                style: "width:{world_w}px;height:{world_h}px;\
+                        transform: translate({pan_x}px, {pan_y}px) scale({zoom});\
+                        transform-origin: 0 0;",
+                for (i, title) in column_titles(*MEDIA_TAB.read()).iter().enumerate() {
+                    div {
+                        key: "{title}",
+                        class: "col-header",
+                        style: "left:{MARGIN + i as f64 * (CARD_W + COL_GAP)}px;width:{CARD_W}px;",
+                        "{title}"
+                    }
+                }
                 svg {
                     class: "cable-layer",
                     width: "{world_w}",
@@ -88,7 +156,7 @@ pub fn GraphCanvas() -> Element {
                 }
                 for card in &lay.cards {
                     NodeCard {
-                        key: "{card.node.id}",
+                        key: "{card.key}",
                         node_id: card.node.id,
                         node_name: card.node.name.clone(),
                         node_label: state::node_label(&card.node.name, &card.node.label),
@@ -105,6 +173,7 @@ pub fn GraphCanvas() -> Element {
                                     .contains_key(&format!("{}:{}", card.node.name, r.label)),
                                 label: state::port_label(&card.node.name, &r.label),
                                 raw_name: r.label.clone(),
+                                monitor: r.monitor,
                                 direction: r.direction,
                                 kind: r.kind,
                                 ports: r.ports.clone(),
@@ -128,6 +197,7 @@ struct RowProps {
     label: String,
     raw_name: String,
     aliased: bool,
+    monitor: bool,
     direction: PortDirection,
     kind: MediaKind,
     ports: Vec<u32>,
@@ -179,13 +249,26 @@ fn NodeCard(
                         && row.ports.len() == 1;
                     let side = if row.direction == PortDirection::Input { "row-in" } else { "row-out" };
                     let classes = format!(
-                        "port-row {side}{}{}{}{}",
+                        "port-row {side}{}{}{}{}{}",
                         if is_group { " group" } else { "" },
                         if armed { " armed" } else { "" },
                         if connectable { " connectable" } else { "" },
                         if row.aliased { " aliased" } else { "" },
+                        if row.monitor { " mon" } else { "" },
                     );
-                    let tooltip = if row.aliased { row.raw_name.clone() } else { String::new() };
+                    let tooltip = if is_group {
+                        format!(
+                            "{} ports — click to {}",
+                            row.ports.len().max(1),
+                            if row.expanded { "collapse" } else { "expand" }
+                        )
+                    } else if row.monitor {
+                        format!("{} — monitor tap (a copy of what this sink plays)", row.raw_name)
+                    } else if row.aliased {
+                        row.raw_name.clone()
+                    } else {
+                        String::new()
+                    };
                     let dot = kind_color(row.kind);
                     rsx! {
                         div {

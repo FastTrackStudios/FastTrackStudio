@@ -108,6 +108,16 @@ git-proto = { workspace = true, features = ["vox"] }
 auth-proto = { workspace = true, features = ["vox"] }
 prefs-proto = { workspace = true, features = ["vox"] }
 
+# App-wide keyboard shortcuts (src/shortcuts.rs): trie-based key
+# dispatch (multi-key `g h` sequences, chord parsing, keymap config).
+# Wasm-clean core crate; the DOM wiring lives in shortcuts.rs.
+input.workspace = true
+
+# Fuzzy ranking for the Ctrl+P command palette — same matcher the
+# fts-ui combobox filter uses, kept here so the palette can rank (not
+# just filter) results.
+nucleo-matcher.workspace = true
+
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 fake.workspace = true
@@ -134,6 +144,13 @@ web-sys = { workspace = true, features = [
     "Event",
     "CloseEvent",
     "ErrorEvent",
+    # Document-level shortcut-engine listeners (src/shortcuts.rs):
+    # capture-phase keydown/keyup + the activeElement typing guard.
+    "Document",
+    "EventTarget",
+    "KeyboardEvent",
+    "Element",
+    "HtmlElement",
     "Storage",
     "console",
     "Response",

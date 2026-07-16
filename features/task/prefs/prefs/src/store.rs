@@ -41,6 +41,9 @@ impl Store {
             active.tasks_active = Set(prefs.tasks_active);
             active.tasks_relevant = Set(prefs.tasks_relevant);
             active.location = Set(prefs.location);
+            active.theme_preset = Set(prefs.theme_preset);
+            active.theme_mode = Set(prefs.theme_mode);
+            active.shortcuts_priority = Set(prefs.shortcuts_priority);
             active.update(&self.conn).await?
         } else {
             UserPrefsActive {
@@ -49,6 +52,9 @@ impl Store {
                 tasks_active: Set(prefs.tasks_active),
                 tasks_relevant: Set(prefs.tasks_relevant),
                 location: Set(prefs.location),
+                theme_preset: Set(prefs.theme_preset),
+                theme_mode: Set(prefs.theme_mode),
+                shortcuts_priority: Set(prefs.shortcuts_priority),
             }
             .insert(&self.conn)
             .await?
@@ -77,5 +83,8 @@ fn model_to_prefs(m: UserPrefsModel) -> UserPrefs {
         tasks_active: m.tasks_active,
         tasks_relevant: m.tasks_relevant,
         location: m.location,
+        theme_preset: m.theme_preset,
+        theme_mode: m.theme_mode,
+        shortcuts_priority: m.shortcuts_priority,
     }
 }

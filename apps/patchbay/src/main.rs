@@ -95,7 +95,7 @@ fn main() {
     }
 
     let window = dioxus::desktop::WindowBuilder::new()
-        .with_title("FTS Patchbay")
+        .with_title("Patchbay")
         .with_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(1480.0, 940.0));
     dioxus::LaunchBuilder::new()
         .with_cfg(
@@ -129,9 +129,31 @@ fn App() -> Element {
         patchbay_ui::refresh_all(&handle).await;
 
         while let Ok(Some(ev)) = rx.recv().await {
-            patchbay_ui::apply_graph_event(ev.get());
+            let ev = ev.get();
+            patchbay_ui::apply_graph_event(ev);
+            // A Reset means the engine rebuilt its mirror (PipeWire
+            // restart) — the follow-up flood can overrun any buffer,
+            // so reconcile from the snapshot instead of trusting it.
+            if matches!(ev, GraphEvent::Reset) {
+                patchbay_ui::refresh_all(&handle).await;
+            }
         }
         tracing::warn!("graph event stream ended");
+    });
+
+    // Belt-and-suspenders reconcile: streams can drop under burst
+    // (an app connecting = hundreds of events at once); a periodic
+    // snapshot swap guarantees the UI converges within seconds even
+    // if the event path lost something.
+    use_future(move || async move {
+        let engine = ENGINE.get().expect("engine bootstrapped in main");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            match engine.client.graph().await {
+                Ok(snap) => patchbay_ui::replace_graph(snap),
+                Err(e) => tracing::warn!("graph reconcile failed: {e:?}"),
+            }
+        }
     });
 
     rsx! {

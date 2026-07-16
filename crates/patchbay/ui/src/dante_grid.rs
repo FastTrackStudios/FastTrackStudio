@@ -35,13 +35,20 @@ fn toggle_expanded(axis: &str, dev: &str, now: bool) {
 }
 
 /// Subscription of `rx_dev`'s channel `rx_ch` if any: (tx_device,
-/// tx_channel_name, healthy).
+/// tx_channel_name, healthy). Healthy ARC statuses: 1 (inferno-aoip's
+/// "connected"), 9 (Dante dynamic/unicast), 14 (Dante static/multicast).
 fn sub_of(rx_dev: &DanteDevice, rx_ch: u32) -> Option<(&str, &str, bool)> {
     rx_dev
         .subscriptions
         .iter()
         .find(|s| s.rx_channel == rx_ch)
-        .map(|s| (s.tx_device.as_str(), s.tx_channel.as_str(), s.status == 1))
+        .map(|s| {
+            (
+                s.tx_device.as_str(),
+                s.tx_channel.as_str(),
+                matches!(s.status, 1 | 9 | 14),
+            )
+        })
 }
 
 /// Subscriptions running from `tx_dev` into `rx_dev` (for collapsed

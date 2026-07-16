@@ -54,9 +54,6 @@ pub struct TimeGridViewProps {
     /// Fired with `(date, block_id)` when a plan block is clicked.
     #[props(default)]
     pub on_block_click: Option<EventHandler<(NaiveDate, String)>>,
-    /// Fired with `(date, block_id, payload)` on a drop onto a block.
-    #[props(default)]
-    pub on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
     /// Fired with `(date, block_id, start_min, end_min)` on a block drag.
     #[props(default)]
     pub on_block_edit: Option<EventHandler<crate::types::BlockEdit>>,
@@ -93,8 +90,13 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
 
     rsx! {
         div { class: "flex flex-col h-full w-full",
+            // Fixed header block (day strip + all-day row). Reserves
+            // the same scrollbar gutter as the scrollable body below
+            // (`scrollbar-gutter: stable` on an overflow-hidden box)
+            // so header columns stay pixel-aligned with the grid.
+            div { class: "shrink-0 overflow-y-hidden [scrollbar-gutter:stable]",
             // Day header strip
-            div { class: "grid border-b border-border/40",
+            div { class: "grid border-b border-border/60",
                 style: "grid-template-columns: 56px repeat({props.days.len()}, 1fr);",
                 div {}
                 for date in props.days.iter() {
@@ -144,12 +146,13 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                 on_event: props.on_event,
                 on_open_editor: props.on_open_editor,
             }
+            } // end fixed header block
             // Scrollable grid body. On mount: size the hour rows so
             // the 06:00–24:00 window fills the container, then start
             // scrolled to 06:00 (pre-06:00 stays reachable upward).
             // On resize: re-derive the row height and keep the
             // top-of-viewport hour anchored.
-            div { class: "flex-1 min-h-0 overflow-y-auto",
+            div { class: "flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]",
                 onmounted: move |e: Event<MountedData>| {
                     scroller.set(Some(e.data()));
                     spawn(async move {
@@ -213,7 +216,6 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                             placements: day_overlap_layout(*date, &timed_events),
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
-                            on_block_drop: props.on_block_drop,
                             on_block_edit: props.on_block_edit,
                             is_last: idx == props.days.len() - 1,
                             px_per_hour: pph,
@@ -244,7 +246,7 @@ fn is_effectively_all_day(ev: &CalendarEvent) -> bool {
 #[component]
 fn HourAxis(px_per_hour: i64) -> Element {
     rsx! {
-        div { class: "relative border-r border-border/40 text-[10px] text-muted-foreground",
+        div { class: "relative border-r border-border/60 text-[10px] text-muted-foreground/80 tabular-nums",
             for (h, label) in hour_labels() {
                 div {
                     key: "{h}",
@@ -266,11 +268,6 @@ struct DayColumnProps {
     /// Fired with `(date, block_id)` when a plan block is clicked.
     #[props(default)]
     on_block_click: Option<EventHandler<(NaiveDate, String)>>,
-    /// Fired with `(date, block_id, payload)` when something is dropped
-    /// on a plan block. `payload` is the dropped item's
-    /// [`TASK_DROP_MIME`] data (`"id|title"`).
-    #[props(default)]
-    on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
     /// Fired with `(date, block_id, start_min, end_min)` after a block
     /// is dragged to a new time.
     #[props(default)]
@@ -281,10 +278,6 @@ struct DayColumnProps {
     on_event: EventHandler<CalendarMutation>,
     on_open_editor: EventHandler<EventId>,
 }
-
-/// `DataTransfer` MIME for dragging a task/project onto a plan block.
-/// Payload is `"id|title"`.
-pub const TASK_DROP_MIME: &str = "text/x-task-assign";
 
 /// Sweep state: a `(start_min, current_min)` range the user is
 /// dragging out with the primary mouse button. While `Some` the
@@ -358,7 +351,6 @@ fn DayColumn(props: DayColumnProps) -> Element {
         })
         .collect();
     let on_block_click = props.on_block_click;
-    let on_block_drop = props.on_block_drop;
     let on_block_edit = props.on_block_edit;
     let mut block_ctx = use_block_drag_context();
     // The drag whose *target* day is this column (drives the ghost).
@@ -567,16 +559,24 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     sweep.set(None);
                 },
             }
-            // Sweep ghost block.
+            // Sweep ghost block — carries a live time-range label so
+            // the gesture reads as "creating an event here" while the
+            // user drags it out.
             if let Some(s) = *sweep.read() {
                 {
                     let (a, b) = s.range();
                     let top = minutes_to_px(a, pph);
                     let h = minutes_to_px(b - a, pph).max(2);
+                    let label = format_ghost_label(a, b);
                     rsx! {
                         div {
-                            class: "absolute left-1 right-1 rounded-sm bg-primary/20 border border-primary/60 pointer-events-none",
+                            class: "absolute left-1 right-1 z-10 rounded-sm bg-primary/20 border border-primary/60 pointer-events-none overflow-hidden",
                             style: "top: {top}px; height: {h}px;",
+                            if h >= 16 {
+                                span { class: "block px-1.5 pt-px text-[10px] font-medium leading-4 text-primary truncate",
+                                    "{label}"
+                                }
+                            }
                         }
                     }
                 }
@@ -587,7 +587,6 @@ fn DayColumn(props: DayColumnProps) -> Element {
             for tp in template_placements.iter() {
                 {
                     let block_id = tp.id.clone();
-                    let drop_id = tp.id.clone();
                     let down_id = tp.id.clone();
                     let rs_id = tp.id.clone();
                     let re_id = tp.id.clone();
@@ -595,7 +594,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     let bend = tp.end_min;
                     let draggable_block = on_block_edit.is_some();
                     let being_dragged = dragging_orig_id.as_deref() == Some(tp.id.as_str());
-                    let interactive = on_block_click.is_some() || on_block_drop.is_some() || draggable_block;
+                    let interactive = on_block_click.is_some() || draggable_block;
                     let cursor = if draggable_block {
                         "cursor-grab active:cursor-grabbing hover:brightness-125"
                     } else if on_block_click.is_some() {
@@ -651,22 +650,6 @@ fn DayColumn(props: DayColumnProps) -> Element {
                             onclick: move |_| {
                                 if let Some(cb) = on_block_click {
                                     cb.call((date, block_id.clone()));
-                                }
-                            },
-                            ondragover: move |e: Event<DragData>| {
-                                if on_block_drop.is_some() {
-                                    e.prevent_default();
-                                }
-                            },
-                            ondrop: move |e: Event<DragData>| {
-                                e.prevent_default();
-                                if let Some(cb) = on_block_drop {
-                                    if let Some(p) = e.data().data_transfer().get_data(TASK_DROP_MIME)
-                                    {
-                                        if !p.is_empty() {
-                                            cb.call((date, drop_id.clone(), p));
-                                        }
-                                    }
                                 }
                             },
                             // Resize handles (top / bottom edges).

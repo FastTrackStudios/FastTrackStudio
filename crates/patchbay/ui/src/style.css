@@ -34,8 +34,19 @@
 
 /* ── main split ──────────────────────────────────────────────────── */
 .main-split { display: flex; flex: 1; min-height: 0; }
-.canvas-scroll { flex: 1; overflow: auto; position: relative; }
-.canvas-world { position: relative; }
+.canvas-scroll {
+  flex: 1; overflow: hidden; position: relative;
+  /* pan/zoom viewport: wheel zooms, middle-drag pans */
+  user-select: none;
+}
+.canvas-world { position: relative; will-change: transform; }
+.canvas-tools {
+  position: absolute; right: 12px; top: 10px; z-index: 10;
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(27,31,38,0.9); border: 1px solid #2b323d;
+  border-radius: 8px; padding: 4px 6px;
+}
+.zoom-pct { color: #7a8494; font-size: 11px; min-width: 36px; text-align: center; }
 .cable-layer {
   position: absolute; left: 0; top: 0;
   pointer-events: none; z-index: 3;
@@ -110,6 +121,16 @@
 .inspect-line .label { color: #7a8494; }
 
 .port-row.aliased .port-name { color: #ffd479; font-weight: 600; }
+.port-row.mon { opacity: 0.5; font-style: italic; }
+.port-row.mon .port-name::after { content: " ⤴"; color: #7a8494; }
+
+.col-header {
+  position: absolute; top: 6px; z-index: 2;
+  text-align: center; font-size: 12px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: #7a8494; padding: 4px 0;
+  border-bottom: 1px solid #262c35;
+}
 
 .alias-input {
   flex: 1; min-width: 0; width: 100%;

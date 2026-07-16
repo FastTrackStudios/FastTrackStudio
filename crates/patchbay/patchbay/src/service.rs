@@ -48,7 +48,11 @@ impl PatchbayBackend {
         let store = Arc::new(RwLock::new(GraphStore::default()));
         let (events_tx, events_rx) = mpsc::channel::<GraphEvent>();
         let engine = engine::spawn(store.clone(), events_tx);
-        let events_hub = architect::PubSub::sliding(256);
+        // Big window: a single app connecting is a burst of hundreds of
+        // port events, a PipeWire reconnect is ~2000 — a small ring
+        // drops the middle of the burst and clients silently lose
+        // nodes (REAPER "not showing up" was exactly this).
+        let events_hub = architect::PubSub::sliding(16_384);
         let pump = events_hub.clone();
         std::thread::Builder::new()
             .name("patchbay-events".into())

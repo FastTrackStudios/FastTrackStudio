@@ -2,7 +2,7 @@
 //! view mode + editor open state), provides drag context, dispatches
 //! `CalendarMutation`s upward, and swaps in the right view.
 
-use chrono::{Days, Months, NaiveDate, TimeZone};
+use chrono::{Days, Months, NaiveDate};
 use dioxus::prelude::*;
 
 use crate::recurrence::expand_all;
@@ -35,10 +35,6 @@ pub struct CalendarProps {
     /// the consumer can edit that date's plan.
     #[props(default)]
     pub on_block_click: Option<EventHandler<(NaiveDate, String)>>,
-    /// Fired with `(date, block_id, payload)` when a task/project is
-    /// dropped onto a plan block (`payload` = `"id|title"`).
-    #[props(default)]
-    pub on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
     /// Fired with `(date, block_id, start_min, end_min)` when a plan
     /// block is dragged to a new time on the grid.
     #[props(default)]
@@ -47,6 +43,9 @@ pub struct CalendarProps {
     /// view range changes, so the consumer can load that range's plans.
     #[props(default)]
     pub on_range: Option<EventHandler<(NaiveDate, NaiveDate)>>,
+    /// Optional muted context line for the toolbar (wide screens).
+    #[props(default)]
+    pub summary: Option<String>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -129,7 +128,10 @@ pub fn Calendar(props: CalendarProps) -> Element {
                     "3" => view.set(ViewMode::Month),
                     "n" => {
                         if !props.readonly {
-                            let start = chrono::Utc::now();
+                            // Create on the *visible* anchor date (not
+                            // today) so the new event lands in view.
+                            let start = day_start_utc(*anchor.peek())
+                                + chrono::Duration::hours(9);
                             let end = start + chrono::Duration::hours(1);
                             let event = CalendarEvent::new("New event", start, end);
                             let id = event.id;
@@ -208,15 +210,16 @@ pub fn Calendar(props: CalendarProps) -> Element {
                 on_today: move |()| anchor.set(today),
                 on_view_change: move |v: ViewMode| view.set(v),
                 on_create: move |()| {
-                    let start = chrono::Utc::now().date_naive().and_hms_opt(9, 0, 0)
-                        .expect("9 am") ;
-                    let start = chrono::Utc.from_utc_datetime(&start);
+                    // Anchor date, not today — "+ New event" while
+                    // browsing another week must create *there*.
+                    let start = day_start_utc(*anchor.peek()) + chrono::Duration::hours(9);
                     let end = start + chrono::Duration::hours(1);
                     let event = CalendarEvent::new("New event", start, end);
                     let id = event.id;
                     on_event.call(CalendarMutation::Create { event });
                     editing.set(Some(id));
                 },
+                summary: props.summary.clone(),
                 readonly: props.readonly,
             }
             div { class: "flex-1 min-h-0",
@@ -240,7 +243,6 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             events: events_for_view,
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
-                            on_block_drop: props.on_block_drop,
                             on_block_edit: props.on_block_edit,
                             readonly: props.readonly,
                             on_event,
@@ -253,7 +255,6 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             events: events_for_view,
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
-                            on_block_drop: props.on_block_drop,
                             on_block_edit: props.on_block_edit,
                             readonly: props.readonly,
                             on_event,
