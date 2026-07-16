@@ -128,6 +128,7 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                     ViewMode::List => rsx! {
                         TaskList {
                             tasks: props.tasks.clone(),
+                            on_event: props.on_event,
                             on_toggle: move |id: Uuid| {
                                 // Domain click cycle: open → in-progress
                                 // (timer starts) → done; a subtask under a
