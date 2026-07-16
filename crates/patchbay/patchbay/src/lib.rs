@@ -12,10 +12,12 @@
 pub mod chanmap;
 pub mod clock;
 pub mod dante;
+mod dante_net;
 mod engine;
 mod presets;
 mod service;
 mod store;
+mod units;
 
 pub use patchbay_proto as proto;
 pub use service::PatchbayBackend;

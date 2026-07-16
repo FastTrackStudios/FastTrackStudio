@@ -35,18 +35,29 @@ pub(crate) enum Command {
     Terminate,
 }
 
+/// Live command sender slot: each (re)connection installs a fresh
+/// `pipewire::channel` sender here; `None` while disconnected. The
+/// channel type can't outlive a connection (its receiver attaches to
+/// that connection's main loop), so reconnects swap it out.
+#[cfg(target_os = "linux")]
+type CmdSlot = Arc<parking_lot::Mutex<Option<pipewire::channel::Sender<Command>>>>;
+
 pub(crate) struct EngineHandle {
     #[cfg(target_os = "linux")]
-    cmd_tx: pipewire::channel::Sender<Command>,
+    cmd_slot: CmdSlot,
 }
 
 impl EngineHandle {
     pub fn send(&self, cmd: Command) -> Result<(), String> {
         #[cfg(target_os = "linux")]
         {
-            self.cmd_tx
-                .send(cmd)
-                .map_err(|_| "pipewire engine thread is gone".to_string())
+            let slot = self.cmd_slot.lock();
+            match slot.as_ref() {
+                Some(tx) => tx
+                    .send(cmd)
+                    .map_err(|_| "pipewire engine thread is gone".to_string()),
+                None => Err("pipewire is down (engine reconnecting)".to_string()),
+            }
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -56,25 +67,44 @@ impl EngineHandle {
     }
 }
 
-/// Spawn the engine thread. Returns immediately; if the PipeWire
-/// connection fails the thread logs and exits, and later commands
-/// error with "engine thread is gone".
+/// Spawn the engine thread. It (re)connects forever: when PipeWire
+/// dies the graph mirror is cleared (`GraphEvent::Reset`) and the
+/// thread retries every few seconds — restart PipeWire from the
+/// services panel and the graph re-mirrors by itself.
 pub(crate) fn spawn(
     store: Arc<RwLock<GraphStore>>,
     events: Sender<GraphEvent>,
 ) -> EngineHandle {
     #[cfg(target_os = "linux")]
     {
-        let (cmd_tx, cmd_rx) = pipewire::channel::channel::<Command>();
+        let cmd_slot: CmdSlot = Arc::new(parking_lot::Mutex::new(None));
+        let slot = cmd_slot.clone();
         std::thread::Builder::new()
             .name("patchbay-pw".into())
             .spawn(move || {
-                if let Err(e) = linux::thread_main(store, events, cmd_rx) {
-                    tracing::error!("pipewire engine thread died: {e}");
+                loop {
+                    // Fresh mirror for every attempt — a restarted
+                    // daemon re-announces everything with new ids.
+                    {
+                        let mut s = store.write();
+                        let empty = s.nodes.is_empty() && s.ports.is_empty();
+                        s.nodes.clear();
+                        s.ports.clear();
+                        s.links.clear();
+                        if !empty && events.send(GraphEvent::Reset).is_err() {
+                            return;
+                        }
+                    }
+                    match linux::run_connection(&store, &events, &slot) {
+                        Ok(()) => tracing::warn!("pipewire connection closed; reconnecting"),
+                        Err(e) => tracing::warn!("pipewire connect failed: {e}; retrying"),
+                    }
+                    *slot.lock() = None;
+                    std::thread::sleep(std::time::Duration::from_secs(3));
                 }
             })
             .expect("spawn patchbay-pw thread");
-        EngineHandle { cmd_tx }
+        EngineHandle { cmd_slot }
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -110,15 +140,40 @@ mod linux {
         _listener: LinkListener,
     }
 
-    pub(super) fn thread_main(
-        store: Arc<RwLock<GraphStore>>,
-        events: Sender<GraphEvent>,
-        cmd_rx: pipewire::channel::Receiver<Command>,
+    /// One connection lifetime: connect, mirror, serve commands until
+    /// the daemon goes away (core error quits the loop). Ok(()) =
+    /// connection dropped after being up; Err = couldn't connect.
+    pub(super) fn run_connection(
+        store: &Arc<RwLock<GraphStore>>,
+        events: &Sender<GraphEvent>,
+        slot: &super::CmdSlot,
     ) -> Result<(), pipewire::Error> {
+        let store = store.clone();
+        let events = events.clone();
+        let (cmd_tx, cmd_rx) = pipewire::channel::channel::<Command>();
+
         let mainloop = MainLoopRc::new(None)?;
         let context = ContextRc::new(&mainloop, None)?;
         let core = context.connect_rc(None)?;
         let registry = core.get_registry_rc()?;
+
+        // Commands become sendable only once the connection is up.
+        *slot.lock() = Some(cmd_tx);
+
+        // Core error on id 0 = the connection itself died (daemon
+        // stopped/restarted) → leave the loop so the outer reconnect
+        // loop takes over.
+        let _core_listener = {
+            let mainloop = mainloop.clone();
+            core.add_listener_local()
+                .error(move |id, _seq, res, message| {
+                    if id == 0 {
+                        tracing::warn!("pipewire core error ({res}): {message}");
+                        mainloop.quit();
+                    }
+                })
+                .register()
+        };
 
         let link_proxies: Rc<RefCell<HashMap<u32, LinkProxy>>> =
             Rc::new(RefCell::new(HashMap::new()));

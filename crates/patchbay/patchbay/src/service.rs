@@ -9,9 +9,9 @@ use patchbay_proto::services::patchbay_service::{
     PatchbayServiceStreamSource, patchbay_service_stream_service_descriptor, stream_serve,
 };
 use patchbay_proto::{
-    AliasEntry, ApplyReport, ClockInfo, DanteStatus, GraphEvent, GraphSnapshot, PatchbayError,
-    PatchbayService, PresetLink, RoutingPreset, patchbay_service_service_descriptor,
-    serve_patchbay_service,
+    AliasEntry, ApplyReport, ClockInfo, DanteDevice, DanteStatus, GraphEvent, GraphSnapshot,
+    PatchbayError, PatchbayService, PresetLink, RoutingPreset, ServiceAction, ServiceStatus,
+    patchbay_service_service_descriptor, serve_patchbay_service,
 };
 
 use crate::engine::{self, Command, EngineHandle};
@@ -31,6 +31,7 @@ struct Inner {
     engine: EngineHandle,
     events_hub: architect::PubSub<GraphEvent>,
     presets: PresetStore,
+    dante: crate::dante_net::DanteEndpoints,
 }
 
 impl Default for PatchbayBackend {
@@ -64,6 +65,7 @@ impl PatchbayBackend {
                 engine,
                 events_hub,
                 presets: PresetStore::open(),
+                dante: crate::dante_net::DanteEndpoints::default(),
             }),
         }
     }
@@ -340,5 +342,46 @@ impl PatchbayService for PatchbayBackend {
             .await
             .map_err(|e| PatchbayError::Internal(e.to_string()))?
             .map_err(PatchbayError::Internal)
+    }
+
+    async fn services(&self) -> Result<Vec<ServiceStatus>, PatchbayError> {
+        Ok(tokio::task::spawn_blocking(crate::units::status_all)
+            .await
+            .map_err(|e| PatchbayError::Internal(e.to_string()))?)
+    }
+
+    async fn service_action(
+        &self,
+        unit: String,
+        action: ServiceAction,
+    ) -> Result<(), PatchbayError> {
+        tokio::task::spawn_blocking(move || crate::units::action(&unit, action))
+            .await
+            .map_err(|e| PatchbayError::Internal(e.to_string()))?
+    }
+
+    async fn dante_network(&self) -> Result<Vec<DanteDevice>, PatchbayError> {
+        self.inner.dante.network().await
+    }
+
+    async fn dante_subscribe(
+        &self,
+        rx_device: String,
+        rx_channel: u32,
+        tx_device: String,
+        tx_channel: String,
+    ) -> Result<(), PatchbayError> {
+        self.inner
+            .dante
+            .subscribe(&rx_device, rx_channel, &tx_device, &tx_channel)
+            .await
+    }
+
+    async fn dante_unsubscribe(
+        &self,
+        rx_device: String,
+        rx_channel: u32,
+    ) -> Result<(), PatchbayError> {
+        self.inner.dante.unsubscribe(&rx_device, rx_channel).await
     }
 }

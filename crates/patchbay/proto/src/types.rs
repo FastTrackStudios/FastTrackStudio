@@ -78,6 +78,10 @@ pub struct GraphSnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 #[repr(u8)]
 pub enum GraphEvent {
+    /// The engine's PipeWire connection dropped (daemon restart) —
+    /// clients must clear their mirror; the reconnect re-announces
+    /// everything with fresh ids.
+    Reset,
     NodeAdded(PwNode),
     NodeRemoved { id: u32 },
     PortAdded(PwPort),
@@ -160,6 +164,66 @@ pub struct UnitStatus {
     pub unit: String,
     /// `active` / `inactive` / `failed` / `activating` / …
     pub state: String,
+}
+
+/// One managed audio-stack service (systemd user unit).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct ServiceStatus {
+    /// Unit name (`pipewire.service`, `statime-inferno.service`, …).
+    pub unit: String,
+    /// Short display label ("PipeWire", "PTP clock (statime)").
+    pub label: String,
+    /// `ActiveState`: active / inactive / failed / activating / …
+    pub state: String,
+    /// `SubState`: running / dead / failed / start-pre / …
+    pub sub_state: String,
+    /// Whether the unit exists on this host at all.
+    pub present: bool,
+}
+
+/// Action on a managed service.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
+pub enum ServiceAction {
+    Start,
+    Stop,
+    Restart,
+}
+
+// ─── Dante network (ARC control via inferno-net) ────────────────────────
+
+/// A channel on a Dante device.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct DanteChannel {
+    /// 1-based channel number.
+    pub number: u32,
+    pub name: String,
+}
+
+/// One RX channel's subscription state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct DanteSubscription {
+    /// RX channel number on the owning device.
+    pub rx_channel: u32,
+    /// Subscribed-to TX channel name (empty = unsubscribed).
+    pub tx_channel: String,
+    /// Subscribed-to TX device name.
+    pub tx_device: String,
+    /// Raw ARC subscription status (`1` = healthy).
+    pub status: u32,
+}
+
+/// A Dante device with its channel lists + live subscriptions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct DanteDevice {
+    pub name: String,
+    pub ip: String,
+    pub arc_port: u16,
+    pub tx: Vec<DanteChannel>,
+    pub rx: Vec<DanteChannel>,
+    pub subscriptions: Vec<DanteSubscription>,
+    /// Channel query failed (device visible on mDNS but ARC timed out).
+    pub unreachable: bool,
 }
 
 /// State of the `dante.target` AoIP stack on this host.

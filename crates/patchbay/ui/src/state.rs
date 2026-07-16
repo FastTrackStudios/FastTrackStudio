@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 use patchbay_proto::{
-    ApplyReport, ClockInfo, DanteStatus, GraphEvent, GraphSnapshot, MediaKind,
-    PatchbayServiceClient, RoutingPreset,
+    ApplyReport, ClockInfo, DanteDevice, DanteStatus, GraphEvent, GraphSnapshot, MediaKind,
+    PatchbayServiceClient, RoutingPreset, ServiceStatus,
 };
 
 /// The service client, provided via context by the shell.
@@ -26,6 +26,20 @@ pub static ALIASES: GlobalSignal<HashMap<String, String>> = Signal::global(HashM
 pub static PRESETS: GlobalSignal<Vec<RoutingPreset>> = Signal::global(Vec::new);
 pub static CLOCK: GlobalSignal<ClockInfo> = Signal::global(ClockInfo::default);
 pub static DANTE: GlobalSignal<DanteStatus> = Signal::global(DanteStatus::default);
+pub static SERVICES: GlobalSignal<Vec<ServiceStatus>> = Signal::global(Vec::new);
+pub static DANTE_DEVICES: GlobalSignal<Vec<DanteDevice>> = Signal::global(Vec::new);
+/// Dante grid fetch in flight.
+pub static DANTE_LOADING: GlobalSignal<bool> = Signal::global(|| false);
+/// Last dante grid error (empty = fine).
+pub static DANTE_ERROR: GlobalSignal<String> = Signal::global(String::new);
+
+/// Which main view is showing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    Patchbay,
+    Dante,
+}
+pub static VIEW: GlobalSignal<View> = Signal::global(|| View::Patchbay);
 
 // ─── View state ─────────────────────────────────────────────────────────
 
@@ -58,6 +72,7 @@ pub static LAST_REPORT: GlobalSignal<Option<(String, ApplyReport)>> = Signal::gl
 pub fn apply_graph_event(ev: &GraphEvent) {
     let mut g = GRAPH.write();
     match ev {
+        GraphEvent::Reset => *g = GraphSnapshot::default(),
         GraphEvent::NodeAdded(n) => {
             g.nodes.retain(|x| x.id != n.id);
             g.nodes.push(n.clone());
@@ -107,6 +122,22 @@ pub async fn refresh_meta(handle: &PatchbayHandle) {
     if let Ok(dante) = handle.0.dante_status().await {
         *DANTE.write() = dante;
     }
+    if let Ok(services) = handle.0.services().await {
+        *SERVICES.write() = services;
+    }
+}
+
+/// Re-scan the Dante network (mDNS + per-device ARC — seconds).
+pub async fn refresh_dante(handle: &PatchbayHandle) {
+    *DANTE_LOADING.write() = true;
+    match handle.0.dante_network().await {
+        Ok(devices) => {
+            *DANTE_DEVICES.write() = devices;
+            DANTE_ERROR.write().clear();
+        }
+        Err(e) => *DANTE_ERROR.write() = format!("dante scan failed: {e}"),
+    }
+    *DANTE_LOADING.write() = false;
 }
 
 /// Connect-or-disconnect between an output and input port (helvum's
@@ -127,6 +158,14 @@ pub fn toggle_link(handle: PatchbayHandle, output_port: u32, input_port: u32) {
             tracing::warn!("link toggle failed: {e:?}");
         }
     });
+}
+
+/// Portable async sleep (tokio on native, gloo on wasm).
+pub(crate) async fn sleep_secs(secs: u64) {
+    #[cfg(not(target_arch = "wasm32"))]
+    tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+    #[cfg(target_arch = "wasm32")]
+    gloo_timers::future::TimeoutFuture::new((secs * 1000) as u32).await;
 }
 
 /// Display name for a node (alias wins).

@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use vox::Tx;
 
 use crate::types::{
-    AliasEntry, ApplyReport, ClockInfo, DanteStatus, GraphEvent, GraphSnapshot, RoutingPreset,
+    AliasEntry, ApplyReport, ClockInfo, DanteDevice, DanteStatus, GraphEvent, GraphSnapshot,
+    RoutingPreset, ServiceAction, ServiceStatus,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -127,6 +128,44 @@ pub mod patchbay_service {
 
         /// Bring `dante.target` up or down (systemd user unit).
         async fn set_dante(&self, on: bool) -> Result<(), PatchbayError>;
+
+        // ── Managed services (rig health) ────────────────────────────
+
+        /// Status of every managed audio-stack unit (PipeWire,
+        /// WirePlumber, statime, Inferno nodes, routing links, …).
+        async fn services(&self) -> Result<Vec<ServiceStatus>, PatchbayError>;
+
+        /// Start/stop/restart one managed unit. Only whitelisted units
+        /// are accepted — this is not a general systemctl proxy.
+        async fn service_action(
+            &self,
+            unit: String,
+            action: ServiceAction,
+        ) -> Result<(), PatchbayError>;
+
+        // ── Dante network (ARC routing grid) ─────────────────────────
+
+        /// Discover Dante devices (mDNS) and fetch each one's TX/RX
+        /// channel lists + live subscriptions over ARC. Slowish
+        /// (seconds — network round-trips); call on demand.
+        async fn dante_network(&self) -> Result<Vec<DanteDevice>, PatchbayError>;
+
+        /// Subscribe `rx_device`'s channel `rx_channel` to
+        /// `tx_device`'s channel named `tx_channel`.
+        async fn dante_subscribe(
+            &self,
+            rx_device: String,
+            rx_channel: u32,
+            tx_device: String,
+            tx_channel: String,
+        ) -> Result<(), PatchbayError>;
+
+        /// Clear the subscription on `rx_device`'s channel `rx_channel`.
+        async fn dante_unsubscribe(
+            &self,
+            rx_device: String,
+            rx_channel: u32,
+        ) -> Result<(), PatchbayError>;
     }
 }
 

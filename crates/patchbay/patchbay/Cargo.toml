@@ -18,6 +18,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 dirs = "6"
+inferno-net.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 pipewire = "0.10"

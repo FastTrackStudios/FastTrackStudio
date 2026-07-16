@@ -7,6 +7,7 @@
 
 mod app;
 mod canvas;
+mod dante_grid;
 mod layout;
 mod panels;
 mod state;

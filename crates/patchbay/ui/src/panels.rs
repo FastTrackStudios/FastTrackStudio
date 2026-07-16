@@ -142,8 +142,95 @@ pub fn StatusBar() -> Element {
 pub fn SidePanel() -> Element {
     rsx! {
         div { class: "side-panel",
+            ServicesPanel {}
             PresetsPanel {}
             Inspector {}
+        }
+    }
+}
+
+/// Rig health: the managed systemd units (PipeWire, WirePlumber, PTP
+/// clock, Inferno nodes, routing links…) with restart controls. When
+/// PipeWire itself is down the engine reconnects on its own once it's
+/// restarted from here.
+#[component]
+fn ServicesPanel() -> Element {
+    let handle = state::use_patchbay();
+
+    // Poll every 5 s so a crashed unit shows up without user action.
+    use_future({
+        let handle = handle.clone();
+        move || {
+            let handle = handle.clone();
+            async move {
+                loop {
+                    if let Ok(services) = handle.0.services().await {
+                        *state::SERVICES.write() = services;
+                    }
+                    state::sleep_secs(5).await;
+                }
+            }
+        }
+    });
+
+    let services = state::SERVICES.read().clone();
+    let act = |unit: String, action: patchbay_proto::ServiceAction| {
+        let handle = handle.clone();
+        move |_| {
+            let handle = handle.clone();
+            let unit = unit.clone();
+            spawn(async move {
+                if let Err(e) = handle.0.service_action(unit.clone(), action).await {
+                    tracing::warn!("service {action:?} {unit} failed: {e}");
+                }
+                if let Ok(services) = handle.0.services().await {
+                    *state::SERVICES.write() = services;
+                }
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "panel-section",
+            h3 { "Services" }
+            for svc in services {
+                {
+                    let dot = match (svc.present, svc.state.as_str()) {
+                        (false, _) => "svc-dot missing",
+                        (_, "active") => "svc-dot on",
+                        (_, "failed") => "svc-dot failed",
+                        (_, "activating" | "deactivating" | "reloading") => "svc-dot busy",
+                        _ => "svc-dot",
+                    };
+                    let running = svc.state == "active";
+                    let unit = svc.unit.clone();
+                    rsx! {
+                        div { class: "service-row", key: "{svc.unit}",
+                            span { class: "{dot}" }
+                            span { class: "service-name", title: "{svc.unit} — {svc.state}/{svc.sub_state}",
+                                "{svc.label}"
+                            }
+                            if svc.present {
+                                if running {
+                                    button { class: "chip", title: "restart {svc.unit}",
+                                        onclick: act(unit.clone(), patchbay_proto::ServiceAction::Restart),
+                                        "↻"
+                                    }
+                                    button { class: "chip danger", title: "stop {svc.unit}",
+                                        onclick: act(unit, patchbay_proto::ServiceAction::Stop),
+                                        "■"
+                                    }
+                                } else {
+                                    button { class: "chip", title: "start {svc.unit}",
+                                        onclick: act(unit, patchbay_proto::ServiceAction::Start),
+                                        "▶"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
