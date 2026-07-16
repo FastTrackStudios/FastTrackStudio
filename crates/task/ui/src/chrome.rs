@@ -37,6 +37,75 @@ pub struct FleetingOpen(pub Signal<bool>);
 /// Install the chrome contexts. Call once in the app shell.
 pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
+    use_context_provider(|| StatusBarInfo(Signal::new(None)));
+}
+
+/// What the open document contributes to the bottom status bar —
+/// written by the vault page (an effect keeps it current), cleared on
+/// unmount. `None` = no document context (the bar shows only the
+/// app-level segments).
+#[derive(Clone, PartialEq)]
+pub struct DocStatus {
+    /// Vault-relative path of the open file.
+    pub file: String,
+    /// Unsaved changes?
+    pub dirty: bool,
+    /// Save-cycle message ("Saving…", "Saved", error) — empty = idle.
+    pub save: String,
+    /// Collab session state ("live" / "connecting…"), when attached.
+    pub collab: Option<String>,
+    /// Vim mode label ("NORMAL", "INSERT", …) when vim is active.
+    pub vim: Option<String>,
+    /// Explicit-save hook — renders a Save affordance in the bar.
+    pub on_save: Option<Callback<()>>,
+}
+
+/// Status-bar context: `Signal<Option<DocStatus>>`, provided app-wide.
+#[derive(Clone, Copy)]
+pub struct StatusBarInfo(pub Signal<Option<DocStatus>>);
+
+/// IDE-style bottom status line (Zed-shaped): document segments on the
+/// left (file · dirty dot · save state · collab · vim mode), app-level
+/// state on the right (connection badge). Desktop-only — mobile keeps
+/// its action bar + tab bar.
+#[component]
+pub fn StatusBar() -> Element {
+    let info = use_context::<StatusBarInfo>().0;
+    let doc = info.read().clone();
+    rsx! {
+        div { class: "z-20 hidden h-6 shrink-0 items-center gap-3 border-t border-border bg-card/60 px-3 text-[11px] text-muted-foreground md:flex",
+            if let Some(d) = doc {
+                if let Some(vim) = d.vim {
+                    span { class: "rounded bg-accent px-1.5 font-semibold uppercase tracking-wide text-foreground",
+                        "{vim}"
+                    }
+                }
+                span { class: "min-w-0 truncate", "{d.file}" }
+                if d.dirty {
+                    span { class: "size-1.5 shrink-0 rounded-full bg-primary", title: "Unsaved changes" }
+                }
+                if !d.save.is_empty() {
+                    span { class: "shrink-0", "{d.save}" }
+                }
+                if let Some(save) = d.on_save {
+                    if d.dirty {
+                        button {
+                            r#type: "button",
+                            class: "shrink-0 rounded px-1 text-foreground hover:bg-accent/50",
+                            onclick: move |_| save.call(()),
+                            "Save"
+                        }
+                    }
+                }
+                if let Some(c) = d.collab {
+                    span { class: "shrink-0", "Collab: {c}" }
+                }
+            }
+            div { class: "ml-auto flex items-center gap-3",
+                crate::presence::ConnectionBadge {}
+            }
+        }
+    }
 }
 
 /// Shell panel state: the vault explorer (left) — toggled from the

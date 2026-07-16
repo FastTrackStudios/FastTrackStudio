@@ -16,10 +16,12 @@ use crate::routes::Route;
 
 /// The rail is a shortlist, not a directory: core destinations only.
 /// Everything else is reachable by search (command palette) or links —
-/// most of those pages are vault notes anyway. Settings renders in the
-/// foot cluster, not here.
+/// most of those pages are vault notes anyway, and the vault itself
+/// needs no button (EVERYTHING is the vault; the explorer beside the
+/// rail is it). Connections = the whole-vault graph. Settings renders
+/// in the foot cluster, not here.
 const RAIL_TABS: &[&str] = &[
-    "Home", "Inbox", "Projects", "Tasks", "Vault", "Schedule", "Timer",
+    "Home", "Inbox", "Projects", "Tasks", "Schedule", "Timer", "Connections",
 ];
 
 #[component]

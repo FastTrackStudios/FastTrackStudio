@@ -415,8 +415,22 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         }
     });
 
-    // Whole-vault connections graph, and per-`.base` raw-source editing.
-    let mut show_graph = use_signal(|| false);
+    // Outgoing wikilinks of the open note — the right panel's "Links"
+    // section, refreshed with the same cadence as backlinks.
+    let outlinks = use_resource(move || {
+        let slug = home();
+        let path = selected();
+        let _refresh = session.save_count();
+        async move {
+            match path {
+                Some(p) => fetch_links(slug, p).await,
+                None => Ok(Vec::new()),
+            }
+        }
+    });
+
+    // Per-`.base` raw-source editing (the whole-vault graph moved to
+    // the rail's Connections destination).
     let mut edit_base_source = use_signal(|| false);
 
     // Verses the open note references (from synced note→verse links), with
@@ -512,6 +526,52 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     let moving = move_target.read().clone();
     let create_under = create_parent.read().clone();
     let panel_open = *backlinks_open.read();
+
+    // ── Bottom status line feed ───────────────────────────
+    // The page's document context (file · dirty · save · collab · vim)
+    // renders in the shell's status bar instead of a page header —
+    // the header row is gone (filename lives in the tab/status line).
+    let status_info = use_context::<crate::chrome::StatusBarInfo>().0;
+    let on_save_cb = use_callback(move |_: ()| session.save());
+    use_effect(move || {
+        let mut info = status_info;
+        let Some(file) = session.current_path() else {
+            info.set(None);
+            return;
+        };
+        let save = match session.status() {
+            SaveStatus::Idle => String::new(),
+            SaveStatus::Saving => "Saving…".to_owned(),
+            SaveStatus::Saved => "Saved".to_owned(),
+            SaveStatus::Failed(msg) => msg,
+        };
+        let vim_label = match vim.read().mode {
+            editor::editor_vim::Mode::Normal => "NORMAL",
+            editor::editor_vim::Mode::Insert => "INSERT",
+            editor::editor_vim::Mode::VisualChar => "VISUAL",
+            editor::editor_vim::Mode::VisualLine => "V-LINE",
+            editor::editor_vim::Mode::VisualBlock => "V-BLOCK",
+            editor::editor_vim::Mode::Replace => "REPLACE",
+            editor::editor_vim::Mode::Command => "COMMAND",
+        };
+        let collab_label = collab
+            .read()
+            .as_ref()
+            .map(|c| if c.is_live() { "live" } else { "connecting…" });
+        info.set(Some(crate::chrome::DocStatus {
+            file,
+            dirty: session.dirty(),
+            save,
+            collab: collab_label.map(str::to_owned),
+            vim: Some(vim_label.to_owned()),
+            on_save: Some(on_save_cb),
+        }));
+    });
+    // Leaving the page clears the document segments.
+    use_drop(move || {
+        let mut info = status_info;
+        info.set(None);
+    });
 
     // ── Tree pane content ─────────────────────────────────
     // Shared between the inline mobile pane (no file open) and the
@@ -642,6 +702,62 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                 }
             },
         }
+        // ── Outgoing links ────────────────────────────────
+        div { class: "border-t border-border/60 px-3 pb-1 pt-3",
+            Heading { level: HeadingLevel::H3, "Links" }
+        }
+        match &*outlinks.read_unchecked() {
+            Some(Ok(links)) if links.is_empty() => rsx! {
+                div { class: "px-3 py-2 text-sm text-muted-foreground", "No outgoing links." }
+            },
+            Some(Ok(links)) => rsx! {
+                nav { class: "flex flex-col gap-0.5 px-2 pb-4",
+                    for link in links.iter().cloned() {
+                        {
+                            let label = link.alias.clone().unwrap_or_else(|| link.linkpath.clone());
+                            match link.resolved.clone() {
+                                Some(target_path) => {
+                                    let (_, sha) = page_lookup
+                                        .read()
+                                        .get(&target_path)
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    let target = FileMeta { path: target_path.clone(), sha256: sha };
+                                    rsx! {
+                                        button {
+                                            key: "{link.linkpath}",
+                                            class: "flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-sm hover:bg-accent/50",
+                                            onclick: move |_| on_open.call(target.clone()),
+                                            span { class: "font-medium", "{label}" }
+                                            span { class: "text-xs text-muted-foreground", "{target_path}" }
+                                        }
+                                    }
+                                }
+                                None => rsx! {
+                                    div {
+                                        key: "{link.linkpath}",
+                                        class: "px-2 py-1.5 text-sm text-muted-foreground/70",
+                                        title: "Unresolved link",
+                                        "{label}"
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+            },
+            Some(Err(e)) => rsx! {
+                div { class: "px-3 py-2 text-sm text-destructive", "Couldn't load links: {e}" }
+            },
+            None => rsx! {
+                div { class: "flex flex-col gap-2 px-3 py-2",
+                    Skeleton { class: "h-4 w-2/3" }
+                    Skeleton { class: "h-4 w-1/2" }
+                }
+            },
+        }
+        // FUTURE(56cf3ac7): local graph canvas docks below the links —
+        // 1-hop neighbourhood from backlinks ∪ links, focal = this note.
     };
 
     rsx! {
@@ -667,7 +783,13 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                         session.save();
                     }
                 },
-                div { class: "flex items-center justify-between gap-3 border-b border-border px-4 py-2",
+                // No page header: the filename lives in the tab strip /
+                // status bar, save state + collab in the status bar,
+                // the right panel toggles from the top bar, the whole-
+                // vault graph is the rail's Connections destination.
+                // Mobile keeps a minimal name + save-state strip (no
+                // status bar below `md`).
+                div { class: "flex items-center justify-between gap-3 border-b border-border/60 px-4 py-1.5 md:hidden",
                     div { class: "flex min-w-0 items-center gap-2",
                         if has_file && is_dirty {
                             span { class: "size-2 shrink-0 rounded-full bg-primary", title: "Unsaved changes" }
@@ -675,56 +797,23 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                         div { class: "min-w-0 truncate text-sm font-medium",
                             if has_file { "{current}" } else { "No file selected" }
                         }
-                        // Mobile: the action cluster below is desktop-only,
-                        // so surface save/collab state inline here.
-                        if !status_msg.is_empty() {
-                            Text { variant: TextVariant::Muted, class: "shrink-0 text-xs md:hidden", "{status_msg}" }
-                        }
                     }
-                    div { class: "hidden items-center gap-3 md:flex",
-                        if let Some(cs) = collab_status() {
-                            Text { variant: TextVariant::Muted, class: "text-xs", "{cs}" }
-                        }
-                        if !status_msg.is_empty() {
-                            Text { variant: TextVariant::Muted, class: "text-xs", "{status_msg}" }
-                        }
-                        if is_base && !show_graph() {
-                            Button {
-                                variant: ButtonVariant::Ghost,
-                                size: ButtonSize::Small,
-                                on_click: move |_| {
-                                    let cur = *edit_base_source.peek();
-                                    edit_base_source.set(!cur);
-                                },
-                                if edit_base_source() { "View table" } else { "Edit source" }
-                            }
-                        }
-                        Button {
-                            variant: if show_graph() { ButtonVariant::Primary } else { ButtonVariant::Ghost },
-                            size: ButtonSize::Small,
-                            on_click: move |_| {
-                                let cur = *show_graph.peek();
-                                show_graph.set(!cur);
-                            },
-                            "Graph"
-                        }
-                        Button {
-                            variant: ButtonVariant::Primary,
-                            size: ButtonSize::Small,
-                            disabled: !has_file,
-                            on_click: move |_| session.save(),
-                            "Save"
-                        }
+                    if !status_msg.is_empty() {
+                        Text { variant: TextVariant::Muted, class: "shrink-0 text-xs", "{status_msg}" }
+                    }
+                }
+                // `.base` views keep their table↔source flip as a slim
+                // inline affordance (base files only).
+                if has_file && is_base {
+                    div { class: "flex items-center justify-end border-b border-border/40 px-4 py-1",
                         Button {
                             variant: ButtonVariant::Ghost,
                             size: ButtonSize::Small,
-                            disabled: !has_file,
                             on_click: move |_| {
-                                let mut o = shell_right;
-                                let cur = o.peek().0;
-                                o.set(crate::chrome::RightPanelOpen(!cur));
+                                let cur = *edit_base_source.peek();
+                                edit_base_source.set(!cur);
                             },
-                            if panel_open { "Hide backlinks" } else { "Backlinks" }
+                            if edit_base_source() { "View table" } else { "Edit source" }
                         }
                     }
                 }
@@ -751,10 +840,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                     // pb-14 keeps the last lines clear of the mobile
                     // action bar (see `MobileActionBar` docs).
                     div { class: "flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-14 md:pb-0",
-                        if show_graph() {
-                            // Whole-vault connections graph as a pane.
-                            crate::pages::connections::ConnectionsView {}
-                        } else if has_file && is_base && !edit_base_source() {
+                        if has_file && is_base && !edit_base_source() {
                             // A `.base` renders as its live tables, in place
                             // of the editor — Obsidian-style. Row clicks open
                             // the target note in this same vault view.
@@ -765,7 +851,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                                     sha256: String::new(),
                                 }),
                             }
-                        } else if has_file && is_video && !show_graph() {
+                        } else if has_file && is_video {
                             // A `type: video` note opens in the player (its
                             // basename is the YouTube id). Timestamped notes +
                             // transcript live right here in the vault.
@@ -1089,6 +1175,26 @@ pub(crate) async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, St
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = client;
+        Err("native client not wired yet".to_owned())
+    }
+}
+
+/// Outgoing wikilinks of `path`, via the `VaultGraph` RPC.
+async fn fetch_links(
+    slug: String,
+    path: String,
+) -> Result<Vec<vault_proto::GraphLink>, String> {
+    let client = crate::vox_clients::vault_graph_client(&slug).await?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        client
+            .links(VAULT_ID.to_owned(), path)
+            .await
+            .map_err(|e| format!("links: {e:?}"))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (client, path);
         Err("native client not wired yet".to_owned())
     }
 }

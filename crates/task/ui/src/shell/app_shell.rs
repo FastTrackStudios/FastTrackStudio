@@ -59,6 +59,9 @@ pub fn AppShell() -> Element {
                 FleetingFab {}
             }
             }
+            // IDE-style bottom status line — document segments fed by
+            // the open page via the `StatusBarInfo` context.
+            crate::chrome::StatusBar {}
         }
         // Single global capture modal, toggled from any fleeting button.
         FleetingModal {}
