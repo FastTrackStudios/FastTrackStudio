@@ -20,7 +20,7 @@
 
 use chrono::Utc;
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Feather, Inbox as InboxIcon, Play, Square};
+use fts_ui::lucide_dioxus::{ChevronDown, Feather, Inbox as InboxIcon, Pause, Play, Square};
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
@@ -49,6 +49,86 @@ pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
     use_context_provider(|| StatusBarInfo(Signal::new(None)));
     use_context_provider(|| ZenMode(Signal::new(false)));
+    use_context_provider(|| TimerResumeHint(Signal::new(None)));
+}
+
+// ── timer shared state ──────────────────────────────────────────────
+
+/// A just-paused timer's context, held so the idle widget can offer a
+/// one-click **Resume**. Set on Pause, cleared on Stop or a fresh
+/// Start. Provided at the shell so it survives route navigation.
+#[derive(Clone, PartialEq)]
+pub struct PausedTimer {
+    pub slug: String,
+    pub org_id: Uuid,
+    pub req: timer_proto::StartTimerRequest,
+    pub title: String,
+    /// Seconds already banked before the pause — shown frozen so the
+    /// paused pill reads the accumulated time, not zero.
+    pub banked: i64,
+}
+
+/// Shell-level "paused timer" hint. `None` when nothing is paused.
+#[derive(Clone, Copy)]
+pub struct TimerResumeHint(pub Signal<Option<PausedTimer>>);
+
+pub(crate) fn use_resume_hint() -> Signal<Option<PausedTimer>> {
+    use_context::<TimerResumeHint>().0
+}
+
+/// The single running work session for the active org + owner, if one
+/// is open. Derived from the shared session store, so the top-bar
+/// widget, the `/timer` page, and the task-list banner all agree on
+/// exactly what's tracking right now.
+#[derive(Clone, PartialEq)]
+pub struct ActiveTimer {
+    pub slug: String,
+    pub org_id: Uuid,
+    pub session: timer_proto::WorkSession,
+}
+
+pub(crate) fn use_active_timer() -> Option<ActiveTimer> {
+    let selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let session_rows = crate::stores::use_session_list();
+    let (slug, org_id) = resolve_org(&selection.read(), &org_list.read())?;
+    let owner = owner_id(org_id);
+    session_rows.value().and_then(|rows| {
+        rows.iter()
+            .map(|(_, r)| r)
+            .find(|r| r.slug == slug && r.session.user_id == owner && r.session.end_time.is_none())
+            .map(|r| ActiveTimer {
+                slug: slug.clone(),
+                org_id,
+                session: r.session.clone(),
+            })
+    })
+}
+
+/// Rebuild a start request from an existing session — used by pause →
+/// resume and by switch, which both re-open "the same work".
+pub(crate) fn req_from_session(
+    org_id: Uuid,
+    s: &timer_proto::WorkSession,
+) -> timer_proto::StartTimerRequest {
+    timer_proto::StartTimerRequest {
+        user_id: s.user_id,
+        org_id,
+        project_id: s.project_id,
+        project_path: s.project_path.clone(),
+        task_note_path: s.task_note_path.clone(),
+        description: s.description.clone(),
+    }
+}
+
+/// The label a session shows in the timer chrome — its description, or
+/// a neutral fallback when it was started bare.
+pub(crate) fn session_title(s: &timer_proto::WorkSession) -> String {
+    if s.description.trim().is_empty() {
+        "Tracking".to_string()
+    } else {
+        s.description.clone()
+    }
 }
 
 /// The only chrome visible in zen mode: an invisible ~24px hot-zone
@@ -420,31 +500,27 @@ pub fn FleetingFab() -> Element {
 
 // ── timer widget ────────────────────────────────────────────────────
 
-/// Compact live timer: when a session is running, a pulsing dot +
-/// elapsed clock + Stop; otherwise a small description input + Start.
-/// Org-scoped, mirrors `/timer`.
+/// Compact live timer control mirroring `/timer` and the task-list
+/// banner (all three read the same [`use_active_timer`] source, so they
+/// never disagree). Three states:
+///
+/// - **Running** — pulsing sky dot, task/description, live clock, and
+///   Switch / Pause / Stop controls. Switch opens a task picker and
+///   atomically moves the clock to the chosen task ([`TimerMutations::switch`]).
+/// - **Paused** — an amber pill with the banked time frozen and a
+///   one-click Resume. Pause closes the session (the segment is logged)
+///   but stashes its context in [`TimerResumeHint`] so resuming re-opens
+///   the same work.
+/// - **Idle** — a description input + Start.
 #[component]
 pub fn TimerWidget() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let target = use_memo(move || resolve_org(&selection.read(), &org_list.read()));
 
-    // The running session is derived from the shared session store —
-    // the same rows /timer renders, so the widget and the page can
-    // never disagree.
-    let session_rows = crate::stores::use_session_list();
     let muts = crate::stores::use_timer_mutations();
-    let active: Option<crate::stores::OrgSession> = target().and_then(|(slug, org_id)| {
-        let owner = owner_id(org_id);
-        session_rows.value().and_then(|rows| {
-            rows.iter()
-                .map(|(_, r)| r)
-                .find(|r| {
-                    r.slug == slug && r.session.user_id == owner && r.session.end_time.is_none()
-                })
-                .cloned()
-        })
-    });
+    let active = use_active_timer();
+    let mut hint = use_resume_hint();
 
     // Live clock — re-render once a second so the running elapsed advances.
     let tick = use_signal(|| 0u64);
@@ -452,15 +528,16 @@ pub fn TimerWidget() -> Element {
     let _ = tick();
 
     let mut draft = use_signal(String::new);
+    let mut switching = use_signal(|| false);
 
-    // Optimistic: the running card appears/clears instantly and
-    // reconciles against the server (rollback + tray on failure).
+    // Fresh start from the idle input — clears any paused work.
     let mut start = move || {
         let Some((slug, org_id)) = target() else {
             return;
         };
         let desc = draft.peek().trim().to_string();
         draft.set(String::new());
+        hint.set(None);
         muts.start(
             slug,
             timer_proto::StartTimerRequest {
@@ -474,48 +551,123 @@ pub fn TimerWidget() -> Element {
         );
     };
 
-    let active_for_stop = active.clone();
-    let stop = move || {
-        let Some((slug, org_id)) = target() else {
-            return;
-        };
-        let Some(open) = active_for_stop.as_ref() else {
-            return;
-        };
-        muts.stop(slug, owner_id(org_id), open.session.id);
-    };
-
     if target().is_none() {
         return rsx! {};
     }
 
-    match active.as_ref().map(|r| &r.session) {
-        Some(s) => {
+    match active.as_ref() {
+        // ── Running ──────────────────────────────────────────────
+        Some(at) => {
+            let s = &at.session;
             let elapsed = (Utc::now() - s.start_time).num_seconds();
-            let title = if s.description.trim().is_empty() {
-                "Tracking".to_string()
-            } else {
-                s.description.clone()
+            let title = session_title(s);
+            let slug = at.slug.clone();
+            let org_id = at.org_id;
+            let sid = s.id;
+            // Pause: log the segment (stop) but remember the work so the
+            // idle pill can resume it.
+            let paused = PausedTimer {
+                slug: slug.clone(),
+                org_id,
+                req: req_from_session(org_id, s),
+                title: title.clone(),
+                banked: elapsed.max(0),
+            };
+            let pause = {
+                let slug = slug.clone();
+                move |_: MouseEvent| {
+                    muts.stop(slug.clone(), owner_id(org_id), sid);
+                    hint.set(Some(paused.clone()));
+                }
+            };
+            let stop = {
+                let slug = slug.clone();
+                move |_: MouseEvent| {
+                    muts.stop(slug.clone(), owner_id(org_id), sid);
+                    hint.set(None);
+                }
+            };
+            let on_switch = {
+                let slug = slug.clone();
+                move |req: timer_proto::StartTimerRequest| {
+                    muts.switch(slug.clone(), sid, req);
+                    hint.set(None);
+                    switching.set(false);
+                }
             };
             rsx! {
-                div { class: "flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 py-1 pl-2.5 pr-1.5",
-                    span { class: "relative flex size-2",
-                        span { class: "absolute inline-flex size-full animate-ping rounded-full bg-emerald-400/70" }
-                        span { class: "relative inline-flex size-2 rounded-full bg-emerald-400" }
+                div { class: "relative flex items-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 py-1 pl-2.5 pr-1.5",
+                    span { class: "relative flex size-2 shrink-0",
+                        span { class: "absolute inline-flex size-full animate-ping rounded-full bg-sky-400/70" }
+                        span { class: "relative inline-flex size-2 rounded-full bg-sky-400" }
                     }
-                    span { class: "max-w-[10rem] truncate text-xs text-muted-foreground", "{title}" }
-                    span { class: "font-mono text-sm font-semibold tabular-nums", "{fmt_hms(elapsed)}" }
+                    span { class: "max-w-[10rem] truncate text-xs text-foreground", "{title}" }
+                    span { class: "font-mono text-sm font-semibold tabular-nums text-sky-300", "{fmt_hms(elapsed)}" }
+                    button {
+                        class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sky-500/20 hover:text-sky-300",
+                        title: "Switch task",
+                        onclick: move |_| {
+                            let cur = *switching.peek();
+                            switching.set(!cur);
+                        },
+                        ChevronDown { size: 14 }
+                    }
+                    button {
+                        class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-amber-500/15 hover:text-amber-400",
+                        title: "Pause timer",
+                        onclick: pause,
+                        Pause { size: 14 }
+                    }
                     button {
                         class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive",
                         title: "Stop timer",
-                        onclick: move |_| stop(),
+                        onclick: stop,
                         Square { size: 14 }
+                    }
+                    if switching() {
+                        TimerSwitchMenu {
+                            slug,
+                            org_id,
+                            on_pick: on_switch,
+                            on_close: move |_| switching.set(false),
+                        }
                     }
                 }
             }
         }
-        None => {
-            rsx! {
+        None => match hint.read().clone() {
+            // ── Paused ───────────────────────────────────────────
+            Some(p) => {
+                let resume = {
+                    let p = p.clone();
+                    move |_: MouseEvent| {
+                        muts.start(p.slug.clone(), p.req.clone());
+                        hint.set(None);
+                    }
+                };
+                rsx! {
+                    div { class: "flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 py-1 pl-2.5 pr-1.5",
+                        span { class: "flex shrink-0 items-center text-amber-400", Pause { size: 12 } }
+                        span { class: "max-w-[9rem] truncate text-xs text-foreground", "{p.title}" }
+                        span { class: "font-mono text-sm font-semibold tabular-nums text-amber-300/90", "{fmt_hms(p.banked)}" }
+                        span { class: "text-[10px] uppercase tracking-wide text-muted-foreground", "paused" }
+                        button {
+                            class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sky-500/20 hover:text-sky-300",
+                            title: "Resume timer",
+                            onclick: resume,
+                            Play { size: 14 }
+                        }
+                        button {
+                            class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive",
+                            title: "Discard paused timer",
+                            onclick: move |_| hint.set(None),
+                            Square { size: 14 }
+                        }
+                    }
+                }
+            }
+            // ── Idle ─────────────────────────────────────────────
+            None => rsx! {
                 div { class: "flex items-center gap-1 rounded-lg border border-border bg-card/40 py-1 pl-2.5 pr-1",
                     input {
                         class: "w-32 bg-transparent text-xs outline-none placeholder:text-muted-foreground focus:w-44 xl:w-40 xl:focus:w-56",
@@ -529,15 +681,143 @@ pub fn TimerWidget() -> Element {
                         },
                     }
                     button {
-                        class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-emerald-500/10 hover:text-emerald-400",
+                        class: "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sky-500/15 hover:text-sky-300",
                         title: "Start timer",
                         onclick: move |_| start(),
                         Play { size: 14 }
                     }
                 }
+            },
+        },
+    }
+}
+
+/// Task-picker popover for switching the running timer to a different
+/// task. Fuzzy-searches the active org's open tasks; picking one emits
+/// a fully-formed [`StartTimerRequest`](timer_proto::StartTimerRequest)
+/// linked to that task's note + project.
+#[component]
+fn TimerSwitchMenu(
+    slug: String,
+    org_id: Uuid,
+    on_pick: EventHandler<timer_proto::StartTimerRequest>,
+    on_close: EventHandler<()>,
+) -> Element {
+    let mut query = use_signal(String::new);
+    let tasks = crate::stores::use_task_list();
+    let projects = crate::stores::use_project_list();
+
+    let candidates: Vec<SwitchCandidate> = {
+        let q = query();
+        let q = q.trim();
+        let project_rows = projects.value().cloned().unwrap_or_default();
+        let mut scored: Vec<(i64, crate::stores::OrgTask)> = tasks
+            .value()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, row)| row)
+            .filter(|row| row.slug == slug)
+            .filter(|row| is_open_status(&row.task.status))
+            .filter_map(|row| {
+                if q.is_empty() {
+                    Some((0, row))
+                } else {
+                    crate::fuzzy::fuzzy_match(q, &row.task.title).map(|score| (score, row))
+                }
+            })
+            .collect();
+        scored.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| a.1.task.title.cmp(&b.1.task.title))
+        });
+        scored.truncate(8);
+        scored
+            .into_iter()
+            .map(|(_, row)| {
+                let project = row
+                    .task
+                    .project_id
+                    .and_then(|pid| project_rows.iter().map(|(_, p)| p).find(|p| p.project.id == pid));
+                SwitchCandidate {
+                    id: row.task.id,
+                    title: row.task.title.clone(),
+                    path: row.task.path.clone(),
+                    project_id: row.task.project_id,
+                    project_path: project.map(|p| p.project.path.clone()).unwrap_or_default(),
+                    project_title: project.map(|p| p.project.title.clone()),
+                }
+            })
+            .collect()
+    };
+
+    rsx! {
+        // Backdrop — click-away closes the menu.
+        div {
+            class: "fixed inset-0 z-30",
+            onclick: move |_| on_close.call(()),
+        }
+        div { class: "absolute right-0 top-full z-40 mt-1 flex w-72 flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-xl",
+            div { class: "border-b border-border/60 p-2",
+                input {
+                    class: "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-sky-500/40",
+                    placeholder: "Switch to task…",
+                    autofocus: true,
+                    value: "{query}",
+                    oninput: move |e| query.set(e.value()),
+                }
+            }
+            if candidates.is_empty() {
+                div { class: "px-3 py-3 text-xs text-muted-foreground", "No open tasks match." }
+            } else {
+                div { class: "flex max-h-64 flex-col overflow-y-auto",
+                    for c in candidates {
+                        button {
+                            key: "{c.id}",
+                            r#type: "button",
+                            class: "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-accent",
+                            onclick: move |_| {
+                                on_pick.call(timer_proto::StartTimerRequest {
+                                    user_id: owner_id(org_id),
+                                    org_id,
+                                    project_id: c.project_id,
+                                    project_path: c.project_path.clone(),
+                                    task_note_path: c.path.clone(),
+                                    description: c.title.clone(),
+                                });
+                            },
+                            span { class: "min-w-0 truncate text-foreground", "{c.title}" }
+                            if let Some(project) = c.project_title.as_ref() {
+                                span { class: "shrink-0 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground",
+                                    "#{project}"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/// One fuzzy-matched switch-menu row.
+#[derive(Clone, PartialEq)]
+struct SwitchCandidate {
+    id: Uuid,
+    title: String,
+    path: String,
+    project_id: Option<Uuid>,
+    project_path: String,
+    project_title: Option<String>,
+}
+
+/// Statuses the switch picker treats as "still workable" (mirrors the
+/// `/timer` page's open-task filter).
+fn is_open_status(status: &str) -> bool {
+    !matches!(
+        status,
+        "done" | "complete" | "completed" | "cancelled" | "shipped"
+    )
 }
 
 // ── shared helpers (also used by pages::timer) ─────────────────────

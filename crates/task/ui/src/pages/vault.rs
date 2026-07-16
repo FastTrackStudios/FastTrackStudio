@@ -550,7 +550,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             SaveStatus::Saved => "Saved".to_owned(),
             SaveStatus::Failed(msg) => msg,
         };
-        let vim_label = match vim.read().mode {
+        let vim_label = vim.map(|v| match v.read().mode {
             editor::editor_vim::Mode::Normal => "NORMAL",
             editor::editor_vim::Mode::Insert => "INSERT",
             editor::editor_vim::Mode::VisualChar => "VISUAL",
@@ -558,7 +558,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             editor::editor_vim::Mode::VisualBlock => "V-BLOCK",
             editor::editor_vim::Mode::Replace => "REPLACE",
             editor::editor_vim::Mode::Command => "COMMAND",
-        };
+        });
         let collab_label = collab
             .read()
             .as_ref()
@@ -568,7 +568,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             dirty: session.dirty(),
             save,
             collab: collab_label.map(str::to_owned),
-            vim: Some(vim_label.to_owned()),
+            vim: vim_label.map(str::to_owned),
             on_save: Some(on_save_cb),
         }));
     });

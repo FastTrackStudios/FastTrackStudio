@@ -58,24 +58,29 @@ pub fn AppShell() -> Element {
                 }
             }
 
-            div { class: "flex min-h-screen flex-col md:min-h-0 md:flex-1 md:overflow-y-auto",
+            div { class: "flex min-h-screen flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
                 MobileHeader {}
                 // Bottom padding keeps content clear of the fixed tab
-                // bar (56px + safe area) plus breathing room.
-                main { class: "flex-1 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] md:pb-0",
+                // bar (56px + safe area) plus breathing room. On desktop
+                // `main` is the scroll container so the status line below
+                // stays pinned to the base of the content column.
+                main { class: "flex-1 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] md:min-h-0 md:overflow-y-auto md:pb-0",
                     SuspenseBoundary {
                         fallback: |_| rsx! { RouteFallback {} },
                         Outlet::<Route> {}
                     }
                 }
+                // IDE-style bottom status line — document segments fed by
+                // the open page via the `StatusBarInfo` context. Lives at
+                // the base of the content column (not the outer shell) so
+                // the icon rail + vault explorer run full-height and the
+                // status line starts where the sidebar ends.
+                if !zen() {
+                    crate::chrome::StatusBar {}
+                }
                 BottomTabBar { current }
                 FleetingFab {}
             }
-            }
-            // IDE-style bottom status line — document segments fed by
-            // the open page via the `StatusBarInfo` context.
-            if !zen() {
-                crate::chrome::StatusBar {}
             }
         }
         // Zen's only chrome: the hover-revealed exit button in the

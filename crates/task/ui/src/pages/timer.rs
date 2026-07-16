@@ -156,6 +156,11 @@ pub fn TimerView() -> Element {
         );
     };
 
+    // Shared "paused timer" hint (also drives the top-bar widget) — so
+    // pausing here shows as paused everywhere, and resuming re-opens the
+    // same work.
+    let mut hint = crate::chrome::use_resume_hint();
+
     let active_for_stop = active.clone();
     let stop = move |_| {
         let Some((slug, org_id)) = target() else {
@@ -165,6 +170,36 @@ pub fn TimerView() -> Element {
             return;
         };
         muts.stop(slug, owner_id(org_id), open.session.id);
+        hint.set(None);
+    };
+
+    // Pause: log the current segment and stash its context for resume.
+    let active_for_pause = active.clone();
+    let pause = move |_| {
+        let Some((slug, org_id)) = target() else {
+            return;
+        };
+        let Some(open) = active_for_pause.as_ref() else {
+            return;
+        };
+        let s = &open.session;
+        let banked = (Utc::now() - s.start_time).num_seconds().max(0);
+        muts.stop(slug.clone(), owner_id(org_id), s.id);
+        hint.set(Some(crate::chrome::PausedTimer {
+            slug,
+            org_id,
+            req: crate::chrome::req_from_session(org_id, s),
+            title: crate::chrome::session_title(s),
+            banked,
+        }));
+    };
+
+    let resume = move |_| {
+        let Some(p) = hint.peek().clone() else {
+            return;
+        };
+        muts.start(p.slug.clone(), p.req.clone());
+        hint.set(None);
     };
 
     let body = if target().is_none() {
@@ -173,9 +208,11 @@ pub fn TimerView() -> Element {
         }
     } else {
         rsx! {
-            // Running session, or the start form.
+            // Running session, the paused card, or the start form.
             if let Some(open) = active.as_ref() {
-                {running_card(&open.session, stop)}
+                {running_card(&open.session, stop, pause)}
+            } else if let Some(p) = hint.read().clone() {
+                {paused_card(p, resume, move |_| hint.set(None))}
             } else if first_load {
                 crate::states::LoadingState {}
             } else if let Some(err) = load_err.clone() {
@@ -216,8 +253,14 @@ pub fn TimerView() -> Element {
     }
 }
 
-/// The running-session card: description, live elapsed clock, Stop.
-fn running_card(s: &WorkSession, on_stop: impl FnMut(MouseEvent) + 'static) -> Element {
+/// The running-session card: description, live elapsed clock, Pause +
+/// Stop. Sky styling matches the top-bar widget and the task-list Now
+/// bar — one visual language for "tracking".
+fn running_card(
+    s: &WorkSession,
+    on_stop: impl FnMut(MouseEvent) + 'static,
+    on_pause: impl FnMut(MouseEvent) + 'static,
+) -> Element {
     let elapsed = (Utc::now() - s.start_time).num_seconds();
     let title = if s.description.trim().is_empty() {
         "(no description)".to_string()
@@ -225,21 +268,57 @@ fn running_card(s: &WorkSession, on_stop: impl FnMut(MouseEvent) + 'static) -> E
         s.description.clone()
     };
     rsx! {
-        div { class: "flex flex-col gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5",
+        div { class: "flex flex-col gap-3 rounded-2xl border border-sky-500/40 bg-sky-500/10 p-5",
             div { class: "flex items-center gap-2",
                 span { class: "relative flex size-2.5",
-                    span { class: "absolute inline-flex size-full animate-ping rounded-full bg-emerald-400/70" }
-                    span { class: "relative inline-flex size-2.5 rounded-full bg-emerald-400" }
+                    span { class: "absolute inline-flex size-full animate-ping rounded-full bg-sky-400/70" }
+                    span { class: "relative inline-flex size-2.5 rounded-full bg-sky-400" }
                 }
                 Text { variant: TextVariant::Muted, "Tracking" }
             }
-            div { class: "font-mono text-4xl font-semibold tabular-nums tracking-tight", "{fmt_hms(elapsed)}" }
+            div { class: "font-mono text-4xl font-semibold tabular-nums tracking-tight text-sky-100", "{fmt_hms(elapsed)}" }
             div { class: "text-sm text-foreground", "{title}" }
-            div { class: "flex",
+            div { class: "flex gap-2",
+                Button {
+                    variant: ButtonVariant::Secondary,
+                    on_click: on_pause,
+                    "Pause"
+                }
                 Button {
                     variant: ButtonVariant::Destructive,
                     on_click: on_stop,
                     "Stop"
+                }
+            }
+        }
+    }
+}
+
+/// The paused card: banked time frozen, a Resume that re-opens the same
+/// work, and a Discard that drops the pause. Amber to read as "held".
+fn paused_card(
+    p: crate::chrome::PausedTimer,
+    on_resume: impl FnMut(MouseEvent) + 'static,
+    on_discard: impl FnMut(MouseEvent) + 'static,
+) -> Element {
+    rsx! {
+        div { class: "flex flex-col gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-5",
+            div { class: "flex items-center gap-2",
+                span { class: "size-2.5 rounded-full bg-amber-400" }
+                Text { variant: TextVariant::Muted, "Paused" }
+            }
+            div { class: "font-mono text-4xl font-semibold tabular-nums tracking-tight text-amber-100", "{fmt_hms(p.banked)}" }
+            div { class: "text-sm text-foreground", "{p.title}" }
+            div { class: "flex gap-2",
+                Button {
+                    variant: ButtonVariant::Primary,
+                    on_click: on_resume,
+                    "Resume"
+                }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    on_click: on_discard,
+                    "Discard"
                 }
             }
         }
@@ -505,7 +584,7 @@ fn SessionRow(session: WorkSession, slug: String, pending: bool) -> Element {
                 }
                 span {
                     class: if running {
-                        "shrink-0 font-mono text-sm tabular-nums text-emerald-400"
+                        "shrink-0 font-mono text-sm tabular-nums text-sky-400"
                     } else {
                         "shrink-0 font-mono text-sm tabular-nums text-muted-foreground"
                     },

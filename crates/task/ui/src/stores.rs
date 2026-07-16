@@ -1631,6 +1631,36 @@ impl TimerMutations {
         );
     }
 
+    /// Switch the running timer to a new task in one atomic step: the
+    /// open row closes and a fresh open session appears instantly, then
+    /// both reconcile against the server's `switch_timer`. `open_id` is
+    /// the currently-running session to close (optimistically); it
+    /// self-heals to the server's closed row on the next refetch.
+    pub fn switch(&self, slug: String, open_id: Uuid, req: StartTimerRequest) {
+        let now = Utc::now();
+        let draft = OrgSession {
+            slug: slug.clone(),
+            session: draft_session(&req),
+        };
+        self.write.run(
+            self.store,
+            move |s| {
+                // Close the outgoing row so the recent list doesn't show
+                // two live clocks in the optimistic gap before reconcile.
+                s.update_optimistic(Id::Real(open_id), |r| {
+                    r.session.end_time = Some(now);
+                });
+                // The incoming session is the ticket we reconcile.
+                s.insert_optimistic(draft).0
+            },
+            move || async move {
+                crate::feeds::switch_timer(&slug, req)
+                    .await
+                    .map(|session| Some(OrgSession { slug, session }))
+            },
+        );
+    }
+
     /// Edit a session (description / billable), then reconcile.
     pub fn update(&self, slug: String, req: timer_proto::service::UpdateSessionRequest) {
         let id = req.id;

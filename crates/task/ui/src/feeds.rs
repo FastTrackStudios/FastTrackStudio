@@ -1014,6 +1014,22 @@ pub async fn stop_timer(
         .map_err(|e| format!("{slug}: stop timer: {e:?}"))
 }
 
+/// Atomically stop the caller's running timer (if any) and start a new
+/// one — "switch the timer to a different task" in one transaction, so
+/// the UI never briefly shows two open sessions (or none). Returns the
+/// newly-started session; the closed one settles on the next refetch.
+pub async fn switch_timer(
+    slug: &str,
+    req: timer_proto::StartTimerRequest,
+) -> Result<timer_proto::WorkSession, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .switch_timer(req)
+        .await
+        .map(|(_closed, started)| started)
+        .map_err(|e| format!("{slug}: switch timer: {e:?}"))
+}
+
 /// Edit an existing session — only the `Some(_)` fields change. The
 /// backend re-snapshots the rate afterward.
 pub async fn update_session(
