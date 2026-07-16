@@ -417,6 +417,69 @@ impl PatchbayService for PatchbayBackend {
         Ok(names.len() as u32)
     }
 
+    async fn import_inferno_names(
+        &self,
+        node: String,
+        device: String,
+        direction: String,
+    ) -> Result<u32, PatchbayError> {
+        let want_rx = match direction.trim().to_lowercase().as_str() {
+            "rx" | "in" | "input" | "capture" => true,
+            "tx" | "out" | "output" | "playback" => false,
+            other => {
+                return Err(PatchbayError::Internal(format!(
+                    "direction must be 'rx' or 'tx', got '{other}'"
+                )));
+            }
+        };
+        // Live ARC scan (mDNS + per-device channel query — seconds).
+        let devices = self.inner.dante.network().await?;
+        let dev = if device.trim().is_empty() {
+            devices.first()
+        } else {
+            devices.iter().find(|d| d.name == device)
+        }
+        .ok_or_else(|| {
+            PatchbayError::not_found(
+                "dante device",
+                if device.trim().is_empty() { "<any>" } else { &device },
+            )
+        })?;
+        // channel number → name, from the chosen direction's channel list.
+        let names: std::collections::BTreeMap<u32, String> =
+            if want_rx { &dev.rx } else { &dev.tx }
+                .iter()
+                .filter(|c| !c.name.trim().is_empty())
+                .map(|c| (c.number, c.name.clone()))
+                .collect();
+        // Match ports on `node` by numeric suffix (same as import_chanmap).
+        let ports: Vec<String> = {
+            let store = self.inner.store.read();
+            let Some(n) = store.nodes.values().find(|n| n.name == node) else {
+                return Err(PatchbayError::not_found("node", &node));
+            };
+            store
+                .ports
+                .values()
+                .filter(|p| p.node_id == n.id)
+                .map(|p| p.name.clone())
+                .collect()
+        };
+        let mut written = 0;
+        for port in ports {
+            let Some(channel) = crate::chanmap::channel_of_port(&port) else {
+                continue;
+            };
+            if let Some(name) = names.get(&channel) {
+                self.inner
+                    .presets
+                    .set_alias(format!("{node}:{port}"), name.clone());
+                written += 1;
+            }
+        }
+        Ok(written)
+    }
+
     async fn clock(&self) -> Result<ClockInfo, PatchbayError> {
         // Shells out — keep it off the async executor.
         Ok(tokio::task::spawn_blocking(crate::clock::clock_info)

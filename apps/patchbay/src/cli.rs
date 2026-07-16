@@ -61,6 +61,31 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AliasCmd,
     },
+    /// Alias a node's ports from a REAPER ChanMap file (channel names
+    /// → port aliases). Empty path = the host's default chanmap.
+    Chanmap {
+        /// Node to name (name, label, or alias).
+        node: String,
+        /// ChanMap path; empty = `~/.fasttrackstudio/Reaper/ChanMaps/<host>.ReaperChanMap`.
+        #[arg(long, default_value = "")]
+        path: String,
+    },
+    /// Alias a node's ports from a live Dante device's channel names
+    /// over ARC (channel N → port `*_N` by numeric suffix). The device
+    /// must be one from `dante list` whose numbering matches the node's
+    /// ports 1:1. NOTE: the local Inferno soundcard isn't in mDNS
+    /// discovery yet (only remote consoles/interfaces are), so this
+    /// can't name the local proxy from its own labels — see `dante list`.
+    InfernoNames {
+        /// Node to name (any node with numbered ports).
+        node: String,
+        /// `rx` (received channels → capture/input ports) or
+        /// `tx` (transmitted channels → playback/output ports).
+        direction: String,
+        /// Dante device name (from `dante list`); empty = first discovered.
+        #[arg(long, default_value = "")]
+        device: String,
+    },
     /// Show or force the graph quantum (`auto` clears the force).
     Quantum { frames: Option<String> },
     /// Managed systemd units (status, or `restart|start|stop <unit>`).
@@ -430,6 +455,21 @@ async fn main() -> eyre::Result<()> {
                 println!("{target} → {alias}");
             }
         },
+        Cmd::Chanmap { node, path } => {
+            let g = ok_or_msg(c.graph().await)?;
+            let aliases = alias_map(ok_or_msg(c.aliases().await)?);
+            let n = find_node(&g, &aliases, &node)?.name.clone();
+            let written = ok_or_msg(c.import_chanmap(n.clone(), path).await)?;
+            println!("aliased {written} port(s) on {n} from the ChanMap");
+        }
+        Cmd::InfernoNames { node, direction, device } => {
+            let g = ok_or_msg(c.graph().await)?;
+            let aliases = alias_map(ok_or_msg(c.aliases().await)?);
+            let n = find_node(&g, &aliases, &node)?.name.clone();
+            let written =
+                ok_or_msg(c.import_inferno_names(n.clone(), device, direction).await)?;
+            println!("aliased {written} port(s) on {n} from Inferno ARC names");
+        }
         Cmd::Quantum { frames } => match frames {
             None => {
                 let clock = ok_or_msg(c.clock().await)?;

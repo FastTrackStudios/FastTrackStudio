@@ -134,6 +134,31 @@ pub mod patchbay_service {
         /// number of channel names written.
         async fn export_chanmap(&self, node: String, path: String) -> Result<u32, PatchbayError>;
 
+        /// Alias `node`'s ports from a live Dante device's channel names
+        /// over ARC — the network-sourced sibling of `import_chanmap`.
+        /// `direction` is `"rx"` (received channels → name the
+        /// capture/input proxy, e.g. `daw_inputs`) or `"tx"` (transmitted
+        /// channels → name the playback/output proxy, e.g. `daw`). Ports
+        /// are matched to channels by numeric suffix, so device channel
+        /// 57 ("Engineer Vocal [DSP]") names `capture_57` — this only
+        /// lines up when the device's channel numbering matches the
+        /// node's port numbering 1:1.
+        ///
+        /// `device` must be a name from `dante_network()`. NOTE: the
+        /// local Inferno virtual soundcard does not currently advertise
+        /// itself in mDNS discovery (it appears only as a subscription
+        /// *source*, e.g. `THEBATTLESHIP`), so naming a proxy from the
+        /// local Inferno's own labels is not yet possible here — target
+        /// a discovered console/interface whose numbering matches. Empty
+        /// `device` falls back to the first discovered device. Returns
+        /// the number of aliases written.
+        async fn import_inferno_names(
+            &self,
+            node: String,
+            device: String,
+            direction: String,
+        ) -> Result<u32, PatchbayError>;
+
         // ── Clock ────────────────────────────────────────────────────
 
         async fn clock(&self) -> Result<ClockInfo, PatchbayError>;
