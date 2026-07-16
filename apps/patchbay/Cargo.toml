@@ -1,0 +1,22 @@
+[package]
+name = "fts-patchbay"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "fts-patchbay"
+path = "src/main.rs"
+
+[dependencies]
+patchbay.workspace = true
+patchbay-proto.workspace = true
+patchbay-ui.workspace = true
+architect = { workspace = true, features = ["vox", "local", "host", "server-axum"] }
+vox.workspace = true
+dioxus = { workspace = true, default-features = true, features = ["desktop", "launch"] }
+eyre.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

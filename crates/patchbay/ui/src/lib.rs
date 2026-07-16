@@ -1,0 +1,15 @@
+//! Patchbay UI — Dioxus components for the PipeWire studio-routing app.
+//!
+//! Pure client surface: renders from global signals fed by
+//! [`apply_graph_event`] / the fetch helpers, and talks back through the
+//! [`PatchbayHandle`] (a `PatchbayServiceClient` provided via context by
+//! the shell — desktop in-process today, browser remote later).
+
+mod app;
+mod canvas;
+mod layout;
+mod panels;
+mod state;
+
+pub use app::PatchbayApp;
+pub use state::{PatchbayHandle, apply_graph_event, refresh_all};
