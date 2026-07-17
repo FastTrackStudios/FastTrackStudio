@@ -51,8 +51,10 @@ pub fn MembersView() -> Element {
         let token = token();
         async move {
             let (slug, org_id) = target.ok_or("Select an org.")?;
-            let token = token.ok_or("Sign in to manage members and rates.")?;
-            let members = crate::feeds::fetch_org_members(&slug, token).await?;
+            // The member list is org-scoped by the endpoint, so no token
+            // is required; pass one when signed in for the precise
+            // membership/role path.
+            let members = crate::feeds::fetch_org_members(&slug, token.unwrap_or_default()).await?;
             let rates = crate::feeds::fetch_org_member_rates(&slug, org_id)
                 .await
                 .unwrap_or_default();
