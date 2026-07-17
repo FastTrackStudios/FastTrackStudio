@@ -916,6 +916,17 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                                 node: format!("video:{}", basename_of(&current)),
                             }
                         } else if has_file {
+                            // Obsidian-style note header: editable title
+                            // (renames the file) + a structured Properties
+                            // editor over the note's frontmatter, mounted
+                            // above the editor body. Reads + rewrites the
+                            // frontmatter region through the same
+                            // `DocumentSession` the editor holds.
+                            crate::pages::note_header::NoteHeader {
+                                collab,
+                                home,
+                                on_renamed: move |_| files.restart(),
+                            }
                             div { class: "editor-app",
                                 // --flush: no card chrome — the vault page is a
                                 // full-page embed; the editor sits directly on
@@ -1185,10 +1196,20 @@ pub(crate) fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
 }
 
 /// Filename without dirs/extension — display fallback for paths
-/// missing from the folder index.
-fn basename_of(path: &str) -> &str {
+/// missing from the folder index. Also the note title shown +
+/// edited by the [`note_header`](crate::pages::note_header) H1.
+pub(crate) fn basename_of(path: &str) -> &str {
     let file = path.rsplit('/').next().unwrap_or(path);
     file.strip_suffix(".md").unwrap_or(file)
+}
+
+/// Starter scaffold for a freshly-created note: an empty-but-present
+/// frontmatter block so the Properties panel has something to show
+/// (a `created` date + empty `tags`/`aliases` sequences). No `title`
+/// key — the note's title IS its filename (see `note_header`).
+pub(crate) fn seed_note_bytes() -> Vec<u8> {
+    let today = chrono::Local::now().date_naive();
+    format!("---\ncreated: {today}\ntags: []\naliases: []\n---\n\n").into_bytes()
 }
 
 /// OSIS verse id → a human reference the scripture service parses
@@ -1379,14 +1400,17 @@ async fn move_to_folder(
     }
 }
 
-/// Create a new empty file (create-only). Returns its sha.
+/// Create a new note (create-only), seeded with the starter
+/// frontmatter scaffold ([`seed_note_bytes`]) so the Properties
+/// panel opens with `created`/`tags`/`aliases` already present.
+/// Returns its sha.
 pub(crate) async fn create_new_file(slug: String, path: String) -> Result<String, String> {
     let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
         use vault_proto::IfMatch;
         let ack = client
-            .put_file(VAULT_ID.to_owned(), path, Vec::new(), IfMatch::CreateOnly)
+            .put_file(VAULT_ID.to_owned(), path, seed_note_bytes(), IfMatch::CreateOnly)
             .await
             .map_err(|e| format!("put_file: {e:?}"))?;
         Ok(ack.sha256)

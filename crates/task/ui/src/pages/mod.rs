@@ -23,6 +23,7 @@ pub mod ledger;
 pub mod locations;
 pub mod mealplan;
 pub mod milestones;
+pub mod note_header;
 pub mod project_detail;
 pub mod projects;
 pub mod recall;

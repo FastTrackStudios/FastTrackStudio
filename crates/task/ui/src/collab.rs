@@ -204,6 +204,28 @@ fn apply_remote_to_editor(state: Signal<EditorState>, remote: &str) {
     state.set(cur.update(TransactionSpec::new().changes(changes).user_event("remote")));
 }
 
+/// Push a **full-document replacement** into the live replica: diff
+/// the current replica text against `new_text`, apply the delta as
+/// scalar ops, and commit. The [`CollabSession`] revision effect then
+/// echoes the merged text back into the editor buffer
+/// ([`apply_remote_to_editor`]) — so a host-side rewrite (the note
+/// header's frontmatter splice) reaches BOTH the shared doc and the
+/// editor without a host-driven `state.set` (which would never reach
+/// peers, since it doesn't re-enter `on_transaction`). No-op when the
+/// replica isn't attached yet.
+pub fn push_full_text(c: &CollabHandles, new_text: &str) {
+    let Some(doc) = c.doc.doc() else { return };
+    let text = doc.loro().get_text(COLLAB_TEXT_CONTAINER);
+    let base = Doc::from_str(&text.to_string());
+    let changes = editor_crdt::remote_text_to_changes(base.rope(), new_text);
+    if changes.is_empty() {
+        return;
+    }
+    let ops = editor_crdt::changes_to_text_ops(base.rope(), &changes);
+    apply_ops_clamped(&text, &ops);
+    doc.loro().commit();
+}
+
 /// The vault page's `on_transaction` sink body: forward local edits
 /// into the replica (echo-guarded) and publish the caret to the
 /// file's presence channel (debounced).
