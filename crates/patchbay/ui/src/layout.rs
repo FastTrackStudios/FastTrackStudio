@@ -388,3 +388,180 @@ pub fn compute_layout(
         height: height + MARGIN,
     }
 }
+
+#[cfg(test)]
+mod reaper_layout {
+    use super::*;
+
+    /// REAPER joins the graph as a JACK client: `node.name = "REAPER"`,
+    /// EMPTY `media.class` (kind `Other`), 128 audio `in*` + 128 audio
+    /// `out*` ports. It must still lay out as a routable duplex card in
+    /// the middle (Applications) column on the Audio tab — the "REAPER
+    /// isn't a thing I can route to/from" regression.
+    fn reaper_snapshot() -> GraphSnapshot {
+        let node = PwNode {
+            id: 1,
+            name: "REAPER".into(),
+            label: "REAPER".into(),
+            media_class: String::new(), // JACK clients carry no media.class
+            media_kind: MediaKind::Other,
+            app_name: String::new(),
+            latency: String::new(),
+        };
+        let mut ports = Vec::new();
+        let mut pid = 100;
+        for (dir, prefix) in [
+            (PortDirection::Input, "in"),
+            (PortDirection::Output, "out"),
+        ] {
+            for ch in 1..=128 {
+                ports.push(PwPort {
+                    id: pid,
+                    node_id: 1,
+                    name: format!("{prefix}{ch}"),
+                    direction: dir,
+                    media_kind: MediaKind::Audio,
+                });
+                pid += 1;
+            }
+        }
+        GraphSnapshot { nodes: vec![node], ports, links: Vec::new() }
+    }
+
+    #[test]
+    fn reaper_is_a_routable_card() {
+        let graph = reaper_snapshot();
+        let aliases = HashMap::new();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+
+        let card = lay
+            .cards
+            .iter()
+            .find(|c| c.node.name == "REAPER")
+            .expect("REAPER must appear as a card on the Audio tab");
+
+        // Empty media.class ⇒ Applications (middle) column.
+        let middle_x = MARGIN + 1.0 * (CARD_W + COL_GAP);
+        assert!(
+            (card.x - middle_x).abs() < 1.0,
+            "REAPER should land in the Applications column, got x={}",
+            card.x
+        );
+
+        // Both directions are present, so it's routable to AND from.
+        assert!(
+            card.rows.iter().any(|r| r.direction == PortDirection::Input),
+            "REAPER must expose input rows (route audio INTO it)"
+        );
+        assert!(
+            card.rows.iter().any(|r| r.direction == PortDirection::Output),
+            "REAPER must expose output rows (route audio OUT of it)"
+        );
+
+        // Every one of the 256 audio ports is anchored (reachable by a cable).
+        assert_eq!(
+            graph.ports.iter().filter(|p| lay.anchors.contains_key(&p.id)).count(),
+            256,
+            "all REAPER audio ports must be cable-anchored"
+        );
+    }
+}
+
+#[cfg(test)]
+mod live_probe {
+    use super::*;
+    use patchbay_proto::PatchbayServiceClient;
+
+    /// Diagnose UI-vs-engine drift against a RUNNING patchbay app:
+    /// `cargo test -p patchbay-ui live_layout -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "needs a running patchbay app on :4046"]
+    async fn live_layout() {
+        let link = vox_websocket::WsLink::connect("ws://127.0.0.1:4046/vox")
+            .await
+            .expect("ws connect (is patchbay running?)");
+        let client: PatchbayServiceClient =
+            vox_core::initiator_on(link).establish().await.expect("establish");
+        let graph = client.graph().await.expect("graph");
+        println!(
+            "graph: {} nodes / {} ports / {} links",
+            graph.nodes.len(),
+            graph.ports.len(),
+            graph.links.len()
+        );
+        let aliases = HashMap::new();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        for col in 0..3 {
+            let x = MARGIN + col as f64 * (CARD_W + COL_GAP);
+            println!("── column {col} ({})", COLUMN_TITLES_DBG[col]);
+            for c in lay.cards.iter().filter(|c| (c.x - x).abs() < 1.0) {
+                println!("   y={:>6.0} h={:>5.0} {} [{}]", c.y, c.h, c.node.label, c.node.name);
+            }
+        }
+        assert!(
+            lay.cards.iter().any(|c| c.node.name == "REAPER"),
+            "REAPER missing from layout"
+        );
+    }
+
+    const COLUMN_TITLES_DBG: [&str; 3] = ["Inputs", "Applications", "Outputs"];
+
+    /// Ground truth against the LIVE PipeWire graph via an in-process
+    /// backend (no separate app needed):
+    /// `cargo test -p patchbay-ui inproc_layout -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "needs live PipeWire"]
+    async fn inproc_layout() {
+        let backend = patchbay::PatchbayBackend::new();
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        use patchbay::proto::PatchbayService as _;
+        let graph = backend.graph().await.expect("snapshot");
+        println!(
+            "graph: {} nodes / {} ports / {} links",
+            graph.nodes.len(),
+            graph.ports.len(),
+            graph.links.len()
+        );
+        if let Some(r) = graph.nodes.iter().find(|n| n.name == "REAPER") {
+            let ins = graph.ports.iter().filter(|p| p.node_id == r.id
+                && p.direction == PortDirection::Input).count();
+            let outs = graph.ports.iter().filter(|p| p.node_id == r.id
+                && p.direction == PortDirection::Output).count();
+            println!("mirror REAPER: id={} class={:?} kind={:?} ins={ins} outs={outs}",
+                r.id, r.media_class, r.media_kind);
+        } else {
+            println!("mirror REAPER: ABSENT");
+        }
+        let aliases = HashMap::new();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        match lay.cards.iter().find(|c| c.node.name == "REAPER") {
+            Some(c) => {
+                let col = ((c.x - MARGIN) / (CARD_W + COL_GAP)).round() as usize;
+                println!("layout REAPER: column {col} ({}), {} rows, x={}",
+                    COLUMN_TITLES_DBG.get(col).unwrap_or(&"?"), c.rows.len(), c.x);
+            }
+            None => println!("layout REAPER: NOT IN LAYOUT (nodes present but filtered out)"),
+        }
+    }
+}

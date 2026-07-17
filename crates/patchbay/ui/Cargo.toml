@@ -19,3 +19,9 @@ doctest = false
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+vox-websocket.workspace = true
+vox-core.workspace = true
+patchbay.workspace = true

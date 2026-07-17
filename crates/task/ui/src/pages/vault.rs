@@ -550,14 +550,19 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             SaveStatus::Saved => "Saved".to_owned(),
             SaveStatus::Failed(msg) => msg,
         };
-        let vim_label = vim.map(|v| match v.read().mode {
-            editor::editor_vim::Mode::Normal => "NORMAL",
-            editor::editor_vim::Mode::Insert => "INSERT",
-            editor::editor_vim::Mode::VisualChar => "VISUAL",
-            editor::editor_vim::Mode::VisualLine => "V-LINE",
-            editor::editor_vim::Mode::VisualBlock => "V-BLOCK",
-            editor::editor_vim::Mode::Replace => "REPLACE",
-            editor::editor_vim::Mode::Command => "COMMAND",
+        // `vim` is None on coarse-pointer devices (touch keeps plain
+        // editing) — the status chip simply doesn't render then.
+        let vim_label = vim.map(|v| {
+            match v.read().mode {
+                editor::editor_vim::Mode::Normal => "NORMAL",
+                editor::editor_vim::Mode::Insert => "INSERT",
+                editor::editor_vim::Mode::VisualChar => "VISUAL",
+                editor::editor_vim::Mode::VisualLine => "V-LINE",
+                editor::editor_vim::Mode::VisualBlock => "V-BLOCK",
+                editor::editor_vim::Mode::Replace => "REPLACE",
+                editor::editor_vim::Mode::Command => "COMMAND",
+            }
+            .to_owned()
         });
         let collab_label = collab
             .read()
@@ -568,7 +573,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             dirty: session.dirty(),
             save,
             collab: collab_label.map(str::to_owned),
-            vim: vim_label.map(str::to_owned),
+            vim: vim_label,
             on_save: Some(on_save_cb),
         }));
     });
