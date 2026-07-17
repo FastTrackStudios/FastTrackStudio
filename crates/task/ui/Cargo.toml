@@ -41,6 +41,10 @@ inbox-proto = { workspace = true, features = ["vox", "atom"] }
 # `/recall` spaced-repetition deck. Wasm-clean (serde + the pure FSRS
 # scheduler); `vox` + `atom` for the optimistic store.
 recall-proto = { workspace = true, features = ["vox", "atom"] }
+# Contacts wire surface — `Contact` + `CardDavAccount` + `ContactsClient`
+# for the `/contacts` people directory. Wasm-clean; `vox` + `atom` for
+# the optimistic store.
+contacts-proto = { workspace = true, features = ["vox", "atom"] }
 # The FSRS scheduler the review flow drives client-side.
 spaced-repetition = { workspace = true }
 threads = { workspace = true, features = ["vox", "ui", "atom"] }

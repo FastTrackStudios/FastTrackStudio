@@ -56,6 +56,7 @@ pub fn provide_stores() {
     provide_pantry_store();
     provide_inbox_store();
     provide_recall_store();
+    provide_contact_store();
     provide_booking_store();
     provide_event_type_store();
     provide_dayplan_store();
@@ -1223,6 +1224,81 @@ impl RecallMutations {
             move |s| s.remove_optimistic(Id::Real(key)),
             move || async move {
                 crate::feeds::delete_recall_card(&slug, &id)
+                    .await
+                    .map(|()| None)
+            },
+        );
+    }
+}
+
+// ── contacts (vault-backed people directory) ────────────────────────
+
+pub type ContactStore = Store<contacts_proto::Contact, String>;
+
+pub fn provide_contact_store() -> ContactStore {
+    let store = use_store();
+    use_context_provider(move || store)
+}
+
+pub fn use_contact_store() -> ContactStore {
+    use_context()
+}
+
+pub fn use_contact_list() -> AtomResult<Vec<(Id<String>, contacts_proto::Contact)>, String> {
+    use_first_org_list(use_contact_store(), |slug| async move {
+        crate::feeds::fetch_contacts(&slug).await
+    })
+}
+
+/// Optimistic writes for the directory. Upserts return unit on the
+/// wire, so the row we sent doubles as the reconciled value (the id is
+/// client-minted and stable).
+#[derive(Clone, Copy)]
+pub struct ContactMutations {
+    store: ContactStore,
+    write: Mutation<String>,
+}
+
+pub fn use_contact_mutations() -> ContactMutations {
+    ContactMutations {
+        store: use_contact_store(),
+        write: use_mutation(),
+    }
+}
+
+impl ContactMutations {
+    /// Author a fresh contact: it appears instantly, then persists.
+    pub fn create(&self, slug: String, contact: contacts_proto::Contact) {
+        run_create(self.write, self.store, contact, move |contact| async move {
+            crate::feeds::upsert_contact(&slug, contact.clone())
+                .await
+                .map(|()| contact)
+        });
+    }
+
+    /// Replace a contact in place (edits, link, archive), then persist.
+    pub fn save(&self, slug: String, next: contacts_proto::Contact) {
+        let id = next.id.clone();
+        let row = next.clone();
+        self.write.run(
+            self.store,
+            move |s| s.update_optimistic(Id::Real(id), move |r| *r = row),
+            move || async move {
+                crate::feeds::upsert_contact(&slug, next.clone())
+                    .await
+                    .map(|()| Some(next))
+            },
+        );
+    }
+
+    /// Remove a contact now; restore (and notify) if the delete fails.
+    pub fn delete(&self, slug: String, id: String) {
+        let key = id.clone();
+        self.write.run(
+            self.store,
+            move |s| s.remove_optimistic(Id::Real(key)),
+            move || async move {
+                crate::feeds::delete_contact(&slug, &id)
                     .await
                     .map(|()| None)
             },

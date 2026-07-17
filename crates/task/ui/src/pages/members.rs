@@ -3,12 +3,18 @@
 //! Lists every member of the active org (via `AuthService::list_org_members`)
 //! and their org-level hourly rate (cascade level 3). The rate is
 //! editable inline and upserted through `TimerService::set_org_member_rate`,
-//! so several people can bill at different rates. Per-project overrides
-//! (cascade level 1 — different rates on one project) live in the
-//! "Project rates" section, keyed off a project picker.
+//! so several people can bill at different rates.
+//!
+//! Members render as the ledger's shared **person-chip** (initials
+//! avatar + name + role badge), the same shape used on `/contacts` and
+//! `/invoices`. When a contact is linked to a member (`linked_user_id`),
+//! the chip is enriched with the contact's phone — but a link is never
+//! required.
 //!
 //! Requires a signed-in session (the member list is derived from the
 //! caller's token); Guest sees a sign-in prompt.
+
+use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
@@ -17,15 +23,14 @@ use uuid::Uuid;
 use crate::auth::AuthCtx;
 use crate::chrome::resolve_org;
 use crate::orgs::{OrgMeta, OrgSelection};
-
-const FIELD: &str =
-    "w-24 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-primary/40";
+use crate::pages::contacts::PersonChip;
 
 fn money(cents: i64) -> String {
     format!("${}.{:02}", cents / 100, (cents % 100).abs())
 }
 
-/// A member joined with their org-level rate (0 = unset).
+/// A member joined with their org-level rate (0 = unset) and, if one
+/// exists, the phone from a linked contact.
 #[derive(Clone, PartialEq)]
 struct MemberRow {
     user_id: Uuid,
@@ -33,6 +38,7 @@ struct MemberRow {
     email: String,
     role: String,
     cents: i64,
+    phone: Option<String>,
 }
 
 #[component]
@@ -58,12 +64,25 @@ pub fn MembersView() -> Element {
             let rates = crate::feeds::fetch_org_member_rates(&slug, org_id)
                 .await
                 .unwrap_or_default();
-            let by_user: std::collections::HashMap<Uuid, i64> =
+            let by_user: HashMap<Uuid, i64> =
                 rates.iter().map(|r| (r.user_id, r.hourly_cents)).collect();
+            // Enrich with linked contacts (phone) — best-effort, never
+            // required.
+            let phones: HashMap<Uuid, String> = crate::feeds::fetch_contacts(&slug)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|c| {
+                    let uid = c.linked_user_id.as_ref()?.parse::<Uuid>().ok()?;
+                    let phone = c.primary_phone()?.to_string();
+                    Some((uid, phone))
+                })
+                .collect();
             let mut out: Vec<MemberRow> = members
                 .into_iter()
                 .map(|m| MemberRow {
                     cents: by_user.get(&m.user_id).copied().unwrap_or(0),
+                    phone: phones.get(&m.user_id).cloned(),
                     user_id: m.user_id,
                     name: m.name,
                     email: m.email,
@@ -81,27 +100,40 @@ pub fn MembersView() -> Element {
         Some(Ok(list)) => {
             let list = list.clone();
             let (slug, org_id) = target_now.clone().unwrap_or_default();
-            rsx! {
-                div { class: "flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40",
-                    div { class: "grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-border/60 px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground",
-                        span { "Member" }
-                        span { "Rate / hr" }
-                        span { "" }
-                    }
-                    for row in list {
-                        MemberRateRow {
-                            key: "{row.user_id}",
-                            row,
-                            slug: slug.clone(),
-                            org_id,
-                            on_saved: move |_| reload += 1,
+            if list.is_empty() {
+                rsx! {
+                    EmptyState { message: "No members in this org yet.".to_string() }
+                }
+            } else {
+                rsx! {
+                    Card { class: "overflow-hidden".to_string(),
+                        TableContainer {
+                            Table {
+                                TableHeader {
+                                    TableRow {
+                                        TableHead { class: "text-[0.7rem] uppercase tracking-wider text-muted-foreground".to_string(), "Member" }
+                                        TableHead { class: "text-right text-[0.7rem] uppercase tracking-wider text-muted-foreground".to_string(), "Rate / hr" }
+                                    }
+                                }
+                                TableBody {
+                                    for row in list {
+                                        MemberRateRow {
+                                            key: "{row.user_id}",
+                                            row,
+                                            slug: slug.clone(),
+                                            org_id,
+                                            on_saved: move |_| reload += 1,
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         Some(Err(e)) => rsx! {
-            crate::states::EmptyState { title: "{e}" }
+            EmptyState { message: e.clone() }
         },
         None => rsx! { crate::states::LoadingState {} },
     };
@@ -122,7 +154,7 @@ pub fn MembersView() -> Element {
     }
 }
 
-/// One member row — name/email/role + an inline editable org rate.
+/// One member row — a person-chip + role badge + an inline editable rate.
 #[component]
 fn MemberRateRow(
     row: MemberRow,
@@ -130,66 +162,63 @@ fn MemberRateRow(
     org_id: Uuid,
     on_saved: EventHandler<()>,
 ) -> Element {
-    let mut dollars = use_signal(|| {
-        if row.cents > 0 {
-            format!("{:.2}", row.cents as f64 / 100.0)
-        } else {
-            String::new()
-        }
-    });
-    let mut saving = use_signal(|| false);
     let user_id = row.user_id;
 
-    let save = move |_| {
-        let cents = (dollars.peek().trim().parse::<f64>().unwrap_or(0.0) * 100.0).round() as i64;
+    let (role_variant, role_label) = match row.role.as_str() {
+        "owner" => (StatusBadgeVariant::Success, "Owner"),
+        "admin" => (StatusBadgeVariant::Warning, "Admin"),
+        _ => (StatusBadgeVariant::Neutral, "Member"),
+    };
+
+    // Subtitle: email, plus the linked contact's phone when present.
+    let subtitle = match &row.phone {
+        Some(p) => format!("{} · {p}", row.email),
+        None => row.email.clone(),
+    };
+
+    // Current rate as a dollars string for the inline editor.
+    let rate_str = if row.cents > 0 {
+        format!("{:.2}", row.cents as f64 / 100.0)
+    } else {
+        String::new()
+    };
+
+    let commit = move |next: String| {
+        let cents = (next.trim().parse::<f64>().unwrap_or(0.0) * 100.0).round() as i64;
         if cents < 0 {
             return;
         }
         let slug = slug.clone();
-        saving.set(true);
         spawn(async move {
-            let _ = crate::feeds::set_org_member_rate(&slug, org_id, user_id, cents, "USD".to_string())
-                .await;
-            saving.set(false);
+            let _ =
+                crate::feeds::set_org_member_rate(&slug, org_id, user_id, cents, "USD".to_string())
+                    .await;
             on_saved.call(());
         });
     };
 
-    let (role_variant, role_label) = match row.role.as_str() {
-        "owner" => (StatusBadgeVariant::Success, "owner"),
-        "admin" => (StatusBadgeVariant::Warning, "admin"),
-        _ => (StatusBadgeVariant::Neutral, "member"),
-    };
-
     rsx! {
-        div { class: "grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-border/40 px-4 py-2.5 last:border-b-0",
-            div { class: "flex min-w-0 flex-col",
-                div { class: "flex items-center gap-2",
-                    span { class: "truncate text-sm font-medium text-foreground", "{row.name}" }
-                    StatusBadge { variant: role_variant, label: role_label.to_string(), class: "px-1.5 py-0 text-[10px]".to_string() }
-                }
-                span { class: "truncate text-xs text-muted-foreground", "{row.email}" }
-                if row.cents > 0 {
-                    span { class: "text-[10px] text-muted-foreground", "current: {money(row.cents)}/hr" }
-                }
-            }
-            div { class: "flex items-center gap-1",
-                span { class: "text-sm text-muted-foreground", "$" }
-                input {
-                    class: FIELD,
-                    r#type: "number",
-                    step: "0.50",
-                    min: "0",
-                    placeholder: "0.00",
-                    value: "{dollars}",
-                    oninput: move |e| dollars.set(e.value()),
+        TableRow {
+            TableCell {
+                PersonChip {
+                    name: row.name.clone(),
+                    email: row.email.clone(),
+                    subtitle: Some(subtitle),
+                    badge_label: Some(role_label.to_string()),
+                    badge_variant: role_variant,
                 }
             }
-            Button {
-                variant: ButtonVariant::Secondary,
-                size: ButtonSize::Small,
-                on_click: save,
-                if saving() { "Saving…" } else { "Save" }
+            TableCell { class: "text-right".to_string(),
+                div { class: "flex items-center justify-end gap-1 font-mono tabular-nums",
+                    span { class: "text-muted-foreground", "$" }
+                    InlineEdit {
+                        value: rate_str,
+                        placeholder: "0.00".to_string(),
+                        class: "min-w-16 text-right".to_string(),
+                        on_commit: commit,
+                    }
+                    span { class: "text-xs text-muted-foreground", "/hr" }
+                }
             }
         }
     }

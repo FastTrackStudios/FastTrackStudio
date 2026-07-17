@@ -8,6 +8,7 @@ pub mod agents;
 pub mod bases;
 pub mod bookings;
 pub mod connections;
+pub mod contacts;
 pub mod cook_mode;
 pub mod email;
 pub mod finances;
