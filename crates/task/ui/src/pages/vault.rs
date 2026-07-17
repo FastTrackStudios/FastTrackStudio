@@ -1380,7 +1380,7 @@ async fn move_to_folder(
 }
 
 /// Create a new empty file (create-only). Returns its sha.
-async fn create_new_file(slug: String, path: String) -> Result<String, String> {
+pub(crate) async fn create_new_file(slug: String, path: String) -> Result<String, String> {
     let client = crate::vox_clients::vault_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {

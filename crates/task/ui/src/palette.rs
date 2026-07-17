@@ -1,29 +1,32 @@
-//! Ctrl+P command palette — fuzzy jump to any page or vault note.
+//! Ctrl+P command palette + Ctrl+O note omni-picker.
 //!
-//! One global overlay ([`CommandPalette`]), toggled by a
-//! [`PaletteOpen`] context signal the app shell provides (same shape
-//! as `chrome::FleetingOpen`). Ctrl+P / Ctrl+K toggle it from anywhere
-//! via the app-wide shortcut engine ([`crate::shortcuts`]), which this
-//! component mounts (it's the app-long shell child with the palette /
-//! chrome contexts and the router in scope). Escape closes it from the
-//! palette input's own handler — the input autofocuses on open, so
-//! focus is always there.
+//! [`CommandPalette`] is the one app-long overlay host: it mounts the
+//! shared shortcut engine ([`crate::shortcuts::use_app_shortcuts`]) and
+//! renders the which-key overlay, the note omni-picker, and the command
+//! palette modal. All three are toggled by context signals the app shell
+//! provides ([`PaletteOpen`] / [`OmniOpen`], same shape as
+//! `chrome::FleetingOpen`).
 //!
-//! Results mix two sections, both nucleo-ranked (fzf-style, matching
-//! `fts_ui`'s combobox filter):
+//! The palette mixes three nucleo-ranked sections:
 //!
+//! - **Commands** — every action from [`crate::actions::task_action_defs`]
+//!   (create note, start timer, go to …). Selecting one executes it
+//!   through the shared [`actions_standalone::StandaloneActions`]
+//!   registry — the exact path a keyboard shortcut takes.
 //! - **Pages** — every app destination from [`crate::nav::nav_tabs`].
-//! - **Notes** — every vault note from the home org's folder index
-//!   (title → `Route::VaultRoute { path }`), fetched when the palette
-//!   opens.
+//! - **Notes** — every vault note from the home org's folder index.
+//!
+//! The omni-picker ([`OmniPicker`], Ctrl+O) is the Notes section on its
+//! own: uncapped, fuzzy over the whole vault.
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{FileText, Search};
 use nucleo_matcher::{
-    pattern::{CaseMatching, Normalization, Pattern},
     Matcher, Utf32Str,
+    pattern::{CaseMatching, Normalization, Pattern},
 };
 
+use crate::actions::{ActionsCtx, task_action_defs};
 use crate::nav::nav_tabs;
 use crate::orgs::OrgMeta;
 use crate::routes::Route;
@@ -35,9 +38,15 @@ use crate::routes::Route;
 #[derive(Clone, Copy)]
 pub struct PaletteOpen(pub Signal<bool>);
 
-/// Install the palette context. Call once in the app shell.
+/// Visibility of the note omni-picker. Provided once by the app shell;
+/// opened by the `fts.picker.notes` action (Ctrl+O).
+#[derive(Clone, Copy)]
+pub struct OmniOpen(pub Signal<bool>);
+
+/// Install the palette + omni contexts. Call once in the app shell.
 pub fn provide_palette_context() {
     use_context_provider(|| PaletteOpen(Signal::new(false)));
+    use_context_provider(|| OmniOpen(Signal::new(false)));
 }
 
 pub(crate) fn use_palette_open() -> Signal<bool> {
@@ -46,40 +55,53 @@ pub(crate) fn use_palette_open() -> Signal<bool> {
 
 // ── data ────────────────────────────────────────────────────────────
 
-/// Rows rendered at once — keeps ranking + render cheap over big
-/// vaults (the folder index can be hundreds of notes).
-const MAX_RESULTS: usize = 12;
+/// Rows rendered at once in the palette — keeps ranking + render cheap.
+const MAX_RESULTS: usize = 14;
 
-/// One selectable row: an app page or a vault note.
+/// What selecting a palette row does.
+#[derive(Clone, PartialEq)]
+enum Target {
+    /// Navigate to a route (pages + notes).
+    Route(Route),
+    /// Execute a registry action by id.
+    Action(String),
+}
+
+/// Which section a row belongs to — drives display grouping + order.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Kind {
+    Command,
+    Page,
+    Note,
+}
+
+/// One selectable row.
 #[derive(Clone, PartialEq)]
 #[allow(unpredictable_function_pointer_comparisons)]
 struct PaletteEntry {
     label: String,
     /// Secondary match/display text — the vault-relative path for
-    /// notes, empty for pages.
+    /// notes, the shortcut hint for commands, empty for pages.
     detail: String,
-    route: Route,
-    /// Nav-tab icon for pages; notes render a file icon.
+    target: Target,
+    /// Nav-tab icon for pages; commands + notes render a glyph.
     icon: Option<fn() -> Element>,
-    is_page: bool,
+    kind: Kind,
 }
 
-/// Rank `entries` against `query` and keep the top [`MAX_RESULTS`],
-/// pages before notes for display grouping. Empty query = everything
-/// in given order (pages lead), capped the same way.
+/// Rank `entries` against `query`, keep the top [`MAX_RESULTS`], and
+/// group by [`Kind`] (Commands, Pages, Notes) preserving rank within
+/// each group.
 fn rank(query: &str, entries: Vec<PaletteEntry>) -> Vec<PaletteEntry> {
-    let survivors: Vec<PaletteEntry> = if query.is_empty() {
+    let mut survivors: Vec<PaletteEntry> = if query.is_empty() {
         entries.into_iter().take(MAX_RESULTS).collect()
     } else {
-        // Same nucleo setup as `fts_ui`'s combobox filter, but keeping
-        // the score so the list is ranked, not just filtered.
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
         let mut buf = Vec::new();
         let mut scored: Vec<(u32, PaletteEntry)> = entries
             .into_iter()
             .filter_map(|e| {
-                // Notes match on title AND path, so folder names hit too.
                 let hay = if e.detail.is_empty() {
                     e.label.clone()
                 } else {
@@ -93,25 +115,37 @@ fn rank(query: &str, entries: Vec<PaletteEntry>) -> Vec<PaletteEntry> {
         scored.truncate(MAX_RESULTS);
         scored.into_iter().map(|(_, e)| e).collect()
     };
-    // Group for display: pages section, then notes — rank order kept
-    // within each.
-    let (pages, notes): (Vec<_>, Vec<_>) = survivors.into_iter().partition(|e| e.is_page);
-    pages.into_iter().chain(notes).collect()
+    // Stable group by kind (Command < Page < Note), rank order kept
+    // within each group.
+    survivors.sort_by_key(|e| e.kind);
+    survivors
 }
 
-// ── overlay ─────────────────────────────────────────────────────────
+// ── overlay host ────────────────────────────────────────────────────
 
-/// The global command palette. Render once (in the app shell).
-/// Centered top-third modal over a scrim; type to fuzzy-filter,
-/// Up/Down + Enter (or click) to jump, Escape / click outside closes.
+/// The app-long overlay host: mounts the shortcut engine and renders
+/// the which-key overlay, the note omni-picker, and the palette modal.
+/// Render once (in the app shell).
 #[component]
 pub fn CommandPalette() -> Element {
+    // The app-wide shortcut engine (Ctrl+P/Ctrl+O, leader keys, `g …`
+    // nav) + the actions registry mount here; it returns the which-key
+    // overlay signal.
+    let whichkey = crate::shortcuts::use_app_shortcuts();
+    rsx! {
+        crate::shortcuts::WhichKeyOverlay { state: whichkey }
+        OmniPicker {}
+        PaletteModal {}
+    }
+}
+
+/// The command-palette modal: Commands + Pages + Notes, fuzzy-ranked.
+/// Centered top-third modal over a scrim; type to filter, Up/Down +
+/// Enter (or click) to run, Escape / click outside closes.
+#[component]
+fn PaletteModal() -> Element {
     let mut open = use_palette_open();
-    // The app-wide shortcut engine (Ctrl+P/Ctrl+K → this palette,
-    // capture, panel toggles, `g …` navigation) mounts here: the
-    // palette is the app-long shell child that owns this subtask's
-    // wiring and has every dispatch target in context.
-    crate::shortcuts::use_app_shortcuts();
+    let actions = use_context::<ActionsCtx>();
 
     let nav = use_navigator();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
@@ -120,8 +154,6 @@ pub fn CommandPalette() -> Element {
     let mut query = use_signal(String::new);
     let mut cursor = use_signal(|| 0usize);
 
-    // Vault note index — the home org's folder index, fetched each
-    // time the palette opens so new notes appear without a reload.
     let notes = use_resource(move || {
         let want = open();
         let slug = home();
@@ -145,17 +177,26 @@ pub fn CommandPalette() -> Element {
         cursor.set(0);
     };
 
-    // Pages from the nav set + notes from the vault index, ranked.
-    let mut entries: Vec<PaletteEntry> = nav_tabs()
+    // Commands (registry) + Pages (nav set) + Notes (vault index).
+    let mut entries: Vec<PaletteEntry> = task_action_defs()
         .into_iter()
-        .map(|tab| PaletteEntry {
-            label: tab.label.to_string(),
-            detail: String::new(),
-            route: tab.route,
-            icon: Some(tab.icon),
-            is_page: true,
+        .map(|def| PaletteEntry {
+            label: def.name.clone(),
+            detail: def.shortcut_hint.clone().unwrap_or_default(),
+            target: Target::Action(def.id.as_str().to_string()),
+            icon: None,
+            kind: Kind::Command,
         })
         .collect();
+    for tab in nav_tabs() {
+        entries.push(PaletteEntry {
+            label: tab.label.to_string(),
+            detail: String::new(),
+            target: Target::Route(tab.route),
+            icon: Some(tab.icon),
+            kind: Kind::Page,
+        });
+    }
     if let Some(pages) = &*notes.read() {
         for meta in pages {
             let label = if meta.title.is_empty() {
@@ -166,11 +207,11 @@ pub fn CommandPalette() -> Element {
             entries.push(PaletteEntry {
                 label,
                 detail: meta.path.clone(),
-                route: Route::VaultRoute {
+                target: Target::Route(Route::VaultRoute {
                     path: meta.path.clone(),
-                },
+                }),
                 icon: None,
-                is_page: false,
+                kind: Kind::Note,
             });
         }
     }
@@ -180,18 +221,26 @@ pub fn CommandPalette() -> Element {
 
     let go = {
         let ranked = ranked.clone();
+        let registry = actions.registry.clone();
         move |i: usize| {
             if let Some(entry) = ranked.get(i) {
-                nav.push(entry.route.clone());
+                match &entry.target {
+                    Target::Route(r) => {
+                        nav.push(r.clone());
+                    }
+                    Target::Action(id) => {
+                        let registry = registry.clone();
+                        let id = id.clone();
+                        spawn(async move {
+                            registry.execute(id).await;
+                        });
+                    }
+                }
             }
             close();
         }
     };
     let mut go_key = go.clone();
-
-    // Section split: `rank` puts pages first, so the notes group is
-    // the tail starting at the first non-page row.
-    let first_note = ranked.iter().position(|e| !e.is_page).unwrap_or(count);
 
     rsx! {
         div {
@@ -204,13 +253,178 @@ pub fn CommandPalette() -> Element {
                     span { class: "text-muted-foreground", Search { size: 15 } }
                     input {
                         class: "h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground",
-                        placeholder: "Jump to a page or note…",
-                        // `autofocus` only fires on initial page load, not
-                        // when the modal is inserted dynamically — focus on
-                        // mount (same dance as the fleeting modal), and once
-                        // more a beat later: the editor's focus bookkeeping
-                        // can steal focus back in the same frame the palette
-                        // opens, which left the input unfocused in practice.
+                        placeholder: "Run a command, jump to a page or note…",
+                        onmounted: move |e: Event<MountedData>| {
+                            spawn(async move {
+                                let _ = e.data().set_focus(true).await;
+                                architect::sleep(architect::Duration::from_millis(80)).await;
+                                let _ = e.data().set_focus(true).await;
+                            });
+                        },
+                        value: "{query}",
+                        oninput: move |e| {
+                            query.set(e.value());
+                            cursor.set(0);
+                        },
+                        onkeydown: move |e| match e.key() {
+                            Key::ArrowDown => {
+                                e.prevent_default();
+                                if count > 0 {
+                                    cursor.set((sel + 1).min(count - 1));
+                                }
+                            }
+                            Key::ArrowUp => {
+                                e.prevent_default();
+                                cursor.set(sel.saturating_sub(1));
+                            }
+                            Key::Enter => {
+                                e.prevent_default();
+                                go_key(sel);
+                            }
+                            Key::Escape => close(),
+                            _ => {}
+                        },
+                    }
+                    span { class: "shrink-0 text-xs text-muted-foreground", "↵ to run · esc to close" }
+                }
+                div { class: "max-h-[50vh] overflow-y-auto py-1",
+                    if count == 0 {
+                        div { class: "px-3 py-4 text-center text-sm text-muted-foreground", "No matches." }
+                    }
+                    {render_sections(&ranked, sel, cursor, go.clone())}
+                }
+            }
+        }
+    }
+}
+
+/// Render the ranked rows split into their [`Kind`] sections. `ranked`
+/// is already grouped by [`Kind`], so a row starts a new section iff its
+/// kind differs from the previous row's.
+fn render_sections(
+    ranked: &[PaletteEntry],
+    sel: usize,
+    mut cursor: Signal<usize>,
+    go: impl FnMut(usize) + Clone + 'static,
+) -> Element {
+    rsx! {
+        for (i, entry) in ranked.iter().enumerate() {
+            if i == 0 || ranked[i - 1].kind != entry.kind {
+                SectionLabel { text: section_label(entry.kind) }
+            }
+            PaletteRow {
+                entry: entry.clone(),
+                selected: i == sel,
+                on_hover: move |_| cursor.set(i),
+                on_pick: {
+                    let mut go = go.clone();
+                    move |_| go(i)
+                },
+            }
+        }
+    }
+}
+
+fn section_label(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Command => "Commands",
+        Kind::Page => "Pages",
+        Kind::Note => "Notes",
+    }
+}
+
+// ── omni-picker ─────────────────────────────────────────────────────
+
+/// The Ctrl+O note omni-picker: the Notes section on its own, fuzzy over
+/// the whole vault (uncapped, scrollable). Enter opens the note.
+#[component]
+pub fn OmniPicker() -> Element {
+    let mut open = use_context::<OmniOpen>().0;
+    let nav = use_navigator();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+
+    let mut query = use_signal(String::new);
+    let mut cursor = use_signal(|| 0usize);
+
+    let notes = use_resource(move || {
+        let want = open();
+        let slug = home();
+        async move {
+            if !want {
+                return Vec::new();
+            }
+            crate::pages::vault::fetch_folder_index(slug)
+                .await
+                .unwrap_or_default()
+        }
+    });
+
+    if !open() {
+        return rsx! {};
+    }
+
+    let mut close = move || {
+        open.set(false);
+        query.set(String::new());
+        cursor.set(0);
+    };
+
+    // All notes, fuzzy-ranked (title + path), uncapped.
+    let mut entries: Vec<(String, String)> = Vec::new();
+    if let Some(pages) = &*notes.read() {
+        for meta in pages {
+            let label = if meta.title.is_empty() {
+                meta.basename.clone()
+            } else {
+                meta.title.clone()
+            };
+            entries.push((label, meta.path.clone()));
+        }
+    }
+    let ranked: Vec<(String, String)> = if query().is_empty() {
+        entries
+    } else {
+        let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
+        let pattern = Pattern::parse(&query(), CaseMatching::Ignore, Normalization::Smart);
+        let mut buf = Vec::new();
+        let mut scored: Vec<(u32, (String, String))> = entries
+            .into_iter()
+            .filter_map(|(label, path)| {
+                let hay = format!("{label} {path}");
+                let score = pattern.score(Utf32Str::new(&hay, &mut buf), &mut matcher)?;
+                Some((score, (label, path)))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().map(|(_, e)| e).collect()
+    };
+    let count = ranked.len();
+    let sel = cursor().min(count.saturating_sub(1));
+
+    let go = {
+        let ranked = ranked.clone();
+        move |i: usize| {
+            if let Some((_, path)) = ranked.get(i) {
+                nav.push(Route::VaultRoute { path: path.clone() });
+            }
+            close();
+        }
+    };
+    let mut go_key = go.clone();
+
+    rsx! {
+        div {
+            class: "fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-[12vh]",
+            onclick: move |_| close(),
+            div {
+                class: "flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl",
+                onclick: move |e| e.stop_propagation(),
+                div { class: "flex items-center gap-2 border-b border-border px-3",
+                    span { class: "text-muted-foreground", FileText { size: 15 } }
+                    input {
+                        class: "h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground",
+                        placeholder: "Open a note…",
                         onmounted: move |e: Event<MountedData>| {
                             spawn(async move {
                                 let _ = e.data().set_focus(true).await;
@@ -244,38 +458,27 @@ pub fn CommandPalette() -> Element {
                     }
                     span { class: "shrink-0 text-xs text-muted-foreground", "↵ to open · esc to close" }
                 }
-                div { class: "max-h-[50vh] overflow-y-auto py-1",
+                div { class: "max-h-[60vh] overflow-y-auto py-1",
                     if count == 0 {
-                        div { class: "px-3 py-4 text-center text-sm text-muted-foreground", "No matches." }
+                        div { class: "px-3 py-4 text-center text-sm text-muted-foreground", "No notes." }
                     }
-                    if first_note > 0 {
-                        SectionLabel { text: "Pages" }
-                        for (i, entry) in ranked[..first_note].iter().enumerate() {
-                            PaletteRow {
-                                key: "{entry.label}",
-                                entry: entry.clone(),
-                                selected: i == sel,
-                                on_hover: move |_| cursor.set(i),
-                                on_pick: {
-                                    let mut go = go.clone();
-                                    move |_| go(i)
-                                },
-                            }
-                        }
-                    }
-                    if first_note < count {
-                        SectionLabel { text: "Notes" }
-                        for (off, entry) in ranked[first_note..].iter().enumerate() {
-                            PaletteRow {
-                                key: "{entry.detail}",
-                                entry: entry.clone(),
-                                selected: first_note + off == sel,
-                                on_hover: move |_| cursor.set(first_note + off),
-                                on_pick: {
-                                    let mut go = go.clone();
-                                    move |_| go(first_note + off)
-                                },
-                            }
+                    for (i, (label, path)) in ranked.iter().enumerate() {
+                        button {
+                            key: "{path}",
+                            r#type: "button",
+                            class: if i == sel {
+                                "flex w-full items-center gap-2.5 bg-accent/60 px-3 py-2 text-left text-sm text-foreground"
+                            } else {
+                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-muted-foreground hover:text-foreground"
+                            },
+                            onmouseenter: move |_| cursor.set(i),
+                            onclick: {
+                                let mut go = go.clone();
+                                move |_| go(i)
+                            },
+                            span { class: "flex h-4 w-4 shrink-0 items-center justify-center", FileText { size: 15 } }
+                            span { class: "truncate", "{label}" }
+                            span { class: "ml-auto max-w-[40%] truncate text-xs text-muted-foreground/70", "{path}" }
                         }
                     }
                 }
@@ -283,6 +486,8 @@ pub fn CommandPalette() -> Element {
         }
     }
 }
+
+// ── rows ────────────────────────────────────────────────────────────
 
 #[component]
 fn SectionLabel(text: &'static str) -> Element {
@@ -293,8 +498,8 @@ fn SectionLabel(text: &'static str) -> Element {
     }
 }
 
-/// One result row: icon + label (+ muted path for notes). Hover moves
-/// the keyboard cursor so mouse and arrows never fight.
+/// One result row: icon/glyph + label (+ muted detail). Hover moves the
+/// keyboard cursor so mouse and arrows never fight.
 #[component]
 fn PaletteRow(
     entry: PaletteEntry,
@@ -303,6 +508,7 @@ fn PaletteRow(
     on_pick: EventHandler<()>,
 ) -> Element {
     let icon = entry.icon;
+    let kind = entry.kind;
     rsx! {
         button {
             r#type: "button",
@@ -316,13 +522,15 @@ fn PaletteRow(
             span { class: "flex h-4 w-4 shrink-0 items-center justify-center",
                 if let Some(icon) = icon {
                     {icon()}
+                } else if kind == Kind::Command {
+                    span { class: "font-mono text-xs text-muted-foreground", "›" }
                 } else {
                     FileText { size: 15 }
                 }
             }
             span { class: "truncate", "{entry.label}" }
             if !entry.detail.is_empty() {
-                span { class: "ml-auto max-w-[40%] truncate text-xs text-muted-foreground/70",
+                span { class: "ml-auto max-w-[45%] shrink-0 truncate text-xs text-muted-foreground/70",
                     "{entry.detail}"
                 }
             }
