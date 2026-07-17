@@ -13049,6 +13049,7 @@ name = "inbox-proto"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "facet 0.50.0-rc.5",
  "fake",
  "sea-orm",
@@ -13240,8 +13241,18 @@ name = "input-dioxus"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "fts-ui",
  "input",
  "tokio",
+]
+
+[[package]]
+name = "input-keybinds"
+version = "0.1.0"
+dependencies = [
+ "facet-styx 5.0.0-rc.5",
+ "input",
+ "input-config-proto",
 ]
 
 [[package]]
@@ -21608,6 +21619,8 @@ dependencies = [
  "helgoboss-midi",
  "input",
  "input-config-proto",
+ "input-dioxus",
+ "input-keybinds",
  "once_cell",
  "reaper-config",
  "reaper-dioxus",

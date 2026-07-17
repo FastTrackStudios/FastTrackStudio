@@ -91,6 +91,7 @@ members = [
     "crates/input/actions-standalone",
     "crates/input/input",
     "crates/input/input-dioxus",
+    "crates/input/input-keybinds",
     # ── crates/daw — daw domain core (wave 2) ─────────────────────────
     "crates/daw/daw",
     "crates/daw/proto",
@@ -383,6 +384,7 @@ actions-standalone = { path = "crates/input/actions-standalone" }
 actions-reaper = { path = "features/reaper/actions-reaper" }
 input = { path = "crates/input/input" }
 input-dioxus = { path = "crates/input/input-dioxus" }
+input-keybinds = { path = "crates/input/input-keybinds" }
 
 # ── daw domain (wave 2) ───────────────────────────────────────────────
 # Facade crate — the only public API surface for the daw domain.

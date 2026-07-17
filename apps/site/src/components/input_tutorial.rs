@@ -138,6 +138,7 @@ fn context_label(ctx: Option<KeybindContext>) -> Option<&'static str> {
         KeybindContext::Midi => Some("MIDI Editor"),
         KeybindContext::MidiInline => Some("Inline MIDI"),
         KeybindContext::MediaExplorer => Some("Media Explorer"),
+        KeybindContext::Custom(_) => None,
     }
 }
 
@@ -585,7 +586,7 @@ fn BindingRow(
 ) -> Element {
     let chords = pretty_keys(&binding.keys);
     let desc = binding.desc.clone().unwrap_or_default();
-    let ctx = context_label(binding.context);
+    let ctx = context_label(binding.context.clone());
 
     rsx! {
         div {
@@ -652,7 +653,7 @@ fn WheelRow(bind: WheelBindDef, zebra: bool) -> Element {
         "Wheel ↕"
     };
     let desc = bind.desc.clone().unwrap_or_default();
-    let ctx = context_label(bind.context);
+    let ctx = context_label(bind.context.clone());
 
     rsx! {
         div {
