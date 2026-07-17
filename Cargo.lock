@@ -28025,6 +28025,8 @@ dependencies = [
 name = "ui"
 version = "0.1.0"
 dependencies = [
+ "actions-proto",
+ "actions-standalone",
  "agent-proto",
  "architect",
  "auth-proto",

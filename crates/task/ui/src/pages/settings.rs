@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 
 use crate::prefs::PrefsCtx;
-use crate::shortcuts::{SHORTCUTS, ShortcutDef, effective_sequence};
+use crate::shortcuts::{BINDINGS, Binding, effective_sequence};
 use crate::theming::use_org_theme_switcher_state;
 
 /// The routes worth landing on. `""` = the app default (`/`).
@@ -90,9 +90,9 @@ pub fn SettingsView() -> Element {
                             }
                         }
                         tbody {
-                            for def in SHORTCUTS {
+                            for def in BINDINGS {
                                 ShortcutRow {
-                                    key: "{def.action}-{def.canonical}",
+                                    key: "{def.action}-{def.seq}",
                                     def,
                                     priority_on: prefs.shortcuts_priority,
                                 }
@@ -136,7 +136,7 @@ pub fn SettingsView() -> Element {
 /// combo / overrides a browser default / inactive while the priority
 /// toggle is off).
 #[component]
-fn ShortcutRow(def: &'static ShortcutDef, priority_on: bool) -> Element {
+fn ShortcutRow(def: &'static Binding, priority_on: bool) -> Element {
     let inactive = def.overrides_browser && !priority_on;
     let seq = effective_sequence(def);
     rsx! {
@@ -156,10 +156,10 @@ fn ShortcutRow(def: &'static ShortcutDef, priority_on: bool) -> Element {
                     }
                 }
             }
-            td { class: "px-3 py-2", "{def.description}" }
+            td { class: "px-3 py-2", "{def.label}" }
             td { class: "px-3 py-2 text-xs text-muted-foreground",
                 if def.web.is_some() {
-                    span { class: "mr-2", "web remap of {def.canonical} (browser-reserved)" }
+                    span { class: "mr-2", "web remap of {def.seq} (browser-reserved)" }
                 }
                 if def.overrides_browser {
                     if inactive {

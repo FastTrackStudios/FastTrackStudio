@@ -113,6 +113,13 @@ prefs-proto = { workspace = true, features = ["vox"] }
 # Wasm-clean core crate; the DOM wiring lives in shortcuts.rs.
 input.workspace = true
 
+# The shared actions framework (src/actions.rs): `ActionDefinition`s +
+# the `StandaloneActions` registry the command palette and the shortcut
+# dispatcher both execute through. Both crates are wasm-clean
+# (actions-standalone uses async-lock, not tokio).
+actions-proto.workspace = true
+actions-standalone.workspace = true
+
 # Fuzzy ranking for the Ctrl+P command palette — same matcher the
 # fts-ui combobox filter uses, kept here so the palette can rank (not
 # just filter) results.
