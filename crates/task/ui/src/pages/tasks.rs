@@ -22,6 +22,7 @@
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Plus, SlidersHorizontal};
+use fts_ui::prelude::*;
 use task_ui::{QuickAdd, TaskInfo as UiTask, TaskMutation, TasksApp};
 
 use crate::chrome::{
@@ -100,6 +101,9 @@ pub fn TasksView() -> Element {
     let active_only = user_prefs.tasks_active;
     let relevant_only = user_prefs.tasks_relevant;
     let at_location = user_prefs.location.clone();
+    // "I'm at" location picker — one String signal shared by the desktop
+    // chip and the mobile sheet select; on_change writes through to prefs.
+    let location_pick = use_signal(|| user_prefs.location.clone());
 
     let prefs_signal = prefs_ctx.prefs;
     let board = use_memo(move || -> Option<BoardData> {
@@ -225,7 +229,6 @@ pub fn TasksView() -> Element {
                 hidden,
                 now,
             } = data;
-            let location_value = at_location.clone();
             // Inline chips are desktop chrome; on phones the same
             // controls live in the Filters bottom sheet below.
             let chips = rsx! {
@@ -244,14 +247,14 @@ pub fn TasksView() -> Element {
                     }
                     // "I'm at:" — feeds the @location relevance gates
                     // and persists per user.
-                    select {
-                        class: "rounded-full border border-border bg-transparent px-2 py-0.5 text-xs text-muted-foreground outline-none focus:border-primary/50",
-                        title: "Where you are — @home/@studio/@out tasks gate on this",
-                        value: "{location_value}",
-                        onchange: move |e| prefs_ctx.update(|p| p.location = e.value()),
-                        option { value: "", selected: location_value.is_empty(), "anywhere" }
-                        for loc in LOCATIONS {
-                            option { key: "{loc}", value: "{loc}", selected: location_value == *loc, "@{loc}" }
+                    Select {
+                        value: location_pick,
+                        placeholder: "anywhere".to_string(),
+                        on_change: move |v: String| prefs_ctx.update(|p| p.location = v.clone()),
+                        SelectContent {
+                            for (i, loc) in LOCATIONS.iter().enumerate() {
+                                SelectItem { key: "{loc}", value: "{loc}", index: i, "@{loc}" }
+                            }
                         }
                     }
                     if hidden > 0 {
@@ -265,7 +268,6 @@ pub fn TasksView() -> Element {
             let filter_count = usize::from(active_only)
                 + usize::from(relevant_only)
                 + usize::from(!at_location.is_empty());
-            let sheet_location = at_location.clone();
             let sheet_projects = project_choices.clone();
             rsx! {
                 div { class: "flex h-full w-full flex-col pb-14 md:pb-0",
@@ -333,13 +335,15 @@ pub fn TasksView() -> Element {
                                 span { class: "px-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
                                     "I'm at"
                                 }
-                                select {
-                                    class: "min-h-11 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50",
-                                    value: "{sheet_location}",
-                                    onchange: move |e| prefs_ctx.update(|p| p.location = e.value()),
-                                    option { value: "", selected: sheet_location.is_empty(), "anywhere" }
-                                    for loc in LOCATIONS {
-                                        option { key: "{loc}", value: "{loc}", selected: sheet_location == *loc, "@{loc}" }
+                                Select {
+                                    value: location_pick,
+                                    placeholder: "anywhere".to_string(),
+                                    class: "min-h-11 w-full".to_string(),
+                                    on_change: move |v: String| prefs_ctx.update(|p| p.location = v.clone()),
+                                    SelectContent {
+                                        for (i, loc) in LOCATIONS.iter().enumerate() {
+                                            SelectItem { key: "{loc}", value: "{loc}", index: i, "@{loc}" }
+                                        }
                                     }
                                 }
                             }

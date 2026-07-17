@@ -168,12 +168,13 @@ fn BodySection(slug: Memo<Option<String>>) -> Element {
                         }
                     },
                 }
-                select {
-                    class: "{INPUT_CLS}",
-                    value: "{kind}",
-                    onchange: move |e| kind.set(e.value()),
-                    for k in BODY_KINDS {
-                        option { key: "{k}", value: "{k}", "{k}" }
+                Select {
+                    value: kind,
+                    placeholder: "Kind".to_string(),
+                    SelectContent {
+                        for (i, k) in BODY_KINDS.iter().enumerate() {
+                            SelectItem { key: "{k}", value: "{k}", index: i, "{k}" }
+                        }
                     }
                 }
                 input {
@@ -290,12 +291,13 @@ fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
                         }
                     },
                 }
-                select {
-                    class: "{INPUT_CLS}",
-                    value: "{category}",
-                    onchange: move |e| category.set(e.value()),
-                    for c in EXERCISE_CATEGORIES {
-                        option { key: "{c}", value: "{c}", "{c}" }
+                Select {
+                    value: category,
+                    placeholder: "Category".to_string(),
+                    SelectContent {
+                        for (i, c) in EXERCISE_CATEGORIES.iter().enumerate() {
+                            SelectItem { key: "{c}", value: "{c}", index: i, "{c}" }
+                        }
                     }
                 }
                 Button { variant: ButtonVariant::Primary, on_click: move |_| create(), "Add" }

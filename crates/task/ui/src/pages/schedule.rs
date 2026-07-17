@@ -317,6 +317,8 @@ fn BlockEditor(
     let mut start = use_signal(|| start_min);
     let mut end = use_signal(|| end_min);
     let mut assign = use_signal(move || assignment.peek().clone());
+    // The task/project picker binds a String; on_change dispatches into `assign`.
+    let pick_sel = use_signal(String::new);
 
     let assign_title = assign().map(|a| a.1).unwrap_or_default();
     // Copy signal handles for the picker's change handler — no list
@@ -395,10 +397,10 @@ fn BlockEditor(
                             });
                         },
                     }
-                    select {
-                        class: "{input_cls}",
-                        onchange: move |e| {
-                            let v = e.value();
+                    Select {
+                        value: pick_sel,
+                        placeholder: "— pick task / project —".to_string(),
+                        on_change: move |v: String| {
                             if let Some(id) = v.strip_prefix("task:") {
                                 if let Some((_, t)) = pick_tasks.read().iter().find(|(i, _)| i == id) {
                                     assign.set(Some(("task".into(), t.clone(), Some(id.to_string()))));
@@ -411,19 +413,22 @@ fn BlockEditor(
                                 assign.set(None);
                             }
                         },
-                        option { value: "", "— pick task / project —" }
-                        option { value: "__clear", "— clear —" }
-                        if !tasks.is_empty() {
-                            optgroup { label: "Tasks",
-                                for (id, title) in tasks.iter() {
-                                    option { key: "t-{id}", value: "task:{id}", "{title}" }
+                        SelectContent {
+                            SelectItem { value: "__clear".to_string(), index: 0, "— clear —" }
+                            if !tasks.is_empty() {
+                                SelectGroup {
+                                    SelectLabel { "Tasks" }
+                                    for (i, (id, title)) in tasks.iter().enumerate() {
+                                        SelectItem { key: "t-{id}", value: "task:{id}", index: i + 1, "{title}" }
+                                    }
                                 }
                             }
-                        }
-                        if !projects.is_empty() {
-                            optgroup { label: "Projects",
-                                for (id, title) in projects.iter() {
-                                    option { key: "p-{id}", value: "project:{id}", "{title}" }
+                            if !projects.is_empty() {
+                                SelectGroup {
+                                    SelectLabel { "Projects" }
+                                    for (i, (id, title)) in projects.iter().enumerate() {
+                                        SelectItem { key: "p-{id}", value: "project:{id}", index: i + 1 + tasks.len(), "{title}" }
+                                    }
                                 }
                             }
                         }
