@@ -52,34 +52,37 @@ pub fn AppShell() -> Element {
                     crate::shell::rail::IconRail { current: current.clone() }
                 }
             }
-            if explorer.read().0 && !zen() {
-                div { class: "hidden w-[17rem] shrink-0 border-r border-border/60 md:flex md:min-h-0 md:flex-col md:overflow-hidden",
-                    crate::shell::explorer::VaultExplorer {}
-                }
-            }
-
-            div { class: "flex min-h-screen flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
-                MobileHeader {}
-                // Bottom padding keeps content clear of the fixed tab
-                // bar (56px + safe area) plus breathing room. On desktop
-                // `main` is the scroll container so the status line below
-                // stays pinned to the base of the content column.
-                main { class: "flex-1 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] md:min-h-0 md:overflow-y-auto md:pb-0",
-                    SuspenseBoundary {
-                        fallback: |_| rsx! { RouteFallback {} },
-                        Outlet::<Route> {}
+            // Everything right of the icon rail: the [vault explorer |
+            // open view] row, with the IDE status line spanning BENEATH
+            // it. The rail runs full-height beside the status bar, but the
+            // vault explorer stops just above it (VS Code-style).
+            div { class: "flex flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
+                div { class: "flex flex-col md:min-h-0 md:flex-1 md:flex-row",
+                    if explorer.read().0 && !zen() {
+                        div { class: "hidden w-[17rem] shrink-0 border-r border-border/60 md:flex md:min-h-0 md:flex-col md:overflow-hidden",
+                            crate::shell::explorer::VaultExplorer {}
+                        }
+                    }
+                    div { class: "flex min-h-screen flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
+                        MobileHeader {}
+                        // Bottom padding keeps content clear of the fixed
+                        // tab bar (56px + safe area). On desktop `main` is
+                        // the scroll container.
+                        main { class: "flex-1 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] md:min-h-0 md:overflow-y-auto md:pb-0",
+                            SuspenseBoundary {
+                                fallback: |_| rsx! { RouteFallback {} },
+                                Outlet::<Route> {}
+                            }
+                        }
+                        BottomTabBar { current }
+                        FleetingFab {}
                     }
                 }
-                // IDE-style bottom status line — document segments fed by
-                // the open page via the `StatusBarInfo` context. Lives at
-                // the base of the content column (not the outer shell) so
-                // the icon rail + vault explorer run full-height and the
-                // status line starts where the sidebar ends.
+                // IDE status line — spans the explorer + view (right of the
+                // full-height rail), pinned to the base.
                 if !zen() {
                     crate::chrome::StatusBar {}
                 }
-                BottomTabBar { current }
-                FleetingFab {}
             }
             }
         }

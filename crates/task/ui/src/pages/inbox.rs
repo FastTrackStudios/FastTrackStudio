@@ -40,208 +40,58 @@ pub fn InboxView() -> Element {
             .next()
     });
 
-    let mut draft = use_signal(String::new);
-    let mut show_all = use_signal(|| false);
-    // Focused daily-review ("process") mode + its frozen work queue.
-    let mut processing = use_signal(|| false);
-    let mut queue = use_signal(Vec::<InboxItem>::new);
-
-    // The shared store: one AtomResult for the list; every mutation is
-    // optimistic, so exiting process mode needs no reload.
+    let nav = use_navigator();
     let result = stores::use_inbox_list();
     let store = stores::use_inbox_store();
-    let muts = stores::use_inbox_mutations();
-
-    // Capture the current draft as a fresh fleeting note: it appears
-    // instantly as a typed temp row, then persists.
-    let mut capture = move || {
-        let text = draft.read().trim().to_string();
-        if text.is_empty() {
-            return;
-        }
-        let Some(s) = slug() else { return };
-        draft.set(String::new());
-        let id = uuid::Uuid::new_v4().to_string();
-        let created = Utc::now().to_rfc3339();
-        muts.capture(s, InboxItem::capture(id, text, "ui", created));
-    };
-
     let today = Utc::now().date_naive().to_string();
 
-    let all_rows: Vec<(Id<String>, InboxItem)> = result.value().cloned().unwrap_or_default();
-    let load_err = result.error().cloned();
-    let first_load = result.is_waiting() && result.value().is_none();
+    // The inbox IS the review deck. Freeze the due set into a queue ONCE
+    // (when the list first loads) so decisions — which mutate the shared
+    // store optimistically — never reshuffle the cards under the cursor.
+    let mut queue = use_signal(Vec::<InboxItem>::new);
+    let mut seeded = use_signal(|| false);
+    let seed_result = result.clone();
+    use_effect(move || {
+        if *seeded.peek() {
+            return;
+        }
+        if let Some(rows) = seed_result.value() {
+            let due: Vec<InboxItem> = rows
+                .iter()
+                .filter(|(_, it)| {
+                    it.is_open()
+                        && it
+                            .resurface_on
+                            .as_deref()
+                            .is_none_or(|d| d <= today.as_str())
+                })
+                .map(|(_, it)| it.clone())
+                .collect();
+            queue.set(due);
+            seeded.set(true);
+        }
+    });
 
-    let show_all_now = show_all();
-    let rows: Vec<(Id<String>, InboxItem)> = all_rows
-        .iter()
-        .filter(|(_, it)| {
-            show_all_now
-                || (it.is_open()
-                    && it
-                        .resurface_on
-                        .as_deref()
-                        .is_none_or(|d| d <= today.as_str()))
-        })
-        .cloned()
-        .collect();
-
-    let open_count = all_rows.iter().filter(|(_, it)| it.is_open()).count();
-
-    // The daily-review work set: open items whose snooze has elapsed,
-    // oldest first (the fetch already sorts). Frozen into `queue` when
-    // the user enters process mode so mutations don't reshuffle it.
-    let due_open: Vec<InboxItem> = all_rows
-        .iter()
-        .filter(|(_, it)| {
-            it.is_open()
-                && it
-                    .resurface_on
-                    .as_deref()
-                    .is_none_or(|d| d <= today.as_str())
-        })
-        .map(|(_, it)| it.clone())
-        .collect();
-
-    // Agent-proposed captures awaiting one-tap accept/dismiss.
-    let suggested: Vec<(Id<String>, InboxItem)> = all_rows
-        .iter()
-        .filter(|(_, it)| it.status == InboxItem::STATUS_SUGGESTED)
-        .cloned()
-        .collect();
-
-    // Focused review mode takes over the whole page. Decisions mutate
-    // the shared store optimistically, so exiting just exits.
-    if processing() {
+    if result.is_waiting() && result.value().is_none() {
+        return rsx! { crate::states::LoadingState {} };
+    }
+    if let Some(err) = result.error() {
         return rsx! {
-            ProcessReview {
-                items: queue(),
-                slug,
-                on_exit: move |()| processing.set(false),
+            crate::states::ErrorState {
+                title: "Couldn't reach the inbox",
+                message: err.clone(),
+                on_retry: move |()| store.reload(),
             }
         };
     }
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-4 pb-14 sm:p-6 md:pb-6 lg:p-10",
-            div { class: "flex items-center justify-between gap-3",
-                Heading { level: HeadingLevel::H1, "Inbox" }
-                if !due_open.is_empty() {
-                    // Desktop CTA — on phones the sticky bottom action
-                    // bar (thumb reach) carries the same action.
-                    div { class: "hidden md:block",
-                        Button {
-                            variant: ButtonVariant::Primary,
-                            size: ButtonSize::Small,
-                            on_click: {
-                                let q = due_open.clone();
-                                move |_| {
-                                    queue.set(q.clone());
-                                    processing.set(true);
-                                }
-                            },
-                            "Process {due_open.len()} →"
-                        }
-                    }
-                    span { class: "text-sm text-muted-foreground md:hidden", "{open_count} open" }
-                } else {
-                    Text { variant: TextVariant::Muted, class: "text-sm", "{open_count} open" }
-                }
-            }
-            Text {
-                variant: TextVariant::Muted,
-                class: "text-sm -mt-2",
-                "Capture anything. Read it again tomorrow — process it, snooze it, or let it go.",
-            }
-
-            // ── Quick-add ──────────────────────────────────────────
-            div { class: "flex gap-2",
-                input {
-                    class: "{INPUT_CLS} flex-1",
-                    placeholder: "Capture a thought…",
-                    value: "{draft}",
-                    oninput: move |e| draft.set(e.value()),
-                    onkeydown: move |e| {
-                        if e.key() == Key::Enter {
-                            capture();
-                        }
-                    },
-                }
-                Button {
-                    variant: ButtonVariant::Primary,
-                    on_click: move |_| capture(),
-                    "Capture"
-                }
-            }
-
-            // ── Filter toggle ──────────────────────────────────────
-            div { class: "flex items-center gap-3 text-xs text-muted-foreground",
-                button {
-                    class: "underline-offset-2 hover:underline",
-                    onclick: move |_| show_all.toggle(),
-                    if show_all() {
-                        "Showing all — show open only"
-                    } else {
-                        "Show all (processed + archived)"
-                    }
-                }
-            }
-
-            // ── Suggested (agent-proposed) — one-tap accept/dismiss ──
-            if !suggested.is_empty() {
-                div { class: "flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3",
-                    div { class: "flex items-baseline gap-2",
-                        span { class: "text-sm font-medium text-foreground", "Suggested for you" }
-                        span { class: "text-xs text-muted-foreground",
-                            "{suggested.len()} from your sources — accept to add to the queue"
-                        }
-                    }
-                    for (id, item) in suggested {
-                        SuggestedRow { key: "{id}", pending: id.is_temp(), item, slug }
-                    }
-                }
-            }
-
-            // ── The queue ──────────────────────────────────────────
-            if first_load {
-                crate::states::LoadingState {}
-            } else if rows.is_empty() {
-                if let Some(err) = load_err {
-                    crate::states::ErrorState {
-                        title: "Couldn't load inbox",
-                        message: err,
-                        on_retry: move |()| store.reload(),
-                    }
-                } else {
-                    crate::states::EmptyState {
-                        title: "Inbox empty",
-                        hint: "Capture a thought above — nothing to review right now.",
-                    }
-                }
-            } else {
-                div { class: "flex flex-col gap-2",
-                    for (id, item) in rows {
-                        InboxRow { key: "{id}", pending: id.is_temp(), item, slug }
-                    }
-                }
-            }
-        }
-        // ── Mobile: sticky Process CTA above the tab bar ───────────
-        if !due_open.is_empty() {
-            MobileActionBar {
-                button {
-                    r#type: "button",
-                    class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground active:bg-primary/85",
-                    onclick: {
-                        let q = due_open.clone();
-                        move |_| {
-                            queue.set(q.clone());
-                            processing.set(true);
-                        }
-                    },
-                    "Process {due_open.len()} →"
-                }
-            }
+        ProcessReview {
+            items: queue(),
+            slug,
+            on_exit: move |()| {
+                nav.push(crate::routes::Route::DashboardRoute {});
+            },
         }
     }
 }
@@ -468,7 +318,7 @@ fn ProcessReview(
 
     if idx >= total {
         return rsx! {
-            div { class: "fixed inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-background px-6 text-center",
+            div { class: "flex h-full flex-col items-center justify-center gap-4 px-6 text-center",
                 div { class: "text-6xl", "🃏" }
                 Heading { level: HeadingLevel::H2, "Deck cleared" }
                 Text { variant: TextVariant::Muted, class: "max-w-md",
@@ -500,7 +350,7 @@ fn ProcessReview(
 
     rsx! {
         div {
-            class: "fixed inset-0 z-40 flex flex-col bg-background text-foreground outline-none",
+            class: "flex h-full flex-col text-foreground outline-none",
             tabindex: "0",
             autofocus: true,
             onkeydown: {
