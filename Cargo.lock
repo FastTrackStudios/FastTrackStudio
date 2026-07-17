@@ -4080,6 +4080,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "contacts"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "contacts-proto",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid 1.23.4",
+]
+
+[[package]]
+name = "contacts-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "content_disposition"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
