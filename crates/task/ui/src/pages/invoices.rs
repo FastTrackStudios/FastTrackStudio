@@ -110,19 +110,61 @@ pub fn InvoicesView() -> Element {
             .map(|(_, r)| r.invoice.clone())
     });
 
+    // ── Billing summary — the money hero of the page ──────────────
+    let mut outstanding = 0i64;
+    let mut overdue = 0i64;
+    let mut collected = 0i64;
+    let mut draft_count = 0usize;
+    let mut open_count = 0usize;
+    for (_, row) in &inv_rows {
+        let inv = &row.invoice;
+        collected += inv.amount_paid_minor;
+        match inv.status {
+            InvoiceStatus::Draft => draft_count += 1,
+            InvoiceStatus::Sent | InvoiceStatus::Viewed | InvoiceStatus::PartiallyPaid => {
+                outstanding += inv.balance_minor;
+                open_count += 1;
+            }
+            InvoiceStatus::Overdue => {
+                outstanding += inv.balance_minor;
+                overdue += inv.balance_minor;
+                open_count += 1;
+            }
+            _ => {}
+        }
+    }
+    let ready_total: i64 = un_rows.iter().map(|(_, g)| g.amount_minor).sum();
+    let ready_count = un_rows.len();
+
     rsx! {
-        div { class: "mx-auto flex w-full max-w-3xl flex-col gap-5 p-4 sm:p-6 lg:p-8",
+        div { class: "mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:p-8",
             header { class: "flex flex-col gap-1",
                 span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
                     "Billing"
                 }
                 Heading { level: HeadingLevel::H1, class: "tracking-tight", "Invoices" }
+                Text { variant: TextVariant::Muted,
+                    "Everything you're owed, at a glance — generate from billable time, bill a contact, track what's paid."
+                }
+            }
+
+            // ── Summary tiles: outstanding is the thesis ────────────
+            div { class: "grid grid-cols-2 gap-3 sm:grid-cols-4",
+                StatTile { label: "Outstanding", value: money(outstanding), accent: "primary".to_string(), hint: format!("{open_count} open") }
+                StatTile { label: "Overdue", value: money(overdue), accent: "destructive".to_string(), hint: String::new() }
+                StatTile { label: "Collected", value: money(collected), accent: "emerald".to_string(), hint: String::new() }
+                StatTile { label: "Drafts", value: draft_count.to_string(), accent: "muted".to_string(), hint: String::new() }
             }
 
             // ── Uninvoiced time → generate ─────────────────────────
             if !un_rows.is_empty() {
                 div { class: "flex flex-col gap-2",
-                    Heading { level: HeadingLevel::H3, "Ready to invoice" }
+                    div { class: "flex items-end justify-between gap-3",
+                        Heading { level: HeadingLevel::H3, "Ready to invoice" }
+                        span { class: "font-mono text-sm font-semibold tabular-nums text-primary",
+                            "{money(ready_total)} · {ready_count} bucket" {if ready_count == 1 { "" } else { "s" }}
+                        }
+                    }
                     div { class: "flex flex-col gap-2",
                         for (slug , g) in un_rows {
                             UninvoicedRow {
@@ -139,7 +181,7 @@ pub fn InvoicesView() -> Element {
 
             // ── Persisted invoices ─────────────────────────────────
             div { class: "flex flex-col gap-2",
-                Heading { level: HeadingLevel::H3, "Invoices" }
+                Heading { level: HeadingLevel::H3, "All invoices" }
                 if first_load {
                     crate::states::LoadingState {}
                 } else if inv_rows.is_empty() {
@@ -185,6 +227,32 @@ pub fn InvoicesView() -> Element {
             // ── Printable preview of the selected invoice ──────────
             if let Some(inv) = selected_inv {
                 InvoicePreview { invoice: inv }
+            }
+        }
+    }
+}
+
+/// One summary tile in the billing header. `accent` tints the value +
+/// its status dot: `primary` / `destructive` / `emerald` / `muted`.
+#[component]
+fn StatTile(label: String, value: String, hint: String, accent: String) -> Element {
+    let (value_cls, dot_cls) = match accent.as_str() {
+        "primary" => ("text-foreground", "bg-primary"),
+        "destructive" => ("text-destructive", "bg-destructive"),
+        "emerald" => ("text-emerald-500", "bg-emerald-500"),
+        _ => ("text-muted-foreground", "bg-muted-foreground/60"),
+    };
+    rsx! {
+        Card { class: "flex flex-col gap-1.5 p-3.5".to_string(),
+            div { class: "flex items-center gap-1.5",
+                span { class: "h-1.5 w-1.5 rounded-full {dot_cls}" }
+                span { class: "text-[0.7rem] font-medium uppercase tracking-wider text-muted-foreground",
+                    "{label}"
+                }
+            }
+            span { class: "font-mono text-2xl font-semibold tabular-nums {value_cls}", "{value}" }
+            if !hint.is_empty() {
+                span { class: "text-xs text-muted-foreground", "{hint}" }
             }
         }
     }
