@@ -176,6 +176,10 @@ pub struct OrgAppState {
     /// Mounted for `Inbox` so the capture UIs + daily review can
     /// round-trip fleeting notes.
     pub inbox: inbox::VaultInbox,
+    /// Recall backend — spaced-repetition learning cards under
+    /// `vault/Records/recall/`. Mounted for `Recall` so the deck UI +
+    /// flashcard review round-trip FSRS-scheduled cards.
+    pub recall: recall::VaultRecall,
     /// Tag registry — name → icon/color decorations at
     /// `vault/Records/tags.json`. Mounted for `TagService` so the
     /// calendar / lists decorate markdown tag names with an icon.
@@ -694,6 +698,11 @@ pub(crate) async fn build_org_state(
         let inbox = inbox::VaultInbox::new(vault_root.clone())
             .map_err(|e| eyre::eyre!("inbox backend: {e}"))?;
 
+        // Recall backend rooted at the same vault — learning cards
+        // live under `Records/recall/`.
+        let recall = recall::VaultRecall::new(vault_root.clone())
+            .map_err(|e| eyre::eyre!("recall backend: {e}"))?;
+
         // Tag registry rooted at the same vault — `Records/tags.json`.
         let tags =
             tag::VaultTags::new(vault_root.clone()).map_err(|e| eyre::eyre!("tag backend: {e}"))?;
@@ -995,6 +1004,7 @@ pub(crate) async fn build_org_state(
             prefs,
             scheduling,
             inbox,
+            recall,
             tags,
             finance_conn,
             finance_backend,
@@ -1368,6 +1378,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         scheduling_proto::service::slots::slots_rpc_service_descriptor(),
         scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
         inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
+        recall_proto::service::recall::recall_rpc_service_descriptor(),
         tag_proto::service::tags::tag_service_rpc_service_descriptor(),
         finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
         finance_proto::service::ledger::ledger_rpc_service_descriptor(),
@@ -1509,6 +1520,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
             inbox_proto::service::inbox::serve(org.inbox.clone()),
+        )
+        .with(
+            recall_proto::service::recall::recall_rpc_service_descriptor(),
+            recall_proto::service::recall::serve(org.recall.clone()),
         )
         .with(
             tag_proto::service::tags::tag_service_rpc_service_descriptor(),

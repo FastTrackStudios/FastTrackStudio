@@ -24,6 +24,11 @@ pub enum Route {
         #[route("/inbox")]
         InboxRoute {},
 
+        // Recall — the spaced-repetition learning deck (adjacent to
+        // Inbox; keep this anchor stable for clean merges).
+        #[route("/recall")]
+        RecallRoute {},
+
         #[route("/email")]
         EmailRoute {},
 
@@ -150,6 +155,11 @@ fn DashboardRoute() -> Element {
 #[component]
 fn InboxRoute() -> Element {
     rsx! { pages::inbox::InboxView {} }
+}
+
+#[component]
+fn RecallRoute() -> Element {
+    rsx! { pages::recall::RecallView {} }
 }
 
 #[component]
