@@ -9396,6 +9396,7 @@ dependencies = [
  "include_dir",
  "keyflow",
  "keyflow-sync",
+ "objc2 0.5.2",
  "session",
  "session-guide",
  "session-proto",
