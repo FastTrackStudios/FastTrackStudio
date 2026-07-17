@@ -468,10 +468,12 @@ fn ProcessReview(
 
     if idx >= total {
         return rsx! {
-            div { class: "mx-auto flex max-w-2xl flex-col items-center gap-4 p-6 pt-[12vh] text-center lg:p-10",
-                div { class: "text-5xl", "🎉" }
-                Heading { level: HeadingLevel::H2, "Inbox clear" }
-                Text { variant: TextVariant::Muted, "You've processed everything in the queue." }
+            div { class: "fixed inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-background px-6 text-center",
+                div { class: "text-6xl", "🃏" }
+                Heading { level: HeadingLevel::H2, "Deck cleared" }
+                Text { variant: TextVariant::Muted, class: "max-w-md",
+                    "Every due card is processed. Come back tomorrow — the schedule resurfaces only what still matters."
+                }
                 Button {
                     variant: ButtonVariant::Primary,
                     on_click: move |_| on_exit.call(()),
@@ -498,20 +500,26 @@ fn ProcessReview(
 
     rsx! {
         div {
-            class: "mx-auto flex max-w-2xl flex-col gap-4 p-4 outline-none sm:p-6 lg:p-10",
+            class: "fixed inset-0 z-40 flex flex-col bg-background text-foreground outline-none",
             tabindex: "0",
             autofocus: true,
             onkeydown: {
                 let item = item.clone();
                 move |e: KeyboardEvent| {
+                    // Esc leaves the deck; letters/digits drive the triage.
+                    if e.key() == Key::Escape {
+                        e.prevent_default();
+                        on_exit.call(());
+                        return;
+                    }
                     let a = if let Key::Character(c) = e.key() {
                         match c.as_str() {
                             "1" => Some(Act::Rate(ReviewResponse::Hard)),
                             "2" => Some(Act::Rate(ReviewResponse::Good)),
                             "3" => Some(Act::Rate(ReviewResponse::Easy)),
+                            "c" | "d" => Some(Act::Done),
                             "t" => Some(Act::Task),
                             "n" => Some(Act::Note),
-                            "d" => Some(Act::Done),
                             "x" => Some(Act::Delete),
                             " " => Some(Act::Skip),
                             _ => None,
@@ -525,94 +533,72 @@ fn ProcessReview(
                     }
                 }
             },
-            // Progress + exit.
-            div { class: "flex items-center justify-between",
-                Text { variant: TextVariant::Muted, class: "text-sm", "Processing {idx + 1} of {total}" }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    on_click: move |_| on_exit.call(()),
-                    "Exit"
+
+            // ── header: leave · progress · position ──
+            header { class: "flex items-center gap-4 px-5 py-3 sm:px-8",
+                button {
+                    r#type: "button",
+                    class: "flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                    title: "Exit review (Esc)",
+                    onclick: move |_| on_exit.call(()),
+                    fts_ui::lucide_dioxus::X { size: 16 }
                 }
-            }
-            div { class: "h-1 w-full overflow-hidden rounded-full bg-muted",
-                div { class: "h-full rounded-full bg-primary transition-all", style: "width: {pct}%" }
+                div { class: "h-1 flex-1 overflow-hidden rounded-full bg-muted",
+                    div { class: "h-full rounded-full bg-primary transition-all duration-300", style: "width: {pct}%" }
+                }
+                span { class: "shrink-0 font-mono text-xs tabular-nums text-muted-foreground", "{idx + 1} / {total}" }
             }
 
-            // The capture, verbatim + its review schedule.
-            div { class: "flex flex-col gap-2 rounded-xl border border-border bg-card/40 p-5",
-                div { class: "flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground",
-                    span { class: "rounded bg-muted px-1.5 py-px", "{kind}" }
-                    span { "{date}" }
-                    if source != "ui" && source != "cli" {
-                        span { class: "rounded bg-muted px-1.5 py-px", "via {source}" }
+            // ── the card, centered, deck stacked behind it ──
+            div { class: "relative flex flex-1 items-center justify-center px-4 sm:px-8",
+                div { class: "pointer-events-none absolute left-1/2 top-1/2 h-[min(58vh,30rem)] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2",
+                    div { class: "absolute inset-0 translate-y-4 scale-[0.955] rounded-3xl border border-border/40 bg-card/30" }
+                    div { class: "absolute inset-0 translate-y-2 scale-[0.978] rounded-3xl border border-border/50 bg-card/50" }
+                }
+                article {
+                    key: "{item.id}",
+                    class: "relative flex h-[min(58vh,30rem)] w-full max-w-2xl flex-col rounded-3xl border border-border bg-card p-8 shadow-xl sm:p-10",
+                    // eyebrow: what/when/where + the due-date stamp
+                    div { class: "flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
+                        span { "{kind}" }
+                        span { class: "text-border", "·" }
+                        span { "{date}" }
+                        if source != "ui" && source != "cli" {
+                            span { class: "text-border", "·" }
+                            span { "via {source}" }
+                        }
+                        if reviews > 0 {
+                            span { class: "ml-auto rounded border border-border/70 px-2 py-0.5 font-mono text-[10px] normal-case tracking-normal text-muted-foreground",
+                                "seen {reviews}\u{d7} · {fmt_interval(interval)}"
+                            }
+                        }
                     }
-                    if reviews > 0 {
-                        span { class: "ml-auto", "seen {reviews}\u{d7} · last {fmt_interval(interval)}" }
+                    // the capture — the hero of the card
+                    div { class: "mt-6 flex-1 overflow-y-auto",
+                        p { class: "whitespace-pre-wrap break-words text-2xl font-medium leading-relaxed text-foreground sm:text-[1.75rem] sm:leading-relaxed",
+                            "{body}"
+                        }
                     }
                 }
-                Text { class: "whitespace-pre-wrap break-words text-base", "{body}" }
             }
 
-            // Spaced-repetition triage — urgency escalates the schedule so
-            // only the consistently-urgent items keep resurfacing.
-            Text { variant: TextVariant::Muted, class: "text-xs", "How urgent is this?  (1 · 2 · 3)" }
-            div { class: "flex flex-wrap gap-2",
-                {rate_button(act, item.clone(), ReviewResponse::Hard, "Urgent", iv_urgent, ButtonVariant::Primary)}
-                {rate_button(act, item.clone(), ReviewResponse::Good, "Maybe", iv_maybe, ButtonVariant::Secondary)}
-                {rate_button(act, item.clone(), ReviewResponse::Easy, "Someday", iv_someday, ButtonVariant::Outline)}
-            }
-
-            // …or act on it now.
-            Text { variant: TextVariant::Muted, class: "text-xs", "…or handle it now" }
-            div { class: "flex flex-wrap items-center gap-2",
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    class: "min-h-11 sm:min-h-0",
-                    on_click: {
-                        let item = item.clone();
-                        move |_| act.call((item.clone(), Act::Task))
-                    },
-                    "→ Task (t)"
+            // ── decision bar ──
+            footer { class: "flex flex-col gap-3 border-t border-border/60 bg-card/30 px-4 py-4 sm:px-8",
+                // Temperature triage: warm = keep near, cool = file far.
+                div { class: "mx-auto grid w-full max-w-2xl grid-cols-3 gap-3",
+                    {urgency_button(act, item.clone(), ReviewResponse::Hard, "Urgent", iv_urgent, "1",
+                        "border-rose-500/50 bg-rose-500/10 text-rose-200 hover:border-rose-500/70 hover:bg-rose-500/20")}
+                    {urgency_button(act, item.clone(), ReviewResponse::Good, "Maybe", iv_maybe, "2",
+                        "border-amber-500/50 bg-amber-500/10 text-amber-200 hover:border-amber-500/70 hover:bg-amber-500/20")}
+                    {urgency_button(act, item.clone(), ReviewResponse::Easy, "Someday", iv_someday, "3",
+                        "border-indigo-500/50 bg-indigo-500/10 text-indigo-200 hover:border-indigo-500/70 hover:bg-indigo-500/20")}
                 }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    class: "min-h-11 sm:min-h-0",
-                    on_click: {
-                        let item = item.clone();
-                        move |_| act.call((item.clone(), Act::Note))
-                    },
-                    "→ Note (n)"
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    class: "min-h-11 sm:min-h-0",
-                    on_click: {
-                        let item = item.clone();
-                        move |_| act.call((item.clone(), Act::Done))
-                    },
-                    "Done (d)"
-                }
-                div { class: "flex-1" }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    class: "min-h-11 sm:min-h-0",
-                    on_click: move |_| cursor += 1,
-                    "Skip"
-                }
-                Button {
-                    variant: ButtonVariant::Destructive,
-                    size: ButtonSize::Small,
-                    class: "min-h-11 sm:min-h-0",
-                    on_click: {
-                        let item = item.clone();
-                        move |_| act.call((item.clone(), Act::Delete))
-                    },
-                    "Delete (x)"
+                // Handle it now.
+                div { class: "mx-auto flex w-full max-w-2xl flex-wrap items-center justify-center gap-1.5 text-sm",
+                    {act_chip(act, item.clone(), Act::Done, "Complete", "c", "hover:bg-emerald-500/15 hover:text-emerald-300")}
+                    {act_chip(act, item.clone(), Act::Task, "→ Task", "t", "hover:bg-accent hover:text-foreground")}
+                    {act_chip(act, item.clone(), Act::Note, "→ Note", "n", "hover:bg-accent hover:text-foreground")}
+                    {act_chip(act, item.clone(), Act::Delete, "Delete", "x", "hover:bg-destructive/15 hover:text-destructive")}
                 }
             }
         }
@@ -630,23 +616,49 @@ enum Act {
     Rate(ReviewResponse),
 }
 
-/// One urgency-rating button: label over the interval it would schedule.
-fn rate_button(
+/// A big temperature-graded urgency button: label, the interval it would
+/// schedule, and its key hint. Colour encodes how far it files the card.
+fn urgency_button(
     act: Callback<(InboxItem, Act)>,
     item: InboxItem,
     resp: ReviewResponse,
     label: &str,
     interval: i64,
-    variant: ButtonVariant,
+    key: &str,
+    color: &str,
 ) -> Element {
     let label = label.to_string();
+    let key = key.to_string();
     rsx! {
-        Button {
-            variant,
-            class: "min-h-12 flex-1 flex-col gap-0 sm:flex-none",
-            on_click: move |_| act.call((item.clone(), Act::Rate(resp))),
+        button {
+            r#type: "button",
+            class: "flex min-h-[4.5rem] flex-col items-center justify-center gap-0.5 rounded-2xl border text-center transition-colors {color}",
+            onclick: move |_| act.call((item.clone(), Act::Rate(resp))),
+            span { class: "text-base font-semibold leading-none", "{label}" }
+            span { class: "text-xs opacity-80", "{fmt_interval(interval)}" }
+            span { class: "mt-1 rounded bg-foreground/10 px-1.5 font-mono text-[10px] opacity-80", "{key}" }
+        }
+    }
+}
+
+/// A small secondary action chip (Complete / Task / Note / Delete).
+fn act_chip(
+    act: Callback<(InboxItem, Act)>,
+    item: InboxItem,
+    action: Act,
+    label: &str,
+    key: &str,
+    hover: &str,
+) -> Element {
+    let label = label.to_string();
+    let key = key.to_string();
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex items-center gap-1.5 rounded-lg px-3 py-2 text-muted-foreground transition-colors {hover}",
+            onclick: move |_| act.call((item.clone(), action.clone())),
             span { "{label}" }
-            span { class: "text-[10px] font-normal opacity-70", "{fmt_interval(interval)}" }
+            span { class: "rounded bg-muted px-1 font-mono text-[10px]", "{key}" }
         }
     }
 }
