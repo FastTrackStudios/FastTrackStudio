@@ -216,12 +216,14 @@ pub fn RecallView() -> Element {
                         value: "{draft_project}",
                         oninput: move |e| draft_project.set(e.value()),
                     }
-                    select {
-                        class: "{INPUT_CLS} sm:w-48",
-                        value: "{draft_type}",
-                        onchange: move |e| draft_type.set(e.value()),
-                        for t in CardType::all() {
-                            option { value: "{t}", "{t}" }
+                    Select {
+                        value: draft_type,
+                        placeholder: "Card type".to_string(),
+                        class: "sm:w-48".to_string(),
+                        SelectContent {
+                            for (i , t) in CardType::all().iter().enumerate() {
+                                SelectItem { key: "{t}", value: t.to_string(), index: i, "{t}" }
+                            }
                         }
                     }
                 }

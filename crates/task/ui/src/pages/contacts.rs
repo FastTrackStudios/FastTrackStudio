@@ -872,13 +872,14 @@ fn AddAccountForm(slug: Memo<Option<String>>, on_saved: EventHandler<()>) -> Ele
                     }
                     Field {
                         FieldLabel { "Provider" }
-                        select {
-                            class: "{INPUT_CLS}",
-                            value: "{provider}",
-                            onchange: move |e| provider.set(e.value()),
-                            option { value: CardDavProvider::NEXTCLOUD, "Nextcloud" }
-                            option { value: CardDavProvider::ICLOUD, "iCloud" }
-                            option { value: CardDavProvider::GENERIC, "Generic" }
+                        Select {
+                            value: provider,
+                            placeholder: "Provider".to_string(),
+                            SelectContent {
+                                SelectItem { value: CardDavProvider::NEXTCLOUD.to_string(), index: 0, "Nextcloud" }
+                                SelectItem { value: CardDavProvider::ICLOUD.to_string(), index: 1, "iCloud" }
+                                SelectItem { value: CardDavProvider::GENERIC.to_string(), index: 2, "Generic" }
+                            }
                         }
                     }
                 }
