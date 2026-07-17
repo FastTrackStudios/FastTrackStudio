@@ -61,6 +61,28 @@ pub struct InboxItem {
     /// you can always walk from the durable artifact back to the
     /// raw capture.
     pub processed_into: Option<String>,
+    /// SM-2 ease factor ×100 (obsidian-spaced-repetition `sr-ease`).
+    /// `250` = 2.5, the plugin's `BASE_EASE`. Clamped to `MIN_EASE`
+    /// (130) on repeated "hard" responses. Frontmatter key `sr-ease`.
+    #[serde(default = "default_ease")]
+    #[architect(filterable, sortable)]
+    pub ease: i64,
+    /// Current review interval in whole days (`sr-interval`). `0` =
+    /// never reviewed (a brand-new capture); the first review treats
+    /// it as `1`. Frontmatter key `sr-interval`.
+    #[serde(default)]
+    #[architect(filterable, sortable)]
+    pub interval: i64,
+    /// How many times this item has been reviewed (`sr-reviews`).
+    /// `0` = new. Frontmatter key `sr-reviews`.
+    #[serde(default)]
+    #[architect(filterable, sortable)]
+    pub reviews: i64,
+}
+
+/// serde default for [`InboxItem::ease`]: the plugin's `BASE_EASE`.
+fn default_ease() -> i64 {
+    crate::schedule::BASE_EASE
 }
 
 impl InboxItem {
@@ -98,6 +120,9 @@ impl InboxItem {
             created: created.into(),
             resurface_on: None,
             processed_into: None,
+            ease: 0,
+            interval: 0,
+            reviews: 0,
         }
     }
 

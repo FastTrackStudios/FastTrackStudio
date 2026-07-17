@@ -18,7 +18,7 @@ use architect::Id;
 use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use inbox_proto::InboxItem;
+use inbox_proto::{review, InboxItem, ReviewResponse};
 
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::shell::mobile::MobileActionBar;
@@ -419,6 +419,53 @@ fn ProcessReview(
     let total = items.len();
     let idx = cursor();
 
+    // One dispatcher for every decision — a Copy `Callback`, so the
+    // buttons AND the keyboard both fire it. The item is passed in each
+    // call (never a stale capture). Every decision advances the cursor.
+    let act = use_callback(move |(item, action): (InboxItem, Act)| {
+        let Some(s) = slug() else {
+            cursor += 1;
+            return;
+        };
+        match action {
+            Act::Task => {
+                let (title, details) = split_title_body(&item.body);
+                muts.promote_to_task(s, item, title, details);
+            }
+            Act::Note => {
+                let (title, _) = split_title_body(&item.body);
+                let path = format!(
+                    "Wiki/Atomic/{}-{}.md",
+                    slugify(&title),
+                    item.id.get(..6).unwrap_or("note")
+                );
+                let md = atomic_markdown(&title, &item.body, &Utc::now().to_rfc3339());
+                muts.promote_to_note(s, item, path, md);
+            }
+            Act::Done => {
+                let mut done = item;
+                done.status = InboxItem::STATUS_PROCESSED.to_string();
+                muts.save(s, done);
+            }
+            Act::Delete => muts.delete(s, item.id),
+            Act::Skip => {}
+            Act::Rate(resp) => {
+                // Spaced-repetition reschedule (obsidian-SR SM-2): urgency
+                // escalates the interval; the item stays open and resurfaces
+                // on its new due date.
+                let today = Utc::now().date_naive();
+                let (interval, ease, resurface_on, reviews) = review(&item, resp, today);
+                let mut next = item;
+                next.interval = interval;
+                next.ease = ease;
+                next.resurface_on = Some(resurface_on);
+                next.reviews = reviews;
+                muts.save(s, next);
+            }
+        }
+        cursor += 1;
+    });
+
     if idx >= total {
         return rsx! {
             div { class: "mx-auto flex max-w-2xl flex-col items-center gap-4 p-6 pt-[12vh] text-center lg:p-10",
@@ -436,79 +483,48 @@ fn ProcessReview(
 
     let item = items[idx].clone();
     let body = item.body.clone();
-    let (title, details) = split_title_body(&body);
     let kind = item.kind.clone();
     let source = item.source.clone();
     let date = item.created.get(..10).unwrap_or(&item.created).to_string();
+    let reviews = item.reviews;
+    let interval = item.interval;
     let pct = ((idx as f32) / (total.max(1) as f32) * 100.0).round() as i32;
 
-    // ── action closures (each fires its mutation, then advances) ──
-    let to_task = {
-        let item = item.clone();
-        let title = title.clone();
-        let details = details.clone();
-        move |_| {
-            if let Some(s) = slug() {
-                muts.promote_to_task(s, item.clone(), title.clone(), details.clone());
-            }
-            cursor += 1;
-        }
-    };
-
-    let to_note = {
-        let item = item.clone();
-        let title = title.clone();
-        let body = body.clone();
-        move |_| {
-            if let Some(s) = slug() {
-                let path = format!(
-                    "Wiki/Atomic/{}-{}.md",
-                    slugify(&title),
-                    item.id.get(..6).unwrap_or("note")
-                );
-                let md = atomic_markdown(&title, &body, &Utc::now().to_rfc3339());
-                muts.promote_to_note(s, item.clone(), path, md);
-            }
-            cursor += 1;
-        }
-    };
-
-    let mark_done = {
-        let item = item.clone();
-        move |_| {
-            if let Some(s) = slug() {
-                let mut done = item.clone();
-                done.status = InboxItem::STATUS_PROCESSED.to_string();
-                muts.save(s, done);
-            }
-            cursor += 1;
-        }
-    };
-
-    let delete = {
-        let id = item.id.clone();
-        move |_| {
-            if let Some(s) = slug() {
-                muts.delete(s, id.clone());
-            }
-            cursor += 1;
-        }
-    };
-
-    // Snooze the current item `days` out, then advance. Inlined per
-    // button (each needs its own clone of the item).
-    let snooze_btn = move |item: InboxItem, mut cursor: Signal<usize>, days: i64| {
-        if let Some(s) = slug() {
-            let mut next = item;
-            let until = (Utc::now().date_naive() + chrono::Duration::days(days)).to_string();
-            next.resurface_on = Some(until);
-            muts.save(s, next);
-        }
-        cursor += 1;
-    };
+    // Preview where each urgency rating would push the item.
+    let today = Utc::now().date_naive();
+    let iv_urgent = review(&item, ReviewResponse::Hard, today).0;
+    let iv_maybe = review(&item, ReviewResponse::Good, today).0;
+    let iv_someday = review(&item, ReviewResponse::Easy, today).0;
 
     rsx! {
-        div { class: "mx-auto flex max-w-2xl flex-col gap-4 p-4 sm:p-6 lg:p-10",
+        div {
+            class: "mx-auto flex max-w-2xl flex-col gap-4 p-4 outline-none sm:p-6 lg:p-10",
+            tabindex: "0",
+            autofocus: true,
+            onkeydown: {
+                let item = item.clone();
+                move |e: KeyboardEvent| {
+                    let a = if let Key::Character(c) = e.key() {
+                        match c.as_str() {
+                            "1" => Some(Act::Rate(ReviewResponse::Hard)),
+                            "2" => Some(Act::Rate(ReviewResponse::Good)),
+                            "3" => Some(Act::Rate(ReviewResponse::Easy)),
+                            "t" => Some(Act::Task),
+                            "n" => Some(Act::Note),
+                            "d" => Some(Act::Done),
+                            "x" => Some(Act::Delete),
+                            " " => Some(Act::Skip),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(a) = a {
+                        e.prevent_default();
+                        act.call((item.clone(), a));
+                    }
+                }
+            },
             // Progress + exit.
             div { class: "flex items-center justify-between",
                 Text { variant: TextVariant::Muted, class: "text-sm", "Processing {idx + 1} of {total}" }
@@ -523,7 +539,7 @@ fn ProcessReview(
                 div { class: "h-full rounded-full bg-primary transition-all", style: "width: {pct}%" }
             }
 
-            // The capture, verbatim.
+            // The capture, verbatim + its review schedule.
             div { class: "flex flex-col gap-2 rounded-xl border border-border bg-card/40 p-5",
                 div { class: "flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground",
                     span { class: "rounded bg-muted px-1.5 py-px", "{kind}" }
@@ -531,45 +547,34 @@ fn ProcessReview(
                     if source != "ui" && source != "cli" {
                         span { class: "rounded bg-muted px-1.5 py-px", "via {source}" }
                     }
+                    if reviews > 0 {
+                        span { class: "ml-auto", "seen {reviews}\u{d7} · last {fmt_interval(interval)}" }
+                    }
                 }
                 Text { class: "whitespace-pre-wrap break-words text-base", "{body}" }
             }
 
-            // Decisions.
-            Text { variant: TextVariant::Muted, class: "text-xs", "What should this become?" }
-            // Primary decisions stretch to equal thumb-sized thirds on
-            // phones; compact inline on desktop.
+            // Spaced-repetition triage — urgency escalates the schedule so
+            // only the consistently-urgent items keep resurfacing.
+            Text { variant: TextVariant::Muted, class: "text-xs", "How urgent is this?  (1 · 2 · 3)" }
             div { class: "flex flex-wrap gap-2",
-                Button {
-                    variant: ButtonVariant::Primary,
-                    class: "min-h-11 flex-1 sm:min-h-0 sm:flex-none",
-                    on_click: to_task,
-                    "→ Task"
-                }
-                Button {
-                    variant: ButtonVariant::Secondary,
-                    class: "min-h-11 flex-1 sm:min-h-0 sm:flex-none",
-                    on_click: to_note,
-                    "→ Note"
-                }
-                Button {
-                    variant: ButtonVariant::Outline,
-                    class: "min-h-11 flex-1 sm:min-h-0 sm:flex-none",
-                    on_click: mark_done,
-                    "Done"
-                }
+                {rate_button(act, item.clone(), ReviewResponse::Hard, "Urgent", iv_urgent, ButtonVariant::Primary)}
+                {rate_button(act, item.clone(), ReviewResponse::Good, "Maybe", iv_maybe, ButtonVariant::Secondary)}
+                {rate_button(act, item.clone(), ReviewResponse::Easy, "Someday", iv_someday, ButtonVariant::Outline)}
             }
+
+            // …or act on it now.
+            Text { variant: TextVariant::Muted, class: "text-xs", "…or handle it now" }
             div { class: "flex flex-wrap items-center gap-2",
-                Text { variant: TextVariant::Muted, class: "text-xs", "Snooze:" }
                 Button {
                     variant: ButtonVariant::Ghost,
                     size: ButtonSize::Small,
                     class: "min-h-11 sm:min-h-0",
                     on_click: {
                         let item = item.clone();
-                        move |_| snooze_btn(item.clone(), cursor, 1)
+                        move |_| act.call((item.clone(), Act::Task))
                     },
-                    "Tomorrow"
+                    "→ Task (t)"
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
@@ -577,9 +582,9 @@ fn ProcessReview(
                     class: "min-h-11 sm:min-h-0",
                     on_click: {
                         let item = item.clone();
-                        move |_| snooze_btn(item.clone(), cursor, 3)
+                        move |_| act.call((item.clone(), Act::Note))
                     },
-                    "3 days"
+                    "→ Note (n)"
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
@@ -587,9 +592,9 @@ fn ProcessReview(
                     class: "min-h-11 sm:min-h-0",
                     on_click: {
                         let item = item.clone();
-                        move |_| snooze_btn(item.clone(), cursor, 7)
+                        move |_| act.call((item.clone(), Act::Done))
                     },
-                    "1 week"
+                    "Done (d)"
                 }
                 div { class: "flex-1" }
                 Button {
@@ -603,11 +608,63 @@ fn ProcessReview(
                     variant: ButtonVariant::Destructive,
                     size: ButtonSize::Small,
                     class: "min-h-11 sm:min-h-0",
-                    on_click: delete,
-                    "Delete"
+                    on_click: {
+                        let item = item.clone();
+                        move |_| act.call((item.clone(), Act::Delete))
+                    },
+                    "Delete (x)"
                 }
             }
         }
+    }
+}
+
+/// A decision the review dispatcher can carry out.
+#[derive(Clone)]
+enum Act {
+    Task,
+    Note,
+    Done,
+    Delete,
+    Skip,
+    Rate(ReviewResponse),
+}
+
+/// One urgency-rating button: label over the interval it would schedule.
+fn rate_button(
+    act: Callback<(InboxItem, Act)>,
+    item: InboxItem,
+    resp: ReviewResponse,
+    label: &str,
+    interval: i64,
+    variant: ButtonVariant,
+) -> Element {
+    let label = label.to_string();
+    rsx! {
+        Button {
+            variant,
+            class: "min-h-12 flex-1 flex-col gap-0 sm:flex-none",
+            on_click: move |_| act.call((item.clone(), Act::Rate(resp))),
+            span { "{label}" }
+            span { class: "text-[10px] font-normal opacity-70", "{fmt_interval(interval)}" }
+        }
+    }
+}
+
+/// Human-friendly interval label ("today", "1d", "3w", "2mo").
+fn fmt_interval(days: i64) -> String {
+    if days <= 0 {
+        "today".to_string()
+    } else if days == 1 {
+        "1d".to_string()
+    } else if days < 7 {
+        format!("{days}d")
+    } else if days < 30 {
+        format!("{}w", (days as f64 / 7.0).round() as i64)
+    } else if days < 365 {
+        format!("{}mo", (days as f64 / 30.0).round() as i64)
+    } else {
+        format!("{:.1}y", days as f64 / 365.0)
     }
 }
 
