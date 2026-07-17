@@ -4086,11 +4086,14 @@ dependencies = [
  "architect",
  "chrono",
  "contacts-proto",
+ "ical",
+ "roxmltree 0.20.0",
  "serde",
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+ "ureq 2.12.1",
  "uuid 1.23.4",
 ]
 
@@ -12342,6 +12345,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "ical"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b7cab7543a8b7729a19e2c04309f902861293dcdae6558dfbeb634454d279f6"
+dependencies = [
+ "thiserror 1.0.69",
 ]
 
 [[package]]
