@@ -24,6 +24,9 @@ const PAGE_CHOICES: &[(&str, &str)] = &[
 pub fn SettingsView() -> Element {
     let prefs_ctx = use_context::<PrefsCtx>();
     let prefs = prefs_ctx.prefs.read().clone();
+    // Start-page picker binds a String signal; on_change writes it through
+    // to the prefs context (the source of truth).
+    let page_pick = use_signal(|| prefs.default_page.clone());
 
     // Same active-org ↔ overrides bridge as the shell's theme pickers;
     // persistence rides the App-root `use_theme_prefs_sync` effect.
@@ -48,16 +51,14 @@ pub fn SettingsView() -> Element {
                     variant: TextVariant::Muted,
                     "Where the app opens. Follows your account on every device."
                 }
-                select {
-                    class: "w-64 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/50",
-                    value: "{prefs.default_page}",
-                    onchange: move |e| prefs_ctx.update(|p| p.default_page = e.value()),
-                    for (value, label) in PAGE_CHOICES {
-                        option {
-                            key: "{value}",
-                            value: "{value}",
-                            selected: prefs.default_page == *value,
-                            "{label}"
+                Select {
+                    value: page_pick,
+                    placeholder: "Start page".to_string(),
+                    class: "w-64".to_string(),
+                    on_change: move |v: String| prefs_ctx.update(|p| p.default_page = v.clone()),
+                    SelectContent {
+                        for (i, (value, label)) in PAGE_CHOICES.iter().enumerate() {
+                            SelectItem { key: "{value}", value: "{value}", index: i, "{label}" }
                         }
                     }
                 }

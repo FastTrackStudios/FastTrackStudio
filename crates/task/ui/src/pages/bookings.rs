@@ -44,6 +44,8 @@ pub fn BookingsView() -> Element {
 
     let mut title = use_signal(String::new);
     let mut duration = use_signal(|| 30u16);
+    // Select binds a String; mirror it into the u16 `duration` on change.
+    let duration_pick = use_signal(|| "30".to_string());
 
     // Shared optimistic stores for both halves of the page.
     let types_result = stores::use_event_type_list();
@@ -98,16 +100,18 @@ pub fn BookingsView() -> Element {
                         }
                     },
                 }
-                select {
-                    class: "{INPUT_CLS}",
-                    value: "{duration}",
-                    onchange: move |e| {
-                        if let Ok(d) = e.value().parse::<u16>() {
+                Select {
+                    value: duration_pick,
+                    placeholder: "Duration".to_string(),
+                    on_change: move |v: String| {
+                        if let Ok(d) = v.parse::<u16>() {
                             duration.set(d);
                         }
                     },
-                    for d in DURATIONS {
-                        option { key: "{d}", value: "{d}", "{d} min" }
+                    SelectContent {
+                        for (i, d) in DURATIONS.iter().enumerate() {
+                            SelectItem { key: "{d}", value: "{d}", index: i, "{d} min" }
+                        }
                     }
                 }
                 Button {

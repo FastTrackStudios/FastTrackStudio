@@ -114,13 +114,13 @@ pub fn MilestonesView() -> Element {
                         }
                     },
                 }
-                select {
-                    class: "{INPUT_CLS}",
-                    value: "{project}",
-                    onchange: move |e| project.set(e.value()),
-                    option { value: "", "Project…" }
-                    for p in project_options.iter() {
-                        option { key: "{p.id}", value: "{p.id}", "{p.title}" }
+                Select {
+                    value: project,
+                    placeholder: "Project…".to_string(),
+                    SelectContent {
+                        for (i, p) in project_options.iter().enumerate() {
+                            SelectItem { key: "{p.id}", value: "{p.id}", index: i, "{p.title}" }
+                        }
                     }
                 }
                 input {
