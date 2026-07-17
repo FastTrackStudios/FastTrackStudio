@@ -5,6 +5,7 @@
 //! reusable components; this crate composes them into the
 //! product surface.
 
+pub mod actions;
 pub mod app;
 pub mod app_views;
 pub mod auth;

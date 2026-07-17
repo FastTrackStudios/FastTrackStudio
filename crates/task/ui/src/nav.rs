@@ -5,10 +5,10 @@
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    BookOpen, Bot, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
+    BookOpen, Bot, Brain, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
     FolderKanban, GitBranch, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package,
-    ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Utensils, Wallet, Waypoints,
-    Youtube,
+    ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Users, Utensils, Wallet,
+    Waypoints, Youtube,
 };
 
 use crate::routes::Route;
@@ -26,6 +26,9 @@ fn icon_house() -> Element {
 }
 fn icon_inbox() -> Element {
     rsx! { InboxIcon { size: 16 } }
+}
+fn icon_recall() -> Element {
+    rsx! { Brain { size: 16 } }
 }
 fn icon_email() -> Element {
     rsx! { Mail { size: 16 } }
@@ -75,6 +78,9 @@ fn icon_finances() -> Element {
 fn icon_invoices() -> Element {
     rsx! { ReceiptText { size: 16 } }
 }
+fn icon_members() -> Element {
+    rsx! { Users { size: 16 } }
+}
 fn icon_ledger() -> Element {
     rsx! { Scale { size: 16 } }
 }
@@ -111,6 +117,12 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Inbox",
             icon: icon_inbox,
             route: Route::InboxRoute {},
+        },
+        // Recall — spaced-repetition deck (adjacent to Inbox).
+        NavTab {
+            label: "Recall",
+            icon: icon_recall,
+            route: Route::RecallRoute {},
         },
         NavTab {
             label: "Email",
@@ -203,6 +215,11 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Invoices",
             icon: icon_invoices,
             route: Route::InvoicesRoute {},
+        },
+        NavTab {
+            label: "Members",
+            icon: icon_members,
+            route: Route::MembersRoute {},
         },
         NavTab {
             label: "Ledger",
@@ -301,6 +318,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::HomeRoute {} => "Tasks",
         Route::DashboardRoute {} => "Home",
         Route::InboxRoute {} => "Inbox",
+        Route::RecallRoute {} => "Recall",
         Route::EmailRoute {} => "Email",
         Route::ProjectsRoute {} => "Projects",
         Route::ProjectDetailRoute { .. } => "Project",
@@ -322,6 +340,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::TimerRoute {} => "Timer",
         Route::FinancesRoute {} => "Finances",
         Route::InvoicesRoute {} => "Invoices",
+        Route::MembersRoute {} => "Members",
         Route::LedgerRoute {} => "Ledger",
         Route::WikiRoute {} => "Wiki",
         Route::ConnectionsRoute {} => "Connections",

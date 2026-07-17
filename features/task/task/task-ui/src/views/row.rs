@@ -2,11 +2,11 @@
 //! priority badge · context / project chips.
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Check, Hash};
+use fts_ui::lucide_dioxus::{Ban, Check, Ellipsis, Hash, Trash2};
 use uuid::Uuid;
 
-use crate::TaskInfo;
 use crate::model::{Priority, Status};
+use crate::{TaskInfo, TaskMutation};
 
 use super::palette::{priority_pill, status_pill};
 
@@ -15,6 +15,9 @@ pub struct TaskRowProps {
     pub task: TaskInfo,
     pub on_toggle: EventHandler<Uuid>,
     pub on_open: EventHandler<Uuid>,
+    /// Mutation sink for the row's overflow menu (complete / cancel /
+    /// delete). Same channel the detail panel and quick-add use.
+    pub on_event: EventHandler<TaskMutation>,
 }
 
 #[component]
@@ -127,6 +130,87 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
                 div { class: "flex items-center gap-1.5 flex-wrap sm:hidden empty:hidden",
                     {identity}
                     {temporal}
+                }
+            }
+            RowMenu { id, done, on_event: props.on_event }
+        }
+    }
+}
+
+/// Per-row overflow menu (⋯) — complete/reopen, cancel (hide without
+/// deleting), and a two-click delete. Hidden until hover on desktop,
+/// always visible on touch. Stops click propagation so acting on a row
+/// never also opens its detail panel.
+#[component]
+fn RowMenu(id: Uuid, done: bool, on_event: EventHandler<TaskMutation>) -> Element {
+    let mut open = use_signal(|| false);
+    let mut confirm_delete = use_signal(|| false);
+    rsx! {
+        div { class: "relative shrink-0",
+            button {
+                r#type: "button",
+                class: "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-100 transition-colors hover:bg-accent hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100",
+                title: "Task actions",
+                onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
+                    let v = *open.peek();
+                    open.set(!v);
+                    confirm_delete.set(false);
+                },
+                Ellipsis { size: 16 }
+            }
+            if open() {
+                // Click-away backdrop.
+                div {
+                    class: "fixed inset-0 z-30",
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        open.set(false);
+                        confirm_delete.set(false);
+                    },
+                }
+                div {
+                    class: "absolute right-0 top-full z-40 mt-1 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-popover py-1 text-xs shadow-xl",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    button {
+                        r#type: "button",
+                        class: "flex items-center gap-2 px-3 py-1.5 text-left hover:bg-accent",
+                        onclick: move |_| {
+                            on_event.call(TaskMutation::SetStatus {
+                                id,
+                                status: if done { "open".into() } else { "done".into() },
+                            });
+                            open.set(false);
+                        },
+                        Check { size: 13 }
+                        if done { "Reopen" } else { "Complete" }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "flex items-center gap-2 px-3 py-1.5 text-left hover:bg-accent",
+                        onclick: move |_| {
+                            on_event.call(TaskMutation::SetStatus { id, status: "cancelled".into() });
+                            open.set(false);
+                        },
+                        Ban { size: 13 }
+                        "Cancel (hide)"
+                    }
+                    div { class: "my-1 h-px bg-border/60" }
+                    button {
+                        r#type: "button",
+                        class: "flex items-center gap-2 px-3 py-1.5 text-left text-destructive hover:bg-destructive/10",
+                        onclick: move |_| {
+                            if *confirm_delete.peek() {
+                                on_event.call(TaskMutation::Delete { id });
+                                open.set(false);
+                                confirm_delete.set(false);
+                            } else {
+                                confirm_delete.set(true);
+                            }
+                        },
+                        Trash2 { size: 13 }
+                        if confirm_delete() { "Confirm delete" } else { "Delete" }
+                    }
                 }
             }
         }

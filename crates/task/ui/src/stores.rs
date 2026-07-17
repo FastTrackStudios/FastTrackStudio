@@ -55,6 +55,7 @@ pub fn provide_stores() {
     provide_recipe_store();
     provide_pantry_store();
     provide_inbox_store();
+    provide_recall_store();
     provide_booking_store();
     provide_event_type_store();
     provide_dayplan_store();
@@ -1139,6 +1140,96 @@ impl InboxMutations {
     }
 }
 
+// ── recall (spaced-repetition deck) ─────────────────────────────────
+
+pub type RecallStore = Store<recall_proto::RecallCard, String>;
+
+pub fn provide_recall_store() -> RecallStore {
+    let store = use_store();
+    use_context_provider(move || store)
+}
+
+pub fn use_recall_store() -> RecallStore {
+    use_context()
+}
+
+pub fn use_recall_list() -> AtomResult<Vec<(Id<String>, recall_proto::RecallCard)>, String> {
+    use_first_org_list(use_recall_store(), |slug| async move {
+        crate::feeds::fetch_recall_cards(&slug).await
+    })
+}
+
+/// Optimistic writes for the deck. Upserts return unit on the wire, so
+/// the row we sent doubles as the reconciled value (the id is
+/// client-minted and stable).
+#[derive(Clone, Copy)]
+pub struct RecallMutations {
+    store: RecallStore,
+    write: Mutation<String>,
+}
+
+pub fn use_recall_mutations() -> RecallMutations {
+    RecallMutations {
+        store: use_recall_store(),
+        write: use_mutation(),
+    }
+}
+
+impl RecallMutations {
+    /// Author a fresh card: it appears instantly, then persists.
+    pub fn create(&self, slug: String, card: recall_proto::RecallCard) {
+        run_create(self.write, self.store, card, move |card| async move {
+            crate::feeds::upsert_recall_card(&slug, card.clone())
+                .await
+                .map(|()| card)
+        });
+    }
+
+    /// Replace a card in place (edits, archive, review reschedule),
+    /// then persist.
+    pub fn save(&self, slug: String, next: recall_proto::RecallCard) {
+        let id = next.id.clone();
+        let row = next.clone();
+        self.write.run(
+            self.store,
+            move |s| s.update_optimistic(Id::Real(id), move |r| *r = row),
+            move || async move {
+                crate::feeds::upsert_recall_card(&slug, next.clone())
+                    .await
+                    .map(|()| Some(next))
+            },
+        );
+    }
+
+    /// Grade the card under review on `today`, reschedule it via FSRS,
+    /// and persist — an optimistic in-place update.
+    pub fn review(
+        &self,
+        slug: String,
+        card: recall_proto::RecallCard,
+        rating: spaced_repetition::Rating,
+        today: NaiveDate,
+    ) {
+        let mut next = card;
+        next.review(rating, today);
+        self.save(slug, next);
+    }
+
+    /// Remove a card now; restore (and notify) if the delete fails.
+    pub fn delete(&self, slug: String, id: String) {
+        let key = id.clone();
+        self.write.run(
+            self.store,
+            move |s| s.remove_optimistic(Id::Real(key)),
+            move || async move {
+                crate::feeds::delete_recall_card(&slug, &id)
+                    .await
+                    .map(|()| None)
+            },
+        );
+    }
+}
+
 // ── bookings + event types ──────────────────────────────────────────
 
 pub type BookingStore = Store<scheduling_proto::Booking, String>;
@@ -1629,6 +1720,68 @@ impl TimerMutations {
                     .map(|session| Some(OrgSession { slug, session }))
             },
         );
+    }
+
+    /// Switch the running timer to a new task in one atomic step: the
+    /// open row closes and a fresh open session appears instantly, then
+    /// both reconcile against the server's `switch_timer`. `open_id` is
+    /// the currently-running session to close (optimistically); it
+    /// self-heals to the server's closed row on the next refetch.
+    pub fn switch(&self, slug: String, open_id: Uuid, req: StartTimerRequest) {
+        let now = Utc::now();
+        let draft = OrgSession {
+            slug: slug.clone(),
+            session: draft_session(&req),
+        };
+        self.write.run(
+            self.store,
+            move |s| {
+                // Close the outgoing row so the recent list doesn't show
+                // two live clocks in the optimistic gap before reconcile.
+                s.update_optimistic(Id::Real(open_id), |r| {
+                    r.session.end_time = Some(now);
+                });
+                // The incoming session is the ticket we reconcile.
+                s.insert_optimistic(draft).0
+            },
+            move || async move {
+                crate::feeds::switch_timer(&slug, req)
+                    .await
+                    .map(|session| Some(OrgSession { slug, session }))
+            },
+        );
+    }
+
+    /// Retro-log a past, already-closed session (manual entry). It
+    /// appears in the list instantly, then reconciles to the server's
+    /// row (authoritative id + rate snapshot).
+    pub fn log(&self, slug: String, req: timer_proto::LogSessionRequest) {
+        let now = Utc::now();
+        let draft = OrgSession {
+            slug: slug.clone(),
+            session: WorkSession {
+                id: Uuid::nil(),
+                org_id: req.org_id,
+                user_id: req.user_id,
+                project_id: req.project_id,
+                project_path: req.project_path.clone(),
+                description: req.description.clone(),
+                start_time: req.start_time,
+                end_time: Some(req.end_time),
+                billable: req.billable_override.unwrap_or(false),
+                rate_cents: 0,
+                currency: String::new(),
+                task_note_path: req.task_note_path.clone(),
+                invoice_id: None,
+                created_at: now,
+                updated_at: now,
+            },
+        };
+        run_create(self.write, self.store, draft, move |_| async move {
+            crate::feeds::log_session(&slug, req)
+                .await
+                .map(|session| OrgSession { slug, session })
+        });
     }
 
     /// Edit a session (description / billable), then reconcile.

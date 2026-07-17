@@ -7412,7 +7412,7 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
             // Resolve user_id → display name from the org's
             // auth.sqlite. Missing rows fall back to a
             // short-id label so a stranded id still reads.
-            let names_by_id = {
+            let mut names_by_id = {
                 use architect_auth::db::{AuthUserColumn, AuthUserEntity};
                 use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
                 let auth_path = ctx.root.auth_db();
@@ -7440,6 +7440,21 @@ async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Resul
                 }
                 map
             };
+            // Manual override: `TASK_MEMBER_NAMES="<uuid>=Name;<uuid>=Name"`
+            // wins over the auth.sqlite lookup — and seeds a display name
+            // when there's no auth row at all (CLI-only invoices where the
+            // member id is a local stand-in, not a signed-up account).
+            if let Ok(raw) = std::env::var("TASK_MEMBER_NAMES") {
+                for pair in raw.split([';', ',']) {
+                    if let Some((id, name)) = pair.split_once('=') {
+                        if let (Ok(uid), name) = (id.trim().parse::<uuid::Uuid>(), name.trim()) {
+                            if !name.is_empty() {
+                                names_by_id.insert(uid, name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
             enrich_invoice_with_assignees(&mut ifp, &build.line_meta, &names_by_id);
             // User asked to drop the due-date row; keep
             // `Invoice.due_date` in the proto for accounting

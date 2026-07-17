@@ -18,12 +18,16 @@ use sea_orm::{
 use timer_proto::service::{
     LogSessionRequest, RateResolution, RateSource, StartTimerRequest, TimerService,
 };
-use timer_proto::{TimerError, WorkSession, WorkSessionFilter};
+use timer_proto::{
+    OrgMemberRate, ProjectMemberRate, TimerError, WorkSession, WorkSessionFilter,
+};
 use uuid::Uuid;
 
 use crate::entity::{
-    OrgMemberRateColumn, OrgMemberRateEntity, ProjectMemberRateColumn, ProjectMemberRateEntity,
-    WorkSessionActive, WorkSessionColumn, WorkSessionEntity, WorkSessionModel,
+    OrgMemberRateActive, OrgMemberRateColumn, OrgMemberRateEntity, OrgMemberRateModel,
+    ProjectMemberRateActive, ProjectMemberRateColumn, ProjectMemberRateEntity,
+    ProjectMemberRateModel, WorkSessionActive, WorkSessionColumn, WorkSessionEntity,
+    WorkSessionModel,
 };
 use crate::error::TimerDbError;
 use crate::rate_cascade::{CascadeInputs, ResolvedRate, resolve};
@@ -527,6 +531,111 @@ impl TimerService for Store {
             .await
             .map_err(|e| TimerError::Backend(e.to_string()))?;
         Ok(())
+    }
+
+    async fn set_org_member_rate(
+        &self,
+        org_id: Uuid,
+        user_id: Uuid,
+        hourly_cents: i64,
+        currency: String,
+    ) -> Result<OrgMemberRate, TimerError> {
+        // Reuse the inherent upsert helper (takes &str), read the row back.
+        Store::set_org_member_rate(self, org_id, user_id, hourly_cents, &currency)
+            .await
+            .map_err(TimerError::from)?;
+        let row = OrgMemberRateEntity::find()
+            .filter(OrgMemberRateColumn::OrgId.eq(org_id))
+            .filter(OrgMemberRateColumn::UserId.eq(user_id))
+            .one(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?
+            .ok_or_else(|| TimerError::Backend("org member rate vanished after upsert".into()))?;
+        Ok(org_member_rate_from_model(row))
+    }
+
+    async fn set_project_member_rate(
+        &self,
+        project_id: Uuid,
+        user_id: Uuid,
+        hourly_cents: i64,
+    ) -> Result<ProjectMemberRate, TimerError> {
+        let existing = ProjectMemberRateEntity::find()
+            .filter(ProjectMemberRateColumn::ProjectId.eq(project_id))
+            .filter(ProjectMemberRateColumn::UserId.eq(user_id))
+            .one(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        let now = Utc::now();
+        let saved = if let Some(row) = existing {
+            let mut a: ProjectMemberRateActive = row.into();
+            a.hourly_cents = Set(hourly_cents);
+            a.updated_at = Set(now);
+            a.update(&self.conn).await
+        } else {
+            ProjectMemberRateActive {
+                id: Set(Uuid::new_v4()),
+                project_id: Set(project_id),
+                user_id: Set(user_id),
+                hourly_cents: Set(hourly_cents),
+                created_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&self.conn)
+            .await
+        }
+        .map_err(|e| TimerError::Backend(e.to_string()))?;
+        Ok(project_member_rate_from_model(saved))
+    }
+
+    async fn list_org_member_rates(
+        &self,
+        org_id: Uuid,
+    ) -> Result<Vec<OrgMemberRate>, TimerError> {
+        let rows = OrgMemberRateEntity::find()
+            .filter(OrgMemberRateColumn::OrgId.eq(org_id))
+            .all(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        Ok(rows.into_iter().map(org_member_rate_from_model).collect())
+    }
+
+    async fn list_project_member_rates(
+        &self,
+        project_id: Uuid,
+    ) -> Result<Vec<ProjectMemberRate>, TimerError> {
+        let rows = ProjectMemberRateEntity::find()
+            .filter(ProjectMemberRateColumn::ProjectId.eq(project_id))
+            .all(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(project_member_rate_from_model)
+            .collect())
+    }
+}
+
+fn org_member_rate_from_model(m: OrgMemberRateModel) -> OrgMemberRate {
+    OrgMemberRate {
+        id: m.id,
+        org_id: m.org_id,
+        user_id: m.user_id,
+        hourly_cents: m.hourly_cents,
+        currency: m.currency,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+    }
+}
+
+fn project_member_rate_from_model(m: ProjectMemberRateModel) -> ProjectMemberRate {
+    ProjectMemberRate {
+        id: m.id,
+        project_id: m.project_id,
+        user_id: m.user_id,
+        hourly_cents: m.hourly_cents,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
     }
 }
 

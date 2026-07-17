@@ -27,6 +27,10 @@ pub fn serialize_inbox_item(item: &InboxItem) -> Result<String, WriteError> {
     if let Some(p) = &item.processed_into {
         map.insert("processed_into".into(), p.clone().into());
     }
+    // Spaced-repetition state (obsidian-spaced-repetition SM-2).
+    map.insert("sr-ease".into(), item.ease.into());
+    map.insert("sr-interval".into(), item.interval.into());
+    map.insert("sr-reviews".into(), item.reviews.into());
 
     let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(map))
         .map_err(|e| WriteError::Yaml(e.to_string()))?;
@@ -49,6 +53,9 @@ mod tests {
             created: "2026-05-31T09:00:00Z".into(),
             resurface_on: Some("2026-06-07".into()),
             processed_into: None,
+            ease: 250,
+            interval: 3,
+            reviews: 1,
         };
         let page = serialize_inbox_item(&item).unwrap();
         let (fm, body) = frontmatter_split(&page).expect("frontmatter");

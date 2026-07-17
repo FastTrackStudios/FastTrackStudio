@@ -17,10 +17,12 @@
 
 pub mod error;
 pub mod inbox_item;
+pub mod schedule;
 pub mod service;
 
 pub use error::InboxError;
 pub use inbox_item::InboxItem;
+pub use schedule::{ReviewResponse, review, schedule};
 pub use service::Inbox;
 
 // architect-emitted vox bits: the async client / dispatcher /

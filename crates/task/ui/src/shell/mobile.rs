@@ -254,7 +254,7 @@ fn MobileTimerBar(mut open: Signal<bool>) -> Element {
                     onclick: move |_| open.set(true),
                     span { class: "flex min-w-0 flex-col leading-tight",
                         span { class: "truncate text-sm font-medium text-foreground", "{title}" }
-                        span { class: "font-mono text-xs tabular-nums text-emerald-500", "{fmt_hms(elapsed)}" }
+                        span { class: "font-mono text-xs tabular-nums text-sky-400", "{fmt_hms(elapsed)}" }
                     }
                 }
             } else {
@@ -414,13 +414,13 @@ fn MobileTimerSheet(mut open: Signal<bool>) -> Element {
                     }
                 } else if tracking {
                     // Active session — big live clock + what you're on + Stop.
-                    div { class: "flex flex-col gap-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5",
+                    div { class: "flex flex-col gap-4 rounded-2xl border border-sky-500/40 bg-sky-500/10 p-5",
                         div { class: "flex items-center gap-2",
                             span { class: "relative flex size-2.5",
-                                span { class: "absolute inline-flex size-full animate-ping rounded-full bg-emerald-400/70" }
-                                span { class: "relative inline-flex size-2.5 rounded-full bg-emerald-400" }
+                                span { class: "absolute inline-flex size-full animate-ping rounded-full bg-sky-400/70" }
+                                span { class: "relative inline-flex size-2.5 rounded-full bg-sky-400" }
                             }
-                            span { class: "text-xs font-semibold uppercase tracking-[0.18em] text-emerald-500",
+                            span { class: "text-xs font-semibold uppercase tracking-[0.18em] text-sky-400",
                                 "Tracking"
                             }
                         }

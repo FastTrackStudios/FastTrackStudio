@@ -6,8 +6,8 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::ChevronRight;
 use uuid::Uuid;
 
-use crate::TaskInfo;
 use crate::model::Status;
+use crate::{TaskInfo, TaskMutation};
 
 use super::row::TaskRow;
 
@@ -16,6 +16,7 @@ pub struct TaskListProps {
     pub tasks: Vec<TaskInfo>,
     pub on_toggle: EventHandler<Uuid>,
     pub on_open: EventHandler<Uuid>,
+    pub on_event: EventHandler<TaskMutation>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -113,7 +114,7 @@ pub fn TaskList(props: TaskListProps) -> Element {
                         // The Done section starts collapsed —
                         // typical Things 3 / Todoist behaviour.
                         initially_open: group != Group::Done,
-                        TaskList_Children { items, on_toggle: props.on_toggle, on_open: props.on_open }
+                        TaskList_Children { items, on_toggle: props.on_toggle, on_open: props.on_open, on_event: props.on_event }
                     }
                 }
             }
@@ -137,6 +138,7 @@ struct TaskListChildrenProps {
     items: Vec<TaskInfo>,
     on_toggle: EventHandler<Uuid>,
     on_open: EventHandler<Uuid>,
+    on_event: EventHandler<TaskMutation>,
 }
 
 #[allow(non_snake_case)]
@@ -157,6 +159,7 @@ fn TaskList_Children(props: TaskListChildrenProps) -> Element {
                         task: t,
                         on_toggle: props.on_toggle,
                         on_open: props.on_open,
+                        on_event: props.on_event,
                     }
                 }
             }

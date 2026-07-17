@@ -24,6 +24,11 @@ pub enum Route {
         #[route("/inbox")]
         InboxRoute {},
 
+        // Recall — the spaced-repetition learning deck (adjacent to
+        // Inbox; keep this anchor stable for clean merges).
+        #[route("/recall")]
+        RecallRoute {},
+
         #[route("/email")]
         EmailRoute {},
 
@@ -93,6 +98,9 @@ pub enum Route {
         #[route("/invoices")]
         InvoicesRoute {},
 
+        #[route("/members")]
+        MembersRoute {},
+
         #[route("/ledger")]
         LedgerRoute {},
 
@@ -147,6 +155,11 @@ fn DashboardRoute() -> Element {
 #[component]
 fn InboxRoute() -> Element {
     rsx! { pages::inbox::InboxView {} }
+}
+
+#[component]
+fn RecallRoute() -> Element {
+    rsx! { pages::recall::RecallView {} }
 }
 
 #[component]
@@ -267,6 +280,11 @@ fn FinancesRoute() -> Element {
 #[component]
 fn InvoicesRoute() -> Element {
     rsx! { pages::invoices::InvoicesView {} }
+}
+
+#[component]
+fn MembersRoute() -> Element {
+    rsx! { pages::members::MembersView {} }
 }
 
 #[component]

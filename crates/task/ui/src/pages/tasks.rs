@@ -24,7 +24,9 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Plus, SlidersHorizontal};
 use task_ui::{QuickAdd, TaskInfo as UiTask, TaskMutation, TasksApp};
 
-use crate::chrome::use_second_tick;
+use crate::chrome::{
+    fmt_hms, owner_id, req_from_session, resolve_org, use_resume_hint, use_second_tick, PausedTimer,
+};
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::prefs::PrefsCtx;
 use crate::shell::mobile::{BottomSheet, MobileActionBar};
@@ -47,8 +49,26 @@ struct BoardData {
     projects: Vec<(uuid::Uuid, String)>,
     /// Rows the Active/Relevant chips filtered out.
     hidden: usize,
-    /// The in-progress task with a live time entry, if any.
-    running: Option<UiTask>,
+    /// The running work session (the unified timer source), if any —
+    /// what the Now bar reflects. `None` when nothing is tracking.
+    now: Option<NowInfo>,
+}
+
+/// The Now bar's data, derived from the open [`WorkSession`] rather
+/// than task markdown — so the banner, the top-bar widget, and `/timer`
+/// all show the same running timer. `task_id` is resolved from the
+/// session's `task_note_path` (present only for task-linked timers) and
+/// gates the Complete button.
+#[derive(Clone, PartialEq)]
+struct NowInfo {
+    title: String,
+    start_time: chrono::DateTime<chrono::Utc>,
+    slug: String,
+    org_id: uuid::Uuid,
+    session_id: uuid::Uuid,
+    task_id: Option<uuid::Uuid>,
+    /// Rebuilt start request, so Pause can stash it for one-click resume.
+    req: timer_proto::StartTimerRequest,
 }
 
 #[component]
@@ -145,23 +165,55 @@ pub fn TasksView() -> Element {
             })
             .collect();
 
-        // The running task (in-progress with a live entry) — the
-        // whole board's rows are candidates, filters or not: a
-        // running clock is never invisible.
-        let running: Option<UiTask> = rows
-            .iter()
-            .map(|(_, r)| &r.task)
-            .find(|t| {
-                task::Status::from_str(&t.status) == Some(task::Status::InProgress)
-                    && t.time_entries.0.iter().any(|e| e.end_time.is_none())
-            })
-            .map(|t| stores::to_ui(t));
+        // The Now bar reflects the open work session (the unified timer
+        // source) for the active org + owner — not task markdown — so a
+        // running clock started anywhere (widget, /timer, here) is never
+        // invisible and never disagrees with the top-bar widget.
+        let now: Option<NowInfo> = resolve_org(&selection.read(), &org_list.read()).and_then(
+            |(slug, org_id)| {
+                let owner = owner_id(org_id);
+                session_store
+                    .list()
+                    .into_iter()
+                    .find(|r| {
+                        r.slug == slug
+                            && r.session.user_id == owner
+                            && r.session.end_time.is_none()
+                    })
+                    .map(|r| {
+                        let s = &r.session;
+                        let matched = (!s.task_note_path.is_empty())
+                            .then(|| {
+                                rows.iter()
+                                    .map(|(_, t)| &t.task)
+                                    .find(|t| t.path == s.task_note_path)
+                            })
+                            .flatten();
+                        let title = if s.description.trim().is_empty() {
+                            matched
+                                .map(|t| t.title.clone())
+                                .unwrap_or_else(|| "Tracking".to_string())
+                        } else {
+                            s.description.clone()
+                        };
+                        NowInfo {
+                            title,
+                            start_time: s.start_time,
+                            slug: slug.clone(),
+                            org_id,
+                            session_id: s.id,
+                            task_id: matched.map(|t| t.id),
+                            req: req_from_session(org_id, s),
+                        }
+                    })
+            },
+        );
 
         Some(BoardData {
             ui_tasks,
             projects: project_names.into_iter().collect(),
             hidden,
-            running,
+            now,
         })
     });
 
@@ -171,7 +223,7 @@ pub fn TasksView() -> Element {
                 ui_tasks,
                 projects: project_choices,
                 hidden,
-                running,
+                now,
             } = data;
             let location_value = at_location.clone();
             // Inline chips are desktop chrome; on phones the same
@@ -217,9 +269,9 @@ pub fn TasksView() -> Element {
             let sheet_projects = project_choices.clone();
             rsx! {
                 div { class: "flex h-full w-full flex-col pb-14 md:pb-0",
-                    if let Some(t) = running {
+                    if let Some(n) = now {
                         NowBar {
-                            task: t,
+                            now: n,
                             on_complete: move |id| {
                                 muts.apply(
                                     &crate::orgs::create_target(&selection.read(), &org_list.read()),
@@ -333,29 +385,88 @@ pub fn TasksView() -> Element {
 }
 
 /// The page's opening statement: what's running right now. A slim
-/// full-width strip — pulsing dot, task title, live elapsed clock,
-/// one button to land it. Rendered only while a clock is live, so an
-/// idle board stays clean.
+/// full-width strip — pulsing sky dot, timer title, live elapsed clock,
+/// and the same Pause / Stop controls as the top-bar widget, plus
+/// Complete when the timer is linked to a task. Driven by the open
+/// [`WorkSession`], so it always agrees with the widget. Rendered only
+/// while a clock is live, so an idle board stays clean.
 #[component]
-fn NowBar(task: UiTask, on_complete: EventHandler<uuid::Uuid>) -> Element {
+fn NowBar(now: NowInfo, on_complete: EventHandler<uuid::Uuid>) -> Element {
     let tick = use_signal(|| 0u64);
     use_second_tick(tick);
     let _ = tick(); // subscribe: the clock re-renders each second
 
-    let id = task.id;
-    let elapsed = task.tracked_seconds(chrono::Utc::now());
+    let muts = stores::use_timer_mutations();
+    let mut hint = use_resume_hint();
+    let elapsed = (chrono::Utc::now() - now.start_time).num_seconds();
+    let owner = owner_id(now.org_id);
+
+    let pause = {
+        let now = now.clone();
+        move |_| {
+            muts.stop(now.slug.clone(), owner, now.session_id);
+            hint.set(Some(PausedTimer {
+                slug: now.slug.clone(),
+                org_id: now.org_id,
+                req: now.req.clone(),
+                title: now.title.clone(),
+                banked: elapsed.max(0),
+            }));
+        }
+    };
+    let stop = {
+        let slug = now.slug.clone();
+        let sid = now.session_id;
+        move |_| {
+            muts.stop(slug.clone(), owner, sid);
+            hint.set(None);
+        }
+    };
+    let complete = {
+        let slug = now.slug.clone();
+        let sid = now.session_id;
+        let task_id = now.task_id;
+        move |_| {
+            // Landing the task also stops its clock and clears any pause.
+            muts.stop(slug.clone(), owner, sid);
+            hint.set(None);
+            if let Some(id) = task_id {
+                on_complete.call(id);
+            }
+        }
+    };
+
     rsx! {
         div { class: "flex items-center gap-3 border-b border-sky-500/30 bg-sky-500/10 px-4 py-2 sm:px-6 lg:px-8",
-            span { class: "h-2 w-2 shrink-0 animate-pulse rounded-full bg-sky-400" }
-            span { class: "min-w-0 truncate text-sm font-medium text-foreground", "{task.title}" }
-            span { class: "shrink-0 font-mono text-sm tabular-nums text-sky-300",
-                {task_ui::clock_label(elapsed)}
+            span { class: "relative flex size-2 shrink-0",
+                span { class: "absolute inline-flex size-full animate-ping rounded-full bg-sky-400/70" }
+                span { class: "relative inline-flex size-2 rounded-full bg-sky-400" }
             }
-            button {
-                r#type: "button",
-                class: "ml-auto shrink-0 rounded-md border border-sky-500/40 px-2.5 py-0.5 text-xs font-medium text-sky-200 transition-colors hover:bg-sky-500/20",
-                onclick: move |_| on_complete.call(id),
-                "Complete"
+            span { class: "min-w-0 truncate text-sm font-medium text-foreground", "{now.title}" }
+            span { class: "shrink-0 font-mono text-sm tabular-nums text-sky-300",
+                "{fmt_hms(elapsed)}"
+            }
+            div { class: "ml-auto flex shrink-0 items-center gap-1.5",
+                button {
+                    r#type: "button",
+                    class: "rounded-md border border-amber-500/40 px-2.5 py-0.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-500/20",
+                    onclick: pause,
+                    "Pause"
+                }
+                button {
+                    r#type: "button",
+                    class: "rounded-md border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                    onclick: stop,
+                    "Stop"
+                }
+                if now.task_id.is_some() {
+                    button {
+                        r#type: "button",
+                        class: "rounded-md border border-sky-500/40 px-2.5 py-0.5 text-xs font-medium text-sky-200 transition-colors hover:bg-sky-500/20",
+                        onclick: complete,
+                        "Complete"
+                    }
+                }
             }
         }
     }

@@ -12,6 +12,7 @@ repository.workspace = true
 # pull in the architect-emitted RPC client + dispatcher.
 [dependencies]
 facet = { workspace = true }
+chrono = { workspace = true }
 thiserror = { workspace = true }
 architect = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

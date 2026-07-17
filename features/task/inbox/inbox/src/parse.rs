@@ -30,6 +30,11 @@ fn take_str(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn take_i64(map: &serde_yaml::Mapping, key: &str) -> Option<i64> {
+    map.get(serde_yaml::Value::from(key))
+        .and_then(serde_yaml::Value::as_i64)
+}
+
 /// Parse a captured inbox item. `path` supplies the fallback id
 /// (the file stem) when frontmatter has none; `body` is the raw
 /// markdown after the frontmatter fence.
@@ -58,5 +63,11 @@ pub fn parse_inbox_item(
         created: take_str(&map, "created").unwrap_or_default(),
         resurface_on: take_str(&map, "resurface_on"),
         processed_into: take_str(&map, "processed_into"),
+        // Spaced-repetition state (obsidian-spaced-repetition SM-2).
+        // Absent on notes captured before SR landed → sensible defaults:
+        // BASE_EASE, never-reviewed interval 0, zero reviews.
+        ease: take_i64(&map, "sr-ease").unwrap_or(inbox_proto::schedule::BASE_EASE),
+        interval: take_i64(&map, "sr-interval").unwrap_or(0),
+        reviews: take_i64(&map, "sr-reviews").unwrap_or(0),
     })
 }

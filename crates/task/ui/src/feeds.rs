@@ -262,6 +262,63 @@ pub async fn delete_inbox_item(slug: &str, id: &str) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete inbox item: {e:?}"))
 }
 
+// ── Recall (spaced-repetition learning deck) ─────────────────────────
+
+/// Every recall card (all decks, archived + active), oldest first.
+/// Consumers filter by `project` / `archived` / due-date client-side.
+pub async fn fetch_recall_cards(slug: &str) -> Result<Vec<recall_proto::RecallCard>, String> {
+    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
+    client
+        .list_cards()
+        .await
+        .map_err(|e| format!("{slug}: list recall cards: {e:?}"))
+}
+
+/// The due, non-archived review queue for `today` (ISO `YYYY-MM-DD`).
+pub async fn fetch_recall_due(
+    slug: &str,
+    today: &str,
+) -> Result<Vec<recall_proto::RecallCard>, String> {
+    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
+    client
+        .review_queue(today.to_string())
+        .await
+        .map_err(|e| format!("{slug}: recall review queue: {e:?}"))
+}
+
+/// Create or update one card (keyed by id). Authoring, edits, and
+/// review-reschedules all flow through here.
+pub async fn upsert_recall_card(
+    slug: &str,
+    card: recall_proto::RecallCard,
+) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
+    client
+        .upsert_card(card)
+        .await
+        .map_err(|e| format!("{slug}: save recall card: {e:?}"))
+}
+
+/// Read one vault note's text (UTF-8, lossy) — backs the recall
+/// "generate cards from note" action.
+pub async fn fetch_note_text(slug: &str, path: &str) -> Result<String, String> {
+    let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
+    let bytes = client
+        .get_file("default".to_owned(), path.to_string())
+        .await
+        .map_err(|e| format!("{slug}: read {path}: {e:?}"))?;
+    Ok(String::from_utf8_lossy(&bytes.0).into_owned())
+}
+
+/// Delete one card.
+pub async fn delete_recall_card(slug: &str, id: &str) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
+    client
+        .delete_card(id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: delete recall card: {e:?}"))
+}
+
 // ── Threads (conversations on tasks/projects) ────────────────────────
 //
 // Single cross-target impl — the architect-generated `ThreadsServiceClient`
@@ -1014,6 +1071,36 @@ pub async fn stop_timer(
         .map_err(|e| format!("{slug}: stop timer: {e:?}"))
 }
 
+/// Atomically stop the caller's running timer (if any) and start a new
+/// one — "switch the timer to a different task" in one transaction, so
+/// the UI never briefly shows two open sessions (or none). Returns the
+/// newly-started session; the closed one settles on the next refetch.
+pub async fn switch_timer(
+    slug: &str,
+    req: timer_proto::StartTimerRequest,
+) -> Result<timer_proto::WorkSession, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .switch_timer(req)
+        .await
+        .map(|(_closed, started)| started)
+        .map_err(|e| format!("{slug}: switch timer: {e:?}"))
+}
+
+/// Retro-log a completed session (start + end in the past) — the "I
+/// forgot to start the timer" / manual-entry path. Skips the
+/// active-timer invariant, so it never disturbs a running timer.
+pub async fn log_session(
+    slug: &str,
+    req: timer_proto::LogSessionRequest,
+) -> Result<timer_proto::WorkSession, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .log_session(req)
+        .await
+        .map_err(|e| format!("{slug}: log session: {e:?}"))
+}
+
 /// Edit an existing session — only the `Some(_)` fields change. The
 /// backend re-snapshots the rate afterward.
 pub async fn update_session(
@@ -1034,6 +1121,76 @@ pub async fn delete_session(slug: &str, id: uuid::Uuid) -> Result<(), String> {
         .delete_session(id)
         .await
         .map_err(|e| format!("{slug}: delete session: {e:?}"))
+}
+
+// ── member rates ────────────────────────────────────────────────────
+
+/// Upsert an org-level member rate; returns the stored row.
+pub async fn set_org_member_rate(
+    slug: &str,
+    org_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    hourly_cents: i64,
+    currency: String,
+) -> Result<timer_proto::OrgMemberRate, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .set_org_member_rate(org_id, user_id, hourly_cents, currency)
+        .await
+        .map_err(|e| format!("{slug}: set org rate: {e:?}"))
+}
+
+/// Upsert a per-project member rate (lets members bill one project at
+/// different rates); returns the stored row.
+pub async fn set_project_member_rate(
+    slug: &str,
+    project_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    hourly_cents: i64,
+) -> Result<timer_proto::ProjectMemberRate, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .set_project_member_rate(project_id, user_id, hourly_cents)
+        .await
+        .map_err(|e| format!("{slug}: set project rate: {e:?}"))
+}
+
+/// Every org-level member rate configured for `org_id`.
+pub async fn fetch_org_member_rates(
+    slug: &str,
+    org_id: uuid::Uuid,
+) -> Result<Vec<timer_proto::OrgMemberRate>, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .list_org_member_rates(org_id)
+        .await
+        .map_err(|e| format!("{slug}: list org rates: {e:?}"))
+}
+
+/// Every per-member rate set on `project_id`.
+pub async fn fetch_project_member_rates(
+    slug: &str,
+    project_id: uuid::Uuid,
+) -> Result<Vec<timer_proto::ProjectMemberRate>, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .list_project_member_rates(project_id)
+        .await
+        .map_err(|e| format!("{slug}: list project rates: {e:?}"))
+}
+
+/// The org's members (name / email / role), for the current session's
+/// org. Requires a valid session `token` — the org is derived from it.
+pub async fn fetch_org_members(
+    slug: &str,
+    token: String,
+) -> Result<Vec<auth_proto::OrgMember>, String> {
+    let client =
+        crate::vox_clients::establish_for::<auth_proto::AuthServiceClient>(slug).await?;
+    client
+        .list_org_members(token)
+        .await
+        .map_err(|e| format!("{slug}: list members: {e:?}"))
 }
 
 // ── finance / invoicing ─────────────────────────────────────────────
