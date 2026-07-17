@@ -51,6 +51,7 @@ members = [
     "libs/nice-plug/egui-baseview",
     "libs/nice-plug/iced_baseview",
     "libs/utils",
+    "libs/spaced-repetition",
     "libs/monarchy/monarchy",
     "libs/monarchy/monarchy-derive",
     "libs/vox-discover",
@@ -883,6 +884,11 @@ scheduling-proto = { path = "features/task/scheduling/scheduling-proto", default
 scheduling-ui = { path = "features/task/scheduling/scheduling-ui" }
 inbox = { path = "features/task/inbox/inbox" }
 inbox-proto = { path = "features/task/inbox/inbox-proto", default-features = false }
+# features/task/recall — FSRS spaced-repetition learning deck
+recall = { path = "features/task/recall/recall" }
+recall-proto = { path = "features/task/recall/recall-proto", default-features = false }
+# libs/spaced-repetition — the FSRS scheduler the recall deck runs on
+spaced-repetition = { path = "libs/spaced-repetition" }
 # features/task/git — forge integration (GitHub / Forgejo)
 git-proto = { path = "features/task/git/git-proto" }
 git-github = { path = "features/task/git/git-github" }

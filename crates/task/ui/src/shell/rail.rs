@@ -21,7 +21,7 @@ use crate::routes::Route;
 /// rail is it). Connections = the whole-vault graph. Settings renders
 /// in the foot cluster, not here.
 const RAIL_TABS: &[&str] = &[
-    "Home", "Inbox", "Projects", "Tasks", "Schedule", "Timer", "Connections",
+    "Home", "Inbox", "Recall", "Projects", "Tasks", "Schedule", "Timer", "Connections",
 ];
 
 #[component]

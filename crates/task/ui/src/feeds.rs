@@ -262,6 +262,63 @@ pub async fn delete_inbox_item(slug: &str, id: &str) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete inbox item: {e:?}"))
 }
 
+// ── Recall (spaced-repetition learning deck) ─────────────────────────
+
+/// Every recall card (all decks, archived + active), oldest first.
+/// Consumers filter by `project` / `archived` / due-date client-side.
+pub async fn fetch_recall_cards(slug: &str) -> Result<Vec<recall_proto::RecallCard>, String> {
+    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
+    client
+        .list_cards()
+        .await
+        .map_err(|e| format!("{slug}: list recall cards: {e:?}"))
+}
+
+/// The due, non-archived review queue for `today` (ISO `YYYY-MM-DD`).
+pub async fn fetch_recall_due(
+    slug: &str,
+    today: &str,
+) -> Result<Vec<recall_proto::RecallCard>, String> {
+    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
+    client
+        .review_queue(today.to_string())
+        .await
+        .map_err(|e| format!("{slug}: recall review queue: {e:?}"))
+}
+
+/// Create or update one card (keyed by id). Authoring, edits, and
+/// review-reschedules all flow through here.
+pub async fn upsert_recall_card(
+    slug: &str,
+    card: recall_proto::RecallCard,
+) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
+    client
+        .upsert_card(card)
+        .await
+        .map_err(|e| format!("{slug}: save recall card: {e:?}"))
+}
+
+/// Read one vault note's text (UTF-8, lossy) — backs the recall
+/// "generate cards from note" action.
+pub async fn fetch_note_text(slug: &str, path: &str) -> Result<String, String> {
+    let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
+    let bytes = client
+        .get_file("default".to_owned(), path.to_string())
+        .await
+        .map_err(|e| format!("{slug}: read {path}: {e:?}"))?;
+    Ok(String::from_utf8_lossy(&bytes.0).into_owned())
+}
+
+/// Delete one card.
+pub async fn delete_recall_card(slug: &str, id: &str) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
+    client
+        .delete_card(id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: delete recall card: {e:?}"))
+}
+
 // ── Threads (conversations on tasks/projects) ────────────────────────
 //
 // Single cross-target impl — the architect-generated `ThreadsServiceClient`

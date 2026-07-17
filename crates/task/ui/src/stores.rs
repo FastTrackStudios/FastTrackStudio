@@ -55,6 +55,7 @@ pub fn provide_stores() {
     provide_recipe_store();
     provide_pantry_store();
     provide_inbox_store();
+    provide_recall_store();
     provide_booking_store();
     provide_event_type_store();
     provide_dayplan_store();
@@ -1134,6 +1135,96 @@ impl InboxMutations {
                 crate::feeds::upsert_inbox_item(&slug, done.clone())
                     .await
                     .map(|()| Some(done))
+            },
+        );
+    }
+}
+
+// ── recall (spaced-repetition deck) ─────────────────────────────────
+
+pub type RecallStore = Store<recall_proto::RecallCard, String>;
+
+pub fn provide_recall_store() -> RecallStore {
+    let store = use_store();
+    use_context_provider(move || store)
+}
+
+pub fn use_recall_store() -> RecallStore {
+    use_context()
+}
+
+pub fn use_recall_list() -> AtomResult<Vec<(Id<String>, recall_proto::RecallCard)>, String> {
+    use_first_org_list(use_recall_store(), |slug| async move {
+        crate::feeds::fetch_recall_cards(&slug).await
+    })
+}
+
+/// Optimistic writes for the deck. Upserts return unit on the wire, so
+/// the row we sent doubles as the reconciled value (the id is
+/// client-minted and stable).
+#[derive(Clone, Copy)]
+pub struct RecallMutations {
+    store: RecallStore,
+    write: Mutation<String>,
+}
+
+pub fn use_recall_mutations() -> RecallMutations {
+    RecallMutations {
+        store: use_recall_store(),
+        write: use_mutation(),
+    }
+}
+
+impl RecallMutations {
+    /// Author a fresh card: it appears instantly, then persists.
+    pub fn create(&self, slug: String, card: recall_proto::RecallCard) {
+        run_create(self.write, self.store, card, move |card| async move {
+            crate::feeds::upsert_recall_card(&slug, card.clone())
+                .await
+                .map(|()| card)
+        });
+    }
+
+    /// Replace a card in place (edits, archive, review reschedule),
+    /// then persist.
+    pub fn save(&self, slug: String, next: recall_proto::RecallCard) {
+        let id = next.id.clone();
+        let row = next.clone();
+        self.write.run(
+            self.store,
+            move |s| s.update_optimistic(Id::Real(id), move |r| *r = row),
+            move || async move {
+                crate::feeds::upsert_recall_card(&slug, next.clone())
+                    .await
+                    .map(|()| Some(next))
+            },
+        );
+    }
+
+    /// Grade the card under review on `today`, reschedule it via FSRS,
+    /// and persist — an optimistic in-place update.
+    pub fn review(
+        &self,
+        slug: String,
+        card: recall_proto::RecallCard,
+        rating: spaced_repetition::Rating,
+        today: NaiveDate,
+    ) {
+        let mut next = card;
+        next.review(rating, today);
+        self.save(slug, next);
+    }
+
+    /// Remove a card now; restore (and notify) if the delete fails.
+    pub fn delete(&self, slug: String, id: String) {
+        let key = id.clone();
+        self.write.run(
+            self.store,
+            move |s| s.remove_optimistic(Id::Real(key)),
+            move || async move {
+                crate::feeds::delete_recall_card(&slug, &id)
+                    .await
+                    .map(|()| None)
             },
         );
     }

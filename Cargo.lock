@@ -21704,6 +21704,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
 
 [[package]]
+name = "recall"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "recall-proto",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid 1.23.4",
+]
+
+[[package]]
+name = "recall-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "spaced-repetition",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "recipe-import"
 version = "0.1.0"
 dependencies = [
@@ -24569,6 +24601,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spaced-repetition"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+]
+
+[[package]]
 name = "spectrum-analyzer"
 version = "0.1.0"
 dependencies = [
@@ -26237,6 +26276,8 @@ dependencies = [
  "prefs-proto",
  "project",
  "rand 0.8.6",
+ "recall",
+ "recall-proto",
  "regex",
  "reqwest 0.12.28",
  "resources",
@@ -28059,12 +28100,14 @@ dependencies = [
  "pantry-proto",
  "prefs-proto",
  "project",
+ "recall-proto",
  "resources-proto",
  "scheduling-proto",
  "scheduling-ui",
  "scripture-proto",
  "serde",
  "serde_json",
+ "spaced-repetition",
  "tag-proto",
  "task",
  "task-ui",

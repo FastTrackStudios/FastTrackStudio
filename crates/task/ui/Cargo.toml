@@ -37,6 +37,12 @@ task-ui.workspace = true
 # the day-plan overlay. Wasm-clean (serde-only client side).
 scheduling-proto = { workspace = true, features = ["vox", "atom"] }
 inbox-proto = { workspace = true, features = ["vox", "atom"] }
+# Recall wire surface — `RecallCard` + `RecallService` client for the
+# `/recall` spaced-repetition deck. Wasm-clean (serde + the pure FSRS
+# scheduler); `vox` + `atom` for the optimistic store.
+recall-proto = { workspace = true, features = ["vox", "atom"] }
+# The FSRS scheduler the review flow drives client-side.
+spaced-repetition = { workspace = true }
 threads = { workspace = true, features = ["vox", "ui", "atom"] }
 locations-proto = { workspace = true, features = ["vox", "atom"] }
 # Inventory wire surface — `Item` model + `InventoryService`

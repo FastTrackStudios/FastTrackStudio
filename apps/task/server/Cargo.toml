@@ -104,6 +104,8 @@ scheduling-proto = { workspace = true, features = ["vox"] }
 scheduling = { workspace = true }
 inbox-proto = { workspace = true, features = ["vox"] }
 inbox = { workspace = true }
+recall-proto = { workspace = true, features = ["vox"] }
+recall = { workspace = true }
 tag-proto = { workspace = true, features = ["vox"] }
 tag = { workspace = true }
 store-proto = { workspace = true }
