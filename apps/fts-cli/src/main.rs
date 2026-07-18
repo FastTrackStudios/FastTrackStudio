@@ -153,7 +153,10 @@ fn signal_engine(addr: Option<String>, foreground: bool) -> Result<()> {
         env.push(("SIGNAL_ENGINE_ADDR".to_string(), addr.clone()));
     }
 
-    let spawned = spawn(&SIGNAL_ENGINE, &[], &env, !foreground)?;
+    // supervise: false — the CLI manages the engine's lifecycle itself
+    // (foreground = shared Ctrl-C group; background = detached), so it should
+    // not self-reap on the CLI process exiting.
+    let spawned = spawn(&SIGNAL_ENGINE, &[], &env, !foreground, false)?;
     let url = match &addr {
         Some(a) => format!("ws://{a}/vox"),
         None => SIGNAL_ENGINE.ws_url(),

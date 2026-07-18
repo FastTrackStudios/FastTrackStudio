@@ -8399,6 +8399,9 @@ dependencies = [
 [[package]]
 name = "engine-launcher"
 version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "engraver"
@@ -9398,6 +9401,7 @@ dependencies = [
  "include_dir",
  "keyflow",
  "keyflow-sync",
+ "libc",
  "objc2 0.5.2",
  "session",
  "session-guide",

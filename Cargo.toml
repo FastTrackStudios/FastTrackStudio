@@ -773,6 +773,10 @@ hidapi = "2"
 # pipewire host (via daw-audio-io); the `pipewire`/`jack` backends are
 # feature-gated per consumer.
 cpal = "0.18"
+# Unix process supervision: the desktop app spawns the signal engine as a
+# child and must reap it (and its group) on exit — kill(pid,0) liveness probe
+# (engine watchdog) + process-group teardown. See apps/fasttrackstudio.
+libc = "0.2"
 
 # ── Task (subtree-imported; workspace dissolved into the root) ────────
 # Internal Task path deps, declared once. `-proto` crates that ship a
