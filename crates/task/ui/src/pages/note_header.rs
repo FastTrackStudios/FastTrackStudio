@@ -90,7 +90,7 @@ pub fn NoteHeader(
     rsx! {
         // No border / card — the title blends into the top of the page
         // and flows straight into the editor's own properties widget.
-        div { class: "flex flex-col gap-1.5 px-6 pt-5 pb-1",
+        div { class: "flex flex-col gap-1 px-6 pt-5 pb-0",
             TitleField { title, on_commit: do_rename }
             // Disclosure chevron at the top of the properties — icon
             // only (a tooltip carries the label). Down = expanded,
