@@ -32,6 +32,17 @@ accounts + inherited config.
   sheet; dev picker now debug-only; fts-ui `Input` gained `input_type`.
 - ✅ **Item 2 (native token persistence)** — commit 2e193f1b4. `FileTokenStore`
   under `$XDG_DATA_HOME/task/ui-tokens/`.
+- ✅ **Item 3 (multi-server)** — commit 06ce03699. `vox_session` ActiveServer
+  holder + `vox_url()` reads it; `caller_for` cache keyed by URL; registry
+  native persistence + active selection; `ServersPanel` (add by URL / select /
+  remove) in the mobile account sheet; app root seeds/syncs the holder + re-runs
+  org discovery on switch. *Follow-ups:* surface `ServersPanel` on desktop; write
+  the token back into the active `ServerEntry` + per-server re-auth on switch.
+- ✅ **Item 4 (watch bridge session tokens)** — commit 5cd2007e2. Bridge accepts
+  a real `current_session`-validated token OR the static device token.
+- ✅ **Item 5 (env auth secret)** — commit 5cd2007e2. `TASK_AUTH_SECRET`.
+- ⏳ **Item 6 (WCSession watch inheritance)** — NEXT. Needs native Swift in the
+  dx iPhone app (none today) + device testing; see below.
 - ⚠️ **Crate-name gotcha**: the app shell UI crate is **`ui`** (`crates/task/ui`,
   what apps/task/{mobile,desktop,web} depend on), NOT `task-ui`
   (`features/task/task/task-ui`, a separate task-list crate). Verify auth/shell
