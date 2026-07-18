@@ -240,17 +240,22 @@ pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
             static ROOTS: RefCell<HashMap<String, RootLane>> =
                 RefCell::new(HashMap::new());
         }
+        // Key by the full endpoint URL, not the bare slug: the same slug
+        // on two different servers (multi-server registry) must be two
+        // independent sockets, and switching the active server must not
+        // hand back the previous server's cached root.
+        let url = org_ws_url(slug)?;
         // Validate on access: a dead root (server restart, socket drop)
         // is evicted so the next lines re-establish instead of handing
         // out a corpse forever. See the module docs ("Liveness") for why
         // this is a per-access check rather than generation keying.
         if let Some(caller) = ROOTS.with(|m| {
             let mut m = m.borrow_mut();
-            match m.get(slug) {
+            match m.get(&url) {
                 Some(root) if root.caller.is_connected() => Some(root.caller.clone()),
                 Some(_) => {
-                    tracing::warn!(slug, "vox: cached org root is dead; re-establishing");
-                    m.remove(slug);
+                    tracing::warn!(url, "vox: cached org root is dead; re-establishing");
+                    m.remove(&url);
                     None
                 }
                 None => None,
@@ -258,9 +263,9 @@ pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
         }) {
             return Ok(caller);
         }
-        let root = establish_at::<RootLane>(&org_ws_url(slug)?).await?;
+        let root = establish_at::<RootLane>(&url).await?;
         let caller = root.caller.clone();
-        ROOTS.with(|m| m.borrow_mut().insert(slug.to_owned(), root));
+        ROOTS.with(|m| m.borrow_mut().insert(url, root));
         Ok(caller)
     }
     #[cfg(not(target_arch = "wasm32"))]

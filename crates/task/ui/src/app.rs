@@ -55,10 +55,33 @@ pub fn App() -> Element {
     // Defaults to `All` (every hosted org); the org switcher drives it.
     let org_selection: Signal<OrgSelection> =
         use_context_provider(|| Signal::new(OrgSelection::All));
+
+    // Multi-server registry (add/select servers by URL). Provided for the
+    // Servers UI + auth (which writes tokens back into the active entry).
+    let server_registry =
+        use_context_provider(crate::server_registry::ServerRegistry::new);
+    // Seed the process-global active-server holder synchronously from the
+    // persisted active entry, so the very first org discovery + connection
+    // dial the right server (before any effect has run).
+    crate::vox_session::set_active_server(server_registry.active_entry().map(|e| {
+        crate::vox_session::ActiveServer { url: e.server_url, token: e.session_token }
+    }));
+    // Keep the holder in lock-step with the active selection / entries.
+    use_effect(move || {
+        crate::vox_session::set_active_server(server_registry.active_entry().map(|e| {
+            crate::vox_session::ActiveServer { url: e.server_url, token: e.session_token }
+        }));
+    });
+
     // Hosted org list, discovered from the server's well-known endpoint
     // and published for the switcher + data fetchers.
     let mut org_list: Signal<Vec<OrgMeta>> = use_context_provider(|| Signal::new(Vec::new()));
-    let orgs_res = use_resource(|| async move { fetch_orgs().await });
+    // Re-discover orgs whenever the active server changes (reading the
+    // active id inside the resource closure registers the dependency).
+    let orgs_res = use_resource(move || {
+        let _active = server_registry.active_id();
+        async move { fetch_orgs().await }
+    });
     use_effect(move || {
         if let Some(Ok(list)) = &*orgs_res.read_unchecked() {
             if *org_list.peek() != *list {

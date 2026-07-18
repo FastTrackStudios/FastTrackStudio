@@ -10,6 +10,38 @@
 /// `TASK_VOX_URL_WEB` at build time). Matches the dev server's bind.
 pub const DEFAULT_VOX_URL: &str = "ws://127.0.0.1:18080/vox";
 
+use std::sync::{LazyLock, RwLock};
+
+/// The user-selected active server (from the multi-server registry).
+/// When set, it overrides the env/same-origin default in [`vox_url`].
+/// Held in a process-global so the plain (non-component) `vox_url` +
+/// establish paths can read it; the app root keeps it in sync with the
+/// active [`crate::server_registry::ServerEntry`] via [`set_active_server`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ActiveServer {
+    /// vox base URL — `ws(s)://host[:port]` (a trailing `/vox` is fine;
+    /// [`crate::vox_clients`] normalizes it).
+    pub url: String,
+    /// The session token issued when signing into this server, if any.
+    pub token: Option<String>,
+}
+
+static ACTIVE: LazyLock<RwLock<Option<ActiveServer>>> = LazyLock::new(|| RwLock::new(None));
+
+/// Set (or clear) the active server. Called from the app root whenever
+/// the active registry entry changes.
+pub fn set_active_server(server: Option<ActiveServer>) {
+    if let Ok(mut w) = ACTIVE.write() {
+        *w = server.filter(|s| !s.url.trim().is_empty());
+    }
+}
+
+/// The active server, if one is selected.
+#[must_use]
+pub fn active_server() -> Option<ActiveServer> {
+    ACTIVE.read().ok().and_then(|r| r.clone())
+}
+
 /// The configured vox base URL.
 ///
 /// Wasm resolution order:
@@ -27,6 +59,10 @@ pub const DEFAULT_VOX_URL: &str = "ws://127.0.0.1:18080/vox";
 /// Native: `TASK_VOX_URL` at runtime, empty when unset.
 #[must_use]
 pub fn vox_url() -> String {
+    // A user-selected server (multi-server registry) always wins.
+    if let Some(server) = active_server() {
+        return server.url;
+    }
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(baked) = option_env!("TASK_VOX_URL_WEB") {

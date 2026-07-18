@@ -592,6 +592,13 @@ pub fn AccountSheetBody(on_done: EventHandler<()>) -> Element {
 
             section {
                 h3 { class: "px-1 pb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                    "Servers"
+                }
+                crate::server_registry::ServersPanel {}
+            }
+
+            section {
+                h3 { class: "px-1 pb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
                     "Sign in"
                 }
                 LoginForm {}
