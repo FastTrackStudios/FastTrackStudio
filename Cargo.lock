@@ -9383,7 +9383,9 @@ dependencies = [
  "architect",
  "axum",
  "base64 0.22.1",
+ "cpal 0.18.1",
  "daw",
+ "daw-audio-io",
  "daw-standalone",
  "daw-ui",
  "dawfile-reaper",
@@ -19942,8 +19944,6 @@ dependencies = [
 [[package]]
 name = "phon-jit"
 version = "0.2.0-rc.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6ea26bdf9d65fb13e2c1a4c6b39819cdbcc86d6408303707a3afac7839a55f3"
 dependencies = [
  "copypatch",
  "phon-ir",
