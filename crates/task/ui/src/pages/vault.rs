@@ -923,7 +923,6 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                             // frontmatter region through the same
                             // `DocumentSession` the editor holds.
                             crate::pages::note_header::NoteHeader {
-                                collab,
                                 home,
                                 on_renamed: move |_| files.restart(),
                             }
