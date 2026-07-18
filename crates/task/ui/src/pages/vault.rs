@@ -135,6 +135,9 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     // Editor extensions — same standard markdown setup as the
     // turnkey `editor::EditorApp`.
     let keymap = use_signal(editor::standard_markdown_keymap);
+    // Properties widget visibility — the note header's chevron toggles
+    // this; when false the editor wrapper hides the frontmatter widget.
+    let props_open = use_signal(|| true);
     let vim = use_signal(VimState::new);
     // Vim is a physical-keyboard idiom — soft keyboards have no Esc,
     // so Normal mode on a phone is a trap (letters become motions).
@@ -924,9 +927,10 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                             // `DocumentSession` the editor holds.
                             crate::pages::note_header::NoteHeader {
                                 home,
+                                props_open,
                                 on_renamed: move |_| files.restart(),
                             }
-                            div { class: "editor-app",
+                            div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
                                 // --flush: no card chrome — the vault page is a
                                 // full-page embed; the editor sits directly on
                                 // the app background (Obsidian-style).

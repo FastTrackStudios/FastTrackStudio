@@ -22,6 +22,10 @@ use crate::pages::vault::basename_of;
 pub fn NoteHeader(
     /// The home-org slug the note lives under (for the rename RPCs).
     home: Memo<String>,
+    /// Shared with the vault page: when `false`, the editor wrapper gets
+    /// `props-collapsed` and hides the frontmatter properties widget.
+    /// The chevron below the title toggles it.
+    props_open: Signal<bool>,
     /// Refresh the folder index after a rename commits (the tree row
     /// path changed).
     on_renamed: EventHandler<()>,
@@ -85,8 +89,22 @@ pub fn NoteHeader(
     rsx! {
         // No border / card — the title blends into the top of the page
         // and flows straight into the editor's own properties widget.
-        div { class: "px-6 pt-5 pb-1",
+        div { class: "flex flex-col gap-1 px-6 pt-5 pb-1",
             TitleField { title, on_commit: do_rename }
+            button {
+                r#type: "button",
+                class: "flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground",
+                onclick: move |_| {
+                    let mut po = props_open;
+                    let open = *po.peek();
+                    po.set(!open);
+                },
+                span {
+                    class: if props_open() { "inline-block rotate-90 transition-transform" } else { "inline-block transition-transform" },
+                    "›"
+                }
+                if props_open() { "Hide properties" } else { "Show properties" }
+            }
         }
     }
 }
