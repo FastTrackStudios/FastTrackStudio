@@ -7,12 +7,16 @@
 //! of FTS's `engine_watch.rs`, following the `EngineHost::extend` precedent
 //! architect ships for watch remotes.
 //!
-//! Auth is a single static device token (`TASK_WATCH_TOKEN`) presented as
-//! `Authorization: Bearer <token>` — enough for a personal watch over HTTPS.
-//! Identity is the deterministic local owner
-//! (`user_id = v5(org_id, "task-local-owner")`), matching `task_ui::chrome::
-//! owner_id` and the CLI's `timer_owner_id`, so watch entries land in the same
-//! keyspace as the desktop and CLI.
+//! Auth accepts `Authorization: Bearer <token>` where the token is EITHER:
+//!   1. a real architect-auth **session token** (validated via
+//!      `current_session` → the session's `user.id`) — this is what a watch
+//!      that inherited the phone's signed-in session presents; or
+//!   2. the static **device token** `TASK_WATCH_TOKEN`, whose identity is the
+//!      deterministic local owner (`user_id = v5(org_id, "task-local-owner")`,
+//!      matching `task_ui::chrome::owner_id` / the CLI) — a headless/testing
+//!      fallback.
+//! Either way the resulting `user_id` keys the timer/inbox rows so watch
+//! entries land in the same keyspace as the desktop and CLI.
 
 use axum::{
     Json, Router,
@@ -35,33 +39,27 @@ fn owner_id(org_id: Uuid) -> Uuid {
     Uuid::new_v5(&org_id, b"task-local-owner")
 }
 
-/// Validate the `Authorization: Bearer <TASK_WATCH_TOKEN>` header. Returns
-/// `Err(response)` (401/503) when the token is absent, unset, or wrong.
-fn authorize(headers: &HeaderMap) -> Result<(), Response> {
-    let expected = std::env::var("TASK_WATCH_TOKEN").unwrap_or_default();
-    if expected.is_empty() {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "watch bridge disabled: TASK_WATCH_TOKEN unset",
-        )
-            .into_response());
-    }
-    let presented = headers
+/// Extract the `Authorization: Bearer <token>` value, if present.
+fn bearer(headers: &HeaderMap) -> Option<String> {
+    headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-    // Length-then-bytes compare; not constant-time, but the token is a
-    // high-entropy secret over TLS.
-    if presented == expected {
-        Ok(())
-    } else {
-        Err((StatusCode::UNAUTHORIZED, "bad or missing bearer token").into_response())
-    }
+        .map(str::to_owned)
+        .filter(|t| !t.is_empty())
 }
 
-/// Resolve `(org backend state, org_id, user_id)` for a slug, or a 404.
-fn resolve(state: &AppState, slug: &str) -> Result<(crate::OrgAppState, Uuid, Uuid), Response> {
+/// Authenticate the request and resolve `(org backend state, org_id,
+/// user_id)`. The bearer token is accepted as the static device token
+/// (`TASK_WATCH_TOKEN` → deterministic local owner) or validated as a real
+/// architect-auth session token (→ that session's user id).
+async fn authenticate(
+    state: &AppState,
+    slug: &str,
+    headers: &HeaderMap,
+) -> Result<(crate::OrgAppState, Uuid, Uuid), Response> {
+    let token = bearer(headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "missing bearer token").into_response())?;
     let org = state
         .org(slug)
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("org `{slug}` not hosted")).into_response())?;
@@ -77,8 +75,23 @@ fn resolve(state: &AppState, slug: &str) -> Result<(crate::OrgAppState, Uuid, Uu
                 .into_response()
         })?
         .id;
-    let user_id = owner_id(org_id);
-    Ok((org, org_id, user_id))
+
+    // Static device token (headless/testing) → the deterministic local owner.
+    let device_token = std::env::var("TASK_WATCH_TOKEN").unwrap_or_default();
+    if !device_token.is_empty() && token == device_token {
+        return Ok((org, org_id, owner_id(org_id)));
+    }
+
+    // Otherwise validate as a real session token against this org's auth engine.
+    match org
+        .auth
+        .auth
+        .current_session(architect_auth::CurrentSession { token })
+        .await
+    {
+        Ok(bundle) => Ok((org, org_id, bundle.user.id)),
+        Err(_) => Err((StatusCode::UNAUTHORIZED, "invalid session token").into_response()),
+    }
 }
 
 // ── Wire DTOs (the watch's JSON contract) ────────────────────────────────
@@ -134,10 +147,7 @@ async fn timer_start(
     headers: HeaderMap,
     body: Option<Json<StartBody>>,
 ) -> Response {
-    if let Err(r) = authorize(&headers) {
-        return r;
-    }
-    let (org, org_id, user_id) = match resolve(&state, &slug) {
+    let (org,org_id, user_id) = match authenticate(&state, &slug, &headers).await {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -161,10 +171,7 @@ async fn timer_stop(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(r) = authorize(&headers) {
-        return r;
-    }
-    let (org, _org_id, user_id) = match resolve(&state, &slug) {
+    let (org,_org_id, user_id) = match authenticate(&state, &slug, &headers).await {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -180,10 +187,7 @@ async fn timer_active(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(r) = authorize(&headers) {
-        return r;
-    }
-    let (org, _org_id, user_id) = match resolve(&state, &slug) {
+    let (org,_org_id, user_id) = match authenticate(&state, &slug, &headers).await {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -200,10 +204,7 @@ async fn inbox_capture(
     headers: HeaderMap,
     Json(body): Json<CaptureBody>,
 ) -> Response {
-    if let Err(r) = authorize(&headers) {
-        return r;
-    }
-    let (org, _org_id, _user_id) = match resolve(&state, &slug) {
+    let (org,_org_id, _user_id) = match authenticate(&state, &slug, &headers).await {
         Ok(v) => v,
         Err(r) => return r,
     };
