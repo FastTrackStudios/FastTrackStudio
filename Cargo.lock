@@ -28090,6 +28090,7 @@ dependencies = [
  "actions-standalone",
  "agent-proto",
  "architect",
+ "architect-auth",
  "auth-proto",
  "chrono",
  "cookbook-proto",
