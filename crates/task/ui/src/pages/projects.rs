@@ -406,12 +406,14 @@ pub(crate) fn ProjectQuickAdd(
             }
             // Which org gets it — only a question when several could.
             if orgs.len() > 1 {
-                select {
-                    class: "shrink-0 rounded-md border border-border/60 bg-transparent px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-border",
-                    value: "{chosen}",
-                    onchange: move |e| chosen.set(e.value()),
-                    for (slug, name) in orgs.iter() {
-                        option { key: "{slug}", value: "{slug}", selected: *slug == chosen(), "{name}" }
+                Select {
+                    value: chosen,
+                    placeholder: "Org".to_string(),
+                    class: "shrink-0".to_string(),
+                    SelectContent {
+                        for (i, (slug, name)) in orgs.iter().enumerate() {
+                            SelectItem { key: "{slug}", value: "{slug}", index: i, "{name}" }
+                        }
                     }
                 }
             }

@@ -101,23 +101,23 @@ pub fn ScriptureView() -> Element {
             // ── Controls ──
             div { class: "flex flex-wrap items-center gap-3",
                 Heading { level: HeadingLevel::H1, "Scripture" }
-                select {
-                    class: CTRL_CLS,
-                    value: "{translation}",
-                    onchange: move |e| translation.set(e.value()),
-                    for t in tx_list.iter() {
-                        option { key: "{t.id}", value: "{t.id}", "{t.id}" }
+                Select {
+                    value: translation,
+                    placeholder: "Translation".to_string(),
+                    SelectContent {
+                        for (i, t) in tx_list.iter().enumerate() {
+                            SelectItem { key: "{t.id}", value: "{t.id}", index: i, "{t.id}" }
+                        }
                     }
                 }
-                select {
-                    class: CTRL_CLS,
-                    value: "{book}",
-                    onchange: move |e| {
-                        book.set(e.value());
-                        chapter.set(1);
-                    },
-                    for b in books.iter() {
-                        option { key: "{b}", value: "{b}", "{b}" }
+                Select {
+                    value: book,
+                    placeholder: "Book".to_string(),
+                    on_change: move |_v: String| chapter.set(1),
+                    SelectContent {
+                        for (i, b) in books.iter().enumerate() {
+                            SelectItem { key: "{b}", value: "{b}", index: i, "{b}" }
+                        }
                     }
                 }
                 div { class: "flex items-center gap-2",

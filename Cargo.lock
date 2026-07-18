@@ -4080,6 +4080,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "contacts"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "contacts-proto",
+ "ical",
+ "roxmltree 0.20.0",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "ureq 2.12.1",
+ "uuid 1.23.4",
+]
+
+[[package]]
+name = "contacts-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "content_disposition"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12317,6 +12351,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "ical"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b7cab7543a8b7729a19e2c04309f902861293dcdae6558dfbeb634454d279f6"
+dependencies = [
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -26262,6 +26305,8 @@ dependencies = [
  "base64 0.22.1",
  "body",
  "chrono",
+ "contacts",
+ "contacts-proto",
  "cookbook",
  "crdt",
  "ed25519-dalek 2.2.0",
@@ -28093,6 +28138,7 @@ dependencies = [
  "architect-auth",
  "auth-proto",
  "chrono",
+ "contacts-proto",
  "cookbook-proto",
  "crdt",
  "cycle",

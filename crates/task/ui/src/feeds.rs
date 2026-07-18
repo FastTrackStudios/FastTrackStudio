@@ -319,6 +319,96 @@ pub async fn delete_recall_card(slug: &str, id: &str) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete recall card: {e:?}"))
 }
 
+// ── Contacts (vault-backed people directory) ─────────────────────────
+
+/// Every contact in the directory (archived + active). Consumers filter
+/// by group / archived / source client-side.
+pub async fn fetch_contacts(slug: &str) -> Result<Vec<contacts_proto::Contact>, String> {
+    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
+    client
+        .list_contacts()
+        .await
+        .map_err(|e| format!("{slug}: list contacts: {e:?}"))
+}
+
+/// One contact by id, or `None` if the file is gone.
+pub async fn get_contact(
+    slug: &str,
+    id: &str,
+) -> Result<Option<contacts_proto::Contact>, String> {
+    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
+    client
+        .get_contact(id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: get contact: {e:?}"))
+}
+
+/// Create or update one contact (keyed by id). Author, edit, link, and
+/// archive all flow through here.
+pub async fn upsert_contact(
+    slug: &str,
+    contact: contacts_proto::Contact,
+) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
+    client
+        .upsert_contact(contact)
+        .await
+        .map_err(|e| format!("{slug}: save contact: {e:?}"))
+}
+
+/// Permanently remove a contact from the vault.
+pub async fn delete_contact(slug: &str, id: &str) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
+    client
+        .delete_contact(id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: delete contact: {e:?}"))
+}
+
+/// Every configured CardDAV sync account (passwords blanked).
+pub async fn fetch_carddav_accounts(
+    slug: &str,
+) -> Result<Vec<contacts_proto::CardDavAccount>, String> {
+    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
+    client
+        .list_accounts()
+        .await
+        .map_err(|e| format!("{slug}: list carddav accounts: {e:?}"))
+}
+
+/// Create or update one CardDAV sync account (keyed by id).
+pub async fn upsert_carddav_account(
+    slug: &str,
+    account: contacts_proto::CardDavAccount,
+) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
+    client
+        .upsert_account(account)
+        .await
+        .map_err(|e| format!("{slug}: save carddav account: {e:?}"))
+}
+
+/// Remove a CardDAV sync account (its imported contacts stay).
+pub async fn delete_carddav_account(slug: &str, id: &str) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
+    client
+        .delete_account(id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: delete carddav account: {e:?}"))
+}
+
+/// Run a one-way pull for one account, returning its [`SyncReport`].
+pub async fn sync_carddav_account(
+    slug: &str,
+    id: &str,
+) -> Result<contacts_proto::SyncReport, String> {
+    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
+    client
+        .sync_account(id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: sync carddav account: {e:?}"))
+}
+
 // ── Threads (conversations on tasks/projects) ────────────────────────
 //
 // Single cross-target impl — the architect-generated `ThreadsServiceClient`

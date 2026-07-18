@@ -102,12 +102,13 @@ pub fn InventoryView() -> Element {
                         }
                     },
                 }
-                select {
-                    class: "{INPUT_CLS}",
-                    value: "{category}",
-                    onchange: move |e| category.set(e.value()),
-                    for c in CATEGORIES {
-                        option { key: "{c}", value: "{c}", "{c}" }
+                Select {
+                    value: category,
+                    placeholder: "Category".to_string(),
+                    SelectContent {
+                        for (i, c) in CATEGORIES.iter().enumerate() {
+                            SelectItem { key: "{c}", value: "{c}", index: i, "{c}" }
+                        }
                     }
                 }
                 Button {

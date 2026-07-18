@@ -893,6 +893,9 @@ inbox-proto = { path = "features/task/inbox/inbox-proto", default-features = fal
 # features/task/recall — FSRS spaced-repetition learning deck
 recall = { path = "features/task/recall/recall" }
 recall-proto = { path = "features/task/recall/recall-proto", default-features = false }
+# features/task/contacts — vault-backed people directory + CardDAV sync
+contacts = { path = "features/task/contacts/contacts" }
+contacts-proto = { path = "features/task/contacts/contacts-proto", default-features = false }
 # libs/spaced-repetition — the FSRS scheduler the recall deck runs on
 spaced-repetition = { path = "libs/spaced-repetition" }
 # features/task/git — forge integration (GitHub / Forgejo)

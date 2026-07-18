@@ -181,6 +181,10 @@ pub struct OrgAppState {
     /// `vault/Records/recall/`. Mounted for `Recall` so the deck UI +
     /// flashcard review round-trip FSRS-scheduled cards.
     pub recall: recall::VaultRecall,
+    /// Contacts backend — vault-backed people directory under
+    /// `vault/Records/contacts/`. Mounted for `Contacts` so the
+    /// directory UI + CardDAV sync accounts round-trip.
+    pub contacts: contacts::VaultContacts,
     /// Tag registry — name → icon/color decorations at
     /// `vault/Records/tags.json`. Mounted for `TagService` so the
     /// calendar / lists decorate markdown tag names with an icon.
@@ -704,6 +708,11 @@ pub(crate) async fn build_org_state(
         let recall = recall::VaultRecall::new(vault_root.clone())
             .map_err(|e| eyre::eyre!("recall backend: {e}"))?;
 
+        // Contacts backend rooted at the same vault — people live
+        // under `Records/contacts/`.
+        let contacts = contacts::VaultContacts::new(vault_root.clone())
+            .map_err(|e| eyre::eyre!("contacts backend: {e}"))?;
+
         // Tag registry rooted at the same vault — `Records/tags.json`.
         let tags =
             tag::VaultTags::new(vault_root.clone()).map_err(|e| eyre::eyre!("tag backend: {e}"))?;
@@ -1006,6 +1015,7 @@ pub(crate) async fn build_org_state(
             scheduling,
             inbox,
             recall,
+            contacts,
             tags,
             finance_conn,
             finance_backend,
@@ -1397,6 +1407,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
         inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
         recall_proto::service::recall::recall_rpc_service_descriptor(),
+        contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
         tag_proto::service::tags::tag_service_rpc_service_descriptor(),
         finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
         finance_proto::service::ledger::ledger_rpc_service_descriptor(),
@@ -1542,6 +1553,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             recall_proto::service::recall::serve(org.recall.clone()),
+        )
+        .with(
+            contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
+            contacts_proto::service::contacts::serve(org.contacts.clone()),
         )
         .with(
             tag_proto::service::tags::tag_service_rpc_service_descriptor(),

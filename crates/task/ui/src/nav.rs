@@ -5,7 +5,7 @@
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    BookOpen, Bot, Brain, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
+    BookOpen, BookUser, Bot, Brain, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
     FolderKanban, GitBranch, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package,
     ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Users, Utensils, Wallet,
     Waypoints, Youtube,
@@ -29,6 +29,9 @@ fn icon_inbox() -> Element {
 }
 fn icon_recall() -> Element {
     rsx! { Brain { size: 16 } }
+}
+fn icon_contacts() -> Element {
+    rsx! { BookUser { size: 16 } }
 }
 fn icon_email() -> Element {
     rsx! { Mail { size: 16 } }
@@ -123,6 +126,12 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Recall",
             icon: icon_recall,
             route: Route::RecallRoute {},
+        },
+        // Contacts — the people directory (adjacent to Recall).
+        NavTab {
+            label: "Contacts",
+            icon: icon_contacts,
+            route: Route::ContactsRoute {},
         },
         NavTab {
             label: "Email",
@@ -319,6 +328,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::DashboardRoute {} => "Home",
         Route::InboxRoute {} => "Inbox",
         Route::RecallRoute {} => "Recall",
+        Route::ContactsRoute {} => "Contacts",
         Route::EmailRoute {} => "Email",
         Route::ProjectsRoute {} => "Projects",
         Route::ProjectDetailRoute { .. } => "Project",

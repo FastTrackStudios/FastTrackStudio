@@ -95,12 +95,13 @@ pub fn LocationsView() -> Element {
                         }
                     },
                 }
-                select {
-                    class: "{INPUT_CLS}",
-                    value: "{kind}",
-                    onchange: move |e| kind.set(e.value()),
-                    for k in KINDS {
-                        option { key: "{k}", value: "{k}", "{k}" }
+                Select {
+                    value: kind,
+                    placeholder: "Kind".to_string(),
+                    SelectContent {
+                        for (i, k) in KINDS.iter().enumerate() {
+                            SelectItem { key: "{k}", value: "{k}", index: i, "{k}" }
+                        }
                     }
                 }
                 input {

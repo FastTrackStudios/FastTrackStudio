@@ -29,6 +29,11 @@ pub enum Route {
         #[route("/recall")]
         RecallRoute {},
 
+        // Contacts — the vault-backed people directory (adjacent to
+        // Recall; keep this anchor stable for clean merges).
+        #[route("/contacts")]
+        ContactsRoute {},
+
         #[route("/email")]
         EmailRoute {},
 
@@ -160,6 +165,11 @@ fn InboxRoute() -> Element {
 #[component]
 fn RecallRoute() -> Element {
     rsx! { pages::recall::RecallView {} }
+}
+
+#[component]
+fn ContactsRoute() -> Element {
+    rsx! { pages::contacts::ContactsView {} }
 }
 
 #[component]

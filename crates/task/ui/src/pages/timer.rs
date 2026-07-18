@@ -351,6 +351,8 @@ fn LogPastForm(slug: String, org_id: Uuid) -> Element {
     let mut hours = use_signal(String::new);
     let mut project_id = use_signal(|| None::<Uuid>);
     let mut billable = use_signal(|| true);
+    // Select binds a String; parse it into the `project_id` Uuid on change.
+    let project_pick = use_signal(String::new);
 
     let project_rows = projects.value().cloned().unwrap_or_default();
     // Resolve the picked project's vault path for the request.
@@ -443,15 +445,16 @@ fn LogPastForm(slug: String, org_id: Uuid) -> Element {
                     }
                     label { class: "flex flex-col gap-1 text-xs text-muted-foreground",
                         "Project (sets the rate)"
-                        select {
-                            class: "{FIELD}",
-                            onchange: move |e| {
-                                let v = e.value();
+                        Select {
+                            value: project_pick,
+                            placeholder: "— none —".to_string(),
+                            on_change: move |v: String| {
                                 project_id.set(Uuid::parse_str(&v).ok());
                             },
-                            option { value: "", "— none —" }
-                            for (_ , p) in project_rows.iter() {
-                                option { key: "{p.project.id}", value: "{p.project.id}", "{p.project.title}" }
+                            SelectContent {
+                                for (i, (_ , p)) in project_rows.iter().enumerate() {
+                                    SelectItem { key: "{p.project.id}", value: "{p.project.id}", index: i, "{p.project.title}" }
+                                }
                             }
                         }
                     }

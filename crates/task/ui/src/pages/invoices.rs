@@ -5,13 +5,17 @@
 //!    generate a draft invoice from it.
 //! 2. **Invoices** — the persisted list with Draft / Sent / Paid /
 //!    Partially-paid status; mark sent, record payment, delete drafts.
-//! 3. **Preview** — a printable card for the selected invoice.
+//! 3. **Preview** — a printable document card for the selected invoice.
 //!
 //! State is the shared optimistic invoice store ([`crate::stores`]):
 //! mutations patch the list instantly and reconcile against the server
 //! (rollback + tray notification on failure) — no refresh counter. The
 //! *derived* uninvoiced view can't be reconciled client-side, so the
 //! mutations invalidate its reactivity key and it refetches.
+//!
+//! The bill-to is picked from the contacts directory (a person-chip),
+//! so who you bill renders the same here as on `/contacts` and
+//! `/members`.
 
 use std::collections::HashMap;
 
@@ -20,10 +24,12 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
+use contacts_proto::Contact;
 use finance_proto::GenerateInvoice;
 use finance_proto::invoice::{Invoice, InvoiceStatus};
 
 use crate::orgs::{OrgMeta, OrgSelection};
+use crate::pages::contacts::PersonChip;
 use crate::stores;
 
 fn money(cents: i64) -> String {
@@ -32,21 +38,22 @@ fn money(cents: i64) -> String {
     format!("{}${}.{:02}", if neg { "-" } else { "" }, v / 100, v % 100)
 }
 
-/// `(label, tailwind classes)` for a status chip.
-fn status_chip(s: &InvoiceStatus) -> (&'static str, &'static str) {
+/// `(variant, label)` for an invoice status badge.
+fn status_badge(s: &InvoiceStatus) -> (StatusBadgeVariant, &'static str) {
     match s {
-        InvoiceStatus::Draft => ("Draft", "bg-muted text-muted-foreground"),
-        InvoiceStatus::Sent => ("Unpaid", "bg-amber-500/15 text-amber-400"),
-        InvoiceStatus::Viewed => ("Viewed", "bg-amber-500/15 text-amber-400"),
-        InvoiceStatus::PartiallyPaid => ("Partial", "bg-amber-500/15 text-amber-400"),
-        InvoiceStatus::Paid => ("Paid", "bg-emerald-500/15 text-emerald-400"),
-        InvoiceStatus::Overdue => ("Overdue", "bg-destructive/15 text-destructive"),
-        InvoiceStatus::Cancelled => ("Cancelled", "bg-muted text-muted-foreground"),
-        InvoiceStatus::Reversed => ("Reversed", "bg-muted text-muted-foreground"),
+        InvoiceStatus::Draft => (StatusBadgeVariant::Neutral, "Draft"),
+        InvoiceStatus::Sent => (StatusBadgeVariant::Warning, "Unpaid"),
+        InvoiceStatus::Viewed => (StatusBadgeVariant::Warning, "Viewed"),
+        InvoiceStatus::PartiallyPaid => (StatusBadgeVariant::Warning, "Partial"),
+        InvoiceStatus::Paid => (StatusBadgeVariant::Success, "Paid"),
+        InvoiceStatus::Overdue => (StatusBadgeVariant::Danger, "Overdue"),
+        InvoiceStatus::Cancelled => (StatusBadgeVariant::Neutral, "Cancelled"),
+        InvoiceStatus::Reversed => (StatusBadgeVariant::Neutral, "Reversed"),
     }
 }
 
-const FIELD: &str = "rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/40";
+const FIELD: &str = "w-full rounded-lg border border-input bg-input/30 px-3 py-2 text-sm outline-none \
+     focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 placeholder:text-muted-foreground";
 
 #[component]
 pub fn InvoicesView() -> Element {
@@ -77,6 +84,15 @@ pub fn InvoicesView() -> Element {
             .map(|p| (p.id, p.title))
             .collect::<HashMap<Uuid, String>>()
     });
+    // Contacts back the bill-to picker (active only).
+    let contacts = use_resource(move || async move {
+        crate::feeds::fetch_contacts(&slugs().into_iter().next().unwrap_or_default())
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|c: &Contact| !c.archived)
+            .collect::<Vec<Contact>>()
+    });
 
     let store = stores::use_invoice_store();
     let un_rows = uninvoiced.read().clone().unwrap_or_default();
@@ -85,6 +101,7 @@ pub fn InvoicesView() -> Element {
     let load_err = invoices.error().cloned();
     let first_load = invoices.is_waiting() && invoices.value().is_none();
     let proj_names = projects.read().clone().unwrap_or_default();
+    let contact_rows = contacts.read().clone().unwrap_or_default();
 
     let selected_inv = selected().and_then(|id| {
         inv_rows
@@ -93,19 +110,61 @@ pub fn InvoicesView() -> Element {
             .map(|(_, r)| r.invoice.clone())
     });
 
+    // ── Billing summary — the money hero of the page ──────────────
+    let mut outstanding = 0i64;
+    let mut overdue = 0i64;
+    let mut collected = 0i64;
+    let mut draft_count = 0usize;
+    let mut open_count = 0usize;
+    for (_, row) in &inv_rows {
+        let inv = &row.invoice;
+        collected += inv.amount_paid_minor;
+        match inv.status {
+            InvoiceStatus::Draft => draft_count += 1,
+            InvoiceStatus::Sent | InvoiceStatus::Viewed | InvoiceStatus::PartiallyPaid => {
+                outstanding += inv.balance_minor;
+                open_count += 1;
+            }
+            InvoiceStatus::Overdue => {
+                outstanding += inv.balance_minor;
+                overdue += inv.balance_minor;
+                open_count += 1;
+            }
+            _ => {}
+        }
+    }
+    let ready_total: i64 = un_rows.iter().map(|(_, g)| g.amount_minor).sum();
+    let ready_count = un_rows.len();
+
     rsx! {
-        div { class: "mx-auto flex w-full max-w-3xl flex-col gap-5 p-4 sm:p-6 lg:p-8",
+        div { class: "mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:p-8",
             header { class: "flex flex-col gap-1",
                 span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
                     "Billing"
                 }
                 Heading { level: HeadingLevel::H1, class: "tracking-tight", "Invoices" }
+                Text { variant: TextVariant::Muted,
+                    "Everything you're owed, at a glance — generate from billable time, bill a contact, track what's paid."
+                }
+            }
+
+            // ── Summary tiles: outstanding is the thesis ────────────
+            div { class: "grid grid-cols-2 gap-3 sm:grid-cols-4",
+                StatTile { label: "Outstanding", value: money(outstanding), accent: "primary".to_string(), hint: format!("{open_count} open") }
+                StatTile { label: "Overdue", value: money(overdue), accent: "destructive".to_string(), hint: String::new() }
+                StatTile { label: "Collected", value: money(collected), accent: "emerald".to_string(), hint: String::new() }
+                StatTile { label: "Drafts", value: draft_count.to_string(), accent: "muted".to_string(), hint: String::new() }
             }
 
             // ── Uninvoiced time → generate ─────────────────────────
             if !un_rows.is_empty() {
                 div { class: "flex flex-col gap-2",
-                    Heading { level: HeadingLevel::H3, "Ready to invoice" }
+                    div { class: "flex items-end justify-between gap-3",
+                        Heading { level: HeadingLevel::H3, "Ready to invoice" }
+                        span { class: "font-mono text-sm font-semibold tabular-nums text-primary",
+                            "{money(ready_total)} · {ready_count} bucket" {if ready_count == 1 { "" } else { "s" }}
+                        }
+                    }
                     div { class: "flex flex-col gap-2",
                         for (slug , g) in un_rows {
                             UninvoicedRow {
@@ -113,6 +172,7 @@ pub fn InvoicesView() -> Element {
                                 slug: slug.clone(),
                                 group: g.clone(),
                                 label: g.project_id.and_then(|p| proj_names.get(&p).cloned()).unwrap_or_else(|| if g.tag.is_empty() { "General".into() } else { g.tag.clone() }),
+                                contacts: contact_rows.clone(),
                             }
                         }
                     }
@@ -121,7 +181,7 @@ pub fn InvoicesView() -> Element {
 
             // ── Persisted invoices ─────────────────────────────────
             div { class: "flex flex-col gap-2",
-                Heading { level: HeadingLevel::H3, "Invoices" }
+                Heading { level: HeadingLevel::H3, "All invoices" }
                 if first_load {
                     crate::states::LoadingState {}
                 } else if inv_rows.is_empty() {
@@ -132,20 +192,32 @@ pub fn InvoicesView() -> Element {
                             on_retry: move |()| store.reload(),
                         }
                     } else {
-                        crate::states::EmptyState {
-                            title: "No invoices yet",
-                            hint: "Generate one from billable time above.",
+                        EmptyState {
+                            message: "No invoices yet — generate one from billable time above.".to_string(),
                         }
                     }
                 } else {
-                    div { class: "flex flex-col divide-y divide-border/50 rounded-xl border border-border/60 bg-card/40",
-                        for (id , row) in inv_rows {
-                            InvoiceRow {
-                                key: "{id}",
-                                pending: id.is_temp(),
-                                slug: row.slug.clone(),
-                                invoice: row.invoice.clone(),
-                                on_view: move |id| selected.set(Some(id)),
+                    Card { class: "overflow-hidden".to_string(),
+                        TableContainer {
+                            Table {
+                                TableHeader {
+                                    TableRow {
+                                        TableHead { class: "text-[0.7rem] uppercase tracking-wider text-muted-foreground".to_string(), "Invoice" }
+                                        TableHead { class: "text-right text-[0.7rem] uppercase tracking-wider text-muted-foreground".to_string(), "Total" }
+                                        TableHead { class: "text-right".to_string(), "" }
+                                    }
+                                }
+                                TableBody {
+                                    for (id , row) in inv_rows {
+                                        InvoiceRow {
+                                            key: "{id}",
+                                            pending: id.is_temp(),
+                                            slug: row.slug.clone(),
+                                            invoice: row.invoice.clone(),
+                                            on_view: move |id| selected.set(Some(id)),
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -160,11 +232,42 @@ pub fn InvoicesView() -> Element {
     }
 }
 
+/// One summary tile in the billing header. `accent` tints the value +
+/// its status dot: `primary` / `destructive` / `emerald` / `muted`.
 #[component]
-fn UninvoicedRow(slug: String, group: finance_proto::UninvoicedGroup, label: String) -> Element {
+fn StatTile(label: String, value: String, hint: String, accent: String) -> Element {
+    let (value_cls, dot_cls) = match accent.as_str() {
+        "primary" => ("text-foreground", "bg-primary"),
+        "destructive" => ("text-destructive", "bg-destructive"),
+        "emerald" => ("text-emerald-500", "bg-emerald-500"),
+        _ => ("text-muted-foreground", "bg-muted-foreground/60"),
+    };
+    rsx! {
+        Card { class: "flex flex-col gap-1.5 p-3.5".to_string(),
+            div { class: "flex items-center gap-1.5",
+                span { class: "h-1.5 w-1.5 rounded-full {dot_cls}" }
+                span { class: "text-[0.7rem] font-medium uppercase tracking-wider text-muted-foreground",
+                    "{label}"
+                }
+            }
+            span { class: "font-mono text-2xl font-semibold tabular-nums {value_cls}", "{value}" }
+            if !hint.is_empty() {
+                span { class: "text-xs text-muted-foreground", "{hint}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn UninvoicedRow(
+    slug: String,
+    group: finance_proto::UninvoicedGroup,
+    label: String,
+    contacts: Vec<Contact>,
+) -> Element {
     let muts = stores::use_invoice_mutations();
     let mut open = use_signal(|| false);
-    let mut client = use_signal(|| label.clone());
+    let client = use_signal(|| label.clone());
     let mut net_days = use_signal(|| "30".to_string());
 
     let hrs = group.seconds as f64 / 3600.0;
@@ -201,41 +304,123 @@ fn UninvoicedRow(slug: String, group: finance_proto::UninvoicedGroup, label: Str
     };
 
     rsx! {
-        div { class: "flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5",
-            div { class: "flex items-center justify-between gap-3",
-                div { class: "flex min-w-0 flex-col",
-                    div { class: "flex items-center gap-1.5",
-                        span { class: "truncate text-sm font-medium text-foreground", "{label}" }
-                        if kind != "project" {
-                            span { class: "rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground", "{kind}" }
+        Card { class: "border-primary/30 bg-primary/5 p-3".to_string(),
+            div { class: "flex flex-col gap-2",
+                div { class: "flex items-center justify-between gap-3",
+                    div { class: "flex min-w-0 flex-col",
+                        div { class: "flex items-center gap-1.5",
+                            span { class: "truncate text-sm font-medium text-foreground", "{label}" }
+                            if kind != "project" {
+                                StatusBadge { variant: StatusBadgeVariant::Neutral, label: kind.to_string(), class: "px-1.5 py-0 text-[10px]".to_string() }
+                            }
                         }
-                    }
-                    span { class: "text-xs text-muted-foreground",
-                        "{group.session_count} sessions · {hrs:.1}h · {money(group.amount_minor)}"
-                    }
-                }
-                Button {
-                    variant: ButtonVariant::Primary,
-                    size: ButtonSize::Small,
-                    on_click: move |_| open.toggle(),
-                    "Generate"
-                }
-            }
-            if open() {
-                div { class: "flex flex-wrap items-end gap-2",
-                    label { class: "flex flex-1 flex-col gap-1 text-xs text-muted-foreground",
-                        "Bill to"
-                        input { class: "{FIELD}", value: "{client}", oninput: move |e| client.set(e.value()) }
-                    }
-                    label { class: "flex w-20 flex-col gap-1 text-xs text-muted-foreground",
-                        "Net days"
-                        input { class: "{FIELD}", r#type: "number", value: "{net_days}", oninput: move |e| net_days.set(e.value()) }
+                        span { class: "text-xs text-muted-foreground",
+                            "{group.session_count} sessions · {hrs:.1}h · {money(group.amount_minor)}"
+                        }
                     }
                     Button {
                         variant: ButtonVariant::Primary,
                         size: ButtonSize::Small,
-                        on_click: generate,
-                        "Create draft"
+                        on_click: move |_| open.toggle(),
+                        "Generate"
+                    }
+                }
+                if open() {
+                    div { class: "flex flex-col gap-3 border-t border-border/60 pt-3",
+                        div { class: "flex flex-wrap items-start gap-3",
+                            div { class: "flex flex-1 flex-col gap-1",
+                                span { class: "text-xs text-muted-foreground", "Bill to" }
+                                ContactPicker { contacts: contacts.clone(), value: client }
+                            }
+                            label { class: "flex w-20 flex-col gap-1 text-xs text-muted-foreground",
+                                "Net days"
+                                input { class: "{FIELD}", r#type: "number", value: "{net_days}", oninput: move |e| net_days.set(e.value()) }
+                            }
+                        }
+                        div { class: "flex justify-end",
+                            Button {
+                                variant: ButtonVariant::Primary,
+                                size: ButtonSize::Small,
+                                on_click: generate,
+                                "Create draft"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A searchable bill-to picker over the contacts directory. Free text is
+/// allowed (defaults to the project label); picking a contact fills its
+/// `full_name` and shows it as a person-chip.
+#[component]
+fn ContactPicker(contacts: Vec<Contact>, value: Signal<String>) -> Element {
+    let mut value = value;
+    let mut open = use_signal(|| false);
+
+    let current = value();
+    let q = current.trim().to_lowercase();
+    // An exact-name match means the user has settled on a contact —
+    // hide the suggestion list.
+    let exact = contacts.iter().any(|c| c.full_name == current);
+    let matches: Vec<Contact> = contacts
+        .iter()
+        .filter(|c| {
+            let hay = format!("{} {}", c.full_name, c.emails).to_lowercase();
+            q.is_empty() || hay.contains(&q)
+        })
+        .take(6)
+        .cloned()
+        .collect();
+
+    let picked = contacts.iter().find(|c| c.full_name == current).cloned();
+
+    rsx! {
+        div { class: "relative flex flex-col gap-1.5",
+            input {
+                class: "{FIELD}",
+                placeholder: "Search contacts or type a name…",
+                value: "{value}",
+                oninput: move |e| {
+                    value.set(e.value());
+                    open.set(true);
+                },
+                onfocusin: move |_| open.set(true),
+            }
+            if let Some(c) = picked {
+                PersonChip {
+                    name: c.full_name.clone(),
+                    email: c.primary_email().unwrap_or_default().to_string(),
+                    subtitle: c.organization.clone(),
+                    size: 28,
+                }
+            }
+            if open() && !exact && !matches.is_empty() {
+                div { class: "absolute top-full z-30 mt-1 flex w-full flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg",
+                    for c in matches {
+                        button {
+                            key: "{c.id}",
+                            r#type: "button",
+                            class: "flex items-center px-2.5 py-2 text-left hover:bg-muted/60",
+                            // mousedown fires before the input's blur, so the
+                            // pick lands even as focus leaves the field.
+                            onmousedown: {
+                                let name = c.full_name.clone();
+                                move |e: MouseEvent| {
+                                    e.prevent_default();
+                                    value.set(name.clone());
+                                    open.set(false);
+                                }
+                            },
+                            PersonChip {
+                                name: c.full_name.clone(),
+                                email: c.primary_email().unwrap_or_default().to_string(),
+                                subtitle: c.organization.clone(),
+                                size: 28,
+                            }
+                        }
                     }
                 }
             }
@@ -255,7 +440,7 @@ fn InvoiceRow(
     // multiple button closures below.
     let slug = use_signal(|| slug);
     let id = invoice.id;
-    let (badge, badge_cls) = status_chip(&invoice.status);
+    let (variant, badge) = status_badge(&invoice.status);
     let number = if invoice.number.is_empty() {
         "Draft".to_string()
     } else {
@@ -285,27 +470,32 @@ fn InvoiceRow(
         _ => {}
     };
 
-    let row_cls = if pending { " opacity-60" } else { "" };
+    let row_cls = if pending { "opacity-60" } else { "" };
 
     rsx! {
-        div { class: "flex items-center justify-between gap-3 px-3 py-2.5{row_cls}",
-            button {
-                class: "flex min-w-0 flex-1 items-center gap-2 text-left",
-                onclick: move |_| on_view.call(id),
-                span { class: "shrink-0 rounded px-1.5 py-px text-[10px] font-medium {badge_cls}", "{badge}" }
-                div { class: "flex min-w-0 flex-col",
-                    span { class: "truncate text-sm text-foreground", "{number}" }
-                    span { class: "text-xs text-muted-foreground", "{date}" }
+        TableRow { class: row_cls.to_string(),
+            TableCell {
+                button {
+                    r#type: "button",
+                    class: "flex w-full items-center gap-2.5 text-left",
+                    onclick: move |_| on_view.call(id),
+                    StatusBadge { variant, label: badge.to_string(), class: "px-1.5 py-0 text-[10px]".to_string() }
+                    div { class: "flex min-w-0 flex-col",
+                        span { class: "truncate text-sm text-foreground", "{number}" }
+                        span { class: "text-xs text-muted-foreground", "{date}" }
+                    }
                 }
             }
-            div { class: "flex shrink-0 items-center gap-3",
+            TableCell { class: "text-right".to_string(),
                 div { class: "flex flex-col items-end",
                     span { class: "font-mono text-sm tabular-nums text-foreground", "{total}" }
                     if balance > 0 {
-                        span { class: "font-mono text-[11px] tabular-nums text-amber-400", "{money(balance)} due" }
+                        span { class: "font-mono text-[11px] tabular-nums text-yellow-500", "{money(balance)} due" }
                     }
                 }
-                div { class: "flex items-center gap-1",
+            }
+            TableCell { class: "text-right".to_string(),
+                div { class: "flex items-center justify-end gap-1",
                     if is_draft {
                         Button { variant: ButtonVariant::Secondary, size: ButtonSize::Small, on_click: move |_| act("sent"), "Send" }
                         Button { variant: ButtonVariant::Ghost, size: ButtonSize::Small, on_click: move |_| act("delete"), "Delete" }
@@ -326,45 +516,49 @@ fn InvoicePreview(invoice: Invoice) -> Element {
     } else {
         invoice.number.clone()
     };
+    let (variant, badge) = status_badge(&invoice.status);
     rsx! {
         div { class: "flex flex-col gap-3",
+            // The document card. Kept on a light surface so print output
+            // is clean regardless of the app theme.
             div { id: "invoice-print",
-                class: "flex flex-col gap-4 rounded-xl border border-border bg-white p-6 text-slate-900 shadow-sm",
-                div { class: "flex items-start justify-between",
-                    div {
-                        div { class: "text-lg font-bold", "Invoice" }
-                        div { class: "text-sm text-slate-500", "{number}" }
+                class: "flex flex-col gap-6 rounded-xl border border-border bg-white p-6 text-slate-900 shadow-sm sm:p-8",
+                div { class: "flex items-start justify-between gap-4",
+                    div { class: "flex flex-col gap-1",
+                        span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-slate-400", "Invoice" }
+                        span { class: "font-mono text-lg font-semibold", "{number}" }
                     }
-                    div { class: "text-right text-sm",
-                        div { class: "text-slate-500", "Issued" }
-                        div { "{invoice.issue_date}" }
+                    div { class: "flex flex-col items-end gap-2 text-right text-sm",
+                        StatusBadge { variant, label: badge.to_string(), class: "px-2 py-0.5 text-[11px]".to_string() }
+                        div { class: "text-slate-400", "Issued" }
+                        div { class: "tabular-nums", "{invoice.issue_date}" }
                         if !invoice.due_date.is_empty() {
-                            div { class: "text-slate-500", "Due {invoice.due_date}" }
+                            div { class: "text-slate-400", "Due {invoice.due_date}" }
                         }
                     }
                 }
-                table { class: "w-full text-sm",
+                table { class: "w-full border-collapse text-sm",
                     thead {
-                        tr { class: "border-b border-slate-200 text-left text-slate-500",
-                            th { class: "py-1.5 font-medium", "Description" }
-                            th { class: "py-1.5 text-right font-medium", "Hours" }
-                            th { class: "py-1.5 text-right font-medium", "Amount" }
+                        tr { class: "border-b border-slate-200 text-left text-[0.7rem] uppercase tracking-wider text-slate-400",
+                            th { class: "py-2 font-medium", "Description" }
+                            th { class: "py-2 text-right font-medium", "Hours" }
+                            th { class: "py-2 text-right font-medium", "Amount" }
                         }
                     }
                     tbody {
                         for li in invoice.line_items.0.iter() {
                             tr { key: "{li.id}", class: "border-b border-slate-100",
-                                td { class: "py-1.5", "{li.description}" }
-                                td { class: "py-1.5 text-right tabular-nums", {format!("{:.2}", li.quantity_milli as f64 / 1000.0)} }
-                                td { class: "py-1.5 text-right tabular-nums", "{money(li.line_total_minor)}" }
+                                td { class: "py-2", "{li.description}" }
+                                td { class: "py-2 text-right tabular-nums", {format!("{:.2}", li.quantity_milli as f64 / 1000.0)} }
+                                td { class: "py-2 text-right tabular-nums", "{money(li.line_total_minor)}" }
                             }
                         }
                     }
                     tfoot {
-                        tr { class: "font-semibold",
-                            td { class: "py-2", "Total" }
+                        tr { class: "text-base font-semibold",
+                            td { class: "py-3", "Total" }
                             td {}
-                            td { class: "py-2 text-right tabular-nums", "{money(invoice.total_minor)}" }
+                            td { class: "py-3 text-right tabular-nums", "{money(invoice.total_minor)}" }
                         }
                         if invoice.amount_paid_minor > 0 {
                             tr { class: "text-emerald-700",
