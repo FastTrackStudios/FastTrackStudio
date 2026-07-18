@@ -870,29 +870,85 @@ fn clear_active_email() {
     }
 }
 
-// Native: no persistent token cache yet (rides the future settings
-// store) — every launch performs a fresh sign-in, which is correct.
+// Native (desktop/mobile): persist tokens through architect-auth's
+// FileTokenStore (atomic, 0600) under `$XDG_DATA_HOME/task/ui-tokens/`
+// so a signed-in account survives relaunch — one `<email>.json` per
+// account, plus a plain `active` file naming the last account. On the
+// iOS/macOS sandbox `HOME` is the app container, so this stays inside it.
 #[cfg(not(target_arch = "wasm32"))]
-fn load_cached_token(_email: &str) -> Option<String> {
-    None
+fn tokens_dir() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local").join("share"))
+        })?;
+    Some(base.join("task").join("ui-tokens"))
+}
+
+/// A per-email token file. Emails are filename-safe on the targets we
+/// ship, but sanitize defensively (only `/` is illegal on unix).
+#[cfg(not(target_arch = "wasm32"))]
+fn token_store(email: &str) -> Option<architect_auth::client::FileTokenStore> {
+    let safe = email.replace(['/', '\\'], "_");
+    tokens_dir().map(|d| architect_auth::client::FileTokenStore::new(d.join(format!("{safe}.json"))))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn save_cached_token(_email: &str, _token: &str) {}
+fn load_cached_token(email: &str) -> Option<String> {
+    use architect_auth::client::TokenStore as _;
+    token_store(email)?
+        .load()
+        .ok()
+        .flatten()
+        .map(|s| s.token)
+        .filter(|t| !t.is_empty())
+}
 
 #[cfg(not(target_arch = "wasm32"))]
-fn clear_cached_token(_email: &str) {}
+fn save_cached_token(email: &str, token: &str) {
+    use architect_auth::client::{StoredSession, TokenStore as _};
+    if let Some(store) = token_store(email) {
+        let _ = store.save(&StoredSession::new(token).with_email(email));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn clear_cached_token(email: &str) {
+    use architect_auth::client::TokenStore as _;
+    if let Some(store) = token_store(email) {
+        let _ = store.clear();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn active_path() -> Option<std::path::PathBuf> {
+    tokens_dir().map(|d| d.join("active"))
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_active_email() -> Option<String> {
-    None
+    let raw = std::fs::read_to_string(active_path()?).ok()?;
+    let email = raw.trim();
+    (!email.is_empty()).then(|| email.to_owned())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn save_active_email(_email: &str) {}
+fn save_active_email(email: &str) {
+    if let Some(path) = active_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, email);
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
-fn clear_active_email() {}
+fn clear_active_email() {
+    if let Some(path) = active_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
 
 #[cfg(test)]
 mod tests {
