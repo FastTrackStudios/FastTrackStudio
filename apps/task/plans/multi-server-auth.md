@@ -26,9 +26,23 @@ accounts + inherited config.
 - **`AuthClientMiddleware::bearer(token)`** (`auth/src/transport.rs:889`) is the
   client middleware to attach `Authorization: Bearer` to vox calls.
 
+## Progress
+- ✅ **Item 1 (real login)** — commit 0bcc95c19. `LoginForm` + `AuthAction::
+  SignIn`/`SignUp` + `run_credential_sign_in`; wired into the mobile account
+  sheet; dev picker now debug-only; fts-ui `Input` gained `input_type`.
+- ✅ **Item 2 (native token persistence)** — commit 2e193f1b4. `FileTokenStore`
+  under `$XDG_DATA_HOME/task/ui-tokens/`.
+- ⚠️ **Crate-name gotcha**: the app shell UI crate is **`ui`** (`crates/task/ui`,
+  what apps/task/{mobile,desktop,web} depend on), NOT `task-ui`
+  (`features/task/task/task-ui`, a separate task-list crate). Verify auth/shell
+  changes with `cargo check -p ui` (native) + `cargo check -p task-app-web
+  --target wasm32-unknown-unknown` (wasm) — `-p ui --target wasm32` fails on
+  getrandom's `wasm_js` flag (only the app crate sets it), and `-p task-ui` is
+  the wrong crate entirely.
+
 ## Work items
 
-### 1. Real login (client) — `crates/task/ui/src/auth.rs`
+### 1. Real login (client) — `crates/task/ui/src/auth.rs` ✅ done
 - Add a `LoginForm` (email + password) + optional `SignUpForm`
   (`sign_up_email_password`). Follow fts-ui primitives (AGENTS.md).
 - Add a credential-carrying `AuthAction::SignIn { email, password }`; drop the
