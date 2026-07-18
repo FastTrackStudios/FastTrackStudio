@@ -25,7 +25,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
-use auth_proto::{AuthServiceClient, AuthUser, SignInEmailPassword};
+use auth_proto::{AuthServiceClient, AuthUser, SignInEmailPassword, SignUpEmailPassword};
 
 use crate::orgs::{OrgMeta, home_slug};
 use crate::presence::{ManualStatus, PresenceLocal, PresenceStatus};
@@ -101,6 +101,14 @@ pub struct ActiveAccount {
 /// impossible.
 pub enum AuthAction {
     Switch(String),
+    /// Real credential sign-in from the login form.
+    SignIn { email: String, password: String },
+    /// Self-serve account creation (architect-auth `sign_up_email_password`).
+    SignUp {
+        email: String,
+        password: String,
+        name: String,
+    },
     SignOut,
 }
 
@@ -125,6 +133,28 @@ impl AuthCtx {
     /// work runs in the root coroutine, not the caller's scope.
     pub fn switch_account(self, email: impl Into<String>) {
         self.actions.send(AuthAction::Switch(email.into()));
+    }
+
+    /// Sign in with real credentials (the login form). Fire-and-forget.
+    pub fn sign_in(self, email: impl Into<String>, password: impl Into<String>) {
+        self.actions.send(AuthAction::SignIn {
+            email: email.into(),
+            password: password.into(),
+        });
+    }
+
+    /// Create a new account, then sign into it (the sign-up form).
+    pub fn sign_up(
+        self,
+        email: impl Into<String>,
+        password: impl Into<String>,
+        name: impl Into<String>,
+    ) {
+        self.actions.send(AuthAction::SignUp {
+            email: email.into(),
+            password: password.into(),
+            name: name.into(),
+        });
     }
 
     /// Request sign-out (revoke server-side, drop cached token, fall
@@ -160,6 +190,65 @@ async fn run_switch(mut st: AuthState, email: &str) {
     st.busy.set(true);
     st.error.set(None);
     match resolve_session(&slug, email).await {
+        Ok(account) => {
+            save_active_email(&account.email);
+            st.active.set(Some(account));
+        }
+        Err(e) => st.error.set(Some(e)),
+    }
+    st.busy.set(false);
+}
+
+/// Real credential sign-in (login form). When `name` is `Some`, first
+/// creates the account via `sign_up_email_password`, then the returned
+/// bundle IS the session (sign-up logs you in). Caches the token under
+/// the email so later `switch_account`/boot restores it via `whoami`.
+async fn run_credential_sign_in(
+    mut st: AuthState,
+    email: &str,
+    password: &str,
+    name: Option<&str>,
+) {
+    let slug = home_slug(&st.orgs.peek());
+    if slug.is_empty() {
+        st.error
+            .set(Some("org discovery hasn't resolved yet".to_owned()));
+        return;
+    }
+    st.busy.set(true);
+    st.error.set(None);
+    let result = async {
+        let client = establish_for::<AuthServiceClient>(&slug).await?;
+        let bundle = if let Some(name) = name {
+            client
+                .sign_up_email_password(SignUpEmailPassword {
+                    email: email.to_owned(),
+                    password: password.to_owned(),
+                    name: Some(name.to_owned()),
+                    username: None,
+                    image: None,
+                    metadata_json: None,
+                    ip_address: None,
+                    user_agent: Some("task-web".to_owned()),
+                })
+                .await
+                .map_err(|e| format!("create account: {e}"))?
+        } else {
+            client
+                .sign_in_email_password(SignInEmailPassword {
+                    email: email.to_owned(),
+                    password: password.to_owned(),
+                    ip_address: None,
+                    user_agent: Some("task-web".to_owned()),
+                })
+                .await
+                .map_err(|e| format!("sign in: {e}"))?
+        };
+        save_cached_token(email, &bundle.token);
+        Ok::<ActiveAccount, String>(account_from(bundle.user, email, bundle.token))
+    }
+    .await;
+    match result {
         Ok(account) => {
             save_active_email(&account.email);
             st.active.set(Some(account));
@@ -219,6 +308,16 @@ pub fn provide_auth() -> AuthCtx {
             }
             match msg {
                 AuthAction::Switch(email) => run_switch(st, &email).await,
+                AuthAction::SignIn { email, password } => {
+                    run_credential_sign_in(st, &email, &password, None).await;
+                }
+                AuthAction::SignUp {
+                    email,
+                    password,
+                    name,
+                } => {
+                    run_credential_sign_in(st, &email, &password, Some(&name)).await;
+                }
                 AuthAction::SignOut => run_sign_out(st).await,
             }
         }
@@ -374,6 +473,79 @@ pub const STATUS_OPTIONS: [(ManualStatus, &str, PresenceStatus); 3] = [
     (ManualStatus::Dnd, "Do not disturb", PresenceStatus::Dnd),
 ];
 
+/// Email/password sign-in (and self-serve sign-up) form. Rides
+/// [`AuthCtx`] — `sign_in`/`sign_up` are fire-and-forget; `busy`/`error`
+/// come back on the context. Real architect-auth accounts; this is what
+/// production shows in place of the dev-account picker.
+#[component]
+pub fn LoginForm() -> Element {
+    let ctx = use_context::<AuthCtx>();
+    let busy = ctx.busy;
+    let mut error = ctx.error;
+    let mut email = use_signal(String::new);
+    let mut password = use_signal(String::new);
+    let mut name = use_signal(String::new);
+    let mut creating = use_signal(|| false);
+
+    let submit = move |_| {
+        let e = email.peek().trim().to_owned();
+        let p = password.peek().clone();
+        if e.is_empty() || p.is_empty() {
+            return;
+        }
+        if *creating.peek() {
+            ctx.sign_up(e, p, name.peek().trim().to_owned());
+        } else {
+            ctx.sign_in(e, p);
+        }
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2",
+            if creating() {
+                Input {
+                    value: name,
+                    placeholder: "Name",
+                    on_change: move |_| error.set(None),
+                }
+            }
+            Input {
+                value: email,
+                input_type: "email".to_string(),
+                placeholder: "Email",
+                on_change: move |_| error.set(None),
+            }
+            Input {
+                value: password,
+                input_type: "password".to_string(),
+                placeholder: "Password",
+                on_change: move |_| error.set(None),
+            }
+            Button {
+                variant: ButtonVariant::Primary,
+                size: ButtonSize::Medium,
+                loading: busy(),
+                on_click: submit,
+                class: "w-full",
+                if creating() { "Create account" } else { "Sign in" }
+            }
+            button {
+                r#type: "button",
+                class: "text-xs text-muted-foreground hover:text-foreground",
+                onclick: move |_| {
+                    error.set(None);
+                    let now = *creating.peek();
+                    creating.set(!now);
+                },
+                if creating() { "Have an account? Sign in" } else { "Create an account" }
+            }
+            if let Some(msg) = error.read().as_ref() {
+                div { class: "px-1 text-xs text-destructive", "{msg}" }
+            }
+        }
+    }
+}
+
 /// Account & status content for the mobile bottom sheet — the same
 /// roster / status / sign-out actions as the desktop [`AccountSwitcher`]
 /// popover (both ride [`AuthCtx`] + [`PresenceLocal`]), restyled as
@@ -420,25 +592,35 @@ pub fn AccountSheetBody(on_done: EventHandler<()>) -> Element {
 
             section {
                 h3 { class: "px-1 pb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
-                    "Switch account"
+                    "Sign in"
                 }
-                div { class: "flex flex-col",
-                    for dev in DEV_ACCOUNTS {
-                        button {
-                            key: "{dev.email}",
-                            r#type: "button",
-                            class: "flex min-h-[44px] w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-accent",
-                            onclick: move |_| {
-                                on_done.call(());
-                                ctx.switch_account(dev.email);
-                            },
-                            Avatar { name: dev.name.to_string(), email: dev.email.to_string(), size: 28 }
-                            span { class: "flex min-w-0 flex-col",
-                                span { class: "truncate text-sm text-foreground", "{dev.name}" }
-                                span { class: "truncate text-xs text-muted-foreground", "{dev.email}" }
-                            }
-                            if active_email.as_deref() == Some(dev.email) {
-                                span { class: "ml-auto text-sm text-primary", "●" }
+                LoginForm {}
+            }
+
+            // Dev-account quick picker — one-click switch, DEBUG builds only.
+            if cfg!(debug_assertions) {
+                section {
+                    h3 { class: "px-1 pb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                        "Dev accounts"
+                    }
+                    div { class: "flex flex-col",
+                        for dev in DEV_ACCOUNTS {
+                            button {
+                                key: "{dev.email}",
+                                r#type: "button",
+                                class: "flex min-h-[44px] w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-accent",
+                                onclick: move |_| {
+                                    on_done.call(());
+                                    ctx.switch_account(dev.email);
+                                },
+                                Avatar { name: dev.name.to_string(), email: dev.email.to_string(), size: 28 }
+                                span { class: "flex min-w-0 flex-col",
+                                    span { class: "truncate text-sm text-foreground", "{dev.name}" }
+                                    span { class: "truncate text-xs text-muted-foreground", "{dev.email}" }
+                                }
+                                if active_email.as_deref() == Some(dev.email) {
+                                    span { class: "ml-auto text-sm text-primary", "●" }
+                                }
                             }
                         }
                     }
