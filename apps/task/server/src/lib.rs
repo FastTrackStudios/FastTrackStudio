@@ -25,6 +25,7 @@ pub mod link_sync;
 pub mod presence;
 pub mod server_mgmt;
 pub mod snapshot;
+pub mod watch_bridge;
 pub mod webhooks;
 
 use std::path::PathBuf;
@@ -1169,6 +1170,7 @@ pub fn router(state: AppState) -> Router {
         .merge(well_known)
         .merge(per_org)
         .merge(server_mgmt)
+        .merge(watch_bridge::watch_router())
         .merge(blob_router)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
