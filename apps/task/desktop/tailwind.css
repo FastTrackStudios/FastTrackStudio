@@ -1,50 +1,41 @@
 @import "tailwindcss";
-@import "../../../FastTrackStudio/fts-ui/crates/showcase/assets/fts-theme.css";
+/* Vendored FTS design tokens — see apps/web/fts-theme.css header. The
+ * canonical sheet lives in the (workspace-sibling) fts-ui repo, but a
+ * relative @import that climbs out of the Task repo breaks the pure-Nix
+ * image build (which sees only the Task repo), so it is vendored
+ * in-tree — the same workaround ui-lab already uses. */
+@import "./fts-theme.css";
 
+/* Paths track the monorepo dissolve (c1c5754ce): the Task crates now
+ * live at <root>/crates/task/* and <root>/features/task/*. */
 @source "./src/**/*.{rs,html,css}";
-@source "../../crates/ui/src/**/*.rs";
-@source "../../features/*/*-ui/src/**/*.rs";
-@source "../../features/*/view-*/src/**/*.rs";
-@source "../../../FastTrackStudio/fts-ui/crates/fts-ui/src/**/*.rs";
-@source "../../../FastTrackStudio/fts-ui/features/core/src/**/*.rs";
+@source "../../../crates/task/ui/src/**/*.rs";
+@source "../../../features/task/*/*-ui/src/**/*.rs";
+@source "../../../features/task/view/view-*/src/**/*.rs";
+/* fts-ui primitives (Button/Sheet/Badge/…) — their variant classes
+ * must exist in the compiled sheet too. In-tree since the monorepo
+ * merge, so the pure-Nix image build sees it as well. */
+@source "../../../libs/fts-ui/fts-ui/src/**/*.rs";
 
-@layer base {
-    html {
-        color-scheme: dark;
-    }
+@theme {
+    --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-/* Logseq-style task-keyword pills used by knowledge-ui's
-   BlockView (sourced from publish-core helpers). Defined here
-   so the live outliner can map TaskMarker → class name without
-   embedding the per-marker palette in the Rust source. */
-@layer components {
-    .task-todo {
-        background: color-mix(in srgb, var(--color-blue-500) 18%, transparent);
-        color: var(--color-blue-500);
-        border-color: color-mix(in srgb, var(--color-blue-500) 35%, transparent);
+@layer base {
+    html { color-scheme: dark; }
+
+    /* Thin, theme-tinted scrollbars everywhere — the default fat
+     * gutters fight the shell. Track is invisible; the thumb is the
+     * border token, brightening on hover. */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in oklch, var(--border) 85%, transparent) transparent;
     }
-    .task-doing,
-    .task-now {
-        background: color-mix(in srgb, var(--color-amber-400) 22%, transparent);
-        color: var(--color-amber-400);
-        border-color: color-mix(in srgb, var(--color-amber-400) 35%, transparent);
+    *::-webkit-scrollbar { width: 7px; height: 7px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb {
+        background: color-mix(in oklch, var(--border) 85%, transparent);
+        border-radius: 9999px;
     }
-    .task-done {
-        background: color-mix(in srgb, var(--color-emerald-400) 18%, transparent);
-        color: var(--color-emerald-400);
-        border-color: color-mix(in srgb, var(--color-emerald-400) 35%, transparent);
-    }
-    .task-later,
-    .task-waiting {
-        background: color-mix(in srgb, var(--color-neutral-500) 20%, transparent);
-        color: var(--color-neutral-300);
-        border-color: var(--color-neutral-600);
-    }
-    .task-cancelled {
-        background: color-mix(in srgb, var(--color-red-500) 18%, transparent);
-        color: var(--color-red-500);
-        border-color: color-mix(in srgb, var(--color-red-500) 35%, transparent);
-        text-decoration: line-through;
-    }
+    *::-webkit-scrollbar-thumb:hover { background: var(--border); }
 }

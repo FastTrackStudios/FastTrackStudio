@@ -25,6 +25,7 @@ pub mod link_sync;
 pub mod presence;
 pub mod server_mgmt;
 pub mod snapshot;
+pub mod watch_bridge;
 pub mod webhooks;
 
 use std::path::PathBuf;
@@ -411,7 +412,7 @@ impl AppState {
         for org_root in org_roots {
             let slug = org_root.slug().to_owned();
             let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
-            let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET).await?;
+            let auth = AuthState::open(&auth_db_url, &auth_secret()).await?;
             let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
             orgs.insert(slug, org_state);
         }
@@ -1072,6 +1073,22 @@ fn discover_mail_accounts(
 /// at build time so this fails loudly if shortened.
 const DEFAULT_AUTH_SECRET: &str = "task-server-auth-dev-secret-32+!";
 
+/// The secret that signs every org's session tokens. A real deployment
+/// MUST set `TASK_AUTH_SECRET` (a high-entropy 32+ char value) — the
+/// hardcoded [`DEFAULT_AUTH_SECRET`] is a dev convenience and makes
+/// tokens forgeable. Falls back to it (with a warning) when unset.
+pub(crate) fn auth_secret() -> String {
+    match std::env::var("TASK_AUTH_SECRET") {
+        Ok(s) if !s.is_empty() => s,
+        _ => {
+            tracing::warn!(
+                "TASK_AUTH_SECRET unset — using the dev auth secret (tokens are forgeable)"
+            );
+            DEFAULT_AUTH_SECRET.to_owned()
+        }
+    }
+}
+
 /// Pick the org root this server should serve.
 ///
 /// Order: explicit `slug` arg → `TASK_SERVER_ORG` env →
@@ -1179,6 +1196,7 @@ pub fn router(state: AppState) -> Router {
         .merge(well_known)
         .merge(per_org)
         .merge(server_mgmt)
+        .merge(watch_bridge::watch_router())
         .merge(blob_router)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)

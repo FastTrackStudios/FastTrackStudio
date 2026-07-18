@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use org_proto::{CreateOrgRequest, OrgManagementError, OrgManagementService, OrgManifest, OrgRoot};
 
-use crate::{AppState, AuthState, DEFAULT_AUTH_SECRET, build_org_state};
+use crate::{AppState, AuthState, build_org_state};
 
 /// Backend that knows how to scaffold + register orgs against
 /// a live [`AppState`]. Holds an `Arc<AppState>` so mutations
@@ -125,7 +125,7 @@ impl OrgManagementService for OrgManagementImpl {
         let scope = self.state.scope.clone();
         let slug = org_root.slug().to_owned();
         let built = tokio::runtime::Handle::current().block_on(async move {
-            let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET)
+            let auth = AuthState::open(&auth_db_url, &crate::auth_secret())
                 .await
                 .map_err(|e| OrgManagementError::Internal(format!("open auth: {e}")))?;
             build_org_state(auth, &keypair, org_root, &scope)

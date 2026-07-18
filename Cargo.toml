@@ -773,6 +773,10 @@ hidapi = "2"
 # pipewire host (via daw-audio-io); the `pipewire`/`jack` backends are
 # feature-gated per consumer.
 cpal = "0.18"
+# Unix process supervision: the desktop app spawns the signal engine as a
+# child and must reap it (and its group) on exit — kill(pid,0) liveness probe
+# (engine watchdog) + process-group teardown. See apps/fasttrackstudio.
+libc = "0.2"
 
 # ── Task (subtree-imported; workspace dissolved into the root) ────────
 # Internal Task path deps, declared once. `-proto` crates that ship a
@@ -971,6 +975,12 @@ styx-format = { path = "libs/vendor/styx-format" }
 # such a field — every task-server list/stats call died. Drop the vendor
 # once upstream phon derives these scalars.
 phon = { path = "libs/vendor/phon" }
+# Vendored phon-jit rc.5 with a one-line build.rs fix: force the stable,
+# call-based stencils. Upstream's nightly detection can be true while no real
+# nightly is present (the pinned nix toolchain), so it compiled the `become`
+# (explicit tail calls) stencils on stable rustc 1.94 → E0658, breaking the
+# macOS-aarch64 build. Drop the vendor once phon-jit builds on stable.
+phon-jit = { path = "libs/vendor/phon-jit" }
 # Editor's vendored mermaid-rs-renderer fork (web_time::Instant so the
 # layouter works on wasm32) — see libs/editor/vendor/.
 mermaid-rs-renderer = { path = "libs/editor/vendor/mermaid-rs-renderer" }
