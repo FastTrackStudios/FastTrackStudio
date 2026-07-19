@@ -173,6 +173,44 @@ struct AuthState {
     error: Signal<Option<String>>,
     busy: Signal<bool>,
     orgs: Signal<Vec<OrgMeta>>,
+    /// The multi-server registry — the resolved session is mirrored into
+    /// the active [`crate::server_registry::ServerEntry`] so each server
+    /// remembers who you signed in as (see [`sync_active_server_entry`]).
+    registry: crate::server_registry::ServerRegistry,
+}
+
+/// Mirror a freshly-resolved session into the active server's registry
+/// entry: on real sign-in the entry gains `session_token` / `my_user_id`
+/// / `my_email`; a Guest/anonymous session (or sign-out) clears them.
+///
+/// This is what makes multi-server auth stick: the app root's effect
+/// forwards the active entry's `session_token` into the
+/// [`crate::vox_session::ActiveServer`] holder, so switching servers
+/// re-points the connection at the right identity. No-op when no server
+/// is selected (the env/same-origin default) or the entry is unchanged.
+fn sync_active_server_entry(
+    mut registry: crate::server_registry::ServerRegistry,
+    account: Option<&ActiveAccount>,
+) {
+    let Some(id) = registry.active_id() else {
+        return;
+    };
+    let Some(mut entry) = registry.get(id) else {
+        return;
+    };
+    let (token, uid, mail) = match account {
+        Some(a) if a.email != GUEST_EMAIL => {
+            (Some(a.token.clone()), Some(a.user_id), Some(a.email.clone()))
+        }
+        _ => (None, None, None),
+    };
+    if entry.session_token == token && entry.my_user_id == uid && entry.my_email == mail {
+        return;
+    }
+    entry.session_token = token;
+    entry.my_user_id = uid;
+    entry.my_email = mail;
+    registry.upsert(entry);
 }
 
 /// Switch to `email`: cached token → `whoami` validates; on miss or
@@ -192,6 +230,7 @@ async fn run_switch(mut st: AuthState, email: &str) {
     match resolve_session(&slug, email).await {
         Ok(account) => {
             save_active_email(&account.email);
+            sync_active_server_entry(st.registry, Some(&account));
             st.active.set(Some(account));
         }
         Err(e) => st.error.set(Some(e)),
@@ -251,6 +290,7 @@ async fn run_credential_sign_in(
     match result {
         Ok(account) => {
             save_active_email(&account.email);
+            sync_active_server_entry(st.registry, Some(&account));
             st.active.set(Some(account));
         }
         Err(e) => st.error.set(Some(e)),
@@ -267,6 +307,7 @@ async fn run_sign_out(mut st: AuthState) {
     };
     clear_cached_token(&account.email);
     clear_active_email();
+    sync_active_server_entry(st.registry, None);
     st.active.set(None);
     let slug = home_slug(&st.orgs.peek());
     if !slug.is_empty() {
@@ -285,6 +326,7 @@ pub fn provide_auth() -> AuthCtx {
     use futures_util::StreamExt as _;
 
     let orgs = use_context::<Signal<Vec<OrgMeta>>>();
+    let registry = use_context::<crate::server_registry::ServerRegistry>();
     let active = use_signal(|| None::<ActiveAccount>);
     let error = use_signal(|| None::<String>);
     let busy = use_signal(|| false);
@@ -293,6 +335,7 @@ pub fn provide_auth() -> AuthCtx {
         error,
         busy,
         orgs,
+        registry,
     };
 
     // The auth service: one sequential consumer for every auth action
