@@ -8,6 +8,8 @@ import SwiftUI
 @main
 struct TaskWatchApp: App {
     @State private var store = TaskStore()
+    // Inherits the paired iPhone's active server + session over WCSession.
+    @State private var phoneSync = PhoneSync()
     @State private var tab: String =
         ProcessInfo.processInfo.environment["TASK_TAB"] ?? "timer"
 
@@ -23,6 +25,7 @@ struct TaskWatchApp: App {
             }
             .tabViewStyle(.verticalPage)
             .environment(store)
+            .onAppear { phoneSync.start(store: store) }
         }
     }
 }
