@@ -8,16 +8,18 @@
 //! - `stems/*.ogg`   — one Opus file per stem.
 //! - `chart.kf`      — the keyflow chart (optional).
 //!
-//! All fetched same-origin (no CORS). Each stem is decoded via
-//! `AudioContext.decodeAudioData` into an `AudioBuffer`, wired through its own
-//! `GainNode` → destination. Play spins up a fresh `AudioBufferSourceNode` per
-//! stem, all `start()`ed at one common context time so they are
-//! sample-synchronized. This is the web-native counterpart to
-//! `daw-standalone`'s `WebRenderer`, but plain Web Audio (no worklet) is
-//! enough for straight setlist playback.
+//! All fetched same-origin (no CORS). Each stem is **streamed** through an
+//! `HTMLAudioElement` (progressive Opus/ogg — the browser range-requests and
+//! decodes on the fly, so memory stays flat and playback starts fast). Every
+//! element is routed into a Web Audio graph via
+//! `AudioContext.createMediaElementSource` → its own `GainNode` →
+//! destination, so the per-stem mixer (mute/solo/volume) drives the gains.
+//! The elements all share one wall clock; element 0 is the master and a 4 Hz
+//! poll loop resyncs any stem that drifts past 50 ms.
 //!
-//! The heavy lifting is `wasm32`-only (Web Audio + fetch). Off-wasm the crate
-//! still has to compile (workspace member), so there's a tiny stub below.
+//! The heavy lifting is `wasm32`-only (Web Audio + media elements). Off-wasm
+//! the crate still has to compile (workspace member), so there's a tiny stub
+//! below.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // wasm32: the real player.
@@ -28,13 +30,17 @@ mod imp {
     use std::rc::Rc;
 
     use dioxus::prelude::*;
-    use js_sys::ArrayBuffer;
     use serde::Deserialize;
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
-    use web_sys::{AudioBuffer, AudioContext, GainNode, Response};
+    use web_sys::{AudioContext, GainNode, HtmlAudioElement, Response};
 
     use crate::components::{PreviewMode, StaticChartRenderer};
+
+    /// Drift tolerance (seconds) before a stem is snapped back to the master.
+    const DRIFT_TOLERANCE: f64 = 0.05;
+    /// `HTMLMediaElement.readyState` for HAVE_CURRENT_DATA.
+    const HAVE_CURRENT_DATA: u16 = 2;
 
     // ── manifest model ──────────────────────────────────────────────────────
 
@@ -79,90 +85,63 @@ mod imp {
         volume: f32,
     }
 
-    // ── the Web Audio engine ────────────────────────────────────────────────
+    // ── the streaming Web Audio engine ──────────────────────────────────────
 
-    /// One decoded stem plus its permanent gain node (connected to the
-    /// destination once) and the source that's currently playing it (if any).
+    /// One streamed stem: its media element (the actual audio source, streamed
+    /// progressively) plus the gain node the mixer drives. The
+    /// `MediaElementAudioSourceNode` is kept alive so the routing survives.
     struct StemNode {
-        buffer: AudioBuffer,
+        el: HtmlAudioElement,
         gain: GainNode,
-        source: Option<web_sys::AudioBufferSourceNode>,
+        #[allow(dead_code)]
+        node: web_sys::MediaElementAudioSourceNode,
     }
 
-    /// The shared, mutable playback graph. Held in an `Rc<RefCell<…>>` so the
-    /// resource future, the poll loop, and every event handler can drive it.
+    /// The shared playback graph. Held in an `Rc<RefCell<…>>` so the resource
+    /// future, the poll loop, and every event handler can drive it. Element 0
+    /// is the master clock; there is no separate anchor arithmetic.
     struct EngineInner {
+        #[allow(dead_code)]
         ctx: AudioContext,
         stems: Vec<StemNode>,
         duration: f64,
         playing: bool,
-        /// `ctx.currentTime` captured when the current run was scheduled.
-        anchor_ctx_time: f64,
-        /// Song offset (seconds) that `anchor_ctx_time` corresponds to.
-        anchor_offset: f64,
     }
 
     type Engine = Rc<RefCell<EngineInner>>;
 
     impl EngineInner {
-        /// Current song position in seconds, derived from the context clock.
+        /// Current song position — the master element's playback time.
         fn position(&self) -> f64 {
-            let p = if self.playing {
-                self.anchor_offset + (self.ctx.current_time() - self.anchor_ctx_time)
-            } else {
-                self.anchor_offset
-            };
-            p.clamp(0.0, self.duration)
+            self.stems
+                .first()
+                .map(|s| s.el.current_time())
+                .unwrap_or(0.0)
+                .clamp(0.0, self.duration)
         }
 
-        /// Tear down every currently-playing source.
-        fn stop_sources(&mut self) {
-            for stem in self.stems.iter_mut() {
-                if let Some(src) = stem.source.take() {
-                    // `stop` is inherited from AudioScheduledSourceNode; call it
-                    // through the parent to dodge the deprecated shim on the
-                    // AudioBufferSourceNode alias.
-                    let sched: &web_sys::AudioScheduledSourceNode = &src;
-                    let _ = sched.stop();
-                    let _ = src.disconnect();
-                }
-            }
-        }
-
-        /// Start every stem from `offset`, sample-synchronized: all sources are
-        /// scheduled at one common context time slightly in the future.
+        /// Resume the context, park every element at `offset`, and play them.
         fn play(&mut self, offset: f64) {
-            self.stop_sources();
-            let when = self.ctx.current_time() + 0.03;
-            for stem in self.stems.iter_mut() {
-                if let Ok(src) = self.ctx.create_buffer_source() {
-                    src.set_buffer(Some(&stem.buffer));
-                    // Deref coercion: &GainNode → &AudioNode.
-                    let _ = src.connect_with_audio_node(&stem.gain);
-                    let _ = src.start_with_when_and_grain_offset(when, offset);
-                    stem.source = Some(src);
-                }
-            }
             let _ = self.ctx.resume();
-            self.anchor_ctx_time = when;
-            self.anchor_offset = offset;
+            for s in &self.stems {
+                s.el.set_current_time(offset);
+                let _ = s.el.play();
+            }
             self.playing = true;
         }
 
         fn pause(&mut self) {
-            let pos = self.position();
-            self.stop_sources();
-            self.anchor_offset = pos;
+            for s in &self.stems {
+                let _ = s.el.pause();
+            }
             self.playing = false;
         }
 
-        /// Jump to `offset`. Restarts the sources if currently playing so audio
-        /// stays synced to the new position.
+        /// Jump every element to `offset` (works whether or not playing —
+        /// elements keep streaming from the new position).
         fn seek(&mut self, offset: f64) {
-            if self.playing {
-                self.play(offset);
-            } else {
-                self.anchor_offset = offset;
+            for s in &self.stems {
+                s.el.set_current_time(offset);
             }
         }
 
@@ -170,6 +149,27 @@ mod imp {
             if let Some(stem) = self.stems.get(idx) {
                 stem.gain.gain().set_value(value);
             }
+        }
+
+        /// Resync stems to the master (element 0). Never touches the master.
+        fn correct_drift(&self) {
+            let Some(master) = self.stems.first() else {
+                return;
+            };
+            let m = master.el.current_time();
+            for s in self.stems.iter().skip(1) {
+                if (s.el.current_time() - m).abs() > DRIFT_TOLERANCE {
+                    s.el.set_current_time(m);
+                }
+            }
+        }
+
+        /// How many stems have at least HAVE_CURRENT_DATA buffered.
+        fn ready_count(&self) -> usize {
+            self.stems
+                .iter()
+                .filter(|s| s.el.ready_state() >= HAVE_CURRENT_DATA)
+                .count()
         }
     }
 
@@ -189,27 +189,6 @@ mod imp {
     }
 
     // ── fetch helpers (same-origin) ─────────────────────────────────────────
-
-    async fn fetch_array_buffer(url: &str) -> Result<ArrayBuffer, String> {
-        let win = web_sys::window().ok_or_else(|| "no window".to_string())?;
-        let resp_val = JsFuture::from(win.fetch_with_str(url))
-            .await
-            .map_err(|e| format!("fetch {url}: {e:?}"))?;
-        let resp: Response = resp_val
-            .dyn_into()
-            .map_err(|_| "fetch did not return a Response".to_string())?;
-        if !resp.ok() {
-            return Err(format!("{url}: HTTP {}", resp.status()));
-        }
-        let promise = resp
-            .array_buffer()
-            .map_err(|e| format!("{url}: array_buffer: {e:?}"))?;
-        let ab = JsFuture::from(promise)
-            .await
-            .map_err(|e| format!("{url}: array_buffer await: {e:?}"))?;
-        ab.dyn_into::<ArrayBuffer>()
-            .map_err(|_| format!("{url}: not an ArrayBuffer"))
-    }
 
     async fn fetch_text(url: &str) -> Result<String, String> {
         let win = web_sys::window().ok_or_else(|| "no window".to_string())?;
@@ -235,40 +214,35 @@ mod imp {
         serde_json::from_str(&txt).map_err(|e| format!("{url}: bad manifest json: {e}"))
     }
 
-    /// Build the full playback graph: create the context, fetch + decode every
-    /// stem (bumping `progress` as each lands), and wire the gain nodes.
-    async fn build_engine(
-        slug: &str,
-        manifest: &Manifest,
-        mut progress: Signal<usize>,
-    ) -> Result<Engine, String> {
+    /// Build the streaming graph: create the context, and for each stem create
+    /// an `HTMLAudioElement` (progressive stream) routed through
+    /// media-element-source → gain → destination. Synchronous and side-effect
+    /// free apart from element creation — no fetch/decode, so no per-stem
+    /// progress signal and nothing to re-fire on transport ticks.
+    fn build_engine(slug: &str, manifest: &Manifest) -> Result<Engine, String> {
         let ctx = AudioContext::new().map_err(|e| format!("AudioContext: {e:?}"))?;
         let dest = ctx.destination();
         let mut stems = Vec::with_capacity(manifest.stems.len());
         for spec in &manifest.stems {
             let url = format!("/media/songs/{slug}/{}", spec.file);
-            let buf = fetch_array_buffer(&url).await?;
-            let promise = ctx
-                .decode_audio_data(&buf)
-                .map_err(|e| format!("{}: decode: {e:?}", spec.name))?;
-            let decoded = JsFuture::from(promise)
-                .await
-                .map_err(|e| format!("{}: decode await: {e:?}", spec.name))?;
-            let audio_buffer: AudioBuffer = decoded
-                .dyn_into()
-                .map_err(|_| format!("{}: decode did not return an AudioBuffer", spec.name))?;
+            let el =
+                HtmlAudioElement::new_with_src(&url).map_err(|e| format!("audio element: {e:?}"))?;
+            el.set_preload("auto");
+            el.set_loop(false);
 
+            let node = ctx
+                .create_media_element_source(&el)
+                .map_err(|e| format!("media element source: {e:?}"))?;
             let gain = ctx.create_gain().map_err(|e| format!("create_gain: {e:?}"))?;
+            // Deref coercion: &MediaElementAudioSourceNode / &GainNode → &AudioNode.
+            let _ = node.connect_with_audio_node(&gain);
             let _ = gain.connect_with_audio_node(&dest);
             gain.gain()
                 .set_value(if spec.default_muted { 0.0 } else { 1.0 });
+            // Kick off buffering.
+            el.load();
 
-            stems.push(StemNode {
-                buffer: audio_buffer,
-                gain,
-                source: None,
-            });
-            progress.set(progress() + 1);
+            stems.push(StemNode { el, gain, node });
         }
 
         Ok(Rc::new(RefCell::new(EngineInner {
@@ -276,8 +250,6 @@ mod imp {
             ctx,
             stems,
             playing: false,
-            anchor_ctx_time: 0.0,
-            anchor_offset: 0.0,
         })))
     }
 
@@ -294,28 +266,25 @@ mod imp {
 
     #[component]
     pub fn SongSession(org: String, collection: String, song: String) -> Element {
-        // Transport + decode-progress state.
-        let progress = use_signal(|| 0usize);
-        let total = use_signal(|| 0usize);
         let mut playing = use_signal(|| false);
         let mut position = use_signal(|| 0.0_f64);
+        let mut buffering = use_signal(|| true);
         // Per-stem mixer state; filled once the manifest lands (see effect).
         let mut stem_ui = use_signal(Vec::<StemUi>::new);
 
-        // Fetch manifest → build (fetch+decode all stems) engine. Runs once per
-        // song; the returned tuple lives in the resource's signal.
+        // Fetch manifest → build the streaming graph. Keyed on the song slug
+        // via `use_reactive!`: the future reads ONLY the `song` prop (no
+        // signals), so it runs exactly once per song and never re-fires on
+        // transport ticks / playhead updates.
         let song_r = song.clone();
-        let loaded = use_resource(move || {
+        let loaded = use_resource(use_reactive!(|song_r| {
             let slug = song_r.clone();
-            let mut total = total;
-            let progress = progress;
             async move {
                 let manifest = fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
-                total.set(manifest.stems.len());
-                let eng = build_engine(&slug, &manifest, progress).await?;
+                let eng = build_engine(&slug, &manifest)?;
                 Ok::<(Manifest, Engine), String>((manifest, eng))
             }
-        });
+        }));
 
         // Chart source (optional). Rendered once loaded (StaticChartRenderer
         // peeks its source on mount, so mount only after the text is present).
@@ -359,18 +328,34 @@ mod imp {
             }
         });
 
-        // Poll the context clock ~20×/s to drive the playhead + detect the end.
+        // 4 Hz loop: readiness (buffering), drift correction, playhead, end.
+        // A short timeout (~4s) enables Play even if a stem is slow to buffer.
         use_future(move || async move {
+            let mut ticks: u32 = 0;
             loop {
-                gloo_timers::future::TimeoutFuture::new(50).await;
-                let Some(eng) = engine_of() else { continue };
-                let (is_playing, pos, dur) = {
-                    let e = eng.borrow();
-                    (e.playing, e.position(), e.duration)
+                gloo_timers::future::TimeoutFuture::new(250).await;
+                ticks += 1;
+                let Some(eng) = engine_of() else {
+                    continue;
                 };
+                let (rc, total, is_playing, pos, dur) = {
+                    let e = eng.borrow();
+                    (
+                        e.ready_count(),
+                        e.stems.len(),
+                        e.playing,
+                        e.position(),
+                        e.duration,
+                    )
+                };
+                let all_ready = total > 0 && rc >= total;
+                let timed_out = ticks > 16;
+                buffering.set(!(all_ready || timed_out));
+
                 if is_playing {
+                    eng.borrow().correct_drift();
                     position.set(pos);
-                    if pos >= dur - 0.02 {
+                    if dur > 0.0 && pos >= dur - 0.25 {
                         eng.borrow_mut().pause();
                         playing.set(false);
                         position.set(dur);
@@ -433,16 +418,11 @@ mod imp {
 
         // ── render ──────────────────────────────────────────────────────────
         let body = match &*loaded.read_unchecked() {
-            None => {
-                let (p, t) = (progress(), total());
-                rsx! {
-                    div { class: "flex flex-col gap-2 py-10",
-                        span { class: "text-sm text-muted-foreground",
-                            if t == 0 { "Loading manifest…" } else { "Decoding stems… {p}/{t}" }
-                        }
-                    }
+            None => rsx! {
+                div { class: "flex flex-col gap-2 py-10",
+                    span { class: "text-sm text-muted-foreground", "Loading manifest…" }
                 }
-            }
+            },
             Some(Err(msg)) => rsx! {
                 div { class: "flex flex-col gap-2 py-10",
                     span { class: "text-sm font-semibold text-destructive", "Could not load song" }
@@ -458,6 +438,7 @@ mod imp {
                         manifest,
                         playing,
                         position,
+                        buffering,
                         stem_ui,
                         chart_src,
                         chart_mode,
@@ -486,6 +467,7 @@ mod imp {
         manifest: Manifest,
         playing: Signal<bool>,
         position: Signal<f64>,
+        buffering: Signal<bool>,
         stem_ui: Signal<Vec<StemUi>>,
         chart_src: Signal<String>,
         chart_mode: Signal<PreviewMode>,
@@ -498,6 +480,7 @@ mod imp {
         let duration = manifest.duration_sec.max(0.001);
         let pos = position();
         let is_playing = playing();
+        let is_buffering = buffering();
 
         // Which section contains the playhead?
         let cur_section = manifest
@@ -553,9 +536,10 @@ mod imp {
             // Transport.
             div { class: "flex items-center gap-3 p-3 border border-border rounded-lg bg-card",
                 button {
-                    class: "w-11 h-11 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-lg hover:bg-primary/90 transition-colors",
+                    class: "w-11 h-11 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-lg hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+                    disabled: is_buffering,
                     onclick: move |e| toggle_play.call(e),
-                    if is_playing { "⏸" } else { "▶" }
+                    if is_buffering { "…" } else if is_playing { "⏸" } else { "▶" }
                 }
                 span { class: "text-xs font-mono text-muted-foreground tabular-nums min-w-[84px]",
                     "{fmt_time(pos)} / {fmt_time(duration)}"
@@ -572,6 +556,9 @@ mod imp {
                             do_seek.call(v);
                         }
                     },
+                }
+                if is_buffering {
+                    span { class: "text-[11px] text-muted-foreground/70", "buffering…" }
                 }
             }
 
@@ -699,7 +686,7 @@ pub use imp::SongSession;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Non-wasm: a stub so the crate still compiles as a workspace member. The
-// session view is a browser-only feature (Web Audio + fetch).
+// session view is a browser-only feature (Web Audio + media elements).
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(not(target_arch = "wasm32"))]
 mod stub {
