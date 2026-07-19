@@ -15,8 +15,20 @@
 //! `Model`/`Entity`/`Column`/`Relation`/`ActiveModel` plus
 //! `LinkedServerRepoStorage<C>`.
 //!
-//! No RPC service lives here yet — that arrives in a later subtask.
+//! ## RPC
+//!
+//! [`IdentityService`] (in [`service`]) exposes the home org's
+//! locker over vox, mounted at the server-level `/server/vox`
+//! endpoint and gated by a home-org session token.
 
 pub mod linked_server;
+pub mod service;
 
 pub use linked_server::LinkedServer;
+pub use service::{IdentityService, IdentityServiceError, LinkServerRequest, LinkView};
+
+#[cfg(feature = "vox")]
+pub use service::{
+    IdentityServiceClient, identity_service_rpc_service_descriptor as identity_descriptor,
+    serve as serve_identity,
+};
