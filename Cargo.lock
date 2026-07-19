@@ -28191,6 +28191,7 @@ dependencies = [
  "git-proto",
  "gloo-timers",
  "goal",
+ "identity-proto",
  "inbox-proto",
  "input",
  "inventory-proto",
