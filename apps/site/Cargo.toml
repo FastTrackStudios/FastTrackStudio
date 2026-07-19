@@ -117,18 +117,19 @@ web-sys = { version = "0.3", features = [
     "Request",
     "RequestInit",
     "Response",
-    # Session view — Web Audio multitrack playback of served stems.
-    # Fetch (Window::fetch_with_str) + decode + a per-stem gain graph.
+    # Session view — Web Audio multitrack player. Each stem is streamed via an
+    # HTMLAudioElement (progressive Opus/ogg, low memory) routed through a
+    # per-stem GainNode for the mixer (mute/solo/volume).
     "AudioContext",
     "AudioContextState",
     "BaseAudioContext",
-    "AudioBuffer",
-    "AudioBufferSourceNode",
-    "AudioScheduledSourceNode",
     "AudioNode",
     "AudioParam",
     "GainNode",
     "AudioDestinationNode",
+    "HtmlAudioElement",
+    "HtmlMediaElement",
+    "MediaElementAudioSourceNode",
 ] }
 
 # Async runtime for WASM — deliberately NOT the workspace tokio (that one is
