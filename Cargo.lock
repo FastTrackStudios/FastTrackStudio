@@ -28394,6 +28394,7 @@ dependencies = [
  "task-ui",
  "threads",
  "timer-proto",
+ "tokio-tungstenite",
  "tracing",
  "uuid 1.23.4",
  "vault-proto",
