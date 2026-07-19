@@ -83,6 +83,20 @@ pub enum CollectionCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Remove the item pointing at `--node` from a collection.
+    Remove {
+        /// Target collection — id or title.
+        collection: String,
+        /// The node token to remove (`kind:id`, e.g. `song:king-of-kings`).
+        #[arg(long)]
+        node: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// List collections in the active org, optionally filtered by kind.
     List {
         /// Restrict to one kind (`library` | `setlist` | … | `other:NAME`).
@@ -320,6 +334,25 @@ pub async fn run_collection(cmd: CollectionCmd) -> eyre::Result<()> {
                 })
                 .await
                 .map_err(|e| eyre::eyre!("reorder: {e:?}"))?;
+            if json {
+                return emit_json(&updated);
+            }
+            print_collection(&updated);
+        }
+        CollectionCmd::Remove {
+            collection,
+            node,
+            org,
+            server,
+            json,
+        } => {
+            let (client, slug) = client_for(org, server).await?;
+            let coll = resolve_collection(&client, &slug, &collection).await?;
+            let node = parse_node(&node)?;
+            let updated = client
+                .remove_item(coll.id, node)
+                .await
+                .map_err(|e| eyre::eyre!("remove_item: {e:?}"))?;
             if json {
                 return emit_json(&updated);
             }
