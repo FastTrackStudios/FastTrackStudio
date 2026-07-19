@@ -41,11 +41,16 @@ pub enum Route {
     // `CollectionService` and renders the matching collection's songs.
     #[route("/session/:org/:collection")]
     SessionCollection { org: String, collection: String },
+    // The session view — a browser multitrack player for one song. Fetches the
+    // song's manifest + stems (served same-origin at /media/songs/{song}/…) and
+    // plays them mixed in the browser via Web Audio.
+    #[route("/session/:org/:collection/:song")]
+    SongSession { org: String, collection: String, song: String },
 }
 
-// Re-export so the `Routable` derive can resolve the `SessionCollection`
-// route component (defined in `components`) by name.
-use components::SessionCollection;
+// Re-export so the `Routable` derive can resolve the route components
+// (defined in `components`) by name.
+use components::{SessionCollection, SongSession};
 
 fn main() {
     // Initialize panic hook for better WASM debugging

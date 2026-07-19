@@ -117,6 +117,18 @@ web-sys = { version = "0.3", features = [
     "Request",
     "RequestInit",
     "Response",
+    # Session view — Web Audio multitrack playback of served stems.
+    # Fetch (Window::fetch_with_str) + decode + a per-stem gain graph.
+    "AudioContext",
+    "AudioContextState",
+    "BaseAudioContext",
+    "AudioBuffer",
+    "AudioBufferSourceNode",
+    "AudioScheduledSourceNode",
+    "AudioNode",
+    "AudioParam",
+    "GainNode",
+    "AudioDestinationNode",
 ] }
 
 # Async runtime for WASM — deliberately NOT the workspace tokio (that one is

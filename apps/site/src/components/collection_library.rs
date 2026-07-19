@@ -19,6 +19,8 @@
 use collection_proto::{Collection, CollectionItem, CollectionServiceClient};
 use dioxus::prelude::*;
 
+use crate::Route;
+
 // ── fts-server URL + establish plumbing ─────────────────────────────────────
 
 /// Read the `fts.<key>` pref from browser localStorage. `None` off-wasm or
@@ -192,7 +194,7 @@ pub fn SessionCollection(org: String, collection: String) -> Element {
             }
         },
         Some(Ok(Loaded::Found(col))) => rsx! {
-            CollectionCard { collection: col.clone() }
+            CollectionCard { org: org.clone(), collection_slug: collection.clone(), collection: col.clone() }
         },
     };
 
@@ -210,9 +212,17 @@ pub fn SessionCollection(org: String, collection: String) -> Element {
     }
 }
 
-/// The resolved collection: title, kind badge, and an ordered song list.
+/// The song slug for an item's node id — `song:praise` → `praise`. This is the
+/// `{song}` segment of the session-view route and the media base slug.
+fn song_slug(item: &CollectionItem) -> String {
+    let id = &item.node.id;
+    id.strip_prefix("song:").unwrap_or(id).to_string()
+}
+
+/// The resolved collection: title, kind badge, and an ordered song list. Each
+/// song links to the session view (`/session/{org}/{collection}/{song}`).
 #[component]
-fn CollectionCard(collection: Collection) -> Element {
+fn CollectionCard(org: String, collection_slug: String, collection: Collection) -> Element {
     let items = collection.items.clone();
     rsx! {
         div {
@@ -229,9 +239,14 @@ fn CollectionCard(collection: Collection) -> Element {
             ol {
                 class: "list-none m-0 p-0 flex flex-col gap-1.5 mt-1.5",
                 for (i, item) in items.iter().enumerate() {
-                    li {
+                    Link {
                         key: "{item.node.to_token()}",
-                        class: "flex items-baseline gap-3 px-3 py-2.5 border border-border rounded-lg bg-card",
+                        to: Route::SongSession {
+                            org: org.clone(),
+                            collection: collection_slug.clone(),
+                            song: song_slug(item),
+                        },
+                        class: "flex items-baseline gap-3 px-3 py-2.5 border border-border rounded-lg bg-card hover:border-primary/60 hover:bg-accent/40 transition-colors",
                         span {
                             class: "text-xs text-muted-foreground/70 min-w-[22px] text-right",
                             "{i + 1}"
