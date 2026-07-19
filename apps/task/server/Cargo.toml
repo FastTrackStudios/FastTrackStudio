@@ -97,6 +97,10 @@ timer = { workspace = true }
 threads = { workspace = true, features = ["server", "vox"] }
 prefs-proto = { workspace = true, features = ["server", "vox"] }
 prefs = { workspace = true }
+# Identity locker: the home org's per-user encrypted linked-server
+# tokens, exposed as the server-level `IdentityService` RPC.
+identity-proto = { workspace = true, features = ["vox"] }
+identity = { workspace = true }
 # Scheduling: day-template service mounted over vox so the app can
 # overlay the daily plan on the calendar. Read-mostly; bookings/slots
 # use in-memory stores until they're surfaced.

@@ -21,6 +21,7 @@ pub mod attachments;
 pub mod capability;
 pub mod connections;
 pub mod forge_sync;
+pub mod identity_mgmt;
 pub mod link_sync;
 pub mod presence;
 pub mod server_mgmt;
@@ -169,6 +170,12 @@ pub struct OrgAppState {
     /// defaults, last "I'm at" location; SeaORM-backed. Mounted for
     /// the `PrefsService` RPC surface.
     pub prefs: prefs::Store,
+    /// Identity locker — per-user encrypted session tokens for
+    /// linked remote servers. `Some` only for the **home** org
+    /// (the identity anchor); `None` for every federated org.
+    /// Backed by `<org>/identity.sqlite`. Mounted for the
+    /// server-level `IdentityService` RPC.
+    pub identity: Option<identity::Store>,
     /// Scheduling backend — day templates / availability under
     /// `vault/Projects/Scheduling/`. Mounted for `DayTemplates` so
     /// the app can overlay the daily plan on the calendar.
@@ -687,6 +694,23 @@ pub(crate) async fn build_org_state(
         .await?;
         let prefs = prefs::Store::new(prefs_conn);
 
+        // Identity locker — only the **home** org anchors it. Opened
+        // at `<org>/identity.sqlite` (per `OrgRoot::identity_db`);
+        // `is_home` comes from the on-disk manifest (same source
+        // `AppState::home_slug` reads). Tokens are (de)crypted with the
+        // shared AEAD secret. Federated orgs get `None`.
+        let is_home = org_root.manifest().map(|m| m.is_home).unwrap_or(false);
+        let identity = if is_home {
+            let identity_url = format!("sqlite://{}?mode=rwc", org_root.identity_db().display());
+            let identity_conn = open_sqlite_pool(scope, identity_url, "identity", |db| {
+                Box::pin(async move { identity::Migrator::up(&db, None).await.map(|()| db) })
+            })
+            .await?;
+            Some(identity::Store::new(identity_conn, auth_secret()))
+        } else {
+            None
+        };
+
         // Scheduling backend rooted at the same vault. Day templates
         // live under `Projects/Scheduling/templates/`; the kv/log
         // stores back bookings + slot caches we don't surface yet, so
@@ -970,7 +994,7 @@ pub(crate) async fn build_org_state(
         // wal_checkpoint pass. Keep in lockstep with the pools
         // opened above — a missing entry only costs checkpoint
         // coverage for that db, never correctness of live serving.
-        let sqlite_conns = vec![
+        let mut sqlite_conns = vec![
             auth.db.clone(),
             agent_tasks.conn().clone(),
             timer.conn().clone(),
@@ -978,6 +1002,11 @@ pub(crate) async fn build_org_state(
             prefs.conn().clone(),
             finance_conn.clone(),
         ];
+        // Identity locker only exists on the home org; include its pool
+        // in the snapshot checkpoint set when it was opened.
+        if let Some(store) = &identity {
+            sqlite_conns.push(store.conn().clone());
+        }
 
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
@@ -1012,6 +1041,7 @@ pub(crate) async fn build_org_state(
             timer,
             threads,
             prefs,
+            identity,
             scheduling,
             inbox,
             recall,
@@ -1315,15 +1345,17 @@ async fn server_vox_handler(
 /// since the embedded CLI process is ephemeral).
 #[must_use]
 pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::LayerRouter {
-    let (mgmt, snap) = if local_trusted {
+    let (mgmt, snap, identity) = if local_trusted {
         (
             crate::server_mgmt::OrgManagementImpl::new_local_trusted(state.clone()),
             crate::snapshot::SnapshotImpl::new_local_trusted(state.clone()),
+            crate::identity_mgmt::IdentityServiceImpl::new_local_trusted(state.clone()),
         )
     } else {
         (
             crate::server_mgmt::OrgManagementImpl::new(state.clone()),
             crate::snapshot::SnapshotImpl::new(state.clone()),
+            crate::identity_mgmt::IdentityServiceImpl::new(state.clone()),
         )
     };
     architect::LayerRouter::new()
@@ -1334,6 +1366,10 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
         .with(
             org_proto::snapshot_descriptor(),
             org_proto::serve_snapshot(snap),
+        )
+        .with(
+            identity_proto::identity_descriptor(),
+            identity_proto::serve_identity(identity),
         )
 }
 
