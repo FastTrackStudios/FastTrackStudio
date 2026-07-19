@@ -482,9 +482,9 @@ impl PatchbayService for PatchbayBackend {
 
     async fn clock(&self) -> Result<ClockInfo, PatchbayError> {
         // Shells out — keep it off the async executor.
-        Ok(tokio::task::spawn_blocking(crate::clock::clock_info)
+        tokio::task::spawn_blocking(crate::clock::clock_info)
             .await
-            .map_err(|e| PatchbayError::Internal(e.to_string()))?)
+            .map_err(|e| PatchbayError::Internal(e.to_string()))
     }
 
     async fn force_quantum(&self, frames: u32) -> Result<(), PatchbayError> {
@@ -494,9 +494,9 @@ impl PatchbayService for PatchbayBackend {
     }
 
     async fn clock_defaults(&self) -> Result<ClockDefaults, PatchbayError> {
-        Ok(tokio::task::spawn_blocking(crate::clock::clock_defaults)
+        tokio::task::spawn_blocking(crate::clock::clock_defaults)
             .await
-            .map_err(|e| PatchbayError::Internal(e.to_string()))?)
+            .map_err(|e| PatchbayError::Internal(e.to_string()))
     }
 
     async fn set_clock_defaults(&self, defaults: ClockDefaults) -> Result<(), PatchbayError> {
@@ -531,9 +531,9 @@ impl PatchbayService for PatchbayBackend {
     }
 
     async fn dante_status(&self) -> Result<DanteStatus, PatchbayError> {
-        Ok(tokio::task::spawn_blocking(crate::dante::status)
+        tokio::task::spawn_blocking(crate::dante::status)
             .await
-            .map_err(|e| PatchbayError::Internal(e.to_string()))?)
+            .map_err(|e| PatchbayError::Internal(e.to_string()))
     }
 
     async fn set_dante(&self, on: bool) -> Result<(), PatchbayError> {
@@ -544,9 +544,9 @@ impl PatchbayService for PatchbayBackend {
     }
 
     async fn services(&self) -> Result<Vec<ServiceStatus>, PatchbayError> {
-        Ok(tokio::task::spawn_blocking(crate::units::status_all)
+        tokio::task::spawn_blocking(crate::units::status_all)
             .await
-            .map_err(|e| PatchbayError::Internal(e.to_string()))?)
+            .map_err(|e| PatchbayError::Internal(e.to_string()))
     }
 
     async fn service_action(
