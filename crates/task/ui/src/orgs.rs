@@ -84,13 +84,11 @@ pub fn home_slug(orgs: &[OrgMeta]) -> String {
 
 // ── discovery ───────────────────────────────────────────────────────
 
-#[cfg(target_arch = "wasm32")]
 #[derive(serde::Deserialize)]
 struct WellKnown {
     orgs: Vec<RawOrg>,
 }
 
-#[cfg(target_arch = "wasm32")]
 #[derive(serde::Deserialize)]
 struct RawOrg {
     slug: String,
@@ -100,7 +98,6 @@ struct RawOrg {
     id: Option<uuid::Uuid>,
 }
 
-#[cfg(target_arch = "wasm32")]
 fn parse_orgs(body: &str) -> Result<Vec<OrgMeta>, String> {
     let wk: WellKnown = serde_json::from_str(body).map_err(|e| format!("parse well-known: {e}"))?;
     Ok(wk
@@ -156,7 +153,28 @@ pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
     parse_orgs(&text)
 }
 
+/// Fetch the hosted org list from `/.well-known/task-server.json`.
+///
+/// Native (desktop/mobile, incl. iOS) has no `window.fetch`; use
+/// `reqwest` (rustls — works in the iOS sandbox) over the same
+/// [`http_base`]-derived URL. This is what makes an installed app with
+/// no `TASK_VOX_URL` env connect: the user-selected server drives
+/// [`http_base`], discovery resolves the org slug, and the vox dial can
+/// proceed (`vox_clients::org_ws_url` needs a real slug).
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
-    Err("org discovery not wired on native".to_owned())
+    let base = http_base();
+    if base.is_empty() {
+        return Err("no server URL configured".to_owned());
+    }
+    let url = format!("{base}/.well-known/task-server.json");
+    let body = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("fetch orgs `{url}`: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("fetch orgs `{url}`: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("orgs body `{url}`: {e}"))?;
+    parse_orgs(&body)
 }
