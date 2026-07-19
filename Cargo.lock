@@ -24694,6 +24694,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "song"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
+]
+
+[[package]]
 name = "sorted-index-buffer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
