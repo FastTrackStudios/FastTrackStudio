@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 ui.workspace = true
+task-telemetry.workspace = true
 
 [features]
 default = ["desktop"]

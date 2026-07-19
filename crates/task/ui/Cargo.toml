@@ -215,6 +215,8 @@ architect-auth = { workspace = true, features = ["client"] }
 # Native org discovery (desktop/mobile/iOS) — `window.fetch` is wasm-only,
 # so `orgs::fetch_orgs` uses reqwest (rustls) for the `.well-known` GET.
 reqwest.workspace = true
+# Direct Sentry capture at the org-discovery failure (native only).
+sentry.workspace = true
 
 [features]
 default = []

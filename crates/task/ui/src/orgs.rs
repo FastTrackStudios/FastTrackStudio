@@ -201,7 +201,17 @@ pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
     .await;
     match &result {
         Ok(orgs) => tracing::info!(url, count = orgs.len(), "org discovery ok"),
-        Err(e) => tracing::warn!(url, error = %e, "org discovery failed"),
+        Err(e) => {
+            tracing::warn!(url, error = %e, "org discovery failed");
+            // Belt-and-suspenders: capture directly so this failure
+            // reaches Sentry even if the client's tracing subscriber was
+            // superseded by dioxus's own subscriber init.
+            #[cfg(not(target_arch = "wasm32"))]
+            sentry::capture_message(
+                &format!("org discovery failed: {e}"),
+                sentry::Level::Warning,
+            );
+        }
     }
     result
 }

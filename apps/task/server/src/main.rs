@@ -5,14 +5,20 @@ use std::net::SocketAddr;
 use eyre::WrapErr;
 use task_server::{AppState, router};
 use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "task_server=info,tower_http=info".into()),
-        )
+    // Sentry error/crash telemetry — hold the guard for all of `main`.
+    let _sentry = task_telemetry::init("task-server");
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "task_server=info,tower_http=info".into());
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(task_telemetry::tracing_layer())
         .init();
 
     let bind: SocketAddr = std::env::var("TASK_SERVER_BIND")
