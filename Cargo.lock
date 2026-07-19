@@ -24697,10 +24697,13 @@ dependencies = [
 name = "song"
 version = "0.1.0"
 dependencies = [
+ "attachments-proto",
  "serde",
  "serde_yaml",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "uuid 1.23.4",
 ]
 
