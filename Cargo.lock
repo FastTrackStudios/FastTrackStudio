@@ -10260,6 +10260,7 @@ name = "fts-site"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "collection-proto",
  "console_error_panic_hook",
  "dioxus",
  "editor",
@@ -10285,6 +10286,8 @@ dependencies = [
  "tracing-wasm",
  "uuid 1.23.4",
  "view-knowledge-graph",
+ "vox-core",
+ "vox-websocket",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

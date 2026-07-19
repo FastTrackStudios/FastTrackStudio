@@ -36,7 +36,16 @@ pub enum Route {
     GuideNotePage { path: Vec<String> },
     #[route("/test/render")]
     TestRender {},
+    // Collection library browser, namespaced under `/session/` so it never
+    // shadows the static routes above. Dials the fts-server's per-org
+    // `CollectionService` and renders the matching collection's songs.
+    #[route("/session/:org/:collection")]
+    SessionCollection { org: String, collection: String },
 }
+
+// Re-export so the `Routable` derive can resolve the `SessionCollection`
+// route component (defined in `components`) by name.
+use components::SessionCollection;
 
 fn main() {
     // Initialize panic hook for better WASM debugging
