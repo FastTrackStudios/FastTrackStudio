@@ -33,6 +33,18 @@ view-calendar.workspace = true
 # vault's `[[wikilink]]` web, built client-side from file contents.
 view-knowledge-graph.workspace = true
 task-ui.workspace = true
+
+# `type: song` vault view — the browser multitrack session player. The real
+# session-ui presentational components (mixer, transport, progress bars) plus
+# the proto types that drive them; the player populates session-ui's global
+# signals directly and renders these components (same crates the fasttrackstudio
+# wasm remote uses). `keyflow` (engraver+text) + `editor-keyflow` render the
+# synced chart pane (CPU engraver → inline SVG + `@font-face` glyphs).
+session-ui = { workspace = true, features = ["web"] }
+session-proto = { workspace = true }
+daw-proto = { workspace = true }
+keyflow = { workspace = true, features = ["engraver", "text"] }
+editor-keyflow = { workspace = true }
 # `vox` for the `DayTemplatesClient` the schedule page calls to load
 # the day-plan overlay. Wasm-clean (serde-only client side).
 scheduling-proto = { workspace = true, features = ["vox", "atom"] }
@@ -176,6 +188,19 @@ web-sys = { workspace = true, features = [
     "Storage",
     "console",
     "Response",
+    # `type: song` session player — Web Audio multitrack. Each stem is streamed
+    # via an HTMLAudioElement (progressive Opus/ogg, low memory) routed through
+    # a per-stem GainNode for the mixer (mute/solo/volume).
+    "AudioContext",
+    "AudioContextState",
+    "BaseAudioContext",
+    "AudioNode",
+    "AudioParam",
+    "GainNode",
+    "AudioDestinationNode",
+    "HtmlAudioElement",
+    "HtmlMediaElement",
+    "MediaElementAudioSourceNode",
 ] }
 futures-channel.workspace = true
 futures-util.workspace = true

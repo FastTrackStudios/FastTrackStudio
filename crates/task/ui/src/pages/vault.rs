@@ -519,6 +519,17 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             .map(|n| n.meta.page_type.to_lowercase())
     });
     let is_video = current_type.as_deref() == Some("video");
+    // A `type: song` note renders the multitrack session player ABOVE the
+    // note body (see the content-pane dispatch below). The media slug is a
+    // `song_slug`/`slug` frontmatter field if present, else the slugified
+    // basename; it selects `/media/songs/{slug}/…` (served same-origin).
+    let is_song = current_type.as_deref() == Some("song");
+    let song_slug_value = if is_song {
+        let front = session.state.peek().doc.to_string();
+        song_slug_from(&front, basename_of(&current))
+    } else {
+        String::new()
+    };
     let is_base = current
         .rsplit_once('.')
         .is_some_and(|(_, e)| e.eq_ignore_ascii_case("base"));
@@ -919,6 +930,14 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                                 node: format!("video:{}", basename_of(&current)),
                             }
                         } else if has_file {
+                            // A `type: song` note renders the multitrack
+                            // session player ABOVE the note body, so the note
+                            // keeps its editor/notes AND shows the player.
+                            if is_song {
+                                crate::pages::song_session::SongView {
+                                    slug: song_slug_value.clone(),
+                                }
+                            }
                             // Obsidian-style note header: editable title
                             // (renames the file) + a structured Properties
                             // editor over the note's frontmatter, mounted
@@ -1204,6 +1223,55 @@ pub(crate) fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
 pub(crate) fn basename_of(path: &str) -> &str {
     let file = path.rsplit('/').next().unwrap_or(path);
     file.strip_suffix(".md").unwrap_or(file)
+}
+
+/// Media slug for a `type: song` note. Prefers a `song_slug:` (or `slug:`)
+/// key in the leading YAML frontmatter block; otherwise slugifies the note
+/// basename. The slug selects `/media/songs/{slug}/…` (served same-origin).
+fn song_slug_from(text: &str, basename: &str) -> String {
+    if let Some(v) = frontmatter_value(text, "song_slug").or_else(|| frontmatter_value(text, "slug"))
+    {
+        let v = v.trim().trim_matches(['"', '\'']).trim();
+        if !v.is_empty() {
+            return v.to_owned();
+        }
+    }
+    slugify(basename)
+}
+
+/// Read a scalar `key: value` from the note's leading `---` frontmatter block.
+fn frontmatter_value(text: &str, key: &str) -> Option<String> {
+    let rest = text.strip_prefix("---")?;
+    let (front, _) = rest.split_once("\n---")?;
+    for line in front.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim() == key {
+                return Some(v.to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Lowercase, spaces/underscores → hyphens, drop other punctuation.
+fn slugify(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_dash = false;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if c == ' ' || c == '_' || c == '-' {
+            if !prev_dash && !out.is_empty() {
+                out.push('-');
+                prev_dash = true;
+            }
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
 }
 
 /// Starter scaffold for a freshly-created note: an empty-but-present
