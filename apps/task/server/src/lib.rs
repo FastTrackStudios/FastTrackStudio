@@ -133,6 +133,10 @@ pub struct OrgAppState {
     /// Typed-link store — verse↔verse, note↔verse, idea↔wiki links with
     /// confidence + visibility (`<org>/links.jsonl`).
     pub links: links::Store,
+    /// Ordered-collection store — song Library / Setlist / Show / Playlist,
+    /// one `CollectionService` per org (`<org>/collections.jsonl`; override
+    /// `TASK_SERVER_COLLECTIONS_PATH`). JSONL-backed, lexorank-ordered.
+    pub collections: collection::Store,
     /// Resource Library reader — serves transcript sidecars under
     /// `<org>/resources/` to the watch/reader UI.
     pub resources: resources::ResourcesBackend,
@@ -938,6 +942,13 @@ pub(crate) async fn build_org_state(
                 );
         // Typed-link store (user-asserted verse/note/wiki links).
         let links = links::Store::open(org_root.path().join("links.jsonl"));
+        // Ordered-collection store — Library / Setlist / Show / Playlist.
+        // JSONL at `<org>/collections.jsonl` (override via
+        // `TASK_SERVER_COLLECTIONS_PATH`, mirroring the vault-root override
+        // so tests can isolate it). A missing file is an empty store.
+        let collections_path = std::env::var("TASK_SERVER_COLLECTIONS_PATH")
+            .map_or_else(|_| org_root.path().join("collections.jsonl"), PathBuf::from);
+        let collections = collection::Store::open(collections_path);
         // Link-graph reader over the same `"default"` vault root
         // the sync backend serves — read-only, so no dir creation.
         let vault_graph = vault::GraphBackend::single("default", vault_root.clone());
@@ -1017,6 +1028,7 @@ pub(crate) async fn build_org_state(
             vault_watcher,
             scripture,
             links,
+            collections,
             resources,
             wiki,
             projects,
@@ -1469,6 +1481,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         inventory::inventory_service_descriptor(),
         scripture::scripture_service_descriptor(),
         links::links_service_descriptor(),
+        collection::collection_service_descriptor(),
         resources_proto::resources_service_rpc_service_descriptor(),
         cookbook::cookbook_service_descriptor(),
         mealplan::mealplan_service_descriptor(),
@@ -1715,6 +1728,11 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             links::links_service_descriptor(),
             links::serve_links_service(org.links.clone()),
+        )
+        // Ordered collections — Library / Setlist / Show / Playlist.
+        .with(
+            collection::collection_service_descriptor(),
+            collection::serve_collection_service(org.collections.clone()),
         )
         .with(
             resources_proto::resources_service_rpc_service_descriptor(),
