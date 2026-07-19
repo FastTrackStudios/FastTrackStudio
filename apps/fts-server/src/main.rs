@@ -50,6 +50,16 @@ async fn main() -> eyre::Result<()> {
     // through to the SPA (index.html) so the client-side router handles deep
     // links like `/session/{org}/{collection}`. Set FTS_WEB_DIR to the dx build
     // output (the dir containing index.html + wasm/ + assets/).
+    // Song media (stems + manifest.json) served same-origin so the browser can
+    // fetch a song's multitrack stems for client-side Web-Audio playback.
+    // FTS_MEDIA_DIR points at the org's `resources/` dir; a song's files live at
+    // `/media/songs/{slug}/…`.
+    if let Ok(media_dir) = std::env::var("FTS_MEDIA_DIR") {
+        use tower_http::services::ServeDir;
+        app = app.nest_service("/media", ServeDir::new(&media_dir));
+        info!(%media_dir, "serving song media at /media");
+    }
+
     if let Ok(web_dir) = std::env::var("FTS_WEB_DIR") {
         use axum::response::Html;
         use tower_http::services::ServeDir;
