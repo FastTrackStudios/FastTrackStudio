@@ -827,6 +827,8 @@ threads = { path = "features/task/threads/threads" }
 threads-ui = { path = "features/task/threads/threads-ui" }
 prefs-proto = { path = "features/task/prefs/prefs-proto" }
 prefs = { path = "features/task/prefs/prefs" }
+identity-proto = { path = "features/task/identity/identity-proto" }
+identity = { path = "features/task/identity/identity" }
 finance-proto = { path = "features/task/finance/finance-proto", default-features = false }
 finance-db = { path = "features/task/finance/finance-db" }
 finance = { path = "features/task/finance/finance" }
