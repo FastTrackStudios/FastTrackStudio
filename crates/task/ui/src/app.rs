@@ -82,12 +82,25 @@ pub fn App() -> Element {
         let _active = server_registry.active_id();
         async move { fetch_orgs().await }
     });
-    use_effect(move || {
-        if let Some(Ok(list)) = &*orgs_res.read_unchecked() {
+    // Surface the discovery outcome so the Servers UI can show *why* it
+    // didn't resolve (native fetch failures are otherwise invisible).
+    let mut discovery_err =
+        use_context_provider(|| crate::orgs::DiscoveryError(Signal::new(None)));
+    use_effect(move || match &*orgs_res.read_unchecked() {
+        Some(Ok(list)) => {
             if *org_list.peek() != *list {
                 org_list.set(list.clone());
             }
+            if discovery_err.0.peek().is_some() {
+                discovery_err.0.set(None);
+            }
         }
+        Some(Err(e)) => {
+            if discovery_err.0.peek().as_deref() != Some(e.as_str()) {
+                discovery_err.0.set(Some(e.clone()));
+            }
+        }
+        None => {}
     });
 
     let org_overrides: OrgThemeOverrides = use_context_provider(|| OrgThemeOverrides {

@@ -6,6 +6,14 @@
 //! `Signal<OrgSelection>` context; data fetchers resolve it to a list
 //! of slugs via [`selected_slugs`] and fan out per org.
 
+/// App-root context: the last org-discovery error (a native `fetch_orgs`
+/// failure), surfaced in the Servers UI so a stuck "org discovery hasn't
+/// resolved yet" shows *why* — a connect timeout, TLS error, 404, etc. —
+/// instead of the app silently sitting on an empty org list. `None` = no
+/// error / discovery succeeded.
+#[derive(Clone, Copy)]
+pub struct DiscoveryError(pub dioxus::prelude::Signal<Option<String>>);
+
 /// One hosted org, as surfaced by the server's well-known endpoint.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct OrgMeta {
@@ -168,13 +176,32 @@ pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
         return Err("no server URL configured".to_owned());
     }
     let url = format!("{base}/.well-known/task-server.json");
-    let body = reqwest::get(&url)
-        .await
-        .map_err(|e| format!("fetch orgs `{url}`: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("fetch orgs `{url}`: {e}"))?
-        .text()
-        .await
-        .map_err(|e| format!("orgs body `{url}`: {e}"))?;
-    parse_orgs(&body)
+    // Explicit connect + total timeouts: on device a stalled DNS/TLS/connect
+    // would otherwise leave the resource pending forever ("org discovery
+    // hasn't resolved yet" with no way to tell why). Fail fast + loud instead.
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .timeout(std::time::Duration::from_secs(20))
+        .user_agent("task-mobile")
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let result = async {
+        let body = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("fetch orgs `{url}`: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("fetch orgs `{url}`: {e}"))?
+            .text()
+            .await
+            .map_err(|e| format!("orgs body `{url}`: {e}"))?;
+        parse_orgs(&body)
+    }
+    .await;
+    match &result {
+        Ok(orgs) => tracing::info!(url, count = orgs.len(), "org discovery ok"),
+        Err(e) => tracing::warn!(url, error = %e, "org discovery failed"),
+    }
+    result
 }

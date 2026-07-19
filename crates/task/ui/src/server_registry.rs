@@ -183,6 +183,8 @@ pub fn ServersPanel() -> Element {
     let mut registry = use_context::<ServerRegistry>();
     let mut label = use_signal(String::new);
     let mut url = use_signal(String::new);
+    // Why discovery didn't resolve for the active server, if it failed.
+    let discovery_err = use_context::<crate::orgs::DiscoveryError>().0;
 
     let servers = registry.list();
     let active = registry.active_id();
@@ -209,6 +211,12 @@ pub fn ServersPanel() -> Element {
 
     rsx! {
         div { class: "flex flex-col gap-3",
+            if let Some(err) = discovery_err.read().as_ref() {
+                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-2 py-2 text-xs text-destructive",
+                    div { class: "font-medium", "Couldn't reach this server" }
+                    div { class: "mt-0.5 break-words opacity-90", "{err}" }
+                }
+            }
             if servers.is_empty() {
                 div { class: "px-1 text-xs text-muted-foreground",
                     "No servers yet. Add one below (e.g. task.starcommand.live)."
