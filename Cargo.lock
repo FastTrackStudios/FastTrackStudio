@@ -10251,6 +10251,7 @@ dependencies = [
  "eyre",
  "task-server",
  "tokio",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
 ]

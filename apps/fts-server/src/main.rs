@@ -41,7 +41,32 @@ async fn main() -> eyre::Result<()> {
     let org_slug = std::env::var("FTS_SERVER_ORG").ok();
     let state = AppState::new(org_slug.as_deref()).await?;
     let scope = state.scope.clone();
-    let app = router(state);
+    let mut app = router(state);
+
+    // Serve the fasttrackstudio.app web bundle SAME-ORIGIN alongside vox, so the
+    // browser reaches `/org/{slug}/vox` on the very host that served the page
+    // (architect's same-origin remote pattern — no second port to reach). The
+    // vox / health / blob routes above take precedence; everything else falls
+    // through to the SPA (index.html) so the client-side router handles deep
+    // links like `/session/{org}/{collection}`. Set FTS_WEB_DIR to the dx build
+    // output (the dir containing index.html + wasm/ + assets/).
+    if let Ok(web_dir) = std::env::var("FTS_WEB_DIR") {
+        use axum::response::Html;
+        use tower_http::services::ServeDir;
+        let web = std::path::PathBuf::from(&web_dir);
+        // Asset dirs served as files; everything else (`/`, and SPA deep links
+        // like `/session/{org}/{collection}`) returns index.html so the wasm
+        // router takes over. Version-independent SPA fallback.
+        let index_body = std::fs::read_to_string(web.join("index.html")).unwrap_or_default();
+        app = app
+            .nest_service("/wasm", ServeDir::new(web.join("wasm")))
+            .nest_service("/assets", ServeDir::new(web.join("assets")))
+            .fallback(move || {
+                let b = index_body.clone();
+                async move { Html(b) }
+            });
+        info!(%web_dir, "serving web bundle (SPA) same-origin");
+    }
 
     info!(%bind, "fts-server listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;

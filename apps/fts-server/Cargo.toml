@@ -17,3 +17,4 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 eyre = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+tower-http = { workspace = true, features = ["fs"] }

@@ -40,10 +40,25 @@ fn pref(_key: &str) -> Option<String> {
 /// `task-server-ws-url` pref, default `ws://127.0.0.1:18080`. Any trailing
 /// `/vox` or `/` is stripped so the per-org path composes cleanly.
 fn task_server_base() -> String {
-    let raw = pref("task-server-ws-url").unwrap_or_else(|| "ws://127.0.0.1:18080".to_string());
-    let trimmed = raw.trim();
-    let trimmed = trimmed.strip_suffix("/vox").unwrap_or(trimmed);
-    trimmed.trim_end_matches('/').to_string()
+    // Explicit override wins (localStorage `fts.task-server-ws-url`).
+    if let Some(raw) = pref("task-server-ws-url") {
+        let t = raw.trim();
+        let t = t.strip_suffix("/vox").unwrap_or(t);
+        return t.trim_end_matches('/').to_string();
+    }
+    // Architect same-origin: the host that served this page also serves vox
+    // (prod: the fasttrackstudio.app ingress; dev: dx proxies the path to
+    // fts-server). No second port for the browser to reach.
+    if let Some(w) = web_sys::window() {
+        let loc = w.location();
+        if let (Ok(proto), Ok(host)) = (loc.protocol(), loc.host()) {
+            let scheme = if proto == "https:" { "wss" } else { "ws" };
+            if !host.is_empty() {
+                return format!("{scheme}://{host}");
+            }
+        }
+    }
+    "ws://127.0.0.1:18080".to_string()
 }
 
 /// The per-org vox URL for `org` on the configured fts-server.
