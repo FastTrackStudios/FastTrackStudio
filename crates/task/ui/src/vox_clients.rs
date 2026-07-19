@@ -216,6 +216,33 @@ fn org_ws_url(slug: &str) -> Result<String, String> {
     Ok(format!("{trimmed}/org/{slug}/vox"))
 }
 
+/// Server-level vox endpoint (`/server/vox`) — the process-wide surface
+/// (identity locker, etc.), NOT a per-org one. Normalizes any active
+/// base — `wss://host/vox`, bare `wss://host`, or a per-org
+/// `wss://host/org/<slug>/vox` — down to `wss://host/server/vox` by
+/// keeping only the scheme + authority.
+fn server_ws_url(base_override: Option<&str>) -> Result<String, String> {
+    let base = base_override.map(str::to_owned).unwrap_or_else(vox_url);
+    let base = base.trim();
+    if base.is_empty() {
+        return Err("no vox URL configured (set TASK_VOX_URL[_WEB])".to_owned());
+    }
+    let (scheme, rest) = base.split_once("://").unwrap_or(("wss", base));
+    let host = rest.split('/').next().unwrap_or(rest);
+    Ok(format!("{scheme}://{host}/server/vox"))
+}
+
+/// Establish *any* service client against the server-level `/server/vox`
+/// endpoint (see [`server_ws_url`]). Cross-target — `establish_at`
+/// handles the wasm vs native transport. Used for the identity locker,
+/// which is mounted per server-process, not per org.
+pub async fn establish_server<C>(base_override: Option<&str>) -> Result<C, String>
+where
+    C: vox_core::FromVoxLane + Clone + 'static,
+{
+    establish_at::<C>(&server_ws_url(base_override)?).await
+}
+
 /// One shared [`vox_core::Caller`] per org — the handle every typed
 /// client is built from. On wasm the connection root (a liveness-only
 /// `NoopClient`) is cached per slug: one socket per org, no matter how

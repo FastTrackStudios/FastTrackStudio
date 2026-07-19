@@ -117,6 +117,11 @@ git-proto = { workspace = true, features = ["vox"] }
 # like the other proto clients above.
 auth-proto = { workspace = true, features = ["vox"] }
 prefs-proto = { workspace = true, features = ["vox"] }
+# identity-locker wire surface — `IdentityServiceClient` for
+# client-side multi-server sync (`src/auth.rs`): pull linked servers
+# from the home locker on sign-in, push new links up. `vox` feature
+# only (no `server`), wasm-clean like the other proto clients above.
+identity-proto = { workspace = true, features = ["vox"] }
 
 # App-wide keyboard shortcuts (src/shortcuts.rs): trie-based key
 # dispatch (multi-key `g h` sequences, chord parsing, keymap config).

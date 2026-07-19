@@ -26,6 +26,7 @@ use fts_ui::prelude::*;
 use uuid::Uuid;
 
 use auth_proto::{AuthServiceClient, AuthUser, SignInEmailPassword, SignUpEmailPassword};
+use identity_proto::{IdentityServiceClient, LinkServerRequest};
 
 use crate::orgs::{OrgMeta, home_slug};
 use crate::presence::{ManualStatus, PresenceLocal, PresenceStatus};
@@ -165,6 +166,18 @@ impl AuthCtx {
     }
 }
 
+/// The server whose identity locker we last pulled — the anchor we push
+/// new links UP to. A server is a locker host iff its `list_links`
+/// answered (see [`pull_locker`]); non-locker servers leave this at the
+/// previously-anchored home so [`push_link`] still targets it.
+#[derive(Clone, PartialEq)]
+struct HomeLocker {
+    /// The home server's vox base URL (matches [`crate::vox_session::ActiveServer::url`]).
+    url: String,
+    /// The session token that authenticates us against the locker.
+    token: String,
+}
+
 /// The signals the auth service mutates — plumbed as one bundle so
 /// the coroutine closure and the async workers stay readable.
 #[derive(Clone, Copy)]
@@ -177,6 +190,10 @@ struct AuthState {
     /// the active [`crate::server_registry::ServerEntry`] so each server
     /// remembers who you signed in as (see [`sync_active_server_entry`]).
     registry: crate::server_registry::ServerRegistry,
+    /// The server whose identity locker anchors multi-server sync — set
+    /// by [`pull_locker`] when a signed-into server turns out to host a
+    /// locker; read by [`push_link`] to decide where to push new links.
+    home_locker: Signal<Option<HomeLocker>>,
 }
 
 /// Mirror a freshly-resolved session into the active server's registry
@@ -213,6 +230,110 @@ fn sync_active_server_entry(
     registry.upsert(entry);
 }
 
+/// Pull the identity locker from the server we just signed into.
+///
+/// If that server hosts a locker (its `list_links` answers), it becomes
+/// the [`HomeLocker`] anchor and every linked server it knows about is
+/// upserted into the multi-server [`crate::server_registry::ServerRegistry`]
+/// — token, user id, email, label all mirrored so switching to any of
+/// them is instant. A server WITHOUT a locker (`list_links` errors) is a
+/// plain remote: no-op, the previous anchor stands. Never touches the
+/// active selection.
+async fn pull_locker(mut st: AuthState, account: &ActiveAccount) {
+    let Some(server) = crate::vox_session::active_server() else {
+        return;
+    };
+    let client = match crate::vox_clients::establish_server::<IdentityServiceClient>(Some(
+        &server.url,
+    ))
+    .await
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let links = match client.list_links(account.token.clone()).await {
+        // Err = this server has no locker / isn't a home server. No-op —
+        // NOT fatal: it's just a plain remote we've signed into.
+        Ok(l) => l,
+        Err(_) => return,
+    };
+    // This server IS a locker host → it's our identity anchor.
+    st.home_locker.set(Some(HomeLocker {
+        url: server.url.clone(),
+        token: account.token.clone(),
+    }));
+    for link in links {
+        let mut entry = st
+            .registry
+            .list()
+            .into_iter()
+            .find(|e| e.server_url == link.remote_url)
+            .unwrap_or_else(|| {
+                crate::server_registry::ServerEntry::new(link.label.clone(), link.remote_url.clone())
+            });
+        entry.session_token = link.token;
+        entry.my_user_id = link.remote_user_id;
+        entry.my_email = link.remote_email;
+        entry.label = link.label;
+        st.registry.upsert(entry);
+    }
+}
+
+/// Push the server we just signed into UP to the home locker as a linked
+/// server, so the locker (and every other client of it) learns about it.
+///
+/// Best-effort: no anchor, no active server, or a link RPC error is a
+/// silent no-op. Skips when the active server IS the home locker (you
+/// don't link a server to itself) — which is exactly the case right
+/// after [`pull_locker`] anchored THIS server.
+async fn push_link(st: AuthState, account: &ActiveAccount) {
+    let Some(home) = st.home_locker.peek().clone() else {
+        return;
+    };
+    let Some(server) = crate::vox_session::active_server() else {
+        return;
+    };
+    if server.url == home.url {
+        return;
+    }
+    let label = st
+        .registry
+        .active_entry()
+        .map(|e| e.label)
+        .filter(|l| !l.trim().is_empty())
+        .unwrap_or_else(|| {
+            server
+                .url
+                .split("://")
+                .nth(1)
+                .unwrap_or(&server.url)
+                .split('/')
+                .next()
+                .unwrap_or(&server.url)
+                .to_owned()
+        });
+    let remote_slug = home_slug(&st.orgs.peek());
+    let client = match crate::vox_clients::establish_server::<IdentityServiceClient>(Some(&home.url))
+        .await
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    // Best-effort — tolerate errors (the locker is a convenience mirror).
+    let _ = client
+        .link_server(LinkServerRequest {
+            session_token: home.token,
+            label,
+            remote_url: server.url,
+            remote_slug,
+            remote_user_id: Some(account.user_id),
+            remote_email: Some(account.email.clone()),
+            token: Some(account.token.clone()),
+            expires_at: None,
+        })
+        .await;
+}
+
 /// Switch to `email`: cached token → `whoami` validates; on miss or
 /// invalid → real `sign_in_email_password` → cache the fresh token.
 /// Sets the context + persists `task.auth.active`. The previous
@@ -231,6 +352,11 @@ async fn run_switch(mut st: AuthState, email: &str) {
         Ok(account) => {
             save_active_email(&account.email);
             sync_active_server_entry(st.registry, Some(&account));
+            // Multi-server sync: pull this server's locker (if it hosts
+            // one, it becomes the anchor), then push it up to whatever
+            // anchor stands. Both borrow `&account` before the move.
+            pull_locker(st, &account).await;
+            push_link(st, &account).await;
             st.active.set(Some(account));
         }
         Err(e) => st.error.set(Some(e)),
@@ -291,6 +417,9 @@ async fn run_credential_sign_in(
         Ok(account) => {
             save_active_email(&account.email);
             sync_active_server_entry(st.registry, Some(&account));
+            // Same multi-server sync as run_switch (borrow before move).
+            pull_locker(st, &account).await;
+            push_link(st, &account).await;
             st.active.set(Some(account));
         }
         Err(e) => st.error.set(Some(e)),
@@ -330,12 +459,14 @@ pub fn provide_auth() -> AuthCtx {
     let active = use_signal(|| None::<ActiveAccount>);
     let error = use_signal(|| None::<String>);
     let busy = use_signal(|| false);
+    let home_locker = use_signal(|| None::<HomeLocker>);
     let st = AuthState {
         active,
         error,
         busy,
         orgs,
         registry,
+        home_locker,
     };
 
     // The auth service: one sequential consumer for every auth action
