@@ -10,6 +10,7 @@ mod chart_renderer;
 mod keyboard;
 mod live_editor;
 pub(crate) mod modes;
+mod session_chart_pane;
 mod song_session;
 
 pub use input_tutorial::InputTutorial;
@@ -17,4 +18,5 @@ pub use chart_editor::{ExportButton, HighlightedEditor, PreviewMode, StaticChart
 pub use chart_renderer::LayoutMode;
 pub use collection_library::SessionCollection;
 pub use live_editor::LiveEditor;
+pub use session_chart_pane::SessionChartPane;
 pub use song_session::SongSession;

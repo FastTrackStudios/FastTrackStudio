@@ -47,6 +47,14 @@ collection-proto = { workspace = true, features = ["vox"] }
 vox-core = { workspace = true }
 vox-websocket = { workspace = true }
 
+# Session performance view — the real session-ui presentational components
+# (mixer, transport, progress bars) plus the proto types that drive them. The
+# browser session player populates session-ui's global signals directly and
+# renders these components (same crates the fasttrackstudio wasm remote uses).
+session-ui = { workspace = true, features = ["web"] }
+session-proto = { workspace = true }
+daw-proto = { workspace = true }
+
 # Color type used by the engraver's SVG export config
 peniko = { workspace = true }
 
