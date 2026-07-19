@@ -32,21 +32,30 @@ final class PhoneSync: NSObject, WCSessionDelegate {
         session.activate()
         // The phone may have delivered a context before we activated —
         // `receivedApplicationContext` holds the latest one, replayed here.
-        apply(session.receivedApplicationContext)
+        let ctx = session.receivedApplicationContext
+        apply(
+            base: ctx["baseURL"] as? String,
+            slug: ctx["orgSlug"] as? String,
+            token: ctx["token"] as? String
+        )
     }
 
-    /// Apply an application-context dictionary to the store (main-actor).
-    private func apply(_ ctx: [String: Any]) {
+    /// Apply the three config fields to the store (main-actor). Takes plain
+    /// `String?`s (Sendable) rather than the `[String: Any]` context, so the
+    /// nonisolated delegate callbacks can extract values on their own actor
+    /// and hand only Sendable data across the main-actor hop (Swift 6 strict
+    /// concurrency — a captured `[String: Any]` would race).
+    private func apply(base: String?, slug: String?, token: String?) {
         guard let store else { return }
-        if let base = ctx["baseURL"] as? String, !base.isEmpty { store.baseURL = base }
-        if let slug = ctx["orgSlug"] as? String, !slug.isEmpty { store.orgSlug = slug }
-        if let token = ctx["token"] as? String, !token.isEmpty { store.token = token }
+        if let base, !base.isEmpty { store.baseURL = base }
+        if let slug, !slug.isEmpty { store.orgSlug = slug }
+        if let token, !token.isEmpty { store.token = token }
     }
 
     // ── WCSessionDelegate ──
     // On watchOS the only required callback is activation completion; the
     // inactive/deactivate pair is iOS-only. Delegate callbacks arrive off the
-    // main actor, so hop back before touching the @MainActor store.
+    // main actor, so extract the Sendable values here, then hop to apply them.
 
     nonisolated func session(
         _ session: WCSession,
@@ -54,13 +63,19 @@ final class PhoneSync: NSObject, WCSessionDelegate {
         error: Error?
     ) {
         let ctx = session.receivedApplicationContext
-        Task { @MainActor in self.apply(ctx) }
+        let base = ctx["baseURL"] as? String
+        let slug = ctx["orgSlug"] as? String
+        let token = ctx["token"] as? String
+        Task { @MainActor [weak self] in self?.apply(base: base, slug: slug, token: token) }
     }
 
     nonisolated func session(
         _ session: WCSession,
         didReceiveApplicationContext applicationContext: [String: Any]
     ) {
-        Task { @MainActor in self.apply(applicationContext) }
+        let base = applicationContext["baseURL"] as? String
+        let slug = applicationContext["orgSlug"] as? String
+        let token = applicationContext["token"] as? String
+        Task { @MainActor [weak self] in self?.apply(base: base, slug: slug, token: token) }
     }
 }
