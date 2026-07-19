@@ -686,6 +686,10 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
     let local = use_context::<PresenceLocal>();
     let mut manual = local.manual;
     let mut open = use_signal(|| false);
+    // The "Servers…" item opens a modal hosting the same Servers +
+    // Sign-in surface the mobile account sheet carries — a dialog, not
+    // the roving-focus menu, so the text inputs behave.
+    let mut servers_open = use_signal(|| false);
 
     let account = active.read().clone();
     let (name, email) = account.as_ref().map_or_else(
@@ -777,12 +781,22 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
                         }
                     }
                     DropdownSeparator {}
+                    DropdownItem {
+                        value: "__servers".to_string(),
+                        index: DEV_ACCOUNTS.len(),
+                        on_select: move |_| {
+                            open.set(false);
+                            servers_open.set(true);
+                        },
+                        "Servers…"
+                    }
+                    DropdownSeparator {}
                     DropdownLabel { "Status" }
                     for (idx, (value, label, status)) in status_options.into_iter().enumerate() {
                         DropdownItem {
                             key: "{label}",
                             value: label.to_string(),
-                            index: DEV_ACCOUNTS.len() + idx,
+                            index: DEV_ACCOUNTS.len() + 1 + idx,
                             on_select: move |_| {
                                 manual.set(value);
                                 open.set(false);
@@ -801,7 +815,7 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
                     DropdownSeparator {}
                     DropdownItem {
                         value: "__sign_out".to_string(),
-                        index: DEV_ACCOUNTS.len() + status_options.len(),
+                        index: DEV_ACCOUNTS.len() + status_options.len() + 1,
                         destructive: true,
                         on_select: move |_| {
                             open.set(false);
@@ -813,6 +827,32 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
             }
             if let Some(msg) = error.read().as_ref() {
                 div { class: "px-1 text-[11px] text-destructive", "{msg}" }
+            }
+
+            // Servers + sign-in modal — the desktop surface for the
+            // multi-server registry (mirrors the mobile account sheet).
+            Dialog {
+                open: servers_open(),
+                on_open_change: move |o| servers_open.set(o),
+                class: "sm:max-w-lg",
+                DialogHeader {
+                    DialogTitle { "Servers" }
+                    DialogDescription {
+                        "Add a server by URL, pick which one the app connects to, and sign in."
+                    }
+                }
+                section { class: "flex flex-col gap-2",
+                    h3 { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                        "Connections"
+                    }
+                    crate::server_registry::ServersPanel {}
+                }
+                section { class: "flex flex-col gap-2",
+                    h3 { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                        "Sign in"
+                    }
+                    LoginForm {}
+                }
             }
         }
     }
