@@ -9450,6 +9450,7 @@ dependencies = [
  "architect",
  "axum",
  "base64 0.22.1",
+ "collection-proto",
  "cpal 0.18.1",
  "daw",
  "daw-audio-io",
