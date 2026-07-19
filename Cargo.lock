@@ -3715,6 +3715,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "724d27a0ee38b700e5e164350e79aba601a0db673ac47fce1cb74c3e38864036"
 
 [[package]]
+name = "collection"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "collection-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
+ "vault-live",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "collection-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "links-proto",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "color"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

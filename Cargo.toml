@@ -864,6 +864,8 @@ scripture = { path = "features/task/scripture/scripture" }
 scripture-proto = { path = "features/task/scripture/scripture-proto", default-features = false }
 links = { path = "features/task/links/links" }
 links-proto = { path = "features/task/links/links-proto", default-features = false }
+collection = { path = "features/task/collection/collection" }
+collection-proto = { path = "features/task/collection/collection-proto", default-features = false }
 resources = { path = "features/task/resources/resources" }
 resources-proto = { path = "features/task/resources/resources-proto", default-features = false }
 cookbook = { path = "features/task/mealplan/cookbook" }
