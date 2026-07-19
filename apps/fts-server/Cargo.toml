@@ -1,0 +1,19 @@
+[package]
+name = "fts-server"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The public FastTrackStudio.app platform server. Same architecture as
+# task-server (per-org vox router: org / vault / attachments / collection),
+# federatable with it, but a DISTINCT server + deployment. Reuses the
+# `task_server` router core as a library today; grows fts-specific
+# session + audio-streaming services on top.
+
+[dependencies]
+task-server = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+eyre = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

@@ -256,6 +256,7 @@ members = [
     "crates/patchbay/ui",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/fasttrackstudio",
+    "apps/fts-server",
     "apps/patchbay",
     "apps/installer",
     "apps/fts-cli",
@@ -821,6 +822,7 @@ tag-proto = { path = "features/task/tag/tag-proto" }
 tag = { path = "features/task/tag/tag" }
 task = { path = "features/task/task/task", default-features = false }
 task-ui = { path = "features/task/task/task-ui" }
+task-server = { path = "apps/task/server" }
 project = { path = "features/task/project/project", default-features = false }
 org-proto = { path = "features/task/org/org-proto" }
 org-snapshot = { path = "features/task/org/org-snapshot" }
