@@ -33,6 +33,7 @@ pub mod repos;
 pub mod schedule;
 pub mod scripture;
 pub mod session_chart_pane;
+pub mod setlist_session;
 pub mod song_session;
 pub mod settings;
 pub mod task_detail;

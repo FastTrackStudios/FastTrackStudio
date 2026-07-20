@@ -530,6 +530,16 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     } else {
         String::new()
     };
+    // A `type: setlist` note renders the setlist session player ABOVE the note
+    // body. The ordered set is the `songs:` YAML list in the frontmatter (each
+    // entry a media slug selecting `/media/songs/{slug}/…`).
+    let is_setlist = current_type.as_deref() == Some("setlist");
+    let setlist_songs_value = if is_setlist {
+        let front = session.state.peek().doc.to_string();
+        setlist_songs_from(&front)
+    } else {
+        Vec::new()
+    };
     let is_base = current
         .rsplit_once('.')
         .is_some_and(|(_, e)| e.eq_ignore_ascii_case("base"));
@@ -938,6 +948,14 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                                     slug: song_slug_value.clone(),
                                 }
                             }
+                            // A `type: setlist` note renders the setlist session
+                            // player (whole set + current-song tabs) above the
+                            // note body, so the run-of-show notes still show.
+                            if is_setlist {
+                                crate::pages::setlist_session::SetlistPlayer {
+                                    songs: setlist_songs_value.clone(),
+                                }
+                            }
                             // Obsidian-style note header: editable title
                             // (renames the file) + a structured Properties
                             // editor over the note's frontmatter, mounted
@@ -1237,6 +1255,58 @@ fn song_slug_from(text: &str, basename: &str) -> String {
         }
     }
     slugify(basename)
+}
+
+/// Ordered media slugs for a `type: setlist` note, parsed from the `songs:`
+/// YAML list in the leading frontmatter. Accepts both the block form
+///
+/// ```yaml
+/// songs:
+///   - song-a
+///   - song-b
+/// ```
+///
+/// and the inline flow form `songs: [song-a, song-b]`. Each entry is trimmed
+/// of quotes/whitespace; blanks are dropped.
+fn setlist_songs_from(text: &str) -> Vec<String> {
+    let Some(rest) = text.strip_prefix("---") else {
+        return Vec::new();
+    };
+    let Some((front, _)) = rest.split_once("\n---") else {
+        return Vec::new();
+    };
+    let clean = |s: &str| s.trim().trim_matches(['"', '\'']).trim().to_owned();
+
+    let mut lines = front.lines();
+    let mut out = Vec::new();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        let Some(after) = trimmed.strip_prefix("songs:") else {
+            continue;
+        };
+        let after = after.trim();
+        // Inline flow list: songs: [a, b, c]
+        if let Some(inner) = after.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            out.extend(inner.split(',').map(clean).filter(|s| !s.is_empty()));
+            return out;
+        }
+        // Block list: subsequent `- item` lines.
+        for l in lines.by_ref() {
+            let t = l.trim_start();
+            if let Some(item) = t.strip_prefix("- ").or_else(|| t.strip_prefix('-')) {
+                let v = clean(item);
+                if !v.is_empty() {
+                    out.push(v);
+                }
+            } else if t.is_empty() {
+                continue;
+            } else {
+                break; // next frontmatter key ends the list
+            }
+        }
+        return out;
+    }
+    out
 }
 
 /// Read a scalar `key: value` from the note's leading `---` frontmatter block.

@@ -40,7 +40,7 @@
 // wasm32: the real player.
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(target_arch = "wasm32")]
-mod imp {
+pub(crate) mod imp {
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -73,49 +73,49 @@ mod imp {
     /// Stable synthetic project guid for the single-song setlist.
     const PROJECT_GUID_PREFIX: &str = "web-session:";
     /// Transport poll interval (ms). ~10 Hz: smooth playhead + drift/buffering.
-    const TICK_MS: u32 = 100;
+    pub(crate) const TICK_MS: u32 = 100;
 
     // ── manifest model ──────────────────────────────────────────────────────
 
     #[derive(Clone, Debug, PartialEq, Deserialize)]
-    struct Manifest {
+    pub(crate) struct Manifest {
         #[allow(dead_code)]
         slug: Option<String>,
-        title: Option<String>,
-        artist: Option<String>,
-        key: Option<String>,
-        bpm: Option<f64>,
-        time_signature: Option<String>,
-        duration_sec: f64,
+        pub(crate) title: Option<String>,
+        pub(crate) artist: Option<String>,
+        pub(crate) key: Option<String>,
+        pub(crate) bpm: Option<f64>,
+        pub(crate) time_signature: Option<String>,
+        pub(crate) duration_sec: f64,
         #[serde(default)]
-        sections: Vec<Section>,
+        pub(crate) sections: Vec<Section>,
         #[serde(default)]
-        stems: Vec<StemSpec>,
+        pub(crate) stems: Vec<StemSpec>,
     }
 
     #[derive(Clone, Debug, PartialEq, Deserialize)]
-    struct Section {
-        name: String,
-        start_sec: f64,
-        end_sec: f64,
+    pub(crate) struct Section {
+        pub(crate) name: String,
+        pub(crate) start_sec: f64,
+        pub(crate) end_sec: f64,
     }
 
     #[derive(Clone, Debug, PartialEq, Deserialize)]
-    struct StemSpec {
-        name: String,
+    pub(crate) struct StemSpec {
+        pub(crate) name: String,
         #[serde(default)]
-        group: Option<String>,
-        file: String,
+        pub(crate) group: Option<String>,
+        pub(crate) file: String,
         #[serde(default)]
-        default_muted: bool,
+        pub(crate) default_muted: bool,
     }
 
     /// Per-stem UI/mix state, indexed parallel to `Manifest::stems`.
     #[derive(Clone, Copy)]
-    struct StemUi {
-        muted: bool,
-        soloed: bool,
-        volume: f32,
+    pub(crate) struct StemUi {
+        pub(crate) muted: bool,
+        pub(crate) soloed: bool,
+        pub(crate) volume: f32,
     }
 
     // ── the streaming Web Audio engine ──────────────────────────────────────
@@ -123,29 +123,27 @@ mod imp {
     /// One streamed stem: its media element (the actual audio source, streamed
     /// progressively) plus the gain node the mixer drives. The
     /// `MediaElementAudioSourceNode` is kept alive so the routing survives.
-    struct StemNode {
+    pub(crate) struct StemNode {
         el: HtmlAudioElement,
         gain: GainNode,
-        #[allow(dead_code)]
         node: web_sys::MediaElementAudioSourceNode,
     }
 
     /// The shared playback graph. Held in an `Rc<RefCell<…>>` so the resource
     /// future, the poll loop, and every event handler can drive it. Element 0
     /// is the master clock; there is no separate anchor arithmetic.
-    struct EngineInner {
-        #[allow(dead_code)]
-        ctx: AudioContext,
-        stems: Vec<StemNode>,
-        duration: f64,
-        playing: bool,
+    pub(crate) struct EngineInner {
+        pub(crate) ctx: AudioContext,
+        pub(crate) stems: Vec<StemNode>,
+        pub(crate) duration: f64,
+        pub(crate) playing: bool,
     }
 
-    type Engine = Rc<RefCell<EngineInner>>;
+    pub(crate) type Engine = Rc<RefCell<EngineInner>>;
 
     impl EngineInner {
         /// Current song position — the master element's playback time.
-        fn position(&self) -> f64 {
+        pub(crate) fn position(&self) -> f64 {
             self.stems
                 .first()
                 .map(|s| s.el.current_time())
@@ -154,7 +152,7 @@ mod imp {
         }
 
         /// Resume the context, park every element at `offset`, and play them.
-        fn play(&mut self, offset: f64) {
+        pub(crate) fn play(&mut self, offset: f64) {
             let _ = self.ctx.resume();
             for s in &self.stems {
                 s.el.set_current_time(offset);
@@ -163,29 +161,43 @@ mod imp {
             self.playing = true;
         }
 
-        fn pause(&mut self) {
+        pub(crate) fn pause(&mut self) {
             for s in &self.stems {
                 let _ = s.el.pause();
             }
             self.playing = false;
         }
 
+        /// Stop playback and release the audio graph. Called when a setlist
+        /// swaps to a different song so the old song's media elements stop
+        /// streaming and the context is freed.
+        pub(crate) fn teardown(&mut self) {
+            for s in &self.stems {
+                let _ = s.el.pause();
+                s.el.set_src("");
+                let _ = s.node.disconnect();
+                let _ = s.gain.disconnect();
+            }
+            self.playing = false;
+            let _ = self.ctx.close();
+        }
+
         /// Jump every element to `offset` (works whether or not playing —
         /// elements keep streaming from the new position).
-        fn seek(&mut self, offset: f64) {
+        pub(crate) fn seek(&mut self, offset: f64) {
             for s in &self.stems {
                 s.el.set_current_time(offset);
             }
         }
 
-        fn set_stem_gain(&self, idx: usize, value: f32) {
+        pub(crate) fn set_stem_gain(&self, idx: usize, value: f32) {
             if let Some(stem) = self.stems.get(idx) {
                 stem.gain.gain().set_value(value);
             }
         }
 
         /// Resync stems to the master (element 0). Never touches the master.
-        fn correct_drift(&self) {
+        pub(crate) fn correct_drift(&self) {
             let Some(master) = self.stems.first() else {
                 return;
             };
@@ -198,7 +210,7 @@ mod imp {
         }
 
         /// How many stems have at least HAVE_CURRENT_DATA buffered.
-        fn ready_count(&self) -> usize {
+        pub(crate) fn ready_count(&self) -> usize {
             self.stems
                 .iter()
                 .filter(|s| s.el.ready_state() >= HAVE_CURRENT_DATA)
@@ -208,7 +220,7 @@ mod imp {
 
     /// Push the mixer state (mute/solo/volume) into the gain nodes. Solo wins:
     /// if anything is soloed, only soloed-and-unmuted stems are audible.
-    fn apply_mix(eng: &Engine, ui: &[StemUi]) {
+    pub(crate) fn apply_mix(eng: &Engine, ui: &[StemUi]) {
         let any_solo = ui.iter().any(|s| s.soloed);
         let e = eng.borrow();
         for (i, s) in ui.iter().enumerate() {
@@ -223,7 +235,7 @@ mod imp {
 
     // ── fetch helpers (same-origin) ─────────────────────────────────────────
 
-    async fn fetch_text(url: &str) -> Result<String, String> {
+    pub(crate) async fn fetch_text(url: &str) -> Result<String, String> {
         let win = web_sys::window().ok_or_else(|| "no window".to_string())?;
         let resp_val = JsFuture::from(win.fetch_with_str(url))
             .await
@@ -242,7 +254,7 @@ mod imp {
             .ok_or_else(|| format!("{url}: response was not text"))
     }
 
-    async fn fetch_manifest(url: &str) -> Result<Manifest, String> {
+    pub(crate) async fn fetch_manifest(url: &str) -> Result<Manifest, String> {
         let txt = fetch_text(url).await?;
         serde_json::from_str(&txt).map_err(|e| format!("{url}: bad manifest json: {e}"))
     }
@@ -252,7 +264,7 @@ mod imp {
     /// media-element-source → gain → destination. Synchronous and side-effect
     /// free apart from element creation — no fetch/decode, so no per-stem
     /// progress signal and nothing to re-fire on transport ticks.
-    fn build_engine(slug: &str, manifest: &Manifest) -> Result<Engine, String> {
+    pub(crate) fn build_engine(slug: &str, manifest: &Manifest) -> Result<Engine, String> {
         let ctx = AudioContext::new().map_err(|e| format!("AudioContext: {e:?}"))?;
         let dest = ctx.destination();
         let mut stems = Vec::with_capacity(manifest.stems.len());
@@ -321,11 +333,20 @@ mod imp {
         }
     }
 
-    /// Build the one-song `Setlist` that drives session-ui from the manifest.
-    fn build_setlist(slug: &str, manifest: &Manifest, chart_text: Option<String>) -> Setlist {
+    /// Build one `session_proto::Song` from a manifest — the per-song core
+    /// shared by the single-song player and the setlist player. Each song's
+    /// sections are in its own local seconds (0-based), and its `project_guid`
+    /// is `web-session:{slug}` so `SONG_CHARTS` and the chart pane can key off
+    /// it.
+    pub(crate) fn build_song(
+        slug: &str,
+        manifest: &Manifest,
+        chart_text: Option<String>,
+    ) -> SessionSong {
         let (ts_num, ts_denom) = parse_time_sig(manifest.time_signature.as_ref());
-        let sections: Vec<SessionSection> = manifest.sections.iter().map(to_session_section).collect();
-        let song = SessionSong {
+        let sections: Vec<SessionSection> =
+            manifest.sections.iter().map(to_session_section).collect();
+        SessionSong {
             id: SongId::new(),
             name: manifest.title.clone().unwrap_or_default(),
             project_guid: format!("{PROJECT_GUID_PREFIX}{slug}"),
@@ -343,7 +364,12 @@ mod imp {
             chart_fingerprint: None,
             advance_mode: None,
             color: None,
-        };
+        }
+    }
+
+    /// Build the one-song `Setlist` that drives session-ui from the manifest.
+    fn build_setlist(slug: &str, manifest: &Manifest, chart_text: Option<String>) -> Setlist {
+        let song = build_song(slug, manifest, chart_text);
         Setlist {
             id: Some(slug.to_string()),
             name: manifest.title.clone().unwrap_or_default(),
@@ -353,7 +379,7 @@ mod imp {
     }
 
     /// Progress-bar segments (percent of song duration) from the manifest.
-    fn progress_sections(manifest: &Manifest) -> Vec<ProgressSection> {
+    pub(crate) fn progress_sections(manifest: &Manifest) -> Vec<ProgressSection> {
         let dur = manifest.duration_sec.max(0.001);
         manifest
             .sections
@@ -373,7 +399,7 @@ mod imp {
     }
 
     /// Musical position (measure.beat.subdivision) from seconds + tempo/meter.
-    fn musical_at(seconds: f64, bpm: f64, ts_num: u32) -> MusicalPosition {
+    pub(crate) fn musical_at(seconds: f64, bpm: f64, ts_num: u32) -> MusicalPosition {
         let bpm = if bpm > 0.0 { bpm } else { 120.0 };
         let num = ts_num.max(1) as f64;
         let beats_total = (seconds.max(0.0)) * bpm / 60.0;
@@ -385,7 +411,7 @@ mod imp {
     }
 
     /// Whether a stem is part of the click/guide bus (Click + Cue/Guide stems).
-    fn is_guide_stem(spec: &StemSpec) -> bool {
+    pub(crate) fn is_guide_stem(spec: &StemSpec) -> bool {
         let hay = format!(
             "{} {}",
             spec.name.to_lowercase(),
@@ -412,7 +438,7 @@ mod imp {
     }
 
     /// Map the per-stem UI state to a flat `daw_proto::Track` list for MixerView.
-    fn stems_to_tracks(manifest: &Manifest, ui: &[StemUi]) -> Vec<Track> {
+    pub(crate) fn stems_to_tracks(manifest: &Manifest, ui: &[StemUi]) -> Vec<Track> {
         manifest
             .stems
             .iter()
@@ -435,7 +461,7 @@ mod imp {
 
     // ── small format helpers ────────────────────────────────────────────────
 
-    fn fmt_time(s: f64) -> String {
+    pub(crate) fn fmt_time(s: f64) -> String {
         let s = s.max(0.0);
         let m = (s / 60.0) as u64;
         let sec = (s % 60.0) as u64;
