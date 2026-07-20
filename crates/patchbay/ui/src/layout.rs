@@ -782,6 +782,58 @@ mod live_probe {
 
     const COLUMN_TITLES_DBG: [&str; 3] = ["Inputs", "Applications", "Outputs"];
 
+    /// Diagnose why pairs/icons aren't visible against the RUNNING app:
+    /// `cargo test -p patchbay-ui live_pairs -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "needs a running patchbay app on :4046"]
+    async fn live_pairs() {
+        let link = vox_websocket::WsLink::connect("ws://127.0.0.1:4046/vox")
+            .await
+            .expect("ws connect (is patchbay running?)");
+        let client: PatchbayServiceClient =
+            vox_core::initiator_on(link).establish().await.expect("establish");
+        let graph = client.graph().await.expect("graph");
+        let aliases: HashMap<String, String> = client
+            .aliases()
+            .await
+            .expect("aliases")
+            .into_iter()
+            .map(|a| (a.target, a.alias))
+            .collect();
+        println!("aliases: {}", aliases.len());
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+            collapsed: [false; 3],
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        for c in &lay.cards {
+            let pairs: Vec<&str> =
+                c.rows.iter().filter(|r| r.pair).map(|r| r.label.as_str()).collect();
+            let ports = graph.ports.iter().filter(|p| p.node_id == c.node.id).count();
+            println!(
+                "card {:30} rows={:3} ports={:3} pairs={:?} icon_name={:?} app={:?}",
+                c.node.label, c.rows.len(), ports, pairs, c.node.icon_name, c.node.app_name
+            );
+        }
+        // What would the icon lookups be, and do they resolve host-side?
+        let candidates: Vec<String> = graph
+            .nodes
+            .iter()
+            .map(crate::state::icon_candidate)
+            .filter(|s| !s.is_empty())
+            .collect();
+        println!("icon candidates: {candidates:?}");
+        let icons = client.icons(candidates).await.expect("icons");
+        println!(
+            "resolved icons: {:?}",
+            icons.iter().map(|i| i.icon_name.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Ground truth against the LIVE PipeWire graph via an in-process
     /// backend (no separate app needed):
     /// `cargo test -p patchbay-ui inproc_layout -- --ignored --nocapture`

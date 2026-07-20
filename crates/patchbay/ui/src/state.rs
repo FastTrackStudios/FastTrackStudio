@@ -355,15 +355,20 @@ pub fn node_color(node_name: &str, default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
-/// The freedesktop icon name to try for a node: the explicit
-/// `application.icon-name` when present, otherwise the lowercased app
-/// name ("REAPER" → "reaper" — most desktop apps install icons under
-/// exactly that). Empty = don't bother.
+/// The icon lookup key for a node: the explicit `application.icon-name`
+/// when present, else the app name, else the node name — the server
+/// resolves any of them via icon dirs + the .desktop index ("REAPER" →
+/// cockos-reaper.png). Devices that match nothing cost one cached miss.
 pub fn icon_candidate(node: &patchbay_proto::PwNode) -> String {
     if !node.icon_name.is_empty() {
         return node.icon_name.clone();
     }
-    node.app_name.to_lowercase().replace(' ', "-")
+    let fallback = if node.app_name.is_empty() {
+        &node.name
+    } else {
+        &node.app_name
+    };
+    fallback.to_lowercase().replace(' ', "-")
 }
 
 /// Fetch any application icons the graph references that we haven't

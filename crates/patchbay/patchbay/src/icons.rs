@@ -14,10 +14,14 @@ use parking_lot::Mutex;
 #[derive(Default)]
 pub(crate) struct IconCache {
     cache: Mutex<HashMap<String, Option<String>>>,
+    /// Lazily-built `.desktop` index: lowercased app Name / file stem →
+    /// the entry's `Icon=` name. How "reaper" finds `cockos-reaper`.
+    desktop_index: Mutex<Option<HashMap<String, String>>>,
 }
 
 impl IconCache {
-    /// `data:` URI for a freedesktop icon name, if any theme dir has it.
+    /// `data:` URI for a freedesktop icon name (or an app name that a
+    /// `.desktop` entry maps to one), if any theme dir has it.
     pub fn data_uri(&self, name: &str) -> Option<String> {
         if name.trim().is_empty() {
             return None;
@@ -25,7 +29,18 @@ impl IconCache {
         if let Some(hit) = self.cache.lock().get(name) {
             return hit.clone();
         }
-        let resolved = resolve(name).and_then(|p| {
+        let path = resolve(name).or_else(|| {
+            // Not an icon name — maybe an app name a .desktop file knows.
+            let icon = {
+                let mut index = self.desktop_index.lock();
+                index
+                    .get_or_insert_with(build_desktop_index)
+                    .get(&name.to_lowercase())
+                    .cloned()
+            };
+            icon.and_then(|icon| resolve(&icon))
+        });
+        let resolved = path.and_then(|p| {
             let mime = match p.extension().and_then(|e| e.to_str()) {
                 Some("svg") => "image/svg+xml",
                 Some("png") => "image/png",
@@ -40,6 +55,48 @@ impl IconCache {
     }
 }
 
+/// Map lowercased desktop-entry Names and file stems to `Icon=` values
+/// across every data dir (`cockos-reaper.desktop`: Name=REAPER,
+/// Icon=cockos-reaper ⇒ "reaper" → "cockos-reaper").
+fn build_desktop_index() -> HashMap<String, String> {
+    let mut index = HashMap::new();
+    for dir in data_dirs() {
+        let Ok(entries) = std::fs::read_dir(dir.join("applications")) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("desktop") {
+                continue;
+            }
+            let Ok(body) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let mut name = None;
+            let mut icon = None;
+            for line in body.lines() {
+                // First group only — per-action groups repeat the keys.
+                if line.starts_with('[') && name.is_some() {
+                    break;
+                }
+                if let Some(v) = line.strip_prefix("Name=") {
+                    name.get_or_insert(v.trim().to_lowercase());
+                } else if let Some(v) = line.strip_prefix("Icon=") {
+                    icon.get_or_insert(v.trim().to_string());
+                }
+            }
+            let Some(icon) = icon else { continue };
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                index.entry(stem.to_lowercase()).or_insert_with(|| icon.clone());
+            }
+            if let Some(name) = name {
+                index.entry(name).or_insert(icon);
+            }
+        }
+    }
+    index
+}
+
 /// Search order: biggest crisp raster first, then scalable, then pixmaps.
 const SIZES: &[&str] = &["128x128", "96x96", "64x64", "48x48", "256x256", "32x32"];
 
@@ -51,8 +108,14 @@ fn data_dirs() -> Vec<PathBuf> {
     let xdg = std::env::var("XDG_DATA_DIRS")
         .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
     dirs.extend(xdg.split(':').filter(|s| !s.is_empty()).map(PathBuf::from));
-    // NixOS system profile isn't always in XDG_DATA_DIRS for user units.
+    // Nix profiles aren't always in XDG_DATA_DIRS for user units.
     dirs.push(PathBuf::from("/run/current-system/sw/share"));
+    if let Some(home) = dirs::home_dir() {
+        dirs.push(home.join(".nix-profile/share"));
+    }
+    if let Ok(user) = std::env::var("USER") {
+        dirs.push(PathBuf::from(format!("/etc/profiles/per-user/{user}/share")));
+    }
     dirs
 }
 
