@@ -40,7 +40,7 @@ mod imp {
     use daw_proto::{Position, PositionInSeconds, TimeSignature};
     use session_proto::{ActiveIndices, Setlist, SongChartHydration};
     use session_ui::components::{
-        MixerView, SectionProgressBar, SongProgressBar, SongTitle, TransportControlBar,
+        MixerView, SongProgressBar, SongTitle, TransportControlBar,
     };
     use session_ui::{
         ACTIVE_INDICES, PerformanceSidebar, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
@@ -523,17 +523,6 @@ mod imp {
         let sections = media::progress_sections(&manifest);
 
         let song_progress = (pos / duration * 100.0).clamp(0.0, 100.0);
-        let cur_section = manifest
-            .sections
-            .iter()
-            .position(|s| pos >= s.start_sec && pos < s.end_sec);
-        let section_progress = cur_section
-            .and_then(|i| manifest.sections.get(i))
-            .map(|s| {
-                let d = (s.end_sec - s.start_sec).max(0.001);
-                ((pos - s.start_sec) / d * 100.0).clamp(0.0, 100.0)
-            })
-            .unwrap_or(0.0);
 
         // Guide (click + cue) stem indices, and whether the bus is on.
         let guide_idxs: Vec<usize> = manifest
@@ -664,9 +653,15 @@ mod imp {
                         if let Some(ts) = manifest.time_signature.as_ref() {
                             Badge { label: "{ts}" }
                         }
+                        if is_buffering {
+                            span { class: "text-[11px] text-muted-foreground/70", "buffering…" }
+                        }
                     }
 
-                    // Song / section progress (segmented; click to seek).
+                    // Song progress (segmented; sections + click-to-seek). The
+                    // old standalone SectionProgressBar + fine scrubber/timestamp
+                    // row were redundant with this bar and have been removed;
+                    // seeking still works via `on_section_click` below.
                     if !manifest.sections.is_empty() {
                         div { class: "pt-2",
                             SongProgressBar {
@@ -675,34 +670,6 @@ mod imp {
                                 song_key: manifest.key.clone(),
                                 on_section_click,
                             }
-                        }
-                        SectionProgressBar {
-                            progress: section_progress,
-                            sections: sections.clone(),
-                            song_key: manifest.key.clone(),
-                        }
-                    }
-
-                    // Fine scrubber + time readout.
-                    div { class: "flex items-center gap-3",
-                        span { class: "text-xs font-mono text-muted-foreground tabular-nums min-w-[84px]",
-                            "{media::fmt_time(pos)} / {media::fmt_time(duration)}"
-                        }
-                        input {
-                            r#type: "range",
-                            class: "flex-1 accent-primary",
-                            min: "0",
-                            max: "{duration}",
-                            step: "0.01",
-                            value: "{pos}",
-                            oninput: move |e| {
-                                if let Ok(v) = e.value().parse::<f64>() {
-                                    seek.call(v);
-                                }
-                            },
-                        }
-                        if is_buffering {
-                            span { class: "text-[11px] text-muted-foreground/70", "buffering…" }
                         }
                     }
 
