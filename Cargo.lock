@@ -78,7 +78,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.1.1"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -570,17 +570,6 @@ checksum = "fb5dfbc6d8d2675589ccbe4d0fd61df2419075625f8c1a62325e718e2b0049f9"
 
 [[package]]
 name = "anyrender"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74dcad75fbef1209804ee5d1cfd7409665c5a7987865c758e45f8c5553f9a75f"
-dependencies = [
- "kurbo 0.13.1",
- "peniko 0.6.1",
- "raw-window-handle 0.6.2",
-]
-
-[[package]]
-name = "anyrender"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c79ab67fa5a03a47b088c5c9dfc8ad727e2a3a1921517cdf4b642433f925d50"
@@ -597,7 +586,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2c1ecd7b35cea3ca88e8310eef73c5c06f7d8b0f878a2ac415ab6cf45de3ec6"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "image",
  "kurbo 0.13.1",
  "peniko 0.6.1",
@@ -606,11 +595,11 @@ dependencies = [
 
 [[package]]
 name = "anyrender_vello"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f495049565a1d1510301bbba7d468a1f0e5c4a9c45c9e75bb99ffa90d2fd07c3"
+checksum = "482dc2351609dff9903c329b73910e42e78ba670aad9d5a1c8c1eecad30aeaac"
 dependencies = [
- "anyrender 0.10.0",
+ "anyrender",
  "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-channel",
  "kurbo 0.13.1",
@@ -619,17 +608,17 @@ dependencies = [
  "rustc-hash 2.1.3",
  "vello",
  "wasm-bindgen-futures",
- "wgpu 29.0.4",
+ "wgpu",
  "wgpu_context 0.6.0",
 ]
 
 [[package]]
 name = "anyrender_vello"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "482dc2351609dff9903c329b73910e42e78ba670aad9d5a1c8c1eecad30aeaac"
+checksum = "93f297de95eb39e5e6b38e4f4d0b28a880f9fb56ee095e49d8a365a7eb4d6af8"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-channel",
  "kurbo 0.13.1",
@@ -638,8 +627,8 @@ dependencies = [
  "rustc-hash 2.1.3",
  "vello",
  "wasm-bindgen-futures",
- "wgpu 29.0.4",
- "wgpu_context 0.6.0",
+ "wgpu",
+ "wgpu_context 0.7.0",
 ]
 
 [[package]]
@@ -648,35 +637,14 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "545d02c58581dc659b65bab63aef1aebcbcc442c96a49a599019c93ac03b1e42"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "glifo",
  "kurbo 0.13.1",
  "peniko 0.6.1",
  "pixels_window_renderer",
- "vello_common 0.0.9",
+ "vello_common",
  "vello_cpu",
-]
-
-[[package]]
-name = "anyrender_vello_hybrid"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c29d7d94f31a211293ec18341a2768e5bdae16b5207dcfcf6817f1359396f0b1"
-dependencies = [
- "anyrender 0.10.0",
- "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "futures-channel",
- "glifo",
- "kurbo 0.13.1",
- "peniko 0.6.1",
- "pollster",
- "rustc-hash 2.1.3",
- "vello_common 0.0.8",
- "vello_hybrid 0.0.8",
- "wasm-bindgen-futures",
- "wgpu 29.0.4",
- "wgpu_context 0.6.0",
 ]
 
 [[package]]
@@ -685,7 +653,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "892ad25d216225508a9b1b559c77503384e3700509def5bb9413cfe090694837"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-channel",
  "glifo",
@@ -693,10 +661,10 @@ dependencies = [
  "peniko 0.6.1",
  "pollster",
  "rustc-hash 2.1.3",
- "vello_common 0.0.9",
- "vello_hybrid 0.0.9",
+ "vello_common",
+ "vello_hybrid",
  "wasm-bindgen-futures",
- "wgpu 29.0.4",
+ "wgpu",
  "wgpu_context 0.7.0",
 ]
 
@@ -2144,7 +2112,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=4b52ca2e6463b428ae5068123756ea50ba2235fd#4b52ca2e6463b428ae5068123756ea50ba2235fd"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
 dependencies = [
  "cocoa 0.24.1",
  "core-foundation 0.9.4",
@@ -2428,11 +2396,11 @@ dependencies = [
 
 [[package]]
 name = "blitz-dom"
-version = "0.3.0-alpha.6"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+version = "0.3.0-beta.1"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
  "accesskit",
- "anyrender 0.11.1",
+ "anyrender",
  "app_units",
  "atomic_refcell",
  "bitflags 2.13.0",
@@ -2440,7 +2408,7 @@ dependencies = [
  "color",
  "cssparser 0.37.0",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893)",
+ "debug_timer 0.1.3 (git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62)",
  "euclid",
  "html-escape",
  "image",
@@ -2452,7 +2420,7 @@ dependencies = [
  "parley 0.10.0",
  "percent-encoding",
  "rayon",
- "selectors 0.38.0",
+ "selectors 0.39.0",
  "skrifa 0.42.1",
  "slab",
  "smallvec 1.15.2",
@@ -2471,8 +2439,8 @@ dependencies = [
 
 [[package]]
 name = "blitz-html"
-version = "0.3.0-alpha.6"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+version = "0.3.0-beta.1"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -2482,8 +2450,8 @@ dependencies = [
 
 [[package]]
 name = "blitz-net"
-version = "0.3.0-alpha.6"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+version = "0.3.0-beta.1"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -2494,10 +2462,10 @@ dependencies = [
 
 [[package]]
 name = "blitz-paint"
-version = "0.3.0-alpha.6"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+version = "0.3.0-beta.1"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "anyrender_svg",
  "blitz-dom",
  "blitz-traits",
@@ -2506,6 +2474,7 @@ dependencies = [
  "kurbo 0.13.1",
  "parley 0.10.0",
  "peniko 0.6.1",
+ "smallvec 1.15.2",
  "stylo",
  "taffy",
  "usvg 0.46.0",
@@ -2513,14 +2482,15 @@ dependencies = [
 
 [[package]]
 name = "blitz-shell"
-version = "0.3.0-alpha.6"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+version = "0.3.0-beta.1"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
  "android-activity",
- "anyrender 0.11.1",
+ "anyrender",
  "arboard",
+ "atomic_refcell",
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
@@ -2536,9 +2506,10 @@ dependencies = [
 
 [[package]]
 name = "blitz-traits"
-version = "0.3.0-alpha.6"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+version = "0.3.0-beta.1"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
+ "atomic_refcell",
  "bitflags 2.13.0",
  "bytes",
  "cursor-icon",
@@ -3594,17 +3565,6 @@ name = "codesnake"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2205f7f6d3de68ecf4c291c789b3edf07b6569268abd0188819086f71ae42225"
-
-[[package]]
-name = "codespan-reporting"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe6d2e5af09e8c8ad56c969f2157a3d4238cebc7c55f0a517728c38f7b200f81"
-dependencies = [
- "serde",
- "termcolor",
- "unicode-width 0.2.2",
-]
 
 [[package]]
 name = "codespan-reporting"
@@ -5960,7 +5920,7 @@ dependencies = [
 name = "daw-reaper-dioxus"
 version = "0.1.0"
 dependencies = [
- "anyrender_vello 0.11.0",
+ "anyrender_vello 0.12.0",
  "architect",
  "blitz-dom",
  "blitz-paint",
@@ -6032,7 +5992,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "vello",
- "wgpu 29.0.4",
+ "wgpu",
  "x11-dl",
 ]
 
@@ -6197,7 +6157,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 
 [[package]]
 name = "debugid"
@@ -6989,12 +6949,12 @@ dependencies = [
 [[package]]
 name = "dioxus-native"
 version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
  "android-activity",
- "anyrender 0.11.1",
+ "anyrender",
  "anyrender_vello_cpu",
- "anyrender_vello_hybrid 0.8.0",
+ "anyrender_vello_hybrid",
  "blitz-dom",
  "blitz-html",
  "blitz-net",
@@ -7018,6 +6978,7 @@ dependencies = [
  "keyboard-types 0.7.0",
  "manganis",
  "rustc-hash 2.1.3",
+ "slotmap",
  "tokio",
  "webbrowser",
  "wgpu_context 0.7.0",
@@ -7027,7 +6988,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native-dom"
 version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -7177,6 +7138,24 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "dioxus-test"
+version = "0.1.0"
+dependencies = [
+ "blitz-dom",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-core",
+ "dioxus-html",
+ "dioxus-native-dom",
+ "indoc",
+ "keyboard-types 0.7.0",
+ "smol_str 0.3.2",
+ "test-that",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7817,11 +7796,13 @@ name = "editor-view"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "dioxus-test",
  "editor-state",
  "editor-vim",
  "ropey",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "uuid 1.23.4",
  "web-sys",
@@ -8172,7 +8153,7 @@ dependencies = [
 name = "engraver-proto"
 version = "0.1.0"
 dependencies = [
- "anyrender 0.10.0",
+ "anyrender",
  "bitflags 2.13.0",
  "bytemuck",
  "color-eyre",
@@ -8210,7 +8191,7 @@ dependencies = [
  "usvg 0.45.1",
  "uuid 1.23.4",
  "vello",
- "wgpu 29.0.4",
+ "wgpu",
  "winit 0.30.13",
 ]
 
@@ -8433,6 +8414,7 @@ dependencies = [
  "audiocore-core",
  "dioxus",
  "dioxus-ssr",
+ "dioxus-test",
  "eq-profiles",
  "fts-ui",
  "fts-ui-audio",
@@ -8442,7 +8424,9 @@ dependencies = [
  "parking_lot",
  "pollster",
  "spectrum-analyzer",
- "wgpu 29.0.4",
+ "test-that",
+ "tokio",
+ "wgpu",
 ]
 
 [[package]]
@@ -9197,15 +9181,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
-]
-
-[[package]]
-name = "fearless_simd"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fb2907d1f08b2b316b9223ced5b0e89d87028ba8deae9764741dba8ff7f3903"
-dependencies = [
- "bytemuck",
 ]
 
 [[package]]
@@ -10041,7 +10016,7 @@ dependencies = [
 name = "fts-story-snapshots"
 version = "0.1.0"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "anyrender_vello_cpu",
  "blitz-dom",
  "blitz-paint",
@@ -10918,7 +10893,7 @@ dependencies = [
  "peniko 0.6.1",
  "skrifa 0.42.1",
  "smallvec 1.15.2",
- "vello_common 0.0.9",
+ "vello_common",
 ]
 
 [[package]]
@@ -10992,18 +10967,6 @@ dependencies = [
 
 [[package]]
 name = "glow"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e5ea60d70410161c8bf5da3fdfeaa1c72ed2c15f8bbb9d19fe3a4fad085f08"
-dependencies = [
- "js-sys",
- "slotmap",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "glow"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5"
@@ -11071,37 +11034,6 @@ dependencies = [
  "log",
  "plain",
  "scroll",
-]
-
-[[package]]
-name = "gpu-alloc"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45cf04b2726f02df5508c6de726acdc90cdf97ac771a9a0ffd8ba10a6e696bf9"
-dependencies = [
- "bitflags 2.13.0",
- "gpu-alloc-types",
-]
-
-[[package]]
-name = "gpu-alloc-types"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2bbed164dd10ed526c2e4fe3e721ca4a71c61730e5aafac6844b417b3227058"
-dependencies = [
- "bitflags 2.13.0",
-]
-
-[[package]]
-name = "gpu-allocator"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c151a2a5ef800297b4e79efa4f4bec035c5f51d5ae587287c9b952bdf734cacd"
-dependencies = [
- "log",
- "presser",
- "thiserror 1.0.69",
- "windows 0.58.0",
 ]
 
 [[package]]
@@ -11202,16 +11134,6 @@ version = "0.1.0"
 dependencies = [
  "nice-plug",
  "session-guide",
-]
-
-[[package]]
-name = "guillotiere"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b62d5865c036cb1393e23c50693df631d3f5d7bcca4c04fe4cc0fd592e74a782"
-dependencies = [
- "euclid",
- "svg_fmt",
 ]
 
 [[package]]
@@ -11399,7 +11321,7 @@ version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c75ab947623ef4ccaa7acf0579edf7cbb5a73838e3839a7be73335e522f433a1"
 dependencies = [
- "fearless_simd 0.4.1",
+ "fearless_simd",
 ]
 
 [[package]]
@@ -13817,9 +13739,9 @@ dependencies = [
 name = "keyflow-ui"
 version = "0.1.0"
 dependencies = [
- "anyrender 0.10.0",
- "anyrender_vello 0.10.1",
- "anyrender_vello_hybrid 0.5.2",
+ "anyrender",
+ "anyrender_vello 0.12.0",
+ "anyrender_vello_hybrid",
  "daw-proto",
  "dioxus",
  "dioxus-native",
@@ -13838,8 +13760,8 @@ dependencies = [
  "tokio",
  "tracing",
  "vello",
- "vello_common 0.0.6",
- "vello_hybrid 0.0.6",
+ "vello_common",
+ "vello_hybrid",
  "web-sys",
  "web-time",
 ]
@@ -16241,21 +16163,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metal"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00c15a6f673ff72ddcc22394663290f870fb224c1bfce55734a75c414150e605"
-dependencies = [
- "bitflags 2.13.0",
- "block",
- "core-graphics-types 0.2.0",
- "foreign-types 0.5.0",
- "log",
- "objc",
- "paste",
-]
-
-[[package]]
 name = "meter-dsp"
 version = "0.1.0"
 dependencies = [
@@ -16840,32 +16747,6 @@ dependencies = [
 
 [[package]]
 name = "naga"
-version = "27.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "066cf25f0e8b11ee0df221219010f213ad429855f57c494f995590c861a9a7d8"
-dependencies = [
- "arrayvec",
- "bit-set 0.8.0",
- "bitflags 2.13.0",
- "cfg-if",
- "cfg_aliases",
- "codespan-reporting 0.12.0",
- "half",
- "hashbrown 0.16.1",
- "hexf-parse",
- "indexmap 2.14.0",
- "libm",
- "log",
- "num-traits",
- "once_cell",
- "rustc-hash 1.1.0",
- "spirv 0.3.0+sdk-1.3.268.0",
- "thiserror 2.0.18",
- "unicode-ident",
-]
-
-[[package]]
-name = "naga"
 version = "29.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2bf919621e7975acb27d881bae2fb993e0d45c8e0446e85e6272971e00dc8df"
@@ -16875,7 +16756,7 @@ dependencies = [
  "bitflags 2.13.0",
  "cfg-if",
  "cfg_aliases",
- "codespan-reporting 0.13.1",
+ "codespan-reporting",
  "half",
  "hashbrown 0.16.1",
  "hexf-parse",
@@ -16885,7 +16766,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "rustc-hash 1.1.0",
- "spirv 0.4.0+sdk-1.4.341.0",
+ "spirv",
  "thiserror 2.0.18",
  "unicode-ident",
 ]
@@ -17101,7 +16982,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nice-log"
 version = "0.3.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=4b52ca2e6463b428ae5068123756ea50ba2235fd#4b52ca2e6463b428ae5068123756ea50ba2235fd"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
 dependencies = [
  "tracing-appender",
  "windows 0.62.2",
@@ -17110,7 +16991,7 @@ dependencies = [
 [[package]]
 name = "nice-plug"
 version = "0.2.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=4b52ca2e6463b428ae5068123756ea50ba2235fd#4b52ca2e6463b428ae5068123756ea50ba2235fd"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -17139,7 +17020,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-core"
 version = "0.2.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=4b52ca2e6463b428ae5068123756ea50ba2235fd#4b52ca2e6463b428ae5068123756ea50ba2235fd"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
 dependencies = [
  "atomic_float",
  "atomic_refcell",
@@ -17158,7 +17039,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-derive"
 version = "0.1.2"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=4b52ca2e6463b428ae5068123756ea50ba2235fd#4b52ca2e6463b428ae5068123756ea50ba2235fd"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -17168,9 +17049,9 @@ dependencies = [
 [[package]]
 name = "nice-plug-dioxus"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=4b52ca2e6463b428ae5068123756ea50ba2235fd#4b52ca2e6463b428ae5068123756ea50ba2235fd"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "anyrender_vello 0.11.0",
  "baseview",
  "blitz-dom",
@@ -17190,7 +17071,7 @@ dependencies = [
  "serde",
  "smol_str 0.3.2",
  "vello",
- "wgpu 29.0.4",
+ "wgpu",
  "wgpu_context 0.6.0",
  "x11-dl",
 ]
@@ -17198,7 +17079,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-xtask"
 version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=4b52ca2e6463b428ae5068123756ea50ba2235fd#4b52ca2e6463b428ae5068123756ea50ba2235fd"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -19565,7 +19446,7 @@ dependencies = [
  "raw-window-handle 0.6.2",
  "thiserror 2.0.18",
  "ultraviolet",
- "wgpu 29.0.4",
+ "wgpu",
 ]
 
 [[package]]
@@ -19574,7 +19455,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87ded35385f65726c281d08118df35f5c8dc24222bab14f3a8de91d61975cbc2"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "pixels",
 ]
@@ -20957,16 +20838,6 @@ dependencies = [
 
 [[package]]
 name = "read-fonts"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b634fabf032fab15307ffd272149b622260f55974d9fad689292a5d33df02e5"
-dependencies = [
- "bytemuck",
- "font-types 0.11.3",
-]
-
-[[package]]
-name = "read-fonts"
 version = "0.39.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4ed38b89c2c77ff968c524145ad65fb010f38af5c7a224b53b81d47ac2daa81"
@@ -21008,7 +20879,7 @@ dependencies = [
 name = "reaper-dioxus"
 version = "0.1.0"
 dependencies = [
- "anyrender_vello 0.11.0",
+ "anyrender_vello 0.12.0",
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
@@ -21028,7 +20899,7 @@ dependencies = [
  "reaper-medium",
  "tracing",
  "vello",
- "wgpu 29.0.4",
+ "wgpu",
  "x11-dl",
 ]
 
@@ -21044,7 +20915,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "vello",
- "wgpu 29.0.4",
+ "wgpu",
  "x11-dl",
 ]
 
@@ -22612,6 +22483,25 @@ dependencies = [
  "rustc-hash 2.1.3",
  "servo_arc 0.4.3",
  "smallvec 1.15.2",
+]
+
+[[package]]
+name = "selectors"
+version = "0.39.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bad7c25c97cc59c4858df8724a3789caa6ee509b628dfe6df34e8a8084c8a84e"
+dependencies = [
+ "bitflags 2.13.0",
+ "cssparser 0.37.0",
+ "derive_more 2.1.1",
+ "log",
+ "new_debug_unreachable",
+ "phf 0.13.1",
+ "phf_codegen 0.13.1",
+ "precomputed-hash",
+ "rustc-hash 2.1.3",
+ "servo_arc 0.4.3",
+ "smallvec 1.15.2",
  "to_shmem",
  "to_shmem_derive",
 ]
@@ -23885,16 +23775,6 @@ dependencies = [
 
 [[package]]
 name = "skrifa"
-version = "0.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fbdfe3d2475fbd7ddd1f3e5cf8288a30eb3e5f95832829570cd88115a7434ac"
-dependencies = [
- "bytemuck",
- "read-fonts 0.37.0",
-]
-
-[[package]]
-name = "skrifa"
 version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c34617370ae968efb7161bb2beb517d9084659aae19e24b89e3db25b46e4564"
@@ -24231,15 +24111,6 @@ name = "spin"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
-
-[[package]]
-name = "spirv"
-version = "0.3.0+sdk-1.3.268.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eda41003dc44290527a59b13432d4a0379379fa074b70174882adfbdfd917844"
-dependencies = [
- "bitflags 2.13.0",
-]
 
 [[package]]
 name = "spirv"
@@ -24802,9 +24673,9 @@ dependencies = [
 
 [[package]]
 name = "stylo"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8656272f7483cdce91f1c55d60810ba6e7c2bac1b5940b2be60a2b12575ddb93"
+checksum = "049fb023adcc72e8814fed99d225a45faa95b0e54b7f433eabb6e88c66c90ded"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -24832,7 +24703,7 @@ dependencies = [
  "rayon",
  "rayon-core",
  "rustc-hash 2.1.3",
- "selectors 0.38.0",
+ "selectors 0.39.0",
  "serde",
  "servo_arc 0.4.3",
  "smallbitvec",
@@ -24859,9 +24730,9 @@ dependencies = [
 
 [[package]]
 name = "stylo_atoms"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e90362005ef68ab406857e3a0c3e04572d1d056f3224333c2da8d5aef660617b"
+checksum = "55651489a0c27f66d08e7c9cf8ee449328c0de291e37227fc1bbcffb2d7e681e"
 dependencies = [
  "string_cache 0.9.0",
  "string_cache_codegen 0.6.1",
@@ -24869,9 +24740,9 @@ dependencies = [
 
 [[package]]
 name = "stylo_derive"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d312e035ba0b282b24f50c45378e9d45424cec68a9cde130df2b54ef59514a3"
+checksum = "e39f4962458b9e9efc91684666509a1811bc690f90188508108583187d19e83c"
 dependencies = [
  "darling 0.20.11",
  "proc-macro2",
@@ -24882,9 +24753,9 @@ dependencies = [
 
 [[package]]
 name = "stylo_dom"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8320050ce458da456b320dfa1252783e4113b3b1a05d0aefb41cbe2bb35ed849"
+checksum = "697851c070e9a9630825e99f7a34ac0ffd31cd969aac38281b8d002ebe675be5"
 dependencies = [
  "bitflags 2.13.0",
  "stylo_malloc_size_of",
@@ -24892,14 +24763,14 @@ dependencies = [
 
 [[package]]
 name = "stylo_malloc_size_of"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ac39ecae5f591b1b200e7e400ce586d47b8e2e6122229ad3e93fcbc85f0b1b1"
+checksum = "5634944bf69cf6b6900d3f0116c3b2530cf55706b1044ddf5d0da45d5d09a527"
 dependencies = [
  "app_units",
  "cssparser 0.37.0",
  "euclid",
- "selectors 0.38.0",
+ "selectors 0.39.0",
  "servo_arc 0.4.3",
  "smallbitvec",
  "smallvec 1.15.2",
@@ -24910,17 +24781,17 @@ dependencies = [
 
 [[package]]
 name = "stylo_static_prefs"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b36e3ea5a1c20dfdc483ae3be554976dc2e7f99510f3322f8e38b594c2f6275"
+checksum = "1f62c30d50b9d26dd6dc040d0ae0b1c6139c3547c6689cf6ed201ca21f4c77a3"
 dependencies = [
  "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]
 name = "stylo_taffy"
-version = "0.3.0-alpha.6"
-source = "git+https://github.com/DioxusLabs/blitz.git?rev=727dab0105fb42659f76f7862040b82f4e982893#727dab0105fb42659f76f7862040b82f4e982893"
+version = "0.3.0-beta.1"
+source = "git+https://github.com/DioxusLabs/blitz.git?rev=02523b833ada999d70f72784b592d61df7279f62#02523b833ada999d70f72784b592d61df7279f62"
 dependencies = [
  "stylo",
  "stylo_atoms",
@@ -24929,16 +24800,16 @@ dependencies = [
 
 [[package]]
 name = "stylo_traits"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bafd455fa178b566e6df9bb0ad3e6e6eae7d202fb636bd32f7af3d33b566a00c"
+checksum = "dd00a0e8c8becc53b3a87e31f28836e7467147d6e463a7e69c37fdd97f4e09c0"
 dependencies = [
  "app_units",
  "bitflags 2.13.0",
  "cssparser 0.37.0",
  "euclid",
  "malloc_size_of_derive",
- "selectors 0.38.0",
+ "selectors 0.39.0",
  "serde",
  "servo_arc 0.4.3",
  "stylo_atoms",
@@ -25511,9 +25382,9 @@ dependencies = [
 
 [[package]]
 name = "taffy"
-version = "0.11.0-experimental-cache-fix.3"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e87b88128d417cd7c2c75b8a398177fb9efcb2ae5cddad22bcec106ba9c8e1c3"
+checksum = "340a09581f29809fc0df82a3955501dc7f2a21f887e5d1c13dbe288fe1c0bef4"
 dependencies = [
  "arrayvec",
  "grid",
@@ -26003,6 +25874,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-that"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "291f228058142bae421e0b4b014a7b18edd6137629550cc15da37feed66a7db6"
+dependencies = [
+ "num-traits",
+ "regex",
+]
+
+[[package]]
 name = "testcontainers"
 version = "0.27.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -26340,9 +26221,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "to_shmem"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8eb8396666f8344ad4b8849ac0d493ae960290ba89ba1aaf0cb8045d2023288"
+checksum = "b8c81cee0d28327337a94f3f32a1a77c03bbfd926510f3b42956f9d914e7810c"
 dependencies = [
  "cssparser 0.37.0",
  "servo_arc 0.4.3",
@@ -27660,7 +27541,7 @@ dependencies = [
 name = "ui-snapshot"
 version = "0.1.0"
 dependencies = [
- "anyrender 0.11.1",
+ "anyrender",
  "anyrender_vello_cpu",
  "blitz-dom",
  "blitz-paint",
@@ -28329,40 +28210,7 @@ dependencies = [
  "thiserror 2.0.18",
  "vello_encoding",
  "vello_shaders",
- "wgpu 29.0.4",
-]
-
-[[package]]
-name = "vello_common"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bd1a4c633ce09e7d713df1a6e036644a125e15e0c169cfb5180ddf5836ca04b"
-dependencies = [
- "bytemuck",
- "fearless_simd 0.3.0",
- "hashbrown 0.16.1",
- "log",
- "peniko 0.6.1",
- "png 0.17.16",
- "skrifa 0.40.0",
- "smallvec 1.15.2",
-]
-
-[[package]]
-name = "vello_common"
-version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3361bff7f7d82c0c496b92048db83846691f0e844cc28dee92b1c824291b55ee"
-dependencies = [
- "bytemuck",
- "fearless_simd 0.4.1",
- "guillotiere 0.7.0",
- "hashbrown 0.17.1",
- "log",
- "peniko 0.6.1",
- "png 0.18.1",
- "smallvec 1.15.2",
- "thiserror 2.0.18",
+ "wgpu",
 ]
 
 [[package]]
@@ -28372,8 +28220,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19d672facaa2d697285a786cd9d44d614cd2ce54cdc022504bf339f8fff3b750"
 dependencies = [
  "bytemuck",
- "fearless_simd 0.4.1",
- "guillotiere 0.7.0",
+ "fearless_simd",
+ "guillotiere",
  "hashbrown 0.17.1",
  "log",
  "peniko 0.6.1",
@@ -28391,7 +28239,7 @@ dependencies = [
  "bytemuck",
  "glifo",
  "hashbrown 0.17.1",
- "vello_common 0.0.9",
+ "vello_common",
 ]
 
 [[package]]
@@ -28401,44 +28249,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2346f5f0d7dccb3582fcd397b4a57b43165209f1424e0d76e85dd814db164af7"
 dependencies = [
  "bytemuck",
- "guillotiere 0.7.0",
+ "guillotiere",
  "peniko 0.6.1",
  "skrifa 0.42.1",
  "smallvec 1.15.2",
-]
-
-[[package]]
-name = "vello_hybrid"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5660521c83853e94316c484d31c757aa40bbab4cfcbf5afdb4270e827c4db699"
-dependencies = [
- "bytemuck",
- "guillotiere 0.6.2",
- "hashbrown 0.16.1",
- "log",
- "thiserror 2.0.18",
- "vello_common 0.0.6",
- "vello_sparse_shaders 0.0.6",
- "wgpu 27.0.1",
-]
-
-[[package]]
-name = "vello_hybrid"
-version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "644d88a5ccb2280a407eada75a9318920bdee029e293b52c6e8b3fc8c31c70dd"
-dependencies = [
- "bytemuck",
- "glifo",
- "hashbrown 0.17.1",
- "js-sys",
- "log",
- "thiserror 2.0.18",
- "vello_common 0.0.8",
- "vello_sparse_shaders 0.0.8",
- "web-sys",
- "wgpu 29.0.4",
 ]
 
 [[package]]
@@ -28450,11 +28264,13 @@ dependencies = [
  "bytemuck",
  "glifo",
  "hashbrown 0.17.1",
+ "js-sys",
  "log",
  "thiserror 2.0.18",
- "vello_common 0.0.9",
- "vello_sparse_shaders 0.0.9",
- "wgpu 29.0.4",
+ "vello_common",
+ "vello_sparse_shaders",
+ "web-sys",
+ "wgpu",
 ]
 
 [[package]]
@@ -28465,24 +28281,9 @@ checksum = "9dd38937516fa4b47423d9255bb5e4a65e839ec9d57c38c4af6189ce56bf46b7"
 dependencies = [
  "bytemuck",
  "log",
- "naga 29.0.4",
+ "naga",
  "thiserror 2.0.18",
  "vello_encoding",
-]
-
-[[package]]
-name = "vello_sparse_shaders"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d84ceb248d455e90199f37bf3e3dab63bbe10ad75c0b0556611a9ad094ef1b6b"
-
-[[package]]
-name = "vello_sparse_shaders"
-version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45c3abf652bc0f42be7b8235bc2b9ae97991ee801bbdbc694485dead5786202c"
-dependencies = [
- "naga 29.0.4",
 ]
 
 [[package]]
@@ -28490,6 +28291,9 @@ name = "vello_sparse_shaders"
 version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e004cfe28eb71738643f60460b9cae2236eba57b351afebf244148256ff25d8b"
+dependencies = [
+ "naga",
+]
 
 [[package]]
 name = "venial"
@@ -29531,35 +29335,6 @@ dependencies = [
 
 [[package]]
 name = "wgpu"
-version = "27.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfe68bac7cde125de7a731c3400723cadaaf1703795ad3f4805f187459cd7a77"
-dependencies = [
- "arrayvec",
- "bitflags 2.13.0",
- "cfg-if",
- "cfg_aliases",
- "document-features",
- "hashbrown 0.16.1",
- "js-sys",
- "log",
- "naga 27.0.3",
- "parking_lot",
- "portable-atomic",
- "profiling",
- "raw-window-handle 0.6.2",
- "smallvec 1.15.2",
- "static_assertions",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu-core 27.0.3",
- "wgpu-hal 27.0.4",
- "wgpu-types 27.0.1",
-]
-
-[[package]]
-name = "wgpu"
 version = "29.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76e8840e1ba2881d4cbb18d2147627a56af426ff064c0401eb0c8410c6325d07"
@@ -29573,7 +29348,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "js-sys",
  "log",
- "naga 29.0.4",
+ "naga",
  "parking_lot",
  "portable-atomic",
  "profiling",
@@ -29583,41 +29358,9 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu-core 29.0.4",
- "wgpu-hal 29.0.4",
- "wgpu-types 29.0.4",
-]
-
-[[package]]
-name = "wgpu-core"
-version = "27.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27a75de515543b1897b26119f93731b385a19aea165a1ec5f0e3acecc229cae7"
-dependencies = [
- "arrayvec",
- "bit-set 0.8.0",
- "bit-vec 0.8.0",
- "bitflags 2.13.0",
- "bytemuck",
- "cfg_aliases",
- "document-features",
- "hashbrown 0.16.1",
- "indexmap 2.14.0",
- "log",
- "naga 27.0.3",
- "once_cell",
- "parking_lot",
- "portable-atomic",
- "profiling",
- "raw-window-handle 0.6.2",
- "rustc-hash 1.1.0",
- "smallvec 1.15.2",
- "thiserror 2.0.18",
- "wgpu-core-deps-apple 27.0.0",
- "wgpu-core-deps-emscripten 27.0.0",
- "wgpu-core-deps-windows-linux-android 27.0.0",
- "wgpu-hal 27.0.4",
- "wgpu-types 27.0.1",
+ "wgpu-core",
+ "wgpu-hal",
+ "wgpu-types",
 ]
 
 [[package]]
@@ -29636,7 +29379,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "indexmap 2.14.0",
  "log",
- "naga 29.0.4",
+ "naga",
  "once_cell",
  "parking_lot",
  "portable-atomic",
@@ -29645,22 +29388,13 @@ dependencies = [
  "rustc-hash 1.1.0",
  "smallvec 1.15.2",
  "thiserror 2.0.18",
- "wgpu-core-deps-apple 29.0.4",
- "wgpu-core-deps-emscripten 29.0.4",
+ "wgpu-core-deps-apple",
+ "wgpu-core-deps-emscripten",
  "wgpu-core-deps-wasm",
- "wgpu-core-deps-windows-linux-android 29.0.4",
- "wgpu-hal 29.0.4",
+ "wgpu-core-deps-windows-linux-android",
+ "wgpu-hal",
  "wgpu-naga-bridge",
- "wgpu-types 29.0.4",
-]
-
-[[package]]
-name = "wgpu-core-deps-apple"
-version = "27.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0772ae958e9be0c729561d5e3fd9a19679bcdfb945b8b1a1969d9bfe8056d233"
-dependencies = [
- "wgpu-hal 27.0.4",
+ "wgpu-types",
 ]
 
 [[package]]
@@ -29669,16 +29403,7 @@ version = "29.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5e39e26c4c0e07589e67d18546cf79ff45383659fc72fca4dd293358a0347f3"
 dependencies = [
- "wgpu-hal 29.0.4",
-]
-
-[[package]]
-name = "wgpu-core-deps-emscripten"
-version = "27.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b06ac3444a95b0813ecfd81ddb2774b66220b264b3e2031152a4a29fda4da6b5"
-dependencies = [
- "wgpu-hal 27.0.4",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -29687,7 +29412,7 @@ version = "29.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01e09be551dc939498bdd5f6b2c66e55ab275dad25825267a08605a80fc9f0af"
 dependencies = [
- "wgpu-hal 29.0.4",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -29696,16 +29421,7 @@ version = "29.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af1fb1798be2a912497d4c224f72d39bb0cb34af50e8bcc29865bc339c943059"
 dependencies = [
- "wgpu-hal 29.0.4",
-]
-
-[[package]]
-name = "wgpu-core-deps-windows-linux-android"
-version = "27.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71197027d61a71748e4120f05a9242b2ad142e3c01f8c1b47707945a879a03c3"
-dependencies = [
- "wgpu-hal 27.0.4",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -29714,56 +29430,7 @@ version = "29.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e592c1bbef6ad047647ae6e666ebd8cee7a32bb4544d9700ec96cbf73230257"
 dependencies = [
- "wgpu-hal 29.0.4",
-]
-
-[[package]]
-name = "wgpu-hal"
-version = "27.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b21cb61c57ee198bc4aff71aeadff4cbb80b927beb912506af9c780d64313ce"
-dependencies = [
- "android_system_properties",
- "arrayvec",
- "ash",
- "bit-set 0.8.0",
- "bitflags 2.13.0",
- "block",
- "bytemuck",
- "cfg-if",
- "cfg_aliases",
- "core-graphics-types 0.2.0",
- "glow 0.16.0",
- "glutin_wgl_sys",
- "gpu-alloc",
- "gpu-allocator 0.27.0",
- "gpu-descriptor",
- "hashbrown 0.16.1",
- "js-sys",
- "khronos-egl",
- "libc",
- "libloading 0.8.9",
- "log",
- "metal",
- "naga 27.0.3",
- "ndk-sys",
- "objc",
- "once_cell",
- "ordered-float 5.3.0",
- "parking_lot",
- "portable-atomic",
- "portable-atomic-util",
- "profiling",
- "range-alloc",
- "raw-window-handle 0.6.2",
- "renderdoc-sys",
- "smallvec 1.15.2",
- "thiserror 2.0.18",
- "wasm-bindgen",
- "web-sys",
- "wgpu-types 27.0.1",
- "windows 0.58.0",
- "windows-core 0.58.0",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -29781,9 +29448,9 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "cfg_aliases",
- "glow 0.17.0",
+ "glow",
  "glutin_wgl_sys",
- "gpu-allocator 0.28.0",
+ "gpu-allocator",
  "gpu-descriptor",
  "hashbrown 0.16.1",
  "js-sys",
@@ -29791,7 +29458,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "log",
- "naga 29.0.4",
+ "naga",
  "ndk-sys",
  "objc2 0.6.4",
  "objc2-core-foundation",
@@ -29814,7 +29481,7 @@ dependencies = [
  "wayland-sys",
  "web-sys",
  "wgpu-naga-bridge",
- "wgpu-types 29.0.4",
+ "wgpu-types",
  "windows 0.62.2",
  "windows-core 0.62.2",
  "windows-result 0.4.1",
@@ -29826,22 +29493,8 @@ version = "29.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95226013f547544b223281cd16a4fb549aa9dcb562adbda0faae4c73ffbbc161"
 dependencies = [
- "naga 29.0.4",
- "wgpu-types 29.0.4",
-]
-
-[[package]]
-name = "wgpu-types"
-version = "27.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afdcf84c395990db737f2dd91628706cb31e86d72e53482320d368e52b5da5eb"
-dependencies = [
- "bitflags 2.13.0",
- "bytemuck",
- "js-sys",
- "log",
- "thiserror 2.0.18",
- "web-sys",
+ "naga",
+ "wgpu-types",
 ]
 
 [[package]]
@@ -29865,7 +29518,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1352548a4576b7998474fa6fbc54232df5f9ccd90cdea079418c3577e26e220"
 dependencies = [
  "futures-intrusive",
- "wgpu 29.0.4",
+ "wgpu",
 ]
 
 [[package]]
@@ -29875,7 +29528,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e5a5aafb0eeb7cdf21f6155a77da67b35f848820044a6ba2d4a280392546fc1"
 dependencies = [
  "futures-intrusive",
- "wgpu 29.0.4",
+ "wgpu",
 ]
 
 [[package]]

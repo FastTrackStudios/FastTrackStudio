@@ -12,6 +12,7 @@ members = [
     # ── libs/architect — the entity/RPC framework (subtree-imported, ──
     #    history preserved; framework changes are ordinary in-tree work)
     "libs/architect/architect",
+    "libs/vendor/dioxus-test",
     "libs/architect/macros/architect-derive",
     "libs/architect/macros/architect-rpc-derive",
     "libs/architect/macros/architect-action-derive",
@@ -333,9 +334,9 @@ dock-proto = { path = "libs/dock/dock-proto" }
 # PR #61 baseview-0.2 + the FTS delta: nice-plug-dioxus, embedded editors,
 # rich track-info, param rescan). The ONE sanctioned exception to
 # path-deps-only — it left the tree so it can track upstream.
-nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "4b52ca2e6463b428ae5068123756ea50ba2235fd" }
-nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "4b52ca2e6463b428ae5068123756ea50ba2235fd" }
-nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "4b52ca2e6463b428ae5068123756ea50ba2235fd" }
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "781647316f7b5797d02c52332a4a11deac44f4ad" }
+nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "781647316f7b5797d02c52332a4a11deac44f4ad" }
+nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "781647316f7b5797d02c52332a4a11deac44f4ad" }
 utils = { path = "libs/utils" }
 vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
@@ -636,10 +637,14 @@ dioxus = { version = "=0.7.9", default-features = false, features = ["lib"] }
 # blitz-* must resolve to the same source). Feature union of the wave-1
 # UI libs (prelude, system-fonts) and daw-reaper-dioxus (svg, autofocus,
 # incremental, data-uri theme-skin PNGs).
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893", features = ["prelude", "system-fonts", "svg", "autofocus", "incremental", "data-uri"] }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", features = ["prelude", "system-fonts", "svg", "autofocus", "incremental", "data-uri"] }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+# Vendored DioxusLabs/dioxus-test backported to the pins above — headless
+# component tests on blitz-dom (no browser). See libs/vendor/dioxus-test.
+dioxus-test = { path = "libs/vendor/dioxus-test" }
 dioxus-devtools = "0.7"
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "837c9d4c1c9f99b19de7a3f087d8af1b0538dcae", default-features = false }
@@ -682,17 +687,17 @@ libloading = "0.8"
 wgpu = { version = "29", features = ["wgsl"] }
 vello = { version = "0.9", features = ["wgpu"] }
 skrifa = "0.37"
-anyrender_vello = "0.11"
+anyrender_vello = "0.12"
 # keyflow-ui / engraver-proto renderer stack (paired with dioxus-native
 # 0.7.9 from crates.io). NOTE: keyflow-ui pins anyrender_vello 0.10.1 and
 # dioxus-native 0.7.9 INLINE in its own manifest — they collide with the
 # root's anyrender_vello 0.11 / blitz-git dioxus-native pins above, and
 # root pins win in the workspace table, so the conflicting pair stays
 # crate-local.
-anyrender = "0.10"
-anyrender_vello_hybrid = "0.5.1"
-vello_hybrid = "0.0.6"
-vello_common = "0.0.6"
+anyrender = "0.11"
+anyrender_vello_hybrid = "0.8"
+vello_hybrid = "0.0.9"
+vello_common = "0.0.9"
 peniko = "0.6"
 kurbo = "0.13"
 # Deterministic CPU rendering for the ui-snapshot regression gate.
