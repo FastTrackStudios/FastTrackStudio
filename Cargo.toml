@@ -193,6 +193,7 @@ members = [
     "features/fx/eq/eq-dsp",
     "features/fx/eq/eq-profiles",
     "features/fx/eq/eq-ui",
+    "features/fx/eq/apps/eq-standalone",
     "features/fx/eq/spectrum-analyzer/spectrum-analyzer",
     "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp",
     "features/fx/comp/comp",
@@ -262,6 +263,8 @@ members = [
     "apps/plugins/modulation",
     "apps/plugins/guide",
     "apps/plugins/signal",
+    "apps/plugins/gate",
+    "apps/plugins/limiter",
     "apps/plugins/xtask",
     # ── apps/extensions — DAW-host extension cdylibs ──────────────────
     #    (apps/extensions/<host>-fts-extensions; reaper is the first host)
