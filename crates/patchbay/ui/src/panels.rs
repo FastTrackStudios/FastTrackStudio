@@ -1052,6 +1052,29 @@ fn ChanmapSync(node_name: String) -> Element {
         }
     };
 
+    let run_dante = |direction: &'static str| {
+        let handle = handle.clone();
+        let node_name = node_name.clone();
+        move |_| {
+            let handle = handle.clone();
+            let node_name = node_name.clone();
+            result.set("scanning Dante network…".into());
+            spawn(async move {
+                match handle
+                    .0
+                    .import_inferno_names(node_name, String::new(), direction.into())
+                    .await
+                {
+                    Ok(n) => {
+                        result.set(format!("imported {n} Dante {direction} channel names"));
+                        state::refresh_meta(&handle).await;
+                    }
+                    Err(e) => result.set(format!("dante import failed: {e}")),
+                }
+            });
+        }
+    };
+
     rsx! {
         div { class: "chanmap-sync",
             input {
@@ -1065,6 +1088,14 @@ fn ChanmapSync(node_name: String) -> Element {
                     onclick: run(true), "import chanmap" }
                 button { class: "chip", title: "channel aliases → ChanMap nameN lines",
                     onclick: run(false), "export chanmap" }
+            }
+            div { class: "chanmap-buttons",
+                button { class: "chip",
+                    title: "name channels from a Dante device's RX list over ARC (for capture/source proxies)",
+                    onclick: run_dante("rx"), "Dante names (rx)" }
+                button { class: "chip",
+                    title: "name channels from a Dante device's TX list over ARC (for playback/sink proxies)",
+                    onclick: run_dante("tx"), "Dante names (tx)" }
             }
             if !result.read().is_empty() {
                 div { class: "apply-report", "{result}" }

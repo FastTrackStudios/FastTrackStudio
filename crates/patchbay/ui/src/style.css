@@ -1,5 +1,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root { color-scheme: dark; }
+
 .patchbay-root {
   display: flex; flex-direction: column;
   width: 100vw; height: 100vh; overflow: hidden;
@@ -7,6 +9,17 @@
   font-family: "Inter", "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
 }
+
+/* Native controls follow the theme (webkit defaults to light). */
+select, option, input {
+  background: #10131a; color: #d7dde5;
+  border: 1px solid #2b323d; border-radius: 6px;
+  accent-color: #4a90d9; color-scheme: dark;
+}
+select { padding: 3px 6px; font-size: 12px; }
+option { background: #1b1f26; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { filter: invert(0.85); }
 
 /* ── top bar ─────────────────────────────────────────────────────── */
 .topbar {

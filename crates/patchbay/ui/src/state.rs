@@ -78,7 +78,7 @@ pub static LAST_REPORT: GlobalSignal<Option<(String, ApplyReport)>> = Signal::gl
 pub static HOVERED_NODE: GlobalSignal<Option<u32>> = Signal::global(|| None);
 /// Per-column collapse (Inputs | Applications | Outputs): collapsed
 /// columns render cards as headers only, cables converging on them.
-pub static COLLAPSED_COLS: GlobalSignal<[bool; 3]> = Signal::global(|| [false; 3]);
+pub static COLLAPSED_COLS: GlobalSignal<[bool; 4]> = Signal::global(|| [false; 4]);
 
 // ─── Drag-to-connect ────────────────────────────────────────────────────
 

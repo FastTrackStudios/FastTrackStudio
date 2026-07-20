@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use patchbay_proto::{GraphSnapshot, MediaKind, PortDirection, PwNode, PwPort};
 
-pub const CARD_W: f64 = 360.0;
+pub const CARD_W: f64 = 280.0;
 pub const ROW_H: f64 = 22.0;
 pub const HEADER_H: f64 = 34.0;
 pub const CARD_GAP: f64 = 18.0;
@@ -22,13 +22,18 @@ pub const COL_HEADER_H: f64 = 34.0;
 pub const GROUP_MIN: usize = 5;
 
 /// Column semantics: 0 = Inputs (capture devices/sources), 1 =
-/// Applications (streams + app clients), 2 = Outputs (sinks). Driven
-/// by `media.class`, not port shape — an `Audio/Sink` belongs on the
-/// right even though its monitor ports also produce audio.
-pub fn column_of(media_class: &str) -> usize {
-    if media_class.contains("/Sink") {
-        2
-    } else if media_class.contains("/Source") && !media_class.starts_with("Stream") {
+/// Applications (streams + app clients), 2 = Groups (bus sinks —
+/// loopbacks like System Audio / Voice Chat / Games and patchbay
+/// virtual sinks), 3 = Outputs (real hardware/network sinks). Driven
+/// by media.class + bus-ness, not port shape.
+pub fn column_of(node: &PwNode) -> usize {
+    if node.media_class.contains("/Sink") {
+        if node.virtual_sink || node.group.starts_with("loopback") {
+            2
+        } else {
+            3
+        }
+    } else if node.media_class.contains("/Source") && !node.media_class.starts_with("Stream") {
         0
     } else {
         1
@@ -36,11 +41,11 @@ pub fn column_of(media_class: &str) -> usize {
 }
 
 /// Column titles per media tab.
-pub fn column_titles(tab: MediaKind) -> [&'static str; 3] {
+pub fn column_titles(tab: MediaKind) -> [&'static str; 4] {
     match tab {
-        MediaKind::Midi => ["MIDI Inputs", "Applications", "MIDI Outputs"],
-        MediaKind::Video => ["Cameras / Sources", "Applications", "Outputs"],
-        _ => ["Inputs", "Applications", "Outputs"],
+        MediaKind::Midi => ["MIDI Inputs", "Applications", "Groups", "MIDI Outputs"],
+        MediaKind::Video => ["Cameras / Sources", "Applications", "Groups", "Outputs"],
+        _ => ["Inputs", "Applications", "Groups", "Outputs"],
     }
 }
 
@@ -418,7 +423,7 @@ pub struct Filters<'a> {
     pub hide_monitors: bool,
     /// Per-column collapse: collapsed columns render cards as headers
     /// only, with every cable converging on the card edge.
-    pub collapsed: [bool; 3],
+    pub collapsed: [bool; 4],
 }
 
 pub fn compute_layout(
@@ -427,7 +432,7 @@ pub fn compute_layout(
     expanded: &HashMap<String, bool>,
 ) -> GraphLayout {
     let search = filters.search.to_lowercase();
-    let mut columns: [Vec<CardLayout>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    let mut columns: [Vec<CardLayout>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
     for node in &graph.nodes {
         if !search.is_empty() {
@@ -509,7 +514,7 @@ pub fn compute_layout(
             if !ins.is_empty() {
                 let rows =
                     build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
-                columns[2].push(make_card(rows, 2, format!("{}-in", node.id)));
+                columns[3].push(make_card(rows, 3, format!("{}-in", node.id)));
             }
         } else {
             let mut rows =
@@ -521,7 +526,7 @@ pub fn compute_layout(
                 expanded,
                 filters.aliases,
             ));
-            let col = column_of(&node.media_class);
+            let col = column_of(node);
             columns[col].push(make_card(rows, col, node.id.to_string()));
         }
     }
@@ -611,7 +616,7 @@ pub fn compute_layout(
     GraphLayout {
         cards,
         anchors,
-        width: MARGIN * 2.0 + 3.0 * CARD_W + 2.0 * COL_GAP,
+        width: MARGIN * 2.0 + 4.0 * CARD_W + 3.0 * COL_GAP,
         height: height + MARGIN,
     }
 }
@@ -668,7 +673,7 @@ mod reaper_layout {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
 
@@ -748,7 +753,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         let card = &lay.cards[0];
@@ -784,7 +789,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         let rows = &lay.cards[0].rows;
@@ -810,7 +815,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false, false, true],
+            collapsed: [false, false, false, true],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         let card = &lay.cards[0];
@@ -838,7 +843,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         let rows = &lay.cards[0].rows;
@@ -902,7 +907,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         assert_eq!(lay.cards.len(), 1, "forwarder card folds into the sink");
@@ -939,7 +944,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         let card = &lay.cards[0];
@@ -963,7 +968,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         assert!(lay.cards[0].rows.iter().all(|r| !r.pair));
@@ -1000,10 +1005,10 @@ mod live_probe {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
-        for col in 0..3 {
+        for col in 0..4 {
             let x = MARGIN + col as f64 * (CARD_W + COL_GAP);
             println!("── column {col} ({})", COLUMN_TITLES_DBG[col]);
             for c in lay.cards.iter().filter(|c| (c.x - x).abs() < 1.0) {
@@ -1016,7 +1021,7 @@ mod live_probe {
         );
     }
 
-    const COLUMN_TITLES_DBG: [&str; 3] = ["Inputs", "Applications", "Outputs"];
+    const COLUMN_TITLES_DBG: [&str; 4] = ["Inputs", "Applications", "Groups", "Outputs"];
 
     /// Diagnose why pairs/icons aren't visible against the RUNNING app:
     /// `cargo test -p patchbay-ui live_pairs -- --ignored --nocapture`
@@ -1043,7 +1048,7 @@ mod live_probe {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         for c in &lay.cards {
@@ -1103,7 +1108,7 @@ mod live_probe {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
-            collapsed: [false; 3],
+            collapsed: [false; 4],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         match lay.cards.iter().find(|c| c.node.name == "REAPER") {
