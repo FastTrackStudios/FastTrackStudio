@@ -101,6 +101,17 @@
   50%      { background: #38618f; }
 }
 .port-row.pair .port-name { font-weight: 600; }
+.chan-num {
+  flex: 0 0 auto; font-size: 9px; color: #5c6673;
+  font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+  min-width: 14px; text-align: center;
+}
+.port-row:hover .chan-num { color: #8fa3bb; }
+.pair-toggle {
+  flex: 0 0 auto; font-size: 10px; color: #5c6673;
+  padding: 0 3px; border-radius: 4px; cursor: pointer;
+}
+.pair-toggle:hover { color: #d7dde5; background: #2b323d; }
 .pair-dot {
   border-radius: 3px;
   background-image: linear-gradient(transparent 45%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.55) 55%, transparent 55%);

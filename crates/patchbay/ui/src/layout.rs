@@ -65,8 +65,39 @@ pub struct PortRow {
     pub monitor: bool,
     /// Condensed L/R stereo pair — one row, two thin cables.
     pub pair: bool,
+    /// Toggle key for expanding a pair into its two channels (set on
+    /// the pair row AND on its expanded singles, for collapsing back).
+    pub pair_key: Option<String>,
+    /// Channel number(s) from the raw port name's numeric suffix —
+    /// shown as a dim chip so names never need numbers baked in.
+    /// `(first, second)`; second is set for pair rows.
+    pub chan: (Option<u64>, Option<u64>),
     /// y offset of the row center, relative to the card top.
     pub y: f64,
+}
+
+/// "28 - Guitar 1" → "Guitar 1", but ONLY when the leading number is
+/// this port's actual channel — the UI shows the channel natively, so
+/// a matching baked-in number is redundant; a MISmatched one is
+/// information and stays.
+pub fn strip_channel_prefix(label: &str, chan: Option<u64>) -> String {
+    let Some(chan) = chan else {
+        return label.to_string();
+    };
+    let digits = label.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits == 0 {
+        return label.to_string();
+    }
+    let (num, rest) = label.split_at(digits);
+    if num.parse::<u64>() != Ok(chan) {
+        return label.to_string();
+    }
+    let stripped = rest.trim_start_matches([' ', '-', '–', '.', ':', '·']).trim_start();
+    if stripped.is_empty() {
+        label.to_string()
+    } else {
+        stripped.to_string()
+    }
 }
 
 pub struct CardLayout {
@@ -130,36 +161,53 @@ fn lr_split(label: &str) -> Option<(&str, bool)> {
 /// Condense adjacent single-port L/R rows into one pair row (drawn as
 /// two thin cables) — `playback_FL`+`playback_FR`, or aliased channels
 /// like "Room Far L"+"Room Far R" on a 128-channel node. Pairing looks
-/// at the DISPLAY label (alias first), because naming a pair is exactly
-/// how you mark it as stereo.
+/// at the DISPLAY label (alias first) with any baked-in channel-number
+/// prefix stripped, so "28 - Guitar 1 L"+"29 - Guitar 1 R" still pair.
+/// An expanded pair (`expanded["pair/…"]`) stays as its two channels,
+/// each carrying the pair key so it can collapse back.
 fn merge_lr_pairs(
     rows: Vec<PortRow>,
     node: &PwNode,
+    dir_str: &str,
+    expanded: &HashMap<String, bool>,
     aliases: &HashMap<String, String>,
 ) -> Vec<PortRow> {
-    let display = |raw: &str| -> String {
-        aliases
-            .get(&format!("{}:{}", node.name, raw))
+    let display = |row: &PortRow| -> String {
+        let d = aliases
+            .get(&format!("{}:{}", node.name, row.label))
             .cloned()
-            .unwrap_or_else(|| raw.to_string())
+            .unwrap_or_else(|| row.label.clone());
+        strip_channel_prefix(&d, row.chan.0)
     };
     let mut out: Vec<PortRow> = Vec::new();
-    for row in rows {
+    for mut row in rows {
         let mergeable = row.group_key.is_none() && !row.pair && row.ports.len() == 1;
         if mergeable {
             if let Some(prev) = out.last() {
                 if prev.group_key.is_none()
                     && !prev.pair
+                    && prev.pair_key.is_none()
                     && prev.ports.len() == 1
                     && prev.monitor == row.monitor
                     && prev.kind == row.kind
                 {
-                    let (pl, rl) = (display(&prev.label), display(&row.label));
+                    let (pl, rl) = (display(prev), display(&row));
                     let pair = match (lr_split(&pl), lr_split(&rl)) {
                         (Some((b1, false)), Some((b2, true))) if b1 == b2 => Some(b1.to_string()),
                         _ => None,
                     };
                     if let Some(b1) = pair {
+                        let key = format!("pair/{}/{}/{}", node.name, dir_str, prev.label);
+                        if expanded.get(&key).copied().unwrap_or(false) {
+                            // Expanded: keep both channels, each able
+                            // to collapse the pair back.
+                            let mut prev = out.pop().expect("just peeked");
+                            prev.pair_key = Some(key.clone());
+                            row.pair_key = Some(key);
+                            out.push(prev);
+                            out.push(row);
+                            continue;
+                        }
                         let base = b1.trim_end_matches(['_', ' ', '-', '.', '/']);
                         let label = if base.is_empty() {
                             "L/R".to_string()
@@ -175,6 +223,8 @@ fn merge_lr_pairs(
                             group_key: None,
                             monitor: row.monitor,
                             pair: true,
+                            pair_key: Some(key),
+                            chan: (prev.chan.0, row.chan.0),
                             y: 0.0,
                         });
                         continue;
@@ -219,6 +269,8 @@ fn build_rows(
             group_key: None,
             monitor: is_monitor(&p.name),
             pair: false,
+            pair_key: None,
+            chan: (split_numeric(&p.name).map(|(_, n)| n), None),
             y: 0.0,
         });
     };
@@ -241,6 +293,8 @@ fn build_rows(
                 group_key: Some(key),
                 monitor,
                 pair: false,
+                pair_key: None,
+                chan: (None, None),
                 y: 0.0,
             });
             for p in run {
@@ -255,6 +309,8 @@ fn build_rows(
                 group_key: Some(key),
                 monitor,
                 pair: false,
+                pair_key: None,
+                chan: (None, None),
                 y: 0.0,
             });
         }
@@ -315,7 +371,7 @@ fn build_rows(
         }
         segment(&mut rows, &run[seg_start..]);
     }
-    merge_lr_pairs(rows, node, aliases)
+    merge_lr_pairs(rows, node, dir_str, expanded, aliases)
 }
 
 /// Does a port belong on the given media tab? `Other` (control/dsp
@@ -711,6 +767,53 @@ mod stereo_pairs {
         // Both ports share the card-edge midpoint anchor.
         assert_eq!(lay.anchors[&10], lay.anchors[&11]);
         assert_eq!(lay.anchors[&10].0, card.x, "input side edge");
+    }
+
+    #[test]
+    fn numbered_alias_prefixes_dont_defeat_pairing() {
+        // REAPER-style: in28/in29 aliased "28 - Guitar 1 L"/"29 - Guitar 1 R"
+        // must condense to "Guitar 1 L/R" with chans (28, 29).
+        let ports = vec![port(28, "in28"), port(29, "in29")];
+        let graph = GraphSnapshot { nodes: vec![node()], ports, links: Vec::new() };
+        let aliases: HashMap<String, String> = [
+            ("dev:in28".to_string(), "28 - Guitar 1 L".to_string()),
+            ("dev:in29".to_string(), "29 - Guitar 1 R".to_string()),
+        ]
+        .into();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+            collapsed: [false; 3],
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        let rows = &lay.cards[0].rows;
+        assert_eq!(rows.len(), 1, "must condense to one pair row");
+        assert_eq!(rows[0].label, "Guitar 1 L/R");
+        assert_eq!(rows[0].chan, (Some(28), Some(29)));
+
+        // Expanding the pair splits it back into the two channels.
+        let expanded: HashMap<String, bool> =
+            [(rows[0].pair_key.clone().unwrap(), true)].into();
+        let lay = compute_layout(&graph, &filters, &expanded);
+        let rows = &lay.cards[0].rows;
+        assert_eq!(rows.len(), 2, "expanded pair = two channel rows");
+        assert!(rows.iter().all(|r| r.pair_key.is_some() && !r.pair));
+    }
+
+    #[test]
+    fn strip_channel_prefix_only_when_it_matches() {
+        assert_eq!(strip_channel_prefix("28 - Guitar 1", Some(28)), "Guitar 1");
+        assert_eq!(strip_channel_prefix("28. Guitar", Some(28)), "Guitar");
+        assert_eq!(strip_channel_prefix("28-Guitar", Some(28)), "Guitar");
+        // Mismatched number is information — keep it.
+        assert_eq!(strip_channel_prefix("29 - Guitar", Some(28)), "29 - Guitar");
+        // A bare number stays (stripping would leave nothing).
+        assert_eq!(strip_channel_prefix("28", Some(28)), "28");
+        assert_eq!(strip_channel_prefix("Guitar", Some(28)), "Guitar");
+        assert_eq!(strip_channel_prefix("28 - Guitar", None), "28 - Guitar");
     }
 
     #[test]

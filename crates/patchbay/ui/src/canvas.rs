@@ -345,8 +345,20 @@ pub fn GraphCanvas() -> Element {
                                 label: if r.pair {
                                     r.label.clone()
                                 } else {
-                                    state::port_label(&card.node.name, &r.label)
+                                    // The chip shows the channel, so a
+                                    // matching baked-in "28 - " prefix
+                                    // in the alias is dropped.
+                                    layout::strip_channel_prefix(
+                                        &state::port_label(&card.node.name, &r.label),
+                                        r.chan.0,
+                                    )
                                 },
+                                chan_label: match r.chan {
+                                    (Some(a), Some(b)) => format!("{a}·{b}"),
+                                    (Some(a), None) => a.to_string(),
+                                    _ => String::new(),
+                                },
+                                pair_key: r.pair_key.clone(),
                                 raw_name: r.label.clone(),
                                 monitor: r.monitor,
                                 direction: r.direction,
@@ -387,6 +399,11 @@ struct RowProps {
     dot: String,
     /// Condensed stereo pair (ports = [L, R]).
     pair: bool,
+    /// Dim channel-number chip ("28" or "28·29"); empty = no chip.
+    chan_label: String,
+    /// Present on pair rows (expand to channels) and their expanded
+    /// singles (collapse back).
+    pair_key: Option<String>,
     /// World coordinates of this row's cable edge (drag start point).
     anchor: (f64, f64),
     ports: Vec<u32>,
@@ -508,6 +525,27 @@ fn NodeCard(
                         String::new()
                     };
                     let dot = row.dot.clone();
+                    // Pair expand/collapse toggle (tiny, separate from
+                    // the row's arm/connect click).
+                    let toggle = row.pair_key.clone().map(|pk| {
+                        let is_pair = row.pair;
+                        rsx! {
+                            span {
+                                class: "pair-toggle",
+                                title: if is_pair { "split into individual channels" } else { "merge back into stereo pair" },
+                                onclick: move |e: Event<MouseData>| {
+                                    e.stop_propagation();
+                                    let cur = EXPANDED_GROUPS
+                                        .peek()
+                                        .get(&pk)
+                                        .copied()
+                                        .unwrap_or(false);
+                                    EXPANDED_GROUPS.write().insert(pk.clone(), !cur);
+                                },
+                                if is_pair { "±" } else { "=" }
+                            }
+                        }
+                    });
                     rsx! {
                         div {
                             key: "{i}",
@@ -570,6 +608,9 @@ fn NodeCard(
                                     class: if row.pair { "port-dot pair-dot" } else { "port-dot" },
                                     style: "background:{dot};",
                                 }
+                                if !row.chan_label.is_empty() {
+                                    span { class: "chan-num", "{row.chan_label}" }
+                                }
                             }
                             span { class: "port-name",
                                 if is_group {
@@ -578,7 +619,11 @@ fn NodeCard(
                                     "{row.label}"
                                 }
                             }
+                            {toggle}
                             if row.direction == PortDirection::Output {
+                                if !row.chan_label.is_empty() {
+                                    span { class: "chan-num", "{row.chan_label}" }
+                                }
                                 span {
                                     class: if row.pair { "port-dot pair-dot" } else { "port-dot" },
                                     style: "background:{dot};",
