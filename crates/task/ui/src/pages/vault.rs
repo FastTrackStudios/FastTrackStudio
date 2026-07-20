@@ -1530,3 +1530,46 @@ pub(crate) async fn create_new_file(slug: String, path: String) -> Result<String
         Err("native client not wired yet".to_owned())
     }
 }
+
+#[cfg(test)]
+mod song_front_tests {
+    use super::song_front_from;
+
+    const NOTE: &str = "---\ntype: song\nartist: Elevation Worship\nkey: B\nbpm: 128\ntime_signature: \"4/4\"\nduration_sec: 372.5\nsections:\n  - name: Intro\n    start_sec: 0\n    end_sec: 15.2\n  - name: Verse 1\n    start_sec: 15.2\n    end_sec: 45\nstems:\n  - name: Click\n    group: Guide\n    default_muted: true\n    content_hash: aaa111\n  - name: \"Electric Guitar 1\"\n    group: Guitars\n    content_hash: bbb222\n---\n# Praise\nbody text\n";
+
+    #[test]
+    fn parses_full_song_front() {
+        let f = song_front_from(NOTE);
+        assert_eq!(f.artist.as_deref(), Some("Elevation Worship"));
+        assert_eq!(f.key.as_deref(), Some("B"));
+        assert_eq!(f.bpm, Some(128.0));
+        assert_eq!(f.time_signature.as_deref(), Some("4/4"));
+        assert_eq!(f.duration_sec, Some(372.5));
+        assert_eq!(f.sections.len(), 2);
+        assert_eq!(f.sections[1].name, "Verse 1");
+        assert_eq!(f.sections[1].start_sec, 15.2);
+        assert_eq!(f.stems.len(), 2);
+        assert_eq!(f.stems[0].name, "Click");
+        assert_eq!(f.stems[0].group.as_deref(), Some("Guide"));
+        assert!(f.stems[0].default_muted);
+        assert_eq!(f.stems[0].content_hash, "aaa111");
+        assert_eq!(f.stems[1].name, "Electric Guitar 1");
+        assert!(!f.stems[1].default_muted);
+    }
+
+    #[test]
+    fn missing_front_is_empty() {
+        let f = song_front_from("# Just a note\n");
+        assert!(f.stems.is_empty());
+        assert!(f.sections.is_empty());
+        assert_eq!(f.bpm, None);
+    }
+
+    #[test]
+    fn stem_without_hash_is_dropped() {
+        let text = "---\nstems:\n  - name: Click\n  - name: Bass\n    content_hash: ccc\n---\n";
+        let f = song_front_from(text);
+        assert_eq!(f.stems.len(), 1);
+        assert_eq!(f.stems[0].name, "Bass");
+    }
+}

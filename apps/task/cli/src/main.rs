@@ -4862,6 +4862,19 @@ fn resolve_server_base(explicit: Option<&str>) -> String {
     pick_server_base(flag_or_env.as_deref(), session_url.as_deref())
 }
 
+/// HTTP(S) base for the server's plain HTTP routes (`/blobs/*`),
+/// derived from the resolved vox base (`ws→http`, `wss→https`).
+fn resolve_server_http_base(explicit: Option<&str>) -> String {
+    let base = resolve_server_base(explicit);
+    if let Some(rest) = base.strip_prefix("wss://") {
+        format!("https://{rest}")
+    } else if let Some(rest) = base.strip_prefix("ws://") {
+        format!("http://{rest}")
+    } else {
+        base
+    }
+}
+
 /// Pure core of [`resolve_server_base`] — unit-testable precedence
 /// fold. `flag_or_env` is `--server`/`TASK_VOX_URL` (already
 /// flag-over-env, courtesy of clap), `session_url` the active
