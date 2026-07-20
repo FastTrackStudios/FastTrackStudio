@@ -706,18 +706,10 @@ mod imp {
                         }
                     }
 
-                    // Set navigation (prev / next whole song) + transport bar.
-                    div { class: "flex items-center gap-2",
-                        button {
-                            class: "px-3 py-2 rounded-md text-sm font-semibold border border-border text-foreground hover:bg-accent disabled:opacity-40 transition-colors",
-                            disabled: at_first,
-                            onclick: {
-                                let goto_song = goto_song;
-                                move |_| if idx > 0 { goto_song.call(idx - 1) }
-                            },
-                            "‹ Prev song"
-                        }
-                        div { class: "h-16 flex-1 rounded-lg overflow-hidden border border-border",
+                    // Transport (full width so the 6 controls never squish) +
+                    // whole-song prev/next below it.
+                    div { class: "flex flex-col gap-2",
+                        div { class: "h-16 rounded-lg overflow-hidden border border-border",
                             TransportControlBar {
                                 is_playing,
                                 is_looping: false,
@@ -731,14 +723,25 @@ mod imp {
                                 on_forward,
                             }
                         }
-                        button {
-                            class: "px-3 py-2 rounded-md text-sm font-semibold border border-border text-foreground hover:bg-accent disabled:opacity-40 transition-colors",
-                            disabled: at_last,
-                            onclick: {
-                                let goto_song = goto_song;
-                                move |_| if idx + 1 < count { goto_song.call(idx + 1) }
-                            },
-                            "Next song ›"
+                        div { class: "flex items-center justify-between gap-2",
+                            button {
+                                class: "px-3 py-2 rounded-md text-sm font-semibold border border-border text-foreground hover:bg-accent disabled:opacity-40 transition-colors",
+                                disabled: at_first,
+                                onclick: {
+                                    let goto_song = goto_song;
+                                    move |_| if idx > 0 { goto_song.call(idx - 1) }
+                                },
+                                "‹ Prev song"
+                            }
+                            button {
+                                class: "px-3 py-2 rounded-md text-sm font-semibold border border-border text-foreground hover:bg-accent disabled:opacity-40 transition-colors",
+                                disabled: at_last,
+                                onclick: {
+                                    let goto_song = goto_song;
+                                    move |_| if idx + 1 < count { goto_song.call(idx + 1) }
+                                },
+                                "Next song ›"
+                            }
                         }
                     }
 
