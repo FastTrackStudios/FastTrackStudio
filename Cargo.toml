@@ -262,6 +262,7 @@ members = [
     "apps/plugins/modulation",
     "apps/plugins/guide",
     "apps/plugins/signal",
+    "apps/plugins/xtask",
     # ── apps/extensions — DAW-host extension cdylibs ──────────────────
     #    (apps/extensions/<host>-fts-extensions; reaper is the first host)
     "apps/extensions/reaper-fts-extensions",
@@ -331,6 +332,7 @@ dock-proto = { path = "libs/dock/dock-proto" }
 # path-deps-only — it left the tree so it can track upstream.
 nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "4b52ca2e6463b428ae5068123756ea50ba2235fd" }
 nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "4b52ca2e6463b428ae5068123756ea50ba2235fd" }
+nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "4b52ca2e6463b428ae5068123756ea50ba2235fd" }
 utils = { path = "libs/utils" }
 vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }

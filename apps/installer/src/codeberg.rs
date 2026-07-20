@@ -23,6 +23,16 @@ pub struct Release {
 
 /// Resolve the latest release, or the release for a specific tag.
 pub async fn resolve(client: &reqwest::Client, tag: Option<&str>) -> eyre::Result<Release> {
+    resolve_with_prefix(client, tag, "fasttrackstudio-").await
+}
+
+/// Same resolution, but pick the platform tarball by an arbitrary asset
+/// name prefix (e.g. "fts-plugins-" for the plugin bundle).
+pub async fn resolve_with_prefix(
+    client: &reqwest::Client,
+    tag: Option<&str>,
+    asset_prefix: &str,
+) -> eyre::Result<Release> {
     let url = match tag {
         Some(tag) => format!("{API_BASE}/releases/tags/{tag}"),
         None => format!("{API_BASE}/releases/latest"),
@@ -43,7 +53,7 @@ pub async fn resolve(client: &reqwest::Client, tag: Option<&str>) -> eyre::Resul
         // alphas exist it 404s. Fall back to the newest release of any
         // kind.
         if status.as_u16() == 404 && tag.is_none() {
-            return Box::pin(resolve_newest_any(client)).await;
+            return Box::pin(resolve_newest_any(client, asset_prefix)).await;
         }
         let hint = match (status.as_u16(), tag) {
             (404, Some(tag)) => format!(" (no release tagged {tag}?)"),
@@ -76,12 +86,12 @@ pub async fn resolve(client: &reqwest::Client, tag: Option<&str>) -> eyre::Resul
     let suffix = format!("-{}.tar.gz", crate::platform_suffix()?);
     let tarball = assets
         .iter()
-        .find(|a| a.name.starts_with("fasttrackstudio-") && a.name.ends_with(&suffix))
+        .find(|a| a.name.starts_with(asset_prefix) && a.name.ends_with(&suffix))
         .map(|a| Asset { name: a.name.clone(), url: a.url.clone() })
         .ok_or_else(|| {
             let names: Vec<&str> = assets.iter().map(|a| a.name.as_str()).collect();
             eyre!(
-                "release {tag} has no fasttrackstudio-*{suffix} asset (assets: {})",
+                "release {tag} has no {asset_prefix}*{suffix} asset (assets: {})",
                 if names.is_empty() { "none".to_string() } else { names.join(", ") }
             )
         })?;
@@ -95,7 +105,7 @@ pub async fn resolve(client: &reqwest::Client, tag: Option<&str>) -> eyre::Resul
 
 /// Newest release of any kind (prereleases included): first entry of
 /// the paginated list.
-async fn resolve_newest_any(client: &reqwest::Client) -> eyre::Result<Release> {
+async fn resolve_newest_any(client: &reqwest::Client, asset_prefix: &str) -> eyre::Result<Release> {
     let url = format!("{API_BASE}/releases?limit=1");
     let mut req = client.get(&url).header("Accept", "application/json");
     if let Ok(token) = std::env::var("CODEBERG_TOKEN") {
@@ -118,5 +128,5 @@ async fn resolve_newest_any(client: &reqwest::Client) -> eyre::Result<Release> {
     let tag = first["tag_name"]
         .as_str()
         .ok_or_else(|| eyre!("release JSON has no tag_name"))?;
-    Box::pin(resolve(client, Some(tag))).await
+    Box::pin(resolve_with_prefix(client, Some(tag), asset_prefix)).await
 }
