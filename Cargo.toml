@@ -191,6 +191,8 @@ members = [
     # inside each FX dir; they stay implicit members via path deps.
     "features/fx/saturate/saturate",
     "features/fx/saturate/saturate-dsp",
+    "features/fx/trigger/trigger",
+    "features/fx/trigger/trigger-dsp",
     "features/fx/eq/eq",
     "features/fx/eq/eq-dsp",
     "features/fx/eq/eq-profiles",
@@ -200,6 +202,7 @@ members = [
     "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp",
     "features/fx/comp/comp",
     "features/fx/comp/comp-dsp",
+    "features/fx/comp/comp-ui",
     "features/fx/reverb/reverb",
     "features/fx/reverb/reverb-dsp",
     "features/fx/delay/delay",
@@ -267,6 +270,7 @@ members = [
     "apps/plugins/signal",
     "apps/plugins/gate",
     "apps/plugins/limiter",
+    "apps/plugins/trigger",
     "apps/plugins/xtask",
     "apps/plugins/host",
     # ── apps/extensions — DAW-host extension cdylibs ──────────────────
@@ -531,6 +535,8 @@ signal-synth-rig = { path = "features/rigs/synth/rig" }
 # Facade crates — the public FX deps (downstream uses these, not `*-dsp`).
 saturate = { path = "features/fx/saturate/saturate" }
 saturate-dsp = { path = "features/fx/saturate/saturate-dsp" }
+trigger = { path = "features/fx/trigger/trigger" }
+trigger-dsp = { path = "features/fx/trigger/trigger-dsp" }
 eq = { path = "features/fx/eq/eq" }
 # The full Pro-Q EQ editor. Core (graph model / response / SVG / interaction)
 # is wasm-portable; the vello/nice-plug editor is behind its `native` feature.
@@ -540,6 +546,9 @@ spectrum-analyzer = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer
 spectrum-analyzer-dsp = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp" }
 spectrum-analyzer-ui = { path = "features/fx/eq/spectrum-analyzer/spectrum-analyzer-ui" }
 comp = { path = "features/fx/comp/comp" }
+# The comp plugin editor. Core (profile view data model) is portable; the
+# nice-plug/Blitz editor is behind its `native` feature.
+comp-ui = { path = "features/fx/comp/comp-ui", default-features = false }
 reverb = { path = "features/fx/reverb/reverb" }
 delay = { path = "features/fx/delay/delay" }
 pitch = { path = "features/fx/pitch/pitch" }
@@ -1121,4 +1130,6 @@ opt-level = 3
 [profile.dev.package.delay-dsp]
 opt-level = 3
 [profile.dev.package.pitch-dsp]
+opt-level = 3
+[profile.dev.package.trigger-dsp]
 opt-level = 3
