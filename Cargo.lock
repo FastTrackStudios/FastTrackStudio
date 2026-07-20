@@ -2127,6 +2127,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "baseview"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fee31c5ff593b43ef62afbaea18a6b3fa62e84171d00aaf014b9d4ea128776e"
+dependencies = [
+ "block2 0.6.2",
+ "bytemuck",
+ "dispatch2",
+ "dpi",
+ "keyboard-types 0.8.3",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "percent-encoding",
+ "polling",
+ "raw-window-handle 0.6.2",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "windows-sys 0.61.2",
+ "x11-dl",
+ "x11rb",
+ "xkbcommon-dl",
+]
+
+[[package]]
 name = "biblatex"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9775,10 +9801,10 @@ version = "0.1.0"
 name = "fts-clap-host"
 version = "0.1.0"
 dependencies = [
+ "baseview 0.2.2",
  "daw-standalone",
  "eyre",
  "raw-window-handle 0.6.2",
- "winit 0.30.13",
 ]
 
 [[package]]
@@ -17065,7 +17091,7 @@ source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b
 dependencies = [
  "anyrender",
  "anyrender_vello 0.11.0",
- "baseview",
+ "baseview 0.1.0",
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
