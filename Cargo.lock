@@ -3741,6 +3741,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "comp-plugin"
+version = "0.1.0"
+dependencies = [
+ "comp",
+ "nice-plug",
+]
+
+[[package]]
 name = "compact_str"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6251,6 +6259,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "delay-plugin"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "delay",
+ "nice-plug",
+]
+
+[[package]]
 name = "deltae"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8323,6 +8340,14 @@ name = "eq-dsp"
 version = "0.1.0"
 dependencies = [
  "audiocore-dsp",
+]
+
+[[package]]
+name = "eq-plugin"
+version = "0.1.0"
+dependencies = [
+ "eq",
+ "nice-plug",
 ]
 
 [[package]]
@@ -11070,6 +11095,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "guide-plugin"
+version = "0.1.0"
+dependencies = [
+ "nice-plug",
+ "session-guide",
 ]
 
 [[package]]
@@ -16330,6 +16363,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "modulation-plugin"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "modulation",
+ "nice-plug",
+]
+
+[[package]]
 name = "moire"
 version = "1.0.0"
 source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
@@ -16739,6 +16781,14 @@ dependencies = [
  "spirv 0.4.0+sdk-1.4.341.0",
  "thiserror 2.0.18",
  "unicode-ident",
+]
+
+[[package]]
+name = "nam-plugin"
+version = "0.1.0"
+dependencies = [
+ "neural-amp-modeler",
+ "nice-plug",
 ]
 
 [[package]]
@@ -21356,6 +21406,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverb-plugin"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "nice-plug",
+ "reverb",
+]
+
+[[package]]
 name = "rfd"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21901,6 +21960,14 @@ name = "saturate-dsp"
 version = "0.1.0"
 dependencies = [
  "approx",
+]
+
+[[package]]
+name = "saturate-plugin"
+version = "0.1.0"
+dependencies = [
+ "nice-plug",
+ "saturate",
 ]
 
 [[package]]
@@ -23309,6 +23376,19 @@ dependencies = [
  "keyflow-orchestra",
  "session-guide",
  "signal-sampler",
+]
+
+[[package]]
+name = "signal-plugin"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+ "nice-plug",
+ "signal-sampler",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

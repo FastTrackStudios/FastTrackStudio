@@ -253,6 +253,15 @@ members = [
     # ── apps/plugins — CLAP/VST3 plugin shells (nice-plug cdylibs) ─────
     "apps/plugins/level",
     "apps/plugins/tune",
+    "apps/plugins/saturate",
+    "apps/plugins/comp",
+    "apps/plugins/reverb",
+    "apps/plugins/nam",
+    "apps/plugins/delay",
+    "apps/plugins/eq",
+    "apps/plugins/modulation",
+    "apps/plugins/guide",
+    "apps/plugins/signal",
     # ── apps/extensions — DAW-host extension cdylibs ──────────────────
     #    (apps/extensions/<host>-fts-extensions; reaper is the first host)
     "apps/extensions/reaper-fts-extensions",
