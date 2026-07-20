@@ -7279,6 +7279,7 @@ name = "dioxus-test"
 version = "0.1.0"
 dependencies = [
  "blitz-dom",
+ "blitz-html",
  "blitz-traits",
  "dioxus",
  "dioxus-core",
