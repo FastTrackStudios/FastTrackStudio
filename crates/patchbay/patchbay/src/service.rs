@@ -50,7 +50,10 @@ impl PatchbayBackend {
         let store = Arc::new(RwLock::new(GraphStore::default()));
         let presets = Arc::new(PresetStore::open());
         let (events_tx, events_rx) = mpsc::channel::<GraphEvent>();
+        let enrich_tx = events_tx.clone();
         let engine = engine::spawn(store.clone(), events_tx);
+        // Debounce gate for the pw-dump enrichment pass.
+        let enrich_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
         // Big window: a single app connecting is a burst of hundreds of
         // port events, a PipeWire reconnect is ~2000 — a small ring
         // drops the middle of the burst and clients silently lose
@@ -65,6 +68,21 @@ impl PatchbayBackend {
                 .name("patchbay-events".into())
                 .spawn(move || {
                     while let Ok(ev) = events_rx.recv() {
+                        // Any node addition schedules a debounced
+                        // pw-dump enrichment (full props the registry
+                        // subset lacks — node.group, application.*).
+                        if matches!(ev, GraphEvent::NodeAdded(_))
+                            && !enrich_pending.swap(true, std::sync::atomic::Ordering::SeqCst)
+                        {
+                            let store = store.clone();
+                            let tx = enrich_tx.clone();
+                            let pending = enrich_pending.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(1500));
+                                pending.store(false, std::sync::atomic::Ordering::SeqCst);
+                                crate::enrich::enrich_nodes(&store, &tx);
+                            });
+                        }
                         match &ev {
                             // REAPER (re)appeared: pick up its channel
                             // names from the host chanmap once the

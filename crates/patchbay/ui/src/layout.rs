@@ -435,6 +435,11 @@ pub fn compute_layout(
     let mut columns: [Vec<CardLayout>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
     for node in &graph.nodes {
+        // Prop-less ghosts (a global whose full info never arrived)
+        // render as unnamed junk cards — skip until they resolve.
+        if node.name.is_empty() && node.label.is_empty() {
+            continue;
+        }
         if !search.is_empty() {
             let alias = filters.aliases.get(&node.name).map(String::as_str).unwrap_or("");
             let hay = format!("{} {} {}", node.name, node.label, alias).to_lowercase();
@@ -1022,6 +1027,35 @@ mod live_probe {
     }
 
     const COLUMN_TITLES_DBG: [&str; 4] = ["Inputs", "Applications", "Groups", "Outputs"];
+
+    /// Dump every node's classification inputs against the RUNNING app:
+    /// `cargo test -p patchbay-ui live_columns -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "needs a running patchbay app on :4046"]
+    async fn live_columns() {
+        let link = vox_websocket::WsLink::connect("ws://127.0.0.1:4046/vox")
+            .await
+            .expect("ws connect (is patchbay running?)");
+        let client: PatchbayServiceClient =
+            vox_core::initiator_on(link).establish().await.expect("establish");
+        let graph = client.graph().await.expect("graph");
+        for n in &graph.nodes {
+            let ports = graph.ports.iter().filter(|p| p.node_id == n.id).count();
+            if ports == 0 {
+                continue;
+            }
+            println!(
+                "col={} label={:35} name={:35} class={:22} group={:18} virt={} app={:?}",
+                column_of(n),
+                n.label,
+                n.name,
+                n.media_class,
+                n.group,
+                n.virtual_sink,
+                n.app_name,
+            );
+        }
+    }
 
     /// Diagnose why pairs/icons aren't visible against the RUNNING app:
     /// `cargo test -p patchbay-ui live_pairs -- --ignored --nocapture`

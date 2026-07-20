@@ -25,9 +25,15 @@ async fn main() {
     // The adapter takes a moment to appear in the registry.
     let node_name = sink_node_name(name);
     let mut found = false;
-    for _ in 0..20 {
+    for attempt in 0..20 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let graph = backend.graph().await.expect("graph");
+        if attempt % 4 == 0 {
+            println!(
+                "poll {attempt}: {} nodes in mirror, looking for {node_name}",
+                graph.nodes.len()
+            );
+        }
         if let Some(n) = graph.nodes.iter().find(|n| n.name == node_name) {
             println!(
                 "created: [{}] {} virtual={} ports={}",

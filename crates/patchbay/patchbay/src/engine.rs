@@ -153,14 +153,6 @@ mod linux {
         _listener: LinkListener,
     }
 
-    /// Node proxies stay bound because registry globals expose only a
-    /// SUBSET of node props — node.group, application.name and
-    /// application.icon-name arrive via the bound node's info events.
-    struct NodeProxy {
-        _proxy: pipewire::node::Node,
-        _listener: pipewire::node::NodeListener,
-    }
-
     /// One connection lifetime: connect, mirror, serve commands until
     /// the daemon goes away (core error quits the loop). Ok(()) =
     /// connection dropped after being up; Err = couldn't connect.
@@ -188,24 +180,42 @@ mod linux {
             let mainloop = mainloop.clone();
             core.add_listener_local()
                 .error(move |id, _seq, res, message| {
-                    if id == 0 {
-                        tracing::warn!("pipewire core error ({res}): {message}");
-                        mainloop.quit();
+                    if id != 0 {
+                        return;
                     }
+                    // "unknown resource" (-ENOENT) = we dropped a bound
+                    // proxy AFTER the server already reclaimed the
+                    // object (node/link vanished) — routine, NOT a dead
+                    // daemon. Quitting here caused reconnect churn that
+                    // corrupted the mirror.
+                    if res == -2 || message.contains("unknown resource") {
+                        tracing::debug!("pipewire benign core error ({res}): {message}");
+                        return;
+                    }
+                    tracing::warn!("pipewire core error ({res}): {message}");
+                    mainloop.quit();
                 })
                 .register()
         };
 
         let link_proxies: Rc<RefCell<HashMap<u32, LinkProxy>>> =
             Rc::new(RefCell::new(HashMap::new()));
-        let node_proxies: Rc<RefCell<HashMap<u32, NodeProxy>>> =
-            Rc::new(RefCell::new(HashMap::new()));
+
+        // Virtual sinks created on THIS connection whose registry
+        // announce may still be in flight — closes the window where a
+        // second CreateVirtualSink for the same name would duplicate
+        // (ensure_virtual_sinks races the announce otherwise). Pruned
+        // on global_remove so a removed name can be re-created.
+        let pending_sinks: Rc<RefCell<std::collections::HashSet<String>>> =
+            Rc::new(RefCell::new(std::collections::HashSet::new()));
 
         // ── Inbound commands ────────────────────────────────────────
         let _cmd_receiver = {
             let core = core.clone();
             let registry = registry.clone();
             let mainloop_quit = mainloop.clone();
+            let store_cmd = store.clone();
+            let pending_cmd = pending_sinks.clone();
             cmd_rx.attach(mainloop.loop_(), move |cmd| match cmd {
                 Command::CreateLink {
                     output_node,
@@ -243,6 +253,15 @@ mod linux {
                     description,
                     channels,
                 } => {
+                    let already_live = store_cmd
+                        .read()
+                        .nodes
+                        .values()
+                        .any(|n| n.name == node_name);
+                    if already_live || !pending_cmd.borrow_mut().insert(node_name.clone()) {
+                        tracing::debug!(node_name, "virtual sink already exists; skipping");
+                        return;
+                    }
                     let position = match channels {
                         1 => "[ MONO ]".to_string(),
                         2 => "[ FL FR ]".to_string(),
@@ -279,21 +298,14 @@ mod linux {
             let events_add = events.clone();
             let registry_bind = registry.clone();
             let proxies_add = link_proxies.clone();
-            let node_proxies_add = node_proxies.clone();
             let store_rm = store.clone();
             let events_rm = events.clone();
             let proxies_rm = link_proxies.clone();
-            let node_proxies_rm = node_proxies.clone();
+            let pending_rm = pending_sinks.clone();
             registry
                 .add_listener_local()
                 .global(move |global| match global.type_ {
-                    ObjectType::Node => handle_node(
-                        global,
-                        &registry_bind,
-                        &node_proxies_add,
-                        &store_add,
-                        &events_add,
-                    ),
+                    ObjectType::Node => handle_node(global, &store_add, &events_add),
                     ObjectType::Port => handle_port(global, &store_add, &events_add),
                     ObjectType::Link => handle_link(
                         global,
@@ -308,7 +320,7 @@ mod linux {
                     let removed = {
                         let mut s = store_rm.write();
                         if let Some(n) = s.nodes.remove(&id) {
-                            let _ = n;
+                            pending_rm.borrow_mut().remove(&n.name);
                             Some(GraphEvent::NodeRemoved { id })
                         } else if let Some(p) = s.ports.remove(&id) {
                             Some(GraphEvent::PortRemoved {
@@ -322,7 +334,6 @@ mod linux {
                         }
                     };
                     proxies_rm.borrow_mut().remove(&id);
-                    node_proxies_rm.borrow_mut().remove(&id);
                     if let Some(ev) = removed {
                         let _ = events_rm.send(ev);
                     }
@@ -384,58 +395,19 @@ mod linux {
 
     fn handle_node(
         global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
-        registry: &pipewire::registry::RegistryRc,
-        proxies: &Rc<RefCell<HashMap<u32, NodeProxy>>>,
         store: &Arc<RwLock<GraphStore>>,
         events: &Sender<GraphEvent>,
     ) {
         let Some(props) = global.props else { return };
+        // Registry globals carry a SUBSET of node props (no node.group,
+        // often no application.*). Do NOT bind node proxies for the
+        // rest — held node proxies wedge the registry event stream
+        // (verified live: with ~48 bound, new globals stop being
+        // announced). Full props arrive out-of-band via the pw-dump
+        // enrichment pass (see crate::enrich).
         let node = build_node(global.id, props);
         store.write().nodes.insert(global.id, node.clone());
         let _ = events.send(GraphEvent::NodeAdded(node));
-
-        // Bind for full props (node.group, application.*) — the info
-        // event re-emits NodeAdded as an idempotent update when the
-        // full picture differs from the registry subset.
-        let proxy: pipewire::node::Node = match registry.bind(global) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!(id = global.id, "bind node failed: {e}");
-                return;
-            }
-        };
-        let store = store.clone();
-        let events = events.clone();
-        let listener = proxy
-            .add_listener_local()
-            .info(move |info| {
-                let Some(props) = info.props() else { return };
-                let node = build_node(info.id(), props);
-                let changed = {
-                    let mut s = store.write();
-                    // Node may already be gone (remove raced the info).
-                    let Some(existing) = s.nodes.get_mut(&node.id) else {
-                        return;
-                    };
-                    if *existing == node {
-                        false
-                    } else {
-                        *existing = node.clone();
-                        true
-                    }
-                };
-                if changed {
-                    let _ = events.send(GraphEvent::NodeAdded(node));
-                }
-            })
-            .register();
-        proxies.borrow_mut().insert(
-            global.id,
-            NodeProxy {
-                _proxy: proxy,
-                _listener: listener,
-            },
-        );
     }
 
     fn handle_port(
