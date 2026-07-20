@@ -536,7 +536,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -547,7 +547,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3665,7 +3665,7 @@ checksum = "fe6d2e5af09e8c8ad56c969f2157a3d4238cebc7c55f0a517728c38f7b200f81"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.2.2",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -3676,7 +3676,7 @@ checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.2.2",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -3759,7 +3759,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3768,7 +3768,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -6715,7 +6715,7 @@ dependencies = [
 [[package]]
 name = "dioxus-attributes"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dioxus-components?branch=dioxus-0.8#845f213a3950c33d4718e9c5a227569e2f96d6ad"
+source = "git+https://github.com/FastTrackStudios/dioxus-components?branch=main#587cc53af32885cdcc68a5cb256a281c40b58a7e"
 dependencies = [
  "dioxus-rsx",
  "proc-macro2",
@@ -7045,7 +7045,7 @@ dependencies = [
 [[package]]
 name = "dioxus-icons"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dioxus-icons?branch=dioxus-0.8#b66dbe832135c4bbce22bfded004a7625b1ec99d"
+source = "git+https://github.com/FastTrackStudios/dioxus-icons?branch=main#b66dbe832135c4bbce22bfded004a7625b1ec99d"
 dependencies = [
  "dioxus",
  "dioxus-signals",
@@ -7138,7 +7138,7 @@ dependencies = [
 [[package]]
 name = "dioxus-primitives"
 version = "0.0.1"
-source = "git+https://github.com/FastTrackStudios/dioxus-components?branch=dioxus-0.8#845f213a3950c33d4718e9c5a227569e2f96d6ad"
+source = "git+https://github.com/FastTrackStudios/dioxus-components?branch=main#587cc53af32885cdcc68a5cb256a281c40b58a7e"
 dependencies = [
  "dioxus",
  "dioxus-attributes",
@@ -7199,7 +7199,7 @@ dependencies = [
 [[package]]
 name = "dioxus-sdk-time"
 version = "0.7.0"
-source = "git+https://github.com/FastTrackStudios/sdk?branch=dioxus-0.8#80d397c62f9990fc84e0d930eb7d4dac3886e8e6"
+source = "git+https://github.com/FastTrackStudios/sdk?branch=main#80d397c62f9990fc84e0d930eb7d4dac3886e8e6"
 dependencies = [
  "dioxus",
  "futures",
@@ -7312,7 +7312,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7382,7 +7382,7 @@ checksum = "ad5208a115eaba24916f7456929832e310a81518c641f93fee4f89aa93aa3675"
 dependencies = [
  "cfg-if",
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8683,7 +8683,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11320,7 +11320,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.62.2",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -12226,7 +12226,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -12276,7 +12276,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -12811,6 +12811,7 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c0794db0b1a86193ac9c48768d0e6c52c54448e0870ad87907d456ee0dac964"
 dependencies = [
+ "core_maths",
  "icu_collections 2.2.0",
  "icu_locale",
  "icu_provider 2.2.0",
@@ -13620,7 +13621,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -15073,7 +15074,7 @@ dependencies = [
 [[package]]
 name = "launcher-core"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=dioxus-0.8#79a8a44faf586a9bd889da60451df7a8a86dab04"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=main#06507c455817f6966c30e91315f160c90d11a03f"
 dependencies = [
  "chrono",
  "facet 0.46.5",
@@ -15089,7 +15090,7 @@ dependencies = [
 [[package]]
 name = "launcher-ui"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=dioxus-0.8#79a8a44faf586a9bd889da60451df7a8a86dab04"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=main#06507c455817f6966c30e91315f160c90d11a03f"
 dependencies = [
  "dioxus",
  "fts-ui",
@@ -16043,7 +16044,7 @@ dependencies = [
 [[package]]
 name = "lucide-dioxus"
 version = "2.26.0"
-source = "git+https://github.com/FastTrackStudios/lucide?branch=dioxus-0.8#f50471242d01e7f9e961a55d32e928eefbf384e5"
+source = "git+https://github.com/FastTrackStudios/lucide?branch=main#f50471242d01e7f9e961a55d32e928eefbf384e5"
 dependencies = [
  "dioxus",
 ]
@@ -16051,7 +16052,7 @@ dependencies = [
 [[package]]
 name = "lumen-blocks"
 version = "0.3.0"
-source = "git+https://github.com/FastTrackStudios/lumen-blocks?branch=dioxus-0.8#800922f648236b8d76b0525570457d8cf956bafa"
+source = "git+https://github.com/FastTrackStudios/lumen-blocks?branch=main#5e4baa697842b3a3627f450ce1129eb4e4b9c4c6"
 dependencies = [
  "dioxus",
  "dioxus-primitives",
@@ -17142,7 +17143,7 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -17800,7 +17801,7 @@ dependencies = [
  "pin-project-lite",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -17843,7 +17844,7 @@ checksum = "3137a52df66c20090a889828d1c655f21f52294cba64e5c4fbb04fc83eee7c8e"
 dependencies = [
  "cfg_aliases",
  "libc",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -17914,7 +17915,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -20710,7 +20711,7 @@ dependencies = [
 [[package]]
 name = "providers"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=dioxus-0.8#79a8a44faf586a9bd889da60451df7a8a86dab04"
+source = "git+https://codeberg.org/FastTrackStudios/dioxus-launcher.git?branch=main#06507c455817f6966c30e91315f160c90d11a03f"
 dependencies = [
  "launcher-core",
  "serde",
@@ -20946,7 +20947,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -20985,9 +20986,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -22372,7 +22373,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -22440,7 +22441,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -23022,7 +23023,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -24634,7 +24635,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -25071,7 +25072,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -25358,7 +25359,7 @@ dependencies = [
  "derive_more 2.1.1",
  "encoding_rs",
  "euclid",
- "icu_segmenter 1.5.0",
+ "icu_segmenter 2.2.0",
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "itoa 1.0.18",
@@ -26500,7 +26501,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -26551,7 +26552,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix 1.1.4",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -27706,7 +27707,7 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -30386,7 +30387,7 @@ dependencies = [
  "ndk-sys",
  "objc",
  "once_cell",
- "ordered-float 5.3.0",
+ "ordered-float 4.6.0",
  "parking_lot",
  "portable-atomic",
  "portable-atomic-util",
@@ -30436,7 +30437,7 @@ dependencies = [
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "once_cell",
- "ordered-float 5.3.0",
+ "ordered-float 4.6.0",
  "parking_lot",
  "portable-atomic",
  "portable-atomic-util",
@@ -30711,7 +30712,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

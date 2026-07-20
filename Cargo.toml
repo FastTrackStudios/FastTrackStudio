@@ -650,9 +650,9 @@ dioxus-native-dom = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a
 dioxus-test = { path = "libs/vendor/dioxus-test" }
 dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
 # FTS fork branches carrying the dioxus-0.8 bumps until upstream moves.
-lumen-blocks = { git = "https://github.com/FastTrackStudios/lumen-blocks", branch = "dioxus-0.8" }
-dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", package = "dioxus-primitives", branch = "dioxus-0.8", default-features = false }
-lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", branch = "dioxus-0.8", features = ["all-icons"] }
+lumen-blocks = { git = "https://github.com/FastTrackStudios/lumen-blocks", branch = "main" }
+dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", package = "dioxus-primitives", branch = "main", default-features = false }
+lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", branch = "main", features = ["all-icons"] }
 clsx = "0.1.1"
 tw_merge = "0.1.21"
 nucleo-matcher = "0.3"
@@ -936,7 +936,7 @@ serde_yaml = "0.9"
 cooklang = "0.18"
 pulldown-cmark = { version = "0.10", default-features = false }
 dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false }
-dioxus-icons = { git = "https://github.com/FastTrackStudios/dioxus-icons", branch = "dioxus-0.8" }
+dioxus-icons = { git = "https://github.com/FastTrackStudios/dioxus-icons", branch = "main" }
 web-sys = "0.3.98"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
