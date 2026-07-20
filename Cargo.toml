@@ -39,17 +39,6 @@ members = [
     "libs/fts-story/fts-story-fuzz",
     "libs/dock/dock-dioxus",
     "libs/dock/dock-proto",
-    "libs/nice-plug/nice-plug",
-    "libs/nice-plug/nice-plug-core",
-    "libs/nice-plug/nice-plug-derive",
-    "libs/nice-plug/nice-plug-dioxus",
-    "libs/nice-plug/nice-plug-egui",
-    "libs/nice-plug/nice-plug-iced",
-    "libs/nice-plug/nice-plug-xtask",
-    "libs/nice-plug/nice-log",
-    "libs/nice-plug/cargo-nice-plug",
-    "libs/nice-plug/egui-baseview",
-    "libs/nice-plug/iced_baseview",
     "libs/utils",
     "libs/spaced-repetition",
     "libs/monarchy/monarchy",
@@ -325,16 +314,12 @@ fts-story-parity = { path = "libs/fts-story/fts-story-parity" }
 fts-story-fuzz = { path = "libs/fts-story/fts-story-fuzz" }
 dock-dioxus = { path = "libs/dock/dock-dioxus", default-features = false }
 dock-proto = { path = "libs/dock/dock-proto" }
-nice-plug = { path = "libs/nice-plug/nice-plug" }
-nice-plug-core = { path = "libs/nice-plug/nice-plug-core" }
-nice-plug-derive = { path = "libs/nice-plug/nice-plug-derive" }
-nice-plug-dioxus = { path = "libs/nice-plug/nice-plug-dioxus" }
-nice-plug-egui = { path = "libs/nice-plug/nice-plug-egui" }
-nice-plug-iced = { path = "libs/nice-plug/nice-plug-iced" }
-nice-plug-xtask = { path = "libs/nice-plug/nice-plug-xtask" }
-nice-log = { path = "libs/nice-plug/nice-log" }
-egui-baseview = { path = "libs/nice-plug/egui-baseview", default-features = false }
-iced_baseview = { path = "libs/nice-plug/iced_baseview", default-features = false }
+# nice-plug lives in its own fork repo (upstream RustAudio/nice-plug +
+# PR #61 baseview-0.2 + the FTS delta: nice-plug-dioxus, embedded editors,
+# rich track-info, param rescan). The ONE sanctioned exception to
+# path-deps-only — it left the tree so it can track upstream.
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "4b52ca2e6463b428ae5068123756ea50ba2235fd" }
+nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "4b52ca2e6463b428ae5068123756ea50ba2235fd" }
 utils = { path = "libs/utils" }
 vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
@@ -732,7 +717,6 @@ proptest = "1"
 atomic_float = "1.1"
 atomic_refcell = "0.1"
 bitflags = "2.11"
-baseview = "0.1.1"
 raw-window-handle = "0.5"
 realfft = "3.0"
 # Pure-Rust ONNX inference (no C onnxruntime dep) — Basic Pitch polyphonic
