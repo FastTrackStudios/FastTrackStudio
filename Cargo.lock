@@ -3386,6 +3386,7 @@ dependencies = [
  "clack-common",
  "clack-host",
  "clap-sys",
+ "raw-window-handle 0.6.2",
 ]
 
 [[package]]
@@ -6023,6 +6024,7 @@ dependencies = [
  "libloading 0.8.9",
  "memmap2",
  "moire",
+ "raw-window-handle 0.6.2",
  "rtrb",
  "symphonia",
  "thiserror 2.0.18",
@@ -9768,6 +9770,16 @@ dependencies = [
 [[package]]
 name = "fts-audio-proto"
 version = "0.1.0"
+
+[[package]]
+name = "fts-clap-host"
+version = "0.1.0"
+dependencies = [
+ "daw-standalone",
+ "eyre",
+ "raw-window-handle 0.6.2",
+ "winit 0.30.13",
+]
 
 [[package]]
 name = "fts-cli"

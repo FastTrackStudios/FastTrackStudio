@@ -267,6 +267,7 @@ members = [
     "apps/plugins/gate",
     "apps/plugins/limiter",
     "apps/plugins/xtask",
+    "apps/plugins/host",
     # ── apps/extensions — DAW-host extension cdylibs ──────────────────
     #    (apps/extensions/<host>-fts-extensions; reaper is the first host)
     "apps/extensions/reaper-fts-extensions",
@@ -668,6 +669,8 @@ nih_plug = { git = "https://codeberg.org/FastTrackStudios/nih-plug.git", branch 
 clack-host = { git = "https://github.com/prokopyl/clack" }
 clack-extensions = { git = "https://github.com/prokopyl/clack", features = [
     "clack-host",
+    # Bridge host windows (winit 0.30) into CLAP embedded GUIs (fts-clap-host).
+    "raw-window-handle_06",
     "audio-ports",
     "note-ports",
     "params",
