@@ -18,6 +18,21 @@ static CSS: &str = include_str!("style.css");
 pub fn PatchbayApp() -> Element {
     let view = *VIEW.read();
     let handle = crate::state::use_patchbay();
+
+    // Pre-scan the Dante network in the background right after launch,
+    // so the Dante tab opens populated instead of blank-then-scanning.
+    let prescan = handle.clone();
+    use_future(move || {
+        let handle = prescan.clone();
+        async move {
+            crate::state::sleep_secs(1).await;
+            if crate::state::DANTE_DEVICES.peek().is_empty()
+                && !*crate::state::DANTE_LOADING.peek()
+            {
+                crate::state::refresh_dante(&handle).await;
+            }
+        }
+    });
     rsx! {
         document::Style { {CSS} }
         div {

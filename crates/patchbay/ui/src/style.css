@@ -347,7 +347,19 @@ input[type="number"]::-webkit-outer-spin-button { filter: invert(0.85); }
   width: 24px; height: 20px; min-width: 24px;
   text-align: center; cursor: pointer; color: #58d68d;
 }
-.cell:hover { background: rgba(74,144,217,0.25); }
+.cell:hover { background: rgba(74,144,217,0.35); outline: 1px solid #4a90d9; }
+/* Row crosshair: hovering any cell tints its whole RX row. */
+.dante-grid tbody tr:hover td { background: rgba(74,144,217,0.07); }
+.dante-grid tbody tr:hover .rx-ch { color: #d7dde5; }
+
+.dante-legend { margin-left: 8px; }
+.cell-demo {
+  display: inline-block; width: 16px; text-align: center;
+  border: 1px solid #262c35; border-radius: 3px; font-size: 10px;
+}
+.cell-demo.ok { color: #58d68d; background: rgba(88,214,141,0.18); }
+.cell-demo.warn { color: #ffd479; background: rgba(255,212,121,0.2); }
+.dante-header .search { width: 170px; }
 .cell.sub.ok { background: rgba(88,214,141,0.18); }
 .cell.sub.warn { background: rgba(255,212,121,0.2); color: #ffd479; }
 .cell.collapsed { cursor: default; }

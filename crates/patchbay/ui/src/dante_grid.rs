@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use patchbay_proto::DanteDevice;
+use patchbay_proto::{DanteDevice, DanteSubscription};
 
 use crate::state::{self, DANTE_DEVICES, DANTE_ERROR, DANTE_LOADING};
 
@@ -19,6 +19,9 @@ const AUTO_EXPAND_MAX: usize = 40;
 
 /// `"tx/<dev>"` / `"rx/<dev>"` → expanded override.
 static GRID_EXPANDED: GlobalSignal<HashMap<String, bool>> = Signal::global(HashMap::new);
+
+/// Channel-name filter for the grid (matches TX and RX names).
+static GRID_FILTER: GlobalSignal<String> = Signal::global(String::new);
 
 fn is_expanded(axis: &str, dev: &DanteDevice, channel_count: usize) -> bool {
     GRID_EXPANDED
@@ -89,11 +92,27 @@ pub fn DanteGrid() -> Element {
         }
     };
 
-    // Toggle (or move) a subscription, then re-scan for truth.
+    // Toggle (or move) a subscription. The mirror updates OPTIMISTICALLY
+    // so the cell flips instantly; a delayed re-scan verifies against
+    // the network (ARC round-trips are seconds).
     let click_cell = {
         let handle = handle.clone();
         move |rx_device: String, rx_channel: u32, tx_device: String, tx_channel: String, is_sub: bool| {
             let handle = handle.clone();
+            {
+                let mut devs = DANTE_DEVICES.write();
+                if let Some(d) = devs.iter_mut().find(|d| d.name == rx_device) {
+                    d.subscriptions.retain(|s| s.rx_channel != rx_channel);
+                    if !is_sub {
+                        d.subscriptions.push(DanteSubscription {
+                            rx_channel,
+                            tx_channel: tx_channel.clone(),
+                            tx_device: tx_device.clone(),
+                            status: 1,
+                        });
+                    }
+                }
+            }
             spawn(async move {
                 let res = if is_sub {
                     handle.0.dante_unsubscribe(rx_device, rx_channel).await
@@ -106,8 +125,10 @@ pub fn DanteGrid() -> Element {
                 if let Err(e) = res {
                     *DANTE_ERROR.write() = format!("subscription change failed: {e}");
                 } else {
-                    state::refresh_dante(&handle).await;
+                    // Let the device settle, then fetch the truth.
+                    state::sleep_secs(2).await;
                 }
+                state::refresh_dante(&handle).await;
             });
         }
     };
@@ -157,12 +178,27 @@ pub fn DanteGrid() -> Element {
         phantoms
     };
 
-    let tx_devices: Vec<&DanteDevice> = devices
+    // Channel filter: matching channels stay, empty devices drop out.
+    let filter = GRID_FILTER.read().to_lowercase();
+    let keep = |name: &str| filter.is_empty() || name.to_lowercase().contains(&filter);
+    let mut tx_devices: Vec<DanteDevice> = devices
         .iter()
         .filter(|d| !d.tx.is_empty())
-        .chain(phantoms.iter())
+        .cloned()
+        .chain(phantoms)
         .collect();
-    let rx_devices: Vec<&DanteDevice> = devices.iter().filter(|d| !d.rx.is_empty()).collect();
+    let mut rx_devices: Vec<DanteDevice> =
+        devices.iter().filter(|d| !d.rx.is_empty()).cloned().collect();
+    if !filter.is_empty() {
+        for d in &mut tx_devices {
+            d.tx.retain(|c| keep(&c.name));
+        }
+        tx_devices.retain(|d| !d.tx.is_empty());
+        for d in &mut rx_devices {
+            d.rx.retain(|c| keep(&c.name));
+        }
+        rx_devices.retain(|d| !d.rx.is_empty());
+    }
 
     rsx! {
         div { class: "dante-view",
@@ -170,8 +206,18 @@ pub fn DanteGrid() -> Element {
                 button { class: "chip", onclick: refresh,
                     if loading { "scanning…" } else { "rescan network" }
                 }
+                input {
+                    class: "search",
+                    placeholder: "filter channels…",
+                    value: "{GRID_FILTER}",
+                    oninput: move |e| *GRID_FILTER.write() = e.value(),
+                }
                 span { class: "label",
                     "{devices.len()} device(s) — click a cell to route TX → RX"
+                }
+                span { class: "label dante-legend",
+                    span { class: "cell-demo ok", "✓" } " subscribed  "
+                    span { class: "cell-demo warn", "!" } " unresolved"
                 }
                 if !error.is_empty() {
                     span { class: "dante-error", "{error}" }
@@ -198,9 +244,11 @@ pub fn DanteGrid() -> Element {
                                         let expanded = is_expanded("tx", dev, dev.tx.len());
                                         let name = dev.name.clone();
                                         let cols = if expanded { dev.tx.len().max(1) } else { 1 };
+                                        let accent = state::auto_color(&dev.name);
                                         rsx! {
                                             th {
                                                 class: if dev.unreachable { "dev-h unreachable" } else { "dev-h" },
+                                                style: "border-top: 2px solid {accent};",
                                                 colspan: "{cols}",
                                                 onclick: move |_| toggle_expanded("tx", &name, expanded),
                                                 "{dev.name} "
@@ -234,11 +282,13 @@ pub fn DanteGrid() -> Element {
                                 {
                                     let rx_expanded = is_expanded("rx", rx_dev, rx_dev.rx.len());
                                     let rx_name = rx_dev.name.clone();
+                                    let rx_accent = state::auto_color(&rx_dev.name);
                                     rsx! {
                                         // RX device header row (aggregates when collapsed).
                                         tr { class: "rx-dev-row", key: "dev-{rx_dev.name}",
                                             th {
                                                 class: if rx_dev.unreachable { "rx-dev unreachable" } else { "rx-dev" },
+                                                style: "border-left: 3px solid {rx_accent};",
                                                 onclick: move |_| toggle_expanded("rx", &rx_name, rx_expanded),
                                                 "{rx_dev.name} "
                                                 span { class: "dev-count",
