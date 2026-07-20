@@ -15,7 +15,7 @@ publish = false
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 task-telemetry.workspace = true
@@ -72,6 +72,9 @@ locations = { workspace = true, features = ["vox"] }
 inventory = { workspace = true, features = ["vox"] }
 scripture = { workspace = true, features = ["vox"] }
 links = { workspace = true, features = ["vox"] }
+# Ordered-collection primitive (song Library / Setlist / Show /
+# Playlist) — one `CollectionService` mounted per org, JSONL-backed.
+collection = { workspace = true, features = ["vox"] }
 resources = { workspace = true, features = ["vox"] }
 resources-proto = { workspace = true, features = ["vox"] }
 cookbook = { workspace = true, features = ["vox"] }
@@ -157,6 +160,7 @@ walkdir = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 vault-proto = { workspace = true, features = ["vox"] }
 project = { workspace = true, features = ["vox"] }
+collection-proto = { workspace = true, features = ["vox"] }
 
 [lints]
 workspace = true

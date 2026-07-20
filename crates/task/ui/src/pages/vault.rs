@@ -12,11 +12,22 @@
 //! sidebar (a "move to folder" picker rewrites the `folder`
 //! property through [`set_folder`]).
 //!
+//! **Document tabs + split panes.** The document area is a set of
+//! **panes** (a single 2-way horizontal split, max [`MAX_PANES`]);
+//! each pane carries its own **tab strip** of open notes and an
+//! active tab. Clicking a note in the tree (or a backlink / graph
+//! node, or a `?path=` deep link) **opens-or-focuses** a tab in the
+//! *focused* pane. Each open note renders as a
+//! [`NoteView`](crate::pages::note_view::NoteView) — the per-note
+//! `DocumentSession` + collab + `type:`-dispatch, extracted so it can
+//! be instantiated once per tab/pane. With a single open note the
+//! page looks exactly as it did before tabs existed.
+//!
 //! The open/save/conflict lifecycle lives in
 //! [`DocumentSession`](crate::document_session::DocumentSession):
 //! typed conflicts, a debounced autosave, explicit save (Ctrl+S /
 //! toolbar), force-save (the conflict banner's *Overwrite*), and
-//! reload — the page renders from its typed state instead of a
+//! reload — each `NoteView` renders from its typed state instead of a
 //! hand-rolled signal cluster.
 //!
 //! Wikilinks + embeds resolve through the client-side
@@ -26,7 +37,7 @@
 //! autocomplete ride the editor's trigger `CompletionSource`
 //! (basenames + aliases from the folder index, tags from the
 //! `VaultGraph` RPC). A right-side **backlinks panel** lists
-//! pages linking to the open note via the same RPC and refreshes
+//! pages linking to the *focused* note via the same RPC and refreshes
 //! after every save.
 //!
 //! The server registers exactly one vault per org under the id
@@ -40,27 +51,44 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use editor::Editor;
-use editor::editor_view::slash::{SlashMenu, SlashState};
-use editor::editor_vim::VimState;
 use fts_ui::lucide_dioxus::{ChevronRight, FileText, Folder};
 use fts_ui::prelude::*;
 use vault_proto::{PageMeta, TagCount};
 use view_knowledge_graph::{GraphEdge, GraphNode, KnowledgeGraphView, WikiGraph};
 
-use crate::document_session::{SaveStatus, use_document_session};
+use crate::pages::note_view::NoteView;
 use crate::shell::mobile::{BottomSheet, MobileActionBar};
-use crate::vault_lookup::{self, ClientVaultIndex};
+use crate::vault_lookup;
 
 #[cfg(target_arch = "wasm32")]
 use crate::document_session::VAULT_ID;
 
 /// Minimal payload to open a file: its path + last-known sha.
 #[derive(Clone, PartialEq)]
-struct FileMeta {
-    path: String,
-    sha256: String,
+pub(crate) struct FileMeta {
+    pub(crate) path: String,
+    pub(crate) sha256: String,
 }
+
+/// One open note in a pane's tab strip: its path + last-known sha
+/// (the `DocumentSession` conditional-write base).
+#[derive(Clone, PartialEq)]
+struct OpenTab {
+    path: String,
+    sha: String,
+}
+
+/// A document pane — an ordered set of open tabs and the active one.
+/// Each pane mounts exactly its active tab's [`NoteView`] (inactive
+/// tabs are unmounted; switching remounts a fresh session).
+#[derive(Clone, PartialEq)]
+struct Pane {
+    tabs: Vec<OpenTab>,
+    active: usize,
+}
+
+/// Hard cap on side-by-side panes — a single 2-way horizontal split.
+const MAX_PANES: usize = 2;
 
 /// One node of the virtual-folder tree.
 #[derive(Clone, PartialEq)]
@@ -81,50 +109,14 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         async move { fetch_folder_index(slug).await }
     });
 
-    // Open file + its editing state — the whole
-    // open/save/autosave/conflict lifecycle in one handle. Provided
-    // as context for the keyed `CollabSession` child.
-    let session = use_document_session(home);
-    use_context_provider(|| session);
-    let selected = use_memo(move || session.current_path());
-
-    // Deep-link + shell-tree navigation: `/vault?path=<vault-relative
-    // path>` opens that note once the folder index lands (graph node
-    // clicks, the shell explorer's tree rows). Reactive on the query
-    // param — every NEW `?path=` opens; `last_link` remembers the one
-    // already honored so in-page selection (backlinks, wikilinks)
-    // isn't stomped by the stale param on unrelated re-runs.
-    let mut last_link = use_signal(String::new);
-    use_effect(move || {
-        let want = initial_path();
-        if want.is_empty() || *last_link.peek() == want {
-            return;
-        }
-        if let Some(Ok(pages)) = &*files.read() {
-            // Exact vault-relative path first; fall back to the
-            // basename so graph node ids (file stems) resolve too.
-            let hit = pages.iter().find(|p| p.path == want).or_else(|| {
-                pages
-                    .iter()
-                    .find(|p| basename_of(&p.path) == basename_of(&want))
-            });
-            if let Some(p) = hit {
-                last_link.set(want);
-                session.open(p.path.clone(), p.sha256.clone());
-            }
-        }
-    });
-
     let mut new_name = use_signal(String::new);
     // Failures from tree operations (move / create) outlive their
     // buttons via the app-wide notification queue.
     let notify = architect::try_use_notifications();
 
-    // Tree UI state. `collapsed` holds folders the user has
-    // closed — default-empty means the whole tree starts
-    // expanded. `move_target` is the path of a note being
-    // re-filed (drives the folder picker). `create_parent` is
-    // the folder a new note will be filed under.
+    // Tree UI state. `collapsed` holds folders the user has closed.
+    // `move_target` is a note being re-filed; `create_parent` is the
+    // folder a new note will be filed under.
     let collapsed = use_signal(HashSet::<String>::new);
     let mut move_target = use_signal(|| None::<String>);
     let mut create_parent = use_signal(|| None::<String>);
@@ -132,200 +124,155 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     // is open (inline full-width while nothing is selected).
     let mut files_open = use_signal(|| false);
 
-    // Editor extensions — same standard markdown setup as the
-    // turnkey `editor::EditorApp`.
-    let keymap = use_signal(editor::standard_markdown_keymap);
-    // Properties widget visibility — the note header's chevron toggles
-    // this; when false the editor wrapper hides the frontmatter widget.
-    let props_open = use_signal(|| true);
-    let vim = use_signal(VimState::new);
-    // Vim is a physical-keyboard idiom — soft keyboards have no Esc,
-    // so Normal mode on a phone is a trap (letters become motions).
-    // Decide once at mount: coarse pointer → plain editing.
-    let vim = (!use_hook(editor::editor_view::coarse_pointer)).then_some(vim);
-    let slash = use_signal(|| None::<SlashState>);
+    // ── Tabs + split state ────────────────────────────────────
+    // `panes` is 1–2 panes, each an ordered tab set + active index;
+    // `focused` is the pane that tree/deep-link opens route into and
+    // that owns the status line + backlinks. `focus_tick` is bumped by
+    // the focused NoteView after each save so the backlinks/links/graph
+    // panel refreshes (it used to read `session.save_count`).
+    let mut panes = use_signal(|| {
+        vec![Pane {
+            tabs: Vec::new(),
+            active: 0,
+        }]
+    });
+    let mut focused = use_signal(|| 0usize);
+    let focus_tick = use_signal(|| 0u64);
 
-    // Cross-file lookup for the decoration pass: rebuild the
-    // client index whenever the folder index (or org) changes.
-    // The decoration source below captures the *signal*, so the
-    // swap doesn't rebuild the source (Rc identity = the editor's
-    // prop-diff contract).
-    let mut lookup = use_signal(|| None::<Rc<ClientVaultIndex>>);
-    // Lazy-fetch worker for embeds/previews — page-owned, so the
-    // fetch's awaits and editor pokes never touch signals from the
-    // root scope (the suite's console gate treats that as fatal).
-    let fetcher = vault_lookup::use_vault_fetch_worker(home, lookup);
-    use_effect(move || {
-        let pages = match &*files.read() {
-            Some(Ok(pages)) => pages.clone(),
-            _ => Vec::new(),
+    // Focused pane's active-tab path — drives the tree highlight, the
+    // backlinks panel, and the "any note open?" layout switches.
+    let selected = use_memo(move || {
+        let p = panes.read();
+        let f = (*focused.read()).min(p.len().saturating_sub(1));
+        p.get(f)
+            .and_then(|pane| pane.tabs.get(pane.active))
+            .map(|t| t.path.clone())
+    });
+
+    // Open-or-focus a note in the focused pane (tree rows, backlinks,
+    // wikilinks, graph nodes, `.base` rows, freshly-created notes).
+    let on_open = use_callback(move |meta: FileMeta| {
+        files_open.set(false);
+        let mut p = panes.write();
+        let f = (*focused.peek()).min(p.len().saturating_sub(1));
+        let Some(pane) = p.get_mut(f) else { return };
+        if let Some(i) = pane.tabs.iter().position(|t| t.path == meta.path) {
+            pane.active = i;
+        } else {
+            pane.tabs.push(OpenTab {
+                path: meta.path,
+                sha: meta.sha256,
+            });
+            pane.active = pane.tabs.len() - 1;
+        }
+    });
+
+    // ── Tab / pane controls ───────────────────────────────────
+    let focus_tab = use_callback(move |(pi, idx): (usize, usize)| {
+        focused.set(pi);
+        let mut p = panes.write();
+        if let Some(pane) = p.get_mut(pi) {
+            if idx < pane.tabs.len() {
+                pane.active = idx;
+            }
+        }
+    });
+    let close_tab = use_callback(move |(pi, idx): (usize, usize)| {
+        let mut removed_pane = false;
+        {
+            let mut p = panes.write();
+            let Some(pane) = p.get_mut(pi) else { return };
+            if idx >= pane.tabs.len() {
+                return;
+            }
+            pane.tabs.remove(idx);
+            if pane.active >= pane.tabs.len() {
+                pane.active = pane.tabs.len().saturating_sub(1);
+            }
+            // Drop an emptied pane when it isn't the last one.
+            if pane.tabs.is_empty() && p.len() > 1 {
+                p.remove(pi);
+                removed_pane = true;
+            }
+        }
+        if removed_pane {
+            let len = panes.read().len();
+            if *focused.peek() >= len {
+                focused.set(len.saturating_sub(1));
+            }
+        }
+    });
+    let split = use_callback(move |()| {
+        let new_idx = {
+            let mut p = panes.write();
+            if p.len() >= MAX_PANES {
+                return;
+            }
+            p.push(Pane {
+                tabs: Vec::new(),
+                active: 0,
+            });
+            p.len() - 1
         };
-        lookup.set(Some(ClientVaultIndex::new(&pages, session.state, fetcher)));
+        focused.set(new_idx);
+    });
+    let close_pane = use_callback(move |pi: usize| {
+        let len = {
+            let mut p = panes.write();
+            if p.len() <= 1 || pi >= p.len() {
+                return;
+            }
+            p.remove(pi);
+            p.len()
+        };
+        if *focused.peek() >= len {
+            focused.set(len.saturating_sub(1));
+        }
+    });
+    let focus_pane = use_callback(move |pi: usize| focused.set(pi));
+
+    // Refresh the folder index after a rename commits (tree row path
+    // changed) — threaded into every mounted NoteView.
+    let on_renamed = use_callback(move |()| files.restart());
+
+    // Deep-link + shell-tree navigation: `/vault?path=<path>` opens a
+    // tab in the focused pane once the folder index lands. Reactive on
+    // the query param — every NEW `?path=` opens; `last_link` remembers
+    // the one already honored so in-page selection isn't stomped.
+    let mut last_link = use_signal(String::new);
+    use_effect(move || {
+        let want = initial_path();
+        if want.is_empty() || *last_link.peek() == want {
+            return;
+        }
+        if let Some(Ok(pages)) = &*files.read() {
+            let hit = pages.iter().find(|p| p.path == want).or_else(|| {
+                pages
+                    .iter()
+                    .find(|p| basename_of(&p.path) == basename_of(&want))
+            });
+            if let Some(p) = hit {
+                last_link.set(want);
+                on_open.call(FileMeta {
+                    path: p.path.clone(),
+                    sha256: p.sha256.clone(),
+                });
+            }
+        }
     });
 
-    // Autocomplete candidates. `[[` completes basenames + aliases
-    // straight off the folder index; `#` completes vault tags
-    // pulled once per org (and re-pulled after each save, since
-    // saves can mint tags).
-    let link_candidates = use_memo(move || match &*files.read() {
-        Some(Ok(pages)) => vault_lookup::wikilink_candidates(pages),
-        _ => Vec::new(),
-    });
+    // Autocomplete tags — `#` completes vault tags pulled once per org
+    // (re-pulled after each save via `focus_tick`, since saves mint
+    // tags). Shared by every mounted NoteView's completion source.
     let mut tag_rows = use_signal(Vec::<TagCount>::new);
     use_effect(move || {
         let slug = home();
-        let _refresh = session.save_count();
+        let _refresh = *focus_tick.read();
         spawn(async move {
             if let Ok(tags) = vault_lookup::tag_candidates(slug).await {
                 tag_rows.set(tags);
             }
         });
-    });
-
-    // ── Per-file CRDT collaboration ───────────────────────────
-    // When a file opens, register it via `open_collab` and mount a
-    // keyed `CollabSession` (synced replica + presence cursors).
-    // While the session is live the server write-behind owns
-    // persistence and the sha autosave pauses; if the sync session
-    // drops, tear down and fall back to sha saves (a fresh replica
-    // is opened on the next file open — never a stale outbox).
-    //
-    // OWNERSHIP: `handles` (and every signal inside it) is created
-    // HERE, at the page scope, via `use_collab_handles`. The keyed
-    // `CollabSession` child only *drives* the slots. The Editor's
-    // decoration source + on_transaction sink capture `handles`
-    // through `collab`; because the page scope outlives the Editor,
-    // a session remount (file switch, reconnect-generation re-key,
-    // Live→Offline teardown) can never leave the Editor's keydown
-    // path holding dropped signals — the bug that used to kill all
-    // input (backspace, vim) after the first re-key.
-    let handles = crate::collab::use_collab_handles();
-    let mut collab = use_signal(|| None::<crate::collab::CollabHandles>);
-    let mut collab_doc = use_signal(|| None::<uuid::Uuid>);
-    let account = try_use_context::<Signal<Option<crate::auth::ActiveAccount>>>();
-    let conn = architect::use_connection::<vox_core::Caller>();
-    use_effect(move || {
-        let path = selected();
-        // Reactive read: re-run on every (re-)establish of the shared
-        // org connection. After an outage the Live→Offline teardown
-        // below clears the session; the generation bump is what re-opens
-        // collab for the still-open file once the socket is back — no
-        // refresh, fresh replica, delta resync by version vector.
-        let _generation = conn.generation();
-        collab_doc.set(None);
-        collab.set(None);
-        handles.reset();
-        let Some(path) = path else { return };
-        let slug = home.peek().clone();
-        spawn(async move {
-            match crate::collab::open_collab(slug, path.clone()).await {
-                Ok(ack) => {
-                    // Only arm if this file is still the open one.
-                    if session.current_path().as_deref() == Some(path.as_str()) {
-                        collab_doc.set(Some(ack.doc_id));
-                        collab.set(Some(handles));
-                    }
-                }
-                Err(e) => {
-                    // No collab (older server / native shell) — the
-                    // page simply stays in plain sha mode.
-                    tracing::debug!("vault collab unavailable for {path}: {e}");
-                }
-            }
-        });
-    });
-    // Autosave pauses exactly while collab is live (the server
-    // write-behind owns persistence then).
-    use_effect(move || {
-        let live = collab.read().as_ref().is_some_and(|c| c.is_live());
-        session.set_autosave_paused(live);
-    });
-    // Live → Offline teardown: unmount the session so offline edits
-    // go back through sha saves instead of a buffered CRDT outbox
-    // (re-syncing that outbox AND sha-saving the same edits would
-    // double-apply them server-side).
-    use_effect(move || {
-        let went_offline = collab
-            .read()
-            .as_ref()
-            .is_some_and(|c| (c.live)() && c.doc.status() == crdt::SyncStatus::Offline);
-        if went_offline {
-            collab_doc.set(None);
-            collab.set(None);
-            handles.reset();
-        }
-    });
-    let collab_status = use_memo(move || {
-        collab.read().as_ref().map(|c| {
-            if c.is_live() {
-                "Collab: live"
-            } else {
-                "Collab: connecting…"
-            }
-        })
-    });
-    // Browser-conformance hook (tests/multiplayer): mirror the exact
-    // editor buffer + collab state into `window.__taskVault`. The
-    // decorated DOM can't be scraped back into doc text — hidden
-    // live-preview replacements render *nothing* (see editor-view's
-    // `render_dx.rs` Widget arm), so DOM reconstruction would drop
-    // those bytes. Cost is one string clone per buffer change.
-    #[cfg(target_arch = "wasm32")]
-    use_effect(move || {
-        let text = session.state.read().doc.to_string();
-        // Reading `revision()` subscribes this mirror to remote
-        // imports, so `replica` stays current; replica-vs-text is
-        // exactly the split the conformance suites need to localize
-        // a sync stall (transport vs editor-apply bridge).
-        let (live, status, rev, replica) = match &*collab.read() {
-            Some(c) => (
-                c.is_live(),
-                format!("{:?}", c.doc.status()),
-                c.doc.revision(),
-                c.doc
-                    .doc()
-                    .map(|d| {
-                        d.loro()
-                            .get_text(vault_proto::COLLAB_TEXT_CONTAINER)
-                            .to_string()
-                    })
-                    .unwrap_or_default(),
-            ),
-            None => (false, "none".to_owned(), 0, String::new()),
-        };
-        let path = selected.read().clone().unwrap_or_default();
-        let Some(win) = web_sys::window() else { return };
-        let obj = js_sys::Object::new();
-        let set = |k: &str, v: wasm_bindgen::JsValue| {
-            let _ = js_sys::Reflect::set(&obj, &wasm_bindgen::JsValue::from_str(k), &v);
-        };
-        set("text", wasm_bindgen::JsValue::from_str(&text));
-        set("live", wasm_bindgen::JsValue::from_bool(live));
-        set("status", wasm_bindgen::JsValue::from_str(&status));
-        set("rev", wasm_bindgen::JsValue::from_f64(rev as f64));
-        set("replica", wasm_bindgen::JsValue::from_str(&replica));
-        set("path", wasm_bindgen::JsValue::from_str(&path));
-        let _ = js_sys::Reflect::set(&win, &wasm_bindgen::JsValue::from_str("__taskVault"), &obj);
-    });
-    // Editor → replica bridge + presence cursor publish.
-    let on_transaction = use_callback(move |event: editor::TransactionEvent| {
-        let Some(c) = *collab.peek() else { return };
-        let who = account
-            .and_then(|a| a.peek().as_ref().map(|acct| acct.name.clone()))
-            .unwrap_or_else(|| "anonymous".to_owned());
-        crate::collab::on_editor_transaction(&c, &session, &event, &who);
-    });
-
-    // Editor sources — created once, capturing the signals above.
-    // Decorations = the vault pass + remote presence cursors.
-    let decorations = use_hook(|| crate::collab::collab_decoration_source(lookup, collab));
-    let completion = use_hook(|| vault_lookup::vault_completion_source(link_candidates, tag_rows));
-
-    // Open a note through the session (fetch + seed + sha
-    // bookkeeping).
-    let on_open = use_callback(move |meta: FileMeta| {
-        files_open.set(false);
-        session.open(meta.path, meta.sha256);
     });
 
     // Re-file a note under `parent` (None = root) via set_folder,
@@ -348,10 +295,9 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         },
     );
 
-    // Create a new empty note. If a folder was chosen (via a
-    // folder row's "+"), file it there right after creating, then
-    // open through the session — the open re-fetches, so the
-    // buffer reflects the server-spliced `folder:` frontmatter.
+    // Create a new empty note. If a folder was chosen, file it there,
+    // then open a tab — the open re-fetches, so the buffer reflects the
+    // server-spliced `folder:` frontmatter.
     let create_file = move || {
         let mut name = new_name.peek().trim().to_owned();
         if name.is_empty() {
@@ -368,8 +314,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                     create_parent.set(None);
                     let mut open_sha = created_sha.clone();
                     if let Some(parent) = parent {
-                        match move_to_folder(home(), name.clone(), Some(parent), created_sha).await
-                        {
+                        match move_to_folder(home(), name.clone(), Some(parent), created_sha).await {
                             Ok(new_sha) => open_sha = new_sha,
                             Err(e) => {
                                 if let Some(n) = notify {
@@ -378,7 +323,10 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                             }
                         }
                     }
-                    session.open(name, open_sha);
+                    on_open.call(FileMeta {
+                        path: name,
+                        sha256: open_sha,
+                    });
                     files.restart();
                 }
                 Err(e) => {
@@ -396,6 +344,13 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         _ => None,
     });
 
+    // Folder-index pages threaded into every NoteView (wikilink
+    // candidates + cross-file lookup + the `type:` dispatch).
+    let pages_memo = use_memo(move || match &*files.read_unchecked() {
+        Some(Ok(pages)) => pages.clone(),
+        _ => Vec::new(),
+    });
+
     // path → (title, sha) for the backlinks panel rows.
     let page_lookup = use_memo(move || match &*files.read_unchecked() {
         Some(Ok(pages)) => pages
@@ -405,16 +360,14 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         _ => HashMap::new(),
     });
 
-    // Backlinks for the open note, re-pulled when the selection
-    // changes and after every committed save.
-    // Right-panel state is shell-owned (top-bar toggle); the page's
-    // own Backlinks button flips the same signal.
+    // Backlinks for the focused note, re-pulled when the selection
+    // changes and after every committed save (`focus_tick`).
     let shell_right = use_context::<Signal<crate::chrome::RightPanelOpen>>();
     let backlinks_open = use_memo(move || shell_right.read().0);
     let backlinks = use_resource(move || {
         let slug = home();
         let path = selected();
-        let _refresh = session.save_count();
+        let _refresh = *focus_tick.read();
         async move {
             match path {
                 Some(p) => fetch_backlinks(slug, p).await,
@@ -423,12 +376,11 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         }
     });
 
-    // Outgoing wikilinks of the open note — the right panel's "Links"
-    // section, refreshed with the same cadence as backlinks.
+    // Outgoing wikilinks of the focused note.
     let outlinks = use_resource(move || {
         let slug = home();
         let path = selected();
-        let _refresh = session.save_count();
+        let _refresh = *focus_tick.read();
         async move {
             match path {
                 Some(p) => fetch_links(slug, p).await,
@@ -437,16 +389,12 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         }
     });
 
-    // Per-`.base` raw-source editing (the whole-vault graph moved to
-    // the rail's Connections destination).
-    let mut edit_base_source = use_signal(|| false);
-
-    // Verses the open note references (from synced note→verse links), with
-    // their text — the inline scripture reader.
+    // Verses the focused note references (from synced note→verse
+    // links), with their text — the inline scripture reader.
     let verses = use_resource(move || {
         let slug = home();
         let path = selected();
-        let _refresh = session.save_count();
+        let _refresh = *focus_tick.read();
         async move {
             let Some(p) = path else { return Vec::new() };
             let links = crate::feeds::fetch_links_for(&slug, &format!("note:{p}"))
@@ -498,8 +446,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         },
     };
 
-    // Folder targets for the move picker: every node that is a
-    // folder, by basename + title.
+    // Folder targets for the move picker.
     let folder_targets: Vec<(String, String)> = tree()
         .map(|t| {
             t.0.iter()
@@ -511,85 +458,27 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
 
     let has_file = selected.read().is_some();
     let current = selected.read().clone().unwrap_or_default();
-    // Frontmatter `type:` of the open note (from the tree index) — lets the
-    // content pane open `type: video` notes in the player, Obsidian-style.
-    let current_type = tree().and_then(|t| {
-        t.0.iter()
-            .find(|n| n.meta.path == current)
-            .map(|n| n.meta.page_type.to_lowercase())
-    });
-    let is_video = current_type.as_deref() == Some("video");
-    let is_base = current
-        .rsplit_once('.')
-        .is_some_and(|(_, e)| e.eq_ignore_ascii_case("base"));
     let verse_list = verses.read().clone();
-    let is_dirty = session.dirty();
-    let status_msg = match session.status() {
-        SaveStatus::Idle => String::new(),
-        SaveStatus::Saving => "Saving…".to_owned(),
-        SaveStatus::Saved => "Saved".to_owned(),
-        SaveStatus::Failed(msg) => msg,
-    };
-    let conflict_open = session.conflict().is_some();
     let moving = move_target.read().clone();
     let create_under = create_parent.read().clone();
     let panel_open = *backlinks_open.read();
 
-    // ── Bottom status line feed ───────────────────────────
-    // The page's document context (file · dirty · save · collab · vim)
-    // renders in the shell's status bar instead of a page header —
-    // the header row is gone (filename lives in the tab/status line).
+    // ── Status line (focused NoteView writes it; the page reads it for
+    //    the mobile action bar's Save affordance) ─────────────────────
     let status_info = use_context::<crate::chrome::StatusBarInfo>().0;
-    let on_save_cb = use_callback(move |_: ()| session.save());
+    // Clear the status segments when nothing is open, and on page leave.
     use_effect(move || {
-        let mut info = status_info;
-        let Some(file) = session.current_path() else {
+        if selected().is_none() {
+            let mut info = status_info;
             info.set(None);
-            return;
-        };
-        let save = match session.status() {
-            SaveStatus::Idle => String::new(),
-            SaveStatus::Saving => "Saving…".to_owned(),
-            SaveStatus::Saved => "Saved".to_owned(),
-            SaveStatus::Failed(msg) => msg,
-        };
-        // `vim` is None on coarse-pointer devices (touch keeps plain
-        // editing) — the status chip simply doesn't render then.
-        let vim_label = vim.map(|v| {
-            match v.read().mode {
-                editor::editor_vim::Mode::Normal => "NORMAL",
-                editor::editor_vim::Mode::Insert => "INSERT",
-                editor::editor_vim::Mode::VisualChar => "VISUAL",
-                editor::editor_vim::Mode::VisualLine => "V-LINE",
-                editor::editor_vim::Mode::VisualBlock => "V-BLOCK",
-                editor::editor_vim::Mode::Replace => "REPLACE",
-                editor::editor_vim::Mode::Command => "COMMAND",
-            }
-            .to_owned()
-        });
-        let collab_label = collab
-            .read()
-            .as_ref()
-            .map(|c| if c.is_live() { "live" } else { "connecting…" });
-        info.set(Some(crate::chrome::DocStatus {
-            file,
-            dirty: session.dirty(),
-            save,
-            collab: collab_label.map(str::to_owned),
-            vim: vim_label,
-            on_save: Some(on_save_cb),
-        }));
+        }
     });
-    // Leaving the page clears the document segments.
     use_drop(move || {
         let mut info = status_info;
         info.set(None);
     });
 
     // ── Tree pane content ─────────────────────────────────
-    // Shared between the inline mobile pane (no file open) and the
-    // "Files" bottom sheet (file open) — desktop uses the shell's
-    // persistent VaultExplorer instead.
     let tree_content = rsx! {
         div { class: "flex flex-col gap-2 px-3 py-3",
             if let Some(parent) = create_under.clone() {
@@ -654,10 +543,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     };
 
     // ── Backlinks + verses content ────────────────────────
-    // Shared between the desktop right panel and the mobile bottom
-    // sheet (both driven by the shell's `RightPanelOpen`).
     let backlinks_body = rsx! {
-        // Inline scripture reader: verses this note references.
         if let Some(vs) = verse_list.as_ref().filter(|v| !v.is_empty()) {
             div { class: "border-b border-border/60 px-3 py-3",
                 Heading { level: HeadingLevel::H3, class: "mb-2", "Referenced verses" }
@@ -715,7 +601,6 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                 }
             },
         }
-        // ── Outgoing links ────────────────────────────────
         div { class: "border-t border-border/60 px-3 pb-1 pt-3",
             Heading { level: HeadingLevel::H3, "Links" }
         }
@@ -769,13 +654,6 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                 }
             },
         }
-        // ── Local graph ───────────────────────────────────
-        // The open note + its 1-hop neighbourhood, assembled
-        // client-side from the data the two sections above already
-        // fetched (backlinks ∪ resolved outgoing links — no extra
-        // RPC), docked at the panel's bottom edge (`mt-auto`).
-        // Clicking a neighbour node opens that note through the same
-        // `on_open` flow as a backlink row.
         if has_file {
             div { class: "mt-auto border-t border-border/60 px-3 pb-1 pt-3",
                 Heading { level: HeadingLevel::H3, "Local graph" }
@@ -788,9 +666,6 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                         div { class: "mx-2 mb-3 h-64 shrink-0 overflow-hidden rounded-lg border border-border/70",
                             KnowledgeGraphView {
                                 graph,
-                                // The default sizing model targets big
-                                // whole-vault graphs; a handful of nodes
-                                // in a ~h-64 dock reads better small.
                                 node_scale: 0.3,
                                 spacing: 1.5,
                                 active: Some(current.clone()),
@@ -819,167 +694,73 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         }
     };
 
+    // Snapshot of the panes for this render pass (the mount loop).
+    let pane_list = panes.read().clone();
+    let n_panes = pane_list.len();
+    let focused_idx = (*focused.read()).min(n_panes.saturating_sub(1));
+
     rsx! {
         div { class: "flex h-full min-h-[80vh]",
-            // ── Virtual-folder tree ───────────────────────
-            // Mobile-only (md+ uses the shell VaultExplorer): inline
-            // full-width while no note is open; once a note is open the
-            // tree moves to the "Files" bottom sheet so the editor gets
-            // the whole viewport.
+            // ── Virtual-folder tree (mobile-only) ─────────
             aside {
                 class: if has_file { "hidden" } else { "flex w-full flex-col overflow-y-auto pb-14 md:hidden" },
                 {tree_content.clone()}
             }
-            // ── Editor pane ───────────────────────────────
-            // Hidden on phones while no note is open (the tree pane
-            // above owns the viewport then); always present at md+.
+            // ── Document area: panes + backlinks ──────────
             div {
-                class: if has_file { "flex min-w-0 flex-1 flex-col" } else { "hidden min-w-0 flex-1 flex-col md:flex" },
-                onkeydown: move |evt: Event<KeyboardData>| {
-                    let m = evt.modifiers();
-                    if (m.ctrl() || m.meta()) && evt.key().to_string() == "s" {
-                        evt.prevent_default();
-                        session.save();
-                    }
-                },
-                // No page header: the filename lives in the tab strip /
-                // status bar, save state + collab in the status bar,
-                // the right panel toggles from the top bar, the whole-
-                // vault graph is the rail's Connections destination.
-                // Mobile keeps a minimal name + save-state strip (no
-                // status bar below `md`).
-                div { class: "flex items-center justify-between gap-3 border-b border-border/60 px-4 py-1.5 md:hidden",
-                    div { class: "flex min-w-0 items-center gap-2",
-                        if has_file && is_dirty {
-                            span { class: "size-2 shrink-0 rounded-full bg-primary", title: "Unsaved changes" }
-                        }
-                        div { class: "min-w-0 truncate text-sm font-medium",
-                            if has_file { "{current}" } else { "No file selected" }
-                        }
-                    }
-                    if !status_msg.is_empty() {
-                        Text { variant: TextVariant::Muted, class: "shrink-0 text-xs", "{status_msg}" }
-                    }
-                }
-                // `.base` views keep their table↔source flip as a slim
-                // inline affordance (base files only).
-                if has_file && is_base {
-                    div { class: "flex items-center justify-end border-b border-border/40 px-4 py-1",
-                        Button {
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::Small,
-                            on_click: move |_| {
-                                let cur = *edit_base_source.peek();
-                                edit_base_source.set(!cur);
-                            },
-                            if edit_base_source() { "View table" } else { "Edit source" }
-                        }
-                    }
-                }
-                if conflict_open {
-                    div { class: "flex items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm",
-                        span { "This file changed on the server since you opened it." }
-                        div { class: "flex items-center gap-2",
-                            Button {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Small,
-                                on_click: move |_| session.reload_from_server(),
-                                "Reload"
-                            }
-                            Button {
-                                variant: ButtonVariant::Destructive,
-                                size: ButtonSize::Small,
-                                on_click: move |_| session.force_save(),
-                                "Overwrite"
-                            }
-                        }
-                    }
-                }
-                div { class: "flex min-h-0 flex-1",
-                    // pb-14 keeps the last lines clear of the mobile
-                    // action bar (see `MobileActionBar` docs).
-                    div { class: "flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-14 md:pb-0",
-                        if has_file && is_base && !edit_base_source() {
-                            // A `.base` renders as its live tables, in place
-                            // of the editor — Obsidian-style. Row clicks open
-                            // the target note in this same vault view.
-                            crate::pages::bases::BaseDoc {
-                                base_path: current.clone(),
-                                on_open: move |p: String| on_open.call(FileMeta {
-                                    path: p,
-                                    sha256: String::new(),
-                                }),
-                            }
-                        } else if has_file && is_video {
-                            // A `type: video` note opens in the player (its
-                            // basename is the YouTube id). Timestamped notes +
-                            // transcript live right here in the vault.
-                            crate::pages::watch::WatchView {
-                                v: basename_of(&current).to_string(),
-                                node: format!("video:{}", basename_of(&current)),
-                            }
-                        } else if has_file {
-                            // Obsidian-style note header: editable title
-                            // (renames the file) + a structured Properties
-                            // editor over the note's frontmatter, mounted
-                            // above the editor body. Reads + rewrites the
-                            // frontmatter region through the same
-                            // `DocumentSession` the editor holds.
-                            crate::pages::note_header::NoteHeader {
-                                home,
-                                props_open,
-                                on_renamed: move |_| files.restart(),
-                            }
-                            div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
-                                // --flush: no card chrome — the vault page is a
-                                // full-page embed; the editor sits directly on
-                                // the app background (Obsidian-style).
-                                div { class: "editor-frame editor-frame--flush",
-                                    Editor {
-                                        state: session.state,
-                                        keymap: keymap.read().clone(),
-                                        decorations: decorations.clone(),
-                                        vim,
-                                        slash: Some(slash),
-                                        completion: completion.clone(),
-                                        on_transaction,
+                class: if has_file { "flex min-w-0 flex-1" } else { "hidden min-w-0 flex-1 md:flex" },
+                // Panes container (1–2 panes side by side).
+                div { class: "flex min-h-0 min-w-0 flex-1",
+                    for (pi, pane) in pane_list.iter().cloned().enumerate() {
+                        div {
+                            key: "pane-{pi}",
+                            class: if pi == 0 { "flex min-h-0 min-w-0 flex-1 flex-col" } else { "hidden min-h-0 min-w-0 flex-1 flex-col border-l border-border md:flex" },
+                            onfocusin: move |_| focus_pane.call(pi),
+                            {render_tab_bar(pi, &pane, n_panes, focused_idx, focus_tab, close_tab, split, close_pane)}
+                            if let Some(tab) = pane.tabs.get(pane.active).cloned() {
+                                NoteView {
+                                    key: "{pi}:{tab.path}",
+                                    path: tab.path.clone(),
+                                    sha: tab.sha.clone(),
+                                    home,
+                                    pane_index: pi,
+                                    focused,
+                                    pages: pages_memo,
+                                    tag_rows,
+                                    focus_tick,
+                                    on_open,
+                                    on_renamed,
+                                }
+                            } else {
+                                div { class: "flex h-full items-center justify-center p-8",
+                                    Text { variant: TextVariant::Muted,
+                                        "Select a note from the tree to open it here."
                                     }
-                                    SlashMenu { state: session.state, slash }
-                                }
-                            }
-                        } else {
-                            div { class: "flex h-full items-center justify-center p-8",
-                                Text { variant: TextVariant::Muted,
-                                    "Select a note from the tree to start editing."
                                 }
                             }
                         }
                     }
-                    // ── Backlinks + verses panel (md+) ─────
-                    // On phones the same content opens as a bottom
-                    // sheet (below) instead of squeezing the editor.
-                    if has_file && panel_open {
-                        aside { class: "hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/30 md:flex",
-                            div { class: "flex items-center justify-between px-3 py-3",
-                                Heading { level: HeadingLevel::H3, "Backlinks" }
-                                button {
-                                    class: "text-xs text-muted-foreground hover:text-foreground",
-                                    onclick: move |_| {
-                                        let mut o = shell_right;
-                                        o.set(crate::chrome::RightPanelOpen(false));
-                                    },
-                                    "Hide"
-                                }
+                }
+                // ── Backlinks + verses panel (md+, focused note) ──
+                if has_file && panel_open {
+                    aside { class: "hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/30 md:flex",
+                        div { class: "flex items-center justify-between px-3 py-3",
+                            Heading { level: HeadingLevel::H3, "Backlinks" }
+                            button {
+                                class: "text-xs text-muted-foreground hover:text-foreground",
+                                onclick: move |_| {
+                                    let mut o = shell_right;
+                                    o.set(crate::chrome::RightPanelOpen(false));
+                                },
+                                "Hide"
                             }
-                            {backlinks_body.clone()}
                         }
+                        {backlinks_body.clone()}
                     }
                 }
             }
         }
         // ── Mobile chrome ─────────────────────────────────
-        // Sticky primary actions above the bottom tab bar, plus the
-        // file tree + backlinks as bottom sheets.
         MobileActionBar {
             button {
                 r#type: "button",
@@ -992,8 +773,12 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                 r#type: "button",
                 class: "flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground active:bg-primary/85 disabled:opacity-50",
                 disabled: !has_file,
-                onclick: move |_| session.save(),
-                if is_dirty { "Save •" } else { "Save" }
+                onclick: move |_| {
+                    if let Some(cb) = status_info.peek().as_ref().and_then(|d| d.on_save) {
+                        cb.call(());
+                    }
+                },
+                if status_info.read().as_ref().is_some_and(|d| d.dirty) { "Save •" } else { "Save" }
             }
             button {
                 r#type: "button",
@@ -1022,13 +807,77 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             title: "Backlinks",
             {backlinks_body}
         }
-        // Keyed collab child: remount per doc id = fresh replica,
-        // driven INTO the page-owned `handles` slots.
-        if let Some(doc_id) = collab_doc() {
-            crate::collab::CollabSession { key: "{doc_id}", doc_id, handles }
-        }
         document::Link { rel: "stylesheet", href: editor::EDITOR_STYLE }
         document::Style { {crate::collab::COLLAB_STYLE} }
+    }
+}
+
+/// One pane's tab strip: a button per open tab (active = primary
+/// underline; a dimmer underline marks the active tab of an
+/// *unfocused* pane), each with a close ✕, plus split / close-pane
+/// controls docked at the right edge.
+#[allow(clippy::too_many_arguments)]
+fn render_tab_bar(
+    pi: usize,
+    pane: &Pane,
+    n_panes: usize,
+    focused: usize,
+    focus_tab: Callback<(usize, usize)>,
+    close_tab: Callback<(usize, usize)>,
+    split: Callback<()>,
+    close_pane: Callback<usize>,
+) -> Element {
+    let is_focused_pane = focused == pi;
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-muted/20 px-1",
+            for (idx, tab) in pane.tabs.iter().cloned().enumerate() {
+                {
+                    let is_active = idx == pane.active;
+                    let title = basename_of(&tab.path).to_owned();
+                    let cls = if is_active && is_focused_pane {
+                        "flex items-center gap-1 border-b-2 border-primary px-2 py-1.5 text-xs font-medium text-foreground"
+                    } else if is_active {
+                        "flex items-center gap-1 border-b-2 border-border px-2 py-1.5 text-xs font-medium text-foreground"
+                    } else {
+                        "flex items-center gap-1 border-b-2 border-transparent px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    };
+                    rsx! {
+                        div { key: "{tab.path}", class: cls,
+                            button {
+                                class: "min-w-0 max-w-[12rem] truncate text-left",
+                                title: "{tab.path}",
+                                onclick: move |_| focus_tab.call((pi, idx)),
+                                "{title}"
+                            }
+                            button {
+                                class: "shrink-0 rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground",
+                                title: "Close tab",
+                                onclick: move |_| close_tab.call((pi, idx)),
+                                "×"
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "ml-auto flex shrink-0 items-center gap-0.5 pl-1",
+                if n_panes < MAX_PANES {
+                    button {
+                        class: "rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground",
+                        title: "Split right",
+                        onclick: move |_| split.call(()),
+                        "⇥"
+                    }
+                }
+                if n_panes > 1 {
+                    button {
+                        class: "rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground",
+                        title: "Close pane",
+                        onclick: move |_| close_pane.call(pi),
+                        "⊟"
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1206,6 +1055,266 @@ pub(crate) fn basename_of(path: &str) -> &str {
     file.strip_suffix(".md").unwrap_or(file)
 }
 
+/// Media slug for a `type: song` note. Prefers a `song_slug:` (or `slug:`)
+/// key in the leading YAML frontmatter block; otherwise slugifies the note
+/// basename. The slug selects `/media/songs/{slug}/…` (served same-origin).
+pub(crate) fn song_slug_from(text: &str, basename: &str) -> String {
+    if let Some(v) = frontmatter_value(text, "song_slug").or_else(|| frontmatter_value(text, "slug"))
+    {
+        let v = v.trim().trim_matches(['"', '\'']).trim();
+        if !v.is_empty() {
+            return v.to_owned();
+        }
+    }
+    slugify(basename)
+}
+
+/// Ordered media slugs for a `type: setlist` note, parsed from the `songs:`
+/// YAML list in the leading frontmatter. Accepts both the block form
+///
+/// ```yaml
+/// songs:
+///   - song-a
+///   - song-b
+/// ```
+///
+/// and the inline flow form `songs: [song-a, song-b]`. Each entry is trimmed
+/// of quotes/whitespace; blanks are dropped.
+pub(crate) fn setlist_songs_from(text: &str) -> Vec<String> {
+    let Some(rest) = text.strip_prefix("---") else {
+        return Vec::new();
+    };
+    let Some((front, _)) = rest.split_once("\n---") else {
+        return Vec::new();
+    };
+    let clean = |s: &str| s.trim().trim_matches(['"', '\'']).trim().to_owned();
+
+    let mut lines = front.lines();
+    let mut out = Vec::new();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        let Some(after) = trimmed.strip_prefix("songs:") else {
+            continue;
+        };
+        let after = after.trim();
+        // Inline flow list: songs: [a, b, c]
+        if let Some(inner) = after.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            out.extend(inner.split(',').map(clean).filter(|s| !s.is_empty()));
+            return out;
+        }
+        // Block list: subsequent `- item` lines.
+        for l in lines.by_ref() {
+            let t = l.trim_start();
+            if let Some(item) = t.strip_prefix("- ").or_else(|| t.strip_prefix('-')) {
+                let v = clean(item);
+                if !v.is_empty() {
+                    out.push(v);
+                }
+            } else if t.is_empty() {
+                continue;
+            } else {
+                break; // next frontmatter key ends the list
+            }
+        }
+        return out;
+    }
+    out
+}
+
+// ── song-note frontmatter (stems as attachments) ────────────────────────────
+
+/// One stem parsed from a song note's frontmatter `stems:` block. The
+/// audio lives in the org's content-addressed blob store; `content_hash`
+/// is resolved to a signed `/blobs/download` URL at play time.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FrontStem {
+    pub name: String,
+    pub group: Option<String>,
+    pub default_muted: bool,
+    pub content_hash: String,
+}
+
+/// One section parsed from the frontmatter `sections:` block (song-local
+/// seconds, 0-based).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FrontSection {
+    pub name: String,
+    pub start_sec: f64,
+    pub end_sec: f64,
+}
+
+/// Song metadata + stems parsed from a `type: song` note's frontmatter.
+/// When `stems` is non-empty the player streams from the attachment
+/// blob store instead of `/media/songs/{slug}/…`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SongFront {
+    pub artist: Option<String>,
+    pub key: Option<String>,
+    pub bpm: Option<f64>,
+    pub time_signature: Option<String>,
+    pub duration_sec: Option<f64>,
+    pub sections: Vec<FrontSection>,
+    pub stems: Vec<FrontStem>,
+}
+
+/// Parse the song frontmatter (scalars + the `stems:` / `sections:`
+/// block lists) from a note's text.
+pub(crate) fn song_front_from(text: &str) -> SongFront {
+    let fv = |k: &str| {
+        frontmatter_value(text, k)
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
+            .filter(|v| !v.is_empty())
+    };
+    let num = |k: &str| fv(k).and_then(|v| v.parse::<f64>().ok());
+
+    let stems = front_block_maps(text, "stems")
+        .into_iter()
+        .filter_map(|pairs| {
+            let get = |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(pk, _)| pk == k)
+                    .map(|(_, v)| v.clone())
+                    .filter(|v| !v.is_empty())
+            };
+            let hash = get("content_hash")?;
+            Some(FrontStem {
+                name: get("name")?,
+                group: get("group"),
+                default_muted: get("default_muted").is_some_and(|v| v == "true"),
+                content_hash: hash,
+            })
+        })
+        .collect();
+
+    let sections = front_block_maps(text, "sections")
+        .into_iter()
+        .filter_map(|pairs| {
+            let get = |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(pk, _)| pk == k)
+                    .map(|(_, v)| v.clone())
+            };
+            Some(FrontSection {
+                name: get("name")?,
+                start_sec: get("start_sec")?.parse().ok()?,
+                end_sec: get("end_sec")?.parse().ok()?,
+            })
+        })
+        .collect();
+
+    SongFront {
+        artist: fv("artist"),
+        key: fv("key"),
+        bpm: num("bpm"),
+        time_signature: fv("time_signature"),
+        duration_sec: num("duration_sec"),
+        sections,
+        stems,
+    }
+}
+
+/// Parse a frontmatter block list of maps under `key:`:
+///
+/// ```yaml
+/// key:
+///   - name: Click
+///     group: Guide
+/// ```
+///
+/// Each `-` starts a new entry; indented `k: v` lines extend the current
+/// one. Values are trimmed of quotes/whitespace. Stops at the next
+/// top-level (unindented) key.
+fn front_block_maps(text: &str, key: &str) -> Vec<Vec<(String, String)>> {
+    let Some(rest) = text.strip_prefix("---") else {
+        return Vec::new();
+    };
+    let Some((front, _)) = rest.split_once("\n---") else {
+        return Vec::new();
+    };
+    let clean = |s: &str| s.trim().trim_matches(['"', '\'']).trim().to_owned();
+    let lines: Vec<&str> = front.lines().collect();
+
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        i += 1;
+        // The opening `key:` line, top-level (unindented) with no value.
+        let is_open = line
+            .strip_prefix(key)
+            .and_then(|r| r.strip_prefix(':'))
+            .is_some_and(|r| r.trim().is_empty());
+        if !is_open {
+            continue;
+        }
+        let mut out = Vec::new();
+        let mut cur: Vec<(String, String)> = Vec::new();
+        while i < lines.len() {
+            let raw = lines[i];
+            let t = raw.trim_start();
+            if t.is_empty() {
+                i += 1;
+                continue;
+            }
+            if !raw.starts_with(' ') && !raw.starts_with('\t') {
+                break; // next top-level key
+            }
+            if let Some(after_dash) = t.strip_prefix('-') {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+                if let Some((k, v)) = after_dash.trim_start().split_once(':') {
+                    cur.push((k.trim().to_owned(), clean(v)));
+                }
+            } else if let Some((k, v)) = t.split_once(':') {
+                cur.push((k.trim().to_owned(), clean(v)));
+            }
+            i += 1;
+        }
+        if !cur.is_empty() {
+            out.push(cur);
+        }
+        return out;
+    }
+    Vec::new()
+}
+
+/// Read a scalar `key: value` from the note's leading `---` frontmatter block.
+fn frontmatter_value(text: &str, key: &str) -> Option<String> {
+    let rest = text.strip_prefix("---")?;
+    let (front, _) = rest.split_once("\n---")?;
+    for line in front.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim() == key {
+                return Some(v.to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Lowercase, spaces/underscores → hyphens, drop other punctuation.
+fn slugify(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_dash = false;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if c == ' ' || c == '_' || c == '-' {
+            if !prev_dash && !out.is_empty() {
+                out.push('-');
+                prev_dash = true;
+            }
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
 /// Starter scaffold for a freshly-created note: an empty-but-present
 /// frontmatter block so the Properties panel has something to show
 /// (a `created` date + empty `tags`/`aliases` sequences). No `title`
@@ -1259,7 +1368,7 @@ pub(crate) async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, St
     }
 }
 
-/// The open note + its 1-hop neighbourhood as a [`WikiGraph`], built
+/// The focused note + its 1-hop neighbourhood as a [`WikiGraph`], built
 /// client-side from what the right panel already fetched: backlink
 /// sources point AT `current`, resolved outgoing wikilinks point FROM
 /// it. Node ids are vault-relative paths, so a node click maps
@@ -1336,10 +1445,7 @@ fn build_local_graph(
 }
 
 /// Outgoing wikilinks of `path`, via the `VaultGraph` RPC.
-async fn fetch_links(
-    slug: String,
-    path: String,
-) -> Result<Vec<vault_proto::GraphLink>, String> {
+async fn fetch_links(slug: String, path: String) -> Result<Vec<vault_proto::GraphLink>, String> {
     let client = crate::vox_clients::vault_graph_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
@@ -1422,5 +1528,48 @@ pub(crate) async fn create_new_file(slug: String, path: String) -> Result<String
     {
         let _ = (client, path);
         Err("native client not wired yet".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod song_front_tests {
+    use super::song_front_from;
+
+    const NOTE: &str = "---\ntype: song\nartist: Elevation Worship\nkey: B\nbpm: 128\ntime_signature: \"4/4\"\nduration_sec: 372.5\nsections:\n  - name: Intro\n    start_sec: 0\n    end_sec: 15.2\n  - name: Verse 1\n    start_sec: 15.2\n    end_sec: 45\nstems:\n  - name: Click\n    group: Guide\n    default_muted: true\n    content_hash: aaa111\n  - name: \"Electric Guitar 1\"\n    group: Guitars\n    content_hash: bbb222\n---\n# Praise\nbody text\n";
+
+    #[test]
+    fn parses_full_song_front() {
+        let f = song_front_from(NOTE);
+        assert_eq!(f.artist.as_deref(), Some("Elevation Worship"));
+        assert_eq!(f.key.as_deref(), Some("B"));
+        assert_eq!(f.bpm, Some(128.0));
+        assert_eq!(f.time_signature.as_deref(), Some("4/4"));
+        assert_eq!(f.duration_sec, Some(372.5));
+        assert_eq!(f.sections.len(), 2);
+        assert_eq!(f.sections[1].name, "Verse 1");
+        assert_eq!(f.sections[1].start_sec, 15.2);
+        assert_eq!(f.stems.len(), 2);
+        assert_eq!(f.stems[0].name, "Click");
+        assert_eq!(f.stems[0].group.as_deref(), Some("Guide"));
+        assert!(f.stems[0].default_muted);
+        assert_eq!(f.stems[0].content_hash, "aaa111");
+        assert_eq!(f.stems[1].name, "Electric Guitar 1");
+        assert!(!f.stems[1].default_muted);
+    }
+
+    #[test]
+    fn missing_front_is_empty() {
+        let f = song_front_from("# Just a note\n");
+        assert!(f.stems.is_empty());
+        assert!(f.sections.is_empty());
+        assert_eq!(f.bpm, None);
+    }
+
+    #[test]
+    fn stem_without_hash_is_dropped() {
+        let text = "---\nstems:\n  - name: Click\n  - name: Bass\n    content_hash: ccc\n---\n";
+        let f = song_front_from(text);
+        assert_eq!(f.stems.len(), 1);
+        assert_eq!(f.stems[0].name, "Bass");
     }
 }

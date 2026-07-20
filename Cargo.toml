@@ -138,6 +138,7 @@ members = [
     "crates/session/proto",
     "crates/session/ui",
     "features/guide",
+    "features/song",
     "features/reaper/session-extension",
     # ── crates/keyflow — keyflow domain core (wave 3) ─────────────────
     "crates/keyflow/keyflow",
@@ -335,9 +336,9 @@ dock-proto = { path = "libs/dock/dock-proto" }
 # PR #61 baseview-0.2 + the FTS delta: nice-plug-dioxus, embedded editors,
 # rich track-info, param rescan). The ONE sanctioned exception to
 # path-deps-only — it left the tree so it can track upstream.
-nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "76f8dce3d52eac4f45f3f4313207c645aad174b4" }
-nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "76f8dce3d52eac4f45f3f4313207c645aad174b4" }
-nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "76f8dce3d52eac4f45f3f4313207c645aad174b4" }
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "7d111d8fd055f0ccfdf0642d260138667a7ab2b8" }
+nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "7d111d8fd055f0ccfdf0642d260138667a7ab2b8" }
+nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "7d111d8fd055f0ccfdf0642d260138667a7ab2b8" }
 utils = { path = "libs/utils" }
 vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
@@ -457,6 +458,10 @@ session-ui = { path = "crates/session/ui", default-features = false }
 # feature adds local Chatterbox TTS (its ort/chatterbox pins live in the
 # crate's own manifest, not here).
 session-guide = { path = "features/guide" }
+# Durable Song + Arrangement vault-folder schema (stored counterpart to
+# session_proto::Song). Keyflow-agnostic: charts are stored as references
+# (relative paths / attachment ids), never embedded keyflow::Chart types.
+song = { path = "features/song" }
 
 # ── keyflow domain (wave 3) ───────────────────────────────────────────
 # `keyflow` and `engraver` are the facades; keyflow-proto/-text/-midi/
@@ -633,23 +638,30 @@ monarchy_derive = { path = "libs/monarchy/monarchy-derive" }
 musicxml = "1.1"
 
 # ── UI framework ──────────────────────────────────────────────────────
-dioxus = { version = "=0.7.9", default-features = false, features = ["lib"] }
-# Blitz native renderer — one rev for the whole stack (dioxus-native +
-# blitz-* must resolve to the same source). Feature union of the wave-1
+# dioxus 0.8 line — git rev pinned (0.8.0-alpha.0 + the blitz beta bump;
+# bump this rev deliberately, it must stay in lockstep across every
+# dioxus-* entry below AND the FTS fork branches of primitives/lumen/
+# lucide/sdk, which pin the same rev).
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false, features = ["lib"] }
+# Blitz native renderer — dioxus-native(-dom) moved into the dioxus repo
+# on the 0.8 line; blitz-* come from crates.io (0.3.0-beta.1), matching
+# dioxus git's own `=0.3.0-beta.1` pins. Feature union of the wave-1
 # UI libs (prelude, system-fonts) and daw-reaper-dioxus (svg, autofocus,
 # incremental, data-uri theme-skin PNGs).
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", features = ["prelude", "system-fonts", "svg", "autofocus", "incremental", "data-uri"] }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-# Vendored DioxusLabs/dioxus-test backported to the pins above — headless
-# component tests on blitz-dom (no browser). See libs/vendor/dioxus-test.
+dioxus-native = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", features = ["prelude", "system-fonts", "svg", "autofocus", "incremental", "data-uri"] }
+blitz-dom = "=0.3.0-beta.1"
+blitz-paint = "=0.3.0-beta.1"
+blitz-traits = "=0.3.0-beta.1"
+blitz-shell = "=0.3.0-beta.1"
+dioxus-native-dom = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
+# Vendored DioxusLabs/dioxus-test on the pins above — headless component
+# tests on blitz-dom (no browser). See libs/vendor/dioxus-test.
 dioxus-test = { path = "libs/vendor/dioxus-test" }
-dioxus-devtools = "0.7"
-lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
-dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "837c9d4c1c9f99b19de7a3f087d8af1b0538dcae", default-features = false }
-lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
+# FTS fork branches carrying the dioxus-0.8 bumps until upstream moves.
+lumen-blocks = { git = "https://github.com/FastTrackStudios/lumen-blocks", branch = "main" }
+dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", package = "dioxus-primitives", branch = "main", default-features = false }
+lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", branch = "main", features = ["all-icons"] }
 clsx = "0.1.1"
 tw_merge = "0.1.21"
 nucleo-matcher = "0.3"
@@ -830,6 +842,7 @@ tag-proto = { path = "features/task/tag/tag-proto" }
 tag = { path = "features/task/tag/tag" }
 task = { path = "features/task/task/task", default-features = false }
 task-ui = { path = "features/task/task/task-ui" }
+task-server = { path = "apps/task/server" }
 project = { path = "features/task/project/project", default-features = false }
 org-proto = { path = "features/task/org/org-proto" }
 org-snapshot = { path = "features/task/org/org-snapshot" }
@@ -878,6 +891,8 @@ scripture = { path = "features/task/scripture/scripture" }
 scripture-proto = { path = "features/task/scripture/scripture-proto", default-features = false }
 links = { path = "features/task/links/links" }
 links-proto = { path = "features/task/links/links-proto", default-features = false }
+collection = { path = "features/task/collection/collection" }
+collection-proto = { path = "features/task/collection/collection-proto", default-features = false }
 resources = { path = "features/task/resources/resources" }
 resources-proto = { path = "features/task/resources/resources-proto", default-features = false }
 cookbook = { path = "features/task/mealplan/cookbook" }
@@ -933,8 +948,8 @@ regex = "1"
 serde_yaml = "0.9"
 cooklang = "0.18"
 pulldown-cmark = { version = "0.10", default-features = false }
-dioxus-router = { version = "0.7.9", default-features = false }
-dioxus-icons = "0.1"
+dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false }
+dioxus-icons = { git = "https://github.com/FastTrackStudios/dioxus-icons", branch = "main" }
 web-sys = "0.3.98"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -980,6 +995,16 @@ moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7
 moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
+# Blitz from git HEAD (still the 0.3.0-beta.1 line) instead of the
+# published beta.1 — dioxus git pins `=0.3.0-beta.1`, and the vendored
+# dioxus-test needs post-beta.1 APIs (Node::outer_html_pretty). Same
+# patch upstream dioxus-test carries. One rev across all blitz crates.
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-net = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
 # Vendored one-line fix: quote scalars containing `<`/`>` — upstream
 # (facet-rs/facet) styx-format emits them bare but styx-parse rejects
 # them, so serialized keybind configs (`keys "<C-s>"`) could not be

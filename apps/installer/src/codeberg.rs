@@ -39,11 +39,10 @@ pub async fn resolve_with_prefix(
     };
 
     let mut req = client.get(&url).header("Accept", "application/json");
-    if let Ok(token) = std::env::var("CODEBERG_TOKEN") {
-        if !token.is_empty() {
+    if let Ok(token) = std::env::var("CODEBERG_TOKEN")
+        && !token.is_empty() {
             req = req.header("Authorization", format!("token {token}"));
         }
-    }
 
     let resp = req.send().await.wrap_err_with(|| format!("requesting {url}"))?;
     let status = resp.status();
@@ -108,11 +107,10 @@ pub async fn resolve_with_prefix(
 async fn resolve_newest_any(client: &reqwest::Client, asset_prefix: &str) -> eyre::Result<Release> {
     let url = format!("{API_BASE}/releases?limit=1");
     let mut req = client.get(&url).header("Accept", "application/json");
-    if let Ok(token) = std::env::var("CODEBERG_TOKEN") {
-        if !token.is_empty() {
+    if let Ok(token) = std::env::var("CODEBERG_TOKEN")
+        && !token.is_empty() {
             req = req.header("Authorization", format!("token {token}"));
         }
-    }
     let resp = req.send().await.wrap_err_with(|| format!("requesting {url}"))?;
     let status = resp.status();
     let body = resp.bytes().await.wrap_err("reading releases response")?;
