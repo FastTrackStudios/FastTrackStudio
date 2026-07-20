@@ -631,6 +631,9 @@ mod imp {
                             on_section_select: Callback::new(move |(_song, sec): (usize, usize)| {
                                 on_section_click.call(sec)
                             }),
+                            // Light-themed host: use the subtle tint + ring
+                            // selection instead of the dark "stage" white fill.
+                            plain_selection: true,
                         }
                     }
                 }
