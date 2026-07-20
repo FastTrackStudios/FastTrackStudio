@@ -9,9 +9,10 @@ use patchbay_proto::services::patchbay_service::{
     PatchbayServiceStreamSource, patchbay_service_stream_service_descriptor, stream_serve,
 };
 use patchbay_proto::{
-    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, DanteDevice, DanteStatus, GraphEvent,
-    GraphSnapshot, LatencyRule, PatchbayError, PatchbayService, PresetLink, RoutingPreset,
-    ServiceAction, ServiceStatus, patchbay_service_service_descriptor, serve_patchbay_service,
+    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
+    GraphEvent, GraphSnapshot, IconEntry, LatencyRule, PatchbayError, PatchbayService, PresetLink,
+    RoutingPreset, ServiceAction, ServiceStatus, patchbay_service_service_descriptor,
+    serve_patchbay_service,
 };
 
 use crate::engine::{self, Command, EngineHandle};
@@ -32,6 +33,7 @@ struct Inner {
     events_hub: architect::PubSub<GraphEvent>,
     presets: PresetStore,
     dante: crate::dante_net::DanteEndpoints,
+    icons: crate::icons::IconCache,
 }
 
 impl Default for PatchbayBackend {
@@ -70,6 +72,7 @@ impl PatchbayBackend {
                 events_hub,
                 presets: PresetStore::open(),
                 dante: crate::dante_net::DanteEndpoints::default(),
+                icons: crate::icons::IconCache::default(),
             }),
         }
     }
@@ -478,6 +481,33 @@ impl PatchbayService for PatchbayBackend {
             }
         }
         Ok(written)
+    }
+
+    async fn colors(&self) -> Result<Vec<ColorEntry>, PatchbayError> {
+        Ok(self.inner.presets.colors())
+    }
+
+    async fn set_color(&self, target: String, color: String) -> Result<(), PatchbayError> {
+        self.inner.presets.set_color(target, color);
+        Ok(())
+    }
+
+    async fn icons(&self, names: Vec<String>) -> Result<Vec<IconEntry>, PatchbayError> {
+        // Disk lookups + reads — off the executor.
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || {
+            names
+                .into_iter()
+                .filter_map(|name| {
+                    this.inner.icons.data_uri(&name).map(|data_uri| IconEntry {
+                        icon_name: name,
+                        data_uri,
+                    })
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| PatchbayError::Internal(e.to_string()))
     }
 
     async fn clock(&self) -> Result<ClockInfo, PatchbayError> {

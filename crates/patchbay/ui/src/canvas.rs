@@ -5,8 +5,8 @@ use patchbay_proto::{MediaKind, PortDirection};
 
 use crate::layout::{self, CARD_W, COL_GAP, Filters, MARGIN, ROW_H, column_titles};
 use crate::state::{
-    self, EXPANDED_GROUPS, GRAPH, HIDE_MONITORS, HIDE_UNCONNECTED, MEDIA_TAB, PAN, SEARCH,
-    SELECTED_NODE, SELECTED_OUTPUT, ZOOM,
+    self, ARMED_OUTPUTS, EXPANDED_GROUPS, GRAPH, HIDE_MONITORS, HIDE_UNCONNECTED, MEDIA_TAB, PAN,
+    SEARCH, SELECTED_NODE, ZOOM,
 };
 
 fn kind_color(kind: MediaKind) -> &'static str {
@@ -20,6 +20,16 @@ fn kind_color(kind: MediaKind) -> &'static str {
 
 #[component]
 pub fn GraphCanvas() -> Element {
+    // Fetch application icons for nodes we haven't looked up yet
+    // (re-runs whenever the graph changes; already-known names are
+    // skipped inside).
+    let icon_handle = state::use_patchbay();
+    use_effect(move || {
+        let _ = GRAPH.read().nodes.len();
+        state::request_missing_icons(icon_handle.clone());
+    });
+
+    let handle = state::use_patchbay();
     let graph = GRAPH.read();
     let aliases = state::ALIASES.read();
     let search = SEARCH.read();
@@ -33,34 +43,67 @@ pub fn GraphCanvas() -> Element {
     };
     let lay = layout::compute_layout(&graph, &filters, &expanded);
 
-    // Cables: only when both anchors are visible. Collapsed-group fan-ins
-    // collapse to one drawn path per (from-anchor, to-anchor) pair.
-    let mut seen: std::collections::HashSet<(u64, u64)> = std::collections::HashSet::new();
-    let cables: Vec<_> = graph
-        .links
+    // Ports rendered as condensed stereo pairs draw thin cables.
+    let pair_ports: std::collections::HashSet<u32> = lay
+        .cards
         .iter()
-        .filter_map(|l| {
-            let &(x1, y1) = lay.anchors.get(&l.output_port)?;
-            let &(x2, y2) = lay.anchors.get(&l.input_port)?;
-            let key = ((x1 as u64) << 32 | (y1 as u64), (x2 as u64) << 32 | (y2 as u64));
-            if !seen.insert(key) {
-                return None;
-            }
-            let kind = graph
-                .ports
-                .iter()
-                .find(|p| p.id == l.output_port)
-                .map(|p| p.media_kind)
-                .unwrap_or(MediaKind::Other);
-            let dx = ((x2 - x1) * 0.5).max(40.0);
-            Some((
-                l.id,
-                format!("M {x1} {y1} C {} {y1}, {} {y2}, {x2} {y2}", x1 + dx, x2 - dx),
-                kind_color(kind),
-                l.active,
-            ))
-        })
+        .flat_map(|c| c.rows.iter())
+        .filter(|r| r.pair)
+        .flat_map(|r| r.ports.iter().copied())
         .collect();
+
+    // Cables: only when both anchors are visible. Collapsed-group
+    // fan-ins collapse to one drawn path per (from-anchor, to-anchor)
+    // pair — the path remembers every link id it stands for, so
+    // clicking it disconnects them all.
+    struct Cable {
+        ids: Vec<u32>,
+        d: String,
+        color: String,
+        active: bool,
+        thin: bool,
+    }
+    let mut by_path: std::collections::HashMap<(u64, u64), usize> =
+        std::collections::HashMap::new();
+    let mut cables: Vec<Cable> = Vec::new();
+    for l in &graph.links {
+        let (Some(&(x1, y1)), Some(&(x2, y2))) =
+            (lay.anchors.get(&l.output_port), lay.anchors.get(&l.input_port))
+        else {
+            continue;
+        };
+        let key = (
+            (x1 as u64) << 32 | (y1 as u64),
+            (x2 as u64) << 32 | (y2 as u64),
+        );
+        if let Some(&i) = by_path.get(&key) {
+            cables[i].ids.push(l.id);
+            cables[i].active |= l.active;
+            continue;
+        }
+        let (kind, port_name) = graph
+            .ports
+            .iter()
+            .find(|p| p.id == l.output_port)
+            .map(|p| (p.media_kind, p.name.as_str()))
+            .unwrap_or((MediaKind::Other, ""));
+        let node_name = graph
+            .nodes
+            .iter()
+            .find(|n| n.id == l.output_node)
+            .map(|n| n.name.as_str())
+            .unwrap_or("");
+        let color = state::port_color(node_name, port_name, kind_color(kind));
+        let dx = ((x2 - x1) * 0.5).max(40.0);
+        by_path.insert(key, cables.len());
+        cables.push(Cable {
+            ids: vec![l.id],
+            d: format!("M {x1} {y1} C {} {y1}, {} {y2}, {x2} {y2}", x1 + dx, x2 - dx),
+            color,
+            active: l.active,
+            thin: pair_ports.contains(&l.output_port) || pair_ports.contains(&l.input_port),
+        });
+    }
 
     let world_w = lay.width;
     let world_h = lay.height.max(400.0);
@@ -143,14 +186,36 @@ pub fn GraphCanvas() -> Element {
                     width: "{world_w}",
                     height: "{world_h}",
                     view_box: "0 0 {world_w} {world_h}",
-                    for (id, d, color, active) in cables {
-                        path {
-                            key: "{id}",
-                            d: "{d}",
-                            fill: "none",
-                            stroke: "{color}",
-                            stroke_width: "2",
-                            opacity: if active { "0.95" } else { "0.45" },
+                    for cable in cables {
+                        {
+                            let handle = handle.clone();
+                            let ids = cable.ids.clone();
+                            let n = ids.len();
+                            rsx! {
+                                path {
+                                    key: "{cable.ids[0]}",
+                                    class: "cable",
+                                    d: "{cable.d}",
+                                    fill: "none",
+                                    stroke: "{cable.color}",
+                                    stroke_width: if cable.thin { "1.2" } else { "2" },
+                                    opacity: if cable.active { "0.95" } else { "0.45" },
+                                    pointer_events: "stroke",
+                                    onclick: move |e: Event<MouseData>| {
+                                        e.stop_propagation();
+                                        let handle = handle.clone();
+                                        let ids = ids.clone();
+                                        spawn(async move {
+                                            for id in ids {
+                                                if let Err(e) = handle.0.destroy_link(id).await {
+                                                    tracing::warn!("cable disconnect failed: {e:?}");
+                                                }
+                                            }
+                                        });
+                                    },
+                                    title { "{n} link(s) — click to disconnect" }
+                                }
+                            }
                         }
                     }
                 }
@@ -161,7 +226,15 @@ pub fn GraphCanvas() -> Element {
                         node_name: card.node.name.clone(),
                         node_label: state::node_label(&card.node.name, &card.node.label),
                         media_class: card.node.media_class.clone(),
-                        kind: card.node.media_kind,
+                        accent: state::node_color(
+                            &card.node.name,
+                            kind_color(card.node.media_kind),
+                        ),
+                        icon: state::ICONS
+                            .read()
+                            .get(&card.node.icon_name)
+                            .cloned()
+                            .unwrap_or_default(),
                         x: card.x,
                         y: card.y,
                         h: card.h,
@@ -171,11 +244,24 @@ pub fn GraphCanvas() -> Element {
                             .map(|r| RowProps {
                                 aliased: aliases
                                     .contains_key(&format!("{}:{}", card.node.name, r.label)),
-                                label: state::port_label(&card.node.name, &r.label),
+                                label: if r.pair {
+                                    r.label.clone()
+                                } else {
+                                    state::port_label(&card.node.name, &r.label)
+                                },
                                 raw_name: r.label.clone(),
                                 monitor: r.monitor,
                                 direction: r.direction,
-                                kind: r.kind,
+                                dot: if r.pair {
+                                    state::node_color(&card.node.name, kind_color(r.kind))
+                                } else {
+                                    state::port_color(
+                                        &card.node.name,
+                                        &r.label,
+                                        kind_color(r.kind),
+                                    )
+                                },
+                                pair: r.pair,
                                 ports: r.ports.clone(),
                                 group_key: r.group_key.clone(),
                                 expanded: r
@@ -199,7 +285,10 @@ struct RowProps {
     aliased: bool,
     monitor: bool,
     direction: PortDirection,
-    kind: MediaKind,
+    /// Resolved dot/cable color for this row.
+    dot: String,
+    /// Condensed stereo pair (ports = [L, R]).
+    pair: bool,
     ports: Vec<u32>,
     group_key: Option<String>,
     expanded: bool,
@@ -211,15 +300,15 @@ fn NodeCard(
     node_name: String,
     node_label: String,
     media_class: String,
-    kind: MediaKind,
+    accent: String,
+    icon: String,
     x: f64,
     y: f64,
     h: f64,
     rows: Vec<RowProps>,
 ) -> Element {
-    let selected_out = *SELECTED_OUTPUT.read();
+    let armed = ARMED_OUTPUTS.read().clone();
     let inspected = *SELECTED_NODE.read() == Some(node_id);
-    let accent = kind_color(kind);
     let handle = state::use_patchbay();
 
     rsx! {
@@ -233,28 +322,36 @@ fn NodeCard(
                     let cur = *SELECTED_NODE.peek();
                     *SELECTED_NODE.write() = if cur == Some(node_id) { None } else { Some(node_id) };
                 },
-                span { class: "node-title", "{node_label}" }
-                span { class: "node-class", "{media_class}" }
+                if !icon.is_empty() {
+                    img { class: "node-icon", src: "{icon}" }
+                }
+                div { class: "node-titles",
+                    span { class: "node-title", "{node_label}" }
+                    span { class: "node-class", "{media_class}" }
+                }
             }
             for (i, row) in rows.iter().enumerate() {
                 {
                     let row = row.clone();
                     let handle = handle.clone();
                     let is_group = row.group_key.is_some();
-                    let armed = row.direction == PortDirection::Output
-                        && row.ports.len() == 1
-                        && selected_out == Some(row.ports[0]);
+                    let is_armed = row.direction == PortDirection::Output
+                        && !row.ports.is_empty()
+                        && !is_group
+                        && row.ports == armed;
                     let connectable = row.direction == PortDirection::Input
-                        && selected_out.is_some()
-                        && row.ports.len() == 1;
+                        && !armed.is_empty()
+                        && !is_group
+                        && !row.ports.is_empty();
                     let side = if row.direction == PortDirection::Input { "row-in" } else { "row-out" };
                     let classes = format!(
-                        "port-row {side}{}{}{}{}{}",
+                        "port-row {side}{}{}{}{}{}{}",
                         if is_group { " group" } else { "" },
-                        if armed { " armed" } else { "" },
+                        if is_armed { " armed" } else { "" },
                         if connectable { " connectable" } else { "" },
                         if row.aliased { " aliased" } else { "" },
                         if row.monitor { " mon" } else { "" },
+                        if row.pair { " pair" } else { "" },
                     );
                     let tooltip = if is_group {
                         format!(
@@ -262,6 +359,9 @@ fn NodeCard(
                             row.ports.len().max(1),
                             if row.expanded { "collapse" } else { "expand" }
                         )
+                    } else if row.pair {
+                        format!("stereo pair — click to {} both channels",
+                            if row.direction == PortDirection::Output { "arm" } else { "connect" })
                     } else if row.monitor {
                         format!("{} — monitor tap (a copy of what this sink plays)", row.raw_name)
                     } else if row.aliased {
@@ -269,7 +369,7 @@ fn NodeCard(
                     } else {
                         String::new()
                     };
-                    let dot = kind_color(row.kind);
+                    let dot = row.dot.clone();
                     rsx! {
                         div {
                             key: "{i}",
@@ -282,22 +382,28 @@ fn NodeCard(
                                     EXPANDED_GROUPS.write().insert(key.clone(), now);
                                     return;
                                 }
-                                let Some(&pid) = row.ports.first() else { return };
+                                if row.ports.is_empty() {
+                                    return;
+                                }
                                 match row.direction {
                                     PortDirection::Output => {
-                                        let cur = *SELECTED_OUTPUT.peek();
-                                        *SELECTED_OUTPUT.write() =
-                                            if cur == Some(pid) { None } else { Some(pid) };
+                                        let cur = ARMED_OUTPUTS.peek().clone();
+                                        *ARMED_OUTPUTS.write() = if cur == row.ports {
+                                            Vec::new()
+                                        } else {
+                                            row.ports.clone()
+                                        };
                                     }
                                     PortDirection::Input => {
-                                        if let Some(out) = *SELECTED_OUTPUT.peek() {
-                                            state::toggle_link(handle.clone(), out, pid);
-                                        }
+                                        state::connect_armed(handle.clone(), &row.ports);
                                     }
                                 }
                             },
                             if row.direction == PortDirection::Input {
-                                span { class: "port-dot", style: "background:{dot};" }
+                                span {
+                                    class: if row.pair { "port-dot pair-dot" } else { "port-dot" },
+                                    style: "background:{dot};",
+                                }
                             }
                             span { class: "port-name",
                                 if is_group {
@@ -307,7 +413,10 @@ fn NodeCard(
                                 }
                             }
                             if row.direction == PortDirection::Output {
-                                span { class: "port-dot", style: "background:{dot};" }
+                                span {
+                                    class: if row.pair { "port-dot pair-dot" } else { "port-dot" },
+                                    style: "background:{dot};",
+                                }
                             }
                         }
                     }

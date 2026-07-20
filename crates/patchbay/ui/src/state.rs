@@ -23,6 +23,11 @@ pub fn use_patchbay() -> PatchbayHandle {
 pub static GRAPH: GlobalSignal<GraphSnapshot> = Signal::global(GraphSnapshot::default);
 /// `target → alias` (`node.name` or `node.name:port.name`).
 pub static ALIASES: GlobalSignal<HashMap<String, String>> = Signal::global(HashMap::new);
+/// `target → color` (`node.name` or `node.name:port.name`).
+pub static COLORS: GlobalSignal<HashMap<String, String>> = Signal::global(HashMap::new);
+/// `icon_name → data: URI` (empty string = looked up, not found — so
+/// misses aren't re-requested every graph change).
+pub static ICONS: GlobalSignal<HashMap<String, String>> = Signal::global(HashMap::new);
 pub static PRESETS: GlobalSignal<Vec<RoutingPreset>> = Signal::global(Vec::new);
 pub static CLOCK: GlobalSignal<ClockInfo> = Signal::global(ClockInfo::default);
 pub static DANTE: GlobalSignal<DanteStatus> = Signal::global(DanteStatus::default);
@@ -46,8 +51,9 @@ pub static VIEW: GlobalSignal<View> = Signal::global(|| View::Patchbay);
 
 // ─── View state ─────────────────────────────────────────────────────────
 
-/// Output port armed for connecting (click an input port to link).
-pub static SELECTED_OUTPUT: GlobalSignal<Option<u32>> = Signal::global(|| None);
+/// Output ports armed for connecting (click an input row to link).
+/// One entry for a plain port, two for a condensed stereo pair.
+pub static ARMED_OUTPUTS: GlobalSignal<Vec<u32>> = Signal::global(Vec::new);
 /// Node id whose inspector is open.
 pub static SELECTED_NODE: GlobalSignal<Option<u32>> = Signal::global(|| None);
 pub static SEARCH: GlobalSignal<String> = Signal::global(String::new);
@@ -126,6 +132,9 @@ pub async fn refresh_meta(handle: &PatchbayHandle) {
     if let Ok(aliases) = handle.0.aliases().await {
         *ALIASES.write() = aliases.into_iter().map(|a| (a.target, a.alias)).collect();
     }
+    if let Ok(colors) = handle.0.colors().await {
+        *COLORS.write() = colors.into_iter().map(|c| (c.target, c.color)).collect();
+    }
     if let Ok(presets) = handle.0.list_presets().await {
         *PRESETS.write() = presets;
     }
@@ -185,6 +194,91 @@ pub(crate) async fn sleep_secs(secs: u64) {
     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
     #[cfg(target_arch = "wasm32")]
     gloo_timers::future::TimeoutFuture::new((secs * 1000) as u32).await;
+}
+
+/// The user-pickable cable/port color palette.
+pub const PALETTE: [&str; 8] = [
+    "#e05c52", // red
+    "#ff9f43", // orange
+    "#ffd479", // yellow
+    "#58d68d", // green
+    "#39c2b9", // teal
+    "#4a90d9", // blue
+    "#b487ff", // purple
+    "#ff7ab8", // pink
+];
+
+/// Resolved color for a port: port color → node color → `default`
+/// (the media-kind color).
+pub fn port_color(node_name: &str, port_name: &str, default: &str) -> String {
+    let colors = COLORS.read();
+    colors
+        .get(&format!("{node_name}:{port_name}"))
+        .or_else(|| colors.get(node_name))
+        .cloned()
+        .unwrap_or_else(|| default.to_string())
+}
+
+/// Resolved color for a node card accent (node color → default).
+pub fn node_color(node_name: &str, default: &str) -> String {
+    COLORS
+        .read()
+        .get(node_name)
+        .cloned()
+        .unwrap_or_else(|| default.to_string())
+}
+
+/// Fetch any application icons the graph references that we haven't
+/// looked up yet. Misses are cached as empty strings server-side of
+/// this map so a node without an installed icon costs one request ever.
+pub fn request_missing_icons(handle: PatchbayHandle) {
+    let missing: Vec<String> = {
+        let icons = ICONS.peek();
+        let graph = GRAPH.peek();
+        let mut names: Vec<String> = graph
+            .nodes
+            .iter()
+            .filter(|n| !n.icon_name.is_empty() && !icons.contains_key(&n.icon_name))
+            .map(|n| n.icon_name.clone())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    };
+    if missing.is_empty() {
+        return;
+    }
+    {
+        // Mark pending immediately so a re-render can't double-request.
+        let mut icons = ICONS.write();
+        for name in &missing {
+            icons.insert(name.clone(), String::new());
+        }
+    }
+    spawn(async move {
+        match handle.0.icons(missing).await {
+            Ok(entries) => {
+                let mut icons = ICONS.write();
+                for e in entries {
+                    icons.insert(e.icon_name, e.data_uri);
+                }
+            }
+            Err(e) => tracing::warn!("icon fetch failed: {e:?}"),
+        }
+    });
+}
+
+/// Connect (or toggle) armed outputs into the clicked input ports,
+/// zipped pair-wise: a stereo pair onto a stereo pair links L→L, R→R;
+/// singles behave exactly like the old one-to-one toggle.
+pub fn connect_armed(handle: PatchbayHandle, inputs: &[u32]) {
+    let armed = ARMED_OUTPUTS.peek().clone();
+    if armed.is_empty() {
+        return;
+    }
+    for (out, inp) in armed.iter().zip(inputs.iter()) {
+        toggle_link(handle.clone(), *out, *inp);
+    }
 }
 
 /// Display name for a node (alias wins).

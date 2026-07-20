@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 use crate::canvas::GraphCanvas;
 use crate::dante_grid::DanteGrid;
 use crate::panels::{SidePanel, StatusBar, Toolbar};
-use crate::state::{VIEW, View};
+use crate::state::{ARMED_OUTPUTS, VIEW, View};
 
 static CSS: &str = include_str!("style.css");
 
@@ -19,7 +19,14 @@ pub fn PatchbayApp() -> Element {
     let view = *VIEW.read();
     rsx! {
         document::Style { {CSS} }
-        div { class: "patchbay-root",
+        div {
+            class: "patchbay-root",
+            tabindex: "0",
+            onkeydown: move |e: Event<KeyboardData>| {
+                if e.key() == Key::Escape {
+                    ARMED_OUTPUTS.write().clear();
+                }
+            },
             div { class: "topbar",
                 span { class: "app-title", "Patchbay" }
                 div { class: "view-tabs",

@@ -50,17 +50,21 @@ pub fn is_monitor(port_name: &str) -> bool {
     port_name.starts_with("monitor_") || port_name == "monitor"
 }
 
-/// One rendered row inside a card: a single port, or a collapsed group.
+/// One rendered row inside a card: a single port, a collapsed group,
+/// or a condensed stereo pair.
 pub struct PortRow {
     pub label: String,
     pub direction: PortDirection,
     pub kind: MediaKind,
-    /// All port ids this row anchors (1 for a plain port row).
+    /// All port ids this row anchors (1 for a plain port row,
+    /// `[left, right]` for a stereo pair).
     pub ports: Vec<u32>,
     /// Set when this row is a collapsible group (expansion key).
     pub group_key: Option<String>,
     /// A sink's monitor tap (rendered dimmed + tagged).
     pub monitor: bool,
+    /// Condensed L/R stereo pair — one row, two thin cables.
+    pub pair: bool,
     /// y offset of the row center, relative to the card top.
     pub y: f64,
 }
@@ -95,6 +99,91 @@ fn split_numeric(name: &str) -> Option<(&str, u64)> {
     num.parse().ok().map(|n| (prefix, n))
 }
 
+/// Is this display label the left or right half of a stereo pair?
+/// Returns `(base, is_right)`. Matches `_FL`/`_FR` style PipeWire
+/// channel suffixes and human `… L` / `… R` / `… Left` / `… Right`
+/// aliases — always separated from the base by `_`, space, `-`, `.`
+/// or `/` so `Vocal`/`GTR` never false-match.
+fn lr_split(label: &str) -> Option<(&str, bool)> {
+    for (suffix, right) in [
+        ("FL", false),
+        ("FR", true),
+        ("Left", false),
+        ("Right", true),
+        ("left", false),
+        ("right", true),
+        ("L", false),
+        ("R", true),
+    ] {
+        if let Some(base) = label.strip_suffix(suffix) {
+            if base.ends_with(['_', ' ', '-', '.', '/']) {
+                return Some((base, right));
+            }
+        }
+    }
+    None
+}
+
+/// Condense adjacent single-port L/R rows into one pair row (drawn as
+/// two thin cables) — `playback_FL`+`playback_FR`, or aliased channels
+/// like "Room Far L"+"Room Far R" on a 128-channel node. Pairing looks
+/// at the DISPLAY label (alias first), because naming a pair is exactly
+/// how you mark it as stereo.
+fn merge_lr_pairs(
+    rows: Vec<PortRow>,
+    node: &PwNode,
+    aliases: &HashMap<String, String>,
+) -> Vec<PortRow> {
+    let display = |raw: &str| -> String {
+        aliases
+            .get(&format!("{}:{}", node.name, raw))
+            .cloned()
+            .unwrap_or_else(|| raw.to_string())
+    };
+    let mut out: Vec<PortRow> = Vec::new();
+    for row in rows {
+        let mergeable = row.group_key.is_none() && !row.pair && row.ports.len() == 1;
+        if mergeable {
+            if let Some(prev) = out.last() {
+                if prev.group_key.is_none()
+                    && !prev.pair
+                    && prev.ports.len() == 1
+                    && prev.monitor == row.monitor
+                    && prev.kind == row.kind
+                {
+                    let (pl, rl) = (display(&prev.label), display(&row.label));
+                    let pair = match (lr_split(&pl), lr_split(&rl)) {
+                        (Some((b1, false)), Some((b2, true))) if b1 == b2 => Some(b1.to_string()),
+                        _ => None,
+                    };
+                    if let Some(b1) = pair {
+                        let base = b1.trim_end_matches(['_', ' ', '-', '.', '/']);
+                        let label = if base.is_empty() {
+                            "L/R".to_string()
+                        } else {
+                            format!("{base} L/R")
+                        };
+                        let prev = out.pop().expect("just peeked");
+                        out.push(PortRow {
+                            label,
+                            direction: row.direction,
+                            kind: row.kind,
+                            ports: vec![prev.ports[0], row.ports[0]],
+                            group_key: None,
+                            monitor: row.monitor,
+                            pair: true,
+                            y: 0.0,
+                        });
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(row);
+    }
+    out
+}
+
 /// Group one direction's ports into rows. `expanded` keys are
 /// `"node.name/in|out/prefix<first>"`.
 ///
@@ -126,6 +215,7 @@ fn build_rows(
             ports: vec![p.id],
             group_key: None,
             monitor: is_monitor(&p.name),
+            pair: false,
             y: 0.0,
         });
     };
@@ -147,6 +237,7 @@ fn build_rows(
                 ports: Vec::new(),
                 group_key: Some(key),
                 monitor,
+                pair: false,
                 y: 0.0,
             });
             for p in run {
@@ -160,6 +251,7 @@ fn build_rows(
                 ports: run.iter().map(|p| p.id).collect(),
                 group_key: Some(key),
                 monitor,
+                pair: false,
                 y: 0.0,
             });
         }
@@ -220,7 +312,7 @@ fn build_rows(
         }
         segment(&mut rows, &run[seg_start..]);
     }
-    rows
+    merge_lr_pairs(rows, node, aliases)
 }
 
 /// Does a port belong on the given media tab? `Other` (control/dsp
@@ -375,8 +467,15 @@ pub fn compute_layout(
                 PortDirection::Input => (card.x, card.y + row.y),
                 PortDirection::Output => (card.x + CARD_W, card.y + row.y),
             };
-            for pid in &row.ports {
-                anchors.insert(*pid, (x, y));
+            if row.pair && row.ports.len() == 2 {
+                // Two thin cables want two distinct anchors — L just
+                // above the row center, R just below.
+                anchors.insert(row.ports[0], (x, y - 3.0));
+                anchors.insert(row.ports[1], (x, y + 3.0));
+            } else {
+                for pid in &row.ports {
+                    anchors.insert(*pid, (x, y));
+                }
             }
         }
     }
@@ -407,6 +506,7 @@ mod reaper_layout {
             media_kind: MediaKind::Other,
             app_name: String::new(),
             latency: String::new(),
+            icon_name: String::new(),
         };
         let mut ports = Vec::new();
         let mut pid = 100;
@@ -471,6 +571,114 @@ mod reaper_layout {
             256,
             "all REAPER audio ports must be cable-anchored"
         );
+    }
+}
+
+#[cfg(test)]
+mod stereo_pairs {
+    use super::*;
+
+    fn node() -> PwNode {
+        PwNode {
+            id: 1,
+            name: "dev".into(),
+            label: "dev".into(),
+            media_class: "Audio/Sink".into(),
+            media_kind: MediaKind::Audio,
+            app_name: String::new(),
+            latency: String::new(),
+            icon_name: String::new(),
+        }
+    }
+
+    fn port(id: u32, name: &str) -> PwPort {
+        PwPort {
+            id,
+            node_id: 1,
+            name: name.into(),
+            direction: PortDirection::Input,
+            media_kind: MediaKind::Audio,
+        }
+    }
+
+    #[test]
+    fn fl_fr_condense_into_one_pair_row_with_split_anchors() {
+        let graph = GraphSnapshot {
+            nodes: vec![node()],
+            ports: vec![port(10, "playback_FL"), port(11, "playback_FR")],
+            links: Vec::new(),
+        };
+        let aliases = HashMap::new();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        let card = &lay.cards[0];
+        assert_eq!(card.rows.len(), 1, "FL+FR must condense to one row");
+        assert!(card.rows[0].pair);
+        assert_eq!(card.rows[0].ports, vec![10, 11]);
+        assert_eq!(card.rows[0].label, "playback L/R");
+        // Distinct anchors so the pair draws as two thin cables.
+        let a = lay.anchors[&10];
+        let b = lay.anchors[&11];
+        assert!(a.1 < b.1, "L anchors above R");
+    }
+
+    #[test]
+    fn aliased_lr_channels_pair_up_inside_a_numbered_bank() {
+        // Channels 5+6 of a big bank aliased "Room Far L"/"Room Far R":
+        // they split out of the group AND condense into a stereo row.
+        let ports: Vec<PwPort> =
+            (1..=12).map(|n| port(n, &format!("capture_{n}"))).collect();
+        let graph = GraphSnapshot {
+            nodes: vec![node()],
+            ports,
+            links: Vec::new(),
+        };
+        let aliases: HashMap<String, String> = [
+            ("dev:capture_5".to_string(), "Room Far L".to_string()),
+            ("dev:capture_6".to_string(), "Room Far R".to_string()),
+        ]
+        .into();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        let rows = &lay.cards[0].rows;
+        let pair = rows
+            .iter()
+            .find(|r| r.pair)
+            .expect("aliased L/R channels must condense");
+        assert_eq!(pair.label, "Room Far L/R");
+        assert_eq!(pair.ports, vec![5, 6]);
+    }
+
+    #[test]
+    fn unrelated_neighbors_never_pair() {
+        let graph = GraphSnapshot {
+            nodes: vec![node()],
+            ports: vec![port(1, "Vocal"), port(2, "GTR"), port(3, "aux_L")],
+            links: Vec::new(),
+        };
+        let aliases = HashMap::new();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        assert!(lay.cards[0].rows.iter().all(|r| !r.pair));
+        assert_eq!(lay.cards[0].rows.len(), 3);
     }
 }
 

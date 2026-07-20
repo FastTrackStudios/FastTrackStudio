@@ -305,6 +305,11 @@ mod linux {
             media_class,
             app_name: props.get("application.name").unwrap_or_default().to_string(),
             latency: props.get("node.latency").unwrap_or_default().to_string(),
+            icon_name: props
+                .get("application.icon-name")
+                .or_else(|| props.get("application.icon_name"))
+                .unwrap_or_default()
+                .to_string(),
         };
         store.write().nodes.insert(global.id, node.clone());
         let _ = events.send(GraphEvent::NodeAdded(node));

@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use vox::Tx;
 
 use crate::types::{
-    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, DanteDevice, DanteStatus, GraphEvent,
-    GraphSnapshot, LatencyRule, RoutingPreset, ServiceAction, ServiceStatus,
+    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
+    GraphEvent, GraphSnapshot, IconEntry, LatencyRule, RoutingPreset, ServiceAction, ServiceStatus,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -158,6 +158,21 @@ pub mod patchbay_service {
             device: String,
             direction: String,
         ) -> Result<u32, PatchbayError>;
+
+        // ── Colors (cable/port identity) ─────────────────────────────
+
+        async fn colors(&self) -> Result<Vec<ColorEntry>, PatchbayError>;
+
+        /// Set a color for `"node.name"` or `"node.name:port.name"`.
+        /// An empty color clears the entry.
+        async fn set_color(&self, target: String, color: String) -> Result<(), PatchbayError>;
+
+        // ── Icons ────────────────────────────────────────────────────
+
+        /// Resolve the given freedesktop icon names against this host's
+        /// icon themes and return each hit as a `data:` URI. Unknown
+        /// names are simply absent from the result.
+        async fn icons(&self, names: Vec<String>) -> Result<Vec<IconEntry>, PatchbayError>;
 
         // ── Clock ────────────────────────────────────────────────────
 

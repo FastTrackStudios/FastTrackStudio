@@ -42,6 +42,8 @@ pub struct PwNode {
     /// The node's latency request (`node.latency`, e.g. `"64/48000"`),
     /// empty when unset.
     pub latency: String,
+    /// `application.icon-name` (freedesktop icon id), empty when unset.
+    pub icon_name: String,
 }
 
 /// A port on a node.
@@ -144,6 +146,27 @@ pub struct ApplyReport {
 pub struct AliasEntry {
     pub target: String,
     pub alias: String,
+}
+
+// ─── Colors (cable/port identity) ───────────────────────────────────────
+
+/// User-set color for a node (`target = node.name`) or a port
+/// (`target = "node.name:port.name"`). CSS color string (`#rrggbb`).
+/// Cables inherit: output-port color → output-node color → media-kind
+/// default. Pure presentation, persisted alongside aliases.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct ColorEntry {
+    pub target: String,
+    pub color: String,
+}
+
+/// A resolved application icon: the freedesktop icon name plus its
+/// image as a `data:` URI (so remotes render it without filesystem
+/// access to this host's icon themes).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct IconEntry {
+    pub icon_name: String,
+    pub data_uri: String,
 }
 
 // ─── Clock / latency ────────────────────────────────────────────────────

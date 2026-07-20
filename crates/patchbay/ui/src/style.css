@@ -88,6 +88,27 @@
   flex: 0 0 auto; box-shadow: 0 0 4px rgba(0,0,0,0.5);
 }
 
+.node-header { flex-direction: row; align-items: center; gap: 8px; }
+.node-icon { width: 20px; height: 20px; flex: 0 0 auto; border-radius: 4px; }
+.node-titles {
+  display: flex; flex-direction: column; justify-content: center;
+  min-width: 0;
+}
+
+.port-row.armed { animation: armed-pulse 1.2s ease-in-out infinite; }
+@keyframes armed-pulse {
+  0%, 100% { background: #2b4a6f; }
+  50%      { background: #38618f; }
+}
+.port-row.pair .port-name { font-weight: 600; }
+.pair-dot {
+  border-radius: 3px;
+  background-image: linear-gradient(transparent 45%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.55) 55%, transparent 55%);
+}
+
+.cable { cursor: pointer; transition: opacity 0.1s; }
+.cable:hover { opacity: 1 !important; stroke-width: 3.5; }
+
 /* ── side panel ──────────────────────────────────────────────────── */
 .side-panel {
   width: 280px; flex: 0 0 auto; overflow-y: auto;
@@ -151,6 +172,31 @@
 }
 .chanmap-sync { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .chanmap-buttons { display: flex; gap: 6px; }
+
+.color-swatches {
+  display: flex; align-items: center; gap: 4px; margin-top: 6px;
+  flex-wrap: wrap;
+}
+.color-swatches .label { color: #7a8494; font-size: 11px; }
+.swatch {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 1px solid #2b323d; cursor: pointer; padding: 0;
+  flex: 0 0 auto;
+}
+.swatch:hover { border-color: #d7dde5; }
+.swatch.on { border: 2px solid #ffffff; }
+.swatch.none {
+  background: transparent; color: #7a8494;
+  font-size: 10px; line-height: 1;
+}
+.swatch.cycle { width: 13px; height: 13px; }
+
+.bulk-names { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.bulk-names .label { color: #7a8494; font-size: 11px; }
+.names-paste {
+  resize: vertical; font-family: inherit; min-height: 60px;
+  white-space: pre;
+}
 
 .latency-editor {
   margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px;

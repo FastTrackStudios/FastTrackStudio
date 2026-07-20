@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use parking_lot::Mutex;
-use patchbay_proto::{AliasEntry, PresetLink, RoutingPreset};
+use patchbay_proto::{AliasEntry, ColorEntry, PresetLink, RoutingPreset};
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct FileFormat {
@@ -18,6 +18,26 @@ struct FileFormat {
     aliases: Vec<AliasEntry>,
     #[serde(default)]
     latency_rules: Vec<patchbay_proto::LatencyRule>,
+    #[serde(default)]
+    colors: Vec<ColorEntry>,
+}
+
+/// First-run channel names for a stock REAPER JACK client: the main
+/// stereo pair + click, the studio's baseline output map. Pure aliases
+/// (identity is names), so they apply whenever REAPER shows up and the
+/// user extends/overwrites them like any other alias.
+fn seed_defaults() -> Vec<AliasEntry> {
+    [
+        ("REAPER:out1", "Main Output ST L"),
+        ("REAPER:out2", "Main Output ST R"),
+        ("REAPER:out3", "Click"),
+    ]
+    .into_iter()
+    .map(|(target, alias)| AliasEntry {
+        target: target.into(),
+        alias: alias.into(),
+    })
+    .collect()
 }
 
 pub(crate) struct PresetStore {
@@ -39,10 +59,18 @@ fn config_path() -> PathBuf {
 impl PresetStore {
     pub fn open() -> Self {
         let path = config_path();
-        let data = fs::read_to_string(&path)
+        let data = match fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+        {
+            Some(data) => data,
+            // Fresh install: start from the REAPER baseline so the
+            // main outs/click are named the first time it appears.
+            None => FileFormat {
+                aliases: seed_defaults(),
+                ..FileFormat::default()
+            },
+        };
         Self {
             path,
             data: Mutex::new(data),
@@ -122,6 +150,20 @@ impl PresetStore {
         }
         self.persist(&data);
         Some(data.latency_rules.clone())
+    }
+
+    pub fn colors(&self) -> Vec<ColorEntry> {
+        self.data.lock().colors.clone()
+    }
+
+    /// Empty color clears the entry.
+    pub fn set_color(&self, target: String, color: String) {
+        let mut data = self.data.lock();
+        data.colors.retain(|c| c.target != target);
+        if !color.is_empty() {
+            data.colors.push(ColorEntry { target, color });
+        }
+        self.persist(&data);
     }
 
     /// Empty alias clears the entry.

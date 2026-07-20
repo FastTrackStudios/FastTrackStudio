@@ -14,6 +14,7 @@ pub mod clock;
 pub mod dante;
 mod dante_net;
 mod engine;
+mod icons;
 mod latency;
 mod presets;
 mod service;

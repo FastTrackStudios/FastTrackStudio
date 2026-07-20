@@ -503,18 +503,20 @@ fn Inspector() -> Element {
     });
 
     let aliases = ALIASES.read();
+    let colors = state::COLORS.read();
     let node_alias = aliases.get(&node.name).cloned().unwrap_or_default();
-    let port_aliases: Vec<(String, String)> = ports
+    let node_color = colors.get(&node.name).cloned().unwrap_or_default();
+    let port_aliases: Vec<(String, String, String)> = ports
         .iter()
         .map(|p| {
-            let alias = aliases
-                .get(&format!("{}:{}", node.name, p.name))
-                .cloned()
-                .unwrap_or_default();
-            (p.name.clone(), alias)
+            let key = format!("{}:{}", node.name, p.name);
+            let alias = aliases.get(&key).cloned().unwrap_or_default();
+            let color = colors.get(&key).cloned().unwrap_or_default();
+            (p.name.clone(), alias, color)
         })
         .collect();
     drop(aliases);
+    drop(colors);
 
     rsx! {
         div { class: "panel-section",
@@ -530,14 +532,24 @@ fn Inspector() -> Element {
                 placeholder: "node display name…".to_string(),
                 current: node_alias,
             }
+            ColorSwatches {
+                key: "col-{node.name}",
+                target: node.name.clone(),
+                current: node_color,
+            }
             LatencyRuleEditor { key: "lat-{node.name}", node_name: node.name.clone() }
             BulkRouting { key: "bulk-{node.name}", node_name: node.name.clone() }
             ChanmapSync { node_name: node.name.clone() }
+            BulkNames { key: "names-{node.name}", node_name: node.name.clone() }
             h3 { style: "margin-top:12px;", "Channels" }
             div { class: "channel-list",
-                for (port_name, alias) in port_aliases {
+                for (port_name, alias, color) in port_aliases {
                     div { class: "channel-row", key: "{node.name}:{port_name}",
                         span { class: "channel-port", title: "{port_name}", "{port_name}" }
+                        ColorCycle {
+                            target: format!("{}:{}", node.name, port_name),
+                            current: color,
+                        }
                         AliasEditor {
                             target: format!("{}:{}", node.name, port_name),
                             placeholder: String::new(),
@@ -545,6 +557,175 @@ fn Inspector() -> Element {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Send a color change and refresh the color map.
+fn set_color(handle: state::PatchbayHandle, target: String, color: String) {
+    spawn(async move {
+        if let Err(e) = handle.0.set_color(target, color).await {
+            tracing::warn!("set_color failed: {e:?}");
+        }
+        state::refresh_meta(&handle).await;
+    });
+}
+
+/// Full palette row for a node: cables from this node inherit the
+/// color unless a port overrides it.
+#[component]
+fn ColorSwatches(target: String, current: String) -> Element {
+    let handle = state::use_patchbay();
+    rsx! {
+        div { class: "color-swatches",
+            span { class: "label", "color " }
+            for c in state::PALETTE {
+                {
+                    let handle = handle.clone();
+                    let target = target.clone();
+                    let on = current == c;
+                    rsx! {
+                        button {
+                            key: "{c}",
+                            class: if on { "swatch on" } else { "swatch" },
+                            style: "background:{c};",
+                            onclick: move |_| set_color(
+                                handle.clone(),
+                                target.clone(),
+                                if on { String::new() } else { c.to_string() },
+                            ),
+                        }
+                    }
+                }
+            }
+            button {
+                class: if current.is_empty() { "swatch none on" } else { "swatch none" },
+                title: "no color (media-kind default)",
+                onclick: {
+                    let handle = handle.clone();
+                    let target = target.clone();
+                    move |_| set_color(handle.clone(), target.clone(), String::new())
+                },
+                "×"
+            }
+        }
+    }
+}
+
+/// Tiny per-channel color dot: click cycles the palette, last step
+/// clears back to inherited.
+#[component]
+fn ColorCycle(target: String, current: String) -> Element {
+    let handle = state::use_patchbay();
+    let style = if current.is_empty() {
+        "background:transparent;".to_string()
+    } else {
+        format!("background:{current};")
+    };
+    rsx! {
+        button {
+            class: "swatch cycle",
+            style: "{style}",
+            title: "channel color (click to cycle)",
+            onclick: move |_| {
+                let next = match state::PALETTE.iter().position(|c| *c == current) {
+                    None => state::PALETTE[0].to_string(),
+                    Some(i) if i + 1 < state::PALETTE.len() => state::PALETTE[i + 1].to_string(),
+                    Some(_) => String::new(),
+                };
+                set_color(handle.clone(), target.clone(), next);
+            },
+        }
+    }
+}
+
+/// Paste one name per line → alias this node's channels sequentially
+/// (by numeric channel, on the chosen direction). 128 names in one
+/// paste instead of 128 inputs.
+#[component]
+fn BulkNames(node_name: String) -> Element {
+    let handle = state::use_patchbay();
+    let mut text = use_signal(String::new);
+    let mut result = use_signal(String::new);
+
+    let apply = |direction: patchbay_proto::PortDirection| {
+        let handle = handle.clone();
+        let node_name = node_name.clone();
+        move |_| {
+            let names: Vec<String> = text
+                .peek()
+                .lines()
+                .map(|l| l.trim().to_string())
+                .collect();
+            if names.iter().all(|l| l.is_empty()) {
+                result.set("paste channel names first (one per line)".into());
+                return;
+            }
+            // Ports of the chosen direction, in numeric-channel order.
+            let graph = GRAPH.peek();
+            let Some(node) = graph.nodes.iter().find(|n| n.name == node_name) else {
+                return;
+            };
+            let mut ports: Vec<(u64, String)> = graph
+                .ports
+                .iter()
+                .filter(|p| p.node_id == node.id && p.direction == direction)
+                .filter(|p| !crate::layout::is_monitor(&p.name))
+                .filter_map(|p| {
+                    let digits =
+                        p.name.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+                    if digits == 0 || digits == p.name.len() {
+                        return None;
+                    }
+                    let n: u64 = p.name[p.name.len() - digits..].parse().ok()?;
+                    Some((n, p.name.clone()))
+                })
+                .collect();
+            drop(graph);
+            ports.sort();
+            let pairs: Vec<(String, String)> = ports
+                .into_iter()
+                .zip(names.iter().cloned())
+                .filter(|(_, name)| !name.is_empty()) // blank line = skip channel
+                .map(|((_, port), name)| (format!("{node_name}:{port}"), name))
+                .collect();
+            if pairs.is_empty() {
+                result.set("no numeric channels to name on that side".into());
+                return;
+            }
+            let handle = handle.clone();
+            spawn(async move {
+                let n = pairs.len();
+                for (target, alias) in pairs {
+                    if let Err(e) = handle.0.set_alias(target, alias).await {
+                        tracing::warn!("bulk set_alias failed: {e:?}");
+                    }
+                }
+                state::refresh_meta(&handle).await;
+                result.set(format!("named {n} channels"));
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "bulk-names",
+            span { class: "label", "bulk name channels (one per line, blank = skip)" }
+            textarea {
+                class: "alias-input names-paste",
+                rows: "4",
+                placeholder: "Main Output ST L\nMain Output ST R\nClick\n…",
+                value: "{text}",
+                oninput: move |e| text.set(e.value()),
+            }
+            div { class: "chanmap-buttons",
+                button { class: "chip", onclick: apply(patchbay_proto::PortDirection::Input),
+                    "→ inputs" }
+                button { class: "chip", onclick: apply(patchbay_proto::PortDirection::Output),
+                    "→ outputs" }
+            }
+            if !result.read().is_empty() {
+                div { class: "apply-report", "{result}" }
             }
         }
     }
