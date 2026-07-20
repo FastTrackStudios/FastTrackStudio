@@ -335,9 +335,9 @@ dock-proto = { path = "libs/dock/dock-proto" }
 # PR #61 baseview-0.2 + the FTS delta: nice-plug-dioxus, embedded editors,
 # rich track-info, param rescan). The ONE sanctioned exception to
 # path-deps-only — it left the tree so it can track upstream.
-nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "781647316f7b5797d02c52332a4a11deac44f4ad" }
-nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "781647316f7b5797d02c52332a4a11deac44f4ad" }
-nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "781647316f7b5797d02c52332a4a11deac44f4ad" }
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "76f8dce3d52eac4f45f3f4313207c645aad174b4" }
+nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "76f8dce3d52eac4f45f3f4313207c645aad174b4" }
+nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "76f8dce3d52eac4f45f3f4313207c645aad174b4" }
 utils = { path = "libs/utils" }
 vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }

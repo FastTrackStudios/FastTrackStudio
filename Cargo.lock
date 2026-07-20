@@ -2112,7 +2112,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=76f8dce3d52eac4f45f3f4313207c645aad174b4#76f8dce3d52eac4f45f3f4313207c645aad174b4"
 dependencies = [
  "cocoa 0.24.1",
  "core-foundation 0.9.4",
@@ -17020,16 +17020,16 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nice-log"
 version = "0.3.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=76f8dce3d52eac4f45f3f4313207c645aad174b4#76f8dce3d52eac4f45f3f4313207c645aad174b4"
 dependencies = [
  "tracing-appender",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
 name = "nice-plug"
 version = "0.2.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=76f8dce3d52eac4f45f3f4313207c645aad174b4#76f8dce3d52eac4f45f3f4313207c645aad174b4"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -17052,13 +17052,13 @@ dependencies = [
  "tracing-subscriber",
  "vst3",
  "widestring",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
 name = "nice-plug-core"
 version = "0.2.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=76f8dce3d52eac4f45f3f4313207c645aad174b4#76f8dce3d52eac4f45f3f4313207c645aad174b4"
 dependencies = [
  "atomic_float",
  "atomic_refcell",
@@ -17077,7 +17077,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-derive"
 version = "0.1.2"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=76f8dce3d52eac4f45f3f4313207c645aad174b4#76f8dce3d52eac4f45f3f4313207c645aad174b4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -17087,7 +17087,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-dioxus"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=76f8dce3d52eac4f45f3f4313207c645aad174b4#76f8dce3d52eac4f45f3f4313207c645aad174b4"
 dependencies = [
  "anyrender",
  "anyrender_vello 0.11.0",
@@ -17117,7 +17117,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-xtask"
 version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=781647316f7b5797d02c52332a4a11deac44f4ad#781647316f7b5797d02c52332a4a11deac44f4ad"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=76f8dce3d52eac4f45f3f4313207c645aad174b4#76f8dce3d52eac4f45f3f4313207c645aad174b4"
 dependencies = [
  "anyhow",
  "cargo_metadata",
