@@ -451,7 +451,15 @@ mod imp {
                     let d = s.duration().max(0.001);
                     (Some(i), ((pos - s.start_seconds) / d).clamp(0.0, 1.0))
                 })
-                .unwrap_or((None, 0.0));
+                // Before the first section's start, clamp to section 0
+                // (same fix as the single-song player).
+                .unwrap_or_else(|| {
+                    if song.sections.first().is_some_and(|s| pos < s.start_seconds) {
+                        (Some(0), 0.0)
+                    } else {
+                        (None, 0.0)
+                    }
+                });
             (
                 dur,
                 song.count_in_seconds.unwrap_or(0.0),
