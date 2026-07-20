@@ -240,6 +240,18 @@ architect-auth = { workspace = true, features = ["client"] }
 # Native org discovery (desktop/mobile/iOS) — `window.fetch` is wasm-only,
 # so `orgs::fetch_orgs` uses reqwest (rustls) for the `.well-known` GET.
 reqwest.workspace = true
+# Direct Sentry capture at the org-discovery failure (native only).
+sentry.workspace = true
+# vox-websocket pulls tokio-tungstenite WITHOUT any TLS backend, so native
+# `wss://` dials fail with "TLS support not compiled in" (the first time the
+# native app connects to a TLS server, not a local `ws://`). Enable rustls on
+# the *shared* tokio-tungstenite via feature unification so `connect_async`
+# handles `wss://`. Mirrors `apps/task/cli`.
+tokio-tungstenite = { version = "0.29", default-features = false, features = [
+    "connect",
+    "handshake",
+    "rustls-tls-webpki-roots",
+] }
 
 [features]
 default = []

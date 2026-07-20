@@ -122,6 +122,16 @@ impl ServerRegistry {
     pub fn set_active(&mut self, id: Option<Uuid>) {
         self.active.set(id);
         save_active(id);
+        // Push straight to the vox holder here rather than relying on the app
+        // root re-rendering to sync it: on mobile that reactive propagation
+        // didn't fire when a server was added/selected at runtime, so the
+        // holder stayed empty and every call errored "no server URL
+        // configured" — even though the UI showed the server as active.
+        // Verified on desktop the load-from-disk path already works; this makes
+        // the runtime add/select path work the same everywhere.
+        crate::vox_session::set_active_server(id.and_then(|i| self.get(i)).map(|e| {
+            crate::vox_session::ActiveServer { url: e.server_url, token: e.session_token }
+        }));
     }
 
     #[must_use]

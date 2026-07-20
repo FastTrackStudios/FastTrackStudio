@@ -719,6 +719,9 @@ anyhow = "1.0"
 tracing = { version = "0.1", features = ["std"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+# Sentry error/crash telemetry — rustls (not native-tls) for iOS.
+sentry = { version = "0.44", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
+sentry-tracing = "0.44"
 moire = { version = "1.0" }
 
 # ── Proc-macro plumbing ───────────────────────────────────────────────
@@ -789,6 +792,7 @@ libc = "0.2"
 # wasm-clean surface keep `default-features = false` (the consumer opts
 # into `vox`/`server`/`native`), mirroring Task's original table.
 # crates/task/
+task-telemetry = { path = "crates/task/telemetry" }
 ui = { path = "crates/task/ui" }
 vim = { path = "crates/task/vim" }
 store-proto = { path = "crates/task/store-proto", default-features = false }
