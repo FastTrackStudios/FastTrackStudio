@@ -43,8 +43,8 @@ mod imp {
         MixerView, SectionProgressBar, SongProgressBar, SongTitle, TransportControlBar,
     };
     use session_ui::{
-        ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState,
-        apply_active_indices,
+        ACTIVE_INDICES, PerformanceSidebar, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
+        TransportState, apply_active_indices,
     };
 
     use crate::pages::session_chart_pane::SessionChartPane;
@@ -634,34 +634,14 @@ mod imp {
 
         rsx! {
             div { class: "flex flex-col gap-4 md:flex-row",
-                // ── Setlist navigator ────────────────────────────────────────
-                aside { class: "w-full shrink-0 md:w-64",
-                    div { class: "rounded-lg border border-border bg-card overflow-hidden",
-                        div { class: "px-3 py-2 border-b border-border",
-                            span { class: "text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground",
-                                "Setlist · {count} songs"
-                            }
-                        }
-                        div { class: "flex flex-col max-h-[60vh] overflow-y-auto",
-                            for (i, song) in songs_meta.iter().enumerate() {
-                                button {
-                                    key: "{song.slug}",
-                                    class: if i == idx {
-                                        "flex items-center gap-2 px-3 py-2 text-left text-sm bg-accent text-accent-foreground"
-                                    } else {
-                                        "flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent/50 transition-colors"
-                                    },
-                                    onclick: {
-                                        let goto_song = goto_song;
-                                        move |_| goto_song.call(i)
-                                    },
-                                    span { class: "w-5 shrink-0 text-xs tabular-nums text-muted-foreground", "{i + 1}" }
-                                    span { class: "min-w-0 flex-1 truncate font-medium", "{song.title}" }
-                                    if i == idx && is_playing {
-                                        span { class: "size-2 shrink-0 rounded-full bg-primary" }
-                                    }
-                                }
-                            }
+                // ── Setlist navigator (the session Navigator, client-driven) ──
+                aside { class: "w-full shrink-0 md:w-72",
+                    div { class: "rounded-lg border border-border overflow-hidden h-[70vh]",
+                        PerformanceSidebar {
+                            on_song_select: goto_song,
+                            on_section_select: Callback::new(move |(_song, sec): (usize, usize)| {
+                                on_section_click.call(sec)
+                            }),
                         }
                     }
                 }
