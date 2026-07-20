@@ -44,6 +44,9 @@ pub struct PwNode {
     pub latency: String,
     /// `application.icon-name` (freedesktop icon id), empty when unset.
     pub icon_name: String,
+    /// This node is a patchbay-created virtual sink (`patchbay.virtual`
+    /// prop) — the only nodes the UI may destroy.
+    pub virtual_sink: bool,
 }
 
 /// A port on a node.
@@ -167,6 +170,36 @@ pub struct ColorEntry {
 pub struct IconEntry {
     pub icon_name: String,
     pub data_uri: String,
+}
+
+// ─── Virtual sinks (named buses) ────────────────────────────────────────
+
+/// A patchbay-owned null-audio sink (a named bus): persisted in config
+/// and re-created whenever the engine (re)connects, so buses survive
+/// PipeWire restarts even though `object.linger` alone doesn't.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+pub struct VirtualSink {
+    /// Display name; the node name is derived (`patchbay.<slug>`).
+    pub name: String,
+    /// Channel count: 1 = mono, 2 = stereo (FL/FR), n = AUX0..n-1.
+    pub channels: u32,
+}
+
+/// Node name for a virtual sink ("Stems Bus" → `patchbay.stems_bus`) —
+/// shared by the engine (creation) and UIs (live-state matching).
+pub fn sink_node_name(display: &str) -> String {
+    let slug: String = display
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("patchbay.{slug}")
 }
 
 // ─── Clock / latency ────────────────────────────────────────────────────

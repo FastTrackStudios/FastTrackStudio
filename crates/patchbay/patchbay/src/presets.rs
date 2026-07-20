@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use parking_lot::Mutex;
-use patchbay_proto::{AliasEntry, ColorEntry, PresetLink, RoutingPreset};
+use patchbay_proto::{AliasEntry, ColorEntry, PresetLink, RoutingPreset, VirtualSink};
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct FileFormat {
@@ -20,6 +20,8 @@ struct FileFormat {
     latency_rules: Vec<patchbay_proto::LatencyRule>,
     #[serde(default)]
     colors: Vec<ColorEntry>,
+    #[serde(default)]
+    virtual_sinks: Vec<VirtualSink>,
 }
 
 /// First-run channel names for a stock REAPER JACK client: the main
@@ -150,6 +152,35 @@ impl PresetStore {
         }
         self.persist(&data);
         Some(data.latency_rules.clone())
+    }
+
+    pub fn virtual_sinks(&self) -> Vec<VirtualSink> {
+        self.data.lock().virtual_sinks.clone()
+    }
+
+    pub fn add_virtual_sink(&self, sink: VirtualSink) {
+        let mut data = self.data.lock();
+        data.virtual_sinks.retain(|s| s.name != sink.name);
+        data.virtual_sinks.push(sink);
+        data.virtual_sinks.sort_by(|a, b| a.name.cmp(&b.name));
+        self.persist(&data);
+    }
+
+    pub fn remove_virtual_sink(&self, name: &str) -> bool {
+        let mut data = self.data.lock();
+        let before = data.virtual_sinks.len();
+        data.virtual_sinks.retain(|s| s.name != name);
+        let removed = data.virtual_sinks.len() != before;
+        if removed {
+            self.persist(&data);
+        }
+        removed
+    }
+
+    /// Does this alias target already have a value? (Used by the
+    /// non-destructive auto chanmap import.)
+    pub fn has_alias(&self, target: &str) -> bool {
+        self.data.lock().aliases.iter().any(|a| a.target == target)
     }
 
     pub fn colors(&self) -> Vec<ColorEntry> {

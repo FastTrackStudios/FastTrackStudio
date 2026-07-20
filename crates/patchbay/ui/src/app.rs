@@ -17,6 +17,7 @@ static CSS: &str = include_str!("style.css");
 #[component]
 pub fn PatchbayApp() -> Element {
     let view = *VIEW.read();
+    let handle = crate::state::use_patchbay();
     rsx! {
         document::Style { {CSS} }
         div {
@@ -25,6 +26,13 @@ pub fn PatchbayApp() -> Element {
             onkeydown: move |e: Event<KeyboardData>| {
                 if e.key() == Key::Escape {
                     ARMED_OUTPUTS.write().clear();
+                    *crate::state::DRAG.write() = None;
+                }
+                // Ctrl+Z: undo the last link gesture.
+                if e.modifiers().ctrl()
+                    && matches!(e.key(), Key::Character(ref c) if c == "z" || c == "Z")
+                {
+                    crate::state::undo_last(handle.clone());
                 }
             },
             div { class: "topbar",

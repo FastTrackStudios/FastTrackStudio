@@ -31,6 +31,18 @@ pub(crate) enum Command {
     DestroyLink {
         id: u32,
     },
+    /// Create a `support.null-audio-sink` adapter node (a named bus),
+    /// tagged `patchbay.virtual` so it's identifiable + destroyable.
+    CreateVirtualSink {
+        node_name: String,
+        description: String,
+        channels: u32,
+    },
+    /// Destroy a node global — the service only sends this for nodes
+    /// carrying the `patchbay.virtual` tag.
+    DestroyNode {
+        id: u32,
+    },
     #[allow(dead_code)]
     Terminate,
 }
@@ -42,6 +54,7 @@ pub(crate) enum Command {
 #[cfg(target_os = "linux")]
 type CmdSlot = Arc<parking_lot::Mutex<Option<pipewire::channel::Sender<Command>>>>;
 
+#[derive(Clone)]
 pub(crate) struct EngineHandle {
     #[cfg(target_os = "linux")]
     cmd_slot: CmdSlot,
@@ -210,10 +223,41 @@ mod linux {
                         );
                     }
                 }
-                Command::DestroyLink { id } => {
+                Command::DestroyLink { id } | Command::DestroyNode { id } => {
                     registry.destroy_global(id).into_result().map(|_| ()).unwrap_or_else(|e| {
                         tracing::warn!(id, "destroy_global failed: {e}");
                     });
+                }
+                Command::CreateVirtualSink {
+                    node_name,
+                    description,
+                    channels,
+                } => {
+                    let position = match channels {
+                        1 => "[ MONO ]".to_string(),
+                        2 => "[ FL FR ]".to_string(),
+                        n => {
+                            let auxes: Vec<String> =
+                                (0..n).map(|i| format!("AUX{i}")).collect();
+                            format!("[ {} ]", auxes.join(" "))
+                        }
+                    };
+                    let res = core.create_object::<pipewire::node::Node>(
+                        "adapter",
+                        &properties! {
+                            "factory.name" => "support.null-audio-sink",
+                            "node.name" => node_name.as_str(),
+                            "node.description" => description.as_str(),
+                            "media.class" => "Audio/Sink",
+                            "audio.position" => position.as_str(),
+                            "monitor.channel-volumes" => "true",
+                            "object.linger" => "1",
+                            "patchbay.virtual" => "1",
+                        },
+                    );
+                    if let Err(e) = res {
+                        tracing::warn!(node_name, "virtual sink create failed: {e}");
+                    }
                 }
                 Command::Terminate => mainloop_quit.quit(),
             })
@@ -271,6 +315,10 @@ mod linux {
         Ok(())
     }
 
+    fn node_name_is_virtual(name: &str) -> bool {
+        name.starts_with("patchbay.")
+    }
+
     fn media_kind(media_class: &str) -> MediaKind {
         if media_class.contains("Audio") {
             MediaKind::Audio
@@ -297,6 +345,11 @@ mod linux {
             .unwrap_or_default()
             .to_string();
         let media_class = props.get("media.class").unwrap_or_default().to_string();
+        // The registry's global props are a SUBSET of the node's props —
+        // custom keys like patchbay.virtual don't reach them (verified
+        // live), so ownership rides on the node-name prefix we control.
+        let virtual_sink =
+            props.get("patchbay.virtual") == Some("1") || node_name_is_virtual(&name);
         let node = PwNode {
             id: global.id,
             name,
@@ -310,6 +363,7 @@ mod linux {
                 .or_else(|| props.get("application.icon_name"))
                 .unwrap_or_default()
                 .to_string(),
+            virtual_sink,
         };
         store.write().nodes.insert(global.id, node.clone());
         let _ = events.send(GraphEvent::NodeAdded(node));

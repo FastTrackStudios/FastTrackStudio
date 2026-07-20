@@ -108,6 +108,13 @@
 
 .cable { cursor: pointer; transition: opacity 0.1s; }
 .cable:hover { opacity: 1 !important; stroke-width: 3.5; }
+.cable-ghost { pointer-events: none; }
+
+.col-header { cursor: pointer; user-select: none; }
+.col-header:hover { color: #d7dde5; }
+.col-header.collapsed { color: #4a90d9; }
+
+.bus-ch { flex: 0 0 64px; width: 64px; }
 
 /* ── side panel ──────────────────────────────────────────────────── */
 .side-panel {

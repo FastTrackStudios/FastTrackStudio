@@ -11,8 +11,8 @@ use patchbay_proto::services::patchbay_service::{
 use patchbay_proto::{
     AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
     GraphEvent, GraphSnapshot, IconEntry, LatencyRule, PatchbayError, PatchbayService, PresetLink,
-    RoutingPreset, ServiceAction, ServiceStatus, patchbay_service_service_descriptor,
-    serve_patchbay_service,
+    RoutingPreset, ServiceAction, ServiceStatus, VirtualSink,
+    patchbay_service_service_descriptor, serve_patchbay_service,
 };
 
 use crate::engine::{self, Command, EngineHandle};
@@ -31,7 +31,7 @@ struct Inner {
     store: Arc<RwLock<GraphStore>>,
     engine: EngineHandle,
     events_hub: architect::PubSub<GraphEvent>,
-    presets: PresetStore,
+    presets: Arc<PresetStore>,
     dante: crate::dante_net::DanteEndpoints,
     icons: crate::icons::IconCache,
 }
@@ -48,6 +48,7 @@ impl PatchbayBackend {
     /// then apply (idempotent) events from the recent past.
     pub fn new() -> Self {
         let store = Arc::new(RwLock::new(GraphStore::default()));
+        let presets = Arc::new(PresetStore::open());
         let (events_tx, events_rx) = mpsc::channel::<GraphEvent>();
         let engine = engine::spawn(store.clone(), events_tx);
         // Big window: a single app connecting is a burst of hundreds of
@@ -56,21 +57,63 @@ impl PatchbayBackend {
         // nodes (REAPER "not showing up" was exactly this).
         let events_hub = architect::PubSub::sliding(16_384);
         let pump = events_hub.clone();
-        std::thread::Builder::new()
-            .name("patchbay-events".into())
-            .spawn(move || {
-                while let Ok(ev) = events_rx.recv() {
-                    pump.publish(ev);
-                }
-                tracing::warn!("patchbay event pump ended (engine gone)");
-            })
-            .expect("spawn patchbay-events thread");
+        {
+            let store = store.clone();
+            let presets = presets.clone();
+            let engine = engine.clone();
+            std::thread::Builder::new()
+                .name("patchbay-events".into())
+                .spawn(move || {
+                    while let Ok(ev) = events_rx.recv() {
+                        match &ev {
+                            // REAPER (re)appeared: pick up its channel
+                            // names from the host chanmap once the
+                            // ports have registered.
+                            GraphEvent::NodeAdded(n) if n.name == "REAPER" => {
+                                let store = store.clone();
+                                let presets = presets.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(std::time::Duration::from_secs(2));
+                                    auto_import_chanmap(&store, &presets, "REAPER");
+                                });
+                            }
+                            // Engine reconnected (PipeWire restart):
+                            // re-create the persisted virtual sinks
+                            // once the fresh mirror has settled.
+                            GraphEvent::Reset => {
+                                let store = store.clone();
+                                let presets = presets.clone();
+                                let engine = engine.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(std::time::Duration::from_secs(3));
+                                    ensure_virtual_sinks(&store, &presets, &engine);
+                                });
+                            }
+                            _ => {}
+                        }
+                        pump.publish(ev);
+                    }
+                    tracing::warn!("patchbay event pump ended (engine gone)");
+                })
+                .expect("spawn patchbay-events thread");
+        }
+        // First connect emits no Reset — seed the virtual sinks once
+        // the initial mirror is up.
+        {
+            let store = store.clone();
+            let presets = presets.clone();
+            let engine = engine.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                ensure_virtual_sinks(&store, &presets, &engine);
+            });
+        }
         Self {
             inner: Arc::new(Inner {
                 store,
                 engine,
                 events_hub,
-                presets: PresetStore::open(),
+                presets,
                 dante: crate::dante_net::DanteEndpoints::default(),
                 icons: crate::icons::IconCache::default(),
             }),
@@ -165,6 +208,72 @@ impl PatchbayBackend {
         .await
         .map_err(|e| PatchbayError::Internal(e.to_string()))?
         .map_err(PatchbayError::Internal)
+    }
+}
+
+use patchbay_proto::sink_node_name;
+
+/// Create any persisted virtual sink that isn't in the live graph.
+fn ensure_virtual_sinks(
+    store: &Arc<RwLock<GraphStore>>,
+    presets: &Arc<PresetStore>,
+    engine: &EngineHandle,
+) {
+    for sink in presets.virtual_sinks() {
+        let node_name = sink_node_name(&sink.name);
+        let live = store.read().nodes.values().any(|n| n.name == node_name);
+        if live {
+            continue;
+        }
+        tracing::info!(name = %sink.name, "creating virtual sink");
+        if let Err(e) = engine.send(Command::CreateVirtualSink {
+            node_name,
+            description: sink.name.clone(),
+            channels: sink.channels.max(1),
+        }) {
+            tracing::warn!("virtual sink create failed: {e}");
+        }
+    }
+}
+
+/// Non-destructive chanmap import: name `node`'s channels from the
+/// host's default ReaperChanMap, skipping channels the user already
+/// aliased in the patchbay. Missing chanmap file = silently nothing.
+fn auto_import_chanmap(
+    store: &Arc<RwLock<GraphStore>>,
+    presets: &Arc<PresetStore>,
+    node: &str,
+) {
+    let Ok(names) = crate::chanmap::read_names("") else {
+        return;
+    };
+    let ports: Vec<String> = {
+        let s = store.read();
+        let Some(n) = s.nodes.values().find(|n| n.name == node) else {
+            return;
+        };
+        s.ports
+            .values()
+            .filter(|p| p.node_id == n.id)
+            .map(|p| p.name.clone())
+            .collect()
+    };
+    let mut written = 0u32;
+    for port in ports {
+        let Some(channel) = crate::chanmap::channel_of_port(&port) else {
+            continue;
+        };
+        let target = format!("{node}:{port}");
+        if presets.has_alias(&target) {
+            continue;
+        }
+        if let Some(name) = names.get(&channel) {
+            presets.set_alias(target, name.clone());
+            written += 1;
+        }
+    }
+    if written > 0 {
+        tracing::info!(node, written, "auto-imported chanmap names");
     }
 }
 
@@ -481,6 +590,49 @@ impl PatchbayService for PatchbayBackend {
             }
         }
         Ok(written)
+    }
+
+    async fn virtual_sinks(&self) -> Result<Vec<VirtualSink>, PatchbayError> {
+        Ok(self.inner.presets.virtual_sinks())
+    }
+
+    async fn add_virtual_sink(&self, sink: VirtualSink) -> Result<(), PatchbayError> {
+        if sink.name.trim().is_empty() {
+            return Err(PatchbayError::Internal("sink name is empty".into()));
+        }
+        if !(1..=64).contains(&sink.channels) {
+            return Err(PatchbayError::Internal(format!(
+                "channel count {} out of range (1–64)",
+                sink.channels
+            )));
+        }
+        self.inner.presets.add_virtual_sink(sink);
+        ensure_virtual_sinks(&self.inner.store, &self.inner.presets, &self.inner.engine);
+        Ok(())
+    }
+
+    async fn remove_virtual_sink(&self, name: String) -> Result<(), PatchbayError> {
+        if !self.inner.presets.remove_virtual_sink(&name) {
+            return Err(PatchbayError::not_found("virtual sink", &name));
+        }
+        // Destroy the live node too — but ONLY if it carries the
+        // patchbay.virtual tag (never an arbitrary node).
+        let node_name = sink_node_name(&name);
+        let live_id = self
+            .inner
+            .store
+            .read()
+            .nodes
+            .values()
+            .find(|n| n.name == node_name && n.virtual_sink)
+            .map(|n| n.id);
+        if let Some(id) = live_id {
+            self.inner
+                .engine
+                .send(Command::DestroyNode { id })
+                .map_err(PatchbayError::EngineUnavailable)?;
+        }
+        Ok(())
     }
 
     async fn colors(&self) -> Result<Vec<ColorEntry>, PatchbayError> {

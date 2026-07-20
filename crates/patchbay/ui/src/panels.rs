@@ -149,7 +149,108 @@ pub fn SidePanel() -> Element {
             ServicesPanel {}
             LatencyPanel {}
             PresetsPanel {}
+            VirtualSinksPanel {}
             Inspector {}
+        }
+    }
+}
+
+/// Named buses: patchbay-owned null sinks, persisted in config and
+/// re-created whenever the engine (re)connects.
+#[component]
+fn VirtualSinksPanel() -> Element {
+    let handle = state::use_patchbay();
+    let sinks = state::VIRTUAL_SINKS.read().clone();
+    let graph = GRAPH.read();
+    let live: std::collections::HashSet<String> = graph
+        .nodes
+        .iter()
+        .filter(|n| n.virtual_sink)
+        .map(|n| n.name.clone())
+        .collect();
+    drop(graph);
+    let mut new_name = use_signal(String::new);
+    let mut channels = use_signal(|| 2u32);
+
+    let add = {
+        let handle = handle.clone();
+        move |_| {
+            let name = new_name.peek().trim().to_string();
+            if name.is_empty() {
+                return;
+            }
+            let sink = patchbay_proto::VirtualSink {
+                name,
+                channels: *channels.peek(),
+            };
+            let handle = handle.clone();
+            spawn(async move {
+                if let Err(e) = handle.0.add_virtual_sink(sink).await {
+                    tracing::warn!("add_virtual_sink failed: {e:?}");
+                }
+                state::refresh_meta(&handle).await;
+            });
+            new_name.set(String::new());
+        }
+    };
+
+    rsx! {
+        div { class: "panel-section",
+            h3 { "Buses (virtual sinks)" }
+            div { class: "preset-save",
+                input {
+                    placeholder: "bus name…",
+                    value: "{new_name}",
+                    oninput: move |e| new_name.set(e.value()),
+                }
+                select {
+                    class: "alias-input bus-ch",
+                    onchange: move |e| channels.set(e.value().parse().unwrap_or(2)),
+                    option { value: "1", selected: *channels.read() == 1, "mono" }
+                    option { value: "2", selected: *channels.read() == 2, "stereo" }
+                    option { value: "4", selected: *channels.read() == 4, "4ch" }
+                    option { value: "8", selected: *channels.read() == 8, "8ch" }
+                }
+                button { class: "chip", onclick: add, "add" }
+            }
+            for sink in sinks {
+                {
+                    let is_live = live.contains(&patchbay_proto::sink_node_name(&sink.name));
+                    let del = {
+                        let handle = handle.clone();
+                        let name = sink.name.clone();
+                        move |_| {
+                            let handle = handle.clone();
+                            let name = name.clone();
+                            spawn(async move {
+                                if let Err(e) = handle.0.remove_virtual_sink(name).await {
+                                    tracing::warn!("remove_virtual_sink failed: {e:?}");
+                                }
+                                state::refresh_meta(&handle).await;
+                            });
+                        }
+                    };
+                    rsx! {
+                        div { class: "service-row", key: "{sink.name}",
+                            span { class: if is_live { "svc-dot on" } else { "svc-dot" } }
+                            span { class: "service-name",
+                                title: if is_live { "live" } else { "not in graph yet" },
+                                "{sink.name}"
+                            }
+                            span { class: "rule-quantum",
+                                if sink.channels == 1 { "mono" } else if sink.channels == 2 { "st" } else { "{sink.channels}ch" }
+                            }
+                            button { class: "chip danger", onclick: del, "✕" }
+                        }
+                    }
+                }
+            }
+            if state::VIRTUAL_SINKS.read().is_empty() {
+                div { class: "dim-note",
+                    "Create a named bus (e.g. \"Stems\") to route several apps "
+                    "into one place; it persists across PipeWire restarts."
+                }
+            }
         }
     }
 }

@@ -77,6 +77,9 @@ pub struct CardLayout {
     pub x: f64,
     pub y: f64,
     pub h: f64,
+    /// Header-only rendering (its column is collapsed); ports all
+    /// anchor at the card edges.
+    pub collapsed: bool,
     pub rows: Vec<PortRow>,
 }
 
@@ -336,6 +339,9 @@ pub struct Filters<'a> {
     pub aliases: &'a HashMap<String, String>,
     /// Drop monitor ports entirely (cables through them disappear).
     pub hide_monitors: bool,
+    /// Per-column collapse: collapsed columns render cards as headers
+    /// only, with every cable converging on the card edge.
+    pub collapsed: [bool; 3],
 }
 
 pub fn compute_layout(
@@ -391,17 +397,23 @@ pub fn compute_layout(
         outs.sort_by_key(numeric_key);
 
         let make_card = |rows: Vec<PortRow>, col: usize, key: String| {
+            let collapsed = filters.collapsed[col];
             let mut rows = rows;
             for (idx, row) in rows.iter_mut().enumerate() {
                 row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
             }
-            let h = HEADER_H + rows.len() as f64 * ROW_H + 8.0;
+            let h = if collapsed {
+                HEADER_H + 6.0
+            } else {
+                HEADER_H + rows.len() as f64 * ROW_H + 8.0
+            };
             CardLayout {
                 node: node.clone(),
                 key,
                 x: MARGIN + col as f64 * (CARD_W + COL_GAP),
                 y: 0.0,
                 h,
+                collapsed,
                 rows,
             }
         };
@@ -459,15 +471,25 @@ pub fn compute_layout(
     }
 
     // Anchors: every port maps to its row's edge point (collapsed group
-    // members all share the group row's anchor).
+    // members all share the group row's anchor). A collapsed-column
+    // card anchors ALL its ports at the header edge midpoints, so its
+    // cables converge on the card.
     let mut anchors = HashMap::new();
     for card in &cards {
         for row in &card.rows {
-            let (x, y) = match row.direction {
-                PortDirection::Input => (card.x, card.y + row.y),
-                PortDirection::Output => (card.x + CARD_W, card.y + row.y),
+            let (x, y) = if card.collapsed {
+                let mid = card.y + card.h / 2.0;
+                match row.direction {
+                    PortDirection::Input => (card.x, mid),
+                    PortDirection::Output => (card.x + CARD_W, mid),
+                }
+            } else {
+                match row.direction {
+                    PortDirection::Input => (card.x, card.y + row.y),
+                    PortDirection::Output => (card.x + CARD_W, card.y + row.y),
+                }
             };
-            if row.pair && row.ports.len() == 2 {
+            if !card.collapsed && row.pair && row.ports.len() == 2 {
                 // Two thin cables want two distinct anchors — L just
                 // above the row center, R just below.
                 anchors.insert(row.ports[0], (x, y - 3.0));
@@ -507,6 +529,7 @@ mod reaper_layout {
             app_name: String::new(),
             latency: String::new(),
             icon_name: String::new(),
+            virtual_sink: false,
         };
         let mut ports = Vec::new();
         let mut pid = 100;
@@ -538,6 +561,7 @@ mod reaper_layout {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
+            collapsed: [false; 3],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
 
@@ -588,6 +612,7 @@ mod stereo_pairs {
             app_name: String::new(),
             latency: String::new(),
             icon_name: String::new(),
+            virtual_sink: false,
         }
     }
 
@@ -615,6 +640,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
+            collapsed: [false; 3],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         let card = &lay.cards[0];
@@ -650,6 +676,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
+            collapsed: [false; 3],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         let rows = &lay.cards[0].rows;
@@ -659,6 +686,31 @@ mod stereo_pairs {
             .expect("aliased L/R channels must condense");
         assert_eq!(pair.label, "Room Far L/R");
         assert_eq!(pair.ports, vec![5, 6]);
+    }
+
+    #[test]
+    fn collapsed_column_anchors_converge_on_the_card() {
+        let graph = GraphSnapshot {
+            nodes: vec![node()], // Audio/Sink → column 2
+            ports: vec![port(10, "playback_FL"), port(11, "playback_FR")],
+            links: Vec::new(),
+        };
+        let aliases = HashMap::new();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+            collapsed: [false, false, true],
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        let card = &lay.cards[0];
+        assert!(card.collapsed);
+        assert!(card.h < HEADER_H + ROW_H, "header-only height");
+        // Both ports share the card-edge midpoint anchor.
+        assert_eq!(lay.anchors[&10], lay.anchors[&11]);
+        assert_eq!(lay.anchors[&10].0, card.x, "input side edge");
     }
 
     #[test]
@@ -675,6 +727,7 @@ mod stereo_pairs {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
+            collapsed: [false; 3],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         assert!(lay.cards[0].rows.iter().all(|r| !r.pair));
@@ -711,6 +764,7 @@ mod live_probe {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
+            collapsed: [false; 3],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         for col in 0..3 {
@@ -761,6 +815,7 @@ mod live_probe {
             hide_unconnected: false,
             aliases: &aliases,
             hide_monitors: false,
+            collapsed: [false; 3],
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         match lay.cards.iter().find(|c| c.node.name == "REAPER") {

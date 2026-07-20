@@ -5,8 +5,8 @@ use patchbay_proto::{MediaKind, PortDirection};
 
 use crate::layout::{self, CARD_W, COL_GAP, Filters, MARGIN, ROW_H, column_titles};
 use crate::state::{
-    self, ARMED_OUTPUTS, EXPANDED_GROUPS, GRAPH, HIDE_MONITORS, HIDE_UNCONNECTED, MEDIA_TAB, PAN,
-    SEARCH, SELECTED_NODE, ZOOM,
+    self, ARMED_OUTPUTS, DRAG, Drag, DragSource, EXPANDED_GROUPS, GRAPH, HIDE_MONITORS,
+    HIDE_UNCONNECTED, MEDIA_TAB, PAN, SEARCH, SELECTED_NODE, ZOOM,
 };
 
 fn kind_color(kind: MediaKind) -> &'static str {
@@ -34,14 +34,52 @@ pub fn GraphCanvas() -> Element {
     let aliases = state::ALIASES.read();
     let search = SEARCH.read();
     let expanded = EXPANDED_GROUPS.read();
+    let collapsed_cols = *state::COLLAPSED_COLS.read();
     let filters = Filters {
         search: &search,
         tab: *MEDIA_TAB.read(),
         hide_unconnected: *HIDE_UNCONNECTED.read(),
         aliases: &aliases,
         hide_monitors: *HIDE_MONITORS.read(),
+        collapsed: collapsed_cols,
     };
     let lay = layout::compute_layout(&graph, &filters, &expanded);
+
+    // Hovered node → the set of nodes on its signal path (upstream
+    // sources + downstream destinations, transitively). Cables off the
+    // path dim.
+    let hovered_node = *state::HOVERED_NODE.read();
+    let path_nodes: Option<std::collections::HashSet<u32>> =
+        hovered_node.map(|h| {
+            // Two directed closures (not one undirected sweep — that
+            // would flood into siblings sharing a sink).
+            let mut down = std::collections::HashSet::from([h]);
+            loop {
+                let before = down.len();
+                for l in &graph.links {
+                    if down.contains(&l.output_node) {
+                        down.insert(l.input_node);
+                    }
+                }
+                if down.len() == before {
+                    break;
+                }
+            }
+            let mut up = std::collections::HashSet::from([h]);
+            loop {
+                let before = up.len();
+                for l in &graph.links {
+                    if up.contains(&l.input_node) {
+                        up.insert(l.output_node);
+                    }
+                }
+                if up.len() == before {
+                    break;
+                }
+            }
+            down.extend(up);
+            down
+        });
 
     // Ports rendered as condensed stereo pairs draw thin cables.
     let pair_ports: std::collections::HashSet<u32> = lay
@@ -62,6 +100,8 @@ pub fn GraphCanvas() -> Element {
         color: String,
         active: bool,
         thin: bool,
+        out_node: u32,
+        in_node: u32,
     }
     let mut by_path: std::collections::HashMap<(u64, u64), usize> =
         std::collections::HashMap::new();
@@ -102,8 +142,21 @@ pub fn GraphCanvas() -> Element {
             color,
             active: l.active,
             thin: pair_ports.contains(&l.output_port) || pair_ports.contains(&l.input_port),
+            out_node: l.output_node,
+            in_node: l.input_node,
         });
     }
+
+    // Ghost cable while dragging (only once the pointer has moved).
+    let drag_ghost: Option<String> = DRAG.read().as_ref().and_then(|d| {
+        let (sx, sy) = d.start;
+        let (cx, cy) = d.current;
+        if (cx - sx).abs() + (cy - sy).abs() < 6.0 {
+            return None;
+        }
+        let dx = ((cx - sx) * 0.5).max(40.0);
+        Some(format!("M {sx} {sy} C {} {sy}, {} {cy}, {cx} {cy}", sx + dx, cx - dx))
+    });
 
     let world_w = lay.width;
     let world_h = lay.height.max(400.0);
@@ -150,9 +203,27 @@ pub fn GraphCanvas() -> Element {
                     *PAN.write() = (px + (c.x - lx), py + (c.y - ly));
                     drag_last.set(Some((c.x, c.y)));
                 }
+                // Cable drag: track the pointer in world coordinates.
+                if DRAG.peek().is_some() {
+                    let c = e.element_coordinates();
+                    let (px, py) = *PAN.peek();
+                    let z = *ZOOM.peek();
+                    let world = ((c.x - px) / z, (c.y - py) / z);
+                    if let Some(d) = DRAG.write().as_mut() {
+                        d.current = world;
+                    }
+                }
             },
-            onmouseup: move |_| drag_last.set(None),
-            onmouseleave: move |_| drag_last.set(None),
+            // Row/header mouseups complete a drag first (bubbling);
+            // whatever reaches here just ends the gesture.
+            onmouseup: move |_| {
+                drag_last.set(None);
+                *DRAG.write() = None;
+            },
+            onmouseleave: move |_| {
+                drag_last.set(None);
+                *DRAG.write() = None;
+            },
             div { class: "canvas-tools",
                 button { class: "chip", title: "zoom out",
                     onclick: move |_| { let z = *ZOOM.peek(); *ZOOM.write() = (z / 1.25).max(0.15); },
@@ -176,9 +247,15 @@ pub fn GraphCanvas() -> Element {
                 for (i, title) in column_titles(*MEDIA_TAB.read()).iter().enumerate() {
                     div {
                         key: "{title}",
-                        class: "col-header",
+                        class: if collapsed_cols[i] { "col-header collapsed" } else { "col-header" },
                         style: "left:{MARGIN + i as f64 * (CARD_W + COL_GAP)}px;width:{CARD_W}px;",
-                        "{title}"
+                        title: if collapsed_cols[i] { "expand this column" } else { "collapse this column (headers only)" },
+                        onclick: move |_| {
+                            let mut cols = *state::COLLAPSED_COLS.peek();
+                            cols[i] = !cols[i];
+                            *state::COLLAPSED_COLS.write() = cols;
+                        },
+                        if collapsed_cols[i] { "▸ {title}" } else { "{title}" }
                     }
                 }
                 svg {
@@ -191,6 +268,19 @@ pub fn GraphCanvas() -> Element {
                             let handle = handle.clone();
                             let ids = cable.ids.clone();
                             let n = ids.len();
+                            let dimmed = path_nodes
+                                .as_ref()
+                                .is_some_and(|set| {
+                                    !(set.contains(&cable.out_node)
+                                        && set.contains(&cable.in_node))
+                                });
+                            let opacity = if dimmed {
+                                "0.06"
+                            } else if cable.active {
+                                "0.95"
+                            } else {
+                                "0.45"
+                            };
                             rsx! {
                                 path {
                                     key: "{cable.ids[0]}",
@@ -199,23 +289,26 @@ pub fn GraphCanvas() -> Element {
                                     fill: "none",
                                     stroke: "{cable.color}",
                                     stroke_width: if cable.thin { "1.2" } else { "2" },
-                                    opacity: if cable.active { "0.95" } else { "0.45" },
+                                    opacity: "{opacity}",
                                     pointer_events: "stroke",
                                     onclick: move |e: Event<MouseData>| {
                                         e.stop_propagation();
-                                        let handle = handle.clone();
-                                        let ids = ids.clone();
-                                        spawn(async move {
-                                            for id in ids {
-                                                if let Err(e) = handle.0.destroy_link(id).await {
-                                                    tracing::warn!("cable disconnect failed: {e:?}");
-                                                }
-                                            }
-                                        });
+                                        state::disconnect_links(handle.clone(), ids.clone());
                                     },
                                     title { "{n} link(s) — click to disconnect" }
                                 }
                             }
+                        }
+                    }
+                    if let Some(d) = drag_ghost {
+                        path {
+                            class: "cable-ghost",
+                            d: "{d}",
+                            fill: "none",
+                            stroke: "#7cc4ff",
+                            stroke_width: "2",
+                            stroke_dasharray: "6 5",
+                            opacity: "0.8",
                         }
                     }
                 }
@@ -232,16 +325,21 @@ pub fn GraphCanvas() -> Element {
                         ),
                         icon: state::ICONS
                             .read()
-                            .get(&card.node.icon_name)
+                            .get(&state::icon_candidate(&card.node))
                             .cloned()
                             .unwrap_or_default(),
                         x: card.x,
                         y: card.y,
                         h: card.h,
+                        collapsed: card.collapsed,
                         rows: card
                             .rows
                             .iter()
                             .map(|r| RowProps {
+                                anchor: match r.direction {
+                                    PortDirection::Input => (card.x, card.y + r.y),
+                                    PortDirection::Output => (card.x + CARD_W, card.y + r.y),
+                                },
                                 aliased: aliases
                                     .contains_key(&format!("{}:{}", card.node.name, r.label)),
                                 label: if r.pair {
@@ -289,6 +387,8 @@ struct RowProps {
     dot: String,
     /// Condensed stereo pair (ports = [L, R]).
     pair: bool,
+    /// World coordinates of this row's cable edge (drag start point).
+    anchor: (f64, f64),
     ports: Vec<u32>,
     group_key: Option<String>,
     expanded: bool,
@@ -305,22 +405,57 @@ fn NodeCard(
     x: f64,
     y: f64,
     h: f64,
+    collapsed: bool,
     rows: Vec<RowProps>,
 ) -> Element {
     let armed = ARMED_OUTPUTS.read().clone();
     let inspected = *SELECTED_NODE.read() == Some(node_id);
     let handle = state::use_patchbay();
+    let header_drag_name = node_name.clone();
+    let header_drop_name = node_name.clone();
+    let drop_handle = handle.clone();
 
     rsx! {
         div {
             class: if inspected { "node-card inspected" } else { "node-card" },
             style: "left:{x}px;top:{y}px;width:{CARD_W}px;height:{h}px;",
+            onmouseenter: move |_| *state::HOVERED_NODE.write() = Some(node_id),
+            onmouseleave: move |_| {
+                if *state::HOVERED_NODE.peek() == Some(node_id) {
+                    *state::HOVERED_NODE.write() = None;
+                }
+            },
             div {
                 class: "node-header",
                 style: "border-left: 3px solid {accent};",
+                title: "drag onto another node to bulk-connect 1:1",
                 onclick: move |_| {
                     let cur = *SELECTED_NODE.peek();
                     *SELECTED_NODE.write() = if cur == Some(node_id) { None } else { Some(node_id) };
+                },
+                // Node drag: drop this header on another node's header
+                // to bulk 1:1 connect (numeric-suffix pairing).
+                onmousedown: move |e: Event<MouseData>| {
+                    if e.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
+                        let start = (x + CARD_W, y + 17.0);
+                        *DRAG.write() = Some(Drag {
+                            source: DragSource::Node(header_drag_name.clone()),
+                            start,
+                            current: start,
+                        });
+                    }
+                },
+                onmouseup: move |_| {
+                    let dragged = DRAG.peek().clone();
+                    if let Some(Drag { source: DragSource::Node(from), .. }) = dragged {
+                        if from != header_drop_name {
+                            state::connect_nodes_bulk(
+                                drop_handle.clone(),
+                                from,
+                                header_drop_name.clone(),
+                            );
+                        }
+                    }
                 },
                 if !icon.is_empty() {
                     img { class: "node-icon", src: "{icon}" }
@@ -330,9 +465,12 @@ fn NodeCard(
                     span { class: "node-class", "{media_class}" }
                 }
             }
-            for (i, row) in rows.iter().enumerate() {
+            for (i, row) in rows.iter().enumerate().filter(|_| !collapsed) {
                 {
                     let row = row.clone();
+                    let drag_row = row.clone();
+                    let drop_row = row.clone();
+                    let drop_handle = handle.clone();
                     let handle = handle.clone();
                     let is_group = row.group_key.is_some();
                     let is_armed = row.direction == PortDirection::Output
@@ -376,6 +514,34 @@ fn NodeCard(
                             class: "{classes}",
                             style: "height:{ROW_H}px;",
                             title: "{tooltip}",
+                            // Drag from any port row (single, pair, or
+                            // collapsed bank) to a row on the other side.
+                            onmousedown: move |e: Event<MouseData>| {
+                                if e.trigger_button()
+                                    != Some(dioxus::html::input_data::MouseButton::Primary)
+                                    || drag_row.ports.is_empty()
+                                {
+                                    return;
+                                }
+                                e.stop_propagation();
+                                *DRAG.write() = Some(Drag {
+                                    source: DragSource::Ports(
+                                        drag_row.direction,
+                                        drag_row.ports.clone(),
+                                    ),
+                                    start: drag_row.anchor,
+                                    current: drag_row.anchor,
+                                });
+                            },
+                            onmouseup: move |_| {
+                                if !drop_row.ports.is_empty() {
+                                    state::complete_drag_on_ports(
+                                        drop_handle.clone(),
+                                        drop_row.direction,
+                                        &drop_row.ports,
+                                    );
+                                }
+                            },
                             onclick: move |_| {
                                 if let Some(key) = &row.group_key {
                                     let now = !row.expanded;

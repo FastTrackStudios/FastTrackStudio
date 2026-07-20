@@ -6,7 +6,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use patchbay_proto::{
     ApplyReport, ClockInfo, DanteDevice, DanteStatus, GraphEvent, GraphSnapshot, MediaKind,
-    PatchbayServiceClient, RoutingPreset, ServiceStatus,
+    PatchbayServiceClient, PortDirection, RoutingPreset, ServiceStatus, VirtualSink,
 };
 
 /// The service client, provided via context by the shell.
@@ -33,6 +33,7 @@ pub static CLOCK: GlobalSignal<ClockInfo> = Signal::global(ClockInfo::default);
 pub static DANTE: GlobalSignal<DanteStatus> = Signal::global(DanteStatus::default);
 pub static SERVICES: GlobalSignal<Vec<ServiceStatus>> = Signal::global(Vec::new);
 pub static LATENCY_RULES: GlobalSignal<Vec<patchbay_proto::LatencyRule>> = Signal::global(Vec::new);
+pub static VIRTUAL_SINKS: GlobalSignal<Vec<VirtualSink>> = Signal::global(Vec::new);
 pub static CLOCK_DEFAULTS: GlobalSignal<patchbay_proto::ClockDefaults> =
     Signal::global(patchbay_proto::ClockDefaults::default);
 pub static DANTE_DEVICES: GlobalSignal<Vec<DanteDevice>> = Signal::global(Vec::new);
@@ -73,6 +74,54 @@ pub static HIDE_MONITORS: GlobalSignal<bool> = Signal::global(|| false);
 pub static EXPANDED_GROUPS: GlobalSignal<HashMap<String, bool>> = Signal::global(HashMap::new);
 /// Outcome of the last preset apply, for the status line.
 pub static LAST_REPORT: GlobalSignal<Option<(String, ApplyReport)>> = Signal::global(|| None);
+/// Node id under the pointer — cables off its signal path dim.
+pub static HOVERED_NODE: GlobalSignal<Option<u32>> = Signal::global(|| None);
+/// Per-column collapse (Inputs | Applications | Outputs): collapsed
+/// columns render cards as headers only, cables converging on them.
+pub static COLLAPSED_COLS: GlobalSignal<[bool; 3]> = Signal::global(|| [false; 3]);
+
+// ─── Drag-to-connect ────────────────────────────────────────────────────
+
+/// What a canvas drag started from.
+#[derive(Clone, PartialEq)]
+pub enum DragSource {
+    /// Port row(s): direction + port ids ([L, R] for a pair, the whole
+    /// bank for a collapsed group row).
+    Ports(PortDirection, Vec<u32>),
+    /// A node header (bulk 1:1 connect on drop).
+    Node(String),
+}
+
+/// Active drag gesture: source, start anchor and current pointer, both
+/// in world coordinates.
+#[derive(Clone, PartialEq)]
+pub struct Drag {
+    pub source: DragSource,
+    pub start: (f64, f64),
+    pub current: (f64, f64),
+}
+
+pub static DRAG: GlobalSignal<Option<Drag>> = Signal::global(|| None);
+
+// ─── Undo (link operations) ─────────────────────────────────────────────
+
+/// One undoable gesture: the (output_port, input_port, created) set it
+/// performed. Undo re-applies each entry inverted.
+pub type LinkOp = Vec<(u32, u32, bool)>;
+
+pub static UNDO: GlobalSignal<Vec<LinkOp>> = Signal::global(Vec::new);
+
+fn record_op(op: LinkOp) {
+    if op.is_empty() {
+        return;
+    }
+    let mut undo = UNDO.write();
+    undo.push(op);
+    let excess = undo.len().saturating_sub(50);
+    if excess > 0 {
+        undo.drain(..excess);
+    }
+}
 
 // ─── Mutations ──────────────────────────────────────────────────────────
 
@@ -150,6 +199,9 @@ pub async fn refresh_meta(handle: &PatchbayHandle) {
     if let Ok(rules) = handle.0.latency_rules().await {
         *LATENCY_RULES.write() = rules;
     }
+    if let Ok(sinks) = handle.0.virtual_sinks().await {
+        *VIRTUAL_SINKS.write() = sinks;
+    }
     if let Ok(defaults) = handle.0.clock_defaults().await {
         *CLOCK_DEFAULTS.write() = defaults;
     }
@@ -168,22 +220,97 @@ pub async fn refresh_dante(handle: &PatchbayHandle) {
     *DANTE_LOADING.write() = false;
 }
 
-/// Connect-or-disconnect between an output and input port (helvum's
-/// toggle semantics). The graph mirror updates via the event stream.
-pub fn toggle_link(handle: PatchbayHandle, output_port: u32, input_port: u32) {
-    let existing = GRAPH
-        .peek()
-        .links
-        .iter()
-        .find(|l| l.output_port == output_port && l.input_port == input_port)
-        .map(|l| l.id);
+/// Connect-or-disconnect a set of (output, input) port pairs (helvum's
+/// toggle semantics), recorded as ONE undo step. The graph mirror
+/// updates via the event stream.
+pub fn apply_link_toggles(handle: PatchbayHandle, pairs: Vec<(u32, u32)>) {
+    let mut op: LinkOp = Vec::new();
+    let mut work: Vec<(Option<u32>, u32, u32)> = Vec::new();
+    {
+        let graph = GRAPH.peek();
+        for (out, inp) in pairs {
+            let existing = graph
+                .links
+                .iter()
+                .find(|l| l.output_port == out && l.input_port == inp)
+                .map(|l| l.id);
+            op.push((out, inp, existing.is_none()));
+            work.push((existing, out, inp));
+        }
+    }
+    record_op(op);
     spawn(async move {
-        let res = match existing {
-            Some(id) => handle.0.destroy_link(id).await,
-            None => handle.0.create_link(output_port, input_port).await,
-        };
-        if let Err(e) = res {
-            tracing::warn!("link toggle failed: {e:?}");
+        for (existing, out, inp) in work {
+            let res = match existing {
+                Some(id) => handle.0.destroy_link(id).await,
+                None => handle.0.create_link(out, inp).await,
+            };
+            if let Err(e) = res {
+                tracing::warn!("link toggle failed: {e:?}");
+            }
+        }
+    });
+}
+
+/// Single-pair convenience over [`apply_link_toggles`].
+pub fn toggle_link(handle: PatchbayHandle, output_port: u32, input_port: u32) {
+    apply_link_toggles(handle, vec![(output_port, input_port)]);
+}
+
+/// Destroy the given links (a clicked cable), recorded as one undo step.
+pub fn disconnect_links(handle: PatchbayHandle, ids: Vec<u32>) {
+    let op: LinkOp = {
+        let graph = GRAPH.peek();
+        ids.iter()
+            .filter_map(|id| {
+                let l = graph.links.iter().find(|l| l.id == *id)?;
+                Some((l.output_port, l.input_port, false))
+            })
+            .collect()
+    };
+    record_op(op);
+    spawn(async move {
+        for id in ids {
+            if let Err(e) = handle.0.destroy_link(id).await {
+                tracing::warn!("cable disconnect failed: {e:?}");
+            }
+        }
+    });
+}
+
+/// Undo the most recent link gesture: created links are destroyed,
+/// destroyed links re-created. Endpoints that left the graph since are
+/// skipped.
+pub fn undo_last(handle: PatchbayHandle) {
+    let Some(op) = UNDO.write().pop() else { return };
+    let mut destroy: Vec<u32> = Vec::new();
+    let mut create: Vec<(u32, u32)> = Vec::new();
+    {
+        let graph = GRAPH.peek();
+        for (out, inp, created) in op {
+            if created {
+                if let Some(l) = graph
+                    .links
+                    .iter()
+                    .find(|l| l.output_port == out && l.input_port == inp)
+                {
+                    destroy.push(l.id);
+                }
+            } else {
+                create.push((out, inp));
+            }
+        }
+    }
+    spawn(async move {
+        for id in destroy {
+            if let Err(e) = handle.0.destroy_link(id).await {
+                tracing::warn!("undo destroy failed: {e:?}");
+            }
+        }
+        for (out, inp) in create {
+            if let Err(e) = handle.0.create_link(out, inp).await {
+                tracing::warn!("undo create failed: {e:?}");
+            }
         }
     });
 }
@@ -228,6 +355,17 @@ pub fn node_color(node_name: &str, default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
+/// The freedesktop icon name to try for a node: the explicit
+/// `application.icon-name` when present, otherwise the lowercased app
+/// name ("REAPER" → "reaper" — most desktop apps install icons under
+/// exactly that). Empty = don't bother.
+pub fn icon_candidate(node: &patchbay_proto::PwNode) -> String {
+    if !node.icon_name.is_empty() {
+        return node.icon_name.clone();
+    }
+    node.app_name.to_lowercase().replace(' ', "-")
+}
+
 /// Fetch any application icons the graph references that we haven't
 /// looked up yet. Misses are cached as empty strings server-side of
 /// this map so a node without an installed icon costs one request ever.
@@ -238,8 +376,8 @@ pub fn request_missing_icons(handle: PatchbayHandle) {
         let mut names: Vec<String> = graph
             .nodes
             .iter()
-            .filter(|n| !n.icon_name.is_empty() && !icons.contains_key(&n.icon_name))
-            .map(|n| n.icon_name.clone())
+            .map(icon_candidate)
+            .filter(|name| !name.is_empty() && !icons.contains_key(name))
             .collect();
         names.sort();
         names.dedup();
@@ -276,9 +414,50 @@ pub fn connect_armed(handle: PatchbayHandle, inputs: &[u32]) {
     if armed.is_empty() {
         return;
     }
-    for (out, inp) in armed.iter().zip(inputs.iter()) {
-        toggle_link(handle.clone(), *out, *inp);
+    let pairs: Vec<(u32, u32)> = armed.iter().copied().zip(inputs.iter().copied()).collect();
+    apply_link_toggles(handle, pairs);
+}
+
+/// Complete an active drag released on a port row (`dir`, `ports`).
+/// Port-drags connect when the sides are opposite (zipped pair-wise,
+/// whichever side the drag started from); node-drags are handled by
+/// the header's own mouseup.
+pub fn complete_drag_on_ports(handle: PatchbayHandle, dir: PortDirection, ports: &[u32]) {
+    let Some(drag) = DRAG.peek().clone() else { return };
+    let DragSource::Ports(from_dir, from_ports) = drag.source else {
+        return;
+    };
+    if from_dir == dir {
+        return;
     }
+    let pairs: Vec<(u32, u32)> = match from_dir {
+        PortDirection::Output => {
+            from_ports.iter().copied().zip(ports.iter().copied()).collect()
+        }
+        PortDirection::Input => {
+            ports.iter().copied().zip(from_ports.iter().copied()).collect()
+        }
+    };
+    apply_link_toggles(handle, pairs);
+}
+
+/// Bulk 1:1 connect for a node-header drop (numeric-suffix pairing on
+/// the server). Result lands in the preset/apply report line.
+pub fn connect_nodes_bulk(handle: PatchbayHandle, from: String, to: String) {
+    spawn(async move {
+        match handle.0.connect_one_to_one(from.clone(), to.clone()).await {
+            Ok(n) => {
+                *LAST_REPORT.write() = Some((
+                    format!("{from} → {to}"),
+                    ApplyReport {
+                        created: n,
+                        ..ApplyReport::default()
+                    },
+                ));
+            }
+            Err(e) => tracing::warn!("bulk connect failed: {e:?}"),
+        }
+    });
 }
 
 /// Display name for a node (alias wins).

@@ -12,6 +12,7 @@ use vox::Tx;
 use crate::types::{
     AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
     GraphEvent, GraphSnapshot, IconEntry, LatencyRule, RoutingPreset, ServiceAction, ServiceStatus,
+    VirtualSink,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -158,6 +159,20 @@ pub mod patchbay_service {
             device: String,
             direction: String,
         ) -> Result<u32, PatchbayError>;
+
+        // ── Virtual sinks (named buses) ──────────────────────────────
+
+        /// The persisted virtual sinks (whether or not currently live).
+        async fn virtual_sinks(&self) -> Result<Vec<VirtualSink>, PatchbayError>;
+
+        /// Persist a virtual sink and create it in the live graph.
+        /// Re-created automatically on engine (re)connect.
+        async fn add_virtual_sink(&self, sink: VirtualSink) -> Result<(), PatchbayError>;
+
+        /// Remove a virtual sink from config and destroy its live node
+        /// (if present). Only nodes carrying `patchbay.virtual` are
+        /// ever destroyed.
+        async fn remove_virtual_sink(&self, name: String) -> Result<(), PatchbayError>;
 
         // ── Colors (cable/port identity) ─────────────────────────────
 
