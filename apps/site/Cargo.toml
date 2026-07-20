@@ -40,6 +40,21 @@ fts-ui = { workspace = true }
 # /guides vault — knowledge graph of the markdown notes (wasm-clean SVG view)
 view-knowledge-graph = { workspace = true }
 
+# /session/{org}/{collection} library browser — the fts-server CollectionService
+# wire contract + a minimal vox WebSocket client (wasm-clean). The site dials
+# `<fts-server base>/org/{org}/vox` and lists that org's collections.
+collection-proto = { workspace = true, features = ["vox"] }
+vox-core = { workspace = true }
+vox-websocket = { workspace = true }
+
+# Session performance view — the real session-ui presentational components
+# (mixer, transport, progress bars) plus the proto types that drive them. The
+# browser session player populates session-ui's global signals directly and
+# renders these components (same crates the fasttrackstudio wasm remote uses).
+session-ui = { workspace = true, features = ["web"] }
+session-proto = { workspace = true }
+daw-proto = { workspace = true }
+
 # Color type used by the engraver's SVG export config
 peniko = { workspace = true }
 
@@ -86,6 +101,8 @@ web-sys = { version = "0.3", features = [
     "CanvasRenderingContext2d",
     "Performance",
     "Location",
+    # Read the fts.task-server-ws-url pref from localStorage
+    "Storage",
     # Mouse/touch interaction
     "MouseEvent",
     "WheelEvent",
@@ -108,6 +125,19 @@ web-sys = { version = "0.3", features = [
     "Request",
     "RequestInit",
     "Response",
+    # Session view — Web Audio multitrack player. Each stem is streamed via an
+    # HTMLAudioElement (progressive Opus/ogg, low memory) routed through a
+    # per-stem GainNode for the mixer (mute/solo/volume).
+    "AudioContext",
+    "AudioContextState",
+    "BaseAudioContext",
+    "AudioNode",
+    "AudioParam",
+    "GainNode",
+    "AudioDestinationNode",
+    "HtmlAudioElement",
+    "HtmlMediaElement",
+    "MediaElementAudioSourceNode",
 ] }
 
 # Async runtime for WASM — deliberately NOT the workspace tokio (that one is

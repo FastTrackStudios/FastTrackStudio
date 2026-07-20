@@ -148,6 +148,7 @@ members = [
     "crates/session/proto",
     "crates/session/ui",
     "features/guide",
+    "features/song",
     "features/reaper/session-extension",
     # ── crates/keyflow — keyflow domain core (wave 3) ─────────────────
     "crates/keyflow/keyflow",
@@ -255,6 +256,7 @@ members = [
     "crates/patchbay/ui",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/fasttrackstudio",
+    "apps/fts-server",
     "apps/patchbay",
     "apps/installer",
     "apps/fts-cli",
@@ -454,6 +456,10 @@ session-ui = { path = "crates/session/ui", default-features = false }
 # feature adds local Chatterbox TTS (its ort/chatterbox pins live in the
 # crate's own manifest, not here).
 session-guide = { path = "features/guide" }
+# Durable Song + Arrangement vault-folder schema (stored counterpart to
+# session_proto::Song). Keyflow-agnostic: charts are stored as references
+# (relative paths / attachment ids), never embedded keyflow::Chart types.
+song = { path = "features/song" }
 
 # ── keyflow domain (wave 3) ───────────────────────────────────────────
 # `keyflow` and `engraver` are the facades; keyflow-proto/-text/-midi/
@@ -820,6 +826,7 @@ tag-proto = { path = "features/task/tag/tag-proto" }
 tag = { path = "features/task/tag/tag" }
 task = { path = "features/task/task/task", default-features = false }
 task-ui = { path = "features/task/task/task-ui" }
+task-server = { path = "apps/task/server" }
 project = { path = "features/task/project/project", default-features = false }
 org-proto = { path = "features/task/org/org-proto" }
 org-snapshot = { path = "features/task/org/org-snapshot" }
@@ -868,6 +875,8 @@ scripture = { path = "features/task/scripture/scripture" }
 scripture-proto = { path = "features/task/scripture/scripture-proto", default-features = false }
 links = { path = "features/task/links/links" }
 links-proto = { path = "features/task/links/links-proto", default-features = false }
+collection = { path = "features/task/collection/collection" }
+collection-proto = { path = "features/task/collection/collection-proto", default-features = false }
 resources = { path = "features/task/resources/resources" }
 resources-proto = { path = "features/task/resources/resources-proto", default-features = false }
 cookbook = { path = "features/task/mealplan/cookbook" }

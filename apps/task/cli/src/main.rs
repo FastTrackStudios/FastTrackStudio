@@ -18,6 +18,7 @@
 //! 3. `ws://127.0.0.1:9090/vox` default.
 
 mod brief;
+mod collection;
 mod errors;
 mod json_out;
 mod mealprep;
@@ -169,6 +170,17 @@ enum Commands {
     /// derived rollup (`task workstream rollup`).
     #[command(subcommand)]
     Workstream(workstream::WorkstreamCmd),
+    /// Ordered collections — libraries, setlists, shows, playlists.
+    /// All the same primitive: an ordered list of `NodeRef` items
+    /// over `CollectionService`. Create, populate, reorder, and
+    /// inspect headlessly (the entry point for library/setlist
+    /// seeding).
+    #[command(subcommand)]
+    Collection(collection::CollectionCmd),
+    /// Songs — build a durable Song folder (via the `song` crate)
+    /// and add it to a target collection as a `song:` node.
+    #[command(subcommand)]
+    Song(collection::SongCmd),
     /// Physical places — studios, rooms, venues, storage.
     /// Pantry + inventory reference these by id.
     #[command(subcommand)]
@@ -4759,6 +4771,12 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         }
         Commands::Workstream(cmd) => {
             return Box::pin(workstream::run_workstream(cmd)).await;
+        }
+        Commands::Collection(cmd) => {
+            return Box::pin(collection::run_collection(cmd)).await;
+        }
+        Commands::Song(cmd) => {
+            return Box::pin(collection::run_song(cmd)).await;
         }
         Commands::Location(cmd) => {
             return Box::pin(run_location(cmd)).await;
