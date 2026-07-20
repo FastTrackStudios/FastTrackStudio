@@ -39,12 +39,9 @@ mod imp {
 
     use daw_proto::{Position, PositionInSeconds, TimeSignature};
     use session_proto::{ActiveIndices, Setlist, SongChartHydration};
-    use session_ui::components::{
-        MixerView, SongProgressBar, SongTitle, TransportControlBar,
-    };
+    use session_ui::components::{MixerView, SongProgressBar, TransportControlBar};
     use session_ui::{
-        ACTIVE_INDICES, PerformanceSidebar, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
-        TransportState, apply_active_indices,
+        SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState, apply_active_indices,
     };
 
     use crate::pages::session_chart_pane::SessionChartPane;
@@ -52,11 +49,15 @@ mod imp {
     // with the single-song player (see `song_session::imp`).
     use crate::pages::song_session::imp as media;
 
-    /// One row in the setlist navigator: the media slug + display title.
+    /// One row in the setlist navigator: display title plus the at-a-glance
+    /// facts (key / tempo) and the song's accent color (its first section's
+    /// bright color — the same per-section palette the timeline uses).
     #[derive(Clone, PartialEq)]
     struct SongMeta {
-        slug: String,
         title: String,
+        key: Option<String>,
+        bpm: Option<f64>,
+        accent: String,
     }
 
     /// A song's fetched artifacts: its slug, manifest, and optional chart text.
@@ -387,8 +388,13 @@ mod imp {
                 let songs_meta: Vec<SongMeta> = list
                     .iter()
                     .map(|(slug, m, _)| SongMeta {
-                        slug: slug.clone(),
                         title: m.title.clone().unwrap_or_else(|| slug.clone()),
+                        key: m.key.clone(),
+                        bpm: m.bpm,
+                        accent: media::progress_sections(m)
+                            .first()
+                            .map(|s| s.color.clone())
+                            .unwrap_or_else(|| "#3b82f6".to_owned()),
                     })
                     .collect();
                 let manifest = list
@@ -621,52 +627,197 @@ mod imp {
         let at_first = idx == 0;
         let at_last = idx + 1 >= count;
 
+        // The active song's accent (its first section color) is the panel's
+        // accent — reused for the title rule, the navigator selection, and the
+        // playing indicators so the whole panel reads as one color system.
+        let accent = songs_meta
+            .get(idx)
+            .map(|s| s.accent.clone())
+            .unwrap_or_else(|| "#3b82f6".to_owned());
+        let prev_title = idx
+            .checked_sub(1)
+            .and_then(|i| songs_meta.get(i))
+            .map(|s| s.title.clone());
+        let next_title = songs_meta.get(idx + 1).map(|s| s.title.clone());
+        // The section the playhead is in — the "where am I" caption.
+        let cur_section_name = sections
+            .iter()
+            .find(|s| song_progress >= s.start_percent && song_progress < s.end_percent)
+            .or_else(|| sections.last())
+            .map(|s| s.name.clone());
+        let time_str = format!("{} / {}", fmt_time(pos), fmt_time(duration));
+        let progress_clamped = song_progress.clamp(0.0, 100.0);
+
         rsx! {
-            div { class: "flex flex-col gap-4 md:flex-row",
-                // ── Setlist navigator (the session Navigator, client-driven) ──
-                aside { class: "w-full shrink-0 md:w-72",
-                    div { class: "rounded-lg border border-border overflow-hidden h-[70vh]",
-                        PerformanceSidebar {
-                            on_song_select: goto_song,
-                            on_section_select: Callback::new(move |(_song, sec): (usize, usize)| {
-                                on_section_click.call(sec)
-                            }),
-                            // Light-themed host: use the subtle tint + ring
-                            // selection instead of the dark "stage" white fill.
-                            plain_selection: true,
+            div { class: "flex flex-col gap-4 md:flex-row md:gap-5",
+
+                // ── Setlist navigator: every song visible + scannable ─────────
+                aside { class: "shrink-0 md:w-64",
+                    div { class: "rounded-xl border border-border bg-card overflow-hidden",
+                        div { class: "flex items-baseline justify-between px-3 pt-3 pb-2",
+                            span {
+                                class: "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground",
+                                "Setlist"
+                            }
+                            span { class: "text-[11px] tabular-nums text-muted-foreground", "{count} songs" }
+                        }
+                        // Horizontal chips on a narrow pane; a vertical list on md+.
+                        div {
+                            class: "flex gap-1.5 overflow-x-auto px-2 pb-2 md:flex-col md:gap-0.5 md:overflow-x-visible md:overflow-y-auto md:max-h-[60vh]",
+                            for (i , s) in songs_meta.iter().enumerate() {
+                                {
+                                    let is_cur = i == idx;
+                                    let goto = goto_song;
+                                    let facts = {
+                                        let mut parts: Vec<String> = Vec::new();
+                                        if let Some(k) = &s.key {
+                                            parts.push(k.clone());
+                                        }
+                                        if let Some(b) = s.bpm {
+                                            parts.push(format!("{b:.0} bpm"));
+                                        }
+                                        parts.join(" · ")
+                                    };
+                                    rsx! {
+                                        div { key: "{i}", class: "shrink-0 md:w-full",
+                                            button {
+                                                r#type: "button",
+                                                class: if is_cur {
+                                                    "flex w-full items-center gap-2.5 rounded-lg border-l-2 px-2.5 py-2 text-left min-w-[9.5rem] md:min-w-0 transition-colors"
+                                                } else {
+                                                    "flex w-full items-center gap-2.5 rounded-lg border-l-2 border-transparent px-2.5 py-2 text-left min-w-[9.5rem] md:min-w-0 hover:bg-accent transition-colors"
+                                                },
+                                                style: if is_cur {
+                                                    format!("border-color:{a}; background:{a}14;", a = s.accent)
+                                                } else {
+                                                    String::new()
+                                                },
+                                                onclick: move |_| goto.call(i),
+                                                // Index / color badge
+                                                span {
+                                                    class: if is_cur {
+                                                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold tabular-nums text-white"
+                                                    } else {
+                                                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold tabular-nums bg-muted text-muted-foreground"
+                                                    },
+                                                    style: if is_cur { format!("background:{};", s.accent) } else { String::new() },
+                                                    "{i + 1}"
+                                                }
+                                                // Title + key/bpm caption
+                                                span { class: "flex min-w-0 flex-1 flex-col",
+                                                    span {
+                                                        class: if is_cur {
+                                                            "truncate text-sm font-semibold text-foreground"
+                                                        } else {
+                                                            "truncate text-sm font-medium text-foreground/80"
+                                                        },
+                                                        "{s.title}"
+                                                    }
+                                                    if !facts.is_empty() {
+                                                        span {
+                                                            class: "truncate text-[10px] tabular-nums text-muted-foreground",
+                                                            "{facts}"
+                                                        }
+                                                    }
+                                                }
+                                                // Playing pulse (only the loaded/current song plays)
+                                                if is_cur && is_playing {
+                                                    span {
+                                                        class: "ml-auto h-2 w-2 shrink-0 rounded-full animate-pulse",
+                                                        style: format!("background:{};", s.accent),
+                                                    }
+                                                }
+                                            }
+                                            // Slim section strip for the active song — a glanceable
+                                            // structure preview + playhead, NOT the tall boxes.
+                                            if is_cur && !sections.is_empty() {
+                                                div { class: "mt-1 mb-1 px-2.5",
+                                                    div { class: "relative h-1.5 w-full overflow-hidden rounded-full bg-muted",
+                                                        for (si , seg) in sections.iter().enumerate() {
+                                                            div {
+                                                                key: "{si}",
+                                                                class: "absolute inset-y-0",
+                                                                style: format!(
+                                                                    "left:{}%; width:{}%; background:{};",
+                                                                    seg.start_percent,
+                                                                    seg.end_percent - seg.start_percent,
+                                                                    seg.color,
+                                                                ),
+                                                            }
+                                                        }
+                                                        // Dim the not-yet-played remainder (theme-adaptive).
+                                                        div {
+                                                            class: "absolute inset-y-0 rounded-r-full",
+                                                            style: format!(
+                                                                "left:{p}%; width:{}%; background:color-mix(in oklch, var(--card) 55%, transparent);",
+                                                                100.0 - progress_clamped,
+                                                                p = progress_clamped,
+                                                            ),
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
-                // ── Current song: transport + tabs ───────────────────────────
-                div { class: "flex min-w-0 flex-1 flex-col gap-5",
-                    // Title + metadata badges + set position.
-                    SongTitle { song_name: title.clone() }
-                    div { class: "flex flex-wrap items-center justify-center gap-2 -mt-4",
-                        if !artist.is_empty() {
-                            span { class: "text-sm text-muted-foreground mr-2", "{artist}" }
+                // ── Current song: the hero — header, timeline, transport, tabs ─
+                div { class: "flex min-w-0 flex-1 flex-col gap-4",
+
+                    // Header: accent rule + title + quiet meta caption.
+                    div { class: "flex items-start gap-3",
+                        div {
+                            class: "mt-1 h-9 w-1 shrink-0 rounded-full",
+                            style: format!("background:{accent};"),
                         }
-                        Badge { label: "Song {idx + 1}/{count}" }
-                        if let Some(k) = manifest.key.as_ref() {
-                            Badge { label: "Key {k}" }
-                        }
-                        if let Some(b) = manifest.bpm {
-                            Badge { label: "{b} BPM" }
-                        }
-                        if let Some(ts) = manifest.time_signature.as_ref() {
-                            Badge { label: "{ts}" }
-                        }
-                        if is_buffering {
-                            span { class: "text-[11px] text-muted-foreground/70", "buffering…" }
+                        div { class: "min-w-0 flex-1",
+                            div { class: "flex flex-wrap items-baseline gap-x-2",
+                                h1 { class: "text-2xl font-bold leading-tight tracking-tight text-foreground truncate",
+                                    "{title}"
+                                }
+                                if !artist.is_empty() {
+                                    span { class: "text-sm text-muted-foreground truncate", "{artist}" }
+                                }
+                            }
+                            div {
+                                class: "mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground",
+                                span { "Song {idx + 1} / {count}" }
+                                if let Some(k) = manifest.key.as_ref() {
+                                    span { class: "text-border", "·" }
+                                    span { "Key {k}" }
+                                }
+                                if let Some(b) = manifest.bpm {
+                                    span { class: "text-border", "·" }
+                                    span { "{b:.0} BPM" }
+                                }
+                                if let Some(ts) = manifest.time_signature.as_ref() {
+                                    span { class: "text-border", "·" }
+                                    span { "{ts}" }
+                                }
+                                if is_buffering {
+                                    span { class: "text-border", "·" }
+                                    span { class: "normal-case tracking-normal text-muted-foreground/70", "buffering…" }
+                                }
+                            }
                         }
                     }
 
-                    // Song progress (segmented; sections + click-to-seek). The
-                    // old standalone SectionProgressBar + fine scrubber/timestamp
-                    // row were redundant with this bar and have been removed;
-                    // seeking still works via `on_section_click` below.
+                    // Section timeline — the "where am I" hero. Caption above
+                    // names the current section and the elapsed / total time.
                     if !manifest.sections.is_empty() {
-                        div { class: "pt-2",
+                        div { class: "flex flex-col gap-2",
+                            div { class: "flex items-center justify-between gap-2",
+                                span { class: "truncate text-xs font-semibold uppercase tracking-[0.08em] text-foreground",
+                                    {cur_section_name.clone().unwrap_or_default()}
+                                }
+                                span { class: "shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground",
+                                    "{time_str}"
+                                }
+                            }
                             SongProgressBar {
                                 progress: song_progress,
                                 sections: sections.clone(),
@@ -676,10 +827,10 @@ mod imp {
                         }
                     }
 
-                    // Transport (full width so the 6 controls never squish) +
+                    // Transport (full-width, compact so the six controls fit) +
                     // whole-song prev/next below it.
                     div { class: "flex flex-col gap-2",
-                        div { class: "h-16 rounded-lg overflow-hidden border border-border",
+                        div { class: "h-14 rounded-lg overflow-hidden border border-border",
                             TransportControlBar {
                                 is_playing,
                                 is_looping: false,
@@ -691,26 +842,39 @@ mod imp {
                                 on_arm_toggle: noop,
                                 on_back,
                                 on_forward,
+                                compact: true,
                             }
                         }
-                        div { class: "flex items-center justify-between gap-2",
+                        div { class: "grid grid-cols-2 gap-2",
                             button {
-                                class: "px-3 py-2 rounded-md text-sm font-semibold border border-border text-foreground hover:bg-accent disabled:opacity-40 transition-colors",
+                                class: "flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40 transition-colors",
                                 disabled: at_first,
                                 onclick: {
                                     let goto_song = goto_song;
                                     move |_| if idx > 0 { goto_song.call(idx - 1) }
                                 },
-                                "‹ Prev song"
+                                span { class: "text-lg leading-none text-muted-foreground", "‹" }
+                                span { class: "flex min-w-0 flex-col",
+                                    span { class: "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground", "Prev" }
+                                    span { class: "truncate text-sm font-medium text-foreground",
+                                        {prev_title.clone().unwrap_or_else(|| "—".to_owned())}
+                                    }
+                                }
                             }
                             button {
-                                class: "px-3 py-2 rounded-md text-sm font-semibold border border-border text-foreground hover:bg-accent disabled:opacity-40 transition-colors",
+                                class: "flex items-center justify-end gap-2 rounded-lg border border-border px-3 py-1.5 text-right hover:bg-accent disabled:opacity-40 transition-colors",
                                 disabled: at_last,
                                 onclick: {
                                     let goto_song = goto_song;
                                     move |_| if idx + 1 < count { goto_song.call(idx + 1) }
                                 },
-                                "Next song ›"
+                                span { class: "flex min-w-0 flex-col items-end",
+                                    span { class: "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground", "Next" }
+                                    span { class: "truncate text-sm font-medium text-foreground",
+                                        {next_title.clone().unwrap_or_else(|| "—".to_owned())}
+                                    }
+                                }
+                                span { class: "text-lg leading-none text-muted-foreground", "›" }
                             }
                         }
                     }
@@ -766,9 +930,9 @@ mod imp {
                         }
                     }
 
-                    // Chart tab — follows ACTIVE_INDICES.song_index for free.
+                    // Chart tab — follows the active song index for free.
                     div { class: if active == Tab::Chart { "block" } else { "hidden" },
-                        div { class: "border border-border rounded-lg overflow-hidden bg-white",
+                        div { class: "border border-border rounded-lg overflow-hidden bg-card",
                             SessionChartPane {}
                         }
                     }
@@ -777,14 +941,12 @@ mod imp {
         }
     }
 
-    #[component]
-    fn Badge(label: String) -> Element {
-        rsx! {
-            span {
-                class: "text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground border border-border rounded-full px-2 py-0.5",
-                "{label}"
-            }
-        }
+    /// `mm:ss` for the timeline caption's elapsed / total readout.
+    fn fmt_time(secs: f64) -> String {
+        let s = secs.max(0.0);
+        let m = (s / 60.0).floor() as i64;
+        let rem = (s % 60.0).floor() as i64;
+        format!("{m}:{rem:02}")
     }
 }
 
