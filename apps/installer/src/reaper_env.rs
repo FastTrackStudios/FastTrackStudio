@@ -357,11 +357,10 @@ fn walk<T>(dir: &Path, f: &mut impl FnMut(&Path) -> Option<T>) -> Option<T> {
         if let Some(hit) = f(&path) {
             return Some(hit);
         }
-        if path.is_dir() {
-            if let Some(hit) = walk(&path, f) {
+        if path.is_dir()
+            && let Some(hit) = walk(&path, f) {
                 return Some(hit);
             }
-        }
     }
     None
 }

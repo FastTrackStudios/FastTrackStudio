@@ -31,6 +31,7 @@ eyre.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 serde.workspace = true
 serde_json.workspace = true
+tempfile = "3"
 # Parse `project set-states --from` registry files (YAML, a JSON superset).
 serde_yaml.workspace = true
 uuid.workspace = true
@@ -110,6 +111,9 @@ wiki-graph.workspace = true
 # durable Song-folder writer from the `song` crate.
 collection-proto = { workspace = true, features = ["vox"] }
 song = { workspace = true }
+# `task song ingest` — stems become content-addressed attachments
+# (initiate/PUT/complete against the org's AttachmentService).
+attachments-proto = { workspace = true, features = ["vox"] }
 # `task-cli wiki context --links` — overlay typed-link-store
 # edges onto the context subgraph.
 links.workspace = true

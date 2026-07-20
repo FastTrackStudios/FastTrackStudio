@@ -259,19 +259,75 @@ pub(crate) mod imp {
         serde_json::from_str(&txt).map_err(|e| format!("{url}: bad manifest json: {e}"))
     }
 
+    /// Resolve a frontmatter-stems song: each stem's `content_hash` becomes a
+    /// short-lived signed `/blobs/download` URL via the org's
+    /// `AttachmentService`, and the manifest is synthesized from the
+    /// frontmatter scalars + `sections:` block.
+    pub(crate) async fn resolve_front(
+        org: &str,
+        title: &str,
+        front: &crate::pages::vault::SongFront,
+    ) -> Result<(Manifest, Vec<String>), String> {
+        use attachments_proto::ContentHashArg;
+        let client = crate::vox_clients::attachments_client(org).await?;
+        let mut urls = Vec::with_capacity(front.stems.len());
+        for stem in &front.stems {
+            let signed = client
+                .get_download_url(ContentHashArg {
+                    content_hash: stem.content_hash.clone(),
+                })
+                .await
+                .map_err(|e| format!("stem `{}`: {e:?}", stem.name))?;
+            urls.push(signed.url);
+        }
+        let duration_sec = front
+            .duration_sec
+            .or_else(|| front.sections.last().map(|s| s.end_sec))
+            .unwrap_or(0.0);
+        let manifest = Manifest {
+            slug: None,
+            title: Some(title.to_owned()),
+            artist: front.artist.clone(),
+            key: front.key.clone(),
+            bpm: front.bpm,
+            time_signature: front.time_signature.clone(),
+            duration_sec,
+            sections: front
+                .sections
+                .iter()
+                .map(|s| Section {
+                    name: s.name.clone(),
+                    start_sec: s.start_sec,
+                    end_sec: s.end_sec,
+                })
+                .collect(),
+            stems: front
+                .stems
+                .iter()
+                .map(|s| StemSpec {
+                    name: s.name.clone(),
+                    group: s.group.clone(),
+                    file: String::new(),
+                    default_muted: s.default_muted,
+                })
+                .collect(),
+        };
+        Ok((manifest, urls))
+    }
+
     /// Build the streaming graph: create the context, and for each stem create
     /// an `HTMLAudioElement` (progressive stream) routed through
-    /// media-element-source → gain → destination. Synchronous and side-effect
-    /// free apart from element creation — no fetch/decode, so no per-stem
-    /// progress signal and nothing to re-fire on transport ticks.
-    pub(crate) fn build_engine(slug: &str, manifest: &Manifest) -> Result<Engine, String> {
+    /// media-element-source → gain → destination. `urls` is parallel to
+    /// `manifest.stems` (signed blob URLs or `/media` paths). Synchronous and
+    /// side-effect free apart from element creation — no fetch/decode, so no
+    /// per-stem progress signal and nothing to re-fire on transport ticks.
+    pub(crate) fn build_engine(manifest: &Manifest, urls: &[String]) -> Result<Engine, String> {
         let ctx = AudioContext::new().map_err(|e| format!("AudioContext: {e:?}"))?;
         let dest = ctx.destination();
         let mut stems = Vec::with_capacity(manifest.stems.len());
-        for spec in &manifest.stems {
-            let url = format!("/media/songs/{slug}/{}", spec.file);
+        for (spec, url) in manifest.stems.iter().zip(urls) {
             let el =
-                HtmlAudioElement::new_with_src(&url).map_err(|e| format!("audio element: {e:?}"))?;
+                HtmlAudioElement::new_with_src(url).map_err(|e| format!("audio element: {e:?}"))?;
             el.set_preload("auto");
             el.set_loop(false);
 
@@ -477,25 +533,51 @@ pub(crate) mod imp {
 
     // ── the component ───────────────────────────────────────────────────────
 
-    /// The `type: song` player. `slug` selects the media at
-    /// `/media/songs/{slug}/…`. Rendered above the note editor in the vault.
+    /// The `type: song` player. When the note's frontmatter carries a
+    /// `stems:` block (content-addressed attachments), the stems stream
+    /// from the org's blob store via short-lived signed URLs; otherwise
+    /// `slug` selects the legacy media at `/media/songs/{slug}/…`.
+    /// Rendered above the note editor in the vault.
     #[component]
-    pub fn SongView(slug: String) -> Element {
+    pub fn SongView(
+        slug: String,
+        org: String,
+        title: String,
+        front: crate::pages::vault::SongFront,
+    ) -> Element {
         let mut playing = use_signal(|| false);
         let mut position = use_signal(|| 0.0_f64);
         let mut buffering = use_signal(|| true);
         // Per-stem mixer state; filled once the manifest lands (see effect).
         let mut stem_ui = use_signal(Vec::<StemUi>::new);
 
-        // Fetch manifest → build the streaming graph. Keyed on the slug via
-        // `use_reactive!`: the future reads ONLY the `slug` prop (no signals),
-        // so it runs exactly once per song and never re-fires on ticks.
+        // Resolve stems → build the streaming graph. Keyed on the props via
+        // `use_reactive!`: the future reads ONLY props (no signals), so it
+        // runs once per song (re-firing if the frontmatter stems change) and
+        // never on ticks.
         let slug_r = slug.clone();
-        let loaded = use_resource(use_reactive!(|slug_r| {
+        let org_r = org.clone();
+        let title_r = title.clone();
+        let front_r = front.clone();
+        let loaded = use_resource(use_reactive!(|slug_r, org_r, title_r, front_r| {
             let slug = slug_r.clone();
+            let org = org_r.clone();
+            let title = title_r.clone();
+            let front = front_r.clone();
             async move {
-                let manifest = fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
-                let eng = build_engine(&slug, &manifest)?;
+                let (manifest, urls) = if front.stems.is_empty() {
+                    let manifest =
+                        fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
+                    let urls = manifest
+                        .stems
+                        .iter()
+                        .map(|s| format!("/media/songs/{slug}/{}", s.file))
+                        .collect();
+                    (manifest, urls)
+                } else {
+                    resolve_front(&org, &title, &front).await?
+                };
+                let eng = build_engine(&manifest, &urls)?;
                 Ok::<(Manifest, Engine), String>((manifest, eng))
             }
         }));
@@ -757,7 +839,16 @@ pub(crate) mod imp {
                     let d = s.duration().max(0.001);
                     (Some(i), ((pos - s.start_seconds) / d).clamp(0.0, 1.0))
                 })
-                .unwrap_or((None, 0.0));
+                // Before the first section's start (e.g. 0:00 with a late
+                // first section) the cursor clamps to section 0 instead of
+                // reading no/the-wrong section.
+                .unwrap_or_else(|| {
+                    if song.sections.first().is_some_and(|s| pos < s.start_seconds) {
+                        (Some(0), 0.0)
+                    } else {
+                        (None, 0.0)
+                    }
+                });
             (
                 dur,
                 song.count_in_seconds.unwrap_or(0.0),
@@ -1099,8 +1190,13 @@ mod stub {
     use dioxus::prelude::*;
 
     #[component]
-    pub fn SongView(slug: String) -> Element {
-        let _ = &slug;
+    pub fn SongView(
+        slug: String,
+        org: String,
+        title: String,
+        front: crate::pages::vault::SongFront,
+    ) -> Element {
+        let _ = (&slug, &org, &title, &front);
         rsx! {
             div { class: "mx-auto max-w-3xl px-4 py-10",
                 span { class: "text-sm text-muted-foreground",

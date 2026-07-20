@@ -110,6 +110,9 @@ agent-proto = { workspace = true, features = ["vox"] }
 # auto-emitted `VaultSyncClient`. `vox` feature only (no
 # `server`/`full`), so it stays wasm-clean like the others.
 vault-proto = { workspace = true, features = ["vox"] }
+# Signed blob download URLs for song stems stored as attachments
+# (the `stems:` frontmatter on `type: song` notes).
+attachments-proto = { workspace = true, features = ["vox"] }
 # Wiki raw-source wire surface — `RawLayerClient` for the
 # `/wiki/sources` list + `/wiki/source/:name` SourceViewer
 # (archived articles + ^t-anchored video transcripts). `vox`

@@ -1,8 +1,8 @@
 //! `/session/{org}/{collection}` — a read-only collection library browser.
 //!
-//! Collections live on the **fts-server**, which exposes one
+//! Collections live on the **task-server**, which exposes one
 //! `CollectionService` per org on its per-org router at `/org/{slug}/vox`.
-//! This view dials `<fts-server base>/org/{org}/vox`, `list`s that org's
+//! This view dials `<task-server base>/org/{org}/vox`, `list`s that org's
 //! collections, and picks the one whose title slug matches the URL's
 //! `{collection}` segment — then renders its title, kind badge, and the
 //! ordered list of song items.
@@ -12,7 +12,7 @@
 //! its Tailwind chrome (rendered inside the site `Layout`, so the navbar
 //! frames it).
 //!
-//! Configure the fts-server base with the `task-server-ws-url` pref
+//! Configure the task-server base with the `task-server-ws-url` pref
 //! (browser localStorage key `fts.task-server-ws-url`); default
 //! `ws://127.0.0.1:18080`.
 
@@ -21,7 +21,7 @@ use dioxus::prelude::*;
 
 use crate::Route;
 
-// ── fts-server URL + establish plumbing ─────────────────────────────────────
+// ── task-server URL + establish plumbing ─────────────────────────────────────
 
 /// Read the `fts.<key>` pref from browser localStorage. `None` off-wasm or
 /// when unset/empty.
@@ -38,7 +38,7 @@ fn pref(_key: &str) -> Option<String> {
     None
 }
 
-/// The fts-server base WebSocket URL (scheme + host, no path). Read from the
+/// The task-server base WebSocket URL (scheme + host, no path). Read from the
 /// `task-server-ws-url` pref, default `ws://127.0.0.1:18080`. Any trailing
 /// `/vox` or `/` is stripped so the per-org path composes cleanly.
 fn task_server_base() -> String {
@@ -50,7 +50,7 @@ fn task_server_base() -> String {
     }
     // Architect same-origin: the host that served this page also serves vox
     // (prod: the fasttrackstudio.app ingress; dev: dx proxies the path to
-    // fts-server). No second port for the browser to reach.
+    // task-server). No second port for the browser to reach.
     #[cfg(target_arch = "wasm32")]
     if let Some(w) = web_sys::window() {
         let loc = w.location();
@@ -64,7 +64,7 @@ fn task_server_base() -> String {
     "ws://127.0.0.1:18080".to_string()
 }
 
-/// The per-org vox URL for `org` on the configured fts-server.
+/// The per-org vox URL for `org` on the configured task-server.
 fn org_vox_url(org: &str) -> String {
     format!("{}/org/{}/vox", task_server_base(), org)
 }
@@ -137,7 +137,7 @@ enum Loaded {
 
 // ── component ────────────────────────────────────────────────────────────────
 
-/// `/session/{org}/{collection}` — dial the fts-server, list the org's
+/// `/session/{org}/{collection}` — dial the task-server, list the org's
 /// collections, resolve the one matching `collection`, and render its
 /// ordered songs. Rendered inside the site `Layout` (navbar above).
 #[component]
@@ -153,11 +153,11 @@ pub fn SessionCollection(org: String, collection: String) -> Element {
             let url = org_vox_url(&org);
             let client = establish::<CollectionServiceClient>(&url)
                 .await
-                .ok_or_else(|| format!("could not reach the fts-server at {url}"))?;
+                .ok_or_else(|| format!("could not reach the task-server at {url}"))?;
             let mut collections = client
                 .list(org.clone(), None)
                 .await
-                .map_err(|e| format!("fts-server error: {e}"))?;
+                .map_err(|e| format!("task-server error: {e}"))?;
             let want = slugify(&slug);
             match collections
                 .iter()
@@ -175,14 +175,14 @@ pub fn SessionCollection(org: String, collection: String) -> Element {
 
     let body = match &*data.read_unchecked() {
         None => rsx! {
-            div { class: "text-sm text-muted-foreground", "Connecting to the fts-server…" }
+            div { class: "text-sm text-muted-foreground", "Connecting to the task-server…" }
         },
         Some(Err(msg)) => rsx! {
             div { class: "flex flex-col gap-2",
                 span { class: "text-sm font-semibold text-destructive", "Could not load collection" }
                 span { class: "text-sm text-muted-foreground", "{msg}" }
                 span { class: "text-xs text-muted-foreground/70",
-                    "Set the fts-server address in localStorage (key fts.task-server-ws-url) to point elsewhere."
+                    "Set the task-server address in localStorage (key fts.task-server-ws-url) to point elsewhere."
                 }
             }
         },

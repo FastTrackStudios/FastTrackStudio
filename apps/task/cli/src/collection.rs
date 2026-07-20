@@ -155,6 +155,47 @@ pub enum SongCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Ingest a folder of stems for a `type: song` note: transcode
+    /// WAV→Opus, upload each as a content-addressed attachment, and
+    /// write the `stems:` block into the note's frontmatter.
+    Ingest {
+        /// Vault-relative path of the song note (e.g. `Songs/Praise.md`).
+        /// Created with `type: song` frontmatter if it doesn't exist.
+        note: String,
+        /// Directory of stem audio files (wav/aiff/flac/ogg/…), one per
+        /// stem, sorted by filename. A leading `NN - ` index is stripped
+        /// from the display name.
+        #[arg(long, value_name = "DIR")]
+        stems: PathBuf,
+        /// Artist written into the frontmatter.
+        #[arg(long)]
+        artist: Option<String>,
+        /// Musical key written into the frontmatter (e.g. `"Bb"`).
+        #[arg(long)]
+        key: Option<String>,
+        /// Tempo written into the frontmatter.
+        #[arg(long)]
+        bpm: Option<f64>,
+        /// Time signature written into the frontmatter (e.g. `4/4`).
+        #[arg(long)]
+        time_signature: Option<String>,
+        /// Song duration in seconds. Probed from the first stem via
+        /// ffprobe when omitted.
+        #[arg(long)]
+        duration_sec: Option<f64>,
+        /// Opus bitrate for the transcode.
+        #[arg(long, default_value = "96k")]
+        bitrate: String,
+        /// Plan only: list stems/groups and what would upload, touch nothing.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // ── parsing helpers ───────────────────────────────────────────────────
@@ -510,7 +551,417 @@ pub async fn run_song(cmd: SongCmd) -> eyre::Result<()> {
             println!("added song:{song_slug} to `{}`", updated.title);
             print_collection(&updated);
         }
+        SongCmd::Ingest {
+            note,
+            stems,
+            artist,
+            key,
+            bpm,
+            time_signature,
+            duration_sec,
+            bitrate,
+            dry_run,
+            org,
+            server,
+            json,
+        } => {
+            ingest_song_stems(IngestArgs {
+                note,
+                stems,
+                artist,
+                key,
+                bpm,
+                time_signature,
+                duration_sec,
+                bitrate,
+                dry_run,
+                org,
+                server,
+                json,
+            })
+            .await?;
+        }
     }
+    Ok(())
+}
+
+// ── song ingest (stems → attachments + frontmatter) ───────────────────
+
+struct IngestArgs {
+    note: String,
+    stems: PathBuf,
+    artist: Option<String>,
+    key: Option<String>,
+    bpm: Option<f64>,
+    time_signature: Option<String>,
+    duration_sec: Option<f64>,
+    bitrate: String,
+    dry_run: bool,
+    org: Option<String>,
+    server: Option<String>,
+    json: bool,
+}
+
+/// One stem discovered in the `--stems` dir.
+struct IngestStem {
+    /// Display name (filename minus extension and any `NN - ` index).
+    name: String,
+    /// Instrument group (keyword heuristic — same table the demo
+    /// export / app seeding uses).
+    group: Option<&'static str>,
+    /// Click/cue/count/guide stems start muted.
+    default_muted: bool,
+    path: PathBuf,
+    /// Already Opus/ogg — upload as-is, no transcode.
+    passthrough: bool,
+}
+
+async fn ingest_song_stems(args: IngestArgs) -> eyre::Result<()> {
+    use attachments_proto::{AttachmentServiceClient, CompleteUpload, InitiateUpload};
+
+    let active = crate::org_ctx::resolve_active(args.org.as_deref())?;
+    let org_slug = active.root.slug().to_string();
+    let note_rel = args.note.trim_start_matches('/').to_string();
+    if !note_rel.ends_with(".md") {
+        return Err(errors::usage("song ingest")
+            .cause(format!("`{note_rel}` is not a .md note path"))
+            .hint("pass the vault-relative note path, e.g. Songs/Praise.md")
+            .report());
+    }
+    let note_path = active.root.vault_dir().join(&note_rel);
+
+    let found = discover_stems(&args.stems)?;
+    if found.is_empty() {
+        return Err(errors::usage("song ingest")
+            .cause(format!("no audio files in {}", args.stems.display()))
+            .report());
+    }
+
+    if args.dry_run {
+        println!("would ingest {} stems into `{note_rel}`:", found.len());
+        for s in &found {
+            println!(
+                "  {:<24} group={:<10} muted={} {}{}",
+                s.name,
+                s.group.unwrap_or("-"),
+                s.default_muted,
+                s.path.display(),
+                if s.passthrough { "" } else { "  (→ opus)" },
+            );
+        }
+        return Ok(());
+    }
+
+    // Transcode into a temp dir (Opus ~96k streams + seeks well and
+    // keeps 20-36-stem songs small); passthrough for already-Opus.
+    let tmp = tempfile::tempdir().map_err(|e| eyre::eyre!("tempdir: {e}"))?;
+    let mut uploads: Vec<(usize, PathBuf)> = Vec::with_capacity(found.len());
+    for (i, s) in found.iter().enumerate() {
+        if s.passthrough {
+            uploads.push((i, s.path.clone()));
+            continue;
+        }
+        let dst = tmp.path().join(format!("{i:02}.ogg"));
+        transcode_opus(&s.path, &dst, &args.bitrate)?;
+        uploads.push((i, dst));
+    }
+
+    // Duration: explicit flag, else ffprobe the first stem.
+    let duration_sec = match args.duration_sec {
+        Some(d) => Some(d),
+        None => probe_duration(&uploads[0].1),
+    };
+
+    // Upload each transcoded stem: initiate → PUT → complete.
+    let client =
+        crate::establish_client::<AttachmentServiceClient>(args.server.clone(), &org_slug).await?;
+    let http = reqwest::Client::new();
+    let http_base = crate::resolve_server_http_base(args.server.as_deref());
+    let mut hashes: Vec<String> = Vec::with_capacity(uploads.len());
+    for (i, file) in &uploads {
+        let stem = &found[*i];
+        let bytes = std::fs::read(file).map_err(|e| eyre::eyre!("read {}: {e}", file.display()))?;
+        let filename = format!("{}.ogg", slug(&stem.name));
+        let ticket = client
+            .initiate_upload(InitiateUpload {
+                doc_id: note_rel.clone(),
+                filename,
+                mime_type: "audio/ogg".to_string(),
+                size_bytes: bytes.len() as u64,
+            })
+            .await
+            .map_err(|e| eyre::eyre!("initiate_upload `{}`: {e:?}", stem.name))?;
+        let put_url = absolutize_blob_url(&ticket.upload_url, &http_base);
+        let resp = http
+            .put(&put_url)
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|e| eyre::eyre!("PUT {put_url}: {e}"))?;
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(eyre::eyre!("PUT `{}`: HTTP {status}: {body}", stem.name));
+        }
+        let content_hash = body.trim().to_string();
+        client
+            .complete_upload(CompleteUpload {
+                upload_id: ticket.upload_id,
+                content_hash: content_hash.clone(),
+            })
+            .await
+            .map_err(|e| eyre::eyre!("complete_upload `{}`: {e:?}", stem.name))?;
+        println!("uploaded {:<24} {}", stem.name, &content_hash[..16.min(content_hash.len())]);
+        hashes.push(content_hash);
+    }
+
+    // Write the note frontmatter (scalars only when provided; the
+    // stems block always replaced wholesale).
+    let mut scalars: Vec<(&str, String)> = vec![("type", "song".into())];
+    if let Some(v) = &args.artist {
+        scalars.push(("artist", v.clone()));
+    }
+    if let Some(v) = &args.key {
+        scalars.push(("key", v.clone()));
+    }
+    if let Some(v) = args.bpm {
+        scalars.push(("bpm", format!("{v}")));
+    }
+    if let Some(v) = &args.time_signature {
+        scalars.push(("time_signature", format!("\"{v}\"")));
+    }
+    if let Some(v) = duration_sec {
+        scalars.push(("duration_sec", format!("{v:.3}")));
+    }
+    let mut stems_yaml = String::from("stems:\n");
+    for (s, hash) in found.iter().zip(&hashes) {
+        stems_yaml.push_str(&format!("  - name: \"{}\"\n", s.name));
+        if let Some(g) = s.group {
+            stems_yaml.push_str(&format!("    group: {g}\n"));
+        }
+        if s.default_muted {
+            stems_yaml.push_str("    default_muted: true\n");
+        }
+        stems_yaml.push_str(&format!("    content_hash: {hash}\n"));
+    }
+    upsert_note_frontmatter(&note_path, &scalars, &stems_yaml)?;
+
+    if args.json {
+        return emit_json(&serde_json::json!({
+            "note": note_rel,
+            "stems": found
+                .iter()
+                .zip(&hashes)
+                .map(|(s, h)| serde_json::json!({
+                    "name": s.name,
+                    "group": s.group,
+                    "default_muted": s.default_muted,
+                    "content_hash": h,
+                }))
+                .collect::<Vec<_>>(),
+            "duration_sec": duration_sec,
+        }));
+    }
+    println!(
+        "wrote {} stems into `{}` frontmatter",
+        hashes.len(),
+        note_path.display()
+    );
+    Ok(())
+}
+
+/// Scan a directory for stem audio files, sorted by filename.
+fn discover_stems(dir: &Path) -> eyre::Result<Vec<IngestStem>> {
+    const AUDIO_EXT: &[&str] = &["wav", "aif", "aiff", "flac", "mp3", "m4a", "ogg", "opus"];
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| eyre::eyre!("read {}: {e}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| AUDIO_EXT.contains(&e.to_ascii_lowercase().as_str()))
+        })
+        .collect();
+    files.sort();
+    Ok(files
+        .into_iter()
+        .map(|path| {
+            let base = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            // Strip a leading `NN - ` (or `NN.` / `NN_`) track index.
+            let name = base
+                .split_once(" - ")
+                .filter(|(idx, _)| idx.trim().chars().all(|c| c.is_ascii_digit()))
+                .map(|(_, rest)| rest.trim().to_string())
+                .unwrap_or(base);
+            let group = stem_group_for(&name);
+            let default_muted = {
+                let hay = format!("{} {}", group.unwrap_or(""), name).to_ascii_lowercase();
+                ["click", "guide", "cue", "count"].iter().any(|k| hay.contains(k))
+            };
+            let passthrough = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "ogg" | "opus"));
+            IngestStem {
+                name,
+                group,
+                default_muted,
+                path,
+                passthrough,
+            }
+        })
+        .collect())
+}
+
+/// Instrument-group keyword heuristic — the same table the demo export
+/// and the app's session-engine seeding use.
+fn stem_group_for(name: &str) -> Option<&'static str> {
+    let n = name.to_ascii_lowercase();
+    let any = |ks: &[&str]| ks.iter().any(|k| n.contains(k));
+    if any(&["click", "cue", "guide"]) {
+        Some("Guide")
+    } else if any(&["loop"]) {
+        Some("Tracks")
+    } else if any(&["bass"]) {
+        Some("Bass")
+    } else if any(&["drum", "perc"]) {
+        Some("Drums")
+    } else if any(&["organ", "key", "piano", "rhodes", "synth", "pad"]) {
+        Some("Keys")
+    } else if any(&["guitar", "gtr", "acoustic", "electric"]) {
+        Some("Guitars")
+    } else if any(&["vocal", "vox", "bgv", "choir"]) {
+        Some("Vocals")
+    } else if any(&["sax", "horn", "brass", "string", "orch"]) {
+        Some("Orchestra")
+    } else if any(&["fx"]) {
+        Some("FX")
+    } else {
+        None
+    }
+}
+
+fn ffmpeg_bin() -> String {
+    std::env::var("FTS_FFMPEG").unwrap_or_else(|_| "ffmpeg".to_string())
+}
+
+fn transcode_opus(src: &Path, dst: &Path, bitrate: &str) -> eyre::Result<()> {
+    let status = std::process::Command::new(ffmpeg_bin())
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(src)
+        .args(["-c:a", "libopus", "-b:a", bitrate])
+        .arg(dst)
+        .status()
+        .map_err(|e| {
+            errors::usage("song ingest")
+                .cause(format!("run ffmpeg: {e}"))
+                .hint("install ffmpeg or set FTS_FFMPEG to its path")
+                .report()
+        })?;
+    if !status.success() {
+        return Err(eyre::eyre!("ffmpeg failed on {}", src.display()));
+    }
+    Ok(())
+}
+
+/// Duration of an audio file in seconds via ffprobe. Best-effort.
+fn probe_duration(path: &Path) -> Option<f64> {
+    let ffprobe = std::env::var("FTS_FFPROBE").unwrap_or_else(|_| "ffprobe".to_string());
+    let out = std::process::Command::new(ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path)
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// An upload/download URL from the server may be relative (no
+/// `TASK_SERVER_PUBLIC_URL` configured); resolve it against the HTTP
+/// base derived from the vox server URL.
+fn absolutize_blob_url(url: &str, http_base: &str) -> String {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        url.to_string()
+    } else {
+        format!("{http_base}{url}")
+    }
+}
+
+/// Create or update the note's leading `---` frontmatter: set the given
+/// scalar keys (replacing existing lines) and replace any existing
+/// `stems:` block with `stems_yaml` (which must be a full `stems:`
+/// block, trailing newline included).
+fn upsert_note_frontmatter(
+    note_path: &Path,
+    scalars: &[(&str, String)],
+    stems_yaml: &str,
+) -> eyre::Result<()> {
+    let existing = std::fs::read_to_string(note_path).unwrap_or_default();
+    let (front, body) = match existing.strip_prefix("---") {
+        Some(rest) => match rest.split_once("\n---") {
+            Some((f, b)) => (f.to_string(), b.trim_start_matches('\n').to_string()),
+            None => (String::new(), existing.clone()),
+        },
+        None => (String::new(), existing.clone()),
+    };
+
+    // Drop lines we're about to re-set + any previous stems block.
+    let mut kept: Vec<String> = Vec::new();
+    let mut in_stems = false;
+    for line in front.lines() {
+        if line.trim().is_empty() && kept.is_empty() {
+            continue;
+        }
+        let indented = line.starts_with(' ') || line.starts_with('\t');
+        if in_stems && indented {
+            continue;
+        }
+        in_stems = false;
+        if line.trim_end() == "stems:" {
+            in_stems = true;
+            continue;
+        }
+        let key = line.split_once(':').map(|(k, _)| k.trim());
+        if key.is_some_and(|k| scalars.iter().any(|(sk, _)| *sk == k)) {
+            continue;
+        }
+        kept.push(line.to_string());
+    }
+
+    let mut front_out = String::new();
+    for (k, v) in scalars {
+        front_out.push_str(&format!("{k}: {v}\n"));
+    }
+    for line in kept {
+        front_out.push_str(&line);
+        front_out.push('\n');
+    }
+    front_out.push_str(stems_yaml);
+
+    let body = if body.is_empty() {
+        let title = note_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        format!("\n# {title}\n")
+    } else {
+        format!("\n{body}")
+    };
+    if let Some(parent) = note_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| eyre::eyre!("mkdir {}: {e}", parent.display()))?;
+    }
+    std::fs::write(note_path, format!("---\n{front_out}---\n{body}"))
+        .map_err(|e| eyre::eyre!("write {}: {e}", note_path.display()))?;
     Ok(())
 }
 

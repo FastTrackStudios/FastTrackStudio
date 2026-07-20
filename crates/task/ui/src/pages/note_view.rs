@@ -223,10 +223,14 @@ pub(crate) fn NoteView(
     let is_base = path
         .rsplit_once('.')
         .is_some_and(|(_, e)| e.eq_ignore_ascii_case("base"));
-    let song_slug_value = if is_song {
-        song_slug_from(&session.state.peek().doc.to_string(), basename_of(&path))
+    let (song_slug_value, song_front_value) = if is_song {
+        let doc = session.state.peek().doc.to_string();
+        (
+            song_slug_from(&doc, basename_of(&path)),
+            crate::pages::vault::song_front_from(&doc),
+        )
     } else {
-        String::new()
+        (String::new(), Default::default())
     };
     let setlist_songs_value = if is_setlist {
         setlist_songs_from(&session.state.peek().doc.to_string())
@@ -361,7 +365,12 @@ pub(crate) fn NoteView(
                     }
                 } else {
                     if is_song {
-                        crate::pages::song_session::SongView { slug: song_slug_value.clone() }
+                        crate::pages::song_session::SongView {
+                            slug: song_slug_value.clone(),
+                            org: home.read().clone(),
+                            title: basename_of(&path).to_string(),
+                            front: song_front_value.clone(),
+                        }
                     }
                     if is_setlist {
                         crate::pages::setlist_session::SetlistPlayer { songs: setlist_songs_value.clone() }

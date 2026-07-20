@@ -10254,19 +10254,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fts-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "eyre",
- "task-server",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "fts-site"
 version = "0.1.0"
 dependencies = [
@@ -26481,6 +26468,7 @@ dependencies = [
  "agent-wiki",
  "architect",
  "architect-auth",
+ "attachments-proto",
  "base64 0.22.1",
  "body",
  "chrono",
@@ -26525,6 +26513,7 @@ dependencies = [
  "song",
  "task",
  "task-server",
+ "tempfile",
  "threads",
  "timer",
  "timer-proto",
@@ -28413,6 +28402,7 @@ dependencies = [
  "agent-proto",
  "architect",
  "architect-auth",
+ "attachments-proto",
  "auth-proto",
  "chrono",
  "contacts-proto",

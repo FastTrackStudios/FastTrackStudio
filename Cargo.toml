@@ -256,7 +256,6 @@ members = [
     "crates/patchbay/ui",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/fasttrackstudio",
-    "apps/fts-server",
     "apps/patchbay",
     "apps/installer",
     "apps/fts-cli",
