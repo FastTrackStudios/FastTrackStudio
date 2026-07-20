@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use patchbay_proto::{GraphSnapshot, MediaKind, PortDirection, PwNode, PwPort};
 
-pub const CARD_W: f64 = 280.0;
+pub const CARD_W: f64 = 360.0;
 pub const ROW_H: f64 = 22.0;
 pub const HEADER_H: f64 = 34.0;
 pub const CARD_GAP: f64 = 18.0;
@@ -98,6 +98,27 @@ pub fn strip_channel_prefix(label: &str, chan: Option<u64>) -> String {
     } else {
         stripped.to_string()
     }
+}
+
+/// Position rows as TWO side-by-side stacks — inputs down the left,
+/// outputs down the right, independently — and return the card height
+/// (header + the LONGER side, not the sum: half-height duplex cards).
+fn assign_row_positions(rows: &mut [PortRow]) -> f64 {
+    let (mut n_in, mut n_out) = (0usize, 0usize);
+    for row in rows.iter_mut() {
+        let idx = match row.direction {
+            PortDirection::Input => {
+                n_in += 1;
+                n_in - 1
+            }
+            PortDirection::Output => {
+                n_out += 1;
+                n_out - 1
+            }
+        };
+        row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
+    }
+    HEADER_H + n_in.max(n_out) as f64 * ROW_H + 8.0
 }
 
 pub struct CardLayout {
@@ -455,14 +476,8 @@ pub fn compute_layout(
         let make_card = |rows: Vec<PortRow>, col: usize, key: String| {
             let collapsed = filters.collapsed[col];
             let mut rows = rows;
-            for (idx, row) in rows.iter_mut().enumerate() {
-                row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
-            }
-            let h = if collapsed {
-                HEADER_H + 6.0
-            } else {
-                HEADER_H + rows.len() as f64 * ROW_H + 8.0
-            };
+            let full_h = assign_row_positions(&mut rows);
+            let h = if collapsed { HEADER_H + 6.0 } else { full_h };
             CardLayout {
                 node: node.clone(),
                 key,
@@ -539,11 +554,9 @@ pub fn compute_layout(
             let stream = columns[1].remove(stream_idx);
             let sink = &mut columns[2][sink_idx];
             sink.rows.extend(stream.rows);
-            for (idx, row) in sink.rows.iter_mut().enumerate() {
-                row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
-            }
+            let full_h = assign_row_positions(&mut sink.rows);
             if !sink.collapsed {
-                sink.h = HEADER_H + sink.rows.len() as f64 * ROW_H + 8.0;
+                sink.h = full_h;
             }
         }
     }
@@ -900,6 +913,40 @@ mod stereo_pairs {
         assert!(card.rows.iter().any(|r| r.direction == PortDirection::Output));
         // Forwarder output ports anchor on the sink card's right edge.
         assert_eq!(lay.anchors[&20].0, card.x + CARD_W);
+    }
+
+    #[test]
+    fn duplex_cards_stack_sides_independently() {
+        // 3 inputs + 1 output: height follows the LONGER side (3 rows),
+        // and each side's rows start at the top of the card.
+        let mut ports = vec![
+            port(1, "in_a"),
+            port(2, "in_b"),
+            port(3, "in_c"),
+        ];
+        ports.push(PwPort {
+            id: 4,
+            node_id: 1,
+            name: "out_a".into(),
+            direction: PortDirection::Output,
+            media_kind: MediaKind::Audio,
+        });
+        let graph = GraphSnapshot { nodes: vec![node()], ports, links: Vec::new() };
+        let aliases = HashMap::new();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+            collapsed: [false; 3],
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        let card = &lay.cards[0];
+        assert_eq!(card.h, HEADER_H + 3.0 * ROW_H + 8.0, "height = longer side");
+        let first_in = card.rows.iter().find(|r| r.direction == PortDirection::Input).unwrap();
+        let first_out = card.rows.iter().find(|r| r.direction == PortDirection::Output).unwrap();
+        assert_eq!(first_in.y, first_out.y, "both sides start at the card top");
     }
 
     #[test]

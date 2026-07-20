@@ -329,6 +329,7 @@ pub fn GraphCanvas() -> Element {
                                     PortDirection::Input => (card.x, card.y + r.y),
                                     PortDirection::Output => (card.x + CARD_W, card.y + r.y),
                                 },
+                                y: r.y,
                                 aliased: aliases
                                     .contains_key(&format!("{}:{}", card.node.name, r.label)),
                                 label: if r.pair {
@@ -395,6 +396,9 @@ struct RowProps {
     pair_key: Option<String>,
     /// World coordinates of this row's cable edge (drag start point).
     anchor: (f64, f64),
+    /// Row-center y within the card (independent per side — inputs
+    /// stack down the left half, outputs down the right).
+    y: f64,
     ports: Vec<u32>,
     group_key: Option<String>,
     expanded: bool,
@@ -417,13 +421,21 @@ fn NodeCard(
     let armed = ARMED_OUTPUTS.read().clone();
     let inspected = *SELECTED_NODE.read() == Some(node_id);
     let handle = state::use_patchbay();
+    // Duplex cards run inputs and outputs as SIDE-BY-SIDE half-width
+    // lanes; single-direction cards keep the full width.
+    let both = rows.iter().any(|r| r.direction == PortDirection::Input)
+        && rows.iter().any(|r| r.direction == PortDirection::Output);
     let header_drag_name = node_name.clone();
     let header_drop_name = node_name.clone();
     let drop_handle = handle.clone();
 
     rsx! {
         div {
-            class: if inspected { "node-card inspected" } else { "node-card" },
+            class: format!(
+                "node-card{}{}",
+                if inspected { " inspected" } else { "" },
+                if both && !collapsed { " duplex" } else { "" },
+            ),
             style: "left:{x}px;top:{y}px;width:{CARD_W}px;height:{h}px;",
             onmouseenter: move |_| *state::HOVERED_NODE.write() = Some(node_id),
             onmouseleave: move |_| {
@@ -535,11 +547,18 @@ fn NodeCard(
                             }
                         }
                     });
+                    let (lane_left, lane_width) = match (row.direction, both) {
+                        (PortDirection::Input, true) => ("0%", "50%"),
+                        (PortDirection::Output, true) => ("50%", "50%"),
+                        _ => ("0%", "100%"),
+                    };
+                    let lane_top = row.y - ROW_H / 2.0;
                     rsx! {
                         div {
                             key: "{i}",
                             class: "{classes}",
-                            style: "height:{ROW_H}px;",
+                            style: "position:absolute;top:{lane_top}px;left:{lane_left};\
+                                    width:{lane_width};height:{ROW_H}px;",
                             title: "{tooltip}",
                             // Drag from any port row (single, pair, or
                             // collapsed bank) to a row on the other side.

@@ -60,6 +60,11 @@
   overflow: hidden;
 }
 .node-card.inspected { border-color: #4a90d9; }
+/* Duplex cards: inputs lane left, outputs lane right, thin divider. */
+.node-card.duplex::after {
+  content: ""; position: absolute; left: 50%; top: 34px; bottom: 4px;
+  width: 1px; background: #262c35; pointer-events: none;
+}
 .node-header {
   height: 34px; padding: 0 10px;
   display: flex; flex-direction: column; justify-content: center;
