@@ -21890,6 +21890,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "saturate"
+version = "0.1.0"
+dependencies = [
+ "saturate-dsp",
+]
+
+[[package]]
+name = "saturate-dsp"
+version = "0.1.0"
+dependencies = [
+ "approx",
+]
+
+[[package]]
 name = "scan_fmt"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

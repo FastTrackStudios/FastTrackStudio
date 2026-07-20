@@ -187,6 +187,8 @@ members = [
     # the -dsp crates are internal (like signal-proto under the facade).
     # The per-FX -ui/-profiles crates + apps/ plugin binaries moved along
     # inside each FX dir; they stay implicit members via path deps.
+    "features/fx/saturate/saturate",
+    "features/fx/saturate/saturate-dsp",
     "features/fx/eq/eq",
     "features/fx/eq/eq-dsp",
     "features/fx/eq/eq-profiles",
@@ -506,6 +508,8 @@ signal-synth-rig = { path = "features/rigs/synth/rig" }
 
 # ── features/fx — built-in FX (wave 4) ────────────────────────────────
 # Facade crates — the public FX deps (downstream uses these, not `*-dsp`).
+saturate = { path = "features/fx/saturate/saturate" }
+saturate-dsp = { path = "features/fx/saturate/saturate-dsp" }
 eq = { path = "features/fx/eq/eq" }
 # The full Pro-Q EQ editor. Core (graph model / response / SVG / interaction)
 # is wasm-portable; the vello/nice-plug editor is behind its `native` feature.
