@@ -20,6 +20,29 @@ pub trait ObjectStore: Send + Sync + 'static {
     /// follows when files get large.
     async fn get_blob(&self, content_hash: &str) -> Result<Vec<u8>, AttachmentError>;
 
+    /// Size of the blob in bytes. Default falls back to reading the
+    /// whole blob; backends should override with a metadata lookup.
+    async fn blob_len(&self, content_hash: &str) -> Result<u64, AttachmentError> {
+        Ok(self.get_blob(content_hash).await?.len() as u64)
+    }
+
+    /// Fetch `len` bytes starting at `start` (clamped to the blob's
+    /// end). Serves HTTP Range requests so `<audio>` seek doesn't
+    /// pull the whole file. Default reads everything and slices;
+    /// backends should override with a seek + bounded read.
+    async fn get_blob_range(
+        &self,
+        content_hash: &str,
+        start: u64,
+        len: u64,
+    ) -> Result<Vec<u8>, AttachmentError> {
+        let all = self.get_blob(content_hash).await?;
+        let total = all.len() as u64;
+        let s = start.min(total) as usize;
+        let e = start.saturating_add(len).min(total) as usize;
+        Ok(all[s..e].to_vec())
+    }
+
     async fn blob_exists(&self, content_hash: &str) -> Result<bool, AttachmentError>;
 }
 
@@ -80,6 +103,53 @@ impl ObjectStore for LocalFsStore {
                 path.display()
             ))),
         }
+    }
+
+    async fn blob_len(&self, content_hash: &str) -> Result<u64, AttachmentError> {
+        let path = self.path_for(content_hash);
+        match tokio::fs::metadata(&path).await {
+            Ok(m) => Ok(m.len()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(AttachmentError::NotFound),
+            Err(e) => Err(AttachmentError::Internal(format!(
+                "stat {}: {e}",
+                path.display()
+            ))),
+        }
+    }
+
+    async fn get_blob_range(
+        &self,
+        content_hash: &str,
+        start: u64,
+        len: u64,
+    ) -> Result<Vec<u8>, AttachmentError> {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        let path = self.path_for(content_hash);
+        let mut file = match tokio::fs::File::open(&path).await {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(AttachmentError::NotFound);
+            }
+            Err(e) => {
+                return Err(AttachmentError::Internal(format!(
+                    "open {}: {e}",
+                    path.display()
+                )));
+            }
+        };
+        let io_err =
+            |e: std::io::Error| AttachmentError::Internal(format!("read {}: {e}", path.display()));
+        let total = file.metadata().await.map_err(io_err)?.len();
+        let start = start.min(total);
+        let len = len.min(total - start);
+        file.seek(std::io::SeekFrom::Start(start))
+            .await
+            .map_err(io_err)?;
+        let mut buf = vec![0u8; usize::try_from(len).map_err(|e| {
+            AttachmentError::Internal(format!("range too large for this platform: {e}"))
+        })?];
+        file.read_exact(&mut buf).await.map_err(io_err)?;
+        Ok(buf)
     }
 
     async fn blob_exists(&self, content_hash: &str) -> Result<bool, AttachmentError> {

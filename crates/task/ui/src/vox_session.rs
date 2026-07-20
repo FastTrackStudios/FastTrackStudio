@@ -79,18 +79,24 @@ pub fn vox_url() -> String {
     }
 }
 
-/// Derive `ws(s)://<host>/vox` from the page's own origin. `None` on
-/// localhost (dev — the static server isn't the vox server) or when
-/// there's no window (tests, workers).
+/// Derive `ws(s)://<host>/vox` from the page's own origin. `None` only
+/// when there's no window (tests, workers) or a non-http(s) origin.
+///
+/// The FastTrackStudio / single-binary deploy serves the app AND vox from
+/// one origin (the server, or an ingress routing `/vox`+`/org`+`/.well-known`
+/// to it), so the page's own host is always the vox host — including on
+/// localhost and LAN/Tailscale hosts. The separate-static-server dev flow
+/// bakes `TASK_VOX_URL_WEB` (checked before this in `vox_url`), so it is
+/// unaffected.
 #[cfg(target_arch = "wasm32")]
 fn same_origin_vox_url() -> Option<String> {
     let location = web_sys::window()?.location();
     let host = location.host().ok()?; // host[:port]
-    let hostname = location.hostname().ok()?;
-    if hostname == "localhost" || hostname == "127.0.0.1" || hostname == "[::1]" {
+    let protocol = location.protocol().ok()?;
+    if protocol != "http:" && protocol != "https:" {
         return None;
     }
-    let scheme = match location.protocol().ok()?.as_str() {
+    let scheme = match protocol.as_str() {
         "https:" => "wss",
         _ => "ws",
     };

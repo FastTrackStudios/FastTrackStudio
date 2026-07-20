@@ -18,9 +18,9 @@ use crate::engine::{self, Command, EngineHandle};
 use crate::presets::PresetStore;
 use crate::store::GraphStore;
 
-/// The headless patchbay backend: PipeWire engine thread + graph mirror
-/// + presets/aliases + the RPC surface. Cheap to clone; all state is
-/// shared behind the `Arc`.
+/// The headless patchbay backend: PipeWire engine thread, graph
+/// mirror, presets/aliases, and the RPC surface. Cheap to clone; all
+/// state is shared behind the `Arc`.
 #[derive(Clone)]
 pub struct PatchbayBackend {
     inner: Arc<Inner>,

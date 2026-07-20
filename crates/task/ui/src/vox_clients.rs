@@ -341,6 +341,14 @@ pub async fn vault_client(slug: &str) -> Result<vault_proto::VaultSyncClient, St
     establish_for::<vault_proto::VaultSyncClient>(slug).await
 }
 
+/// An org's `AttachmentServiceClient` — signed upload tickets +
+/// short-lived download URLs for content-addressed blobs (song stems).
+pub async fn attachments_client(
+    slug: &str,
+) -> Result<attachments_proto::AttachmentServiceClient, String> {
+    establish_for::<attachments_proto::AttachmentServiceClient>(slug).await
+}
+
 /// An org's `VaultGraphClient` — link-graph reads (backlinks /
 /// links / orphans / unresolved / deadends / tags) for the vault
 /// page's backlinks panel and the editor's tag candidates.

@@ -3686,6 +3686,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "724d27a0ee38b700e5e164350e79aba601a0db673ac47fce1cb74c3e38864036"
 
 [[package]]
+name = "collection"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "collection-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
+ "vault-live",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "collection-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "links-proto",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "color"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9357,6 +9387,7 @@ dependencies = [
  "architect",
  "axum",
  "base64 0.22.1",
+ "collection-proto",
  "cpal 0.18.1",
  "daw",
  "daw-audio-io",
@@ -10154,7 +10185,9 @@ name = "fts-site"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "collection-proto",
  "console_error_panic_hook",
+ "daw-proto",
  "dioxus",
  "editor",
  "editor-keyflow",
@@ -10173,12 +10206,16 @@ dependencies = [
  "peniko 0.6.1",
  "serde",
  "serde_json",
+ "session-proto",
+ "session-ui",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "tracing-wasm",
  "uuid 1.23.4",
  "view-knowledge-graph",
+ "vox-core",
+ "vox-websocket",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -24682,6 +24719,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "song"
+version = "0.1.0"
+dependencies = [
+ "attachments-proto",
+ "serde",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid 1.23.4",
+]
+
+[[package]]
 name = "sorted-index-buffer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -26301,10 +26352,12 @@ dependencies = [
  "agent-wiki",
  "architect",
  "architect-auth",
+ "attachments-proto",
  "base64 0.22.1",
  "body",
  "chrono",
  "clap",
+ "collection-proto",
  "cookbook",
  "cooklang",
  "cycle",
@@ -26341,8 +26394,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.10.9",
+ "song",
  "task",
  "task-server",
+ "tempfile",
  "threads",
  "timer",
  "timer-proto",
@@ -26385,6 +26440,8 @@ dependencies = [
  "base64 0.22.1",
  "body",
  "chrono",
+ "collection",
+ "collection-proto",
  "contacts",
  "contacts-proto",
  "cookbook",
@@ -28239,17 +28296,20 @@ dependencies = [
  "agent-proto",
  "architect",
  "architect-auth",
+ "attachments-proto",
  "auth-proto",
  "chrono",
  "contacts-proto",
  "cookbook-proto",
  "crdt",
  "cycle",
+ "daw-proto",
  "dioxus",
  "dioxus-icons",
  "dioxus-router",
  "editor",
  "editor-crdt",
+ "editor-keyflow",
  "email-proto",
  "fake",
  "finance-proto",
@@ -28265,6 +28325,7 @@ dependencies = [
  "input",
  "inventory-proto",
  "js-sys",
+ "keyflow",
  "links-proto",
  "locations-proto",
  "mealplan-proto",
@@ -28282,6 +28343,8 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "session-proto",
+ "session-ui",
  "spaced-repetition",
  "tag-proto",
  "task",
