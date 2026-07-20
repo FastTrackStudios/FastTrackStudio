@@ -51,6 +51,7 @@ fn task_server_base() -> String {
     // Architect same-origin: the host that served this page also serves vox
     // (prod: the fasttrackstudio.app ingress; dev: dx proxies the path to
     // fts-server). No second port for the browser to reach.
+    #[cfg(target_arch = "wasm32")]
     if let Some(w) = web_sys::window() {
         let loc = w.location();
         if let (Ok(proto), Ok(host)) = (loc.protocol(), loc.host()) {
