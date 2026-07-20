@@ -258,7 +258,7 @@ members = [
     "apps/fasttrackstudio",
     "apps/patchbay",
     "apps/installer",
-    "apps/fts-cli",
+    "apps/fasttrackstudio/cli",
     "apps/site",
     # ── apps/plugins — CLAP/VST3 plugin shells (nice-plug cdylibs) ─────
     "apps/plugins/level",
