@@ -153,6 +153,14 @@ mod linux {
         _listener: LinkListener,
     }
 
+    /// Node proxies stay bound because registry globals expose only a
+    /// SUBSET of node props — node.group, application.name and
+    /// application.icon-name arrive via the bound node's info events.
+    struct NodeProxy {
+        _proxy: pipewire::node::Node,
+        _listener: pipewire::node::NodeListener,
+    }
+
     /// One connection lifetime: connect, mirror, serve commands until
     /// the daemon goes away (core error quits the loop). Ok(()) =
     /// connection dropped after being up; Err = couldn't connect.
@@ -189,6 +197,8 @@ mod linux {
         };
 
         let link_proxies: Rc<RefCell<HashMap<u32, LinkProxy>>> =
+            Rc::new(RefCell::new(HashMap::new()));
+        let node_proxies: Rc<RefCell<HashMap<u32, NodeProxy>>> =
             Rc::new(RefCell::new(HashMap::new()));
 
         // ── Inbound commands ────────────────────────────────────────
@@ -269,13 +279,21 @@ mod linux {
             let events_add = events.clone();
             let registry_bind = registry.clone();
             let proxies_add = link_proxies.clone();
+            let node_proxies_add = node_proxies.clone();
             let store_rm = store.clone();
             let events_rm = events.clone();
             let proxies_rm = link_proxies.clone();
+            let node_proxies_rm = node_proxies.clone();
             registry
                 .add_listener_local()
                 .global(move |global| match global.type_ {
-                    ObjectType::Node => handle_node(global, &store_add, &events_add),
+                    ObjectType::Node => handle_node(
+                        global,
+                        &registry_bind,
+                        &node_proxies_add,
+                        &store_add,
+                        &events_add,
+                    ),
                     ObjectType::Port => handle_port(global, &store_add, &events_add),
                     ObjectType::Link => handle_link(
                         global,
@@ -304,6 +322,7 @@ mod linux {
                         }
                     };
                     proxies_rm.borrow_mut().remove(&id);
+                    node_proxies_rm.borrow_mut().remove(&id);
                     if let Some(ev) = removed {
                         let _ = events_rm.send(ev);
                     }
@@ -331,12 +350,10 @@ mod linux {
         }
     }
 
-    fn handle_node(
-        global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
-        store: &Arc<RwLock<GraphStore>>,
-        events: &Sender<GraphEvent>,
-    ) {
-        let Some(props) = global.props else { return };
+    /// PwNode from a props dict — used for both the registry global's
+    /// prop subset (immediate) and the bound node's full info (refines
+    /// with node.group / application.* moments later).
+    fn build_node(id: u32, props: &pipewire::spa::utils::dict::DictRef) -> PwNode {
         let name = props.get("node.name").unwrap_or_default().to_string();
         let label = props
             .get("node.nick")
@@ -345,13 +362,10 @@ mod linux {
             .unwrap_or_default()
             .to_string();
         let media_class = props.get("media.class").unwrap_or_default().to_string();
-        // The registry's global props are a SUBSET of the node's props —
-        // custom keys like patchbay.virtual don't reach them (verified
-        // live), so ownership rides on the node-name prefix we control.
         let virtual_sink =
             props.get("patchbay.virtual") == Some("1") || node_name_is_virtual(&name);
-        let node = PwNode {
-            id: global.id,
+        PwNode {
+            id,
             name,
             label,
             media_kind: media_kind(&media_class),
@@ -363,10 +377,65 @@ mod linux {
                 .or_else(|| props.get("application.icon_name"))
                 .unwrap_or_default()
                 .to_string(),
+            group: props.get("node.group").unwrap_or_default().to_string(),
             virtual_sink,
-        };
+        }
+    }
+
+    fn handle_node(
+        global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
+        registry: &pipewire::registry::RegistryRc,
+        proxies: &Rc<RefCell<HashMap<u32, NodeProxy>>>,
+        store: &Arc<RwLock<GraphStore>>,
+        events: &Sender<GraphEvent>,
+    ) {
+        let Some(props) = global.props else { return };
+        let node = build_node(global.id, props);
         store.write().nodes.insert(global.id, node.clone());
         let _ = events.send(GraphEvent::NodeAdded(node));
+
+        // Bind for full props (node.group, application.*) — the info
+        // event re-emits NodeAdded as an idempotent update when the
+        // full picture differs from the registry subset.
+        let proxy: pipewire::node::Node = match registry.bind(global) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(id = global.id, "bind node failed: {e}");
+                return;
+            }
+        };
+        let store = store.clone();
+        let events = events.clone();
+        let listener = proxy
+            .add_listener_local()
+            .info(move |info| {
+                let Some(props) = info.props() else { return };
+                let node = build_node(info.id(), props);
+                let changed = {
+                    let mut s = store.write();
+                    // Node may already be gone (remove raced the info).
+                    let Some(existing) = s.nodes.get_mut(&node.id) else {
+                        return;
+                    };
+                    if *existing == node {
+                        false
+                    } else {
+                        *existing = node.clone();
+                        true
+                    }
+                };
+                if changed {
+                    let _ = events.send(GraphEvent::NodeAdded(node));
+                }
+            })
+            .register();
+        proxies.borrow_mut().insert(
+            global.id,
+            NodeProxy {
+                _proxy: proxy,
+                _listener: listener,
+            },
+        );
     }
 
     fn handle_port(

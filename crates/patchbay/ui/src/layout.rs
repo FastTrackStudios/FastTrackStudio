@@ -511,6 +511,43 @@ pub fn compute_layout(
         }
     }
 
+    // Loopback passthroughs: a Stream/Output node sharing node.group
+    // with an Audio/Sink is that sink's forwarder half — its output
+    // rows belong ON the sink's card (Outputs column), not floating in
+    // Applications ("System Audio → Inferno TX 97/98").
+    if filters.tab == MediaKind::Audio {
+        let moved: Vec<(usize, usize)> = {
+            let sink_groups: HashMap<&str, usize> = columns[2]
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| !c.node.group.is_empty())
+                .map(|(i, c)| (c.node.group.as_str(), i))
+                .collect();
+            columns[1]
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    c.node.media_class.starts_with("Stream/Output")
+                        && !c.node.group.is_empty()
+                })
+                .filter_map(|(i, c)| {
+                    sink_groups.get(c.node.group.as_str()).map(|&s| (i, s))
+                })
+                .collect()
+        };
+        for (stream_idx, sink_idx) in moved.into_iter().rev() {
+            let stream = columns[1].remove(stream_idx);
+            let sink = &mut columns[2][sink_idx];
+            sink.rows.extend(stream.rows);
+            for (idx, row) in sink.rows.iter_mut().enumerate() {
+                row.y = HEADER_H + (idx as f64 + 0.5) * ROW_H;
+            }
+            if !sink.collapsed {
+                sink.h = HEADER_H + sink.rows.len() as f64 * ROW_H + 8.0;
+            }
+        }
+    }
+
     // Stack each column; stable order by label keeps the layout calm
     // as ids churn.
     let mut cards = Vec::new();
@@ -585,6 +622,7 @@ mod reaper_layout {
             app_name: String::new(),
             latency: String::new(),
             icon_name: String::new(),
+            group: String::new(),
             virtual_sink: false,
         };
         let mut ports = Vec::new();
@@ -668,6 +706,7 @@ mod stereo_pairs {
             app_name: String::new(),
             latency: String::new(),
             icon_name: String::new(),
+            group: String::new(),
             virtual_sink: false,
         }
     }
@@ -814,6 +853,53 @@ mod stereo_pairs {
         assert_eq!(strip_channel_prefix("28", Some(28)), "28");
         assert_eq!(strip_channel_prefix("Guitar", Some(28)), "Guitar");
         assert_eq!(strip_channel_prefix("28 - Guitar", None), "28 - Guitar");
+    }
+
+    #[test]
+    fn loopback_forwarder_merges_into_its_sink_card() {
+        // A loopback pair: sink "system_audio" + forwarder stream
+        // "system_audio_to_inferno", same node.group. The stream card
+        // must fold into the sink's card in the Outputs column.
+        let mut sink = node();
+        sink.id = 1;
+        sink.name = "system_audio".into();
+        sink.label = "System Audio".into();
+        sink.group = "loopback-1".into();
+        let mut stream = node();
+        stream.id = 2;
+        stream.name = "system_audio_to_inferno".into();
+        stream.label = "System Audio → Inferno".into();
+        stream.media_class = "Stream/Output/Audio".into();
+        stream.group = "loopback-1".into();
+        let mut ports = vec![port(10, "playback_FL"), port(11, "playback_FR")];
+        for (id, name) in [(20, "output_FL"), (21, "output_FR")] {
+            ports.push(PwPort {
+                id,
+                node_id: 2,
+                name: name.into(),
+                direction: PortDirection::Output,
+                media_kind: MediaKind::Audio,
+            });
+        }
+        let graph = GraphSnapshot { nodes: vec![sink, stream], ports, links: Vec::new() };
+        let aliases = HashMap::new();
+        let filters = Filters {
+            search: "",
+            tab: MediaKind::Audio,
+            hide_unconnected: false,
+            aliases: &aliases,
+            hide_monitors: false,
+            collapsed: [false; 3],
+        };
+        let lay = compute_layout(&graph, &filters, &HashMap::new());
+        assert_eq!(lay.cards.len(), 1, "forwarder card folds into the sink");
+        let card = &lay.cards[0];
+        assert_eq!(card.node.name, "system_audio");
+        // Sink inputs AND the forwarder's outputs live on one card.
+        assert!(card.rows.iter().any(|r| r.direction == PortDirection::Input));
+        assert!(card.rows.iter().any(|r| r.direction == PortDirection::Output));
+        // Forwarder output ports anchor on the sink card's right edge.
+        assert_eq!(lay.anchors[&20].0, card.x + CARD_W);
     }
 
     #[test]

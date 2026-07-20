@@ -9,15 +9,6 @@ use crate::state::{
     HIDE_UNCONNECTED, MEDIA_TAB, PAN, SEARCH, SELECTED_NODE, ZOOM,
 };
 
-fn kind_color(kind: MediaKind) -> &'static str {
-    match kind {
-        MediaKind::Audio => "#7cc4ff",
-        MediaKind::Video => "#ffd479",
-        MediaKind::Midi => "#b487ff",
-        MediaKind::Other => "#9aa4b2",
-    }
-}
-
 #[component]
 pub fn GraphCanvas() -> Element {
     // Fetch application icons for nodes we haven't looked up yet
@@ -121,19 +112,20 @@ pub fn GraphCanvas() -> Element {
             cables[i].active |= l.active;
             continue;
         }
-        let (kind, port_name) = graph
+        let port_name = graph
             .ports
             .iter()
             .find(|p| p.id == l.output_port)
-            .map(|p| (p.media_kind, p.name.as_str()))
-            .unwrap_or((MediaKind::Other, ""));
-        let node_name = graph
+            .map(|p| p.name.as_str())
+            .unwrap_or("");
+        let (node_name, node_label) = graph
             .nodes
             .iter()
             .find(|n| n.id == l.output_node)
-            .map(|n| n.name.as_str())
-            .unwrap_or("");
-        let color = state::port_color(node_name, port_name, kind_color(kind));
+            .map(|n| (n.name.as_str(), n.label.as_str()))
+            .unwrap_or(("", ""));
+        // Cables wear the color of where they come FROM.
+        let color = state::port_color(node_name, node_label, port_name);
         let dx = ((x2 - x1) * 0.5).max(40.0);
         by_path.insert(key, cables.len());
         cables.push(Cable {
@@ -319,10 +311,7 @@ pub fn GraphCanvas() -> Element {
                         node_name: card.node.name.clone(),
                         node_label: state::node_label(&card.node.name, &card.node.label),
                         media_class: card.node.media_class.clone(),
-                        accent: state::node_color(
-                            &card.node.name,
-                            kind_color(card.node.media_kind),
-                        ),
+                        accent: state::node_color(&card.node.name, &card.node.label),
                         icon: state::ICONS
                             .read()
                             .get(&state::icon_candidate(&card.node))
@@ -362,13 +351,13 @@ pub fn GraphCanvas() -> Element {
                                 raw_name: r.label.clone(),
                                 monitor: r.monitor,
                                 direction: r.direction,
-                                dot: if r.pair {
-                                    state::node_color(&card.node.name, kind_color(r.kind))
+                                dot: if r.pair || r.group_key.is_some() {
+                                    state::node_color(&card.node.name, &card.node.label)
                                 } else {
                                     state::port_color(
                                         &card.node.name,
+                                        &card.node.label,
                                         &r.label,
-                                        kind_color(r.kind),
                                     )
                                 },
                                 pair: r.pair,

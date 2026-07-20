@@ -335,24 +335,74 @@ pub const PALETTE: [&str; 8] = [
     "#ff7ab8", // pink
 ];
 
-/// Resolved color for a port: port color → node color → `default`
-/// (the media-kind color).
-pub fn port_color(node_name: &str, port_name: &str, default: &str) -> String {
-    let colors = COLORS.read();
-    colors
-        .get(&format!("{node_name}:{port_name}"))
-        .or_else(|| colors.get(node_name))
-        .cloned()
-        .unwrap_or_else(|| default.to_string())
+/// Deterministic fallback color from a node name — the same hue every
+/// session, so unclassified nodes are still tellable-apart.
+pub fn auto_color(name: &str) -> String {
+    let mut h: u32 = 2_166_136_261;
+    for b in name.bytes() {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(16_777_619);
+    }
+    format!("hsl({}, 60%, 60%)", h % 360)
 }
 
-/// Resolved color for a node card accent (node color → default).
-pub fn node_color(node_name: &str, default: &str) -> String {
-    COLORS
+/// FTS instrument-category color for a label ("28 - Guitar 1 L" →
+/// guitars sky-blue), via music-catalog — the same scheme
+/// dynamic-template paints REAPER tracks with (drums red, bass yellow,
+/// guitars blue, acoustic cyan, keys green, synths violet, vocals
+/// pink…). Tries the label, then progressively drops trailing words
+/// ("Kick In" → "Kick"; "Guitar 1 L" → "Guitar 1" → "guitar").
+pub fn category_color(label: &str) -> Option<String> {
+    let mut words: Vec<&str> = label.split_whitespace().collect();
+    while !words.is_empty() {
+        let candidate = words.join(" ");
+        if let Some(c) = music_catalog::lookup::color_for_region(&candidate) {
+            return Some(c.to_hex_string());
+        }
+        words.pop();
+    }
+    None
+}
+
+/// Resolved color for a node: user-set → instrument category (from the
+/// display label) → stable name hash. Cables take the color of the
+/// node they come FROM.
+pub fn node_color(node_name: &str, node_label: &str) -> String {
+    if let Some(c) = COLORS.read().get(node_name) {
+        return c.clone();
+    }
+    let label = node_label_display(node_name, node_label);
+    category_color(&label).unwrap_or_else(|| auto_color(node_name))
+}
+
+fn node_label_display(name: &str, label: &str) -> String {
+    ALIASES
         .read()
-        .get(node_name)
+        .get(name)
         .cloned()
-        .unwrap_or_else(|| default.to_string())
+        .unwrap_or_else(|| label.to_string())
+}
+
+/// Resolved color for a port: user-set port color → instrument
+/// category from the channel's display name ("Kick" → drums red) →
+/// the owning node's color.
+pub fn port_color(node_name: &str, node_label: &str, port_name: &str) -> String {
+    if let Some(c) = COLORS.read().get(&format!("{node_name}:{port_name}")) {
+        return c.clone();
+    }
+    // Channel-number prefix stripped so "28 - Guitar 1" categorizes.
+    let display = port_label(node_name, port_name);
+    let digits = port_name.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+    let chan = if digits > 0 && digits < port_name.len() {
+        port_name[port_name.len() - digits..].parse::<u64>().ok()
+    } else {
+        None
+    };
+    let display = crate::layout::strip_channel_prefix(&display, chan);
+    if let Some(c) = category_color(&display) {
+        return c;
+    }
+    node_color(node_name, node_label)
 }
 
 /// The icon lookup key for a node: the explicit `application.icon-name`

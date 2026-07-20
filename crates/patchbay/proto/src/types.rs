@@ -44,6 +44,10 @@ pub struct PwNode {
     pub latency: String,
     /// `application.icon-name` (freedesktop icon id), empty when unset.
     pub icon_name: String,
+    /// `node.group` — links related nodes (a loopback's sink half and
+    /// forwarder stream share one). Only present via bound node info
+    /// (registry globals omit it).
+    pub group: String,
     /// This node is a patchbay-created virtual sink (`patchbay.virtual`
     /// prop) — the only nodes the UI may destroy.
     pub virtual_sink: bool,
