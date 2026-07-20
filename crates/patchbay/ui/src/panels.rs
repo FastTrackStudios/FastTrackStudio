@@ -75,7 +75,7 @@ pub fn StatusBar() -> Element {
         let active = if frames == 0 {
             !forced
         } else {
-            clock.force_quantum == frames || (!forced && clock.quantum == frames && false)
+            clock.force_quantum == frames
         };
         let label = if frames == 0 {
             "auto".to_string()

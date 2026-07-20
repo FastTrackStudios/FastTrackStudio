@@ -157,7 +157,7 @@ pub fn ContactsView() -> Element {
             let matches_q = q.is_empty() || hay.contains(&q);
             let matches_group = match active_group.as_deref() {
                 None => true,
-                Some(g) => c.group_list().iter().any(|x| *x == g),
+                Some(g) => c.group_list().contains(&g),
             };
             matches_q && matches_group
         })

@@ -77,6 +77,7 @@ impl WorkflowStore {
     /// Take an exclusive advisory lock for one session's writes, held
     /// until the returned guard drops. Serializes concurrent
     /// read-modify-write on the *same* session across processes.
+    #[allow(clippy::incompatible_msrv)] // File::lock — toolchain is 1.94
     fn lock_session(&self, id: Uuid) -> Result<File, WorkflowError> {
         let dir = self.root.join("locks");
         std::fs::create_dir_all(&dir).map_err(backend("mkdir locks"))?;
