@@ -40,9 +40,9 @@ fts-ui = { workspace = true }
 # /guides vault — knowledge graph of the markdown notes (wasm-clean SVG view)
 view-knowledge-graph = { workspace = true }
 
-# /session/{org}/{collection} library browser — the fts-server CollectionService
+# /session/{org}/{collection} library browser — the task-server CollectionService
 # wire contract + a minimal vox WebSocket client (wasm-clean). The site dials
-# `<fts-server base>/org/{org}/vox` and lists that org's collections.
+# `<task-server base>/org/{org}/vox` and lists that org's collections.
 collection-proto = { workspace = true, features = ["vox"] }
 vox-core = { workspace = true }
 vox-websocket = { workspace = true }

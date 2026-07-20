@@ -37,7 +37,7 @@ pub enum Route {
     #[route("/test/render")]
     TestRender {},
     // Collection library browser, namespaced under `/session/` so it never
-    // shadows the static routes above. Dials the fts-server's per-org
+    // shadows the static routes above. Dials the task-server's per-org
     // `CollectionService` and renders the matching collection's songs.
     #[route("/session/:org/:collection")]
     SessionCollection { org: String, collection: String },

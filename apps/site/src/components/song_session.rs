@@ -1,7 +1,7 @@
 //! `/session/{org}/{collection}/{song}` — the **session view**: a browser
 //! multitrack player driven by the REAL fasttrackstudio session-ui components.
 //!
-//! Self-contained, client-side playback. The page is served by fts-server,
+//! Self-contained, client-side playback. The page is served by task-server,
 //! which also serves the song's media at `/media/songs/{slug}/…`:
 //!
 //! - `manifest.json` — title/key/bpm, the section map, and the stem list.
