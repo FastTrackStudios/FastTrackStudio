@@ -27106,6 +27106,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "trigger"
+version = "0.1.0"
+dependencies = [
+ "trigger-dsp",
+]
+
+[[package]]
+name = "trigger-dsp"
+version = "0.1.0"
+dependencies = [
+ "approx",
+]
+
+[[package]]
+name = "trigger-plugin"
+version = "0.1.0"
+dependencies = [
+ "nice-plug",
+ "trigger",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
