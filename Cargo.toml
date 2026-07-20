@@ -193,6 +193,7 @@ members = [
     "features/fx/saturate/saturate-dsp",
     "features/fx/trigger/trigger",
     "features/fx/trigger/trigger-dsp",
+    "features/fx/trigger/trigger-profiles",
     "features/fx/eq/eq",
     "features/fx/eq/eq-dsp",
     "features/fx/eq/eq-profiles",
@@ -537,6 +538,7 @@ saturate = { path = "features/fx/saturate/saturate" }
 saturate-dsp = { path = "features/fx/saturate/saturate-dsp" }
 trigger = { path = "features/fx/trigger/trigger" }
 trigger-dsp = { path = "features/fx/trigger/trigger-dsp" }
+trigger-profiles = { path = "features/fx/trigger/trigger-profiles" }
 eq = { path = "features/fx/eq/eq" }
 # The full Pro-Q EQ editor. Core (graph model / response / SVG / interaction)
 # is wasm-portable; the vello/nice-plug editor is behind its `native` feature.

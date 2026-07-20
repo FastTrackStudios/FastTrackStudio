@@ -27110,6 +27110,7 @@ name = "trigger"
 version = "0.1.0"
 dependencies = [
  "trigger-dsp",
+ "trigger-profiles",
 ]
 
 [[package]]
@@ -27117,6 +27118,10 @@ name = "trigger-dsp"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "audiocore-dsp",
+ "eq-dsp",
+ "rustfft",
+ "symphonia",
 ]
 
 [[package]]
@@ -27125,6 +27130,13 @@ version = "0.1.0"
 dependencies = [
  "nice-plug",
  "trigger",
+]
+
+[[package]]
+name = "trigger-profiles"
+version = "0.1.0"
+dependencies = [
+ "trigger-dsp",
 ]
 
 [[package]]
