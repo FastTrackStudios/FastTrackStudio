@@ -737,7 +737,17 @@ mod imp {
 
         let title = manifest.title.clone().unwrap_or_default();
         let artist = manifest.artist.clone().unwrap_or_default();
-        let sections = media::progress_sections(&manifest);
+        // Progress-bar segments from the current song's (chart-labelled)
+        // sections, so the bars read `VS 1 A` / `CH 2 A` like the chart + the
+        // navigator; fall back to the manifest's audio regions if unavailable.
+        let sections = {
+            let sl = SETLIST_STRUCTURE.read();
+            sl.songs
+                .get(idx)
+                .map(media::progress_sections_from_song)
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| media::progress_sections(&manifest))
+        };
 
         let song_progress = (pos / duration * 100.0).clamp(0.0, 100.0);
 

@@ -470,19 +470,59 @@ pub(crate) mod imp {
         }
     }
 
+    /// Sections derived from the KEYFLOW chart, labelled exactly like the
+    /// engraved chart (`VS 1 A`, `CH 2 A`, `PRE-CH`, …) via
+    /// `chart_section_timeline`, with timing from the chart's measures (real
+    /// music starts after the count-in). `None` if there's no parseable chart
+    /// or it has no real sections — the caller then falls back to the manifest's
+    /// audio-region sections.
+    fn chart_sections(chart_text: &str, bpm: f64, ts_num: u32) -> Option<Vec<SessionSection>> {
+        use keyflow::engraver::layout::chart::section_layout::chart_section_timeline;
+        let chart = keyflow::parse(chart_text).ok()?;
+        let spans = chart_section_timeline(&chart);
+        let spm = (60.0 / bpm.max(1.0)) * (ts_num.max(1) as f64);
+        // Real music begins after the count-in; align section 0 to that offset
+        // so the chart-measure timeline sits on the audio's SONGSTART.
+        let content_start = spans
+            .iter()
+            .find(|s| s.is_count_in)
+            .map(|s| s.measure_count as f64 * spm)
+            .unwrap_or(0.0);
+        let sections: Vec<SessionSection> = spans
+            .iter()
+            .filter(|s| !s.is_count_in)
+            .map(|s| SessionSection {
+                section_id: SectionId::new(),
+                id: None,
+                name: s.label.clone(),
+                comment: None,
+                section_type: s.section_type.clone(),
+                start_seconds: content_start + s.start_measure as f64 * spm,
+                end_seconds: content_start + (s.start_measure + s.measure_count) as f64 * spm,
+                number: None,
+                color: None,
+            })
+            .collect();
+        (!sections.is_empty()).then_some(sections)
+    }
+
     /// Build one `session_proto::Song` from a manifest — the per-song core
     /// shared by the single-song player and the setlist player. Each song's
     /// sections are in its own local seconds (0-based), and its `project_guid`
     /// is `web-session:{slug}` so `SONG_CHARTS` and the chart pane can key off
-    /// it.
+    /// it. Sections prefer the KEYFLOW chart's own labelling/timing (so the
+    /// navigator + progress bars read `VS 1 A` / `CH 2 A` like the chart), and
+    /// fall back to the manifest's audio-region sections when there's no chart.
     pub(crate) fn build_song(
         slug: &str,
         manifest: &Manifest,
         chart_text: Option<String>,
     ) -> SessionSong {
         let (ts_num, ts_denom) = parse_time_sig(manifest.time_signature.as_ref());
-        let sections: Vec<SessionSection> =
-            manifest.sections.iter().map(to_session_section).collect();
+        let sections: Vec<SessionSection> = chart_text
+            .as_deref()
+            .and_then(|t| chart_sections(t, manifest.bpm.unwrap_or(120.0), ts_num))
+            .unwrap_or_else(|| manifest.sections.iter().map(to_session_section).collect());
         SessionSong {
             id: SongId::new(),
             name: manifest.title.clone().unwrap_or_default(),
@@ -531,6 +571,26 @@ pub(crate) mod imp {
                     short_name: s.short_display(),
                     comment: None,
                 }
+            })
+            .collect()
+    }
+
+    /// Progress-bar segments from a hydrated `Song`'s sections (which prefer the
+    /// KEYFLOW chart's labelling). Used by the setlist so the bars read the same
+    /// `VS 1 A` / `CH 2 A` as the navigator + the engraved chart.
+    pub(crate) fn progress_sections_from_song(song: &SessionSong) -> Vec<ProgressSection> {
+        let dur = (song.end_seconds - song.start_seconds).max(0.001);
+        song.sections
+            .iter()
+            .map(|sec| ProgressSection {
+                start_percent: ((sec.start_seconds - song.start_seconds) / dur * 100.0)
+                    .clamp(0.0, 100.0),
+                end_percent: ((sec.end_seconds - song.start_seconds) / dur * 100.0)
+                    .clamp(0.0, 100.0),
+                color: sec.bright_color(),
+                name: sec.display_name(),
+                short_name: sec.short_display(),
+                comment: sec.comment.clone(),
             })
             .collect()
     }
