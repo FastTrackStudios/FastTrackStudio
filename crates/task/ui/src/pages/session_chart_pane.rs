@@ -43,7 +43,7 @@ use keyflow::engraver::layout::chart::cursor::{
 };
 use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult};
 use keyflow::engraver::style::MStyle;
-use session_ui::{ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_CHARTS};
+use session_ui::{ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_CHARTS, SONG_VIEWS, SongView};
 
 /// Zoom bounds for the pannable viewport (matches the site's editor).
 const ZOOM_MIN: f64 = 0.1;
@@ -51,73 +51,9 @@ const ZOOM_MAX: f64 = 8.0;
 /// Fraction of the viewport height a fitted page fills (leaves a margin).
 const FIT_MARGIN: f64 = 0.94;
 
-// ─── Per-song display view (transposition / notation / capo) ──────────────
-
-/// A non-destructive chart display override for one song. It NEVER changes the
-/// keyflow source — the chart is re-engraved through `keyflow::transpose`, so
-/// the same song can render in a different key, in Nashville numbers or Roman
-/// numerals, or fingered for a capo, while the file stays as written. Keyed by
-/// the song's `project_guid` in [`SONG_VIEWS`].
-#[derive(Clone, PartialEq)]
-pub struct SongView {
-    /// Render sounding in this key (keyflow key string, e.g. `"G"`, `"Bb"`);
-    /// `None` = the song's own key.
-    pub target_key: Option<String>,
-    /// How chord roots are spelled.
-    pub notation: keyflow::NotationSystem,
-    /// Capo fret (0 = none); the chart then renders in the fingered shape key.
-    pub capo: u8,
-}
-
-impl Default for SongView {
-    fn default() -> Self {
-        Self {
-            target_key: None,
-            notation: keyflow::NotationSystem::Letters,
-            capo: 0,
-        }
-    }
-}
-
-impl SongView {
-    /// True when this view renders the chart exactly as written.
-    fn is_identity(&self) -> bool {
-        self.target_key.is_none()
-            && self.capo == 0
-            && self.notation == keyflow::NotationSystem::Letters
-    }
-
-    fn to_chart_view(&self) -> keyflow::ChartView {
-        keyflow::ChartView {
-            target_key: self
-                .target_key
-                .as_deref()
-                .and_then(|s| keyflow::Key::parse(s).ok()),
-            notation: self.notation,
-            capo: self.capo,
-        }
-    }
-
-    /// Discriminant for the layout cache key (so switching view re-renders).
-    fn cache_hash(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        self.target_key.hash(&mut h);
-        let n = match self.notation {
-            keyflow::NotationSystem::Letters => 0u8,
-            keyflow::NotationSystem::Nashville => 1,
-            keyflow::NotationSystem::Roman => 2,
-        };
-        n.hash(&mut h);
-        self.capo.hash(&mut h);
-        h.finish()
-    }
-}
-
-/// Per-song chart-view overrides (`project_guid` → [`SongView`]). A display
-/// layer only — never persisted to the song file.
-pub static SONG_VIEWS: GlobalSignal<std::collections::HashMap<String, SongView>> =
-    Signal::global(std::collections::HashMap::new);
+// `SongView` + `SONG_VIEWS` now live in `session_ui` (beside SETLIST_STRUCTURE
+// / SONG_CHARTS), so the navigator can show the effective key too — imported
+// below.
 
 // ─── Layout cache (one per pane — wasm is single-threaded) ────────────────
 
