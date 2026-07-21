@@ -17,19 +17,20 @@ use editor_keyflow_lang::{HighlightTheme, highlight_css, keyflow_decorations};
 use session_ui::{ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_CHARTS};
 
 /// Resolve the current song's chart text — mirrors `SessionChartPane`'s
-/// resolver (`SONG_CHARTS[project_guid]` then the song's own
-/// `chart_text`). `peek`, not `read`: we only need it at mount (the
-/// caller keys this component on the song index), so a per-tick
-/// `ACTIVE_INDICES` change must not re-render the editor.
+/// resolver (`SONG_CHARTS[project_guid]` then the song's own `chart_text`).
+/// `read` on the structural signals so the seeding effect re-runs when the
+/// setlist hydrates the charts (they arrive an async beat after mount); the
+/// song index is `peek` (the caller keys this component on it), so a
+/// per-tick `ACTIVE_INDICES` change doesn't re-fire the seed.
 fn current_chart_text() -> String {
     let idx = ACTIVE_INDICES.peek().song_index.unwrap_or(0);
-    let setlist = SETLIST_STRUCTURE.peek();
+    let setlist = SETLIST_STRUCTURE.read();
     setlist
         .songs
         .get(idx)
         .and_then(|song| {
             SONG_CHARTS
-                .peek()
+                .read()
                 .get(&song.project_guid)
                 .map(|c| c.chart_text.clone())
                 .or_else(|| song.chart_text.clone())
@@ -39,10 +40,25 @@ fn current_chart_text() -> String {
 
 #[component]
 pub fn KeyflowChartEditor() -> Element {
-    let state = use_signal(|| editor::EditorState::new(current_chart_text()));
+    let mut state = use_signal(|| editor::EditorState::new(String::new()));
+    let mut seeded = use_signal(|| false);
     let keymap = use_hook(editor::standard_markdown_keymap);
     // Per-token `.kf-*` color rules — injected once for this pane.
     let css = use_hook(|| highlight_css(&HighlightTheme::default_dark()));
+
+    // Seed the buffer once the chart text is available (it hydrates just
+    // after mount). Re-runs on SETLIST_STRUCTURE / SONG_CHARTS changes,
+    // seeds exactly once.
+    use_effect(move || {
+        if *seeded.peek() {
+            return;
+        }
+        let text = current_chart_text();
+        if !text.trim().is_empty() {
+            state.set(editor::EditorState::new(text));
+            seeded.set(true);
+        }
+    });
 
     let empty = state.read().doc.to_string().trim().is_empty();
 
