@@ -554,6 +554,8 @@ mod imp {
         // Full-screen center: the right pane beside the chart. Default to
         // the keyflow editor (charts as code); the mixer follows later.
         let mut center_right = use_signal(|| CenterRight::Editor);
+        // Navigator sidebar open/closed (full-screen experience only).
+        let mut nav_open = use_signal(|| true);
 
         let count = songs_meta.len();
         let idx = current_song();
@@ -778,14 +780,34 @@ mod imp {
                     // MIDDLE — navigator (left) + Chart/right center.
                     div { class: "flex min-h-0 flex-1",
 
-                        // LEFT — the session-ui setlist navigator: every song
-                        // with its live section-progress strip, driven by the
-                        // shared ACTIVE_INDICES / SETLIST_STRUCTURE signals.
-                        aside { class: "w-64 shrink-0 border-r border-border",
-                            PerformanceSidebar {
-                                on_song_select: goto_song,
-                                on_section_select,
-                                plain_selection: true,
+                        // LEFT — the session-ui setlist navigator (collapsible):
+                        // every song with its live section-progress strip,
+                        // driven by ACTIVE_INDICES / SETLIST_STRUCTURE.
+                        if nav_open() {
+                            aside { class: "flex w-64 shrink-0 flex-col border-r border-border",
+                                div { class: "flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5",
+                                    span { class: "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground", "Setlist" }
+                                    button {
+                                        class: "rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground",
+                                        title: "Hide navigator",
+                                        onclick: move |_| nav_open.set(false),
+                                        "‹"
+                                    }
+                                }
+                                div { class: "min-h-0 flex-1 overflow-y-auto",
+                                    PerformanceSidebar {
+                                        on_song_select: goto_song,
+                                        on_section_select,
+                                        plain_selection: true,
+                                    }
+                                }
+                            }
+                        } else {
+                            button {
+                                class: "flex w-8 shrink-0 items-center justify-center border-r border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                                title: "Show navigator",
+                                onclick: move |_| nav_open.set(true),
+                                "›"
                             }
                         }
 

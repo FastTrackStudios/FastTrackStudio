@@ -21,7 +21,15 @@ use editor_keyflow_lang::{HighlightTheme, highlight_css, keyflow_decorations};
 /// hydrating (empty → present).
 #[component]
 pub fn KeyflowChartEditor(source: String) -> Element {
-    let state = use_signal(|| editor::EditorState::new(source.clone()));
+    let mut state = use_signal(|| editor::EditorState::new(source.clone()));
+    // Re-seed whenever the resolved chart changes — a song switch or the
+    // charts hydrating (empty → present). `use_reactive` fires only on an
+    // actual `source` change, so editing the buffer (which doesn't change
+    // the setlist's stored chart) is preserved. This is what keeps the
+    // editor current with the selected song regardless of remount timing.
+    use_effect(use_reactive!(|source| {
+        state.set(editor::EditorState::new(source));
+    }));
     let keymap = use_hook(editor::standard_markdown_keymap);
     // Per-token `.kf-*` color rules — injected once for this pane.
     let css = use_hook(|| highlight_css(&HighlightTheme::default_dark()));
