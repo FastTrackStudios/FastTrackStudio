@@ -51,6 +51,74 @@ const ZOOM_MAX: f64 = 8.0;
 /// Fraction of the viewport height a fitted page fills (leaves a margin).
 const FIT_MARGIN: f64 = 0.94;
 
+// ─── Per-song display view (transposition / notation / capo) ──────────────
+
+/// A non-destructive chart display override for one song. It NEVER changes the
+/// keyflow source — the chart is re-engraved through `keyflow::transpose`, so
+/// the same song can render in a different key, in Nashville numbers or Roman
+/// numerals, or fingered for a capo, while the file stays as written. Keyed by
+/// the song's `project_guid` in [`SONG_VIEWS`].
+#[derive(Clone, PartialEq)]
+pub struct SongView {
+    /// Render sounding in this key (keyflow key string, e.g. `"G"`, `"Bb"`);
+    /// `None` = the song's own key.
+    pub target_key: Option<String>,
+    /// How chord roots are spelled.
+    pub notation: keyflow::NotationSystem,
+    /// Capo fret (0 = none); the chart then renders in the fingered shape key.
+    pub capo: u8,
+}
+
+impl Default for SongView {
+    fn default() -> Self {
+        Self {
+            target_key: None,
+            notation: keyflow::NotationSystem::Letters,
+            capo: 0,
+        }
+    }
+}
+
+impl SongView {
+    /// True when this view renders the chart exactly as written.
+    fn is_identity(&self) -> bool {
+        self.target_key.is_none()
+            && self.capo == 0
+            && self.notation == keyflow::NotationSystem::Letters
+    }
+
+    fn to_chart_view(&self) -> keyflow::ChartView {
+        keyflow::ChartView {
+            target_key: self
+                .target_key
+                .as_deref()
+                .and_then(|s| keyflow::Key::parse(s).ok()),
+            notation: self.notation,
+            capo: self.capo,
+        }
+    }
+
+    /// Discriminant for the layout cache key (so switching view re-renders).
+    fn cache_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.target_key.hash(&mut h);
+        let n = match self.notation {
+            keyflow::NotationSystem::Letters => 0u8,
+            keyflow::NotationSystem::Nashville => 1,
+            keyflow::NotationSystem::Roman => 2,
+        };
+        n.hash(&mut h);
+        self.capo.hash(&mut h);
+        h.finish()
+    }
+}
+
+/// Per-song chart-view overrides (`project_guid` → [`SongView`]). A display
+/// layer only — never persisted to the song file.
+pub static SONG_VIEWS: GlobalSignal<std::collections::HashMap<String, SongView>> =
+    Signal::global(std::collections::HashMap::new);
+
 // ─── Layout cache (one per pane — wasm is single-threaded) ────────────────
 
 /// The engraved document: one wide SVG (all A4 pages in a row), its scene box,
@@ -106,21 +174,28 @@ fn text_key(text: &str) -> u64 {
 }
 
 impl Pane {
-    /// Parse + lay out + serialize `text` if it isn't cached.
-    fn ensure(&mut self, text: &str) -> Option<DocRender> {
-        let key = text_key(text);
+    /// Parse + lay out + serialize `text` under `view` if it isn't cached.
+    fn ensure(&mut self, text: &str, view: &SongView) -> Option<DocRender> {
+        let key = text_key(text) ^ view.cache_hash();
         if let Some((cached_key, _, doc)) = &self.layout {
             if *cached_key == key {
                 return Some(doc.clone());
             }
         }
 
-        let chart = match keyflow::parse(text) {
+        let parsed = match keyflow::parse(text) {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("chart pane: parse failed: {e}");
                 return None;
             }
+        };
+        // Transpose / re-notate for display (no-op when the view is the song's
+        // own key in letters with no capo). The source `text` is untouched.
+        let chart = if view.is_identity() {
+            parsed
+        } else {
+            keyflow::apply_view(&parsed, &view.to_chart_view())
         };
 
         // A4 page document with the **Master Rhythm** preset — the same layout
@@ -247,6 +322,143 @@ fn page_pan_x(pages: &[(f64, f64, f64, f64)], i: usize, vw: f64, zoom: f64) -> O
 
 // ─── Components ────────────────────────────────────────────────────────────
 
+/// Chromatic key choices offered by the key selector (worship-friendly
+/// spellings). `""`/`None` = render in the song's own key.
+const KEY_CHOICES: [&str; 12] = [
+    "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B",
+];
+
+/// Mutate the active song's [`SongView`] (creating a default if absent).
+fn update_song_view(guid: &str, f: impl FnOnce(&mut SongView)) {
+    let mut views = SONG_VIEWS.write();
+    f(views.entry(guid.to_string()).or_default());
+}
+
+/// The GUID of the currently-active setlist song, if any.
+fn active_song_guid() -> Option<String> {
+    let idx = ACTIVE_INDICES.read().song_index?;
+    let setlist = SETLIST_STRUCTURE.read();
+    setlist.songs.get(idx).map(|s| s.project_guid.clone())
+}
+
+/// Key / notation / capo selector for the active song. A display control: it
+/// writes [`SONG_VIEWS`] (never the file), which re-engraves the chart. The
+/// keyflow source stays as written. A dropdown for the key + a notation toggle
+/// sit in the bar; capo + the "sounds like" caption live in the Advanced card.
+#[component]
+pub fn KeyBar() -> Element {
+    let guid = use_memo(active_song_guid);
+    let mut advanced = use_signal(|| false);
+
+    let Some(guid) = guid() else {
+        return rsx! {};
+    };
+    let view = SONG_VIEWS.read().get(&guid).cloned().unwrap_or_default();
+    let cur_key = view.target_key.clone().unwrap_or_default();
+    let notation = view.notation;
+    let caption = view.to_chart_view().capo_caption();
+
+    let sel_class = "rounded border border-border bg-card px-1.5 py-0.5 text-xs text-foreground";
+    rsx! {
+        div { class: "relative flex items-center gap-1.5",
+            // Key dropdown (Original + 12 keys).
+            select {
+                class: "{sel_class}",
+                onchange: {
+                    let guid = guid.clone();
+                    move |e: FormEvent| {
+                        let v = e.value();
+                        update_song_view(&guid, |sv| {
+                            sv.target_key = (!v.is_empty()).then_some(v.clone());
+                        });
+                    }
+                },
+                option { value: "", selected: cur_key.is_empty(), "Key · Original" }
+                for k in KEY_CHOICES {
+                    option { value: k, selected: cur_key == k, "Key · {k}" }
+                }
+            }
+            // Notation toggle: letters / Nashville numbers / Roman numerals.
+            div { class: "flex overflow-hidden rounded border border-border",
+                for (n , label , title) in [
+                    (keyflow::NotationSystem::Letters, "A", "Letter names"),
+                    (keyflow::NotationSystem::Nashville, "1", "Nashville numbers"),
+                    (keyflow::NotationSystem::Roman, "I", "Roman numerals"),
+                ] {
+                    button {
+                        key: "{label}",
+                        title,
+                        class: if notation == n {
+                            "px-2 py-0.5 text-xs font-semibold bg-accent text-foreground"
+                        } else {
+                            "px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                        },
+                        onclick: {
+                            let guid = guid.clone();
+                            move |_| update_song_view(&guid, |sv| sv.notation = n)
+                        },
+                        "{label}"
+                    }
+                }
+            }
+            // Advanced (capo + caption + reset).
+            button {
+                class: if advanced() {
+                    "rounded border border-border bg-accent px-2 py-0.5 text-xs text-foreground"
+                } else {
+                    "rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                },
+                onclick: move |_| advanced.toggle(),
+                "Advanced"
+            }
+
+            // Advanced card popup.
+            if advanced() {
+                div { class: "absolute right-0 top-8 z-20 w-64 rounded-lg border border-border bg-card p-3 shadow-xl",
+                    div { class: "mb-2 flex items-center justify-between",
+                        span { class: "text-xs font-semibold text-foreground", "Capo" }
+                        select {
+                            class: "{sel_class}",
+                            onchange: {
+                                let guid = guid.clone();
+                                move |e: FormEvent| {
+                                    let fret = e.value().parse::<u8>().unwrap_or(0);
+                                    update_song_view(&guid, |sv| sv.capo = fret);
+                                }
+                            },
+                            for fret in 0u8..=9 {
+                                option {
+                                    value: "{fret}",
+                                    selected: view.capo == fret,
+                                    if fret == 0 { "None" } else { "Fret {fret}" }
+                                }
+                            }
+                        }
+                    }
+                    p { class: "mb-3 text-[11px] leading-snug text-muted-foreground",
+                        if let Some(cap) = caption.clone() {
+                            "{cap} — finger these shapes, capo on."
+                        } else {
+                            "Choose a key and capo; the chart re-renders in the shapes you finger. The song file is never changed."
+                        }
+                    }
+                    button {
+                        class: "w-full rounded-md bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground",
+                        onclick: {
+                            let guid = guid.clone();
+                            move |_| {
+                                SONG_VIEWS.write().remove(&guid);
+                                advanced.set(false);
+                            }
+                        },
+                        "Reset to original"
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The chart pane: active song's chart document + playhead highlight. Shows a
 /// quiet placeholder when the song has no chart.
 #[component]
@@ -260,15 +472,23 @@ pub fn SessionChartPane() -> Element {
         let setlist = SETLIST_STRUCTURE.read();
         let song = setlist.songs.get(idx)?;
         let charts = SONG_CHARTS.read();
-        charts
+        let text = charts
             .get(&song.project_guid)
             .map(|c| c.chart_text.clone())
-            .or_else(|| song.chart_text.clone())
+            .or_else(|| song.chart_text.clone())?;
+        // The active song's display view (transpose / notation / capo). Read
+        // reactively so changing the key re-engraves the chart.
+        let view = SONG_VIEWS
+            .read()
+            .get(&song.project_guid)
+            .cloned()
+            .unwrap_or_default();
+        Some((text, view))
     });
 
     match chart_text() {
-        Some(text) => rsx! {
-            ChartCanvas { text }
+        Some((text, view)) => rsx! {
+            ChartCanvas { text, view }
         },
         None => rsx! {
             div { style: "display:flex; align-items:center; justify-content:center; min-height:80px;",
@@ -281,9 +501,11 @@ pub fn SessionChartPane() -> Element {
 /// Static page document + pan/zoom viewport + page nav. Re-renders only when the
 /// chart text changes; the playhead lives in `ChartCursorOverlay`.
 #[component]
-fn ChartCanvas(text: String) -> Element {
-    let key = text_key(&text);
-    let doc = with_pane(|pane| pane.ensure(&text)).flatten();
+fn ChartCanvas(text: String, view: SongView) -> Element {
+    // Key the layout + overlay off both the source and the view, so switching
+    // key / notation / capo re-engraves and re-anchors the playhead.
+    let key = text_key(&text) ^ view.cache_hash();
+    let doc = with_pane(|pane| pane.ensure(&text, &view)).flatten();
 
     let Some(doc) = doc else {
         return rsx! {

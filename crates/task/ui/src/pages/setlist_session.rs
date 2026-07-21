@@ -916,25 +916,30 @@ mod imp {
                             // engraved Master Rhythm chart today; a lyric scroller
                             // and per-part views land here later).
                             div { class: "flex min-w-0 flex-1 flex-col overflow-hidden border-r border-border bg-background",
-                                div { class: "flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5",
-                                    for (v , label , enabled) in [
-                                        (ChartLeft::MasterRhythm, "Master Rhythm", true),
-                                        (ChartLeft::Lyrics, "Lyrics", false),
-                                    ] {
-                                        button {
-                                            key: "{label}",
-                                            disabled: !enabled,
-                                            class: if chart_left() == v {
-                                                "rounded px-2 py-0.5 text-xs font-medium bg-accent text-foreground"
-                                            } else if enabled {
-                                                "rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
-                                            } else {
-                                                "rounded px-2 py-0.5 text-xs text-muted-foreground/40"
-                                            },
-                                            onclick: move |_| if enabled { chart_left.set(v); },
-                                            "{label}"
+                                div { class: "flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-1.5",
+                                    // Chart-view switcher (left).
+                                    div { class: "flex items-center gap-1",
+                                        for (v , label , enabled) in [
+                                            (ChartLeft::MasterRhythm, "Master Rhythm", true),
+                                            (ChartLeft::Lyrics, "Lyrics", false),
+                                        ] {
+                                            button {
+                                                key: "{label}",
+                                                disabled: !enabled,
+                                                class: if chart_left() == v {
+                                                    "rounded px-2 py-0.5 text-xs font-medium bg-accent text-foreground"
+                                                } else if enabled {
+                                                    "rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                                                } else {
+                                                    "rounded px-2 py-0.5 text-xs text-muted-foreground/40"
+                                                },
+                                                onclick: move |_| if enabled { chart_left.set(v); },
+                                                "{label}"
+                                            }
                                         }
                                     }
+                                    // Key / notation / capo selector (right).
+                                    crate::pages::session_chart_pane::KeyBar {}
                                 }
                                 div { class: "min-h-0 flex-1 overflow-hidden",
                                     {match chart_left() {
