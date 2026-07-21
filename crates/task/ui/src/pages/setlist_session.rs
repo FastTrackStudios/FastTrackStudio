@@ -143,33 +143,72 @@ mod imp {
                             guid: guid.clone(),
                         }
                     } else if selected == CenterRight::Mixer {
-                        if guide_present {
-                            div { class: "flex shrink-0 items-center gap-3 border-b border-border p-3",
-                                span { class: "flex-1 text-sm font-semibold text-foreground", "Guide / Click" }
-                                button {
-                                    class: if guide_on {
-                                        "rounded-md bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
-                                    } else {
-                                        "rounded-md bg-muted px-4 py-1.5 text-sm font-semibold text-muted-foreground hover:bg-accent"
-                                    },
-                                    onclick: move |_| on_guide.call(()),
-                                    if guide_on { "On" } else { "Off" }
-                                }
-                            }
-                        }
-                        div { class: "min-h-0 flex-1",
-                            MixerView {
-                                tracks: tracks.clone(),
-                                on_volume,
-                                on_mute,
-                                on_solo,
-                            }
+                        MeteredMixer {
+                            tracks: tracks.clone(),
+                            on_volume,
+                            on_mute,
+                            on_solo,
+                            guide_present,
+                            guide_on,
+                            on_guide,
                         }
                     } else {
                         div { class: "p-4 text-sm text-muted-foreground",
                             "Song comments — coming soon. This pane will show the current song's notes + comments."
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// Per-stem peak levels (indexed by stem order, 0.0..=1.0) for the mixer VU
+    /// meters. A pure display signal, written by the playback meter loop.
+    static SETLIST_LEVELS: GlobalSignal<Vec<f32>> = Signal::global(Vec::new);
+
+    /// The mixer plus its live meters. Isolated in its own component so the
+    /// ~20 fps meter updates (it subscribes to [`SETLIST_LEVELS`]) re-render
+    /// only the desk — never the editor sitting beside it in the other pane.
+    #[component]
+    fn MeteredMixer(
+        tracks: Vec<daw_proto::Track>,
+        on_volume: Callback<(String, f64)>,
+        on_mute: Callback<String>,
+        on_solo: Callback<String>,
+        guide_present: bool,
+        guide_on: bool,
+        on_guide: Callback<()>,
+    ) -> Element {
+        // Map per-index peaks onto track guids (guid == stem file, index == i).
+        let levels: std::collections::HashMap<String, f32> = {
+            let peaks = SETLIST_LEVELS.read();
+            tracks
+                .iter()
+                .filter_map(|t| peaks.get(t.index as usize).map(|&p| (t.guid.clone(), p)))
+                .collect()
+        };
+        rsx! {
+            if guide_present {
+                div { class: "flex shrink-0 items-center gap-3 border-b border-border p-3",
+                    span { class: "flex-1 text-sm font-semibold text-foreground", "Guide / Click" }
+                    button {
+                        class: if guide_on {
+                            "rounded-md bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+                        } else {
+                            "rounded-md bg-muted px-4 py-1.5 text-sm font-semibold text-muted-foreground hover:bg-accent"
+                        },
+                        onclick: move |_| on_guide.call(()),
+                        if guide_on { "On" } else { "Off" }
+                    }
+                }
+            }
+            div { class: "min-h-0 flex-1",
+                MixerView {
+                    tracks,
+                    on_volume,
+                    on_mute,
+                    on_solo,
+                    levels,
                 }
             }
         }
@@ -359,6 +398,33 @@ mod imp {
                         }
                     }
                     push_session_signals(idx, pos, is_playing);
+                }
+            });
+        }
+
+        // Meter loop — a faster, lighter pass than the transport poll: while
+        // playing, publish the per-stem peak levels to `SETLIST_LEVELS` (~22 fps)
+        // for the mixer VU meters; clear them once when stopped.
+        {
+            let engine = engine;
+            use_future(move || async move {
+                loop {
+                    gloo_timers::future::TimeoutFuture::new(45).await;
+                    let Some(eng) = engine.peek().clone() else {
+                        if !SETLIST_LEVELS.peek().is_empty() {
+                            *SETLIST_LEVELS.write() = Vec::new();
+                        }
+                        continue;
+                    };
+                    let peaks = {
+                        let e = eng.borrow();
+                        e.playing.then(|| e.peak_levels())
+                    };
+                    if let Some(peaks) = peaks {
+                        *SETLIST_LEVELS.write() = peaks;
+                    } else if !SETLIST_LEVELS.peek().is_empty() {
+                        *SETLIST_LEVELS.write() = Vec::new();
+                    }
                 }
             });
         }
