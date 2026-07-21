@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use parking_lot::Mutex;
-use patchbay_proto::{AliasEntry, ColorEntry, PresetLink, RoutingPreset, VirtualSink};
+use patchbay_proto::{AliasEntry, CanvasView, ColorEntry, PresetLink, RoutingPreset, VirtualSink};
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct FileFormat {
@@ -22,6 +22,8 @@ struct FileFormat {
     colors: Vec<ColorEntry>,
     #[serde(default)]
     virtual_sinks: Vec<VirtualSink>,
+    #[serde(default)]
+    views: Vec<CanvasView>,
 }
 
 /// First-run channel names for a stock REAPER JACK client: the main
@@ -181,6 +183,29 @@ impl PresetStore {
     /// non-destructive auto chanmap import.)
     pub fn has_alias(&self, target: &str) -> bool {
         self.data.lock().aliases.iter().any(|a| a.target == target)
+    }
+
+    pub fn views(&self) -> Vec<CanvasView> {
+        self.data.lock().views.clone()
+    }
+
+    pub fn save_view(&self, view: CanvasView) {
+        let mut data = self.data.lock();
+        data.views.retain(|v| v.name != view.name);
+        data.views.push(view);
+        data.views.sort_by(|a, b| a.name.cmp(&b.name));
+        self.persist(&data);
+    }
+
+    pub fn delete_view(&self, name: &str) -> bool {
+        let mut data = self.data.lock();
+        let before = data.views.len();
+        data.views.retain(|v| v.name != name);
+        let removed = data.views.len() != before;
+        if removed {
+            self.persist(&data);
+        }
+        removed
     }
 
     pub fn colors(&self) -> Vec<ColorEntry> {

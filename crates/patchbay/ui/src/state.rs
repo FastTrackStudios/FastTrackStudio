@@ -34,6 +34,7 @@ pub static DANTE: GlobalSignal<DanteStatus> = Signal::global(DanteStatus::defaul
 pub static SERVICES: GlobalSignal<Vec<ServiceStatus>> = Signal::global(Vec::new);
 pub static LATENCY_RULES: GlobalSignal<Vec<patchbay_proto::LatencyRule>> = Signal::global(Vec::new);
 pub static VIRTUAL_SINKS: GlobalSignal<Vec<VirtualSink>> = Signal::global(Vec::new);
+pub static VIEWS: GlobalSignal<Vec<patchbay_proto::CanvasView>> = Signal::global(Vec::new);
 pub static CLOCK_DEFAULTS: GlobalSignal<patchbay_proto::ClockDefaults> =
     Signal::global(patchbay_proto::ClockDefaults::default);
 pub static DANTE_DEVICES: GlobalSignal<Vec<DanteDevice>> = Signal::global(Vec::new);
@@ -74,6 +75,8 @@ pub static HIDE_MONITORS: GlobalSignal<bool> = Signal::global(|| false);
 pub static EXPANDED_GROUPS: GlobalSignal<HashMap<String, bool>> = Signal::global(HashMap::new);
 /// Outcome of the last preset apply, for the status line.
 pub static LAST_REPORT: GlobalSignal<Option<(String, ApplyReport)>> = Signal::global(|| None);
+/// Last preset diff preview (name, human summary).
+pub static PRESET_DIFF: GlobalSignal<Option<(String, String)>> = Signal::global(|| None);
 /// Node id under the pointer — cables off its signal path dim.
 pub static HOVERED_NODE: GlobalSignal<Option<u32>> = Signal::global(|| None);
 /// Per-column collapse (Inputs | Applications | Outputs): collapsed
@@ -201,6 +204,9 @@ pub async fn refresh_meta(handle: &PatchbayHandle) {
     }
     if let Ok(sinks) = handle.0.virtual_sinks().await {
         *VIRTUAL_SINKS.write() = sinks;
+    }
+    if let Ok(views) = handle.0.views().await {
+        *VIEWS.write() = views;
     }
     if let Ok(defaults) = handle.0.clock_defaults().await {
         *CLOCK_DEFAULTS.write() = defaults;
@@ -513,6 +519,33 @@ pub fn connect_nodes_bulk(handle: PatchbayHandle, from: String, to: String) {
             Err(e) => tracing::warn!("bulk connect failed: {e:?}"),
         }
     });
+}
+
+/// Snapshot the current canvas state under a name.
+pub fn capture_view(name: String) -> patchbay_proto::CanvasView {
+    let (pan_x, pan_y) = *PAN.peek();
+    patchbay_proto::CanvasView {
+        name,
+        zoom: *ZOOM.peek(),
+        pan_x,
+        pan_y,
+        collapsed_cols: COLLAPSED_COLS.peek().to_vec(),
+        hide_unconnected: *HIDE_UNCONNECTED.peek(),
+        hide_monitors: *HIDE_MONITORS.peek(),
+    }
+}
+
+/// Restore a saved canvas view.
+pub fn apply_view(view: &patchbay_proto::CanvasView) {
+    *ZOOM.write() = view.zoom.clamp(0.15, 3.0);
+    *PAN.write() = (view.pan_x, view.pan_y);
+    let mut cols = [false; 4];
+    for (i, c) in view.collapsed_cols.iter().take(4).enumerate() {
+        cols[i] = *c;
+    }
+    *COLLAPSED_COLS.write() = cols;
+    *HIDE_UNCONNECTED.write() = view.hide_unconnected;
+    *HIDE_MONITORS.write() = view.hide_monitors;
 }
 
 /// Display name for a node (alias wins).

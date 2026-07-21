@@ -11,8 +11,8 @@ use vox::Tx;
 
 use crate::types::{
     AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
-    GraphEvent, GraphSnapshot, IconEntry, LatencyRule, RoutingPreset, ServiceAction, ServiceStatus,
-    VirtualSink,
+    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, RoutingPreset, ServiceAction,
+    ServiceStatus, VirtualSink,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -173,6 +173,15 @@ pub mod patchbay_service {
         /// (if present). Only nodes carrying `patchbay.virtual` are
         /// ever destroyed.
         async fn remove_virtual_sink(&self, name: String) -> Result<(), PatchbayError>;
+
+        // ── Saved canvas views ───────────────────────────────────────
+
+        async fn views(&self) -> Result<Vec<CanvasView>, PatchbayError>;
+
+        /// Save (upsert) a canvas view.
+        async fn save_view(&self, view: CanvasView) -> Result<(), PatchbayError>;
+
+        async fn delete_view(&self, name: String) -> Result<(), PatchbayError>;
 
         // ── Colors (cable/port identity) ─────────────────────────────
 

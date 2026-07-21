@@ -97,34 +97,48 @@ pub fn DanteGrid() -> Element {
     // the network (ARC round-trips are seconds).
     let click_cell = {
         let handle = handle.clone();
-        move |rx_device: String, rx_channel: u32, tx_device: String, tx_channel: String, is_sub: bool| {
+        // `ops` = (rx_channel, tx_channel_name) pairs — one for a plain
+        // click, two for a shift-click stereo pair.
+        move |rx_device: String, ops: Vec<(u32, String)>, tx_device: String, is_sub: bool| {
             let handle = handle.clone();
             {
                 let mut devs = DANTE_DEVICES.write();
                 if let Some(d) = devs.iter_mut().find(|d| d.name == rx_device) {
-                    d.subscriptions.retain(|s| s.rx_channel != rx_channel);
-                    if !is_sub {
-                        d.subscriptions.push(DanteSubscription {
-                            rx_channel,
-                            tx_channel: tx_channel.clone(),
-                            tx_device: tx_device.clone(),
-                            status: 1,
-                        });
+                    for (rx_channel, tx_channel) in &ops {
+                        d.subscriptions.retain(|s| s.rx_channel != *rx_channel);
+                        if !is_sub {
+                            d.subscriptions.push(DanteSubscription {
+                                rx_channel: *rx_channel,
+                                tx_channel: tx_channel.clone(),
+                                tx_device: tx_device.clone(),
+                                status: 1,
+                            });
+                        }
                     }
                 }
             }
             spawn(async move {
-                let res = if is_sub {
-                    handle.0.dante_unsubscribe(rx_device, rx_channel).await
-                } else {
-                    handle
-                        .0
-                        .dante_subscribe(rx_device, rx_channel, tx_device, tx_channel)
-                        .await
-                };
-                if let Err(e) = res {
-                    *DANTE_ERROR.write() = format!("subscription change failed: {e}");
-                } else {
+                let mut failed = false;
+                for (rx_channel, tx_channel) in ops {
+                    let res = if is_sub {
+                        handle.0.dante_unsubscribe(rx_device.clone(), rx_channel).await
+                    } else {
+                        handle
+                            .0
+                            .dante_subscribe(
+                                rx_device.clone(),
+                                rx_channel,
+                                tx_device.clone(),
+                                tx_channel,
+                            )
+                            .await
+                    };
+                    if let Err(e) = res {
+                        *DANTE_ERROR.write() = format!("subscription change failed: {e}");
+                        failed = true;
+                    }
+                }
+                if !failed {
                     // Let the device settle, then fetch the truth.
                     state::sleep_secs(2).await;
                 }
@@ -322,7 +336,7 @@ pub fn DanteGrid() -> Element {
                                                             let sub = sub_of(rx_dev, rx_ch.number);
                                                             if tx_expanded {
                                                                 rsx! {
-                                                                    for tx_ch in &tx_dev.tx {
+                                                                    for (ti, tx_ch) in tx_dev.tx.iter().enumerate() {
                                                                         {
                                                                             let is_sub = sub.is_some_and(|(d, c, _)|
                                                                                 d == tx_dev.name && c == tx_ch.name);
@@ -337,14 +351,24 @@ pub fn DanteGrid() -> Element {
                                                                             let txd = tx_dev.name.clone();
                                                                             let txc = tx_ch.name.clone();
                                                                             let rxn = rx_ch.number;
+                                                                            // Shift-click routes this AND the next
+                                                                            // channel on both sides (stereo pair).
+                                                                            let next_tx = tx_dev.tx.get(ti + 1).map(|c| c.name.clone());
+                                                                            let rx_has_next = rx_dev.rx.iter().any(|c| c.number == rxn + 1);
                                                                             rsx! {
                                                                                 td {
                                                                                     key: "{tx_dev.name}:{tx_ch.number}",
                                                                                     class: "{cls}",
-                                                                                    title: "{rx_dev.name}:{rx_ch.name} ← {tx_dev.name}:{tx_ch.name}",
-                                                                                    onclick: move |_| click(
-                                                                                        rxd.clone(), rxn, txd.clone(), txc.clone(), is_sub,
-                                                                                    ),
+                                                                                    title: "{rx_dev.name}:{rx_ch.name} ← {tx_dev.name}:{tx_ch.name} (shift = stereo pair)",
+                                                                                    onclick: move |e: Event<MouseData>| {
+                                                                                        let mut ops = vec![(rxn, txc.clone())];
+                                                                                        if e.modifiers().shift() && rx_has_next {
+                                                                                            if let Some(ntx) = next_tx.clone() {
+                                                                                                ops.push((rxn + 1, ntx));
+                                                                                            }
+                                                                                        }
+                                                                                        click(rxd.clone(), ops, txd.clone(), is_sub);
+                                                                                    },
                                                                                     if is_sub {
                                                                                         if healthy { "✓" } else { "!" }
                                                                                     }

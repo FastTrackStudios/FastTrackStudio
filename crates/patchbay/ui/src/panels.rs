@@ -146,11 +146,84 @@ pub fn StatusBar() -> Element {
 pub fn SidePanel() -> Element {
     rsx! {
         div { class: "side-panel",
+            ViewsPanel {}
             ServicesPanel {}
             LatencyPanel {}
             PresetsPanel {}
             VirtualSinksPanel {}
             Inspector {}
+        }
+    }
+}
+
+/// Saved canvas views: pan/zoom/column-collapse under a name ("FOH",
+/// "Broadcast") — click to jump, persisted server-side for all clients.
+#[component]
+fn ViewsPanel() -> Element {
+    let handle = state::use_patchbay();
+    let views = state::VIEWS.read().clone();
+    let mut new_name = use_signal(String::new);
+
+    let save = {
+        let handle = handle.clone();
+        move |_| {
+            let name = new_name.peek().trim().to_string();
+            if name.is_empty() {
+                return;
+            }
+            let view = state::capture_view(name);
+            let handle = handle.clone();
+            spawn(async move {
+                if let Err(e) = handle.0.save_view(view).await {
+                    tracing::warn!("save_view failed: {e:?}");
+                }
+                state::refresh_meta(&handle).await;
+            });
+            new_name.set(String::new());
+        }
+    };
+
+    rsx! {
+        div { class: "panel-section",
+            h3 { "Views" }
+            div { class: "preset-save",
+                input {
+                    placeholder: "view name…",
+                    value: "{new_name}",
+                    oninput: move |e| new_name.set(e.value()),
+                }
+                button { class: "chip", title: "save the current pan/zoom/columns as a view",
+                    onclick: save, "save view" }
+            }
+            for view in views {
+                {
+                    let apply_view = view.clone();
+                    let del = {
+                        let handle = handle.clone();
+                        let name = view.name.clone();
+                        move |_| {
+                            let handle = handle.clone();
+                            let name = name.clone();
+                            spawn(async move {
+                                if let Err(e) = handle.0.delete_view(name).await {
+                                    tracing::warn!("delete_view failed: {e:?}");
+                                }
+                                state::refresh_meta(&handle).await;
+                            });
+                        }
+                    };
+                    rsx! {
+                        div { class: "preset-row", key: "{view.name}",
+                            span { class: "preset-name", title: "apply this view",
+                                style: "cursor:pointer;",
+                                onclick: move |_| state::apply_view(&apply_view),
+                                "{view.name}"
+                            }
+                            button { class: "chip danger", onclick: del, "✕" }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -481,6 +554,63 @@ fn ServicesPanel() -> Element {
     }
 }
 
+/// What applying `preset` WOULD do against the current graph — the
+/// same resolution the server does, computed client-side for preview.
+fn preset_diff(preset: &patchbay_proto::RoutingPreset) -> String {
+    let graph = GRAPH.read();
+    let port_id = |node: &str, port: &str| -> Option<(u32, u32)> {
+        let n = graph.nodes.iter().find(|n| n.name == node)?;
+        let p = graph
+            .ports
+            .iter()
+            .find(|p| p.node_id == n.id && p.name == port)?;
+        Some((n.id, p.id))
+    };
+    let (mut create, mut existing, mut missing) = (0u32, 0u32, 0u32);
+    for l in &preset.links {
+        match (
+            port_id(&l.output_node, &l.output_port),
+            port_id(&l.input_node, &l.input_port),
+        ) {
+            (Some((_, op)), Some((_, ip))) => {
+                if graph
+                    .links
+                    .iter()
+                    .any(|x| x.output_port == op && x.input_port == ip)
+                {
+                    existing += 1;
+                } else {
+                    create += 1;
+                }
+            }
+            _ => missing += 1,
+        }
+    }
+    // Exclusive mode would ALSO remove live links absent from the preset.
+    let in_preset = |on: &str, op: &str, inn: &str, ip: &str| {
+        preset.links.iter().any(|l| {
+            l.output_node == on && l.output_port == op && l.input_node == inn && l.input_port == ip
+        })
+    };
+    let extras = graph
+        .links
+        .iter()
+        .filter(|l| {
+            let names = || {
+                let on = graph.nodes.iter().find(|n| n.id == l.output_node)?;
+                let op = graph.ports.iter().find(|p| p.id == l.output_port)?;
+                let inn = graph.nodes.iter().find(|n| n.id == l.input_node)?;
+                let ip = graph.ports.iter().find(|p| p.id == l.input_port)?;
+                Some(!in_preset(&on.name, &op.name, &inn.name, &ip.name))
+            };
+            names().unwrap_or(false)
+        })
+        .count();
+    format!(
+        "would create {create}, keep {existing}, {missing} missing; restore would also remove {extras}"
+    )
+}
+
 #[component]
 fn PresetsPanel() -> Element {
     let presets = PRESETS.read().clone();
@@ -551,9 +681,18 @@ fn PresetsPanel() -> Element {
                             });
                         }
                     };
+                    let diff = {
+                        let preset = preset.clone();
+                        move |_| {
+                            *state::PRESET_DIFF.write() =
+                                Some((preset.name.clone(), preset_diff(&preset)));
+                        }
+                    };
                     rsx! {
                         div { class: "preset-row", key: "{preset.name}",
                             span { class: "preset-name", title: "{links} links", "{preset.name}" }
+                            button { class: "chip", title: "preview what apply/restore would do",
+                                onclick: diff, "?" }
                             button { class: "chip", onclick: apply(false), "apply" }
                             button { class: "chip", title: "also remove links not in the preset",
                                 onclick: apply(true), "restore" }
@@ -561,6 +700,9 @@ fn PresetsPanel() -> Element {
                         }
                     }
                 }
+            }
+            if let Some((name, text)) = state::PRESET_DIFF.read().clone() {
+                div { class: "apply-report", "{name}: {text}" }
             }
             if let Some((name, r)) = report {
                 div { class: "apply-report",
@@ -1052,17 +1194,25 @@ fn ChanmapSync(node_name: String) -> Element {
         }
     };
 
+    let mut dante_dev = use_signal(String::new);
+    let dante_names: Vec<String> = state::DANTE_DEVICES
+        .read()
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
+
     let run_dante = |direction: &'static str| {
         let handle = handle.clone();
         let node_name = node_name.clone();
         move |_| {
             let handle = handle.clone();
             let node_name = node_name.clone();
+            let device = dante_dev.peek().clone();
             result.set("scanning Dante network…".into());
             spawn(async move {
                 match handle
                     .0
-                    .import_inferno_names(node_name, String::new(), direction.into())
+                    .import_inferno_names(node_name, device, direction.into())
                     .await
                 {
                     Ok(n) => {
@@ -1090,11 +1240,23 @@ fn ChanmapSync(node_name: String) -> Element {
                     onclick: run(false), "export chanmap" }
             }
             div { class: "chanmap-buttons",
+                select {
+                    class: "alias-input",
+                    title: "which Dante device's channel list to import names from",
+                    onchange: move |e| dante_dev.set(e.value()),
+                    option { value: "", selected: dante_dev.read().is_empty(),
+                        "Dante device (auto)" }
+                    for name in dante_names {
+                        option { value: "{name}", selected: *dante_dev.read() == name, "{name}" }
+                    }
+                }
+            }
+            div { class: "chanmap-buttons",
                 button { class: "chip",
-                    title: "name channels from a Dante device's RX list over ARC (for capture/source proxies)",
+                    title: "name channels from the device's RX list over ARC (for capture/source proxies)",
                     onclick: run_dante("rx"), "Dante names (rx)" }
                 button { class: "chip",
-                    title: "name channels from a Dante device's TX list over ARC (for playback/sink proxies)",
+                    title: "name channels from the device's TX list over ARC (for playback/sink proxies)",
                     onclick: run_dante("tx"), "Dante names (tx)" }
             }
             if !result.read().is_empty() {

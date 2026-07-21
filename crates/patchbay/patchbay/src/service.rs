@@ -10,8 +10,8 @@ use patchbay_proto::services::patchbay_service::{
 };
 use patchbay_proto::{
     AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
-    GraphEvent, GraphSnapshot, IconEntry, LatencyRule, PatchbayError, PatchbayService, PresetLink,
-    RoutingPreset, ServiceAction, ServiceStatus, VirtualSink,
+    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, PatchbayError, PatchbayService,
+    PresetLink, RoutingPreset, ServiceAction, ServiceStatus, VirtualSink,
     patchbay_service_service_descriptor, serve_patchbay_service,
 };
 
@@ -651,6 +651,26 @@ impl PatchbayService for PatchbayBackend {
                 .map_err(PatchbayError::EngineUnavailable)?;
         }
         Ok(())
+    }
+
+    async fn views(&self) -> Result<Vec<CanvasView>, PatchbayError> {
+        Ok(self.inner.presets.views())
+    }
+
+    async fn save_view(&self, view: CanvasView) -> Result<(), PatchbayError> {
+        if view.name.trim().is_empty() {
+            return Err(PatchbayError::Internal("view name is empty".into()));
+        }
+        self.inner.presets.save_view(view);
+        Ok(())
+    }
+
+    async fn delete_view(&self, name: String) -> Result<(), PatchbayError> {
+        self.inner
+            .presets
+            .delete_view(&name)
+            .then_some(())
+            .ok_or_else(|| PatchbayError::not_found("view", &name))
     }
 
     async fn colors(&self) -> Result<Vec<ColorEntry>, PatchbayError> {

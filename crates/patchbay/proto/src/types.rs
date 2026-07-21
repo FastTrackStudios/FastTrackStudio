@@ -206,6 +206,22 @@ pub fn sink_node_name(display: &str) -> String {
     format!("patchbay.{slug}")
 }
 
+// ─── Saved canvas views ─────────────────────────────────────────────────
+
+/// A saved graph-canvas view: pan/zoom/collapse state under a name, so
+/// "FOH" / "Broadcast" layouts are one click away on any client.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct CanvasView {
+    pub name: String,
+    pub zoom: f64,
+    pub pan_x: f64,
+    pub pan_y: f64,
+    /// Per-column collapse (Inputs | Applications | Groups | Outputs).
+    pub collapsed_cols: Vec<bool>,
+    pub hide_unconnected: bool,
+    pub hide_monitors: bool,
+}
+
 // ─── Clock / latency ────────────────────────────────────────────────────
 
 /// Graph clock defaults, materialized as a PipeWire drop-in — the
