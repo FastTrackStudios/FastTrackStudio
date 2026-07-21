@@ -12,6 +12,8 @@ architect = { workspace = true, features = ["vox"] }
 vox.workspace = true
 eyre.workspace = true
 parking_lot.workspace = true
+facet.workspace = true
+facet-styx.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
