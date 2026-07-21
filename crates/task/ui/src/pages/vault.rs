@@ -1363,7 +1363,7 @@ fn front_block_maps(text: &str, key: &str) -> Vec<Vec<(String, String)>> {
 }
 
 /// Read a scalar `key: value` from the note's leading `---` frontmatter block.
-fn frontmatter_value(text: &str, key: &str) -> Option<String> {
+pub(crate) fn frontmatter_value(text: &str, key: &str) -> Option<String> {
     let rest = text.strip_prefix("---")?;
     let (front, _) = rest.split_once("\n---")?;
     for line in front.lines() {
