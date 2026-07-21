@@ -828,12 +828,17 @@ mod imp {
                                 }
                             }
                             div { class: "flex min-h-0 flex-1",
-                                // Chart (left).
-                                div { class: "min-w-0 flex-1 overflow-auto border-r border-border bg-white",
+                                // Chart (left). The pane owns its own background +
+                                // pan/zoom, so the wrapper must NOT paint white or
+                                // scroll (that white bled through while panning).
+                                div { class: "min-w-0 flex-1 overflow-hidden border-r border-border bg-background",
                                     SessionChartPane {}
                                 }
-                                // Switchable right pane.
-                                div { class: "flex min-w-0 flex-1 flex-col overflow-auto bg-card",
+                                // Switchable right pane. Capped at ~A4 reading
+                                // width (5xl) and right-aligned: on a normal
+                                // screen it's a 50/50 split, but on ultrawide the
+                                // cap hands the extra space to the chart.
+                                div { class: "flex min-w-0 max-w-5xl flex-1 flex-col overflow-auto bg-card",
                                     if right == CenterRight::Editor {
                                         // Keyed on song index + chart presence, so it
                                         // remounts (and re-seeds) both on song change

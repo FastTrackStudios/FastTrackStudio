@@ -63,6 +63,11 @@ pub fn FullscreenExperience(
     handle_esc: bool,
     children: Element,
 ) -> Element {
+    // Double-Esc to exit: the experience can host a vim editor whose own Esc
+    // leaves insert mode — a single Esc must NOT drop the whole experience.
+    // The first Esc arms; a second within the window exits (the arm auto-clears
+    // so a stray Esc leaving insert mode never accumulates into an exit).
+    let mut esc_armed = use_signal(|| false);
     rsx! {
         div {
             // `fixed inset-0` escapes the pane/sidebar layout and covers the
@@ -73,8 +78,18 @@ pub fn FullscreenExperience(
             autofocus: true,
             onkeydown: move |e| {
                 if handle_esc && e.key() == Key::Escape {
-                    e.prevent_default();
-                    on_exit.call(());
+                    if *esc_armed.peek() {
+                        e.prevent_default();
+                        esc_armed.set(false);
+                        on_exit.call(());
+                    } else {
+                        esc_armed.set(true);
+                        spawn(async move {
+                            #[cfg(target_arch = "wasm32")]
+                            gloo_timers::future::TimeoutFuture::new(900).await;
+                            esc_armed.set(false);
+                        });
+                    }
                 }
             },
             // Slim top bar: title on the left, Esc-to-exit on the right.
@@ -82,10 +97,12 @@ pub fn FullscreenExperience(
                 span { class: "truncate text-sm font-semibold text-foreground", "{title}" }
                 button {
                     class: "flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground",
-                    title: "Exit (Esc)",
+                    title: "Press Esc twice to exit",
                     onclick: move |_| on_exit.call(()),
                     Minimize2 { class: "size-3.5" }
-                    span { class: "font-medium", "Esc" }
+                    span { class: "font-medium",
+                        if esc_armed() { "Esc again to exit" } else { "Esc Esc" }
+                    }
                 }
             }
             // Experience content fills the rest of the viewport.
