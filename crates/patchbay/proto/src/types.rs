@@ -185,6 +185,41 @@ pub struct ApplyReport {
     pub destroyed: u32,
 }
 
+// ─── Named routes (explicit auto-connect) ───────────────────────────────
+
+/// One endpoint of a [`NamedRoute`], addressed by SEMANTIC name and
+/// resolved against the live graph at apply time (so it survives the
+/// channel being renumbered).
+///
+/// `node` narrows which node to look in — a `node.name` or a node alias,
+/// empty = any node. `port` is a port's alias or raw `port.name`, matched
+/// after normalization: the `"N - "` channel-number prefix and a trailing
+/// `[DSP]` are stripped and the compare is case-insensitive, so
+/// `"Engineer TB"` matches the live alias `"81 - Engineer TB [DSP]"`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Facet)]
+pub struct RouteEndpoint {
+    pub node: String,
+    pub port: String,
+}
+
+/// An explicit auto-connect rule: keep `from`'s output port linked to
+/// `to`'s input port whenever BOTH resolve in the live graph. Applied
+/// idempotently — it only ever *creates* the missing link, never tears
+/// down anything else — on graph settle and on demand. Because the
+/// endpoints are addressed by alias, a route keeps working when the
+/// underlying channel numbers move.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+pub struct NamedRoute {
+    /// Unique label ("Engineer TB → REAPER"); upsert key.
+    pub name: String,
+    /// Output side (the source).
+    pub from: RouteEndpoint,
+    /// Input side (the destination).
+    pub to: RouteEndpoint,
+    /// Disabled routes persist but are skipped by apply.
+    pub enabled: bool,
+}
+
 // ─── Aliases (pretty names) ─────────────────────────────────────────────
 
 /// Display alias for a node (`target = node.name`) or a port

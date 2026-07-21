@@ -11,8 +11,8 @@ use vox::Tx;
 
 use crate::types::{
     AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
-    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, RoutingPreset, ServiceAction,
-    ServiceStatus, VirtualSink,
+    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute, RoutingPreset,
+    ServiceAction, ServiceStatus, VirtualSink,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -112,6 +112,21 @@ pub mod patchbay_service {
         ) -> Result<ApplyReport, PatchbayError>;
 
         async fn delete_preset(&self, name: String) -> Result<(), PatchbayError>;
+
+        // ── Named routes (explicit auto-connect) ─────────────────────
+
+        async fn routes(&self) -> Result<Vec<NamedRoute>, PatchbayError>;
+
+        /// Add or replace a named route (upsert by `route.name`).
+        async fn set_route(&self, route: NamedRoute) -> Result<(), PatchbayError>;
+
+        async fn delete_route(&self, name: String) -> Result<(), PatchbayError>;
+
+        /// Resolve + apply every enabled route against the live graph
+        /// now (idempotent — creates only missing links). Returns the
+        /// number of links created. Routes also apply automatically
+        /// whenever the graph settles after a node/port change.
+        async fn apply_routes(&self) -> Result<u32, PatchbayError>;
 
         // ── Aliases (pretty names) ───────────────────────────────────
 

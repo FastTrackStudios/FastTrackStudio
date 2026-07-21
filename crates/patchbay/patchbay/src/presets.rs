@@ -14,7 +14,9 @@ use std::path::PathBuf;
 
 use facet::Facet;
 use parking_lot::Mutex;
-use patchbay_proto::{AliasEntry, CanvasView, ColorEntry, PresetLink, RoutingPreset, VirtualSink};
+use patchbay_proto::{
+    AliasEntry, CanvasView, ColorEntry, NamedRoute, PresetLink, RoutingPreset, VirtualSink,
+};
 
 /// The whole patchbay config, one styx document. Every list defaults to
 /// empty (`#[facet(default)]`) so a hand-written file can omit any
@@ -40,6 +42,9 @@ struct FileFormat {
     #[serde(default)]
     #[facet(default)]
     views: Vec<CanvasView>,
+    #[serde(default)]
+    #[facet(default)]
+    routes: Vec<NamedRoute>,
 }
 
 /// First-run channel names for a stock REAPER JACK client: the main
@@ -274,6 +279,30 @@ impl PresetStore {
         self.persist(&data);
     }
 
+    pub fn routes(&self) -> Vec<NamedRoute> {
+        self.data.lock().routes.clone()
+    }
+
+    /// Upsert a named route (by `name`).
+    pub fn set_route(&self, route: NamedRoute) {
+        let mut data = self.data.lock();
+        data.routes.retain(|r| r.name != route.name);
+        data.routes.push(route);
+        data.routes.sort_by(|a, b| a.name.cmp(&b.name));
+        self.persist(&data);
+    }
+
+    pub fn delete_route(&self, name: &str) -> bool {
+        let mut data = self.data.lock();
+        let before = data.routes.len();
+        data.routes.retain(|r| r.name != name);
+        let removed = data.routes.len() != before;
+        if removed {
+            self.persist(&data);
+        }
+        removed
+    }
+
     /// Empty alias clears the entry.
     pub fn set_alias(&self, target: String, alias: String) {
         let mut data = self.data.lock();
@@ -327,6 +356,18 @@ mod styx_roundtrip {
                 collapsed_cols: vec![false, true, false, true],
                 hide_unconnected: true,
                 hide_monitors: false,
+            }],
+            routes: vec![NamedRoute {
+                name: "Engineer TB → REAPER".into(),
+                from: patchbay_proto::RouteEndpoint {
+                    node: "Inferno source".into(),
+                    port: "Engineer TB [DSP]".into(),
+                },
+                to: patchbay_proto::RouteEndpoint {
+                    node: "REAPER".into(),
+                    port: "Engineer TB".into(),
+                },
+                enabled: true,
             }],
         };
 

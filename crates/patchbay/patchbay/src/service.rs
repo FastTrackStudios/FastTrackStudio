@@ -1,6 +1,6 @@
 //! `PatchbayService` implementation over the engine + preset store.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc;
 
@@ -10,9 +10,9 @@ use patchbay_proto::services::patchbay_service::{
 };
 use patchbay_proto::{
     AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
-    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, PatchbayError, PatchbayService,
-    PresetLink, RoutingPreset, ServiceAction, ServiceStatus, VirtualSink,
-    patchbay_service_service_descriptor, serve_patchbay_service,
+    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute, PatchbayError,
+    PatchbayService, PortDirection, PresetLink, RouteEndpoint, RoutingPreset, ServiceAction,
+    ServiceStatus, VirtualSink, patchbay_service_service_descriptor, serve_patchbay_service,
 };
 
 use crate::engine::{self, Command, EngineHandle};
@@ -74,6 +74,9 @@ impl PatchbayBackend {
         }
         // Debounce gate for the pw-dump enrichment pass.
         let enrich_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Debounce gate for named-route auto-apply (a node/port burst
+        // schedules ONE apply once the graph settles).
+        let routes_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
         // Big window: a single app connecting is a burst of hundreds of
         // port events, a PipeWire reconnect is ~2000 — a small ring
         // drops the middle of the burst and clients silently lose
@@ -103,6 +106,25 @@ impl PatchbayBackend {
                                 crate::enrich::enrich_nodes(&store, &tx);
                             });
                         }
+                        // Nodes/ports appearing (REAPER launches, Inferno
+                        // re-opens) schedule a debounced named-route apply
+                        // — the explicit auto-connect. Only creates the
+                        // links the user declared; no routes = no-op.
+                        if matches!(ev, GraphEvent::NodeAdded(_) | GraphEvent::PortAdded(_))
+                            && !routes_pending.load(std::sync::atomic::Ordering::SeqCst)
+                            && !presets.routes().is_empty()
+                        {
+                            routes_pending.store(true, std::sync::atomic::Ordering::SeqCst);
+                            let store = store.clone();
+                            let presets = presets.clone();
+                            let engine = engine.clone();
+                            let pending = routes_pending.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(2000));
+                                pending.store(false, std::sync::atomic::Ordering::SeqCst);
+                                apply_named_routes(&store, &presets, &engine);
+                            });
+                        }
                         match &ev {
                             // REAPER (re)appeared: pick up its channel
                             // names from the host chanmap once the
@@ -125,6 +147,7 @@ impl PatchbayBackend {
                                 std::thread::spawn(move || {
                                     std::thread::sleep(std::time::Duration::from_secs(3));
                                     ensure_virtual_sinks(&store, &presets, &engine);
+                                    apply_named_routes(&store, &presets, &engine);
                                 });
                             }
                             _ => {}
@@ -144,6 +167,7 @@ impl PatchbayBackend {
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(3));
                 ensure_virtual_sinks(&store, &presets, &engine);
+                apply_named_routes(&store, &presets, &engine);
             });
         }
         Self {
@@ -274,6 +298,113 @@ fn ensure_virtual_sinks(
     }
 }
 
+/// Normalize an alias/port name for route matching: lowercase, drop a
+/// leading `"N - "` channel-number prefix and a trailing `[DSP]`,
+/// collapse whitespace. So `"81 - Engineer Vocal [DSP]"` and
+/// `"Engineer Vocal"` compare equal (but " L"/" R" is kept — stereo
+/// halves stay distinct).
+fn norm_route_name(s: &str) -> String {
+    let s = s.trim();
+    // Strip a leading "<digits> - ".
+    let s = match s.split_once(" - ") {
+        Some((pre, rest)) if !pre.is_empty() && pre.chars().all(|c| c.is_ascii_digit()) => rest,
+        _ => s,
+    };
+    let mut s = s.trim().to_string();
+    // Strip a trailing "[DSP]" (any case).
+    let lower = s.to_lowercase();
+    if lower.ends_with("[dsp]") {
+        s.truncate(s.len() - "[dsp]".len());
+    }
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Resolve one route endpoint to a live port id of the given direction,
+/// matching the port's ALIAS (or raw name) normalized. `ep.node`, when
+/// set, narrows to a node whose name / label / alias matches.
+fn resolve_route_endpoint(
+    store: &GraphStore,
+    aliases: &HashMap<String, String>,
+    ep: &RouteEndpoint,
+    dir: PortDirection,
+) -> Option<u32> {
+    let want_port = norm_route_name(&ep.port);
+    if want_port.is_empty() {
+        return None;
+    }
+    let want_node = ep.node.trim().to_lowercase();
+    for p in store.ports.values() {
+        if p.direction != dir {
+            continue;
+        }
+        let Some(node) = store.nodes.get(&p.node_id) else {
+            continue;
+        };
+        if !want_node.is_empty() {
+            let node_alias = aliases.get(&node.name).map(|s| s.to_lowercase()).unwrap_or_default();
+            if node.name.to_lowercase() != want_node
+                && node.label.to_lowercase() != want_node
+                && node_alias != want_node
+            {
+                continue;
+            }
+        }
+        let alias = aliases.get(&format!("{}:{}", node.name, p.name));
+        let cand = alias.map(String::as_str).unwrap_or(&p.name);
+        if norm_route_name(cand) == want_port {
+            return Some(p.id);
+        }
+    }
+    None
+}
+
+/// Apply every enabled named route against the live graph: create the
+/// missing link for each route whose endpoints both resolve. Idempotent
+/// — never destroys anything, never duplicates an existing link.
+/// Returns the number of links created. Runs on graph-settle and on the
+/// `apply_routes` RPC.
+fn apply_named_routes(
+    store: &Arc<RwLock<GraphStore>>,
+    presets: &Arc<PresetStore>,
+    engine: &EngineHandle,
+) -> u32 {
+    let routes = presets.routes();
+    if routes.is_empty() {
+        return 0;
+    }
+    let aliases: HashMap<String, String> =
+        presets.aliases().into_iter().map(|a| (a.target, a.alias)).collect();
+    let store_r = store.read();
+    let mut created = 0;
+    for route in routes.iter().filter(|r| r.enabled) {
+        let (Some(out), Some(inp)) = (
+            resolve_route_endpoint(&store_r, &aliases, &route.from, PortDirection::Output),
+            resolve_route_endpoint(&store_r, &aliases, &route.to, PortDirection::Input),
+        ) else {
+            continue;
+        };
+        if store_r.link_between(out, inp).is_some() {
+            continue;
+        }
+        let (Some(on), Some(inn)) = (store_r.node_of_port(out), store_r.node_of_port(inp)) else {
+            continue;
+        };
+        if engine
+            .send(Command::CreateLink {
+                output_node: on.id,
+                output_port: out,
+                input_node: inn.id,
+                input_port: inp,
+            })
+            .is_ok()
+        {
+            tracing::info!(route = %route.name, out, inp, "named route applied");
+            created += 1;
+        }
+    }
+    created
+}
+
 /// Non-destructive chanmap import: name `node`'s channels from the
 /// host's default ReaperChanMap, skipping channels the user already
 /// aliased in the patchbay. Missing chanmap file = silently nothing.
@@ -312,6 +443,97 @@ fn auto_import_chanmap(
     }
     if written > 0 {
         tracing::info!(node, written, "auto-imported chanmap names");
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+    use patchbay_proto::{MediaKind, NodeState, PwNode, PwPort};
+
+    fn node(id: u32, name: &str) -> PwNode {
+        PwNode {
+            id,
+            name: name.into(),
+            label: name.into(),
+            media_class: String::new(),
+            media_kind: MediaKind::Audio,
+            app_name: String::new(),
+            latency: String::new(),
+            icon_name: String::new(),
+            group: String::new(),
+            virtual_sink: false,
+            state: NodeState::Running,
+        }
+    }
+    fn port(id: u32, node_id: u32, name: &str, dir: PortDirection) -> PwPort {
+        PwPort {
+            id,
+            node_id,
+            name: name.into(),
+            direction: dir,
+            media_kind: MediaKind::Audio,
+        }
+    }
+
+    #[test]
+    fn normalization_strips_prefix_and_dsp_but_keeps_lr() {
+        assert_eq!(norm_route_name("81 - Engineer Vocal [DSP]"), "engineer vocal");
+        assert_eq!(norm_route_name("42 - Engineer Vocal"), "engineer vocal");
+        assert_eq!(norm_route_name("Engineer Vocal"), "engineer vocal");
+        // L/R must stay distinct — stereo halves are different channels.
+        assert_ne!(norm_route_name("Vocal 1 Mix L"), norm_route_name("Vocal 1 Mix R"));
+    }
+
+    #[test]
+    fn resolves_by_alias_across_channel_numbers() {
+        // Inferno source outputs capture_96 (aliased with the [DSP] name
+        // and a different channel number than REAPER's input).
+        let mut store = GraphStore::default();
+        store.nodes.insert(1, node(1, "Inferno source"));
+        store.nodes.insert(2, node(2, "REAPER"));
+        store.ports.insert(100, port(100, 1, "capture_96", PortDirection::Output));
+        store.ports.insert(200, port(200, 2, "in5", PortDirection::Input));
+
+        let mut aliases = HashMap::new();
+        aliases.insert("Inferno source:capture_96".into(), "96 - Engineer Vocal [DSP]".into());
+        aliases.insert("REAPER:in5".into(), "5 - Engineer Vocal".into());
+
+        let from = RouteEndpoint { node: "Inferno source".into(), port: "Engineer Vocal".into() };
+        let to = RouteEndpoint { node: "REAPER".into(), port: "Engineer Vocal".into() };
+
+        assert_eq!(
+            resolve_route_endpoint(&store, &aliases, &from, PortDirection::Output),
+            Some(100)
+        );
+        assert_eq!(
+            resolve_route_endpoint(&store, &aliases, &to, PortDirection::Input),
+            Some(200)
+        );
+        // Direction matters: the output-side spec must not match the input port.
+        assert_eq!(
+            resolve_route_endpoint(&store, &aliases, &from, PortDirection::Input),
+            None
+        );
+    }
+
+    #[test]
+    fn node_filter_disambiguates_same_alias() {
+        // Two output ports share the normalized name; the node filter picks one.
+        let mut store = GraphStore::default();
+        store.nodes.insert(1, node(1, "Inferno source"));
+        store.nodes.insert(2, node(2, "Other Card"));
+        store.ports.insert(100, port(100, 1, "capture_1", PortDirection::Output));
+        store.ports.insert(101, port(101, 2, "out_1", PortDirection::Output));
+        let mut aliases = HashMap::new();
+        aliases.insert("Inferno source:capture_1".into(), "Talkback".into());
+        aliases.insert("Other Card:out_1".into(), "Talkback".into());
+
+        let ep = RouteEndpoint { node: "Other Card".into(), port: "Talkback".into() };
+        assert_eq!(
+            resolve_route_endpoint(&store, &aliases, &ep, PortDirection::Output),
+            Some(101)
+        );
     }
 }
 
@@ -502,6 +724,37 @@ impl PatchbayService for PatchbayBackend {
             .delete_preset(&name)
             .then_some(())
             .ok_or_else(|| PatchbayError::not_found("preset", &name))
+    }
+
+    async fn routes(&self) -> Result<Vec<NamedRoute>, PatchbayError> {
+        Ok(self.inner.presets.routes())
+    }
+
+    async fn set_route(&self, route: NamedRoute) -> Result<(), PatchbayError> {
+        if route.name.trim().is_empty() {
+            return Err(PatchbayError::Internal("route name is empty".into()));
+        }
+        self.inner.presets.set_route(route);
+        // Apply immediately so a just-added route wires up now if both
+        // ends are already present.
+        apply_named_routes(&self.inner.store, &self.inner.presets, &self.inner.engine);
+        Ok(())
+    }
+
+    async fn delete_route(&self, name: String) -> Result<(), PatchbayError> {
+        self.inner
+            .presets
+            .delete_route(&name)
+            .then_some(())
+            .ok_or_else(|| PatchbayError::not_found("route", &name))
+    }
+
+    async fn apply_routes(&self) -> Result<u32, PatchbayError> {
+        Ok(apply_named_routes(
+            &self.inner.store,
+            &self.inner.presets,
+            &self.inner.engine,
+        ))
     }
 
     async fn aliases(&self) -> Result<Vec<AliasEntry>, PatchbayError> {

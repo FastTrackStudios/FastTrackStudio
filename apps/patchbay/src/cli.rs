@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use patchbay_proto::{
-    GraphSnapshot, LatencyRule, PatchbayError, PatchbayService, PatchbayServiceClient,
-    PortDirection, PwNode, ServiceAction,
+    GraphSnapshot, LatencyRule, NamedRoute, PatchbayError, PatchbayService, PatchbayServiceClient,
+    PortDirection, PwNode, RouteEndpoint, ServiceAction,
 };
 
 #[derive(Parser)]
@@ -60,6 +60,12 @@ enum Cmd {
     Alias {
         #[command(subcommand)]
         cmd: AliasCmd,
+    },
+    /// Named auto-connect routes: explicit, alias-addressed links the
+    /// engine re-creates whenever both ends appear.
+    Route {
+        #[command(subcommand)]
+        cmd: RouteCmd,
     },
     /// Alias a node's ports from a REAPER ChanMap file (channel names
     /// → port aliases). Empty path = the host's default chanmap.
@@ -124,6 +130,42 @@ enum AliasCmd {
     List,
     /// Empty alias clears.
     Set { target: String, alias: String },
+}
+
+#[derive(Subcommand)]
+enum RouteCmd {
+    List,
+    /// Add/replace a route: `<name> <from> <to>`, each endpoint written
+    /// `Node:Port` (or just `Port`). Port is an alias or raw name,
+    /// matched normalized — `"Engineer TB"` hits `"81 - Engineer TB
+    /// [DSP]"`. E.g. `route set eng-tb "Inferno source:Engineer TB
+    /// [DSP]" "REAPER:Engineer TB"`.
+    Set {
+        name: String,
+        from: String,
+        to: String,
+        /// Store it disabled (won't auto-connect until re-set enabled).
+        #[arg(long)]
+        disabled: bool,
+    },
+    Remove { name: String },
+    /// Apply all enabled routes now; prints links created.
+    Apply,
+}
+
+/// Parse `Node:Port` (or bare `Port`) into a route endpoint. Splits on
+/// the FIRST colon — node names and port aliases don't contain colons.
+fn parse_endpoint(s: &str) -> RouteEndpoint {
+    match s.split_once(':') {
+        Some((node, port)) => RouteEndpoint {
+            node: node.trim().to_string(),
+            port: port.trim().to_string(),
+        },
+        None => RouteEndpoint {
+            node: String::new(),
+            port: s.trim().to_string(),
+        },
+    }
 }
 
 #[derive(Subcommand)]
@@ -453,6 +495,46 @@ async fn main() -> eyre::Result<()> {
             AliasCmd::Set { target, alias } => {
                 ok_or_msg(c.set_alias(target.clone(), alias.clone()).await)?;
                 println!("{target} → {alias}");
+            }
+        },
+        Cmd::Route { cmd } => match cmd {
+            RouteCmd::List => {
+                let routes = ok_or_msg(c.routes().await)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&routes)?);
+                } else if routes.is_empty() {
+                    println!("(no routes)");
+                } else {
+                    for r in routes {
+                        let fmt = |e: &RouteEndpoint| {
+                            if e.node.is_empty() {
+                                e.port.clone()
+                            } else {
+                                format!("{}:{}", e.node, e.port)
+                            }
+                        };
+                        let flag = if r.enabled { "" } else { "  (disabled)" };
+                        println!("{:<24} {}  →  {}{}", r.name, fmt(&r.from), fmt(&r.to), flag);
+                    }
+                }
+            }
+            RouteCmd::Set { name, from, to, disabled } => {
+                let route = NamedRoute {
+                    name: name.clone(),
+                    from: parse_endpoint(&from),
+                    to: parse_endpoint(&to),
+                    enabled: !disabled,
+                };
+                ok_or_msg(c.set_route(route).await)?;
+                println!("route '{name}' set");
+            }
+            RouteCmd::Remove { name } => {
+                ok_or_msg(c.delete_route(name.clone()).await)?;
+                println!("route '{name}' removed");
+            }
+            RouteCmd::Apply => {
+                let n = ok_or_msg(c.apply_routes().await)?;
+                println!("applied routes: {n} link(s) created");
             }
         },
         Cmd::Chanmap { node, path } => {
