@@ -349,6 +349,13 @@ pub async fn attachments_client(
     establish_for::<attachments_proto::AttachmentServiceClient>(slug).await
 }
 
+/// An org's `MediaServiceClient` — content-addressed blob bytes
+/// streamed over the vox lane itself (`Tx<MediaChunk>`), no HTTP
+/// side-channel. The forward path for the session player's stems.
+pub async fn media_client(slug: &str) -> Result<media_proto::MediaServiceClient, String> {
+    establish_for::<media_proto::MediaServiceClient>(slug).await
+}
+
 /// An org's `VaultGraphClient` — link-graph reads (backlinks /
 /// links / orphans / unresolved / deadends / tags) for the vault
 /// page's backlinks panel and the editor's tag candidates.

@@ -41,6 +41,8 @@ sea-orm.workspace = true
 sea-orm-migration.workspace = true
 
 attachments-proto = { workspace = true }
+# Media streamed over vox — read-side view over the attachment blobs.
+media-proto = { workspace = true }
 vault-proto = { workspace = true, features = ["vox"] }
 vault = { workspace = true }
 wiki-proto = { workspace = true }
@@ -161,6 +163,8 @@ tower = { version = "0.5", features = ["util"] }
 vault-proto = { workspace = true, features = ["vox"] }
 project = { workspace = true, features = ["vox"] }
 collection-proto = { workspace = true, features = ["vox"] }
+media-proto = { workspace = true, features = ["vox"] }
+vox-core = { workspace = true }
 
 [lints]
 workspace = true

@@ -866,6 +866,7 @@ email-sync = { path = "features/task/email/email-sync" }
 email-link = { path = "features/task/email/email-link" }
 # features/task — vault-superset slices
 attachments-proto = { path = "features/task/attachments/attachments-proto" }
+media-proto = { path = "features/task/media/media-proto" }
 locations = { path = "features/task/locations/locations" }
 locations-proto = { path = "features/task/locations/locations-proto", default-features = false }
 inventory = { path = "features/task/inventory/inventory" }
