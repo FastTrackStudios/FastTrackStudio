@@ -15,8 +15,8 @@
 //!      deterministic local owner (`user_id = v5(org_id, "task-local-owner")`,
 //!      matching `task_ui::chrome::owner_id` / the CLI) — a headless/testing
 //!      fallback.
-//! Either way the resulting `user_id` keys the timer/inbox rows so watch
-//! entries land in the same keyspace as the desktop and CLI.
+//!      Either way the resulting `user_id` keys the timer/inbox rows so
+//!      watch entries land in the same keyspace as the desktop and CLI.
 
 use axum::{
     Json, Router,
