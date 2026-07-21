@@ -4,25 +4,25 @@
 //! Renders with the CPU engraver pipeline (`keyflow::engraver` layout →
 //! fontless SVG string, wasm-safe — no canvas/wgpu), using the same
 //! **Master Rhythm / paginated A4** layout the site's chart editor uses so the
-//! measures fill each system to the page edge. One page shows at a time, fit to
-//! the viewport, with Prev/Next page controls and drag-to-pan + wheel-to-zoom
-//! (the interaction pattern from the site's `live_editor`).
+//! measures fill each system to the page edge. All pages lay out side-by-side
+//! in one row; the viewport fits the page **height** (so a page's full height
+//! is always visible and a wide viewport shows more than one page), scrolls
+//! horizontally, and supports drag-to-pan + wheel-to-zoom. Prev/Next just pans
+//! to center the target page.
 //!
 //! - **chart source**: `SONG_CHARTS[project_guid].chart_text` (or the song's
 //!   own `chart_text`), keyed off `ACTIVE_INDICES.song_index` +
 //!   `SETLIST_STRUCTURE`.
 //! - **static layer**: chart text → `keyflow::parse` → A4 paginated layout →
-//!   one **fontless** SVG *per page*, re-generated only when the text changes.
-//!   Each SVG is rendered inline via `dangerous_inner_html` (NOT an `<img
-//!   blob>`), and the engraving fonts are injected once as `@font-face`
-//!   (`editor_keyflow::font_face_css()`) so the SMuFL / chord / text glyphs
-//!   resolve. (An SVG loaded through `<img>` does not apply `@font-face` web
-//!   fonts — that was the old tofu-glyph bug.)
-//! - **highlight overlay**: a second SVG with the active page's viewBox stacked
-//!   on top; `ChartCursor` turns the playhead time into draw commands which
-//!   become overlay `rect`/`line` elements, so the active-measure highlight
-//!   scales pixel-perfectly with the page under it. During playback the view
-//!   auto-follows the cursor's page.
+//!   one **fontless** SVG for the whole document (all pages in a row),
+//!   re-generated only when the text changes. Rendered inline via
+//!   `dangerous_inner_html` (NOT an `<img blob>`), with the engraving fonts
+//!   injected once as `@font-face` (`editor_keyflow::font_face_css()`) so the
+//!   SMuFL / chord / text glyphs resolve.
+//! - **highlight overlay**: a second SVG with the document viewBox stacked on
+//!   top; `ChartCursor` turns the playhead time into draw commands, so the
+//!   active-measure highlight scales pixel-perfectly with the page under it.
+//!   During playback the view auto-follows the cursor's page.
 //!
 //! Playhead model: `ACTIVE_INDICES.song_progress` (0..1 over the transport
 //! timeline, whose 0 is the count-in start) maps onto the chart's own timeline,
@@ -45,29 +45,30 @@ use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, Cha
 use keyflow::engraver::style::MStyle;
 use session_ui::{ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_CHARTS};
 
-/// Zoom bounds for the pannable page viewport (matches the site's editor).
+/// Zoom bounds for the pannable viewport (matches the site's editor).
 const ZOOM_MIN: f64 = 0.1;
 const ZOOM_MAX: f64 = 8.0;
-/// Fraction of the viewport a fitted page fills (leaves a small margin).
-const FIT_MARGIN: f64 = 0.96;
+/// Fraction of the viewport height a fitted page fills (leaves a margin).
+const FIT_MARGIN: f64 = 0.94;
 
 // ─── Layout cache (one per pane — wasm is single-threaded) ────────────────
 
-/// One engraved page: its scene-space box (viewBox origin + size) and SVG.
+/// The engraved document: one wide SVG (all A4 pages in a row), its scene box,
+/// and each page's horizontal placement (for centering / nav).
 #[derive(Clone)]
-struct PageRender {
+struct DocRender {
+    /// Whole-document fontless SVG (viewBox `0 0 total_w total_h`).
     svg: String,
-    /// Scene-coordinate box of this page (also the overlay viewBox).
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
+    total_w: f64,
+    total_h: f64,
+    /// `(x_offset, width)` of each page in scene coordinates.
+    pages: Vec<(f64, f64)>,
 }
 
 struct Pane {
     engine: ChartLayoutEngine,
-    /// (key, layout, per-page renders)
-    layout: Option<(u64, ChartLayoutResult, Vec<PageRender>)>,
+    /// (key, layout, rendered document)
+    layout: Option<(u64, ChartLayoutResult, DocRender)>,
 }
 
 thread_local! {
@@ -104,13 +105,12 @@ fn text_key(text: &str) -> u64 {
 }
 
 impl Pane {
-    /// Parse + lay out + serialize each page of `text` if it isn't cached.
-    /// Returns the per-page renders on success.
-    fn ensure(&mut self, text: &str) -> Option<Vec<PageRender>> {
+    /// Parse + lay out + serialize `text` if it isn't cached.
+    fn ensure(&mut self, text: &str) -> Option<DocRender> {
         let key = text_key(text);
-        if let Some((cached_key, _, pages)) = &self.layout {
+        if let Some((cached_key, _, doc)) = &self.layout {
             if *cached_key == key {
-                return Some(pages.clone());
+                return Some(doc.clone());
             }
         }
 
@@ -124,51 +124,40 @@ impl Pane {
 
         // A4 page document with the **Master Rhythm** preset — the same layout
         // the site's chart editor uses: measures fill each system to the page
-        // edge (not content-sized), true A4 page proportions. The paginated
+        // edge (not content-sized), true A4 proportions. `use_page_offsets`
+        // lays the pages out side-by-side in scene space; we serialize the
+        // whole scene as one SVG so the row can be panned/zoomed as a unit and
+        // a single overlay (scene coords) lines up on any page. The paginated
         // path derives the count-in from the chart's `CountIn` section and gives
         // its beats negative-time positions (real measures at t=0), so the
         // playhead maps cleanly (see `ChartCursorOverlay`).
-        //
-        // `use_page_offsets(true)` lays pages out in scene space; we serialize
-        // each page independently (its own `for_page` viewBox) so they can be
-        // shown one at a time, fit and pannable, rather than as a filmstrip.
         let config = ChartLayoutConfig::master_rhythm().with_page_offsets(true);
         let mode = ChartLayoutMode::paginated_a4();
         let layout = self.engine.layout_chart_with_config(&chart, &mode, &config);
 
-        let pages: Vec<PageRender> = if layout.pages.is_empty() {
-            // Unpaginated fallback: the whole scene as a single page.
-            let w = layout.total_width.max(1.0);
-            let h = layout.total_height.max(60.0);
-            let cfg = SvgExportConfig::for_page(0.0, 0.0, w, h);
-            let svg = SvgSerializer::new(cfg).serialize(&layout.scene);
-            vec![PageRender {
-                svg,
-                x: 0.0,
-                y: 0.0,
-                w,
-                h,
-            }]
+        let total_w = layout.total_width.max(1.0);
+        let total_h = layout.total_height.max(60.0);
+        let cfg = SvgExportConfig::for_page(0.0, 0.0, total_w, total_h);
+        let svg = SvgSerializer::new(cfg).serialize(&layout.scene);
+
+        let pages: Vec<(f64, f64)> = if layout.pages.is_empty() {
+            vec![(0.0, total_w)]
         } else {
             layout
                 .pages
                 .iter()
-                .map(|p| {
-                    let cfg = SvgExportConfig::for_page(p.x_offset, p.y_offset, p.width, p.height);
-                    let svg = SvgSerializer::new(cfg).serialize(&layout.scene);
-                    PageRender {
-                        svg,
-                        x: p.x_offset,
-                        y: p.y_offset,
-                        w: p.width,
-                        h: p.height,
-                    }
-                })
+                .map(|p| (p.x_offset, p.width))
                 .collect()
         };
 
-        self.layout = Some((key, layout, pages.clone()));
-        Some(pages)
+        let doc = DocRender {
+            svg,
+            total_w,
+            total_h,
+            pages,
+        };
+        self.layout = Some((key, layout, doc.clone()));
+        Some(doc)
     }
 
     /// Playhead time on the chart's own timeline → cursor state.
@@ -235,6 +224,12 @@ fn chart_seconds_for(progress: Option<f64>) -> Option<f64> {
     Some(p.clamp(0.0, 1.0) * duration - count_in + BOUNDARY_BIAS_S)
 }
 
+/// pan_x that horizontally centers page `i` in a `vw`-wide viewport at `zoom`.
+fn center_page_pan_x(pages: &[(f64, f64)], i: usize, vw: f64, zoom: f64) -> Option<f64> {
+    let (px, pw) = pages.get(i).copied()?;
+    Some(vw / 2.0 - (px + pw / 2.0) * zoom)
+}
+
 // ─── Components ────────────────────────────────────────────────────────────
 
 /// The chart pane: active song's chart document + playhead highlight. Shows a
@@ -273,20 +268,20 @@ pub fn SessionChartPane() -> Element {
 #[component]
 fn ChartCanvas(text: String) -> Element {
     let key = text_key(&text);
-    let pages = with_pane(|pane| pane.ensure(&text)).flatten();
+    let doc = with_pane(|pane| pane.ensure(&text)).flatten();
 
-    let Some(pages) = pages else {
+    let Some(doc) = doc else {
         return rsx! {
             div { style: "display:flex; align-items:center; justify-content:center; min-height:80px;",
                 span { style: "font-size:12px; color:#ef4444;", "Chart failed to render." }
             }
         };
     };
-    let n_pages = pages.len().max(1);
-    // Cheap per-page dimensions for fitting (avoids cloning SVG strings).
-    let dims: Vec<(f64, f64)> = pages.iter().map(|p| (p.w, p.h)).collect();
+    let n_pages = doc.pages.len().max(1);
+    let total_w = doc.total_w;
+    let total_h = doc.total_h;
 
-    // Which page is shown; pan/zoom of the viewport; measured viewport size.
+    // Focused page (label + nav target); pan/zoom of the viewport; viewport size.
     let mut current = use_signal(|| 0usize);
     let mut zoom = use_signal(|| 1.0_f64);
     let mut pan_x = use_signal(|| 0.0_f64);
@@ -295,29 +290,41 @@ fn ChartCanvas(text: String) -> Element {
     let mut last_mouse = use_signal(|| (0.0_f64, 0.0_f64));
     let mut viewport = use_signal(|| None::<(f64, f64)>);
 
-    // Clamp the page index if the document shrank (song switch).
     if current() >= n_pages {
         current.set(0);
     }
 
-    // Auto-fit: whenever the shown page or the viewport size changes, scale the
-    // page to fill the viewport (with a margin) and center it. Manual zoom/pan
-    // don't touch `current`/`viewport`, so a user's zoom survives until they
-    // change pages.
+    // Initial fit: fit the page HEIGHT to the viewport (full height always
+    // visible; a wide viewport then shows more than one page), center vertically
+    // and focus the current page horizontally. Runs when the viewport is first
+    // measured.
     {
-        let dims = dims.clone();
-        let cur_val = current();
+        let pages = doc.pages.clone();
         let vp = viewport();
-        use_effect(use_reactive!(|(cur_val, vp)| {
+        use_effect(use_reactive!(|vp| {
             let Some((vw, vh)) = vp else { return };
-            let (pw, ph) = dims.get(cur_val).copied().unwrap_or((595.0, 842.0));
-            if pw <= 0.0 || ph <= 0.0 {
-                return;
-            }
-            let z = ((vw / pw).min(vh / ph) * FIT_MARGIN).clamp(ZOOM_MIN, ZOOM_MAX);
+            let z = (vh / total_h * FIT_MARGIN).clamp(ZOOM_MIN, ZOOM_MAX);
             zoom.set(z);
-            pan_x.set((vw - pw * z) / 2.0);
-            pan_y.set((vh - ph * z) / 2.0);
+            pan_y.set((vh - total_h * z) / 2.0);
+            let cur = *current.peek();
+            if let Some(px) = center_page_pan_x(&pages, cur, vw, z) {
+                pan_x.set(px);
+            }
+        }));
+    }
+
+    // Page focus: when the focused page changes (Prev/Next or playback follow),
+    // pan horizontally to center it — keeping the current zoom, so the default
+    // fit-height view just scrolls sideways to the page.
+    {
+        let pages = doc.pages.clone();
+        let cur_val = current();
+        use_effect(use_reactive!(|cur_val| {
+            let Some((vw, _vh)) = *viewport.peek() else { return };
+            let z = *zoom.peek();
+            if let Some(px) = center_page_pan_x(&pages, cur_val, vw, z) {
+                pan_x.set(px);
+            }
         }));
     }
 
@@ -331,16 +338,15 @@ fn ChartCanvas(text: String) -> Element {
     });
 
     let cur = current().min(n_pages - 1);
-    let page = pages[cur].clone();
     let at_first = cur == 0;
     let at_last = cur + 1 >= n_pages;
+    let svg = doc.svg.clone();
 
     rsx! {
         document::Style { {font_face_css()} }
         div {
             style: "position:relative; width:100%; height:100%; min-height:0; overflow:hidden; background:#ffffff; user-select:none; touch-action:none; cursor:{drag_cursor(dragging())};",
 
-            // Measure the viewport once mounted, then fit.
             onmounted: move |evt| {
                 spawn(async move {
                     if let Ok(rect) = evt.data().get_client_rect().await {
@@ -348,7 +354,6 @@ fn ChartCanvas(text: String) -> Element {
                     }
                 });
             },
-            // Wheel → zoom, anchored at the cursor.
             onwheel: move |evt| {
                 evt.prevent_default();
                 let delta_y = evt.delta().strip_units().y;
@@ -361,7 +366,6 @@ fn ChartCanvas(text: String) -> Element {
                 pan_y.set(c.y - (c.y - pan_y()) * k);
                 zoom.set(new);
             },
-            // Drag → pan.
             onmousedown: move |evt| {
                 dragging.set(true);
                 let c = evt.client_coordinates();
@@ -378,21 +382,15 @@ fn ChartCanvas(text: String) -> Element {
             onmouseup: move |_| dragging.set(false),
             onmouseleave: move |_| dragging.set(false),
 
-            // The transformed stage holds exactly the current page + overlay.
+            // The transformed stage: the whole page-row document + overlay.
             div {
-                style: "position:absolute; top:0; left:0; {transform}",
-                div {
-                    style: "position:relative; width:{page.w}px; height:{page.h}px; box-shadow:0 1px 8px rgba(0,0,0,0.18);",
-                    div { dangerous_inner_html: "{page.svg}" }
-                    ChartCursorOverlay {
-                        layout_key: key,
-                        page_index: cur,
-                        page_x: page.x,
-                        page_y: page.y,
-                        page_w: page.w,
-                        page_h: page.h,
-                        current,
-                    }
+                style: "position:absolute; top:0; left:0; width:{total_w}px; height:{total_h}px; {transform}",
+                div { dangerous_inner_html: "{svg}" }
+                ChartCursorOverlay {
+                    layout_key: key,
+                    view_w: total_w,
+                    view_h: total_h,
+                    current,
                 }
             }
 
@@ -430,18 +428,15 @@ fn nav_cursor(enabled: bool) -> &'static str {
     if enabled { "pointer" } else { "default" }
 }
 
-/// The playhead overlay for the active page. Same viewBox as the page's SVG,
-/// absolutely positioned over it. Re-renders at cursor rate (only this small
-/// component), and — while playing — advances `current` to follow the cursor
-/// across pages.
+/// The playhead overlay over the whole document. Same viewBox as the document
+/// SVG, absolutely positioned over it. Re-renders at cursor rate (only this
+/// small component), and — while playing — advances `current` to follow the
+/// cursor's page so the view scrolls to it.
 #[component]
 fn ChartCursorOverlay(
     layout_key: u64,
-    page_index: usize,
-    page_x: f64,
-    page_y: f64,
-    page_w: f64,
-    page_h: f64,
+    view_w: f64,
+    view_h: f64,
     current: Signal<usize>,
 ) -> Element {
     let (progress, playing) = {
@@ -465,33 +460,15 @@ fn ChartCursorOverlay(
         }
     }));
 
-    // Scroll the highlight into view while playing (after a page switch).
-    let measure = state.as_ref().map(|s| s.measure);
-    use_effect(use_reactive!(|(measure, playing)| {
-        if playing && measure.is_some() {
-            document::eval(
-                "document.getElementById('kf-playhead')?.scrollIntoView({block:'center', behavior:'smooth'});",
-            );
-        }
-    }));
-
-    // Only draw when the cursor is on THIS page.
-    let Some(state) = state.filter(|s| s.page.saturating_sub(1) as usize == page_index) else {
+    let Some(state) = state else {
         return rsx! {};
     };
 
     rsx! {
         svg {
-            view_box: "{page_x} {page_y} {page_w} {page_h}",
+            view_box: "0 0 {view_w} {view_h}",
             preserve_aspect_ratio: "xMinYMin meet",
             style: "position:absolute; inset:0; width:100%; height:100%; pointer-events:none;",
-            circle {
-                id: "kf-playhead",
-                cx: "{state.cursor_x}",
-                cy: "{state.cursor_y + state.cursor_height / 2.0}",
-                r: "1",
-                fill: "none",
-            }
             for (i, cmd) in state.commands.iter().enumerate() {
                 {render_command(i, cmd)}
             }
