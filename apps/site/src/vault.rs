@@ -235,34 +235,62 @@ fn media_url(name: &str) -> Option<String> {
         .map(|(_, asset)| asset.to_string())
 }
 
-/// Rewrite ```gif fences into an editor media embed the read-only view
-/// renders. A fence is:
+/// Resolved media for a screencast name: `(url, is_video)`. Video
+/// extensions render as a `<video>`, everything else as an `<img>`.
+fn media_render(name: &str) -> Option<(String, bool)> {
+    let url = media_url(name)?;
+    let ext = url.rsplit('.').next().map(str::to_ascii_lowercase);
+    let is_video = matches!(ext.as_deref(), Some("mp4" | "webm" | "mov" | "ogv"));
+    Some((url, is_video))
+}
+
+/// One piece of a rendered note: either a run of markdown or a
+/// screencast block (16:9 media on the left, a notes column on the
+/// right). The vault view renders each `Md` run in its own read-only
+/// editor and each `Cast` as a native side-by-side block.
+#[derive(Clone, PartialEq)]
+pub enum Segment {
+    Md(String),
+    Cast { name: String, side_md: String },
+}
+
+/// Split a note body into markdown runs and screencast blocks. A
+/// ```gif fence becomes a [`Segment::Cast`]:
 ///
 /// ```text
 /// ```gif
-/// transport-play
-/// Optional caption line(s).
+/// transport-play                 ← media name (future filename stem)
+/// Space plays and stops.         ← caption / notes column (markdown:
+/// - Cursor returns to the start    bullets, **bold**, [[links]], and
+/// - Great for repeated takes       `kbd:@` refs all render)
 /// ```
 /// ```
 ///
-/// The first non-empty line is the media NAME (future filename stem);
-/// the rest is an optional caption. We emit `![[<url>|720]]` (the editor
-/// turns a media-extension embed into an `<img>`/`<video>`) plus the
-/// caption as an italic paragraph. Keeping the source as a fence — not a
-/// raw `![[…]]` — is deliberate: the vault's `[[wikilink]]` resolver and
-/// knowledge graph must never see media embeds as note links.
-pub fn rewrite_media_fences(body: &str) -> String {
-    let mut out = String::with_capacity(body.len());
+/// The first non-empty line is the media NAME; everything after it is
+/// the side-column markdown shown to the right of the media. Keeping the
+/// source as a fence — not a raw `![[…]]` — is deliberate: the vault's
+/// `[[wikilink]]` resolver and knowledge graph must never see media
+/// embeds as note links.
+pub fn parse_note_segments(body: &str) -> Vec<Segment> {
+    let mut segs: Vec<Segment> = Vec::new();
+    let mut md = String::new();
+    let flush = |md: &mut String, segs: &mut Vec<Segment>| {
+        if !md.trim().is_empty() {
+            segs.push(Segment::Md(std::mem::take(md)));
+        } else {
+            md.clear();
+        }
+    };
     let mut lines = body.lines().peekable();
     while let Some(line) = lines.next() {
-        let trimmed = line.trim_start();
-        let is_gif_fence = trimmed == "```gif"
-            || (trimmed.starts_with("```gif") && trimmed[6..].trim().is_empty());
-        if !is_gif_fence {
-            out.push_str(line);
-            out.push('\n');
+        let t = line.trim_start();
+        let is_gif = t == "```gif" || (t.starts_with("```gif") && t[6..].trim().is_empty());
+        if !is_gif {
+            md.push_str(line);
+            md.push('\n');
             continue;
         }
+        flush(&mut md, &mut segs);
         // Consume the fence body up to the closing ```.
         let mut inner: Vec<&str> = Vec::new();
         for l in lines.by_ref() {
@@ -271,17 +299,16 @@ pub fn rewrite_media_fences(body: &str) -> String {
             }
             inner.push(l);
         }
-        let mut it = inner.iter().map(|l| l.trim()).filter(|l| !l.is_empty());
-        let Some(name) = it.next() else { continue };
-        let caption = it.collect::<Vec<_>>().join(" ");
-        if let Some(url) = media_url(name) {
-            out.push_str(&format!("![[{url}|720]]\n"));
-        }
-        if !caption.is_empty() {
-            out.push_str(&format!("*{caption}*\n"));
-        }
+        // First non-empty line is the media name; the rest is the side
+        // column markdown.
+        let name_idx = inner.iter().position(|l| !l.trim().is_empty());
+        let Some(i) = name_idx else { continue };
+        let name = inner[i].trim().to_string();
+        let side_md = inner[i + 1..].join("\n").trim().to_string();
+        segs.push(Segment::Cast { name, side_md });
     }
-    out
+    flush(&mut md, &mut segs);
+    segs
 }
 
 /// `kbd:@action` resolver: action id → the keys currently bound to it
@@ -455,30 +482,26 @@ fn NoteChips(content: String) -> Element {
 /// Site-theme overrides so the editor blends into the page (the
 /// bundled editor.css targets a standalone card layout).
 const VAULT_STYLE: &str = "
-.guides-vault .editor-root { background: transparent; border: none; padding: 0; min-height: 12rem; }
+.guides-vault .editor-root { background: transparent; border: none; padding: 0; min-height: 0; }
 .guides-vault .editor-frame { background: transparent; border: none; box-shadow: none; padding: 0; }
 /* Reading measure for the read-only doc view — roomier than the
    editable 14px/1.6 default, which stays untouched for Task/editing
    contexts. */
 .guides-vault .editor-root { font-size: 16px; line-height: 1.7; }
-/* Screencast embeds (from ```gif fences): framed, centered, with the
-   caption line — an emphasized paragraph the fence emits right after —
-   sitting under it as a muted caption. */
-.guides-vault .md-embed-image,
-.guides-vault .md-embed-video {
+/* Screencast block: 16:9 media on the left, notes column on the right
+   (see ScreencastBlock). The frame is a fixed 16:9 box; the notes
+   column reuses the reading editor at a slightly smaller measure. */
+.guides-vault .cast-frame {
+    display: block;
     width: 100%;
-    margin: 1.25rem auto 0.4rem;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
     border: 1px solid rgba(120, 140, 180, 0.22);
     border-radius: 10px;
     box-shadow: 0 8px 30px -12px rgba(0, 0, 0, 0.6);
     background: rgba(20, 24, 33, 0.5);
 }
-.guides-vault .cm-line:has(> em:only-child) {
-    text-align: center;
-    font-size: 0.82rem;
-    color: var(--muted-foreground, #7c8aa0);
-    margin-bottom: 1.5rem;
-}
+.guides-vault .cast-notes .editor-root { font-size: 0.95rem; line-height: 1.62; }
 ";
 
 /// `/guides` and `/guides/:..path` — the vault view: note explorer,
@@ -497,25 +520,14 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
 
     let current = resolve_route(&notes, &path).cloned();
 
-    // Read-only editor state, reseeded whenever the note (or its
-    // live-fetched content) changes. reading_mode keeps every source
-    // marker hidden regardless of caret. The frontmatter block is
-    // stripped — its metadata renders as chips above the note, not as
-    // a properties panel.
-    let mut state = use_signal(|| EditorState::new(String::new()));
-    {
-        let content = current
-            .as_ref()
-            .map(|n| rewrite_media_fences(body_without_frontmatter(&n.content)))
-            .unwrap_or_default();
-        use_effect(use_reactive!(|(content,)| {
-            if state.peek().doc.to_string() != content {
-                let mut s = EditorState::new(content);
-                s.reading_mode = true;
-                state.set(s);
-            }
-        }));
-    }
+    // The note body, split into markdown runs and screencast blocks
+    // (each rendered separately below). The frontmatter is stripped —
+    // its metadata renders as chips above the note, not as a properties
+    // panel.
+    let segments: Vec<Segment> = current
+        .as_ref()
+        .map(|n| parse_note_segments(body_without_frontmatter(&n.content)))
+        .unwrap_or_default();
 
     // Vault-aware live-preview decorations. The source captures the
     // signal (stable Rc identity across renders); the index inside is
@@ -604,11 +616,28 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
                     div { class: "w-full max-w-7xl min-w-0",
                         if let Some(note) = current.as_ref() {
                             div { class: "mb-4", NoteChips { content: note.content.clone() } }
-                            Editor {
-                                state,
-                                decorations: decorations.clone(),
-                                editable: false,
-                                on_link_click,
+                            for (i , seg) in segments.iter().enumerate() {
+                                {
+                                    match seg {
+                                        Segment::Md(text) => rsx! {
+                                            MdSegment {
+                                                key: "{i}",
+                                                content: text.clone(),
+                                                decorations: decorations.clone(),
+                                                on_link_click,
+                                            }
+                                        },
+                                        Segment::Cast { name, side_md } => rsx! {
+                                            ScreencastBlock {
+                                                key: "{i}",
+                                                name: name.clone(),
+                                                side_md: side_md.clone(),
+                                                decorations: decorations.clone(),
+                                                on_link_click,
+                                            }
+                                        },
+                                    }
+                                }
                             }
                         } else {
                             div { class: "py-16 text-center",
@@ -634,6 +663,67 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
                             "Click a node to open its note \u{00b7} drag to pan \u{00b7} scroll to zoom. Current: {title}."
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/// One markdown run of a note, rendered in its own read-only editor
+/// (reseeded when its content changes). Reading mode hides every source
+/// marker regardless of caret.
+#[component]
+fn MdSegment(
+    content: String,
+    decorations: DecorationSource,
+    on_link_click: Callback<String>,
+) -> Element {
+    let mut state = use_signal(|| EditorState::new(String::new()));
+    use_effect(use_reactive!(|(content,)| {
+        if state.peek().doc.to_string() != content {
+            let mut s = EditorState::new(content.clone());
+            s.reading_mode = true;
+            state.set(s);
+        }
+    }));
+    rsx! {
+        Editor { state, decorations: decorations.clone(), editable: false, on_link_click }
+    }
+}
+
+/// A screencast block: the 16:9 media, left-aligned, with a notes
+/// column filling the width to its right (caption, bullets, `kbd:@`
+/// refs, `[[links]]` — all rendered as markdown). Stacks vertically on
+/// narrow screens. The media falls back to the animated placeholder
+/// until a real recording exists under its name.
+#[component]
+fn ScreencastBlock(
+    name: String,
+    side_md: String,
+    decorations: DecorationSource,
+    on_link_click: Callback<String>,
+) -> Element {
+    let media = media_render(&name);
+    rsx! {
+        div { class: "cast-block flex flex-col lg:flex-row gap-6 items-start my-7",
+            // ── 16:9 media (left) ─────────────────────────
+            div { class: "cast-media w-full lg:w-[34rem] xl:w-[38rem] shrink-0",
+                {
+                    match media {
+                        Some((url, true)) => rsx! {
+                            video { class: "cast-frame", src: "{url}", autoplay: true, muted: true, r#loop: true }
+                        },
+                        Some((url, false)) => rsx! {
+                            img { class: "cast-frame", src: "{url}", alt: "{name}" }
+                        },
+                        None => rsx! {},
+                    }
+                }
+            }
+            // ── notes column (fills the width, right) ─────
+            if !side_md.trim().is_empty() {
+                div { class: "cast-notes flex-1 min-w-0 lg:pt-1",
+                    MdSegment { content: side_md.clone(), decorations: decorations.clone(), on_link_click }
                 }
             }
         }
