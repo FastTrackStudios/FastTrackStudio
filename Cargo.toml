@@ -1018,12 +1018,12 @@ moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7
 # tabindex div unfocusable by mouse). dioxus git pins `=0.3.0-beta.1`
 # and the vendored dioxus-test needs post-beta.1 APIs
 # (Node::outer_html_pretty). One rev across all blitz crates.
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
-blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
-blitz-net = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
-blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
 # Vendored one-line fix: quote scalars containing `<`/`>` — upstream
 # (facet-rs/facet) styx-format emits them bare but styx-parse rejects
 # them, so serialized keybind configs (`keys "<C-s>"`) could not be
