@@ -25,6 +25,38 @@ pub enum PortDirection {
     Output,
 }
 
+/// A node's live processing state (`info.state` from `pw-dump`).
+///
+/// This is the closest thing PipeWire gives to "is anything happening
+/// here" without tapping the audio itself: `Running` = the node is
+/// actively cycling in a driven graph; `Idle` = negotiated but not
+/// being driven (a paused stream, a source with nothing to send);
+/// `Suspended` = closed / no clients. NOTE: hardware devices pinned
+/// always-running read `Running` even during digital silence — this
+/// tracks *activity*, not signal presence.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Facet)]
+pub enum NodeState {
+    /// Not yet polled, or an `info.state` value we don't classify.
+    #[default]
+    Unknown,
+    Suspended,
+    Idle,
+    Running,
+}
+
+impl NodeState {
+    /// Parse a `pw-dump` `info.state` string.
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "running" => Self::Running,
+            "idle" => Self::Idle,
+            "suspended" => Self::Suspended,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// A PipeWire node (device, stream, virtual sink/source, …).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct PwNode {
@@ -51,6 +83,9 @@ pub struct PwNode {
     /// This node is a patchbay-created virtual sink (`patchbay.virtual`
     /// prop) — the only nodes the UI may destroy.
     pub virtual_sink: bool,
+    /// Live processing state (`running`/`idle`/`suspended`), polled
+    /// out-of-band via `pw-dump` — registry globals don't carry it.
+    pub state: NodeState,
 }
 
 /// A port on a node.
@@ -98,6 +133,8 @@ pub enum GraphEvent {
     Reset,
     NodeAdded(PwNode),
     NodeRemoved { id: u32 },
+    /// A node's live processing state changed (`running`/`idle`/…).
+    NodeStateChanged { id: u32, state: NodeState },
     PortAdded(PwPort),
     PortRemoved { id: u32, node_id: u32 },
     LinkAdded(PwLink),

@@ -11,9 +11,58 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use parking_lot::RwLock;
-use patchbay_proto::GraphEvent;
+use patchbay_proto::{GraphEvent, NodeState};
 
 use crate::store::GraphStore;
+
+/// Poll every node's live `info.state` (`running`/`idle`/`suspended`)
+/// from one `pw-dump` run and emit [`GraphEvent::NodeStateChanged`] for
+/// each node whose state moved. This is the free, no-tap answer to "is
+/// anything going through this node" — PipeWire exposes no per-port
+/// level, but it does expose which nodes are actively cycling. Runs on
+/// a modest periodic cadence (see the service's poller thread); a
+/// quiet graph emits nothing.
+pub(crate) fn poll_node_states(store: &Arc<RwLock<GraphStore>>, events: &Sender<GraphEvent>) {
+    let Ok(out) = std::process::Command::new("pw-dump").output() else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    let Ok(dump) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        return;
+    };
+    let Some(objects) = dump.as_array() else { return };
+
+    let mut changes = Vec::new();
+    {
+        let mut store_w = store.write();
+        for obj in objects {
+            if obj.get("type").and_then(|t| t.as_str()) != Some("PipeWire:Interface:Node") {
+                continue;
+            }
+            let Some(id) = obj.get("id").and_then(|i| i.as_u64()).map(|i| i as u32) else {
+                continue;
+            };
+            let Some(node) = store_w.nodes.get_mut(&id) else {
+                continue;
+            };
+            let state = obj
+                .pointer("/info/state")
+                .and_then(|v| v.as_str())
+                .map(NodeState::parse)
+                .unwrap_or(NodeState::Unknown);
+            if node.state != state {
+                node.state = state;
+                changes.push((id, state));
+            }
+        }
+    }
+
+    for (id, state) in changes {
+        let _ = events.send(GraphEvent::NodeStateChanged { id, state });
+    }
+}
 
 /// Merge full props from one `pw-dump` run into the store; emits an
 /// (idempotent) `NodeAdded` update for every node that gained detail.

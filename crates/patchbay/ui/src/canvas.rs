@@ -271,12 +271,26 @@ pub fn GraphCanvas() -> Element {
                             } else if cable.active {
                                 "0.95"
                             } else {
-                                "0.45"
+                                "0.4"
+                            };
+                            // Active links are being driven (signal is
+                            // flowing) → animated marching dash. Paused
+                            // links (source node idle/suspended) are
+                            // solid and dim: connected, nothing through.
+                            let cable_class = if !dimmed && cable.active {
+                                "cable flowing"
+                            } else {
+                                "cable"
+                            };
+                            let state_note = if cable.active {
+                                "signal flowing"
+                            } else {
+                                "connected — source idle"
                             };
                             rsx! {
                                 path {
                                     key: "{cable.ids[0]}",
-                                    class: "cable",
+                                    class: "{cable_class}",
                                     d: "{cable.d}",
                                     fill: "none",
                                     stroke: "{cable.color}",
@@ -287,7 +301,7 @@ pub fn GraphCanvas() -> Element {
                                         e.stop_propagation();
                                         state::disconnect_links(handle.clone(), ids.clone());
                                     },
-                                    title { "{n} link(s) — click to disconnect" }
+                                    title { "{n} link(s), {state_note} — click to disconnect" }
                                 }
                             }
                         }
@@ -311,6 +325,7 @@ pub fn GraphCanvas() -> Element {
                         node_name: card.node.name.clone(),
                         node_label: state::node_label(&card.node.name, &card.node.label),
                         media_class: card.node.media_class.clone(),
+                        node_state: card.node.state,
                         accent: state::node_color(&card.node.name, &card.node.label),
                         icon: state::ICONS
                             .read()
@@ -416,6 +431,7 @@ fn NodeCard(
     node_name: String,
     node_label: String,
     media_class: String,
+    node_state: patchbay_proto::NodeState,
     accent: String,
     icon: String,
     x: f64,
@@ -434,6 +450,15 @@ fn NodeCard(
     let header_drag_name = node_name.clone();
     let header_drop_name = node_name.clone();
     let drop_handle = handle.clone();
+    // Live activity dot: PipeWire's node state is the free, no-tap
+    // answer to "is anything happening here" (running = actively
+    // cycling; idle = connected but not driven; suspended = closed).
+    let (state_cls, state_title) = match node_state {
+        patchbay_proto::NodeState::Running => ("running", "running — actively processing"),
+        patchbay_proto::NodeState::Idle => ("idle", "idle — connected, not being driven"),
+        patchbay_proto::NodeState::Suspended => ("suspended", "suspended — closed / no clients"),
+        patchbay_proto::NodeState::Unknown => ("unknown", "activity state unknown"),
+    };
 
     rsx! {
         div {
@@ -487,6 +512,10 @@ fn NodeCard(
                 div { class: "node-titles",
                     span { class: "node-title", "{node_label}" }
                     span { class: "node-class", "{media_class}" }
+                }
+                span {
+                    class: "node-state {state_cls}",
+                    title: "{state_title}",
                 }
             }
             for (i, row) in rows.iter().enumerate().filter(|_| !collapsed) {

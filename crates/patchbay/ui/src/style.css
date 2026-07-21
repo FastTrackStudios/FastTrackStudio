@@ -138,6 +138,27 @@ input[type="number"]::-webkit-outer-spin-button { filter: invert(0.85); }
 .cable { cursor: pointer; transition: opacity 0.1s; }
 .cable:hover { opacity: 1 !important; stroke-width: 3.5; }
 .cable-ghost { pointer-events: none; }
+/* Active links (signal being driven through them) march; paused links
+   stay solid + dim. 14 = dash(8)+gap(6) so the loop is seamless. */
+.cable.flowing { stroke-dasharray: 8 6; animation: cable-flow 0.55s linear infinite; }
+@keyframes cable-flow { to { stroke-dashoffset: -14; } }
+
+/* Live node-activity dot (PipeWire node state — the free, no-tap
+   "is anything going through here" signal). */
+.node-state {
+  margin-left: auto; flex: 0 0 auto;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #3a424e; box-shadow: 0 0 0 1px rgba(0,0,0,0.35) inset;
+}
+.node-state.running {
+  background: #58d68d;
+  box-shadow: 0 0 6px rgba(88,214,141,0.85);
+  animation: node-pulse 1.6s ease-in-out infinite;
+}
+.node-state.idle { background: #ffb454; box-shadow: 0 0 4px rgba(255,180,84,0.55); }
+.node-state.suspended { background: #4a525e; }
+.node-state.unknown { background: #333a44; }
+@keyframes node-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
 .col-header { cursor: pointer; user-select: none; }
 .col-header:hover { color: #d7dde5; }

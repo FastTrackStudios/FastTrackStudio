@@ -647,6 +647,7 @@ mod reaper_layout {
             icon_name: String::new(),
             group: String::new(),
             virtual_sink: false,
+            state: patchbay_proto::NodeState::Running,
         };
         let mut ports = Vec::new();
         let mut pid = 100;
@@ -731,6 +732,7 @@ mod stereo_pairs {
             icon_name: String::new(),
             group: String::new(),
             virtual_sink: false,
+            state: patchbay_proto::NodeState::Running,
         }
     }
 

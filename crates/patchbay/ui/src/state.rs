@@ -140,6 +140,11 @@ pub fn apply_graph_event(ev: &GraphEvent) {
             g.nodes.sort_by_key(|x| x.id);
         }
         GraphEvent::NodeRemoved { id } => g.nodes.retain(|x| x.id != *id),
+        GraphEvent::NodeStateChanged { id, state } => {
+            if let Some(n) = g.nodes.iter_mut().find(|x| x.id == *id) {
+                n.state = *state;
+            }
+        }
         GraphEvent::PortAdded(p) => {
             g.ports.retain(|x| x.id != p.id);
             g.ports.push(p.clone());

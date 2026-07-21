@@ -51,7 +51,27 @@ impl PatchbayBackend {
         let presets = Arc::new(PresetStore::open());
         let (events_tx, events_rx) = mpsc::channel::<GraphEvent>();
         let enrich_tx = events_tx.clone();
+        let poll_tx = events_tx.clone();
         let engine = engine::spawn(store.clone(), events_tx);
+
+        // Live node-state poller: pw-dump every couple seconds and emit
+        // NodeStateChanged deltas. This is the free "is anything going
+        // through here" signal (running/idle/suspended) — PipeWire has
+        // no per-port level API, so activity state is the honest,
+        // no-tap answer. Read-only shell-out; only runs while the app
+        // is up. Quiet graphs emit nothing.
+        {
+            let store = store.clone();
+            std::thread::Builder::new()
+                .name("patchbay-states".into())
+                .spawn(move || {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(2000));
+                        crate::enrich::poll_node_states(&store, &poll_tx);
+                    }
+                })
+                .expect("spawn patchbay-states thread");
+        }
         // Debounce gate for the pw-dump enrichment pass.
         let enrich_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
         // Big window: a single app connecting is a burst of hundreds of

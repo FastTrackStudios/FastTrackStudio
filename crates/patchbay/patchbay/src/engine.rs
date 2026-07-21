@@ -390,6 +390,9 @@ mod linux {
                 .to_string(),
             group: props.get("node.group").unwrap_or_default().to_string(),
             virtual_sink,
+            // Registry globals don't carry live state — filled by the
+            // pw-dump state poller (see crate::enrich).
+            state: patchbay_proto::NodeState::Unknown,
         }
     }
 
