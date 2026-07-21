@@ -6,16 +6,17 @@
 //! left. Charts-as-code: edit the keyflow on the right, read the engraved
 //! chart on the left.
 //!
-//! v1 is a live-editable source view (highlighted). Wiring edits back to
-//! the note's `chart.kf` through the vault mutate path — and re-driving
-//! the engraved preview from the buffer — is the follow-up (issue #30
-//! item 4). Keyed on the song index by the caller, so switching songs
-//! remounts it with the new chart.
+//! Edits push the buffer into `SONG_CHARTS[guid]` (debounced) so the engraved
+//! chart on the left re-renders live. A **Transposed** toggle (shown when the
+//! song has a key/notation/capo view) swaps the editable original for a
+//! read-only preview of the source re-spelled to that view
+//! (`keyflow::transpose::transpose_source`) — so you can read the chart in
+//! Nashville numbers / a new key without the file ever changing.
 
 use dioxus::prelude::*;
 use editor_keyflow_lang::{HighlightTheme, highlight_css, keyflow_decorations};
 use session_proto::SongChartHydration;
-use session_ui::SONG_CHARTS;
+use session_ui::{SONG_CHARTS, SONG_VIEWS};
 
 /// Debounce before pushing an edit into the live chart (re-engrave is
 /// heavy; a newer keystroke supersedes a pending push).
@@ -25,11 +26,6 @@ const RERENDER_DEBOUNCE_MS: u32 = 250;
 /// original chart text; `guid` is its `project_guid` (the `SONG_CHARTS`
 /// key the engraved chart reads). The caller keys this component so it
 /// remounts — and re-seeds — when the song changes or the chart hydrates.
-///
-/// Edits push the buffer into `SONG_CHARTS[guid]` (debounced), so the
-/// engraved chart on the left re-renders live. `source` deliberately reads
-/// the song's own `chart_text` (not `SONG_CHARTS`), so this push can't loop
-/// back into a re-seed.
 #[component]
 pub fn KeyflowChartEditor(source: String, guid: String) -> Element {
     let mut state = use_signal(|| editor::EditorState::new(source.clone()));
@@ -71,18 +67,60 @@ pub fn KeyflowChartEditor(source: String, guid: String) -> Element {
     // Per-token `.kf-*` color rules — injected once for this pane.
     let css = use_hook(|| highlight_css(&HighlightTheme::default_dark()));
 
-    let empty = state.read().doc.to_string().trim().is_empty();
+    // The active display view (transpose / notation / capo) for THIS song.
+    let view = SONG_VIEWS.read().get(&guid).cloned().unwrap_or_default();
+    let transposable = !view.is_identity();
+    let mut show_transposed = use_signal(|| false);
+    // Nothing to transpose to → force the original view.
+    let transposed_on = transposable && show_transposed();
+
+    let buffer = state.read().doc.to_string();
+    let empty = buffer.trim().is_empty();
 
     rsx! {
         document::Style { {css} }
         div { class: "flex h-full min-h-0 flex-col",
             div { class: "flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5",
                 span { class: "text-xs font-semibold text-foreground", "Keyflow source" }
-                span { class: "text-[11px] text-muted-foreground", "charts as code" }
+                span { class: "text-[11px] text-muted-foreground",
+                    if transposed_on { "transposed preview · read-only" } else { "charts as code" }
+                }
+                // Original / Transposed toggle — only when a view is active.
+                if transposable {
+                    div { class: "ml-auto flex overflow-hidden rounded border border-border",
+                        button {
+                            class: if !transposed_on {
+                                "px-2 py-0.5 text-[11px] font-semibold bg-accent text-foreground"
+                            } else {
+                                "px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                            },
+                            onclick: move |_| show_transposed.set(false),
+                            "Original"
+                        }
+                        button {
+                            class: if transposed_on {
+                                "px-2 py-0.5 text-[11px] font-semibold bg-accent text-foreground"
+                            } else {
+                                "px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                            },
+                            onclick: move |_| show_transposed.set(true),
+                            "Transposed"
+                        }
+                    }
+                }
             }
             if empty {
                 div { class: "p-4 text-sm text-muted-foreground",
                     "This song has no chart yet."
+                }
+            } else if transposed_on {
+                // Read-only preview of the source re-spelled to the view. Editing
+                // stays on the original so the file is never rewritten transposed.
+                div { class: "min-h-0 flex-1 overflow-auto p-3",
+                    pre {
+                        class: "whitespace-pre font-mono text-sm leading-relaxed text-foreground",
+                        "{keyflow::transpose::transpose_source(&buffer, &view.to_chart_view())}"
+                    }
                 }
             } else {
                 // `editor-app props-collapsed` reuses the note editor's chrome
