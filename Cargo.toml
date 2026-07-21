@@ -58,7 +58,6 @@ members = [
     "libs/installer-core",
     "libs/engine-launcher",
     "libs/neural-amp-modeler",
-    "libs/moire-trace-capture",
     # ── crates/ — domain cores ────────────────────────────────────────
     "crates/audiocore/audiocore-core",
     "crates/audiocore/audiocore-dsp",
@@ -341,7 +340,6 @@ vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
 engine-launcher = { path = "libs/engine-launcher" }
 neural-amp-modeler = { path = "libs/neural-amp-modeler" }
-moire-trace-capture = { path = "libs/moire-trace-capture" }
 audiocore-core = { path = "crates/audiocore/audiocore-core" }
 audiocore-dsp = { path = "crates/audiocore/audiocore-dsp", default-features = false }
 audiocore-gui = { path = "crates/audiocore/audiocore-gui" }
@@ -721,7 +719,6 @@ tracing-appender = "0.2"
 # Sentry error/crash telemetry — rustls (not native-tls) for iOS.
 sentry = { version = "0.44", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 sentry-tracing = "0.44"
-moire = { version = "1.0" }
 
 # ── Proc-macro plumbing ───────────────────────────────────────────────
 syn = { version = "2", features = ["full", "extra-traits"] }
@@ -921,7 +918,7 @@ git-config = { path = "features/task/git/git-config" }
 
 # Task's externals not already pinned above (root pins win everywhere
 # a key already existed — dioxus, serde, tokio, facet/vox rc.5 fleet,
-# sea-orm crates.io 1.x, loro, moire via [patch]).
+# sea-orm crates.io 1.x, loro).
 keybindings = "0.0.2"
 editor-types = "0.0.2"
 rrule = "0.11"
@@ -964,20 +961,6 @@ actions-proto = { path = "crates/input/actions-proto" }
 [patch."https://codeberg.org/FastTrackStudios/fts-ui.git"]
 fts-ui = { path = "libs/fts-ui/fts-ui" }
 
-# moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
-# All moire crates must point to the same fork rev to avoid duplicate
-# moire-runtime #[ctor] registrations (aligned with daw/session/signal).
-[patch."https://github.com/bearcove/moire"]
-moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-
 [patch.crates-io]
 # Vendored one-line fix: quote scalars containing `<`/`>` — upstream
 # (facet-rs/facet) styx-format emits them bare but styx-parse rejects
@@ -999,15 +982,6 @@ phon-jit = { path = "libs/vendor/phon-jit" }
 # Editor's vendored mermaid-rs-renderer fork (web_time::Instant so the
 # layouter works on wasm32) — see libs/editor/vendor/.
 mermaid-rs-renderer = { path = "libs/editor/vendor/mermaid-rs-renderer" }
-moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 # ── Lints — merged union of the dissolved workspaces' policies ─────────
 [workspace.lints.rust]
