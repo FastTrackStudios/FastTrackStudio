@@ -256,6 +256,7 @@ members = [
     # ── apps ──────────────────────────────────────────────────────────
     "apps/fasttrackstudio",
     "apps/patchbay",
+    "apps/patchbay/web",
     "apps/installer",
     "apps/fts-cli",
     "apps/site",

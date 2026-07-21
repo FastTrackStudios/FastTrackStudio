@@ -322,7 +322,7 @@ pub fn undo_last(handle: PatchbayHandle) {
 }
 
 /// Portable async sleep (tokio on native, gloo on wasm).
-pub(crate) async fn sleep_secs(secs: u64) {
+pub async fn sleep_secs(secs: u64) {
     #[cfg(not(target_arch = "wasm32"))]
     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
     #[cfg(target_arch = "wasm32")]
