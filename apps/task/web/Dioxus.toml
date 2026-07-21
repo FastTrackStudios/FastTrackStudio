@@ -4,3 +4,9 @@ default_platform = "web"
 
 [web.app]
 title = "Task"
+
+# Dev proxy: the setlist player fetches song media from `/media/...`
+# (relative → the dev server). Forward it to the local task-server so
+# `dx serve` (9100) and the media (task-server, 18080) act same-origin.
+[[web.proxy]]
+backend = "http://127.0.0.1:18080/media"
