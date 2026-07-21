@@ -74,14 +74,105 @@ mod imp {
     }
 
     /// The right-hand pane of the full-screen experience's center. The
-    /// left pane is always the engraved chart; this switches what sits
-    /// beside it.
+    /// left pane is always the chart; the selector (on the RIGHT) switches
+    /// what sits beside it. Future options (lyric editor, etc.) slot in here.
     #[derive(Clone, Copy, PartialEq)]
     enum CenterRight {
         /// Keyflow source editor (charts as code) — the default.
         Editor,
         Mixer,
         Comments,
+    }
+
+    /// What the LEFT (chart) pane shows. For now the engraved Master Rhythm
+    /// chart; a lyric scroller (for singers) and per-part views come later.
+    #[derive(Clone, Copy, PartialEq)]
+    enum ChartLeft {
+        MasterRhythm,
+        Lyrics,
+    }
+
+    /// One selectable right-hand pane in the full-screen center: a right-aligned
+    /// selector (Editor / Mixer / Comments, extensible) over the chosen view.
+    /// Shared so the center can render one pane normally and a second on
+    /// ultrawide, both drawing from the same option set. `root_class` carries the
+    /// flex-item sizing + responsive visibility (the second pane is
+    /// `hidden … min-[1700px]:flex`).
+    #[component]
+    fn RightPane(
+        root_class: &'static str,
+        selected: CenterRight,
+        on_select: EventHandler<CenterRight>,
+        /// Remount key for the keyflow editor (distinct per pane + song).
+        editor_key: String,
+        source: String,
+        guid: String,
+        tracks: Vec<daw_proto::Track>,
+        on_volume: Callback<(String, f64)>,
+        on_mute: Callback<String>,
+        on_solo: Callback<String>,
+        guide_present: bool,
+        guide_on: bool,
+        on_guide: Callback<()>,
+    ) -> Element {
+        rsx! {
+            div { class: "{root_class}",
+                div { class: "flex shrink-0 items-center justify-end gap-1 border-b border-border px-3 py-1.5",
+                    for (v , label) in [
+                        (CenterRight::Editor, "Editor"),
+                        (CenterRight::Mixer, "Mixer"),
+                        (CenterRight::Comments, "Comments"),
+                    ] {
+                        button {
+                            key: "{label}",
+                            class: if selected == v {
+                                "rounded px-2 py-0.5 text-xs font-medium bg-accent text-foreground"
+                            } else {
+                                "rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                            },
+                            onclick: move |_| on_select.call(v),
+                            "{label}"
+                        }
+                    }
+                }
+                div { class: "flex min-h-0 flex-1 flex-col overflow-auto",
+                    if selected == CenterRight::Editor {
+                        crate::pages::keyflow_chart_editor::KeyflowChartEditor {
+                            key: "{editor_key}",
+                            source: source.clone(),
+                            guid: guid.clone(),
+                        }
+                    } else if selected == CenterRight::Mixer {
+                        if guide_present {
+                            div { class: "flex shrink-0 items-center gap-3 border-b border-border p-3",
+                                span { class: "flex-1 text-sm font-semibold text-foreground", "Guide / Click" }
+                                button {
+                                    class: if guide_on {
+                                        "rounded-md bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+                                    } else {
+                                        "rounded-md bg-muted px-4 py-1.5 text-sm font-semibold text-muted-foreground hover:bg-accent"
+                                    },
+                                    onclick: move |_| on_guide.call(()),
+                                    if guide_on { "On" } else { "Off" }
+                                }
+                            }
+                        }
+                        div { class: "min-h-0 flex-1",
+                            MixerView {
+                                tracks: tracks.clone(),
+                                on_volume,
+                                on_mute,
+                                on_solo,
+                            }
+                        }
+                    } else {
+                        div { class: "p-4 text-sm text-muted-foreground",
+                            "Song comments — coming soon. This pane will show the current song's notes + comments."
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ── the component ───────────────────────────────────────────────────────
@@ -554,6 +645,12 @@ mod imp {
         // Full-screen center: the right pane beside the chart. Default to
         // the keyflow editor (charts as code); the mixer follows later.
         let mut center_right = use_signal(|| CenterRight::Editor);
+        // Second selectable right pane, shown only on ultrawide — it pulls from
+        // the same option set and defaults to the Mixer, so a wide screen shows
+        // chart + editor + mixer (or any two right views) at once.
+        let mut center_right2 = use_signal(|| CenterRight::Mixer);
+        // Full-screen center: what the LEFT (chart) pane shows.
+        let mut chart_left = use_signal(|| ChartLeft::MasterRhythm);
         // Navigator sidebar open/closed (full-screen experience only).
         let mut nav_open = use_signal(|| true);
 
@@ -683,6 +780,9 @@ mod imp {
             });
 
         let tracks = media::stems_to_tracks(&manifest, &stem_ui.read());
+        // Does this song carry a guide/click bus? (Drives the mixer's guide
+        // toggle, shown in both the tabbed and the ultrawide mixer panes.)
+        let guide_present = !guide_idxs.is_empty();
         let active = tab();
         let at_first = idx == 0;
         let at_last = idx + 1 >= count;
@@ -806,77 +906,83 @@ mod imp {
                             }
                         }
 
-                        // CENTER — Chart on the left, a switchable pane on the right.
-                        div { class: "flex min-h-0 flex-1 flex-col",
-                            div { class: "flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5",
-                                span { class: "mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground", "Chart +" }
-                                for (v , label) in [
-                                    (CenterRight::Editor, "Editor"),
-                                    (CenterRight::Mixer, "Mixer"),
-                                    (CenterRight::Comments, "Comments"),
-                                ] {
-                                    button {
-                                        key: "{label}",
-                                        class: if right == v {
-                                            "rounded px-2 py-0.5 text-xs font-medium bg-accent text-foreground"
-                                        } else {
-                                            "rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
-                                        },
-                                        onclick: move |_| center_right.set(v),
-                                        "{label}"
+                        // CENTER — the chart on the LEFT (always), a selectable
+                        // pane on the right (its selector sits on the RIGHT), and
+                        // — on ultrawide — a dedicated Mixer column so the desk
+                        // sits beside the editor instead of hiding behind its tab.
+                        div { class: "flex min-h-0 flex-1",
+
+                            // LEFT — the chart, with its own view switcher (the
+                            // engraved Master Rhythm chart today; a lyric scroller
+                            // and per-part views land here later).
+                            div { class: "flex min-w-0 flex-1 flex-col overflow-hidden border-r border-border bg-background",
+                                div { class: "flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5",
+                                    for (v , label , enabled) in [
+                                        (ChartLeft::MasterRhythm, "Master Rhythm", true),
+                                        (ChartLeft::Lyrics, "Lyrics", false),
+                                    ] {
+                                        button {
+                                            key: "{label}",
+                                            disabled: !enabled,
+                                            class: if chart_left() == v {
+                                                "rounded px-2 py-0.5 text-xs font-medium bg-accent text-foreground"
+                                            } else if enabled {
+                                                "rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                                            } else {
+                                                "rounded px-2 py-0.5 text-xs text-muted-foreground/40"
+                                            },
+                                            onclick: move |_| if enabled { chart_left.set(v); },
+                                            "{label}"
+                                        }
                                     }
+                                }
+                                div { class: "min-h-0 flex-1 overflow-hidden",
+                                    {match chart_left() {
+                                        ChartLeft::MasterRhythm => rsx! { SessionChartPane {} },
+                                        ChartLeft::Lyrics => rsx! {
+                                            div { class: "flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground",
+                                                "Lyric scroller — coming soon. A big, singer-friendly lyric view synced to the playhead."
+                                            }
+                                        },
+                                    }}
                                 }
                             }
-                            div { class: "flex min-h-0 flex-1",
-                                // Chart (left). The pane owns its own background +
-                                // pan/zoom, so the wrapper must NOT paint white or
-                                // scroll (that white bled through while panning).
-                                div { class: "min-w-0 flex-1 overflow-hidden border-r border-border bg-background",
-                                    SessionChartPane {}
-                                }
-                                // Switchable right pane. Capped at ~A4 reading
-                                // width (5xl) and right-aligned: on a normal
-                                // screen it's a 50/50 split, but on ultrawide the
-                                // cap hands the extra space to the chart.
-                                div { class: "flex min-w-0 max-w-5xl flex-1 flex-col overflow-auto bg-card",
-                                    if right == CenterRight::Editor {
-                                        // Keyed on song index + chart presence, so it
-                                        // remounts (and re-seeds) both on song change
-                                        // and when the chart finishes hydrating.
-                                        crate::pages::keyflow_chart_editor::KeyflowChartEditor {
-                                            key: "{idx}-{chart_present}",
-                                            source: chart_src.clone(),
-                                            guid: chart_guid.clone(),
-                                        }
-                                    } else if right == CenterRight::Mixer {
-                                        if !guide_idxs.is_empty() {
-                                            div { class: "flex shrink-0 items-center gap-3 border-b border-border p-3",
-                                                span { class: "flex-1 text-sm font-semibold text-foreground", "Guide / Click" }
-                                                button {
-                                                    class: if guide_on {
-                                                        "rounded-md bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
-                                                    } else {
-                                                        "rounded-md bg-muted px-4 py-1.5 text-sm font-semibold text-muted-foreground hover:bg-accent"
-                                                    },
-                                                    onclick: move |_| on_guide.call(()),
-                                                    if guide_on { "On" } else { "Off" }
-                                                }
-                                            }
-                                        }
-                                        div { class: "min-h-0 flex-1",
-                                            MixerView {
-                                                tracks: tracks.clone(),
-                                                on_volume: mixer_volume,
-                                                on_mute: mixer_mute,
-                                                on_solo: mixer_solo,
-                                            }
-                                        }
-                                    } else {
-                                        div { class: "p-4 text-sm text-muted-foreground",
-                                            "Song comments — coming soon. This pane will show the current song's notes + comments."
-                                        }
-                                    }
-                                }
+
+                            // RIGHT — one selectable pane always; a SECOND appears
+                            // on ultrawide. Both pull from the same option set (the
+                            // selector sits on the RIGHT), so a wide screen shows
+                            // chart + editor + mixer at once — the second pane
+                            // defaults to the mixer. Below the breakpoint the second
+                            // pane is hidden and everything lives behind pane one.
+                            RightPane {
+                                root_class: "flex min-w-0 max-w-5xl flex-1 flex-col overflow-hidden border-r border-border bg-card",
+                                selected: right,
+                                on_select: move |v| center_right.set(v),
+                                editor_key: format!("a-{idx}-{chart_present}"),
+                                source: chart_src.clone(),
+                                guid: chart_guid.clone(),
+                                tracks: tracks.clone(),
+                                on_volume: mixer_volume,
+                                on_mute: mixer_mute,
+                                on_solo: mixer_solo,
+                                guide_present,
+                                guide_on,
+                                on_guide,
+                            }
+                            RightPane {
+                                root_class: "hidden min-w-0 max-w-5xl flex-1 flex-col overflow-hidden bg-card min-[1700px]:flex",
+                                selected: center_right2(),
+                                on_select: move |v| center_right2.set(v),
+                                editor_key: format!("b-{idx}-{chart_present}"),
+                                source: chart_src.clone(),
+                                guid: chart_guid.clone(),
+                                tracks: tracks.clone(),
+                                on_volume: mixer_volume,
+                                on_mute: mixer_mute,
+                                on_solo: mixer_solo,
+                                guide_present,
+                                guide_on,
+                                on_guide,
                             }
                         }
                     }
