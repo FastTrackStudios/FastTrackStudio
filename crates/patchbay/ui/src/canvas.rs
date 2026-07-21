@@ -352,8 +352,14 @@ pub fn GraphCanvas() -> Element {
                                 raw_name: r.label.clone(),
                                 monitor: r.monitor,
                                 direction: r.direction,
-                                dot: if r.pair || r.group_key.is_some() {
+                                dot: if r.group_key.is_some() {
                                     state::node_color(&card.node.name, &card.node.label)
+                                } else if r.pair {
+                                    state::pair_color(
+                                        &card.node.name,
+                                        &card.node.label,
+                                        &r.label,
+                                    )
                                 } else {
                                     state::port_color(
                                         &card.node.name,

@@ -1155,3 +1155,38 @@ mod live_probe {
         }
     }
 }
+
+#[cfg(test)]
+mod category_colors {
+    /// Print which real-world channel names miss categorization:
+    /// `cargo test -p patchbay-ui category_coverage -- --nocapture`
+    #[test]
+    fn category_coverage() {
+        let names = [
+            "Kick In", "Kick Out", "Snare Top", "Snare Bottom", "Tom 1", "Hi Hat",
+            "Ride", "OH L", "Room L", "Room Far L", "Electronic Kit L", "Drum Pad L",
+            "Bass DI", "Bass Amp", "Bass Synth L", "Guitar 1 L", "Guitar 1 DI",
+            "Keys 1 L", "Lead Mic L", "Engineer Vocal", "Drummer Mic", "Wireless Mic 1",
+            "Click", "Guide", "Talkback L", "Speakers L", "Engineer Mix L",
+            "Drums Mix L", "Bass Mix L", "Guitar 1 Mix L", "Keys 1 Mix L",
+            "Broadcast Mix L", "Voice Chat L", "DAW L", "Spare 1", "Acoustic 1",
+            "Synth Lead", "Pad", "Vocal 1 Mix L",
+        ];
+        let mut misses = Vec::new();
+        for n in names {
+            match crate::state::category_color(n) {
+                Some(c) => println!("{n:24} → {c}"),
+                None => misses.push(n),
+            }
+        }
+        assert!(misses.is_empty(), "uncategorized channel names: {misses:?}");
+
+        // Spot-check the scheme: drums red-family, bass yellow,
+        // guitars sky, acoustic cyan, keys green, synths violet.
+        let c = |n: &str| crate::state::category_color(n).unwrap();
+        assert_eq!(c("Guitar 1 L"), c("Guitar 2 Mix R"));
+        assert_eq!(c("OH L"), c("Ride"), "overheads and cymbals share amber");
+        assert_eq!(c("Bass Synth L"), c("Bass DI"), "bass family yellow");
+        assert_eq!(c("Engineer Vocal"), c("Vocal 1 Mix L"));
+    }
+}

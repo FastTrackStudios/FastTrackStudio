@@ -356,8 +356,12 @@ pub fn auto_color(name: &str) -> String {
 /// guitars sky-blue), via music-catalog — the same scheme
 /// dynamic-template paints REAPER tracks with (drums red, bass yellow,
 /// guitars blue, acoustic cyan, keys green, synths violet, vocals
-/// pink…). Tries the label, then progressively drops trailing words
-/// ("Kick In" → "Kick"; "Guitar 1 L" → "Guitar 1" → "guitar").
+/// pink…).
+///
+/// Resolution: the whole label, then progressively dropping trailing
+/// words ("Kick In" → "Kick"; "Guitar 1 Mix L" → "Guitar 1" →
+/// "guitar"), then single words last-to-first ("Engineer Vocal" →
+/// "vocal"), then studio-utility words (mic/talkback/mix/…).
 pub fn category_color(label: &str) -> Option<String> {
     let mut words: Vec<&str> = label.split_whitespace().collect();
     while !words.is_empty() {
@@ -367,7 +371,42 @@ pub fn category_color(label: &str) -> Option<String> {
         }
         words.pop();
     }
+    // Word-level pass, most-significant (last) word first.
+    for word in label.split_whitespace().rev() {
+        let w = word.to_lowercase();
+        if w.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        if let Some(c) = music_catalog::lookup::color_for_name(&w) {
+            return Some(c.to_hex_string());
+        }
+        if let Some(c) = utility_color(&w) {
+            return Some(c);
+        }
+    }
     None
+}
+
+/// Studio-plumbing words that aren't instruments but deserve stable,
+/// muted colors (comms/utility slate-ish) instead of hash noise.
+fn utility_color(word: &str) -> Option<String> {
+    use music_catalog::instruments::groups;
+    let c = match word {
+        // A bare "mic" with no instrument word before it is a vocal mic.
+        "mic" | "mics" => music_catalog::instruments::vocals::LEAD,
+        "talkback" | "speakers" | "daw" | "chat" | "voice" => groups::GUIDE,
+        "mix" | "broadcast" | "monitor" | "monitors" => groups::REFERENCE,
+        "spare" | "system" | "notifications" | "utility" => groups::STEM_SPLIT,
+        _ => return None,
+    };
+    Some(c.to_hex_string())
+}
+
+/// Color for a condensed stereo-pair row: categorize the pair label
+/// ("Guitar 1 L/R" → guitar blue) before falling back to the node.
+pub fn pair_color(node_name: &str, node_label: &str, pair_label: &str) -> String {
+    let base = pair_label.strip_suffix(" L/R").unwrap_or(pair_label);
+    category_color(base).unwrap_or_else(|| node_color(node_name, node_label))
 }
 
 /// Resolved color for a node: user-set → instrument category (from the
