@@ -390,6 +390,9 @@
   .top-6 {
     top: calc(var(--spacing) * 6);
   }
+  .top-8 {
+    top: calc(var(--spacing) * 8);
+  }
   .top-10 {
     top: calc(var(--spacing) * 10);
   }
@@ -2421,12 +2424,6 @@
       background-color: color-mix(in oklab, var(--card) 70%, transparent);
     }
   }
-  .bg-card\/80 {
-    background-color: var(--card);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--card) 80%, transparent);
-    }
-  }
   .bg-card\/90 {
     background-color: var(--card);
     @supports (color: color-mix(in lab, red, red)) {
@@ -2549,12 +2546,6 @@
   }
   .bg-muted-foreground {
     background-color: var(--muted-foreground);
-  }
-  .bg-muted-foreground\/30 {
-    background-color: var(--muted-foreground);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--muted-foreground) 30%, transparent);
-    }
   }
   .bg-muted-foreground\/40 {
     background-color: var(--muted-foreground);

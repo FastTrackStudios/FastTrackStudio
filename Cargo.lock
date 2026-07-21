@@ -23778,6 +23778,7 @@ dependencies = [
  "dock-proto",
  "eyre",
  "fts-ui",
+ "keyflow",
  "lucide-dioxus 2.577.0",
  "session-proto",
  "tracing",
