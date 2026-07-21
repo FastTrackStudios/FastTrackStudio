@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use vox::Tx;
 
 use crate::types::{
-    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, DanteDevice, DanteStatus, GraphEvent,
-    GraphSnapshot, LatencyRule, RoutingPreset, ServiceAction, ServiceStatus,
+    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
+    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, RoutingPreset, ServiceAction,
+    ServiceStatus, VirtualSink,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -158,6 +159,44 @@ pub mod patchbay_service {
             device: String,
             direction: String,
         ) -> Result<u32, PatchbayError>;
+
+        // ── Virtual sinks (named buses) ──────────────────────────────
+
+        /// The persisted virtual sinks (whether or not currently live).
+        async fn virtual_sinks(&self) -> Result<Vec<VirtualSink>, PatchbayError>;
+
+        /// Persist a virtual sink and create it in the live graph.
+        /// Re-created automatically on engine (re)connect.
+        async fn add_virtual_sink(&self, sink: VirtualSink) -> Result<(), PatchbayError>;
+
+        /// Remove a virtual sink from config and destroy its live node
+        /// (if present). Only nodes carrying `patchbay.virtual` are
+        /// ever destroyed.
+        async fn remove_virtual_sink(&self, name: String) -> Result<(), PatchbayError>;
+
+        // ── Saved canvas views ───────────────────────────────────────
+
+        async fn views(&self) -> Result<Vec<CanvasView>, PatchbayError>;
+
+        /// Save (upsert) a canvas view.
+        async fn save_view(&self, view: CanvasView) -> Result<(), PatchbayError>;
+
+        async fn delete_view(&self, name: String) -> Result<(), PatchbayError>;
+
+        // ── Colors (cable/port identity) ─────────────────────────────
+
+        async fn colors(&self) -> Result<Vec<ColorEntry>, PatchbayError>;
+
+        /// Set a color for `"node.name"` or `"node.name:port.name"`.
+        /// An empty color clears the entry.
+        async fn set_color(&self, target: String, color: String) -> Result<(), PatchbayError>;
+
+        // ── Icons ────────────────────────────────────────────────────
+
+        /// Resolve the given freedesktop icon names against this host's
+        /// icon themes and return each hit as a `data:` URI. Unknown
+        /// names are simply absent from the result.
+        async fn icons(&self, names: Vec<String>) -> Result<Vec<IconEntry>, PatchbayError>;
 
         // ── Clock ────────────────────────────────────────────────────
 

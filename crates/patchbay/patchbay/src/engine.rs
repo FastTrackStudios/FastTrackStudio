@@ -31,6 +31,18 @@ pub(crate) enum Command {
     DestroyLink {
         id: u32,
     },
+    /// Create a `support.null-audio-sink` adapter node (a named bus),
+    /// tagged `patchbay.virtual` so it's identifiable + destroyable.
+    CreateVirtualSink {
+        node_name: String,
+        description: String,
+        channels: u32,
+    },
+    /// Destroy a node global — the service only sends this for nodes
+    /// carrying the `patchbay.virtual` tag.
+    DestroyNode {
+        id: u32,
+    },
     #[allow(dead_code)]
     Terminate,
 }
@@ -42,6 +54,7 @@ pub(crate) enum Command {
 #[cfg(target_os = "linux")]
 type CmdSlot = Arc<parking_lot::Mutex<Option<pipewire::channel::Sender<Command>>>>;
 
+#[derive(Clone)]
 pub(crate) struct EngineHandle {
     #[cfg(target_os = "linux")]
     cmd_slot: CmdSlot,
@@ -167,10 +180,20 @@ mod linux {
             let mainloop = mainloop.clone();
             core.add_listener_local()
                 .error(move |id, _seq, res, message| {
-                    if id == 0 {
-                        tracing::warn!("pipewire core error ({res}): {message}");
-                        mainloop.quit();
+                    if id != 0 {
+                        return;
                     }
+                    // "unknown resource" (-ENOENT) = we dropped a bound
+                    // proxy AFTER the server already reclaimed the
+                    // object (node/link vanished) — routine, NOT a dead
+                    // daemon. Quitting here caused reconnect churn that
+                    // corrupted the mirror.
+                    if res == -2 || message.contains("unknown resource") {
+                        tracing::debug!("pipewire benign core error ({res}): {message}");
+                        return;
+                    }
+                    tracing::warn!("pipewire core error ({res}): {message}");
+                    mainloop.quit();
                 })
                 .register()
         };
@@ -178,11 +201,21 @@ mod linux {
         let link_proxies: Rc<RefCell<HashMap<u32, LinkProxy>>> =
             Rc::new(RefCell::new(HashMap::new()));
 
+        // Virtual sinks created on THIS connection whose registry
+        // announce may still be in flight — closes the window where a
+        // second CreateVirtualSink for the same name would duplicate
+        // (ensure_virtual_sinks races the announce otherwise). Pruned
+        // on global_remove so a removed name can be re-created.
+        let pending_sinks: Rc<RefCell<std::collections::HashSet<String>>> =
+            Rc::new(RefCell::new(std::collections::HashSet::new()));
+
         // ── Inbound commands ────────────────────────────────────────
         let _cmd_receiver = {
             let core = core.clone();
             let registry = registry.clone();
             let mainloop_quit = mainloop.clone();
+            let store_cmd = store.clone();
+            let pending_cmd = pending_sinks.clone();
             cmd_rx.attach(mainloop.loop_(), move |cmd| match cmd {
                 Command::CreateLink {
                     output_node,
@@ -210,10 +243,50 @@ mod linux {
                         );
                     }
                 }
-                Command::DestroyLink { id } => {
+                Command::DestroyLink { id } | Command::DestroyNode { id } => {
                     registry.destroy_global(id).into_result().map(|_| ()).unwrap_or_else(|e| {
                         tracing::warn!(id, "destroy_global failed: {e}");
                     });
+                }
+                Command::CreateVirtualSink {
+                    node_name,
+                    description,
+                    channels,
+                } => {
+                    let already_live = store_cmd
+                        .read()
+                        .nodes
+                        .values()
+                        .any(|n| n.name == node_name);
+                    if already_live || !pending_cmd.borrow_mut().insert(node_name.clone()) {
+                        tracing::debug!(node_name, "virtual sink already exists; skipping");
+                        return;
+                    }
+                    let position = match channels {
+                        1 => "[ MONO ]".to_string(),
+                        2 => "[ FL FR ]".to_string(),
+                        n => {
+                            let auxes: Vec<String> =
+                                (0..n).map(|i| format!("AUX{i}")).collect();
+                            format!("[ {} ]", auxes.join(" "))
+                        }
+                    };
+                    let res = core.create_object::<pipewire::node::Node>(
+                        "adapter",
+                        &properties! {
+                            "factory.name" => "support.null-audio-sink",
+                            "node.name" => node_name.as_str(),
+                            "node.description" => description.as_str(),
+                            "media.class" => "Audio/Sink",
+                            "audio.position" => position.as_str(),
+                            "monitor.channel-volumes" => "true",
+                            "object.linger" => "1",
+                            "patchbay.virtual" => "1",
+                        },
+                    );
+                    if let Err(e) = res {
+                        tracing::warn!(node_name, "virtual sink create failed: {e}");
+                    }
                 }
                 Command::Terminate => mainloop_quit.quit(),
             })
@@ -228,6 +301,7 @@ mod linux {
             let store_rm = store.clone();
             let events_rm = events.clone();
             let proxies_rm = link_proxies.clone();
+            let pending_rm = pending_sinks.clone();
             registry
                 .add_listener_local()
                 .global(move |global| match global.type_ {
@@ -246,7 +320,7 @@ mod linux {
                     let removed = {
                         let mut s = store_rm.write();
                         if let Some(n) = s.nodes.remove(&id) {
-                            let _ = n;
+                            pending_rm.borrow_mut().remove(&n.name);
                             Some(GraphEvent::NodeRemoved { id })
                         } else if let Some(p) = s.ports.remove(&id) {
                             Some(GraphEvent::PortRemoved {
@@ -271,6 +345,10 @@ mod linux {
         Ok(())
     }
 
+    fn node_name_is_virtual(name: &str) -> bool {
+        name.starts_with("patchbay.")
+    }
+
     fn media_kind(media_class: &str) -> MediaKind {
         if media_class.contains("Audio") {
             MediaKind::Audio
@@ -283,12 +361,10 @@ mod linux {
         }
     }
 
-    fn handle_node(
-        global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
-        store: &Arc<RwLock<GraphStore>>,
-        events: &Sender<GraphEvent>,
-    ) {
-        let Some(props) = global.props else { return };
+    /// PwNode from a props dict — used for both the registry global's
+    /// prop subset (immediate) and the bound node's full info (refines
+    /// with node.group / application.* moments later).
+    fn build_node(id: u32, props: &pipewire::spa::utils::dict::DictRef) -> PwNode {
         let name = props.get("node.name").unwrap_or_default().to_string();
         let label = props
             .get("node.nick")
@@ -297,15 +373,39 @@ mod linux {
             .unwrap_or_default()
             .to_string();
         let media_class = props.get("media.class").unwrap_or_default().to_string();
-        let node = PwNode {
-            id: global.id,
+        let virtual_sink =
+            props.get("patchbay.virtual") == Some("1") || node_name_is_virtual(&name);
+        PwNode {
+            id,
             name,
             label,
             media_kind: media_kind(&media_class),
             media_class,
             app_name: props.get("application.name").unwrap_or_default().to_string(),
             latency: props.get("node.latency").unwrap_or_default().to_string(),
-        };
+            icon_name: props
+                .get("application.icon-name")
+                .or_else(|| props.get("application.icon_name"))
+                .unwrap_or_default()
+                .to_string(),
+            group: props.get("node.group").unwrap_or_default().to_string(),
+            virtual_sink,
+        }
+    }
+
+    fn handle_node(
+        global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
+        store: &Arc<RwLock<GraphStore>>,
+        events: &Sender<GraphEvent>,
+    ) {
+        let Some(props) = global.props else { return };
+        // Registry globals carry a SUBSET of node props (no node.group,
+        // often no application.*). Do NOT bind node proxies for the
+        // rest — held node proxies wedge the registry event stream
+        // (verified live: with ~48 bound, new globals stop being
+        // announced). Full props arrive out-of-band via the pw-dump
+        // enrichment pass (see crate::enrich).
+        let node = build_node(global.id, props);
         store.write().nodes.insert(global.id, node.clone());
         let _ = events.send(GraphEvent::NodeAdded(node));
     }
