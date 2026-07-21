@@ -405,8 +405,8 @@ pub fn KeyboardMap(
         }
 
         // With Shift toggled, show the shifted legend as the primary one.
-        let (main_label, sub_label) = if m.shift && shifted.is_some() {
-            (shifted.unwrap(), Some(label))
+        let (main_label, sub_label) = if let (true, Some(s)) = (m.shift, shifted) {
+            (s, Some(label))
         } else {
             (label, shifted)
         };

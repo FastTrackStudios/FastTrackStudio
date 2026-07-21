@@ -1346,10 +1346,11 @@ async fn server_vox_handler(
 }
 
 /// Build the server-management [`LayerRouter`] (`OrgManagementService`
-/// + `SnapshotService`) — the `/server/vox` service set. Shared by the
+/// and `SnapshotService`) — the `/server/vox` service set. Shared by the
 /// WebSocket handler above (which additionally wraps it in the
 /// snapshot [`GatedRouter`](crate::snapshot::GatedRouter)) and the
 /// in-process transport ([`AppState::server_local_server`]).
+///
 /// `local_trusted`: false for the network-facing WebSocket (session
 /// auth enforced, restore exits so the supervisor restarts on the
 /// restored data); true for the in-process transport (the caller
