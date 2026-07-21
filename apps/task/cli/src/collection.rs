@@ -790,12 +790,16 @@ fn discover_stems(dir: &Path) -> eyre::Result<Vec<IngestStem>> {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            // Strip a leading `NN - ` (or `NN.` / `NN_`) track index.
-            let name = base
-                .split_once(" - ")
-                .filter(|(idx, _)| idx.trim().chars().all(|c| c.is_ascii_digit()))
-                .map(|(_, rest)| rest.trim().to_string())
-                .unwrap_or(base);
+            // Strip a leading track index: `NN - `, `NN-`, `NN.`, `NN_`.
+            let stripped = base
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .trim_start_matches([' ', '-', '.', '_'])
+                .trim();
+            let name = if stripped.is_empty() || stripped.len() == base.len() {
+                base.clone()
+            } else {
+                stripped.to_string()
+            };
             let group = stem_group_for(&name);
             let default_muted = {
                 let hay = format!("{} {}", group.unwrap_or(""), name).to_ascii_lowercase();

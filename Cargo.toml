@@ -1062,6 +1062,15 @@ filter_next = "allow"
 [profile.dev]
 opt-level = 1
 
+# dx web builds: native debuginfo in the wasm module blew past
+# Chrome's 1 GiB WebAssembly module cap (1.14 GB observed). Wasm dev
+# builds don't need it — strip it and dev bundles come back to a
+# loadable size.
+[profile.wasm-dev]
+inherits = "dev"
+debug = false
+strip = "debuginfo"
+
 [profile.dev.package."*"]
 opt-level = 3
 

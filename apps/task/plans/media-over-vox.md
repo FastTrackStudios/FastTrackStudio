@@ -52,6 +52,27 @@ same origin, same auth, one protocol.
    streams (this also replaces the browser's 6-connection HTTP cap
    concern from issue #30 item 6 — multiplexed over ONE WebSocket).
 
+## Proxy media (originals + derived streams)
+
+Today ingest ships ONLY the compressed proxy (webm/opus 96k) — which is
+exactly what casual-practice streaming wants (23 stems ≈ 2.2 Mbps
+total), but the full-quality master never enters the store. The DAW
+"proxy media" pattern we should land:
+
+1. **Original is canonical** — ingest uploads the master too
+   (`--keep-original`, FLAC for lossless at ~half of WAV), content-
+   addressed like everything else. Part bundles / performance
+   downloads / re-transcodes derive from it.
+2. **Proxies are derived, not first-class** — a derived-media record
+   keyed by `(source_hash, profile)`; profile `practice` = webm/opus
+   96k. Frontmatter keeps pointing at the stream the player should
+   use; the derivation record links back to the master.
+3. **Server-side lazy derivation** — MediaService grows a
+   "hash X at profile Y" lookup; missing proxies transcode once
+   server-side (ffmpeg in the image) and cache. New profiles (48k
+   cellular tier, stereo practice-mix bus) become rows, not code.
+   Folds into the server-side-mix work (issue #30 item 6).
+
 ## Non-goals
 
 - Server-side mixing (issue #30 item 6) is orthogonal: when it lands it
