@@ -414,6 +414,33 @@ pub struct DanteDevice {
     pub unreachable: bool,
 }
 
+/// A persisted snapshot of one Dante device's routing: its TX/RX
+/// channel NAMES plus its live subscriptions. Saved so the studio's
+/// Dante patch (Galaxy32 → Inferno, etc.) survives power-cycles and can
+/// be re-applied with one command, and so channel names are available
+/// offline for name-addressed routing. IP / ARC port are rediscovered on
+/// each scan, so they aren't stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct DanteDeviceConfig {
+    pub name: String,
+    pub tx: Vec<DanteChannel>,
+    pub rx: Vec<DanteChannel>,
+    pub subscriptions: Vec<DanteSubscription>,
+}
+
+impl DanteDeviceConfig {
+    /// Drop the transient live fields (ip / arc_port / unreachable) from
+    /// a scanned device to get the persistable form.
+    pub fn from_device(d: &DanteDevice) -> Self {
+        Self {
+            name: d.name.clone(),
+            tx: d.tx.clone(),
+            rx: d.rx.clone(),
+            subscriptions: d.subscriptions.clone(),
+        }
+    }
+}
+
 /// State of the `dante.target` AoIP stack on this host.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
 pub struct DanteStatus {

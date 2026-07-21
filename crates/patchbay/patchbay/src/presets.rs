@@ -15,7 +15,8 @@ use std::path::PathBuf;
 use facet::Facet;
 use parking_lot::Mutex;
 use patchbay_proto::{
-    AliasEntry, CanvasView, ColorEntry, NamedRoute, PresetLink, RoutingPreset, VirtualSink,
+    AliasEntry, CanvasView, ColorEntry, DanteDeviceConfig, NamedRoute, PresetLink, RoutingPreset,
+    VirtualSink,
 };
 
 /// The whole patchbay config, one styx document. Every list defaults to
@@ -45,6 +46,9 @@ struct FileFormat {
     #[serde(default)]
     #[facet(default)]
     routes: Vec<NamedRoute>,
+    #[serde(default)]
+    #[facet(default)]
+    dante_devices: Vec<DanteDeviceConfig>,
 }
 
 /// First-run channel names for a stock REAPER JACK client: the main
@@ -283,6 +287,17 @@ impl PresetStore {
         self.data.lock().routes.clone()
     }
 
+    pub fn dante_config(&self) -> Vec<DanteDeviceConfig> {
+        self.data.lock().dante_devices.clone()
+    }
+
+    /// Replace the whole saved Dante snapshot.
+    pub fn set_dante_config(&self, devices: Vec<DanteDeviceConfig>) {
+        let mut data = self.data.lock();
+        data.dante_devices = devices;
+        self.persist(&data);
+    }
+
     /// Upsert a named route (by `name`).
     pub fn set_route(&self, route: NamedRoute) {
         let mut data = self.data.lock();
@@ -368,6 +383,23 @@ mod styx_roundtrip {
                     port: "Engineer TB".into(),
                 },
                 enabled: true,
+            }],
+            dante_devices: vec![DanteDeviceConfig {
+                name: "Galaxy32".into(),
+                tx: vec![patchbay_proto::DanteChannel {
+                    number: 1,
+                    name: "Engineer Talkback DSP".into(),
+                }],
+                rx: vec![patchbay_proto::DanteChannel {
+                    number: 5,
+                    name: "Monitor L".into(),
+                }],
+                subscriptions: vec![patchbay_proto::DanteSubscription {
+                    rx_channel: 5,
+                    tx_channel: "Main L".into(),
+                    tx_device: "Console".into(),
+                    status: 1,
+                }],
             }],
         };
 

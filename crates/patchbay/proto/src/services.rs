@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use vox::Tx;
 
 use crate::types::{
-    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
-    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute, RoutingPreset,
-    ServiceAction, ServiceStatus, VirtualSink,
+    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteDeviceConfig,
+    DanteStatus, CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute,
+    RoutingPreset, ServiceAction, ServiceStatus, VirtualSink,
 };
 
 /// Typed error for patchbay service boundaries.
@@ -285,6 +285,24 @@ pub mod patchbay_service {
             rx_device: String,
             rx_channel: u32,
         ) -> Result<(), PatchbayError>;
+
+        // ── Dante config (persisted routing) ─────────────────────────
+
+        /// The saved Dante routing snapshot (channel names +
+        /// subscriptions of every device), from config.
+        async fn dante_config(&self) -> Result<Vec<DanteDeviceConfig>, PatchbayError>;
+
+        /// Scan the live Dante network (mDNS + ARC) and persist a
+        /// snapshot of every reachable device — its TX/RX channel names
+        /// and subscriptions. Returns the number of devices saved.
+        async fn save_dante_config(&self) -> Result<u32, PatchbayError>;
+
+        /// Re-apply the saved subscriptions to the live network:
+        /// non-destructive (only sets subscriptions that differ from
+        /// what's live, never clears anything). Returns the number of
+        /// subscriptions (re)applied. This writes to the Dante hardware
+        /// over ARC — an explicit, on-demand restore, never automatic.
+        async fn apply_dante_config(&self) -> Result<u32, PatchbayError>;
     }
 }
 

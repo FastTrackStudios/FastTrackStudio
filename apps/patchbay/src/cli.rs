@@ -180,6 +180,13 @@ enum DanteCmd {
         tx_channel: String,
     },
     Unsubscribe { rx_device: String, rx_channel: u32 },
+    /// Scan + persist the Dante routing snapshot (device channel names +
+    /// subscriptions) to config.
+    Save,
+    /// Show the saved Dante config (`--json` for the full record).
+    Config,
+    /// Re-apply saved subscriptions to the live network (non-destructive).
+    Apply,
 }
 
 #[derive(Subcommand)]
@@ -633,6 +640,43 @@ async fn main() -> eyre::Result<()> {
             DanteCmd::Unsubscribe { rx_device, rx_channel } => {
                 ok_or_msg(c.dante_unsubscribe(rx_device, rx_channel).await)?;
                 println!("unsubscribed");
+            }
+            DanteCmd::Save => {
+                let n = ok_or_msg(c.save_dante_config().await)?;
+                println!("saved Dante config: {n} device(s)");
+            }
+            DanteCmd::Config => {
+                let devices = ok_or_msg(c.dante_config().await)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&devices)?);
+                    return Ok(());
+                }
+                if devices.is_empty() {
+                    println!("(no saved Dante config — run `dante save`)");
+                }
+                for d in &devices {
+                    let subs = d.subscriptions.iter().filter(|s| !s.tx_channel.is_empty()).count();
+                    println!(
+                        "{} — {} tx / {} rx / {} sub(s)",
+                        d.name, d.tx.len(), d.rx.len(), subs
+                    );
+                    for s in d.subscriptions.iter().filter(|s| !s.tx_channel.is_empty()) {
+                        let rx_name = d
+                            .rx
+                            .iter()
+                            .find(|ch| ch.number == s.rx_channel)
+                            .map(|ch| ch.name.as_str())
+                            .unwrap_or("?");
+                        println!(
+                            "   rx {:>3} {:<26} <- {}@{}",
+                            s.rx_channel, rx_name, s.tx_channel, s.tx_device
+                        );
+                    }
+                }
+            }
+            DanteCmd::Apply => {
+                let n = ok_or_msg(c.apply_dante_config().await)?;
+                println!("applied Dante config: {n} subscription(s) (re)set");
             }
         },
         Cmd::Latency { cmd } => match cmd {

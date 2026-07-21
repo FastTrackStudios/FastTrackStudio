@@ -9,10 +9,11 @@ use patchbay_proto::services::patchbay_service::{
     PatchbayServiceStreamSource, patchbay_service_stream_service_descriptor, stream_serve,
 };
 use patchbay_proto::{
-    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteStatus,
-    CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute, PatchbayError,
-    PatchbayService, PortDirection, PresetLink, RouteEndpoint, RoutingPreset, ServiceAction,
-    ServiceStatus, VirtualSink, patchbay_service_service_descriptor, serve_patchbay_service,
+    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteDeviceConfig,
+    DanteStatus, CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute,
+    PatchbayError, PatchbayService, PortDirection, PresetLink, RouteEndpoint, RoutingPreset,
+    ServiceAction, ServiceStatus, VirtualSink, patchbay_service_service_descriptor,
+    serve_patchbay_service,
 };
 
 use crate::engine::{self, Command, EngineHandle};
@@ -1075,5 +1076,62 @@ impl PatchbayService for PatchbayBackend {
         rx_channel: u32,
     ) -> Result<(), PatchbayError> {
         self.inner.dante.unsubscribe(&rx_device, rx_channel).await
+    }
+
+    async fn dante_config(&self) -> Result<Vec<DanteDeviceConfig>, PatchbayError> {
+        Ok(self.inner.presets.dante_config())
+    }
+
+    async fn save_dante_config(&self) -> Result<u32, PatchbayError> {
+        // Live ARC scan (mDNS + per-device channel query — seconds).
+        let devices = self.inner.dante.network().await?;
+        // Only persist devices we actually read (an unreachable device
+        // reports empty channels; saving those would wipe good names).
+        let cfg: Vec<DanteDeviceConfig> = devices
+            .iter()
+            .filter(|d| !d.unreachable)
+            .map(DanteDeviceConfig::from_device)
+            .collect();
+        let n = cfg.len() as u32;
+        self.inner.presets.set_dante_config(cfg);
+        Ok(n)
+    }
+
+    async fn apply_dante_config(&self) -> Result<u32, PatchbayError> {
+        let saved = self.inner.presets.dante_config();
+        if saved.is_empty() {
+            return Ok(0);
+        }
+        // Scan the live network so we only (re)write subscriptions that
+        // actually differ — no needless ARC writes to the console.
+        let live = self.inner.dante.network().await.unwrap_or_default();
+        let mut current: HashMap<(String, u32), (String, String)> = HashMap::new();
+        for d in &live {
+            for s in &d.subscriptions {
+                current.insert(
+                    (d.name.clone(), s.rx_channel),
+                    (s.tx_device.clone(), s.tx_channel.clone()),
+                );
+            }
+        }
+        let mut applied = 0;
+        for dev in &saved {
+            for s in &dev.subscriptions {
+                // Skip saved "unsubscribed" rows — apply never clears.
+                if s.tx_channel.trim().is_empty() {
+                    continue;
+                }
+                let want = (s.tx_device.clone(), s.tx_channel.clone());
+                if current.get(&(dev.name.clone(), s.rx_channel)) == Some(&want) {
+                    continue;
+                }
+                self.inner
+                    .dante
+                    .subscribe(&dev.name, s.rx_channel, &s.tx_device, &s.tx_channel)
+                    .await?;
+                applied += 1;
+            }
+        }
+        Ok(applied)
     }
 }
