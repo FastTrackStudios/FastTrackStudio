@@ -28429,6 +28429,7 @@ dependencies = [
  "editor",
  "editor-crdt",
  "editor-keyflow",
+ "editor-keyflow-lang",
  "email-proto",
  "fake",
  "finance-proto",

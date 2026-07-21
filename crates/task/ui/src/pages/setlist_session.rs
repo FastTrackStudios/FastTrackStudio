@@ -43,7 +43,8 @@ mod imp {
         MixerView, SectionProgressBar, SongProgressBar, TransportControlBar,
     };
     use session_ui::{
-        SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState, apply_active_indices,
+        PerformanceSidebar, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState,
+        apply_active_indices,
     };
 
     use crate::pages::session_chart_pane::SessionChartPane;
@@ -73,9 +74,12 @@ mod imp {
     }
 
     /// The right-hand pane of the full-screen experience's center. The
-    /// left pane is always the chart; this switches what sits beside it.
+    /// left pane is always the engraved chart; this switches what sits
+    /// beside it.
     #[derive(Clone, Copy, PartialEq)]
     enum CenterRight {
+        /// Keyflow source editor (charts as code) — the default.
+        Editor,
         Mixer,
         Comments,
     }
@@ -547,8 +551,9 @@ mod imp {
         #[props(default)] fullscreen: bool,
     ) -> Element {
         let mut tab = use_signal(|| Tab::Chart);
-        // Full-screen center: the right pane beside the chart.
-        let mut center_right = use_signal(|| CenterRight::Mixer);
+        // Full-screen center: the right pane beside the chart. Default to
+        // the keyflow editor (charts as code); the mixer follows later.
+        let mut center_right = use_signal(|| CenterRight::Editor);
 
         let count = songs_meta.len();
         let idx = current_song();
@@ -655,6 +660,26 @@ mod imp {
             }
         });
 
+        // Navigator section click `(song_idx, section_idx)`: seek within the
+        // current song, or hop to another song (seeking into a just-loaded
+        // song's section is a follow-up — it starts at 0).
+        let on_section_select: Callback<(usize, usize)> =
+            use_callback(move |(sidx, secidx): (usize, usize)| {
+                if sidx != *current_song.peek() {
+                    goto_song.call(sidx);
+                    return;
+                }
+                let start = SETLIST_STRUCTURE
+                    .peek()
+                    .songs
+                    .get(sidx)
+                    .and_then(|s| s.sections.get(secidx))
+                    .map(|sec| sec.start_seconds);
+                if let Some(t) = start {
+                    seek.call(t);
+                }
+            });
+
         let tracks = media::stems_to_tracks(&manifest, &stem_ui.read());
         let active = tab();
         let at_first = idx == 0;
@@ -735,33 +760,14 @@ mod imp {
                     // MIDDLE — navigator (left) + Chart/right center.
                     div { class: "flex min-h-0 flex-1",
 
-                        // LEFT — the playlist navigator.
-                        aside { class: "flex w-56 shrink-0 flex-col overflow-y-auto border-r border-border bg-card/40",
-                            div { class: "flex items-baseline justify-between px-3 pb-1 pt-3",
-                                span { class: "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground", "Setlist" }
-                                span { class: "text-[11px] tabular-nums text-muted-foreground", "{count}" }
-                            }
-                            for (i , s) in songs_meta.iter().enumerate() {
-                                {
-                                    let is_cur = i == idx;
-                                    let goto = goto_song;
-                                    let sacc = s.accent.clone();
-                                    rsx! {
-                                        button {
-                                            key: "{i}",
-                                            class: if is_cur {
-                                                "flex w-full items-center gap-2 border-l-2 bg-accent px-3 py-2 text-left"
-                                            } else {
-                                                "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-2 text-left hover:bg-accent/50"
-                                            },
-                                            style: if is_cur { format!("border-color:{sacc};") } else { String::new() },
-                                            onclick: move |_| goto.call(i),
-                                            span { class: "size-2 shrink-0 rounded-full", style: format!("background:{sacc};") }
-                                            span { class: "min-w-0 flex-1 truncate text-sm font-medium text-foreground", "{s.title}" }
-                                            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{i + 1}" }
-                                        }
-                                    }
-                                }
+                        // LEFT — the session-ui setlist navigator: every song
+                        // with its live section-progress strip, driven by the
+                        // shared ACTIVE_INDICES / SETLIST_STRUCTURE signals.
+                        aside { class: "w-64 shrink-0 border-r border-border",
+                            PerformanceSidebar {
+                                on_song_select: goto_song,
+                                on_section_select,
+                                plain_selection: true,
                             }
                         }
 
@@ -769,7 +775,11 @@ mod imp {
                         div { class: "flex min-h-0 flex-1 flex-col",
                             div { class: "flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5",
                                 span { class: "mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground", "Chart +" }
-                                for (v , label) in [(CenterRight::Mixer, "Mixer"), (CenterRight::Comments, "Comments")] {
+                                for (v , label) in [
+                                    (CenterRight::Editor, "Editor"),
+                                    (CenterRight::Mixer, "Mixer"),
+                                    (CenterRight::Comments, "Comments"),
+                                ] {
                                     button {
                                         key: "{label}",
                                         class: if right == v {
@@ -789,7 +799,13 @@ mod imp {
                                 }
                                 // Switchable right pane.
                                 div { class: "flex min-w-0 flex-1 flex-col overflow-auto bg-card",
-                                    if right == CenterRight::Mixer {
+                                    if right == CenterRight::Editor {
+                                        // Keyed on the song index → remounts with the
+                                        // new chart when the song changes.
+                                        crate::pages::keyflow_chart_editor::KeyflowChartEditor {
+                                            key: "{idx}",
+                                        }
+                                    } else if right == CenterRight::Mixer {
                                         if !guide_idxs.is_empty() {
                                             div { class: "flex shrink-0 items-center gap-3 border-b border-border p-3",
                                                 span { class: "flex-1 text-sm font-semibold text-foreground", "Guide / Click" }

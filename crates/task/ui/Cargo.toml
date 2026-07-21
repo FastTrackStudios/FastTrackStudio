@@ -45,6 +45,8 @@ session-proto = { workspace = true }
 daw-proto = { workspace = true }
 keyflow = { workspace = true, features = ["engraver", "text"] }
 editor-keyflow = { workspace = true }
+# Keyflow syntax highlighting for the setlist experience's chart editor.
+editor-keyflow-lang = { workspace = true }
 # `vox` for the `DayTemplatesClient` the schedule page calls to load
 # the day-plan overlay. Wasm-clean (serde-only client side).
 scheduling-proto = { workspace = true, features = ["vox", "atom"] }
