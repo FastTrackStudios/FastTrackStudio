@@ -61,8 +61,9 @@ struct DocRender {
     svg: String,
     total_w: f64,
     total_h: f64,
-    /// `(x_offset, width)` of each page in scene coordinates.
-    pages: Vec<(f64, f64)>,
+    /// `(x, y, w, h)` scene box of each page — the white "paper" the pane paints
+    /// behind the (transparent) document SVG, and the nav/centring targets.
+    pages: Vec<(f64, f64, f64, f64)>,
 }
 
 struct Pane {
@@ -137,16 +138,20 @@ impl Pane {
 
         let total_w = layout.total_width.max(1.0);
         let total_h = layout.total_height.max(60.0);
-        let cfg = SvgExportConfig::for_page(0.0, 0.0, total_w, total_h);
+        // Transparent canvas: the pane paints each page's white paper itself, so
+        // the gaps and margins between pages show the app background rather than
+        // one big white sheet under everything.
+        let mut cfg = SvgExportConfig::for_page(0.0, 0.0, total_w, total_h);
+        cfg.background = None;
         let svg = SvgSerializer::new(cfg).serialize(&layout.scene);
 
-        let pages: Vec<(f64, f64)> = if layout.pages.is_empty() {
-            vec![(0.0, total_w)]
+        let pages: Vec<(f64, f64, f64, f64)> = if layout.pages.is_empty() {
+            vec![(0.0, 0.0, total_w, total_h)]
         } else {
             layout
                 .pages
                 .iter()
-                .map(|p| (p.x_offset, p.width))
+                .map(|p| (p.x_offset, p.y_offset, p.width, p.height))
                 .collect()
         };
 
@@ -224,10 +229,20 @@ fn chart_seconds_for(progress: Option<f64>) -> Option<f64> {
     Some(p.clamp(0.0, 1.0) * duration - count_in + BOUNDARY_BIAS_S)
 }
 
-/// pan_x that horizontally centers page `i` in a `vw`-wide viewport at `zoom`.
-fn center_page_pan_x(pages: &[(f64, f64)], i: usize, vw: f64, zoom: f64) -> Option<f64> {
-    let (px, pw) = pages.get(i).copied()?;
-    Some(vw / 2.0 - (px + pw / 2.0) * zoom)
+/// Inset (CSS px) of a focused page from the viewport edge it aligns to.
+const PAGE_MARGIN_PX: f64 = 16.0;
+
+/// pan_x for focusing page `i`: left-aligned (its left edge at `PAGE_MARGIN_PX`),
+/// except the LAST page of a multi-page chart, which is right-aligned (its right
+/// edge at the viewport's right minus the margin) so as much chart as possible
+/// stays in view instead of trailing empty space.
+fn page_pan_x(pages: &[(f64, f64, f64, f64)], i: usize, vw: f64, zoom: f64) -> Option<f64> {
+    let (px, _py, pw, _ph) = pages.get(i).copied()?;
+    if pages.len() > 1 && i + 1 == pages.len() {
+        Some(vw - PAGE_MARGIN_PX - (px + pw) * zoom)
+    } else {
+        Some(PAGE_MARGIN_PX - px * zoom)
+    }
 }
 
 // ─── Components ────────────────────────────────────────────────────────────
@@ -307,7 +322,7 @@ fn ChartCanvas(text: String) -> Element {
             zoom.set(z);
             pan_y.set((vh - total_h * z) / 2.0);
             let cur = *current.peek();
-            if let Some(px) = center_page_pan_x(&pages, cur, vw, z) {
+            if let Some(px) = page_pan_x(&pages, cur, vw, z) {
                 pan_x.set(px);
             }
         }));
@@ -320,9 +335,11 @@ fn ChartCanvas(text: String) -> Element {
         let pages = doc.pages.clone();
         let cur_val = current();
         use_effect(use_reactive!(|cur_val| {
-            let Some((vw, _vh)) = *viewport.peek() else { return };
+            let Some((vw, _vh)) = *viewport.peek() else {
+                return;
+            };
             let z = *zoom.peek();
-            if let Some(px) = center_page_pan_x(&pages, cur_val, vw, z) {
+            if let Some(px) = page_pan_x(&pages, cur_val, vw, z) {
                 pan_x.set(px);
             }
         }));
@@ -341,11 +358,12 @@ fn ChartCanvas(text: String) -> Element {
     let at_first = cur == 0;
     let at_last = cur + 1 >= n_pages;
     let svg = doc.svg.clone();
+    let page_boxes = doc.pages.clone();
 
     rsx! {
         document::Style { {font_face_css()} }
         div {
-            style: "position:relative; width:100%; height:100%; min-height:0; overflow:hidden; background:#ffffff; user-select:none; touch-action:none; cursor:{drag_cursor(dragging())};",
+            style: "position:relative; width:100%; height:100%; min-height:0; overflow:hidden; background:var(--background,#0b0b0d); user-select:none; touch-action:none; cursor:{drag_cursor(dragging())};",
 
             onmounted: move |evt| {
                 spawn(async move {
@@ -382,10 +400,20 @@ fn ChartCanvas(text: String) -> Element {
             onmouseup: move |_| dragging.set(false),
             onmouseleave: move |_| dragging.set(false),
 
-            // The transformed stage: the whole page-row document + overlay.
+            // The transformed stage: white page "paper" + the (transparent)
+            // document SVG + overlay, all in shared scene coordinates.
             div {
                 style: "position:absolute; top:0; left:0; width:{total_w}px; height:{total_h}px; {transform}",
-                div { dangerous_inner_html: "{svg}" }
+                for (i, (px, py, pw, ph)) in page_boxes.iter().enumerate() {
+                    div {
+                        key: "page-{i}",
+                        style: "position:absolute; left:{px}px; top:{py}px; width:{pw}px; height:{ph}px; background:#ffffff; box-shadow:0 1px 10px rgba(0,0,0,0.35);",
+                    }
+                }
+                div {
+                    style: "position:absolute; inset:0;",
+                    dangerous_inner_html: "{svg}",
+                }
                 ChartCursorOverlay {
                     layout_key: key,
                     view_w: total_w,
