@@ -39,7 +39,9 @@ mod imp {
 
     use daw_proto::{Position, PositionInSeconds, TimeSignature};
     use session_proto::{ActiveIndices, Setlist, SongChartHydration};
-    use session_ui::components::{MixerView, SongProgressBar, TransportControlBar};
+    use session_ui::components::{
+        MixerView, SectionProgressBar, SongProgressBar, TransportControlBar,
+    };
     use session_ui::{
         SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState, apply_active_indices,
     };
@@ -63,19 +65,28 @@ mod imp {
     /// A song's fetched artifacts: its slug, manifest, and optional chart text.
     type LoadedSong = (String, media::Manifest, Option<String>);
 
-    /// Which tab is showing in the player.
+    /// Which tab is showing in the embedded player.
     #[derive(Clone, Copy, PartialEq)]
     enum Tab {
         Session,
         Chart,
     }
 
+    /// The right-hand pane of the full-screen experience's center. The
+    /// left pane is always the chart; this switches what sits beside it.
+    #[derive(Clone, Copy, PartialEq)]
+    enum CenterRight {
+        Mixer,
+        Comments,
+    }
+
     // ── the component ───────────────────────────────────────────────────────
 
     /// The `type: setlist` player. `songs` is the ordered list of media slugs
-    /// (from the note's `songs:` frontmatter). Rendered above the note editor.
+    /// (from the note's `songs:` frontmatter). Rendered above the note editor
+    /// (embedded) or inside the full-screen setlist Experience.
     #[component]
-    pub fn SetlistPlayer(songs: Vec<String>) -> Element {
+    pub fn SetlistPlayer(songs: Vec<String>, #[props(default)] fullscreen: bool) -> Element {
         // Current song in the set → drives `ACTIVE_INDICES.song_index`.
         let current_song = use_signal(|| 0usize);
         let playing = use_signal(|| false);
@@ -422,13 +433,19 @@ mod imp {
                         set_volume,
                         set_mutes,
                         goto_song,
+                        fullscreen,
                     }
                 }
             }
         };
 
         rsx! {
-            div { class: "mx-auto w-full max-w-6xl px-4 py-6", {body} }
+            // Full-screen Experience: fill the overlay (no max-width / centering).
+            // Embedded: the centered, capped column above the note editor.
+            div {
+                class: if fullscreen { "flex h-full min-h-0 w-full flex-col" } else { "mx-auto w-full max-w-6xl px-4 py-6" },
+                {body}
+            }
         }
     }
 
@@ -527,8 +544,11 @@ mod imp {
         set_volume: Callback<(usize, f32)>,
         set_mutes: Callback<(Vec<usize>, bool)>,
         goto_song: Callback<usize>,
+        #[props(default)] fullscreen: bool,
     ) -> Element {
         let mut tab = use_signal(|| Tab::Chart);
+        // Full-screen center: the right pane beside the chart.
+        let mut center_right = use_signal(|| CenterRight::Mixer);
 
         let count = songs_meta.len();
         let idx = current_song();
@@ -660,6 +680,195 @@ mod imp {
             .map(|s| s.name.clone());
         let time_str = format!("{} / {}", fmt_time(pos), fmt_time(duration));
         let progress_clamped = song_progress.clamp(0.0, 100.0);
+
+        // Progress WITHIN the current section (0–100) for the section bar.
+        let section_progress = sections
+            .iter()
+            .find(|s| song_progress >= s.start_percent && song_progress < s.end_percent)
+            .map(|s| {
+                let w = (s.end_percent - s.start_percent).max(0.001);
+                ((song_progress - s.start_percent) / w * 100.0).clamp(0.0, 100.0)
+            })
+            .unwrap_or(0.0);
+
+        // ── Full-screen Experience layout ────────────────────────────────────
+        // Progress on top, playlist navigator on the left, a switchable
+        // Chart + (Mixer | Comments) center, and the transport pinned to the
+        // bottom. Reuses every adapter above; only the arrangement differs.
+        if fullscreen {
+            let right = center_right();
+            return rsx! {
+                div { class: "flex h-full min-h-0 flex-col",
+
+                    // TOP — current section caption + time, then the song and
+                    // section progress bars.
+                    div { class: "shrink-0 border-b border-border px-5 py-2.5",
+                        div { class: "mb-2 flex items-center justify-between gap-3",
+                            div { class: "flex min-w-0 items-center gap-2.5",
+                                div { class: "h-6 w-1 shrink-0 rounded-full", style: format!("background:{accent};") }
+                                h1 { class: "truncate text-lg font-bold tracking-tight text-foreground", "{title}" }
+                                if let Some(name) = cur_section_name.clone() {
+                                    span { class: "shrink-0 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground",
+                                        "{name}"
+                                    }
+                                }
+                            }
+                            span { class: "shrink-0 text-xs font-medium tabular-nums text-muted-foreground", "{time_str}" }
+                        }
+                        if !sections.is_empty() {
+                            div { class: "flex flex-col gap-1.5",
+                                SongProgressBar {
+                                    progress: song_progress,
+                                    sections: sections.clone(),
+                                    song_key: manifest.key.clone(),
+                                    on_section_click,
+                                }
+                                SectionProgressBar {
+                                    progress: section_progress,
+                                    sections: sections.clone(),
+                                    song_key: manifest.key.clone(),
+                                }
+                            }
+                        }
+                    }
+
+                    // MIDDLE — navigator (left) + Chart/right center.
+                    div { class: "flex min-h-0 flex-1",
+
+                        // LEFT — the playlist navigator.
+                        aside { class: "flex w-56 shrink-0 flex-col overflow-y-auto border-r border-border bg-card/40",
+                            div { class: "flex items-baseline justify-between px-3 pb-1 pt-3",
+                                span { class: "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground", "Setlist" }
+                                span { class: "text-[11px] tabular-nums text-muted-foreground", "{count}" }
+                            }
+                            for (i , s) in songs_meta.iter().enumerate() {
+                                {
+                                    let is_cur = i == idx;
+                                    let goto = goto_song;
+                                    let sacc = s.accent.clone();
+                                    rsx! {
+                                        button {
+                                            key: "{i}",
+                                            class: if is_cur {
+                                                "flex w-full items-center gap-2 border-l-2 bg-accent px-3 py-2 text-left"
+                                            } else {
+                                                "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-2 text-left hover:bg-accent/50"
+                                            },
+                                            style: if is_cur { format!("border-color:{sacc};") } else { String::new() },
+                                            onclick: move |_| goto.call(i),
+                                            span { class: "size-2 shrink-0 rounded-full", style: format!("background:{sacc};") }
+                                            span { class: "min-w-0 flex-1 truncate text-sm font-medium text-foreground", "{s.title}" }
+                                            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{i + 1}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // CENTER — Chart on the left, a switchable pane on the right.
+                        div { class: "flex min-h-0 flex-1 flex-col",
+                            div { class: "flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5",
+                                span { class: "mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground", "Chart +" }
+                                for (v , label) in [(CenterRight::Mixer, "Mixer"), (CenterRight::Comments, "Comments")] {
+                                    button {
+                                        key: "{label}",
+                                        class: if right == v {
+                                            "rounded px-2 py-0.5 text-xs font-medium bg-accent text-foreground"
+                                        } else {
+                                            "rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                                        },
+                                        onclick: move |_| center_right.set(v),
+                                        "{label}"
+                                    }
+                                }
+                            }
+                            div { class: "flex min-h-0 flex-1",
+                                // Chart (left).
+                                div { class: "min-w-0 flex-1 overflow-auto border-r border-border bg-white",
+                                    SessionChartPane {}
+                                }
+                                // Switchable right pane.
+                                div { class: "flex min-w-0 flex-1 flex-col overflow-auto bg-card",
+                                    if right == CenterRight::Mixer {
+                                        if !guide_idxs.is_empty() {
+                                            div { class: "flex shrink-0 items-center gap-3 border-b border-border p-3",
+                                                span { class: "flex-1 text-sm font-semibold text-foreground", "Guide / Click" }
+                                                button {
+                                                    class: if guide_on {
+                                                        "rounded-md bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+                                                    } else {
+                                                        "rounded-md bg-muted px-4 py-1.5 text-sm font-semibold text-muted-foreground hover:bg-accent"
+                                                    },
+                                                    onclick: move |_| on_guide.call(()),
+                                                    if guide_on { "On" } else { "Off" }
+                                                }
+                                            }
+                                        }
+                                        div { class: "min-h-0 flex-1",
+                                            MixerView {
+                                                tracks: tracks.clone(),
+                                                on_volume: mixer_volume,
+                                                on_mute: mixer_mute,
+                                                on_solo: mixer_solo,
+                                            }
+                                        }
+                                    } else {
+                                        div { class: "p-4 text-sm text-muted-foreground",
+                                            "Song comments — coming soon. This pane will show the current song's notes + comments."
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // BOTTOM — prev / transport / next, pinned.
+                    div { class: "flex shrink-0 items-center gap-3 border-t border-border px-4 py-2",
+                        button {
+                            class: "flex min-w-0 max-w-[16rem] flex-1 items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40",
+                            disabled: at_first,
+                            onclick: {
+                                let goto_song = goto_song;
+                                move |_| if idx > 0 { goto_song.call(idx - 1) }
+                            },
+                            span { class: "text-lg leading-none text-muted-foreground", "‹" }
+                            span { class: "flex min-w-0 flex-col",
+                                span { class: "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground", "Prev" }
+                                span { class: "truncate text-sm font-medium text-foreground", {prev_title.clone().unwrap_or_else(|| "—".to_owned())} }
+                            }
+                        }
+                        div { class: "h-14 flex-[2] overflow-hidden rounded-lg border border-border",
+                            TransportControlBar {
+                                is_playing,
+                                is_looping: false,
+                                is_recording: false,
+                                is_armed: false,
+                                show_recording: false,
+                                on_play_pause,
+                                on_loop_toggle: noop,
+                                on_record_toggle: noop,
+                                on_arm_toggle: noop,
+                                on_back,
+                                on_forward,
+                            }
+                        }
+                        button {
+                            class: "flex min-w-0 max-w-[16rem] flex-1 items-center justify-end gap-2 rounded-lg border border-border px-3 py-1.5 text-right hover:bg-accent disabled:opacity-40",
+                            disabled: at_last,
+                            onclick: {
+                                let goto_song = goto_song;
+                                move |_| if idx + 1 < count { goto_song.call(idx + 1) }
+                            },
+                            span { class: "flex min-w-0 flex-col items-end",
+                                span { class: "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground", "Next" }
+                                span { class: "truncate text-sm font-medium text-foreground", {next_title.clone().unwrap_or_else(|| "—".to_owned())} }
+                            }
+                            span { class: "text-lg leading-none text-muted-foreground", "›" }
+                        }
+                    }
+                }
+            };
+        }
 
         rsx! {
             div { class: "flex flex-col gap-4 md:flex-row md:gap-5",
@@ -974,8 +1183,8 @@ mod stub {
     use dioxus::prelude::*;
 
     #[component]
-    pub fn SetlistPlayer(songs: Vec<String>) -> Element {
-        let _ = &songs;
+    pub fn SetlistPlayer(songs: Vec<String>, #[props(default)] fullscreen: bool) -> Element {
+        let _ = (&songs, fullscreen);
         rsx! {
             div { class: "mx-auto max-w-3xl px-4 py-10",
                 span { class: "text-sm text-muted-foreground",

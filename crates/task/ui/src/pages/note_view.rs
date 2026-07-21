@@ -425,6 +425,7 @@ pub(crate) fn NoteView(
                                 on_exit: move |_| setlist_fullscreen.set(false),
                                 crate::pages::setlist_session::SetlistPlayer {
                                     songs: setlist_songs_value.clone(),
+                                    fullscreen: true,
                                 }
                             }
                         } else {

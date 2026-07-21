@@ -1163,6 +1163,9 @@
   .max-w-\[12rem\] {
     max-width: 12rem;
   }
+  .max-w-\[16rem\] {
+    max-width: 16rem;
+  }
   .max-w-\[28rem\] {
     max-width: 28rem;
   }
@@ -1276,6 +1279,9 @@
   }
   .flex-1 {
     flex: 1;
+  }
+  .flex-\[2\] {
+    flex: 2;
   }
   .flex-none {
     flex: none;
