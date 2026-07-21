@@ -122,6 +122,15 @@ last")
 }
 
 #[tokio::test]
+async fn shot_table() {
+    // Caret away from the table so pipe source hides and it renders as a
+    // grid widget. Verifies native table layout (borders, cell padding).
+    let doc = "intro line\n\n| Feature | Status | Notes |\n|---|---|---|\n| Headings | ok | Mod-1..6 |\n| Tables | ok | GFM pipe |\n| Vim | ok | operators |\n\ntail line";
+    let t = mount(Setup::text(doc).caret(0).markdown().theme(THEME));
+    t.render_png(out("editor_table.png"));
+}
+
+#[tokio::test]
 async fn shot_caret_on_empty_line() {
     // Caret sits on the empty line (offset 11 = the empty line start).
     let t = mount(Setup::text("first line
