@@ -23776,6 +23776,7 @@ dependencies = [
  "dioxus",
  "dock-dioxus",
  "dock-proto",
+ "dynamic-template",
  "eyre",
  "fts-ui",
  "keyflow",

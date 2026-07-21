@@ -375,6 +375,9 @@
   .top-1 {
     top: calc(var(--spacing) * 1);
   }
+  .top-1\.5 {
+    top: calc(var(--spacing) * 1.5);
+  }
   .top-1\/2 {
     top: calc(1 / 2 * 100%);
   }
@@ -422,6 +425,9 @@
   }
   .right-1 {
     right: calc(var(--spacing) * 1);
+  }
+  .right-1\.5 {
+    right: calc(var(--spacing) * 1.5);
   }
   .right-2 {
     right: calc(var(--spacing) * 2);
@@ -1114,8 +1120,14 @@
   .w-\[30\%\] {
     width: 30%;
   }
+  .w-\[58px\] {
+    width: 58px;
+  }
   .w-\[60px\] {
     width: 60px;
+  }
+  .w-\[64px\] {
+    width: 64px;
   }
   .w-\[68px\] {
     width: 68px;
@@ -1197,6 +1209,9 @@
   }
   .max-w-md {
     max-width: var(--container-md);
+  }
+  .max-w-none {
+    max-width: none;
   }
   .max-w-prose {
     max-width: 65ch;
@@ -2010,6 +2025,12 @@
   .border-primary {
     border-color: var(--primary);
   }
+  .border-primary\/25 {
+    border-color: var(--primary);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--primary) 25%, transparent);
+    }
+  }
   .border-primary\/30 {
     border-color: var(--primary);
     @supports (color: color-mix(in lab, red, red)) {
@@ -2269,6 +2290,12 @@
     background-color: var(--background);
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab, var(--background) 60%, transparent);
+    }
+  }
+  .bg-background\/75 {
+    background-color: var(--background);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--background) 75%, transparent);
     }
   }
   .bg-background\/80 {
@@ -3345,6 +3372,9 @@
   }
   .whitespace-nowrap {
     white-space: nowrap;
+  }
+  .whitespace-pre {
+    white-space: pre;
   }
   .whitespace-pre-line {
     white-space: pre-line;

@@ -37,10 +37,10 @@
 mod imp {
     use dioxus::prelude::*;
 
-    use daw_proto::{Position, PositionInSeconds, TimeSignature};
+    use daw_proto::{MusicalPosition, Position, PositionInSeconds, TimeSignature};
     use session_proto::{ActiveIndices, Setlist, SongChartHydration};
     use session_ui::components::{
-        MixerView, SectionProgressBar, SongProgressBar, TransportControlBar,
+        MeasureIndicator, MixerView, SectionProgressBar, SongProgressBar, TransportControlBar,
     };
     use session_ui::{
         PerformanceSidebar, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState,
@@ -115,8 +115,16 @@ mod imp {
         guide_on: bool,
         on_guide: Callback<()>,
     ) -> Element {
+        // Width cap by content: the keyflow editor stays a narrow reading column
+        // (~2xl), comments a bit wider, and the mixer gets the full width for the
+        // console. `root_class` no longer carries a `max-w-*` (this wins).
+        let max_w = match selected {
+            CenterRight::Editor => "max-w-2xl",
+            CenterRight::Comments => "max-w-3xl",
+            CenterRight::Mixer => "max-w-none",
+        };
         rsx! {
-            div { class: "{root_class}",
+            div { class: "{root_class} {max_w}",
                 div { class: "flex shrink-0 items-center justify-end gap-1 border-b border-border px-3 py-1.5",
                     for (v , label) in [
                         (CenterRight::Editor, "Editor"),
@@ -884,6 +892,46 @@ mod imp {
             })
             .unwrap_or(0.0);
 
+        // Divide the current section into measures for the section bar — each is
+        // clickable to seek. `musical_position.measure` carries the measure's
+        // index within the section; the click seeks to its absolute time.
+        let (bpm, beats_per_measure, ts_denom) = {
+            let sl = SETLIST_STRUCTURE.read();
+            sl.songs
+                .get(idx)
+                .map(|s| {
+                    let ts = s.time_signature.unwrap_or(TimeSignature::COMMON_TIME);
+                    (s.tempo.unwrap_or(120.0), ts.numerator() as f64, ts.denominator() as u8)
+                })
+                .unwrap_or((120.0, 4.0, 4))
+        };
+        let seconds_per_measure = (60.0 / bpm.max(1.0)) * beats_per_measure.max(1.0);
+        let cur_section = sections
+            .iter()
+            .find(|s| song_progress >= s.start_percent && song_progress < s.end_percent)
+            .or_else(|| sections.first());
+        let (measure_indicators, measure_section_start) = if let Some(sec) = cur_section {
+            let start_sec = sec.start_percent / 100.0 * duration;
+            let sec_dur = ((sec.end_percent - sec.start_percent) / 100.0 * duration).max(0.001);
+            let n = (sec_dur / seconds_per_measure).round().max(1.0) as usize;
+            // Absolute measure number at the section's start (measure 1 = song start).
+            let first = (start_sec / seconds_per_measure).round() as i32;
+            let inds = (0..n)
+                .map(|i| MeasureIndicator {
+                    position_percent: (i as f64 * seconds_per_measure / sec_dur * 100.0).min(100.0),
+                    measure_number: first + i as i32 + 1,
+                    time_signature: Some((beats_per_measure as u8, ts_denom)),
+                    musical_position: MusicalPosition::new(i as i32, 0, 0),
+                })
+                .collect::<Vec<_>>();
+            (inds, start_sec)
+        } else {
+            (Vec::new(), 0.0)
+        };
+        let on_measure_click: Callback<MusicalPosition> = use_callback(move |mp: MusicalPosition| {
+            seek.call(measure_section_start + mp.measure as f64 * seconds_per_measure);
+        });
+
         // ── Full-screen Experience layout ────────────────────────────────────
         // Progress on top, playlist navigator on the left, a switchable
         // Chart + (Mixer | Comments) center, and the transport pinned to the
@@ -933,6 +981,8 @@ mod imp {
                                     progress: section_progress,
                                     sections: sections.clone(),
                                     song_key: manifest.key.clone(),
+                                    measure_indicators: measure_indicators.clone(),
+                                    on_measure_click: Some(on_measure_click),
                                 }
                             }
                         }
@@ -1026,7 +1076,7 @@ mod imp {
                             // defaults to the mixer. Below the breakpoint the second
                             // pane is hidden and everything lives behind pane one.
                             RightPane {
-                                root_class: "flex min-w-0 max-w-5xl flex-1 flex-col overflow-hidden border-r border-border bg-card",
+                                root_class: "flex min-w-0 flex-1 flex-col overflow-hidden border-r border-border bg-card",
                                 selected: right,
                                 on_select: move |v| center_right.set(v),
                                 editor_key: format!("a-{idx}-{chart_present}"),
@@ -1041,7 +1091,7 @@ mod imp {
                                 on_guide,
                             }
                             RightPane {
-                                root_class: "hidden min-w-0 max-w-5xl flex-1 flex-col overflow-hidden bg-card min-[1700px]:flex",
+                                root_class: "hidden min-w-0 flex-1 flex-col overflow-hidden bg-card min-[1700px]:flex",
                                 selected: center_right2(),
                                 on_select: move |v| center_right2.set(v),
                                 editor_key: format!("b-{idx}-{chart_present}"),
