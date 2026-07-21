@@ -19509,6 +19509,8 @@ dependencies = [
  "architect",
  "dirs",
  "eyre",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
  "inferno-net",
  "parking_lot",
  "patchbay-proto",

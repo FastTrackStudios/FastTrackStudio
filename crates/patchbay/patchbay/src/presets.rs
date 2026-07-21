@@ -1,4 +1,9 @@
-//! Preset + alias persistence — plain JSON under the fts config dir.
+//! Preset + alias persistence — a styx document under the fts config
+//! dir (`fts/patchbay/patchbay.styx`), the same config language the
+//! rest of the FTS stack uses (signal rigs, keybinds, launcher). It's
+//! hand-editable: channel names and colors are just `aliases`/`colors`
+//! lists a human can bulk-edit in a text editor. A legacy
+//! `patchbay.json` is auto-migrated to styx on first open.
 //!
 //! Presets are connection memory (RaySession's jackpatch idea): links
 //! remembered by stable (node.name, port.name) pairs, re-applied
@@ -7,22 +12,33 @@
 use std::fs;
 use std::path::PathBuf;
 
+use facet::Facet;
 use parking_lot::Mutex;
 use patchbay_proto::{AliasEntry, CanvasView, ColorEntry, PresetLink, RoutingPreset, VirtualSink};
 
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+/// The whole patchbay config, one styx document. Every list defaults to
+/// empty (`#[facet(default)]`) so a hand-written file can omit any
+/// section, and `#[serde(default)]` keeps the legacy-JSON migration
+/// reader lenient.
+#[derive(Debug, Default, Facet, PartialEq, serde::Serialize, serde::Deserialize)]
 struct FileFormat {
     #[serde(default)]
+    #[facet(default)]
     presets: Vec<RoutingPreset>,
     #[serde(default)]
+    #[facet(default)]
     aliases: Vec<AliasEntry>,
     #[serde(default)]
+    #[facet(default)]
     latency_rules: Vec<patchbay_proto::LatencyRule>,
     #[serde(default)]
+    #[facet(default)]
     colors: Vec<ColorEntry>,
     #[serde(default)]
+    #[facet(default)]
     virtual_sinks: Vec<VirtualSink>,
     #[serde(default)]
+    #[facet(default)]
     views: Vec<CanvasView>,
 }
 
@@ -57,41 +73,77 @@ fn config_path() -> PathBuf {
     }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("fts/patchbay/patchbay.json")
+        .join("fts/patchbay/patchbay.styx")
+}
+
+/// Load the config: styx if present, else migrate a legacy
+/// `patchbay.json` sitting beside it, else `None` (fresh install).
+fn load(styx_path: &std::path::Path) -> Option<FileFormat> {
+    if let Ok(s) = fs::read_to_string(styx_path) {
+        match facet_styx::from_str::<FileFormat>(&s) {
+            Ok(data) => return Some(data),
+            Err(e) => {
+                // Don't clobber a file we can't parse — surface it and
+                // fall through so the user can fix it by hand.
+                tracing::error!("patchbay.styx parse failed ({e:?}); leaving it untouched");
+                return Some(FileFormat::default());
+            }
+        }
+    }
+    // Legacy JSON migration: read once; the caller writes styx on open.
+    let json_path = styx_path.with_extension("json");
+    let s = fs::read_to_string(&json_path).ok()?;
+    match serde_json::from_str::<FileFormat>(&s) {
+        Ok(data) => {
+            tracing::info!(
+                "migrating patchbay config {} → styx",
+                json_path.display()
+            );
+            // Keep the old file as a backup rather than deleting it.
+            let _ = fs::rename(&json_path, json_path.with_extension("json.bak"));
+            Some(data)
+        }
+        Err(e) => {
+            tracing::warn!("legacy patchbay.json parse failed: {e}");
+            None
+        }
+    }
 }
 
 impl PresetStore {
     pub fn open() -> Self {
         let path = config_path();
-        let data = match fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-        {
-            Some(data) => data,
+        let data = load(&path).unwrap_or_else(|| {
             // Fresh install: start from the REAPER baseline so the
             // main outs/click are named the first time it appears.
-            None => FileFormat {
+            FileFormat {
                 aliases: seed_defaults(),
                 ..FileFormat::default()
-            },
-        };
-        Self {
+            }
+        });
+        let store = Self {
             path,
             data: Mutex::new(data),
+        };
+        // Write the styx file now if it doesn't exist yet — materializes
+        // a freshly-migrated or seeded config so it's hand-editable.
+        if !store.path.exists() {
+            store.persist(&store.data.lock());
         }
+        store
     }
 
     fn persist(&self, data: &FileFormat) {
         if let Some(dir) = self.path.parent() {
             let _ = fs::create_dir_all(dir);
         }
-        match serde_json::to_string_pretty(data) {
-            Ok(json) => {
-                if let Err(e) = fs::write(&self.path, json) {
+        match facet_styx::to_string(data) {
+            Ok(styx) => {
+                if let Err(e) = fs::write(&self.path, styx) {
                     tracing::warn!("patchbay config write failed: {e}");
                 }
             }
-            Err(e) => tracing::warn!("patchbay config serialize failed: {e}"),
+            Err(e) => tracing::warn!("patchbay config serialize failed: {e:?}"),
         }
     }
 
@@ -230,5 +282,65 @@ impl PresetStore {
             data.aliases.push(AliasEntry { target, alias });
         }
         self.persist(&data);
+    }
+}
+
+#[cfg(test)]
+mod styx_roundtrip {
+    use super::*;
+
+    #[test]
+    fn full_config_survives_styx_roundtrip() {
+        let original = FileFormat {
+            presets: vec![RoutingPreset {
+                name: "FOH".into(),
+                description: "front of house".into(),
+                links: vec![PresetLink {
+                    output_node: "REAPER".into(),
+                    output_port: "out1".into(),
+                    input_node: "Inferno sink".into(),
+                    input_port: "playback_1".into(),
+                }],
+            }],
+            aliases: vec![AliasEntry {
+                target: "REAPER:out1".into(),
+                alias: "Main Output ST L".into(),
+            }],
+            latency_rules: vec![patchbay_proto::LatencyRule {
+                pattern: "REAPER".into(),
+                quantum: 64,
+                force: true,
+            }],
+            colors: vec![ColorEntry {
+                target: "REAPER:in25".into(),
+                color: "#4a90d9".into(),
+            }],
+            virtual_sinks: vec![VirtualSink {
+                name: "Stems".into(),
+                channels: 8,
+            }],
+            views: vec![CanvasView {
+                name: "Broadcast".into(),
+                zoom: 1.25,
+                pan_x: -340.5,
+                pan_y: 12.0,
+                collapsed_cols: vec![false, true, false, true],
+                hide_unconnected: true,
+                hide_monitors: false,
+            }],
+        };
+
+        let styx = facet_styx::to_string(&original).expect("serialize");
+        let parsed: FileFormat = facet_styx::from_str(&styx).expect("parse");
+        assert_eq!(original, parsed, "styx round-trip must be lossless\n{styx}");
+    }
+
+    #[test]
+    fn missing_sections_default_to_empty() {
+        // A hand-written file with only aliases parses fine.
+        let styx = "aliases ({target \"REAPER:out3\", alias Click})\n";
+        let parsed: FileFormat = facet_styx::from_str(styx).expect("parse partial");
+        assert_eq!(parsed.aliases.len(), 1);
+        assert!(parsed.presets.is_empty() && parsed.views.is_empty());
     }
 }
