@@ -107,21 +107,32 @@ impl Pane {
             }
         };
 
-        // Continuous scroll — one unbounded vertical column, no page breaks
-        // (the browser scrolls), with the responsive preset for this width.
+        // Paginated (US Letter) — render the whole FIRST page, count-in snippet
+        // and all. The paginated path derives the count-in from the chart's
+        // `CountIn` section and gives its beats negative-time positions (real
+        // measures start at t=0), so the playhead maps cleanly (see
+        // `ChartCursorOverlay`). `use_page_offsets = false` renders page 1 at the
+        // scene origin, so its box is `0 0 w h` and the overlay (same viewBox)
+        // lines up without a scene translation.
         let breakpoint = Breakpoint::from_viewport_pt(LAYOUT_WIDTH_PT);
-        let config = ChartLayoutConfig::responsive_for(breakpoint);
-        let mode = ChartLayoutMode::ContinuousScroll {
-            width: LAYOUT_WIDTH_PT,
-        };
+        let mut config = ChartLayoutConfig::responsive_for(breakpoint);
+        config.use_page_offsets = false;
+        let mode = ChartLayoutMode::paginated_letter();
         let layout = self.engine.layout_chart_with_config(&chart, &mode, &config);
 
-        let (w, h) = (
-            layout.total_width.max(LAYOUT_WIDTH_PT),
-            layout.total_height.max(60.0),
-        );
+        // First page box (fall back to content bounds if the result is unpaginated).
+        let (px, py, w, h) = layout
+            .pages
+            .first()
+            .map(|p| (p.x_offset, p.y_offset, p.width, p.height))
+            .unwrap_or((
+                0.0,
+                0.0,
+                layout.total_width.max(LAYOUT_WIDTH_PT),
+                layout.total_height.max(60.0),
+            ));
         // Fontless SVG (the page carries @font-face for the same families).
-        let config = SvgExportConfig::for_page(0.0, 0.0, w, h);
+        let config = SvgExportConfig::for_page(px, py, w, h);
         let mut serializer = SvgSerializer::new(config);
         let mut svg = serializer.serialize(&layout.scene);
         // Make the inline SVG fluid: width tracks the pane, the viewBox
@@ -250,8 +261,13 @@ fn ChartCursorOverlay(layout_key: u64, view_w: f64, view_h: f64) -> Element {
         (indices.song_progress, indices.is_playing)
     };
 
-    // progress (0..1 over SONGSTART..SONGEND) → seconds on the chart's own
-    // timeline, whose 0 is the start of the count-in.
+    // progress (0..1 over the transport timeline, whose 0 is the count-in
+    // start) → seconds on the paginated chart's timeline, whose 0 is the first
+    // REAL measure (count-in measures sit at negative time). The transport's
+    // section starts already include the count-in (Intro begins at
+    // `count_in_seconds`), so we subtract it: at the very start the playhead
+    // sits in the count-in snippet (negative), and seeking to Intro lands
+    // exactly on the first real measure instead of `count_in` measures late.
     let chart_seconds = progress.and_then(|p| {
         let indices = ACTIVE_INDICES.read();
         let idx = indices.song_index?;
@@ -259,7 +275,24 @@ fn ChartCursorOverlay(layout_key: u64, view_w: f64, view_h: f64) -> Element {
         let setlist = SETLIST_STRUCTURE.read();
         let song = setlist.songs.get(idx)?;
         let duration = song.duration();
-        (duration > 0.0).then(|| song.count_in_seconds.unwrap_or(0.0) + p.clamp(0.0, 1.0) * duration)
+        // Count-in / lead-in before the first real measure. Prefer the explicit
+        // `count_in_seconds`, but hydrated setlists leave it `None` — there the
+        // first section's `start_seconds` IS the lead-in (e.g. a 2-measure count
+        // renders as the first section starting at ~3.78 s @127 bpm). The
+        // paginated chart puts real measures at t=0 with the count-in at negative
+        // time, so subtracting this lead-in lands section seeks on the right
+        // measure (Intro → first real measure, not `count_in` measures late).
+        let count_in = song
+            .count_in_seconds
+            .or_else(|| song.sections.first().map(|s| s.start_seconds))
+            .unwrap_or(0.0);
+        // Section starts coincide with measure boundaries, and both the seek
+        // time and the count-in are rounded seconds — so a section seek lands
+        // *exactly* on a chart measure boundary, where float noise can drop it
+        // into the previous measure. Bias forward by a hair (~15 ms, well under
+        // a beat) so a boundary landing resolves into the measure it begins.
+        const BOUNDARY_BIAS_S: f64 = 0.015;
+        (duration > 0.0).then(|| p.clamp(0.0, 1.0) * duration - count_in + BOUNDARY_BIAS_S)
     });
 
     let state = chart_seconds
