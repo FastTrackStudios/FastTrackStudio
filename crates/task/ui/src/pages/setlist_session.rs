@@ -722,6 +722,24 @@ mod imp {
         // bottom. Reuses every adapter above; only the arrangement differs.
         if fullscreen {
             let right = center_right();
+            // Resolve the current song's chart text (same source the chart
+            // pane engraves) so the keyflow editor seeds from a prop rather
+            // than racing hydration. Reactive read → SetlistBody re-renders
+            // when the charts land, flipping the editor's remount key.
+            let chart_src = {
+                let sl = SETLIST_STRUCTURE.read();
+                sl.songs
+                    .get(idx)
+                    .and_then(|s| {
+                        SONG_CHARTS
+                            .read()
+                            .get(&s.project_guid)
+                            .map(|c| c.chart_text.clone())
+                            .or_else(|| s.chart_text.clone())
+                    })
+                    .unwrap_or_default()
+            };
+            let chart_present = !chart_src.trim().is_empty();
             return rsx! {
                 div { class: "flex h-full min-h-0 flex-col",
 
@@ -800,10 +818,12 @@ mod imp {
                                 // Switchable right pane.
                                 div { class: "flex min-w-0 flex-1 flex-col overflow-auto bg-card",
                                     if right == CenterRight::Editor {
-                                        // Keyed on the song index → remounts with the
-                                        // new chart when the song changes.
+                                        // Keyed on song index + chart presence, so it
+                                        // remounts (and re-seeds) both on song change
+                                        // and when the chart finishes hydrating.
                                         crate::pages::keyflow_chart_editor::KeyflowChartEditor {
-                                            key: "{idx}",
+                                            key: "{idx}-{chart_present}",
+                                            source: chart_src.clone(),
                                         }
                                     } else if right == CenterRight::Mixer {
                                         if !guide_idxs.is_empty() {
