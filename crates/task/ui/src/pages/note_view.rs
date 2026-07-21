@@ -438,23 +438,33 @@ pub(crate) fn NoteView(
                             }
                         }
                     }
-                    crate::pages::note_header::NoteHeader {
-                        home,
-                        props_open,
-                        on_renamed: move |_| on_renamed.call(()),
-                    }
-                    div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
-                        div { class: "editor-frame editor-frame--flush",
-                            Editor {
-                                state: session.state,
-                                keymap: keymap.read().clone(),
-                                decorations: decorations.clone(),
-                                vim,
-                                slash: Some(slash),
-                                completion: completion.clone(),
-                                on_transaction,
+                    // The note body (frontmatter + Markdown editor) is bound to
+                    // `session.state`, which autosaves to the note file. A
+                    // fullscreen experience (e.g. the setlist) draws its OWN
+                    // editors on top; if we also kept this one mounted beneath the
+                    // overlay it would still catch stray keystrokes/edits and
+                    // autosave them into the note — which corrupted the setlist's
+                    // frontmatter when the keyflow-source editor was used. So skip
+                    // it entirely while a fullscreen experience owns the screen.
+                    if note_body_visible(is_setlist, setlist_fullscreen()) {
+                        crate::pages::note_header::NoteHeader {
+                            home,
+                            props_open,
+                            on_renamed: move |_| on_renamed.call(()),
+                        }
+                        div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
+                            div { class: "editor-frame editor-frame--flush",
+                                Editor {
+                                    state: session.state,
+                                    keymap: keymap.read().clone(),
+                                    decorations: decorations.clone(),
+                                    vim,
+                                    slash: Some(slash),
+                                    completion: completion.clone(),
+                                    on_transaction,
+                                }
+                                SlashMenu { state: session.state, slash }
                             }
-                            SlashMenu { state: session.state, slash }
                         }
                     }
                 }
@@ -464,5 +474,46 @@ pub(crate) fn NoteView(
                 crate::collab::CollabSession { key: "{doc_id}", doc_id, handles }
             }
         }
+    }
+}
+
+/// Whether the note body (frontmatter + Markdown editor, bound to the
+/// autosaving `session.state`) should be mounted.
+///
+/// It is hidden while a fullscreen experience owns the screen: that experience
+/// renders its own editors (e.g. the setlist's keyflow-source editor), and
+/// keeping the note's editor mounted underneath let stray keystrokes/edits fall
+/// into it and autosave into the note — which corrupted the setlist note's
+/// frontmatter (chart text written to the top of the file, breaking the `---`
+/// fence so `type: setlist` no longer parsed and the experience stopped
+/// opening). Not mounting it removes that sink entirely.
+fn note_body_visible(is_setlist: bool, setlist_fullscreen: bool) -> bool {
+    !(is_setlist && setlist_fullscreen)
+}
+
+#[cfg(test)]
+mod note_body_tests {
+    use super::note_body_visible;
+
+    #[test]
+    fn note_body_hidden_only_under_fullscreen_setlist() {
+        // The one case that caused the corruption: a setlist note shown
+        // fullscreen. The note-body editor (the autosave sink) must NOT mount,
+        // so the keyflow-source editor's input can never land in the note.
+        assert!(
+            !note_body_visible(true, true),
+            "note body must be hidden while the fullscreen setlist experience is open"
+        );
+
+        // Every other combination keeps the normal note editor.
+        assert!(
+            note_body_visible(true, false),
+            "a setlist note shown embedded still edits normally"
+        );
+        assert!(
+            note_body_visible(false, true),
+            "a non-setlist note is never suppressed by the setlist flag"
+        );
+        assert!(note_body_visible(false, false), "a plain note edits normally");
     }
 }
