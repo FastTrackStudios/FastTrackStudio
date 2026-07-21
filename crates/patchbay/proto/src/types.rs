@@ -85,6 +85,10 @@ pub struct PwNode {
     pub virtual_sink: bool,
     /// Live processing state (`running`/`idle`/`suspended`), polled
     /// out-of-band via `pw-dump` — registry globals don't carry it.
+    /// `#[facet(default)]` so a client built with this field can still
+    /// decode snapshots from an older engine that never sends it (it
+    /// reads back as `Unknown`).
+    #[facet(default)]
     pub state: NodeState,
 }
 
