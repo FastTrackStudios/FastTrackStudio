@@ -37,6 +37,13 @@ async fn shot_visual_line_mode() {
 }
 
 #[tokio::test]
+async fn shot_code_and_markers() {
+    let doc = "Some text\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n\n- item one\n- item two\n\n> [!tip] Tip\n> body line one\n> body line two";
+    let t = mount(Setup::text(doc).caret(0).markdown().theme(THEME));
+    t.render_png(out("editor_code_markers.png"));
+}
+
+#[tokio::test]
 async fn shot_headings() {
     let t = mount(Setup::text("# H1 heading\n## H2 heading\n### H3 heading\nnormal body text").caret(60).markdown().theme(THEME));
     t.render_png(out("editor_headings.png"));
