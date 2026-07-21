@@ -6186,6 +6186,8 @@ dependencies = [
  "dock-proto",
  "eyre",
  "fts-ui",
+ "input",
+ "input-dioxus",
  "tokio",
  "tracing",
  "wasm-bindgen",
@@ -12849,6 +12851,7 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "fts-ui",
+ "gloo-timers",
  "input",
  "tokio",
 ]
