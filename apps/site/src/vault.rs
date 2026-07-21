@@ -245,13 +245,18 @@ fn media_render(name: &str) -> Option<(String, bool)> {
 }
 
 /// One piece of a rendered note: either a run of markdown or a
-/// screencast block (16:9 media on the left, a notes column on the
-/// right). The vault view renders each `Md` run in its own read-only
-/// editor and each `Cast` as a native side-by-side block.
+/// screencast block (16:9 media beside a notes column). The vault view
+/// renders each `Md` run in its own read-only editor and each `Cast` as
+/// a native side-by-side block. `media_right` puts the media on the
+/// right (text left) instead of the default media-left.
 #[derive(Clone, PartialEq)]
 pub enum Segment {
     Md(String),
-    Cast { name: String, side_md: String },
+    Cast {
+        name: String,
+        side_md: String,
+        media_right: bool,
+    },
 }
 
 /// Split a note body into markdown runs and screencast blocks. A
@@ -266,11 +271,12 @@ pub enum Segment {
 /// ```
 /// ```
 ///
-/// The first non-empty line is the media NAME; everything after it is
-/// the side-column markdown shown to the right of the media. Keeping the
-/// source as a fence — not a raw `![[…]]` — is deliberate: the vault's
-/// `[[wikilink]]` resolver and knowledge graph must never see media
-/// embeds as note links.
+/// The info string picks the side: ```gif (or ```gif left) puts the
+/// media on the left, ```gif right puts it on the right (text left).
+/// The first non-empty body line is the media NAME; everything after is
+/// the side-column markdown. Keeping the source as a fence — not a raw
+/// `![[…]]` — is deliberate: the vault's `[[wikilink]]` resolver and
+/// knowledge graph must never see media embeds as note links.
 pub fn parse_note_segments(body: &str) -> Vec<Segment> {
     let mut segs: Vec<Segment> = Vec::new();
     let mut md = String::new();
@@ -284,7 +290,15 @@ pub fn parse_note_segments(body: &str) -> Vec<Segment> {
     let mut lines = body.lines().peekable();
     while let Some(line) = lines.next() {
         let t = line.trim_start();
-        let is_gif = t == "```gif" || (t.starts_with("```gif") && t[6..].trim().is_empty());
+        // A `gif` fence, optionally with a `left` / `right` side flag.
+        let (is_gif, media_right) = match t.strip_prefix("```gif") {
+            Some(rest) => match rest.trim() {
+                "" | "left" => (true, false),
+                "right" => (true, true),
+                _ => (false, false),
+            },
+            None => (false, false),
+        };
         if !is_gif {
             md.push_str(line);
             md.push('\n');
@@ -305,7 +319,11 @@ pub fn parse_note_segments(body: &str) -> Vec<Segment> {
         let Some(i) = name_idx else { continue };
         let name = inner[i].trim().to_string();
         let side_md = inner[i + 1..].join("\n").trim().to_string();
-        segs.push(Segment::Cast { name, side_md });
+        segs.push(Segment::Cast {
+            name,
+            side_md,
+            media_right,
+        });
     }
     flush(&mut md, &mut segs);
     segs
@@ -627,11 +645,12 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
                                                 on_link_click,
                                             }
                                         },
-                                        Segment::Cast { name, side_md } => rsx! {
+                                        Segment::Cast { name, side_md, media_right } => rsx! {
                                             ScreencastBlock {
                                                 key: "{i}",
                                                 name: name.clone(),
                                                 side_md: side_md.clone(),
+                                                media_right: *media_right,
                                                 decorations: decorations.clone(),
                                                 on_link_click,
                                             }
@@ -691,21 +710,26 @@ fn MdSegment(
     }
 }
 
-/// A screencast block: the 16:9 media, left-aligned, with a notes
-/// column filling the width to its right (caption, bullets, `kbd:@`
-/// refs, `[[links]]` — all rendered as markdown). Stacks vertically on
-/// narrow screens. The media falls back to the animated placeholder
-/// until a real recording exists under its name.
+/// A screencast block: the 16:9 media beside a notes column that fills
+/// the width (caption, bullets, `kbd:@` refs, `[[links]]` — all rendered
+/// as markdown). `media_right` flips the pair so the text sits on the
+/// left and the media on the right; otherwise media-left. Stacks
+/// vertically on narrow screens. The media falls back to the animated
+/// placeholder until a real recording exists under its name.
 #[component]
 fn ScreencastBlock(
     name: String,
     side_md: String,
+    #[props(default)] media_right: bool,
     decorations: DecorationSource,
     on_link_click: Callback<String>,
 ) -> Element {
     let media = media_render(&name);
+    // Media and notes are always in the same DOM order; on desktop we
+    // reverse the row to put the media on the right when asked.
+    let row = if media_right { "lg:flex-row-reverse" } else { "lg:flex-row" };
     rsx! {
-        div { class: "cast-block flex flex-col lg:flex-row gap-6 items-start my-7",
+        div { class: "cast-block flex flex-col {row} gap-6 items-start my-7",
             // ── 16:9 media (left) ─────────────────────────
             div { class: "cast-media w-full lg:w-[34rem] xl:w-[38rem] shrink-0",
                 {
