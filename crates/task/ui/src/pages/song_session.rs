@@ -127,6 +127,10 @@ pub(crate) mod imp {
         el: HtmlAudioElement,
         gain: GainNode,
         node: web_sys::MediaElementAudioSourceNode,
+        /// Post-gain tap for VU metering (reads the level the listener hears).
+        /// A side branch off `gain` — it does not connect onward, so it never
+        /// affects the audio path.
+        analyser: web_sys::AnalyserNode,
     }
 
     /// The shared playback graph. Held in an `Rc<RefCell<…>>` so the resource
@@ -149,6 +153,27 @@ pub(crate) mod imp {
                 .map(|s| s.el.current_time())
                 .unwrap_or(0.0)
                 .clamp(0.0, self.duration)
+        }
+
+        /// Per-stem peak level (0.0..=1.0), in stem order, from the metering
+        /// analysers — the post-gain signal the listener hears (muted stems read
+        /// ~0). Cheap; poll at UI rate (~20 fps), not per audio frame.
+        pub(crate) fn peak_levels(&self) -> Vec<f32> {
+            let mut buf = [0u8; 256];
+            self.stems
+                .iter()
+                .map(|s| {
+                    s.analyser.get_byte_time_domain_data(&mut buf);
+                    // 128 = silence; the frame's max deviation → 0..1.
+                    let peak = buf
+                        .iter()
+                        .map(|&b| (b as i16 - 128).unsigned_abs())
+                        .max()
+                        .unwrap_or(0) as f32
+                        / 128.0;
+                    peak.min(1.0)
+                })
+                .collect()
         }
 
         /// Resume the context, park every element at `offset`, and play them.
@@ -381,12 +406,25 @@ pub(crate) mod imp {
             // Deref coercion: &MediaElementAudioSourceNode / &GainNode → &AudioNode.
             let _ = node.connect_with_audio_node(&gain);
             let _ = gain.connect_with_audio_node(&dest);
+            // Metering tap: gain → analyser (a side branch that isn't connected
+            // onward, so it only observes and never colors the signal). Small
+            // FFT → cheap time-domain reads for a peak meter.
+            let analyser = ctx
+                .create_analyser()
+                .map_err(|e| format!("create_analyser: {e:?}"))?;
+            analyser.set_fft_size(256);
+            let _ = gain.connect_with_audio_node(&analyser);
             gain.gain()
                 .set_value(if spec.default_muted { 0.0 } else { 1.0 });
             // Kick off buffering.
             el.load();
 
-            stems.push(StemNode { el, gain, node });
+            stems.push(StemNode {
+                el,
+                gain,
+                node,
+                analyser,
+            });
         }
 
         Ok(Rc::new(RefCell::new(EngineInner {

@@ -205,6 +205,8 @@ web-sys = { workspace = true, features = [
     "AudioParam",
     "GainNode",
     "AudioDestinationNode",
+    # Per-stem VU metering tap (post-gain analyser → peak level).
+    "AnalyserNode",
     "HtmlAudioElement",
     "HtmlMediaElement",
     "MediaElementAudioSourceNode",
