@@ -27129,7 +27129,9 @@ name = "trigger-plugin"
 version = "0.1.0"
 dependencies = [
  "nice-plug",
+ "nice-plug-dioxus",
  "trigger",
+ "trigger-ui",
 ]
 
 [[package]]
@@ -27137,6 +27139,21 @@ name = "trigger-profiles"
 version = "0.1.0"
 dependencies = [
  "trigger-dsp",
+]
+
+[[package]]
+name = "trigger-ui"
+version = "0.1.0"
+dependencies = [
+ "atomic_float",
+ "audiocore-core",
+ "dioxus",
+ "dioxus-test",
+ "fts-ui",
+ "fts-ui-audio",
+ "nice-plug",
+ "nice-plug-dioxus",
+ "tokio",
 ]
 
 [[package]]
