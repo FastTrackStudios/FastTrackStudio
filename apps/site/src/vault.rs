@@ -28,7 +28,7 @@ use view_knowledge_graph::{KnowledgeGraphView, WikiFile, build_wiki_graph};
 
 use crate::Route;
 use crate::components::colors::category_color;
-use crate::components::input_tutorial::embedded::VAULT;
+use crate::components::input_tutorial::embedded::{MEDIA_ASSETS, VAULT};
 use crate::components::modes::find_mode;
 
 // ---------------------------------------------------------------------------
@@ -220,6 +220,70 @@ pub fn body_without_frontmatter(content: &str) -> &str {
         .unwrap_or(content)
 }
 
+// ---------------------------------------------------------------------------
+// Guide screencast media (`gif` fences → embedded <img>/<video>)
+// ---------------------------------------------------------------------------
+
+/// The served URL for a screencast, by its logical name (the eventual
+/// media filename stem, e.g. `transport-play`). Falls back to the
+/// generic animated placeholder until a real recording is dropped into
+/// `assets/guides-media/` under that stem. See `build.rs` `MEDIA_ASSETS`.
+fn media_url(name: &str) -> Option<String> {
+    let by = |stem: &str| MEDIA_ASSETS.iter().find(|(s, _)| *s == stem);
+    by(name.trim())
+        .or_else(|| by("_placeholder"))
+        .map(|(_, asset)| asset.to_string())
+}
+
+/// Rewrite ```gif fences into an editor media embed the read-only view
+/// renders. A fence is:
+///
+/// ```text
+/// ```gif
+/// transport-play
+/// Optional caption line(s).
+/// ```
+/// ```
+///
+/// The first non-empty line is the media NAME (future filename stem);
+/// the rest is an optional caption. We emit `![[<url>|720]]` (the editor
+/// turns a media-extension embed into an `<img>`/`<video>`) plus the
+/// caption as an italic paragraph. Keeping the source as a fence — not a
+/// raw `![[…]]` — is deliberate: the vault's `[[wikilink]]` resolver and
+/// knowledge graph must never see media embeds as note links.
+pub fn rewrite_media_fences(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut lines = body.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        let is_gif_fence = trimmed == "```gif"
+            || (trimmed.starts_with("```gif") && trimmed[6..].trim().is_empty());
+        if !is_gif_fence {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        // Consume the fence body up to the closing ```.
+        let mut inner: Vec<&str> = Vec::new();
+        for l in lines.by_ref() {
+            if l.trim_start().starts_with("```") {
+                break;
+            }
+            inner.push(l);
+        }
+        let mut it = inner.iter().map(|l| l.trim()).filter(|l| !l.is_empty());
+        let Some(name) = it.next() else { continue };
+        let caption = it.collect::<Vec<_>>().join(" ");
+        if let Some(url) = media_url(name) {
+            out.push_str(&format!("![[{url}|720]]\n"));
+        }
+        if !caption.is_empty() {
+            out.push_str(&format!("*{caption}*\n"));
+        }
+    }
+    out
+}
+
 /// `kbd:@action` resolver: action id → the keys currently bound to it
 /// in the embedded fasttrackstudio profile (bindings + which-key leaf
 /// sequences), plus the shared mode/workflow layers.
@@ -397,6 +461,24 @@ const VAULT_STYLE: &str = "
    editable 14px/1.6 default, which stays untouched for Task/editing
    contexts. */
 .guides-vault .editor-root { font-size: 16px; line-height: 1.7; }
+/* Screencast embeds (from ```gif fences): framed, centered, with the
+   caption line — an emphasized paragraph the fence emits right after —
+   sitting under it as a muted caption. */
+.guides-vault .md-embed-image,
+.guides-vault .md-embed-video {
+    width: 100%;
+    margin: 1.25rem auto 0.4rem;
+    border: 1px solid rgba(120, 140, 180, 0.22);
+    border-radius: 10px;
+    box-shadow: 0 8px 30px -12px rgba(0, 0, 0, 0.6);
+    background: rgba(20, 24, 33, 0.5);
+}
+.guides-vault .cm-line:has(> em:only-child) {
+    text-align: center;
+    font-size: 0.82rem;
+    color: var(--muted-foreground, #7c8aa0);
+    margin-bottom: 1.5rem;
+}
 ";
 
 /// `/guides` and `/guides/:..path` — the vault view: note explorer,
@@ -424,7 +506,7 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
     {
         let content = current
             .as_ref()
-            .map(|n| body_without_frontmatter(&n.content).to_string())
+            .map(|n| rewrite_media_fences(body_without_frontmatter(&n.content)))
             .unwrap_or_default();
         use_effect(use_reactive!(|(content,)| {
             if state.peek().doc.to_string() != content {

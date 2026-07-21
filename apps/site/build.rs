@@ -185,6 +185,43 @@ fn main() {
          pub use vault_assets::VAULT_ASSETS;\n",
     );
 
+    // Guide screencast media (apps/site/assets/guides-media/*). Each file
+    // becomes a manganis `asset!` keyed by its file STEM, so a `gif` fence
+    // in a note (`transport-play`) resolves to the hashed, production-served
+    // URL. Any missing name falls back to `_placeholder` at render time
+    // (see vault.rs). Dropping a real `transport-play.gif` (or .webp/.mp4)
+    // into this dir lights up that slot on the next build — no note edits.
+    let media_dir = Path::new(&manifest).join("assets/guides-media");
+    println!("cargo::rerun-if-changed={}", media_dir.display());
+    let mut media: Vec<std::path::PathBuf> = std::fs::read_dir(&media_dir)
+        .expect("assets/guides-media dir")
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
+        .collect();
+    media.sort();
+    out.push_str(
+        "mod media_assets {\n\
+             use dioxus::prelude::*;\n\
+             /// (file stem, hashed asset) for every guide screencast.\n\
+             pub static MEDIA_ASSETS: &[(&str, Asset)] = &[\n",
+    );
+    for file in &media {
+        let stem = file.file_stem().unwrap().to_str().unwrap();
+        let name = file.file_name().unwrap().to_str().unwrap();
+        writeln!(
+            out,
+            "        ({stem:?}, asset!({:?})),",
+            format!("/assets/guides-media/{name}"),
+        )
+        .unwrap();
+    }
+    out.push_str(
+        "    ];\n\
+         }\n\
+         pub use media_assets::MEDIA_ASSETS;\n",
+    );
+
     let dest = Path::new(&std::env::var("OUT_DIR").unwrap()).join("input_profiles.rs");
     std::fs::write(dest, out).expect("write generated profiles");
 }
