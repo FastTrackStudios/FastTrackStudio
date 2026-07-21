@@ -1480,6 +1480,9 @@
   .grid-cols-7 {
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
+  .grid-cols-\[7rem_1fr_auto\] {
+    grid-template-columns: 7rem 1fr auto;
+  }
   .grid-rows-6 {
     grid-template-rows: repeat(6, minmax(0, 1fr));
   }
@@ -1674,6 +1677,9 @@
   }
   .self-start {
     align-self: flex-start;
+  }
+  .justify-self-start {
+    justify-self: flex-start;
   }
   .truncate {
     overflow: hidden;
@@ -5025,6 +5031,14 @@
   .focus-visible\:ring-ring {
     &:focus-visible {
       --tw-ring-color: var(--ring);
+    }
+  }
+  .focus-visible\:ring-ring\/40 {
+    &:focus-visible {
+      --tw-ring-color: var(--ring);
+      @supports (color: color-mix(in lab, red, red)) {
+        --tw-ring-color: color-mix(in oklab, var(--ring) 40%, transparent);
+      }
     }
   }
   .focus-visible\:ring-ring\/50 {

@@ -82,7 +82,10 @@ pub(crate) fn NoteView(
 
     // ── Editor extensions ─────────────────────────────────────
     let keymap = use_signal(editor::standard_markdown_keymap);
-    let props_open = use_signal(|| true);
+    // Frontmatter properties now live in the right sidebar (Properties
+    // tab), so the editor's inline `.md-properties` widget stays
+    // collapsed — the class below is always `props-collapsed`.
+    let props_open = use_signal(|| false);
     let vim = use_signal(VimState::new);
     // Vim is a physical-keyboard idiom — decide once at mount.
     let vim = (!use_hook(editor::editor_view::coarse_pointer)).then_some(vim);
@@ -203,6 +206,33 @@ pub(crate) fn NoteView(
             .unwrap_or_else(|| "anonymous".to_owned());
         crate::collab::on_editor_transaction(&c, &session, &event, &who);
     });
+
+    // Publish this doc to the sidebar Properties panel while focused, so
+    // it edits the SAME live buffer through this note's transaction sink.
+    // The `claim` id makes clears identity-safe: a pane only relinquishes
+    // the context while it is still the holder, so a split-view focus swap
+    // (or a keyed remount) never drops the newly-focused doc.
+    let claim = use_hook(crate::pages::note_properties::next_claim);
+    if let Some(mut focused_doc) =
+        try_use_context::<Signal<Option<crate::pages::note_properties::FocusedDoc>>>()
+    {
+        use_effect(move || {
+            if is_focused() {
+                focused_doc.set(Some(crate::pages::note_properties::FocusedDoc {
+                    claim,
+                    state: session.state,
+                    on_transaction,
+                }));
+            } else if (*focused_doc.peek()).map(|d| d.claim) == Some(claim) {
+                focused_doc.set(None);
+            }
+        });
+        use_drop(move || {
+            if (*focused_doc.peek()).map(|d| d.claim) == Some(claim) {
+                focused_doc.set(None);
+            }
+        });
+    }
 
     // Editor sources — created once, capturing the signals above.
     let decorations = use_hook(|| crate::collab::collab_decoration_source(lookup, collab));

@@ -35,6 +35,7 @@ pub mod schedule;
 pub mod scripture;
 pub mod session_chart_pane;
 pub mod setlist_session;
+pub mod note_properties;
 pub mod song_session;
 pub mod vox_media_source;
 pub mod settings;

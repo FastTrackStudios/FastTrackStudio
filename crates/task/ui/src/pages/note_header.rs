@@ -9,7 +9,6 @@
 //! into the top of the page, Obsidian-style, with no separators.
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{ChevronDown, ChevronRight};
 
 use crate::document_session::DocumentSession;
 use crate::pages::vault::basename_of;
@@ -87,30 +86,13 @@ pub fn NoteHeader(
         });
     };
 
+    // Properties now live in the right sidebar (Properties tab), so the
+    // header is just the note's editable title. `props_open` is retained
+    // for the caller's `props-collapsed` class (always collapsed).
+    let _ = props_open;
     rsx! {
-        // No border / card — the title blends into the top of the page
-        // and flows straight into the editor's own properties widget.
         div { class: "flex flex-col gap-1 px-6 pt-5 pb-0",
             TitleField { title, on_commit: do_rename }
-            // Disclosure chevron at the top of the properties — icon
-            // only (a tooltip carries the label). Down = expanded,
-            // right = collapsed, same idiom as the vault tree rows.
-            button {
-                r#type: "button",
-                class: "-ml-1 flex size-5 w-fit items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground",
-                "aria-label": if props_open() { "Hide properties" } else { "Show properties" },
-                title: if props_open() { "Hide properties" } else { "Show properties" },
-                onclick: move |_| {
-                    let mut po = props_open;
-                    let open = *po.peek();
-                    po.set(!open);
-                },
-                if props_open() {
-                    ChevronDown { class: "size-4" }
-                } else {
-                    ChevronRight { class: "size-4" }
-                }
-            }
         }
     }
 }
