@@ -724,21 +724,16 @@ mod imp {
         // bottom. Reuses every adapter above; only the arrangement differs.
         if fullscreen {
             let right = center_right();
-            // Resolve the current song's chart text (same source the chart
-            // pane engraves) so the keyflow editor seeds from a prop rather
-            // than racing hydration. Reactive read → SetlistBody re-renders
-            // when the charts land, flipping the editor's remount key.
-            let chart_src = {
+            // The current song's ORIGINAL chart text + its guid. The editor
+            // seeds from `chart_src` (the song's own `chart_text`, NOT the
+            // live `SONG_CHARTS` it writes into) so pushing edits back for the
+            // live engrave can't loop into a re-seed. Reactive read → this
+            // re-resolves on song switch / hydration, flipping the remount key.
+            let (chart_src, chart_guid) = {
                 let sl = SETLIST_STRUCTURE.read();
                 sl.songs
                     .get(idx)
-                    .and_then(|s| {
-                        SONG_CHARTS
-                            .read()
-                            .get(&s.project_guid)
-                            .map(|c| c.chart_text.clone())
-                            .or_else(|| s.chart_text.clone())
-                    })
+                    .map(|s| (s.chart_text.clone().unwrap_or_default(), s.project_guid.clone()))
                     .unwrap_or_default()
             };
             let chart_present = !chart_src.trim().is_empty();
@@ -846,6 +841,7 @@ mod imp {
                                         crate::pages::keyflow_chart_editor::KeyflowChartEditor {
                                             key: "{idx}-{chart_present}",
                                             source: chart_src.clone(),
+                                            guid: chart_guid.clone(),
                                         }
                                     } else if right == CenterRight::Mixer {
                                         if !guide_idxs.is_empty() {
