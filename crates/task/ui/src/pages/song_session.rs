@@ -259,26 +259,57 @@ pub(crate) mod imp {
         serde_json::from_str(&txt).map_err(|e| format!("{url}: bad manifest json: {e}"))
     }
 
-    /// Resolve a frontmatter-stems song: each stem's `content_hash` becomes a
-    /// short-lived signed `/blobs/download` URL via the org's
-    /// `AttachmentService`, and the manifest is synthesized from the
-    /// frontmatter scalars + `sections:` block.
+    /// Where one stem's audio comes from.
+    #[derive(Clone, Debug, PartialEq)]
+    pub(crate) enum StemSource {
+        /// Plain URL for an `HTMLAudioElement` (legacy `/media` files,
+        /// signed blob URLs — the browser range-requests over HTTP).
+        Url(String),
+        /// Streamed over the org's vox lane into a MediaSource-backed
+        /// element (`vox_media_source`). webm/opus stems only.
+        Vox { org: String, hash: String },
+    }
+
+    /// Resolve a frontmatter-stems song. webm/opus stems stream over
+    /// vox (MediaSource fed by `MediaService` chunks); anything else
+    /// falls back to a short-lived signed `/blobs/download` URL. The
+    /// manifest is synthesized from the frontmatter scalars +
+    /// `sections:` block.
     pub(crate) async fn resolve_front(
         org: &str,
         title: &str,
         front: &crate::pages::vault::SongFront,
-    ) -> Result<(Manifest, Vec<String>), String> {
+    ) -> Result<(Manifest, Vec<StemSource>), String> {
         use attachments_proto::ContentHashArg;
-        let client = crate::vox_clients::attachments_client(org).await?;
-        let mut urls = Vec::with_capacity(front.stems.len());
+        use crate::pages::vox_media_source::mse_supported;
+
+        let media = crate::vox_clients::media_client(org).await.ok();
+        let mut sources = Vec::with_capacity(front.stems.len());
         for stem in &front.stems {
+            // Vox-MSE path: browser speaks webm/opus MSE AND the blob
+            // was ingested as webm (mime from the media stat).
+            if mse_supported() {
+                if let Some(m) = &media {
+                    if let Ok(info) = m.stat(stem.content_hash.clone()).await {
+                        if info.mime_type.starts_with("audio/webm") {
+                            sources.push(StemSource::Vox {
+                                org: org.to_owned(),
+                                hash: stem.content_hash.clone(),
+                            });
+                            continue;
+                        }
+                    }
+                }
+            }
+            // Fallback: signed HTTP URL (ogg-opus + older ingests).
+            let client = crate::vox_clients::attachments_client(org).await?;
             let signed = client
                 .get_download_url(ContentHashArg {
                     content_hash: stem.content_hash.clone(),
                 })
                 .await
                 .map_err(|e| format!("stem `{}`: {e:?}", stem.name))?;
-            urls.push(signed.url);
+            sources.push(StemSource::Url(signed.url));
         }
         let duration_sec = front
             .duration_sec
@@ -312,22 +343,34 @@ pub(crate) mod imp {
                 })
                 .collect(),
         };
-        Ok((manifest, urls))
+        Ok((manifest, sources))
     }
 
     /// Build the streaming graph: create the context, and for each stem create
-    /// an `HTMLAudioElement` (progressive stream) routed through
-    /// media-element-source → gain → destination. `urls` is parallel to
-    /// `manifest.stems` (signed blob URLs or `/media` paths). Synchronous and
-    /// side-effect free apart from element creation — no fetch/decode, so no
-    /// per-stem progress signal and nothing to re-fire on transport ticks.
-    pub(crate) fn build_engine(manifest: &Manifest, urls: &[String]) -> Result<Engine, String> {
+    /// an `<audio>` element — plain URL (progressive HTTP) or
+    /// MediaSource-fed-from-vox, per its [`StemSource`] — routed through
+    /// media-element-source → gain → destination. `sources` is parallel to
+    /// `manifest.stems`. Synchronous and side-effect free apart from element
+    /// creation (vox feeds run in spawned tasks) — nothing to re-fire on
+    /// transport ticks.
+    pub(crate) fn build_engine(
+        manifest: &Manifest,
+        sources: &[StemSource],
+    ) -> Result<Engine, String> {
         let ctx = AudioContext::new().map_err(|e| format!("AudioContext: {e:?}"))?;
         let dest = ctx.destination();
         let mut stems = Vec::with_capacity(manifest.stems.len());
-        for (spec, url) in manifest.stems.iter().zip(urls) {
-            let el =
-                HtmlAudioElement::new_with_src(url).map_err(|e| format!("audio element: {e:?}"))?;
+        for (spec, source) in manifest.stems.iter().zip(sources) {
+            let el = match source {
+                StemSource::Url(url) => HtmlAudioElement::new_with_src(url)
+                    .map_err(|e| format!("audio element: {e:?}"))?,
+                StemSource::Vox { org, hash } => {
+                    crate::pages::vox_media_source::audio_element_over_vox(
+                        org.clone(),
+                        hash.clone(),
+                    )?
+                }
+            };
             el.set_preload("auto");
             el.set_loop(false);
 
@@ -565,19 +608,19 @@ pub(crate) mod imp {
             let title = title_r.clone();
             let front = front_r.clone();
             async move {
-                let (manifest, urls) = if front.stems.is_empty() {
+                let (manifest, sources) = if front.stems.is_empty() {
                     let manifest =
                         fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
-                    let urls = manifest
+                    let sources = manifest
                         .stems
                         .iter()
-                        .map(|s| format!("/media/songs/{slug}/{}", s.file))
+                        .map(|s| StemSource::Url(format!("/media/songs/{slug}/{}", s.file)))
                         .collect();
-                    (manifest, urls)
+                    (manifest, sources)
                 } else {
                     resolve_front(&org, &title, &front).await?
                 };
-                let eng = build_engine(&manifest, &urls)?;
+                let eng = build_engine(&manifest, &sources)?;
                 Ok::<(Manifest, Engine), String>((manifest, eng))
             }
         }));

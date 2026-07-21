@@ -28,14 +28,17 @@ same origin, same auth, one protocol.
 
 ## Migration steps (follow-ups)
 
-1. **SongView playback over vox** — replace the per-stem
-   `HTMLAudioElement src=<signed url>` graph with MediaSource Extensions:
-   one `MediaSource` per stem fed by `media_client.read(...)` chunks
-   (`SourceBuffer.appendBuffer`), seek = abort + new ranged `read`.
-   Requires the transcode target to be MSE-friendly (`audio/webm;
-   codecs=opus` — Chrome/Firefox; ogg-opus is NOT reliably MSE-supported,
-   so `task song ingest` should emit webm/opus once this lands).
-   Keep the signed-URL path as fallback until verified on real audio.
+1. **SongView playback over vox** — DONE (same PR): per-stem
+   `StemSource::Vox` creates a MediaSource-backed element fed by
+   `media_client.read(...)` chunks (`pages/vox_media_source.rs`,
+   progressive whole-file append v1); `task song ingest` now emits
+   **webm/opus** (MSE-compatible; ogg-opus is not). Selection is
+   per-stem at load: `MediaSource.isTypeSupported` + the blob's mime
+   from `stat` — webm streams over vox, anything else falls back to
+   the signed HTTP URL. Seek stays within the buffered range (fine
+   once the progressive append catches up). REMAINING: drive a real
+   Play with ears/Playwright (issue #30 item 6) and then tighten
+   buffering (step 5).
 2. **Setlist player** — same switch (it still uses `/media` today).
 3. **Retire `/media`** — once songs are ingested as attachments and both
    players stream over vox, drop `TASK_SERVER_MEDIA_DIR` + the chart

@@ -206,6 +206,12 @@ web-sys = { workspace = true, features = [
     "HtmlAudioElement",
     "HtmlMediaElement",
     "MediaElementAudioSourceNode",
+    # Media-over-vox playback: MediaSource-backed <audio> fed by
+    # MediaService chunks (src/pages/vox_media_source.rs).
+    "MediaSource",
+    "SourceBuffer",
+    "MediaSourceReadyState",
+    "Url",
 ] }
 futures-channel.workspace = true
 futures-util.workspace = true

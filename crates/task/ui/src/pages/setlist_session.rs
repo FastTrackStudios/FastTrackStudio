@@ -175,12 +175,12 @@ mod imp {
                 if let Some(old) = engine.peek().clone() {
                     old.borrow_mut().teardown();
                 }
-                let urls: Vec<String> = manifest
+                let sources: Vec<media::StemSource> = manifest
                     .stems
                     .iter()
-                    .map(|s| format!("/media/songs/{slug}/{}", s.file))
+                    .map(|s| media::StemSource::Url(format!("/media/songs/{slug}/{}", s.file)))
                     .collect();
-                match media::build_engine(&manifest, &urls) {
+                match media::build_engine(&manifest, &sources) {
                     Ok(eng) => {
                         let v: Vec<media::StemUi> = manifest
                             .stems
