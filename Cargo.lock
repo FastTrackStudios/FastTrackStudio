@@ -6016,7 +6016,6 @@ dependencies = [
  "facet 0.50.0-rc.5",
  "facet-json 0.50.0-rc.5",
  "futures",
- "moire",
  "serde",
  "serde_json",
  "tracing",
@@ -6249,7 +6248,6 @@ name = "daw-standalone"
 version = "0.1.0"
 dependencies = [
  "architect",
- "async-lock",
  "base64 0.22.1",
  "clack-extensions",
  "clack-host",
@@ -6263,7 +6261,6 @@ dependencies = [
  "js-sys",
  "libloading 0.8.9",
  "memmap2",
- "moire",
  "rtrb",
  "symphonia",
  "thiserror 2.0.18",
@@ -23702,7 +23699,6 @@ dependencies = [
  "eyre",
  "keyflow",
  "keyflow-daw-analysis",
- "moire",
  "music-catalog",
  "reaper-high",
  "reaper-low",
