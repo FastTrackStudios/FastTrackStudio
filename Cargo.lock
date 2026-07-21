@@ -7766,6 +7766,7 @@ name = "editor"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "dioxus-native",
  "editor-state",
  "editor-view",
  "editor-vim",
