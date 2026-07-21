@@ -2,6 +2,7 @@
 //!
 //! Interactive documentation with live chart rendering for the keyflow parser.
 //! Test patterns are displayed as interactive examples using WebGPU.
+//! Guides vault: docs/guides/**/*.md (embedded via build.rs).
 
 mod components;
 mod renderer;
