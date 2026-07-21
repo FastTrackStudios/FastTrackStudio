@@ -996,16 +996,18 @@ moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7
 moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
-# Blitz from git HEAD (still the 0.3.0-beta.1 line) instead of the
-# published beta.1 — dioxus git pins `=0.3.0-beta.1`, and the vendored
-# dioxus-test needs post-beta.1 APIs (Node::outer_html_pretty). Same
-# patch upstream dioxus-test carries. One rev across all blitz crates.
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-net = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+# Blitz from the FTS fork (0.3.0-beta.1 line, upstream 02523b83 +
+# fts-focus: focus-follows-pointerdown for all focusable content —
+# upstream only click-focuses text inputs, leaving the editor's
+# tabindex div unfocusable by mouse). dioxus git pins `=0.3.0-beta.1`
+# and the vendored dioxus-test needs post-beta.1 APIs
+# (Node::outer_html_pretty). One rev across all blitz crates.
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "3e74143376a9cd54a855a20de9958d19b0d17961" }
 # Vendored one-line fix: quote scalars containing `<`/`>` — upstream
 # (facet-rs/facet) styx-format emits them bare but styx-parse rejects
 # them, so serialized keybind configs (`keys "<C-s>"`) could not be
