@@ -56,7 +56,7 @@ pub(crate) mod imp {
         Song as SessionSong, SongChartHydration, SongId,
     };
     use session_ui::components::{
-        MixerView, ProgressSection, SectionProgressBar, SongProgressBar, SongTitle,
+        MixerView, ProgressSection, SectionProgressBar, SongProgressBar,
         TransportControlBar,
     };
     use session_ui::{
@@ -560,6 +560,8 @@ pub(crate) mod imp {
 
     // ── small format helpers ────────────────────────────────────────────────
 
+    #[allow(dead_code)] // kept as a shared helper; the inline scrubber that
+    // used it moved to the progress bars.
     pub(crate) fn fmt_time(s: f64) -> String {
         let s = s.max(0.0);
         let m = (s / 60.0) as u64;
@@ -859,7 +861,9 @@ pub(crate) mod imp {
         };
 
         rsx! {
-            div { class: "mx-auto w-full max-w-4xl px-4 py-6 flex flex-col gap-5", {body} }
+            // Full-width: the embedded player fills the note column (no
+            // artificial max-width) so the progress bars get real room.
+            div { class: "w-full px-4 py-6 flex flex-col gap-5", {body} }
         }
     }
 
@@ -966,8 +970,6 @@ pub(crate) mod imp {
         let is_playing = playing();
         let is_buffering = buffering();
 
-        let title = manifest.title.clone().unwrap_or_default();
-        let artist = manifest.artist.clone().unwrap_or_default();
         let sections = progress_sections(&manifest);
 
         // Song / section progress (0-100) for the session-ui progress bars.
@@ -1074,24 +1076,6 @@ pub(crate) mod imp {
         let active = tab();
 
         rsx! {
-            // Title (real session-ui component) + metadata badges.
-            SongTitle { song_name: title.clone() }
-            div { class: "flex flex-wrap items-center justify-center gap-2 -mt-4",
-                if !artist.is_empty() {
-                    span { class: "text-sm text-muted-foreground mr-2", "{artist}" }
-                }
-                if let Some(k) = manifest.key.as_ref() {
-                    Badge { label: "Key {k}" }
-                }
-                if let Some(b) = manifest.bpm {
-                    Badge { label: "{b} BPM" }
-                }
-                if let Some(ts) = manifest.time_signature.as_ref() {
-                    Badge { label: "{ts}" }
-                }
-                Badge { label: "{manifest.stems.len()} stems" }
-            }
-
             // Song progress (segmented sections; click to seek). Always visible.
             if !manifest.sections.is_empty() {
                 div { class: "pt-2",
@@ -1110,37 +1094,21 @@ pub(crate) mod imp {
                 }
             }
 
-            // Fine scrubber + time readout (kept for precise seeking).
-            div { class: "flex items-center gap-3",
-                span { class: "text-xs font-mono text-muted-foreground tabular-nums min-w-[84px]",
-                    "{fmt_time(pos)} / {fmt_time(duration)}"
-                }
-                input {
-                    r#type: "range",
-                    class: "flex-1 accent-primary",
-                    min: "0",
-                    max: "{duration}",
-                    step: "0.01",
-                    value: "{pos}",
-                    oninput: move |e| {
-                        if let Ok(v) = e.value().parse::<f64>() {
-                            seek.call(v);
-                        }
-                    },
-                }
-                if is_buffering {
-                    span { class: "text-[11px] text-muted-foreground/70", "buffering…" }
-                }
+            // Buffering hint (the scrubbing UI lives in the progress bars above).
+            if is_buffering {
+                div { class: "text-[11px] text-muted-foreground/70", "buffering…" }
             }
 
-            // Transport bar (real session-ui component). Record/arm/loop are
-            // no-ops in the browser player; play/back/forward drive the engine.
+            // Transport bar (real session-ui component) — playback only, so
+            // Arm/Record are hidden. Loop is a no-op in the browser player;
+            // play/back/forward drive the engine.
             div { class: "h-16 rounded-lg overflow-hidden border border-border",
                 TransportControlBar {
                     is_playing,
                     is_looping: false,
                     is_recording: false,
                     is_armed: false,
+                    show_recording: false,
                     on_play_pause,
                     on_loop_toggle: noop,
                     on_record_toggle: noop,
@@ -1206,16 +1174,6 @@ pub(crate) mod imp {
                         on_solo: mixer_solo,
                     }
                 }
-            }
-        }
-    }
-
-    #[component]
-    fn Badge(label: String) -> Element {
-        rsx! {
-            span {
-                class: "text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground border border-border rounded-full px-2 py-0.5",
-                "{label}"
             }
         }
     }
