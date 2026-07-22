@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use architect::host::{self, EngineHost};
+use architect::host::{self, EngineHost, WebBundle};
 use dioxus::prelude::*;
 use patchbay::PatchbayBackend;
 use patchbay_proto::services::patchbay_service::PatchbayServiceStreamClient;
@@ -16,6 +16,47 @@ use patchbay_proto::{GraphEvent, PatchbayServiceClient};
 use patchbay_ui::{PatchbayApp, PatchbayHandle};
 
 const DEFAULT_ADDR: &str = "0.0.0.0:4046";
+
+/// The staged web bundle, compiled into the binary (`just
+/// patchbay-web-stage` copies the dx build into `web-dist/`).
+#[cfg(feature = "embed-web")]
+static EMBEDDED_WEB: include_dir::Dir<'static> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/web-dist");
+
+/// Locate the browser-remote bundle so the engine serves it itself —
+/// any device on the LAN opens `http://<host>:4046/` and gets the
+/// patchbay. First match wins: `PATCHBAY_WEB_DIST` env override, the
+/// embedded bundle (feature `embed-web`), then the dx dev build output.
+/// `None` = headless (`/health` + `/vox` only).
+fn web_bundle() -> Option<WebBundle> {
+    if let Ok(dir) = std::env::var("PATCHBAY_WEB_DIST") {
+        let p = std::path::PathBuf::from(&dir);
+        if p.join("index.html").is_file() {
+            return Some(WebBundle::Dir(p));
+        }
+        tracing::warn!("PATCHBAY_WEB_DIST={dir} has no index.html — ignoring");
+    }
+
+    #[cfg(feature = "embed-web")]
+    {
+        return Some(WebBundle::Embedded(&EMBEDDED_WEB));
+    }
+
+    #[cfg(not(feature = "embed-web"))]
+    {
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))?;
+        let candidates = [
+            exe_dir.join("../dx/patchbay-web/release/web/public"),
+            exe_dir.join("../dx/patchbay-web/debug/web/public"),
+        ];
+        candidates
+            .into_iter()
+            .find(|p| p.join("index.html").is_file())
+            .map(WebBundle::Dir)
+    }
+}
 
 /// In-process clients over the LocalServer conduit — the same shape
 /// every network remote uses.
@@ -61,7 +102,7 @@ fn bootstrap_blocking() -> eyre::Result<()> {
         // not awaited — serve() never returns.
         let router = backend.router();
         tokio::spawn(async move {
-            EngineHost::new(router, bind_addr()).serve().await;
+            EngineHost::new(router, bind_addr()).web(web_bundle()).serve().await;
         });
 
         ENGINE

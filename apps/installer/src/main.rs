@@ -19,6 +19,7 @@
 mod codeberg;
 mod fetch;
 mod layout;
+mod plugins;
 mod reaper_env;
 
 use std::path::PathBuf;
@@ -83,6 +84,38 @@ enum Cmd {
         #[arg(long, value_name = "DIR")]
         prefix: Option<PathBuf>,
     },
+    /// Manage the FTS plugin bundle (.clap/.vst3 → ~/.clap, ~/.vst3).
+    Plugins {
+        #[command(subcommand)]
+        cmd: PluginsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginsCmd {
+    /// Download and install the plugin bundle (default: latest release).
+    Install {
+        /// Install a specific release tag instead of the latest.
+        #[arg(long, value_name = "TAG")]
+        version: Option<String>,
+        /// Install from a local tarball or extracted directory instead of
+        /// the release feed (e.g. target/bundled after `just plugins-bundle`).
+        #[arg(long, value_name = "PATH")]
+        from: Option<PathBuf>,
+        /// Install under this directory instead of $HOME.
+        #[arg(long, value_name = "DIR")]
+        prefix: Option<PathBuf>,
+    },
+    /// Remove the installed plugin bundle (manifest-driven).
+    Uninstall {
+        #[arg(long, value_name = "DIR")]
+        prefix: Option<PathBuf>,
+    },
+    /// Show the installed plugin bundle version and contents.
+    List {
+        #[arg(long, value_name = "DIR")]
+        prefix: Option<PathBuf>,
+    },
 }
 
 #[derive(Args, Default)]
@@ -109,6 +142,13 @@ async fn main() {
         Some(Cmd::Update { prefix }) => update(prefix).await,
         Some(Cmd::Uninstall { prefix }) => Layout::new(prefix).and_then(|l| l.uninstall()),
         Some(Cmd::Reaper { prefix }) => reaper_env::setup(prefix).await,
+        Some(Cmd::Plugins { cmd }) => match cmd {
+            PluginsCmd::Install { version, from, prefix } => {
+                plugins::install(version, from, prefix).await
+            }
+            PluginsCmd::Uninstall { prefix } => plugins::uninstall(prefix),
+            PluginsCmd::List { prefix } => plugins::list(prefix),
+        },
     };
     if let Err(e) = result {
         eprintln!("error: {e:#}");

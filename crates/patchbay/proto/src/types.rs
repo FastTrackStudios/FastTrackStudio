@@ -42,6 +42,15 @@ pub struct PwNode {
     /// The node's latency request (`node.latency`, e.g. `"64/48000"`),
     /// empty when unset.
     pub latency: String,
+    /// `application.icon-name` (freedesktop icon id), empty when unset.
+    pub icon_name: String,
+    /// `node.group` — links related nodes (a loopback's sink half and
+    /// forwarder stream share one). Only present via bound node info
+    /// (registry globals omit it).
+    pub group: String,
+    /// This node is a patchbay-created virtual sink (`patchbay.virtual`
+    /// prop) — the only nodes the UI may destroy.
+    pub virtual_sink: bool,
 }
 
 /// A port on a node.
@@ -144,6 +153,73 @@ pub struct ApplyReport {
 pub struct AliasEntry {
     pub target: String,
     pub alias: String,
+}
+
+// ─── Colors (cable/port identity) ───────────────────────────────────────
+
+/// User-set color for a node (`target = node.name`) or a port
+/// (`target = "node.name:port.name"`). CSS color string (`#rrggbb`).
+/// Cables inherit: output-port color → output-node color → media-kind
+/// default. Pure presentation, persisted alongside aliases.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct ColorEntry {
+    pub target: String,
+    pub color: String,
+}
+
+/// A resolved application icon: the freedesktop icon name plus its
+/// image as a `data:` URI (so remotes render it without filesystem
+/// access to this host's icon themes).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct IconEntry {
+    pub icon_name: String,
+    pub data_uri: String,
+}
+
+// ─── Virtual sinks (named buses) ────────────────────────────────────────
+
+/// A patchbay-owned null-audio sink (a named bus): persisted in config
+/// and re-created whenever the engine (re)connects, so buses survive
+/// PipeWire restarts even though `object.linger` alone doesn't.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+pub struct VirtualSink {
+    /// Display name; the node name is derived (`patchbay.<slug>`).
+    pub name: String,
+    /// Channel count: 1 = mono, 2 = stereo (FL/FR), n = AUX0..n-1.
+    pub channels: u32,
+}
+
+/// Node name for a virtual sink ("Stems Bus" → `patchbay.stems_bus`) —
+/// shared by the engine (creation) and UIs (live-state matching).
+pub fn sink_node_name(display: &str) -> String {
+    let slug: String = display
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("patchbay.{slug}")
+}
+
+// ─── Saved canvas views ─────────────────────────────────────────────────
+
+/// A saved graph-canvas view: pan/zoom/collapse state under a name, so
+/// "FOH" / "Broadcast" layouts are one click away on any client.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct CanvasView {
+    pub name: String,
+    pub zoom: f64,
+    pub pan_x: f64,
+    pub pan_y: f64,
+    /// Per-column collapse (Inputs | Applications | Groups | Outputs).
+    pub collapsed_cols: Vec<bool>,
+    pub hide_unconnected: bool,
+    pub hide_monitors: bool,
 }
 
 // ─── Clock / latency ────────────────────────────────────────────────────
