@@ -1,10 +1,12 @@
 # Collaboration panel — sharing note groups with people and links
 
 Status: DESIGN (2026-07-22). Substrate audit done; nothing implemented.
-Companion plans: `billing-access-control.md` (the enforcement middleware this
-depends on), `multi-server-auth.md` (client tokens — done, server enforcement
-open), `federated-task-platform.md` (external collaborators as federated
-members).
+Companion plans: `architect-permissions.md` (the framework
+PermissionEngine / `#[permit]` system that supersedes this doc's hand-scoped
+share-lane services — the share lane becomes ScopeEngine + Guest principal),
+`billing-access-control.md` (the enforcement middleware this depends on),
+`multi-server-auth.md` (client tokens — done, server enforcement open),
+`federated-task-platform.md` (external collaborators as federated members).
 
 ## Product goal
 
