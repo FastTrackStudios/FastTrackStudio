@@ -161,6 +161,9 @@ nucleo-matcher.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
+# Error type for the Stage 4a in-browser session engine (wasm-only, but
+# wasm-clean + tiny so it rides the shared dep table).
+eyre.workspace = true
 fake.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -235,7 +238,7 @@ vox-websocket.workspace = true
 # module's idle/poll tickers use (crdt's `dioxus` feature pulls it in
 # anyway; declared explicitly so our direct uses don't lean on feature
 # unification).
-architect = { workspace = true, features = ["client", "platform"] }
+architect = { workspace = true, features = ["client", "platform", "local"] }
 
 # Org-wide presence (`src/presence.rs`): `use_presence_channel` +
 # `Presence` over the fixed org doc id, riding the shared per-org
@@ -247,6 +250,23 @@ crdt = { workspace = true, features = ["dioxus"] }
 # page. Wasm-only — used inside `cfg(target_arch = "wasm32")` blocks.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true, features = ["futures"] }
+
+# Stage 4a in-browser session engine (`src/session_engine.rs`, wasm-only):
+# a headless daw-standalone setlist player hosted in the tab via architect's
+# in-process LocalServer. These are the native player crates the
+# fasttrackstudio app embeds; here they run in the browser. Wasm target table
+# ONLY — native task builds (desktop/mobile/server) never pull them (they
+# carry REAPER/audio backends), keeping the native footprint unchanged.
+#
+#   session          the setlist-service facade (wasm-safe path: the
+#                    backend-agnostic `daw::get()` facade, no REAPER)
+#   daw              the base daw facade (`init_from_parts`, `LayerRouter`)
+#   daw-standalone   the in-process backend — `decode`+`web` (pure-Rust
+#                    symphonia + wasm-bindgen, NO cpal) + `bootstrap`
+#                    (`build_in_process_daw`)
+session = { workspace = true }
+daw = { workspace = true }
+daw-standalone = { workspace = true, features = ["decode", "web", "bootstrap"] }
 
 # Native session-token persistence (desktop/mobile) — architect-auth's
 # FileTokenStore, used in `cfg(not(target_arch = "wasm32"))` blocks in auth.rs.

@@ -41,6 +41,13 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{f
 
 #[component]
 pub fn App() -> Element {
+    // Stage 4a: kick off the in-browser session engine once at boot. It
+    // builds a headless daw-standalone setlist player in the tab (via
+    // architect's in-process LocalServer) and parks it; the UI bridge stays
+    // dormant (STAGE_4B), so the live `type: song` path is untouched.
+    #[cfg(target_arch = "wasm32")]
+    use_hook(crate::session_engine::bootstrap);
+
     // App-wide architect registries (notifications + reactivity) and
     // the shared per-org connection: one `Connection<vox::Caller>` for
     // the active org (the selected one, or home under "All"),

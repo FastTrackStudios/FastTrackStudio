@@ -24,6 +24,11 @@ pub mod prefs;
 pub mod presence;
 pub mod routes;
 pub mod server_registry;
+// Stage 4a in-browser session engine (wasm-only): builds a headless
+// daw-standalone setlist player in the tab via architect's in-process
+// LocalServer. Parked at boot; the UI bridge is dormant (STAGE_4B).
+#[cfg(target_arch = "wasm32")]
+pub mod session_engine;
 pub mod shell;
 pub mod shortcuts;
 pub mod states;
