@@ -39,11 +39,20 @@ mod imp {
 
     use crate::pages::song_session::imp::Manifest;
 
-    /// Stable take-guid for stem `i` (each song gets a fresh worklet renderer,
-    /// so an index-based key is unique + stable — the async decode attaches
-    /// PCM by the same key the seed used).
-    fn stem_take_guid(i: usize) -> String {
-        format!("setlist-audio-take-{i:02}")
+    /// Stable take-guid for stem `j` of song `i` — the async decode attaches
+    /// PCM by the same key the seed used. Unique across the whole setlist
+    /// (one renderer hosts every song).
+    fn stem_take_guid(song: usize, j: usize) -> String {
+        format!("setlist-{song:02}-take-{j:02}")
+    }
+
+    /// One setlist song inside the shared renderer: its project guid (mirrors
+    /// the engine's `setlist-XX-slug` layout) + its stems
+    /// `(display_name, take_guid, url)`.
+    struct SongStems {
+        project: String,
+        name: String,
+        stems: Vec<(String, String, String)>,
     }
 
     // The worklet bundle, embedded at COMPILE time (rebuilt by
@@ -242,11 +251,24 @@ mod imp {
     /// Full mixer state, track order == stem order: (muted, soloed, volumes).
     type MixState = (Vec<bool>, Vec<bool>, Vec<f32>);
 
-    /// One active song's audio. Dropping it stops the worklet transport and
-    /// disconnects the node (the shared context stays alive for the next song).
+    /// The WHOLE setlist's audio — ONE worklet renderer hosting every song as
+    /// a separate project (the native engine's exact layout). A song switch
+    /// is a `select_project` message + a PCM swap (decode the incoming song,
+    /// detach the outgoing song's sources — a full set decoded at once is
+    /// multi-GB), never a graph teardown. Dropping it stops the worklet
+    /// transport and disconnects the node (the shared context stays alive).
     pub(crate) struct SetlistAudio {
         ctx: AudioContext,
         pump: Rc<RefCell<Option<Pump>>>,
+        /// Per-song projects + stems, in setlist order.
+        songs: Rc<Vec<SongStems>>,
+        /// Index of the SELECTED song (`usize::MAX` until the first select).
+        current: Rc<Cell<usize>>,
+        /// Decode epoch — bumped on every song switch so in-flight decodes
+        /// for the outgoing song abort instead of attaching stale PCM.
+        epoch: Rc<Cell<u64>>,
+        /// Song selected while the pump was still attaching.
+        pending_song: Rc<Cell<Option<usize>>>,
         /// Transport intent while the worklet is still attaching (the async
         /// module setup takes ~a frame; a Play click can beat it).
         want_play: Rc<Cell<bool>>,
@@ -266,14 +288,39 @@ mod imp {
     }
 
     impl SetlistAudio {
-        /// Wire one song's audio: (async) register + compile the worklet
-        /// assets, create the node, seed a track per stem, and stream each
-        /// stem's decoded PCM in as it lands.
-        pub(crate) fn build(slug: &str, manifest: &Manifest) -> Result<SetlistAudio, String> {
+        /// Wire the SETLIST's audio: (async) register + compile the worklet
+        /// assets, create the node, seed every song as its own project with a
+        /// track per stem. PCM decoding is per-song, driven by
+        /// [`select_song`](Self::select_song).
+        pub(crate) fn build(songs_in: &[(String, Manifest)]) -> Result<SetlistAudio, String> {
             let ctx = shared_ctx()?;
+            let songs: Vec<SongStems> = songs_in
+                .iter()
+                .enumerate()
+                .map(|(i, (slug, manifest))| SongStems {
+                    project: format!("setlist-{i:02}-{slug}"),
+                    name: manifest.title.clone().unwrap_or_else(|| slug.clone()),
+                    stems: manifest
+                        .stems
+                        .iter()
+                        .enumerate()
+                        .map(|(j, s)| {
+                            (
+                                s.name.clone(),
+                                stem_take_guid(i, j),
+                                format!("/media/songs/{slug}/{}", s.file),
+                            )
+                        })
+                        .collect(),
+                })
+                .collect();
             let audio = SetlistAudio {
                 ctx: ctx.clone(),
                 pump: Rc::new(RefCell::new(None)),
+                songs: Rc::new(songs),
+                current: Rc::new(Cell::new(usize::MAX)),
+                epoch: Rc::new(Cell::new(0)),
+                pending_song: Rc::new(Cell::new(None)),
                 want_play: Rc::new(Cell::new(false)),
                 pending_seek: Rc::new(Cell::new(None)),
                 pending_mix: Rc::new(RefCell::new(None)),
@@ -283,22 +330,13 @@ mod imp {
                 peaks: Rc::new(RefCell::new(Vec::new())),
             };
 
-            let stems: Vec<(String, String, String)> = manifest
-                .stems
-                .iter()
-                .enumerate()
-                .map(|(i, s)| {
-                    (
-                        s.name.clone(),
-                        stem_take_guid(i),
-                        format!("/media/songs/{slug}/{}", s.file),
-                    )
-                })
-                .collect();
-
             {
                 let ctx = ctx.clone();
                 let pump = audio.pump.clone();
+                let songs = audio.songs.clone();
+                let current = audio.current.clone();
+                let epoch = audio.epoch.clone();
+                let pending_song = audio.pending_song.clone();
                 let want_play = audio.want_play.clone();
                 let pending_seek = audio.pending_seek.clone();
                 let pending_mix = audio.pending_mix.clone();
@@ -308,11 +346,16 @@ mod imp {
                 wasm_bindgen_futures::spawn_local(async move {
                     if let Err(e) = attach(
                         &ctx,
-                        stems,
-                        &pump,
-                        &want_play,
-                        &pending_seek,
-                        &pending_mix,
+                        AttachState {
+                            songs,
+                            current,
+                            epoch,
+                            pending_song,
+                            pump,
+                            want_play,
+                            pending_seek,
+                            pending_mix,
+                        },
                         pos,
                         playing,
                         peaks,
@@ -324,8 +367,36 @@ mod imp {
                 });
             }
 
-            tracing::info!("setlist audio: built (worklet-hosted renderer, v4b3-mix)");
+            tracing::info!(
+                "setlist audio: built (ONE renderer, {} song projects, v4b4-set2)",
+                audio.songs.len()
+            );
             Ok(audio)
+        }
+
+        /// Switch the renderer to song `idx`: `select_project` + swap the
+        /// decoded PCM (detach the outgoing song's sources, decode the
+        /// incoming song's stems). The graph, tracks, and transport states
+        /// persist — this is the browser twin of the native project switch.
+        pub(crate) fn select_song(&self, idx: usize) {
+            if idx >= self.songs.len() || self.current.get() == idx {
+                return;
+            }
+            let prev = self.current.replace(idx);
+            let e = self.epoch.get() + 1;
+            self.epoch.set(e);
+            match self.pump.borrow().as_ref() {
+                Some(p) => kick_song(
+                    &self.ctx,
+                    &p.port,
+                    &self.songs,
+                    idx,
+                    (prev != usize::MAX).then_some(prev),
+                    e,
+                    &self.epoch,
+                ),
+                None => self.pending_song.set(Some(idx)),
+            }
         }
 
         /// Start playback. Resumes the context (the caller's Play click is the
@@ -481,16 +552,25 @@ mod imp {
 
     /// Register assets, create the worklet node, init the in-worklet renderer,
     /// seed the stems, flush any queued transport intent, and start the
-    /// decodes. Port messages are ordered, so `init` → `add_stem`* →
-    /// `attach`*/transport all land against a live renderer.
-    #[allow(clippy::too_many_arguments)]
+    /// decodes. Port messages are ordered, so `init` → `add_project`* /
+    /// `add_stem`* → `select_project` / `attach`* / transport all land
+    /// against a live renderer.
+    ///
+    /// The shared handles the attach needs (they outlive this async fn).
+    struct AttachState {
+        songs: Rc<Vec<SongStems>>,
+        current: Rc<Cell<usize>>,
+        epoch: Rc<Cell<u64>>,
+        pending_song: Rc<Cell<Option<usize>>>,
+        pump: Rc<RefCell<Option<Pump>>>,
+        want_play: Rc<Cell<bool>>,
+        pending_seek: Rc<Cell<Option<f64>>>,
+        pending_mix: Rc<RefCell<Option<MixState>>>,
+    }
+
     async fn attach(
         ctx: &AudioContext,
-        stems: Vec<(String, String, String)>,
-        pump: &Rc<RefCell<Option<Pump>>>,
-        want_play: &Rc<Cell<bool>>,
-        pending_seek: &Rc<Cell<Option<f64>>>,
-        pending_mix: &Rc<RefCell<Option<MixState>>>,
+        st: AttachState,
         pos: Rc<Cell<f64>>,
         playing: Rc<Cell<bool>>,
         peaks: Rc<RefCell<Vec<f32>>>,
@@ -562,13 +642,21 @@ mod imp {
         port.post_message_with_transferable(&init, &transfer)
             .map_err(|e| format!("post init: {e:?}"))?;
 
-        // Seed one track + take per stem.
-        for (name, guid, path) in &stems {
-            let m = msg("add_stem");
-            set(&m, "name", &JsValue::from_str(name));
-            set(&m, "guid", &JsValue::from_str(guid));
-            set(&m, "path", &JsValue::from_str(path));
+        // Seed EVERY song: one project each (the native engine's layout),
+        // one track + take per stem. Cheap — no PCM until a song is selected.
+        for song in st.songs.iter() {
+            let m = msg("add_project");
+            set(&m, "guid", &JsValue::from_str(&song.project));
+            set(&m, "name", &JsValue::from_str(&song.name));
             let _ = port.post_message(&m);
+            for (name, guid, path) in &song.stems {
+                let m = msg("add_stem");
+                set(&m, "project", &JsValue::from_str(&song.project));
+                set(&m, "name", &JsValue::from_str(name));
+                set(&m, "guid", &JsValue::from_str(guid));
+                set(&m, "path", &JsValue::from_str(path));
+                let _ = port.post_message(&m);
+            }
         }
 
         // Output path. DEFAULT: straight into `ctx.destination()` — the spec
@@ -600,64 +688,116 @@ mod imp {
             None
         };
 
-        // Flush transport + mixer intent queued while attaching.
-        if let Some(s) = pending_seek.take() {
+        // Flush the song selected while attaching, then transport + mixer
+        // intent (order matters: select first, so seeks/mix land on it).
+        let flush_song = st.pending_song.take().or_else(|| {
+            let c = st.current.get();
+            (c != usize::MAX).then_some(c)
+        });
+        if let Some(i) = flush_song {
+            kick_song(ctx, &port, &st.songs, i, None, st.epoch.get(), &st.epoch);
+        }
+        if let Some(s) = st.pending_seek.take() {
             let m = msg("seek");
             set(&m, "seconds", &JsValue::from_f64(s));
             let _ = port.post_message(&m);
         }
-        if let Some((muted, soloed, volumes)) = pending_mix.borrow_mut().take() {
+        if let Some((muted, soloed, volumes)) = st.pending_mix.borrow_mut().take() {
             post_mix(&port, &muted, &soloed, &volumes);
         }
-        if want_play.get() {
+        if st.want_play.get() {
             let _ = port.post_message(&msg("play"));
         }
 
-        *pump.borrow_mut() = Some(Pump {
+        *st.pump.borrow_mut() = Some(Pump {
             node,
             port: port.clone(),
             sink,
             _onmsg: onmsg,
         });
 
-        // Decode every stem, THROTTLED (a handful of range requests at a time
-        // — firing ~23 at once 503s the media server), streaming each result
-        // into the worklet as it lands.
+        tracing::info!(
+            "setlist audio: worklet pump attached ({} song projects)",
+            st.songs.len()
+        );
+        Ok(())
+    }
+
+    /// Song switch inside the shared renderer: post `select_project`, detach
+    /// the outgoing song's PCM, and decode the incoming song's stems —
+    /// THROTTLED (a handful of range requests at a time; ~23 at once 503s the
+    /// media server), each attach epoch-guarded so a decode outlived by
+    /// another switch aborts instead of attaching stale PCM.
+    fn kick_song(
+        ctx: &AudioContext,
+        port: &MessagePort,
+        songs: &Rc<Vec<SongStems>>,
+        idx: usize,
+        prev: Option<usize>,
+        my_epoch: u64,
+        epoch: &Rc<Cell<u64>>,
+    ) {
+        let Some(song) = songs.get(idx) else { return };
+        let m = msg("select_project");
+        set(&m, "guid", &JsValue::from_str(&song.project));
+        let _ = port.post_message(&m);
+        if let Some(p) = prev.and_then(|p| songs.get(p)) {
+            for (_, guid, _) in &p.stems {
+                let m = msg("detach");
+                set(&m, "project", &JsValue::from_str(&p.project));
+                set(&m, "guid", &JsValue::from_str(guid));
+                let _ = port.post_message(&m);
+            }
+        }
+
         const DECODE_CONCURRENCY: usize = 5;
-        let jobs = Rc::new(stems);
+        let project = Rc::new(song.project.clone());
+        let jobs = Rc::new(song.stems.clone());
         let next = Rc::new(Cell::new(0usize));
         for _ in 0..DECODE_CONCURRENCY.min(jobs.len().max(1)) {
+            let project = project.clone();
             let jobs = jobs.clone();
             let next = next.clone();
             let ctx = ctx.clone();
             let port = port.clone();
+            let epoch = epoch.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 loop {
+                    if epoch.get() != my_epoch {
+                        break; // song switched away — stop decoding this one
+                    }
                     let i = next.get();
                     if i >= jobs.len() {
                         break;
                     }
                     next.set(i + 1);
                     let (_, guid, url) = &jobs[i];
-                    if let Err(e) = decode_and_send(&ctx, &port, guid, url).await {
+                    if let Err(e) =
+                        decode_and_send(&ctx, &port, &project, guid, url, &epoch, my_epoch).await
+                    {
                         tracing::warn!("setlist audio: stem `{url}` decode failed: {e}");
                     }
                 }
             });
         }
-
-        tracing::info!("setlist audio: worklet pump attached ({} stems)", jobs.len());
-        Ok(())
+        tracing::info!(
+            "setlist audio: song {idx} selected ({} stems decoding)",
+            jobs.len()
+        );
     }
 
     /// Fetch `url`, decode it through the context (`decodeAudioData` resamples
     /// to the context's rate == the worklet renderer's rate), interleave the
     /// channels, and post the PCM to the worklet (buffer transferred).
+    #[allow(clippy::too_many_arguments)]
     async fn decode_and_send(
         ctx: &AudioContext,
         port: &MessagePort,
+        project: &str,
         take_guid: &str,
         url: &str,
+        epoch: &Rc<Cell<u64>>,
+        my_epoch: u64,
     ) -> Result<(), String> {
         let array_buffer = fetch_array_buffer(url).await?;
         let promise = ctx
@@ -683,8 +823,12 @@ mod imp {
             }
         }
 
+        if epoch.get() != my_epoch {
+            return Ok(()); // song switched away while decoding — drop it
+        }
         let jarr = js_sys::Float32Array::from(&pcm[..]);
         let m = msg("attach");
+        set(&m, "project", &JsValue::from_str(project));
         set(&m, "guid", &JsValue::from_str(take_guid));
         set(&m, "pcm", &jarr);
         set(&m, "channels", &JsValue::from(channels));

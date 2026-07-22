@@ -10,6 +10,13 @@ export class WebRenderer {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Seed one MORE project (a setlist song). Idempotent per guid. The new
+     * project's transport is configured like the default one (no soft clock,
+     * worklet sample rate) but it is NOT selected — call
+     * [`select_project`](Self::select_project).
+     */
+    addProject(guid: string, name: string): void;
+    /**
      * Seed one stem: a track + an audio item/take whose source points at
      * `source_path`, keyed by the stable `take_guid` the caller will later
      * pass to [`attach_audio_source_pcm`] once the browser has decoded the
@@ -24,16 +31,31 @@ export class WebRenderer {
      */
     addStemTrack(display_name: string, take_guid: string, source_path: string): void;
     /**
+     * [`add_stem_track`] targeting an EXPLICIT project (a setlist song).
+     */
+    addStemTrackIn(project: string, display_name: string, take_guid: string, source_path: string): void;
+    /**
      * Attach an already-decoded source for `take_guid`. JS callers
      * typically get the PCM via `AudioContext.decodeAudioData` →
      * `AudioBuffer.getChannelData(ch)` → `Float32Array`.
      */
     attachAudioSource(take_guid: string, interleaved_pcm: Float32Array, channels: number, sample_rate: number): void;
+    /**
+     * [`attach_audio_source_pcm`] targeting an EXPLICIT project — the
+     * setlist path, where decodes race song switches and must land on the
+     * song they were started for.
+     */
+    attachAudioSourceIn(project: string, take_guid: string, interleaved_pcm: Float32Array, channels: number): void;
     audioSourceCount(): number;
     /**
-     * Drop a previously-attached source.
+     * Drop a previously-attached source (searched in the SELECTED project).
      */
     detachAudioSource(take_guid: string): void;
+    /**
+     * Drop a previously-attached source from an EXPLICIT project — used by
+     * the setlist path to free the outgoing song's PCM on a song switch.
+     */
+    detachAudioSourceIn(project: string, take_guid: string): void;
     isPlaying(): boolean;
     /**
      * Construct a fresh renderer + seed a project. The worklet should
@@ -68,6 +90,13 @@ export class WebRenderer {
      * it.
      */
     seekSecondsAt(target: number, at: number): void;
+    /**
+     * Select which project [`render`] renders (a setlist song switch). The
+     * graph, tracks, and any attached PCM persist across switches — this
+     * swaps the transport + meter bank only. No-op for the already-selected
+     * project or an unknown guid.
+     */
+    selectProject(guid: string): void;
     setTrackMute(index: number, muted: boolean): void;
     setTrackSolo(index: number, soloed: boolean): void;
     /**
@@ -96,10 +125,14 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_webrenderer_free: (a: number, b: number) => void;
+    readonly webrenderer_addProject: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly webrenderer_addStemTrack: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly webrenderer_addStemTrackIn: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly webrenderer_attachAudioSource: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly webrenderer_attachAudioSourceIn: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly webrenderer_audioSourceCount: (a: number) => number;
     readonly webrenderer_detachAudioSource: (a: number, b: number, c: number) => void;
+    readonly webrenderer_detachAudioSourceIn: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly webrenderer_isPlaying: (a: number) => number;
     readonly webrenderer_new: (a: number) => number;
     readonly webrenderer_pathsToResolve: (a: number) => [number, number];
@@ -110,6 +143,7 @@ export interface InitOutput {
     readonly webrenderer_render: (a: number, b: number, c: number, d: any, e: number, f: number, g: any) => void;
     readonly webrenderer_seekSeconds: (a: number, b: number) => void;
     readonly webrenderer_seekSecondsAt: (a: number, b: number, c: number) => void;
+    readonly webrenderer_selectProject: (a: number, b: number, c: number) => void;
     readonly webrenderer_setTrackMute: (a: number, b: number, c: number) => void;
     readonly webrenderer_setTrackSolo: (a: number, b: number, c: number) => void;
     readonly webrenderer_setTrackVolume: (a: number, b: number, c: number) => void;

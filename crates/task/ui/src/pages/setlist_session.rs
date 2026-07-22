@@ -364,23 +364,17 @@ mod imp {
             });
         }
 
-        // ── Stage 4b-2: (re)build the WebRenderer audio graph for the CURRENT
-        // song. One render graph at a time — a song switch drops the old
-        // (its `Drop` stops the transport + closes the AudioContext) and builds
-        // the new from its stems. Building is synchronous (context + renderer +
-        // seed tracks + pump); each stem's decode runs async and pops its audio
-        // in as it lands. Mirrors native's per-song re-attach.
+        // ── ONE SetlistAudio per SETLIST (the native engine's layout): every
+        // song is a project inside the shared worklet renderer, seeded up
+        // front; a song switch SELECTS its project + swaps the decoded PCM —
+        // the graph / node / AudioContext are never torn down mid-set.
         {
             let mut audio = audio;
             let current_song = current_song;
             let loaded = loaded;
-            // The slug the live audio graph was built for. The rebuild is
-            // IDEMPOTENT per song: transient `current_song` churn / effect
-            // re-fires for the same song are no-ops, so the *playing* graph is
-            // never torn down mid-song (a rebuild drops the old `SetlistAudio`,
-            // whose `Drop` stops the transport → silence). Only a real song
-            // switch rebuilds.
-            let mut built_slug = use_signal(String::new);
+            // The slug list the live renderer was built for — only a
+            // DIFFERENT setlist rebuilds.
+            let mut built_key = use_signal(String::new);
             let playing = playing;
             use_effect(move || {
                 let idx = current_song();
@@ -388,28 +382,38 @@ mod imp {
                 let Some(Ok(list)) = &*guard else {
                     return;
                 };
-                let Some((slug, manifest, _)) = list.get(idx) else {
+                if list.is_empty() {
                     return;
-                };
-                if *built_slug.peek() == *slug && audio.peek().is_some() {
-                    return; // same song, graph already live — leave it playing
                 }
-                // Real song switch: drop the previous graph FIRST (its `Drop`
-                // stops + closes it) so only one AudioContext is live, then
-                // carry the transport state across the switch (native re-attach
-                // keeps playing when you seek between songs while rolling).
-                let was_playing = *playing.peek();
-                audio.set(None);
-                match SetlistAudio::build(slug, manifest) {
-                    Ok(a) => {
-                        let a = Rc::new(a);
-                        if was_playing {
-                            a.play();
+                let key = list
+                    .iter()
+                    .map(|(s, _, _)| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\u{1f}");
+                if *built_key.peek() != key || audio.peek().is_none() {
+                    audio.set(None); // drop a previous setlist's graph first
+                    let songs: Vec<(String, media::Manifest)> = list
+                        .iter()
+                        .map(|(s, m, _)| (s.clone(), m.clone()))
+                        .collect();
+                    match SetlistAudio::build(&songs) {
+                        Ok(a) => {
+                            audio.set(Some(Rc::new(a)));
+                            built_key.set(key);
                         }
-                        audio.set(Some(a));
-                        built_slug.set(slug.clone());
+                        Err(e) => {
+                            tracing::warn!("setlist audio: build failed: {e}");
+                            return;
+                        }
                     }
-                    Err(e) => tracing::warn!("setlist audio: build failed: {e}"),
+                }
+                // Song switch (or first select): pick the project inside the
+                // shared renderer; keep rolling if the set was playing.
+                if let Some(a) = audio.peek().clone() {
+                    a.select_song(idx.min(list.len() - 1));
+                    if *playing.peek() {
+                        a.play();
+                    }
                 }
             });
         }

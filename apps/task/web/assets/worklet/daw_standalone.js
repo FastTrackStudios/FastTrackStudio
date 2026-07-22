@@ -17,6 +17,21 @@ export class WebRenderer {
         wasm.__wbg_webrenderer_free(ptr, 0);
     }
     /**
+     * Seed one MORE project (a setlist song). Idempotent per guid. The new
+     * project's transport is configured like the default one (no soft clock,
+     * worklet sample rate) but it is NOT selected — call
+     * [`select_project`](Self::select_project).
+     * @param {string} guid
+     * @param {string} name
+     */
+    addProject(guid, name) {
+        const ptr0 = passStringToWasm0(guid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.webrenderer_addProject(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+    }
+    /**
      * Seed one stem: a track + an audio item/take whose source points at
      * `source_path`, keyed by the stable `take_guid` the caller will later
      * pass to [`attach_audio_source_pcm`] once the browser has decoded the
@@ -42,6 +57,24 @@ export class WebRenderer {
         wasm.webrenderer_addStemTrack(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
     }
     /**
+     * [`add_stem_track`] targeting an EXPLICIT project (a setlist song).
+     * @param {string} project
+     * @param {string} display_name
+     * @param {string} take_guid
+     * @param {string} source_path
+     */
+    addStemTrackIn(project, display_name, take_guid, source_path) {
+        const ptr0 = passStringToWasm0(project, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(display_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(take_guid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(source_path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        wasm.webrenderer_addStemTrackIn(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    }
+    /**
      * Attach an already-decoded source for `take_guid`. JS callers
      * typically get the PCM via `AudioContext.decodeAudioData` →
      * `AudioBuffer.getChannelData(ch)` → `Float32Array`.
@@ -58,6 +91,24 @@ export class WebRenderer {
         wasm.webrenderer_attachAudioSource(this.__wbg_ptr, ptr0, len0, ptr1, len1, channels, sample_rate);
     }
     /**
+     * [`attach_audio_source_pcm`] targeting an EXPLICIT project — the
+     * setlist path, where decodes race song switches and must land on the
+     * song they were started for.
+     * @param {string} project
+     * @param {string} take_guid
+     * @param {Float32Array} interleaved_pcm
+     * @param {number} channels
+     */
+    attachAudioSourceIn(project, take_guid, interleaved_pcm, channels) {
+        const ptr0 = passStringToWasm0(project, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(take_guid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF32ToWasm0(interleaved_pcm, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        wasm.webrenderer_attachAudioSourceIn(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, channels);
+    }
+    /**
      * @returns {number}
      */
     audioSourceCount() {
@@ -65,13 +116,26 @@ export class WebRenderer {
         return ret >>> 0;
     }
     /**
-     * Drop a previously-attached source.
+     * Drop a previously-attached source (searched in the SELECTED project).
      * @param {string} take_guid
      */
     detachAudioSource(take_guid) {
         const ptr0 = passStringToWasm0(take_guid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         wasm.webrenderer_detachAudioSource(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Drop a previously-attached source from an EXPLICIT project — used by
+     * the setlist path to free the outgoing song's PCM on a song switch.
+     * @param {string} project
+     * @param {string} take_guid
+     */
+    detachAudioSourceIn(project, take_guid) {
+        const ptr0 = passStringToWasm0(project, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(take_guid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.webrenderer_detachAudioSourceIn(this.__wbg_ptr, ptr0, len0, ptr1, len1);
     }
     /**
      * @returns {boolean}
@@ -165,6 +229,18 @@ export class WebRenderer {
      */
     seekSecondsAt(target, at) {
         wasm.webrenderer_seekSecondsAt(this.__wbg_ptr, target, at);
+    }
+    /**
+     * Select which project [`render`] renders (a setlist song switch). The
+     * graph, tracks, and any attached PCM persist across switches — this
+     * swaps the transport + meter bank only. No-op for the already-selected
+     * project or an unknown guid.
+     * @param {string} guid
+     */
+    selectProject(guid) {
+        const ptr0 = passStringToWasm0(guid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.webrenderer_selectProject(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * @param {number} index
@@ -296,12 +372,12 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 728, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 730, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h5ca89d924f5a02f7);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 685, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 687, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h0ddf7788afd622d7);
             return ret;
         },

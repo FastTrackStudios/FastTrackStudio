@@ -152,16 +152,37 @@ class FtsDawProcessor extends AudioWorkletProcessor {
           this.port.postMessage({ kind: 'ready' });
           break;
         }
+        case 'add_project':
+          // One project per setlist song — ONE renderer hosts the whole set;
+          // a song switch is 'select_project', never a rebuild.
+          this.renderer?.addProject(msg.guid, msg.name);
+          break;
+        case 'select_project':
+          this.renderer?.selectProject(msg.guid);
+          break;
         case 'add_stem':
-          this.renderer?.addStemTrack(msg.name, msg.guid, msg.path);
+          if (msg.project) {
+            this.renderer?.addStemTrackIn(msg.project, msg.name, msg.guid, msg.path);
+          } else {
+            this.renderer?.addStemTrack(msg.name, msg.guid, msg.path);
+          }
           break;
         case 'attach':
-          this.renderer?.attachAudioSource(
-            msg.guid,
-            msg.pcm,
-            msg.channels,
-            msg.sampleRate,
-          );
+          if (msg.project) {
+            // Explicit project: decodes race song switches and must land on
+            // the song they were started for (resampled to the worklet rate
+            // by decodeAudioData already).
+            this.renderer?.attachAudioSourceIn(msg.project, msg.guid, msg.pcm, msg.channels);
+          } else {
+            this.renderer?.attachAudioSource(msg.guid, msg.pcm, msg.channels, msg.sampleRate);
+          }
+          break;
+        case 'detach':
+          if (msg.project) {
+            this.renderer?.detachAudioSourceIn(msg.project, msg.guid);
+          } else {
+            this.renderer?.detachAudioSource(msg.guid);
+          }
           break;
         case 'play':
           this.renderer?.play();

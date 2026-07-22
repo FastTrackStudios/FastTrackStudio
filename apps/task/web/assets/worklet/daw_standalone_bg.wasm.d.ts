@@ -2,10 +2,14 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_webrenderer_free: (a: number, b: number) => void;
+export const webrenderer_addProject: (a: number, b: number, c: number, d: number, e: number) => void;
 export const webrenderer_addStemTrack: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+export const webrenderer_addStemTrackIn: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const webrenderer_attachAudioSource: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+export const webrenderer_attachAudioSourceIn: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const webrenderer_audioSourceCount: (a: number) => number;
 export const webrenderer_detachAudioSource: (a: number, b: number, c: number) => void;
+export const webrenderer_detachAudioSourceIn: (a: number, b: number, c: number, d: number, e: number) => void;
 export const webrenderer_isPlaying: (a: number) => number;
 export const webrenderer_new: (a: number) => number;
 export const webrenderer_pathsToResolve: (a: number) => [number, number];
@@ -16,6 +20,7 @@ export const webrenderer_projectGuid: (a: number) => [number, number];
 export const webrenderer_render: (a: number, b: number, c: number, d: any, e: number, f: number, g: any) => void;
 export const webrenderer_seekSeconds: (a: number, b: number) => void;
 export const webrenderer_seekSecondsAt: (a: number, b: number, c: number) => void;
+export const webrenderer_selectProject: (a: number, b: number, c: number) => void;
 export const webrenderer_setTrackMute: (a: number, b: number, c: number) => void;
 export const webrenderer_setTrackSolo: (a: number, b: number, c: number) => void;
 export const webrenderer_setTrackVolume: (a: number, b: number, c: number) => void;
