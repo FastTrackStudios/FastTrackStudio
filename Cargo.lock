@@ -669,6 +669,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aotuv_lancer_vorbis_sys"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c22da1eae146e1ac2956da45bd1856b2f9ad788e6f7af535b861df497d726a1"
+dependencies = [
+ "cc",
+ "ogg_next_sys",
+]
+
+[[package]]
 name = "apfs"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18204,6 +18214,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ogg_next_sys"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c990730c2782b922815753a62af535e4205267df190dfbd8aa5d74e11d7dcc3"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -23513,10 +23532,13 @@ dependencies = [
  "signal-proto",
  "symphonia",
  "symphonia-bundle-flac",
+ "symphonia-codec-vorbis",
  "symphonia-core",
+ "symphonia-format-ogg",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
+ "vorbis_rs",
  "walkdir",
  "zstd",
 ]
@@ -28585,6 +28607,20 @@ name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
+
+[[package]]
+name = "vorbis_rs"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "874075ad757c0f6031d4706ed75703a9ba6c711164a0b1dab55af86800cd618f"
+dependencies = [
+ "aotuv_lancer_vorbis_sys",
+ "errno",
+ "getrandom 0.2.17",
+ "ogg_next_sys",
+ "thiserror 2.0.18",
+ "tinyvec",
+]
 
 [[package]]
 name = "vox"
