@@ -137,7 +137,15 @@ mod imp {
     }
 
     #[component]
-    pub fn SetlistStreamPlayer(org: String, title: String, songs: Vec<String>) -> Element {
+    pub fn SetlistStreamPlayer(
+        org: String,
+        title: String,
+        songs: Vec<String>,
+        /// Render the track rows. `false` when the rows live elsewhere
+        /// (inline editor song strips) — the header still owns playback.
+        #[props(default = true)]
+        show_rows: bool,
+    ) -> Element {
         // The live element (one at a time). Rc'd so callbacks share it.
         let element: Rc<RefCell<Option<HtmlAudioElement>>> = use_hook(|| Rc::new(RefCell::new(None)));
         let current = use_signal(|| None::<usize>);
@@ -209,6 +217,29 @@ mod imp {
             }
         });
 
+        // Inline song-strip play clicks (`song-play:<name>` links from the
+        // editor) route here: match the name against the track list and
+        // select it.
+        {
+            let play_req = use_context::<crate::chrome::SongPlayRequest>().0;
+            let tracks = tracks;
+            let mut last_gen = use_signal(|| 0u64);
+            use_effect(move || {
+                let (generation, name) = play_req();
+                if generation == 0 || generation == *last_gen.peek() {
+                    return;
+                }
+                last_gen.set(generation);
+                let slug = crate::pages::vault::slugify(&name);
+                let Some(Ok(list)) = &*tracks.read_unchecked() else {
+                    return;
+                };
+                if let Some(i) = list.iter().position(|t| t.slug == slug) {
+                    select.call(i);
+                }
+            });
+        }
+
         // 300 ms poll: mirror position, auto-advance on ended.
         {
             let element = element.clone();
@@ -260,6 +291,7 @@ mod imp {
                 }
 
                 // ── rows ──
+                if show_rows {
                 match &*tracks.read_unchecked() {
                     None => rsx! {
                         div { class: "py-8 text-center text-sm text-muted-foreground", "Loading setlist…" }
@@ -319,6 +351,7 @@ mod imp {
                         }
                     },
                 }
+                }
             }
         }
     }
@@ -332,7 +365,15 @@ mod stub {
     use dioxus::prelude::*;
 
     #[component]
-    pub fn SetlistStreamPlayer(org: String, title: String, songs: Vec<String>) -> Element {
+    pub fn SetlistStreamPlayer(
+        org: String,
+        title: String,
+        songs: Vec<String>,
+        /// Render the track rows. `false` when the rows live elsewhere
+        /// (inline editor song strips) — the header still owns playback.
+        #[props(default = true)]
+        show_rows: bool,
+    ) -> Element {
         let _ = (&org, &title, &songs);
         rsx! {
             div { class: "px-4 py-8 text-sm text-muted-foreground",

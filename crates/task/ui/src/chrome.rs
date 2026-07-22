@@ -59,6 +59,13 @@ pub enum ViewMode {
 #[derive(Clone, Copy)]
 pub struct NoteViewMode(pub Signal<ViewMode>);
 
+/// A song-strip play click (`data-href="song-play:<Note Name>"` from the
+/// editor's inline song widgets). `(generation, note name)` — the counter
+/// makes replaying the same song observable. Consumed by whichever player
+/// is mounted (the setlist stream header today).
+#[derive(Clone, Copy)]
+pub struct SongPlayRequest(pub Signal<(u64, String)>);
+
 /// Anonymous share-link mode (`?share=1` in the URL — appended by the
 /// share landing page's Open button): render NO app chrome at all — no
 /// top bar, rail, explorer, tabs, or capture FAB. The visitor gets just
@@ -85,6 +92,7 @@ pub fn provide_chrome_contexts() {
     use_context_provider(|| ZenMode(Signal::new(false)));
     use_context_provider(|| ShareMode(detect_share_mode()));
     use_context_provider(|| NoteViewMode(Signal::new(ViewMode::Edit)));
+    use_context_provider(|| SongPlayRequest(Signal::new((0, String::new()))));
     use_context_provider(|| TimerResumeHint(Signal::new(None)));
 }
 

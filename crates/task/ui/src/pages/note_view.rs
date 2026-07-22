@@ -281,6 +281,30 @@ pub(crate) fn NoteView(
         Vec::new()
     };
 
+    // Editor link clicks: `song-play:<name>` drives the mounted stream
+    // player (inline song-strip play buttons); wikilink targets navigate
+    // to the note (resolved through the vault index when possible).
+    let nav_links = use_navigator();
+    let lookup_for_links = lookup;
+    let mut play_req = use_context::<crate::chrome::SongPlayRequest>().0;
+    let on_link_click = use_callback(move |href: String| {
+        if let Some(name) = href.strip_prefix("song-play:") {
+            let generation = play_req.peek().0 + 1;
+            play_req.set((generation, name.to_string()));
+            return;
+        }
+        if href.starts_with("http://") || href.starts_with("https://") {
+            return; // the editor already window.open()s external links
+        }
+        let page = href.split(['#', '|']).next().unwrap_or(&href).trim();
+        let path = lookup_for_links
+            .peek()
+            .as_ref()
+            .and_then(|ix| ix.meta(page).map(|m| m.path.clone()))
+            .unwrap_or_else(|| format!("{page}.md"));
+        nav_links.push(crate::routes::Route::VaultRoute { path });
+    });
+
     // ── Save / conflict state ─────────────────────────────────
     let is_dirty = session.dirty();
     let status_msg = match session.status() {
@@ -433,14 +457,16 @@ pub(crate) fn NoteView(
                                 label: "Setlist",
                                 on_enter: move |_| setlist_fullscreen.set(true),
                             }
-                            // Embedded view = the STREAMING player (one
-                            // reference track per song over vox MediaService)
-                            // — the multitrack rig lives in the fullscreen
-                            // Experience above.
+                            // Streaming header (icon · title · play) — the
+                            // setlist's H1 replacement. Rows render INLINE in
+                            // the editor as song strips; this header owns
+                            // playback (one reference track at a time over
+                            // vox MediaService) and answers strip play clicks.
                             crate::pages::setlist_stream::SetlistStreamPlayer {
                                 org: home.read().clone(),
                                 title: basename_of(&path).to_string(),
                                 songs: setlist_songs_value.clone(),
+                                show_rows: false,
                             }
                         }
                     }
@@ -453,15 +479,20 @@ pub(crate) fn NoteView(
                     // frontmatter when the keyflow-source editor was used. So skip
                     // it entirely while a fullscreen experience owns the screen.
                     if note_body_visible(is_setlist, setlist_fullscreen()) {
-                        crate::pages::note_header::NoteHeader {
-                            home,
-                            props_open,
-                            on_renamed: move |_| on_renamed.call(()),
+                        // Setlists: the streaming header above IS the title —
+                        // skip the duplicate note header.
+                        if !is_setlist {
+                            crate::pages::note_header::NoteHeader {
+                                home,
+                                props_open,
+                                on_renamed: move |_| on_renamed.call(()),
+                            }
                         }
                         // Raw view (status-bar toggle): the literal file text
                         // MINUS the YAML frontmatter — properties stay in the
                         // right-sidebar Properties tab. Read currently renders
                         // the editor (the reading-view design comes later).
+                        div { class: "mx-auto w-full max-w-3xl",
                         if use_context::<crate::chrome::NoteViewMode>().0() == crate::chrome::ViewMode::Raw {
                             pre { class: "whitespace-pre-wrap px-6 py-4 font-mono text-sm leading-6 text-foreground",
                                 {raw_body_text(&session.state.read().doc.to_string())}
@@ -477,10 +508,12 @@ pub(crate) fn NoteView(
                                         slash: Some(slash),
                                         completion: completion.clone(),
                                         on_transaction,
+                                        on_link_click,
                                     }
                                     SlashMenu { state: session.state, slash }
                                 }
                             }
+                        }
                         }
                     }
                 }

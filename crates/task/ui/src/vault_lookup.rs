@@ -166,7 +166,7 @@ impl ClientVaultIndex {
         }
     }
 
-    fn meta(&self, name: &str) -> Option<&PageMeta> {
+    pub fn meta(&self, name: &str) -> Option<&PageMeta> {
         self.by_basename.get(&name.to_lowercase())
     }
 }
@@ -235,6 +235,29 @@ impl VaultLookup for ClientVaultIndex {
             Some(raw) => section_body(&raw, heading),
             None => Some(LOADING.to_owned()),
         }
+    }
+
+    fn lookup_song(&self, name: &str) -> Option<editor::markdown::VaultSongHit> {
+        let meta = self.meta(name)?;
+        // A miss queues the fetch; the strip appears when content lands.
+        let raw = self.content(&meta.path)?;
+        // Only `type: song` notes get the strip.
+        let is_song = crate::pages::vault::frontmatter_value(&raw, "type")
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "song")
+            .unwrap_or(false);
+        if !is_song {
+            return None;
+        }
+        let front = crate::pages::vault::song_front_from(&raw);
+        Some(editor::markdown::VaultSongHit {
+            title: meta.basename.clone(),
+            artist: front.artist.clone(),
+            duration_sec: front
+                .duration_sec
+                .or_else(|| front.sections.last().map(|s| s.end_sec))
+                .unwrap_or(0.0),
+            stem_count: front.stems.len(),
+        })
     }
 
     fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String> {
