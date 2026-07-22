@@ -1045,6 +1045,19 @@ inherits = "dev"
 debug = false
 strip = "debuginfo"
 
+# The in-browser setlist player renders daw-standalone's full graph in wasm —
+# mirror the dev-profile audio-path opt overrides here explicitly (package
+# overrides may not carry through `inherits`), so dx dev bundles mix ~20
+# stems in realtime instead of grinding the main thread.
+[profile.wasm-dev.package."*"]
+opt-level = 3
+[profile.wasm-dev.package.audiocore-dsp]
+opt-level = 3
+[profile.wasm-dev.package.daw-audio-graph]
+opt-level = 3
+[profile.wasm-dev.package.daw-standalone]
+opt-level = 3
+
 [profile.dev.package."*"]
 opt-level = 3
 

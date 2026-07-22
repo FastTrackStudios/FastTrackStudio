@@ -221,6 +221,13 @@ pub fn bootstrap() {
 /// UI can command the engine over RPC) and the [`SessionEventBridge`] the page
 /// mounts folds the engine's streams back into the session-ui globals.
 pub fn build_for_setlist(slugs: Vec<String>) {
+    // The setlist page's effect fires once with an EMPTY slug list before its
+    // `songs` prop is populated. Building that produces a 0-song setlist that
+    // fails ("no songs") and needlessly churns the engine (and, downstream, the
+    // per-song AudioContext). Skip it — the real slugs arrive on the next fire.
+    if slugs.is_empty() {
+        return;
+    }
     let key = setlist_key(&slugs);
     if !claim_build(&key) {
         return;

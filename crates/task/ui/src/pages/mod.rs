@@ -34,6 +34,7 @@ pub mod repos;
 pub mod schedule;
 pub mod scripture;
 pub mod session_chart_pane;
+pub mod setlist_audio;
 pub mod setlist_session;
 pub mod experience;
 pub mod keyflow_chart_editor;

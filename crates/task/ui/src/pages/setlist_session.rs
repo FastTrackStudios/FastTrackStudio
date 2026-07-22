@@ -35,6 +35,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(target_arch = "wasm32")]
 mod imp {
+    use std::rc::Rc;
+
     use dioxus::prelude::*;
 
     use daw_proto::{MusicalPosition, TimeSignature};
@@ -44,6 +46,10 @@ mod imp {
     use session_ui::{PerformanceSidebar, SETLIST_STRUCTURE};
 
     use crate::pages::session_chart_pane::SessionChartPane;
+    // Stage 4b-2: the WebRenderer audio graph for the active song (the SAME
+    // daw-standalone render graph as native cpal), driven in lockstep with the
+    // engine transport.
+    use crate::pages::setlist_audio::SetlistAudio;
     // The streaming engine + manifest model + session-proto mapping are shared
     // with the single-song player (see `song_session::imp`).
     use crate::pages::song_session::imp as media;
@@ -231,7 +237,14 @@ mod imp {
         let current_song = use_signal(|| 0usize);
         let playing = use_signal(|| false);
         let position = use_signal(|| 0.0_f64);
-        // No audio yet (Stage 4b-2), so nothing to buffer.
+        // Stage 4b-2: the active song's WebRenderer audio graph. `None` until
+        // the current song's stems are seeded; rebuilt on song switch (one
+        // render graph at a time). Held behind an `Rc` (it's `!Send` + owns a
+        // Web Audio context + closure) so callbacks can clone a handle out.
+        let audio = use_signal(|| None::<Rc<SetlistAudio>>);
+        // No streamed-element buffering to track (the WebRenderer decodes
+        // stems into PCM asynchronously; the graph renders silence until they
+        // land, so there's no explicit buffering gate).
         let buffering = use_signal(|| false);
         // Per-stem mixer state for the CURRENT song (DISPLAY ONLY now — the
         // mixer strips render from this; audio wiring returns in 4b-2). Reset
@@ -287,6 +300,7 @@ mod imp {
             let mut current_song = current_song;
             let mut playing = playing;
             let mut position = position;
+            let audio = audio;
             use_effect(move || {
                 let ai = session_ui::ACTIVE_INDICES.read();
                 let si = ai.song_index.unwrap_or(0);
@@ -303,8 +317,21 @@ mod imp {
                     .map(|s| s.duration())
                     .unwrap_or(0.0);
                 let secs = ai.song_progress.unwrap_or(0.0) * dur;
-                if (secs - *position.peek()).abs() > 0.01 {
+                let prev = *position.peek();
+                if (secs - prev).abs() > 0.01 {
                     position.set(secs);
+                }
+                // Stage 4b-2: keep the WebRenderer aligned to the engine cursor
+                // on DISCRETE jumps (navigator section select, big resync) —
+                // the ~30 Hz smooth per-tick advances during play (tiny deltas)
+                // are left to free-run so playback doesn't stutter. `audio` is
+                // read via `peek` so this effect doesn't churn on a song
+                // rebuild. 4b-2b: drive the UI playhead from
+                // `renderer.position_seconds()` to kill drift instead.
+                if (secs - prev).abs() > 0.5 {
+                    if let Some(a) = audio.peek().clone() {
+                        a.seek(secs);
+                    }
                 }
             });
         }
@@ -339,6 +366,82 @@ mod imp {
             });
         }
 
+        // ── Stage 4b-2: (re)build the WebRenderer audio graph for the CURRENT
+        // song. One render graph at a time — a song switch drops the old
+        // (its `Drop` stops the transport + closes the AudioContext) and builds
+        // the new from its stems. Building is synchronous (context + renderer +
+        // seed tracks + pump); each stem's decode runs async and pops its audio
+        // in as it lands. Mirrors native's per-song re-attach.
+        {
+            let mut audio = audio;
+            let current_song = current_song;
+            let loaded = loaded;
+            // The slug the live audio graph was built for. The rebuild is
+            // IDEMPOTENT per song: transient `current_song` churn / effect
+            // re-fires for the same song are no-ops, so the *playing* graph is
+            // never torn down mid-song (a rebuild drops the old `SetlistAudio`,
+            // whose `Drop` stops the transport → silence). Only a real song
+            // switch rebuilds.
+            let mut built_slug = use_signal(String::new);
+            let playing = playing;
+            use_effect(move || {
+                let idx = current_song();
+                let guard = loaded.read();
+                let Some(Ok(list)) = &*guard else {
+                    return;
+                };
+                let Some((slug, manifest, _)) = list.get(idx) else {
+                    return;
+                };
+                if *built_slug.peek() == *slug && audio.peek().is_some() {
+                    return; // same song, graph already live — leave it playing
+                }
+                // Real song switch: drop the previous graph FIRST (its `Drop`
+                // stops + closes it) so only one AudioContext is live, then
+                // carry the transport state across the switch (native re-attach
+                // keeps playing when you seek between songs while rolling).
+                let was_playing = *playing.peek();
+                audio.set(None);
+                match SetlistAudio::build(slug, manifest) {
+                    Ok(a) => {
+                        let a = Rc::new(a);
+                        if was_playing {
+                            a.play();
+                        }
+                        audio.set(Some(a));
+                        built_slug.set(slug.clone());
+                    }
+                    Err(e) => tracing::warn!("setlist audio: build failed: {e}"),
+                }
+            });
+        }
+
+        // ~20 fps meter pump: publish per-stem peaks from the render graph's
+        // meter cells (written by `render_block` on the audio pump) into
+        // `SETLIST_LEVELS` while playing; clear them when stopped. Only
+        // `MeteredMixer` subscribes, so this re-renders the meters alone.
+        {
+            let audio = audio;
+            use_future(move || async move {
+                loop {
+                    architect::platform::sleep(std::time::Duration::from_millis(45)).await;
+                    let playing_peaks = audio
+                        .peek()
+                        .clone()
+                        .filter(|a| a.is_playing())
+                        .map(|a| a.peaks());
+                    match playing_peaks {
+                        Some(peaks) => *SETLIST_LEVELS.write() = peaks,
+                        None => {
+                            if !SETLIST_LEVELS.peek().is_empty() {
+                                *SETLIST_LEVELS.write() = Vec::new();
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         // ── transport actions — command the in-process engine over RPC ─────────
         // The UI commands the engine; the resulting state flows back through
         // `SessionEventBridge` (ACTIVE_INDICES → the follow-effect above). We
@@ -346,9 +449,20 @@ mod imp {
         // STAGE 4b-2: real audio playback replaces the (silent) soft clock.
         let play_pause: Callback<()> = use_callback({
             let mut playing = playing;
+            let audio = audio;
             move |()| {
                 let want = !*playing.peek();
                 playing.set(want); // optimistic; the bridge confirms
+                // Stage 4b-2: drive the WebRenderer transport in lockstep with
+                // the engine RPC. The Play click is the required audio user
+                // gesture, so `play()` resumes the AudioContext.
+                if let Some(a) = audio.peek().clone() {
+                    if want {
+                        a.play();
+                    } else {
+                        a.pause();
+                    }
+                }
                 if let Some(client) = crate::session_engine::client() {
                     spawn(async move {
                         if let Err(e) = client.toggle_playback().await {
@@ -358,14 +472,25 @@ mod imp {
                 }
             }
         });
-        // Arbitrary-seconds seek: there is no engine RPC for a free position, so
-        // this only moves the local (visual) playhead. Section/song navigation
-        // (which DO map to engine RPCs) go through `goto_song` /
-        // `on_section_select`. STAGE 4b-2: seek the audio transport here.
+        // Arbitrary-seconds seek (progress-bar clicks, measure clicks,
+        // back/forward): song-relative seconds → the engine's `seek_to` RPC
+        // (so the cursor pump republishes the new position) + the WebRenderer
+        // transport in lockstep + an optimistic local playhead nudge.
         let seek: Callback<f64> = use_callback({
             let mut position = position;
+            let audio = audio;
             move |off: f64| {
-                position.set(off);
+                position.set(off); // optimistic; the bridge confirms
+                if let Some(a) = audio.peek().clone() {
+                    a.seek(off);
+                }
+                if let Some(client) = crate::session_engine::client() {
+                    spawn(async move {
+                        if let Err(e) = client.seek_to(off).await {
+                            tracing::warn!("setlist: seek_to({off:.2}) failed: {e:?}");
+                        }
+                    });
+                }
             }
         });
 

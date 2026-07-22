@@ -202,6 +202,7 @@ web-sys = { workspace = true, features = [
     # via an HTMLAudioElement (progressive Opus/ogg, low memory) routed through
     # a per-stem GainNode for the mixer (mute/solo/volume).
     "AudioContext",
+    "AudioContextOptions",
     "AudioContextState",
     "BaseAudioContext",
     "AudioNode",
@@ -210,9 +211,26 @@ web-sys = { workspace = true, features = [
     "AudioDestinationNode",
     # Per-stem VU metering tap (post-gain analyser → peak level).
     "AnalyserNode",
+    # Stage 4b-2 engine-fed audio: a ScriptProcessorNode drives
+    # daw-standalone's WebRenderer (render() → the two output channels),
+    # and decodeAudioData → AudioBuffer supplies the decoded stem PCM.
+    "ScriptProcessorNode",
+    "AudioProcessingEvent",
+    "AudioBuffer",
+    "OscillatorNode",
+    # AudioWorklet render pump (setlist_audio.rs): the queue-player processor
+    # ships inline via a Blob URL; blocks stream over the node's MessagePort.
+    "AudioWorklet",
+    "AudioWorkletNode",
+    "AudioWorkletNodeOptions",
+    "Worklet",
+    "MessagePort",
+    "BlobPropertyBag",
     "HtmlAudioElement",
     "HtmlMediaElement",
     "MediaElementAudioSourceNode",
+    "MediaStream",
+    "MediaStreamAudioDestinationNode",
     # Media-over-vox playback: MediaSource-backed <audio> fed by
     # MediaService chunks (src/pages/vox_media_source.rs).
     "MediaSource",
