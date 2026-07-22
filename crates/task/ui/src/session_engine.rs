@@ -541,11 +541,10 @@ use dioxus::prelude::*;
 pub fn SessionEventBridge() -> Element {
     // ── Events stream: setlist structure + per-song transport ──────────
     use_future(move || async move {
-        let Some(stream_client) = stream_client() else {
-            tracing::warn!("session engine not running; setlist events unavailable");
+        let Some((client, stream_client)) = wait_for_engine().await else {
+            tracing::warn!("session engine never became ready; setlist events unavailable");
             return;
         };
-        let Some(client) = client() else { return };
 
         // Consume the `events` `#[subscribe]` stream through the stream
         // client so the vox lane pumps it (a raw in-process hub attach is
@@ -557,12 +556,36 @@ pub fn SessionEventBridge() -> Element {
             }
         });
 
-        // Deterministic initial snapshot (no reliance on the stream's first
-        // republish).
+        // Deterministic initial snapshot. The events pump publishes its
+        // startup SetlistChanged + SongChartHydrated once, at pump init —
+        // BEFORE this late subscription attaches — so we must re-fetch rather
+        // than rely on that missed republish.
         match client.setlist().await {
-            Ok(setlist) => session_ui::apply_setlist_event(
-                &session::SetlistEvent::SetlistChanged(setlist),
-            ),
+            Ok(setlist) => {
+                let songs = setlist.songs.clone();
+                session_ui::apply_setlist_event(
+                    &session::SetlistEvent::SetlistChanged(setlist),
+                );
+                // Charts are stripped from the Setlist/Song structural payload
+                // and only ride the `SongChartHydrated` deltas — whose startup
+                // publish this late subscriber also missed. Backfill each song's
+                // chart via the dedicated `song_chart` query (exactly its
+                // documented purpose: a remote that connected after hydration
+                // ran uses it to seed the chart pane's initial snapshot).
+                for (index, song) in songs.iter().enumerate() {
+                    match client.song_chart(index).await {
+                        Ok(Some(chart)) => session_ui::apply_setlist_event(
+                            &session::SetlistEvent::SongChartHydrated {
+                                song_id: song.id.clone(),
+                                index,
+                                chart,
+                            },
+                        ),
+                        Ok(None) => {}
+                        Err(e) => tracing::warn!("song_chart({index}) failed: {e:?}"),
+                    }
+                }
+            }
             Err(e) => tracing::warn!("initial setlist snapshot failed: {e:?}"),
         }
 
@@ -574,8 +597,7 @@ pub fn SessionEventBridge() -> Element {
 
     // ── Active-indices stream: the cursor (which song/section is current) ─
     use_future(move || async move {
-        let Some(stream_client) = stream_client() else { return };
-        let Some(client) = client() else { return };
+        let Some((client, stream_client)) = wait_for_engine().await else { return };
 
         let (tx, mut rx) = vox::channel::<session_proto::ActiveIndices>();
         spawn(async move {
@@ -600,4 +622,25 @@ pub fn SessionEventBridge() -> Element {
     });
 
     rsx! {}
+}
+
+/// Await the in-process engine becoming ready, returning clones of its RPC +
+/// stream clients.
+///
+/// [`build_for_setlist`] builds the engine ASYNCHRONOUSLY (it fetches every
+/// song's manifest + chart over the network) and only [`park`]s it — populating
+/// the thread-local [`ENGINE`] — once that finishes. [`SessionEventBridge`] is
+/// mounted in the same render that kicks the build, so on its first poll the
+/// engine is never ready yet. The bridge must WAIT (a `use_future` runs once and
+/// never retries), not bail — bailing is why the navigator / chart / playhead
+/// stayed dark while the section bar (which falls back to the fetched manifest)
+/// looked fine. Polls every 50 ms, up to ~15 s.
+async fn wait_for_engine() -> Option<(SetlistServiceClient, SetlistServiceStreamClient)> {
+    for _ in 0..300 {
+        if let (Some(c), Some(s)) = (client(), stream_client()) {
+            return Some((c, s));
+        }
+        architect::platform::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    None
 }
