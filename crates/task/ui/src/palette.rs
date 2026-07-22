@@ -14,7 +14,8 @@
 //!   through the shared [`actions_standalone::StandaloneActions`]
 //!   registry — the exact path a keyboard shortcut takes.
 //! - **Pages** — every app destination from [`crate::nav::nav_tabs`].
-//! - **Notes** — every vault note from the home org's folder index.
+//! - **Notes** — every vault note from the active org's folder index
+//!   (the org the switcher is scoped to, else the home org).
 //!
 //! The omni-picker ([`OmniPicker`], Ctrl+O) is the Notes section on its
 //! own: uncapped, fuzzy over the whole vault.
@@ -149,14 +150,15 @@ fn PaletteModal() -> Element {
 
     let nav = use_navigator();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let active = use_memo(move || crate::orgs::active_slug(&selection.read(), &org_list.read()));
 
     let mut query = use_signal(String::new);
     let mut cursor = use_signal(|| 0usize);
 
     let notes = use_resource(move || {
         let want = open();
-        let slug = home();
+        let slug = active();
         async move {
             if !want {
                 return Vec::new();
@@ -342,14 +344,15 @@ pub fn OmniPicker() -> Element {
     let mut open = use_context::<OmniOpen>().0;
     let nav = use_navigator();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let active = use_memo(move || crate::orgs::active_slug(&selection.read(), &org_list.read()));
 
     let mut query = use_signal(String::new);
     let mut cursor = use_signal(|| 0usize);
 
     let notes = use_resource(move || {
         let want = open();
-        let slug = home();
+        let slug = active();
         async move {
             if !want {
                 return Vec::new();

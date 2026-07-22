@@ -133,9 +133,10 @@ fn build_tag_tree(pages: &[vault_proto::PageMeta]) -> (TagNode, Vec<vault_proto:
 #[component]
 pub fn VaultExplorer() -> Element {
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
-    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let active = use_memo(move || crate::orgs::active_slug(&selection.read(), &org_list.read()));
     let files = use_resource(move || {
-        let slug = home();
+        let slug = active();
         async move { fetch_folder_index(slug).await }
     });
     let tree = use_memo(move || match &*files.read_unchecked() {
