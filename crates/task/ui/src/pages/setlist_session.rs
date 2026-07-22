@@ -37,15 +37,11 @@
 mod imp {
     use dioxus::prelude::*;
 
-    use daw_proto::{MusicalPosition, Position, PositionInSeconds, TimeSignature};
-    use session_proto::{ActiveIndices, Setlist, SongChartHydration};
+    use daw_proto::{MusicalPosition, TimeSignature};
     use session_ui::components::{
         MeasureIndicator, MixerView, SectionProgressBar, SongProgressBar, TransportControlBar,
     };
-    use session_ui::{
-        PerformanceSidebar, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState,
-        apply_active_indices,
-    };
+    use session_ui::{PerformanceSidebar, SETLIST_STRUCTURE};
 
     use crate::pages::session_chart_pane::SessionChartPane;
     // The streaming engine + manifest model + session-proto mapping are shared
@@ -229,19 +225,25 @@ mod imp {
     /// (embedded) or inside the full-screen setlist Experience.
     #[component]
     pub fn SetlistPlayer(songs: Vec<String>, #[props(default)] fullscreen: bool) -> Element {
-        // Current song in the set → drives `ACTIVE_INDICES.song_index`.
+        // Current song in the set. Mirrored FROM the engine's `ACTIVE_INDICES`
+        // (published by `SessionEventBridge`), and set optimistically by the
+        // navigation callbacks so the UI responds immediately.
         let current_song = use_signal(|| 0usize);
         let playing = use_signal(|| false);
         let position = use_signal(|| 0.0_f64);
-        let buffering = use_signal(|| true);
-        // Per-stem mixer state for the CURRENT song (reset on song switch).
+        // No audio yet (Stage 4b-2), so nothing to buffer.
+        let buffering = use_signal(|| false);
+        // Per-stem mixer state for the CURRENT song (DISPLAY ONLY now — the
+        // mixer strips render from this; audio wiring returns in 4b-2). Reset
+        // from the current song's manifest on song switch.
         let stem_ui = use_signal(Vec::<media::StemUi>::new);
-        // The streaming graph for the CURRENT song only.
-        let engine = use_signal(|| None::<media::Engine>);
 
         // Fetch EVERY song's manifest + chart.kf once. Keyed on the slug list
         // via `use_reactive!` so it runs exactly once per setlist (charts are
-        // optional — a missing chart.kf just yields `None`).
+        // optional — a missing chart.kf just yields `None`). This is now DISPLAY
+        // data only (navigator rows, header facts, progress-bar sections, mixer
+        // strips); the setlist STRUCTURE / charts / playhead are driven by the
+        // in-process engine (see the `build_for_setlist` effect below).
         let songs_r = songs.clone();
         let loaded = use_resource(use_reactive!(|songs_r| {
             let songs = songs_r.clone();
@@ -260,260 +262,145 @@ mod imp {
             }
         }));
 
-        // Hydrate the session-ui structural signals from the WHOLE set — runs
-        // once when the fetch lands. After this the navigator, chart pane and
-        // section bars follow `ACTIVE_INDICES.song_index` with no per-view
-        // refetch.
-        use_effect(move || {
-            let guard = loaded.read();
-            let Some(Ok(list)) = &*guard else {
-                return;
-            };
-            let mut songs_out = Vec::with_capacity(list.len());
-            let mut charts = Vec::new();
-            for (slug, manifest, chart) in list.iter() {
-                let song = media::build_song(slug, manifest, chart.clone());
-                if let Some(c) = chart {
-                    charts.push((song.project_guid.clone(), c.clone()));
-                }
-                songs_out.push(song);
-            }
-            drop(guard);
-
-            *SETLIST_STRUCTURE.write() = Setlist {
-                id: Some("web-setlist".to_owned()),
-                name: "Setlist".to_owned(),
-                advance_mode: session_proto::AdvanceMode::Wait,
-                songs: songs_out,
-            };
-            let mut sc = SONG_CHARTS.write();
-            for (guid, text) in charts {
-                sc.insert(
-                    guid,
-                    SongChartHydration {
-                        project_guid: String::new(),
-                        chart_text: text,
-                        detected_chords: Vec::new(),
-                        chart_fingerprint: String::new(),
-                    },
-                );
-            }
-        });
-
-        // Audio swap: (re)build the CURRENT song's streaming graph whenever the
-        // song index changes (or the fetch first lands). Tears the previous
-        // graph down first — pause, detach, close its `AudioContext` — so we
-        // never hold N songs' worth of media elements, then resets transport to
-        // the head of the new song.
+        // ── Stage 4b-1: build the in-process engine for THIS setlist ─────────
+        // Keyed on the slug list so re-mounting the same setlist does NOT
+        // rebuild; opening a different one rebuilds (dropping the old engine).
+        // The engine is seeded from the setlist's real songs (manifest.json +
+        // chart.kf) and hosts the setlist RPC + `#[subscribe]` streams
+        // in-process. `SessionEventBridge` (mounted in the render below) folds
+        // those streams into the session-ui globals (SETLIST_STRUCTURE /
+        // SONG_CHARTS / ACTIVE_INDICES / SONG_TRANSPORT), so the navigator,
+        // chart pane, section bars and playhead all follow the engine — no
+        // local `SETLIST_STRUCTURE.write()` hydration anymore.
         {
-            let mut engine = engine;
-            let mut stem_ui = stem_ui;
+            let songs = songs.clone();
+            use_effect(use_reactive!(|songs| {
+                crate::session_engine::build_for_setlist(songs.clone());
+            }));
+        }
+
+        // Follow the engine: mirror `ACTIVE_INDICES` (published by the bridge)
+        // into the local signals the layout renders from. Playback is
+        // soft-clock (SILENT) until Stage 4b-2 adds WebRenderer audio, so
+        // `position` advances only on seeks / section jumps, not smoothly.
+        {
+            let mut current_song = current_song;
             let mut playing = playing;
             let mut position = position;
-            let mut buffering = buffering;
+            use_effect(move || {
+                let ai = session_ui::ACTIVE_INDICES.read();
+                let si = ai.song_index.unwrap_or(0);
+                if si != *current_song.peek() {
+                    current_song.set(si);
+                }
+                if ai.is_playing != *playing.peek() {
+                    playing.set(ai.is_playing);
+                }
+                let dur = SETLIST_STRUCTURE
+                    .read()
+                    .songs
+                    .get(si)
+                    .map(|s| s.duration())
+                    .unwrap_or(0.0);
+                let secs = ai.song_progress.unwrap_or(0.0) * dur;
+                if (secs - *position.peek()).abs() > 0.01 {
+                    position.set(secs);
+                }
+            });
+        }
+
+        // Reset the DISPLAY mixer strips from the current song's manifest when
+        // the song changes (or the fetch first lands). No audio graph — the
+        // strips are silent placeholders until Stage 4b-2.
+        // STAGE 4b-2: WebRenderer AudioWorklet audio replaces the removed
+        // Web-Audio graph (`media::build_engine` / `apply_mix` / meter loop).
+        {
+            let mut stem_ui = stem_ui;
             let current_song = current_song;
             use_effect(move || {
                 let idx = current_song();
-                let (slug, manifest) = {
-                    let guard = loaded.read();
-                    let Some(Ok(list)) = &*guard else {
-                        return;
-                    };
-                    let Some((slug, manifest, _)) = list.get(idx) else {
-                        return;
-                    };
-                    (slug.clone(), manifest.clone())
+                let guard = loaded.read();
+                let Some(Ok(list)) = &*guard else {
+                    return;
                 };
-                // Tear down the previous song's graph (peek: no reactive dep).
-                if let Some(old) = engine.peek().clone() {
-                    old.borrow_mut().teardown();
-                }
-                let sources: Vec<media::StemSource> = manifest
+                let Some((_, manifest, _)) = list.get(idx) else {
+                    return;
+                };
+                let v: Vec<media::StemUi> = manifest
                     .stems
                     .iter()
-                    .map(|s| media::StemSource::Url(format!("/media/songs/{slug}/{}", s.file)))
+                    .map(|s| media::StemUi {
+                        muted: s.default_muted,
+                        soloed: false,
+                        volume: 1.0,
+                    })
                     .collect();
-                match media::build_engine(&manifest, &sources) {
-                    Ok(eng) => {
-                        let v: Vec<media::StemUi> = manifest
-                            .stems
-                            .iter()
-                            .map(|s| media::StemUi {
-                                muted: s.default_muted,
-                                soloed: false,
-                                volume: 1.0,
-                            })
-                            .collect();
-                        media::apply_mix(&eng, &v);
-                        stem_ui.set(v);
-                        engine.set(Some(eng));
-                        playing.set(false);
-                        position.set(0.0);
-                        buffering.set(true);
-                        push_session_signals(idx, 0.0, false);
-                    }
-                    Err(e) => tracing::error!("setlist: engine build failed for {slug}: {e}"),
-                }
+                stem_ui.set(v);
             });
         }
 
-        // ~10 Hz loop for the CURRENT song: readiness (buffering), drift
-        // correction, playhead, end-of-song, and session-ui signal population
-        // (ACTIVE_INDICES / SONG_TRANSPORT) for the active index.
-        {
-            let engine = engine;
-            let current_song = current_song;
-            let mut playing = playing;
-            let mut position = position;
-            let mut buffering = buffering;
-            use_future(move || async move {
-                let mut ticks: u32 = 0;
-                let mut last_idx = usize::MAX;
-                loop {
-                    gloo_timers::future::TimeoutFuture::new(media::TICK_MS).await;
-                    let Some(eng) = engine.peek().clone() else {
-                        continue;
-                    };
-                    let idx = *current_song.peek();
-                    if idx != last_idx {
-                        ticks = 0;
-                        last_idx = idx;
-                    }
-                    ticks += 1;
-                    let (rc, total, is_playing, pos, dur) = {
-                        let e = eng.borrow();
-                        (
-                            e.ready_count(),
-                            e.stems.len(),
-                            e.playing,
-                            e.position(),
-                            e.duration,
-                        )
-                    };
-                    let all_ready = total > 0 && rc >= total;
-                    let timed_out = ticks > (4000 / media::TICK_MS);
-                    buffering.set(!(all_ready || timed_out));
-
-                    let mut pos = pos;
-                    if is_playing {
-                        eng.borrow().correct_drift();
-                        position.set(pos);
-                        if dur > 0.0 && pos >= dur - 0.25 {
-                            eng.borrow_mut().pause();
-                            playing.set(false);
-                            position.set(dur);
-                            pos = dur;
-                        }
-                    }
-                    push_session_signals(idx, pos, is_playing);
-                }
-            });
-        }
-
-        // Meter loop — a faster, lighter pass than the transport poll: while
-        // playing, publish the per-stem peak levels to `SETLIST_LEVELS` (~22 fps)
-        // for the mixer VU meters; clear them once when stopped.
-        {
-            let engine = engine;
-            use_future(move || async move {
-                loop {
-                    gloo_timers::future::TimeoutFuture::new(45).await;
-                    let Some(eng) = engine.peek().clone() else {
-                        if !SETLIST_LEVELS.peek().is_empty() {
-                            *SETLIST_LEVELS.write() = Vec::new();
-                        }
-                        continue;
-                    };
-                    let peaks = {
-                        let e = eng.borrow();
-                        e.playing.then(|| e.peak_levels())
-                    };
-                    if let Some(peaks) = peaks {
-                        *SETLIST_LEVELS.write() = peaks;
-                    } else if !SETLIST_LEVELS.peek().is_empty() {
-                        *SETLIST_LEVELS.write() = Vec::new();
-                    }
-                }
-            });
-        }
-
-        // ── transport actions ─────────────────────────────────────────────────
+        // ── transport actions — command the in-process engine over RPC ─────────
+        // The UI commands the engine; the resulting state flows back through
+        // `SessionEventBridge` (ACTIVE_INDICES → the follow-effect above). We
+        // also nudge the local signals optimistically so the UI is snappy.
+        // STAGE 4b-2: real audio playback replaces the (silent) soft clock.
         let play_pause: Callback<()> = use_callback({
-            let engine = engine;
             let mut playing = playing;
-            let position = position;
             move |()| {
-                if let Some(eng) = engine.peek().clone() {
-                    if playing() {
-                        eng.borrow_mut().pause();
-                        playing.set(false);
-                    } else {
-                        let off = position();
-                        eng.borrow_mut().play(off);
-                        playing.set(true);
-                    }
+                let want = !*playing.peek();
+                playing.set(want); // optimistic; the bridge confirms
+                if let Some(client) = crate::session_engine::client() {
+                    spawn(async move {
+                        if let Err(e) = client.toggle_playback().await {
+                            tracing::warn!("setlist: toggle_playback failed: {e:?}");
+                        }
+                    });
                 }
             }
         });
+        // Arbitrary-seconds seek: there is no engine RPC for a free position, so
+        // this only moves the local (visual) playhead. Section/song navigation
+        // (which DO map to engine RPCs) go through `goto_song` /
+        // `on_section_select`. STAGE 4b-2: seek the audio transport here.
         let seek: Callback<f64> = use_callback({
-            let engine = engine;
             let mut position = position;
-            let current_song = current_song;
-            let playing = playing;
             move |off: f64| {
-                if let Some(eng) = engine.peek().clone() {
-                    eng.borrow_mut().seek(off);
-                }
                 position.set(off);
-                push_session_signals(*current_song.peek(), off, playing());
             }
         });
 
-        // ── mixer mutators (by stem index) ─────────────────────────────────────
+        // ── mixer mutators (by stem index) — DISPLAY-ONLY state until 4b-2 ──────
         let toggle_mute: Callback<usize> = use_callback({
-            let engine = engine;
             let mut stem_ui = stem_ui;
             move |i: usize| {
                 let mut ui = stem_ui();
                 if let Some(s) = ui.get_mut(i) {
                     s.muted = !s.muted;
                 }
-                if let Some(eng) = engine.peek().clone() {
-                    media::apply_mix(&eng, &ui);
-                }
                 stem_ui.set(ui);
             }
         });
         let toggle_solo: Callback<usize> = use_callback({
-            let engine = engine;
             let mut stem_ui = stem_ui;
             move |i: usize| {
                 let mut ui = stem_ui();
                 if let Some(s) = ui.get_mut(i) {
                     s.soloed = !s.soloed;
                 }
-                if let Some(eng) = engine.peek().clone() {
-                    media::apply_mix(&eng, &ui);
-                }
                 stem_ui.set(ui);
             }
         });
         let set_volume: Callback<(usize, f32)> = use_callback({
-            let engine = engine;
             let mut stem_ui = stem_ui;
             move |(i, v): (usize, f32)| {
                 let mut ui = stem_ui();
                 if let Some(s) = ui.get_mut(i) {
                     s.volume = v;
                 }
-                if let Some(eng) = engine.peek().clone() {
-                    media::apply_mix(&eng, &ui);
-                }
                 stem_ui.set(ui);
             }
         });
         let set_mutes: Callback<(Vec<usize>, bool)> = use_callback({
-            let engine = engine;
             let mut stem_ui = stem_ui;
             move |(idxs, muted): (Vec<usize>, bool)| {
                 let mut ui = stem_ui();
@@ -522,14 +409,11 @@ mod imp {
                         s.muted = muted;
                     }
                 }
-                if let Some(eng) = engine.peek().clone() {
-                    media::apply_mix(&eng, &ui);
-                }
                 stem_ui.set(ui);
             }
         });
 
-        // ── set navigation: pick / prev / next a whole song ────────────────────
+        // ── set navigation: pick / prev / next a whole song → engine RPC ───────
         let goto_song: Callback<usize> = use_callback({
             let mut current_song = current_song;
             let loaded = loaded;
@@ -543,7 +427,14 @@ mod imp {
                 }
                 let i = i.min(count - 1);
                 if i != *current_song.peek() {
-                    current_song.set(i);
+                    current_song.set(i); // optimistic; the bridge confirms
+                }
+                if let Some(client) = crate::session_engine::client() {
+                    spawn(async move {
+                        if let Err(e) = client.seek_to_song(i).await {
+                            tracing::warn!("setlist: seek_to_song({i}) failed: {e:?}");
+                        }
+                    });
                 }
             }
         });
@@ -609,6 +500,11 @@ mod imp {
         };
 
         rsx! {
+            // Stage 4b-1: fold the in-process engine's `events` /
+            // `active_indices` streams into the session-ui globals
+            // (SETLIST_STRUCTURE / SONG_CHARTS / ACTIVE_INDICES /
+            // SONG_TRANSPORT). Renders nothing; it just runs the stream pumps.
+            crate::session_engine::SessionEventBridge {}
             // Full-screen Experience: fill the overlay (no max-width / centering).
             // Embedded: the centered, capped column above the note editor.
             div {
@@ -618,78 +514,6 @@ mod imp {
         }
     }
 
-    /// Populate the session-ui global signals for the ACTIVE song. Called each
-    /// transport tick and after seeks/song-switches. Writes `ACTIVE_INDICES`
-    /// (with `song_index`), `SONG_TRANSPORT[song_index]`, and `PLAYBACK_STATE`
-    /// (via `apply_active_indices`).
-    fn push_session_signals(song_index: usize, pos: f64, is_playing: bool) {
-        let (dur, count_in, bpm, ts_num, ts_denom, section_index, section_prog) = {
-            let setlist = SETLIST_STRUCTURE.read();
-            let Some(song) = setlist.songs.get(song_index) else {
-                return;
-            };
-            let dur = song.duration().max(0.001);
-            let bpm = song.tempo.unwrap_or(120.0);
-            let ts = song.time_signature.unwrap_or(TimeSignature::COMMON_TIME);
-            let (sec_idx, sec_prog) = song
-                .section_at_position_with_index(pos)
-                .map(|(i, s)| {
-                    let d = s.duration().max(0.001);
-                    (Some(i), ((pos - s.start_seconds) / d).clamp(0.0, 1.0))
-                })
-                // Before the first section's start, clamp to section 0
-                // (same fix as the single-song player).
-                .unwrap_or_else(|| {
-                    if song.sections.first().is_some_and(|s| pos < s.start_seconds) {
-                        (Some(0), 0.0)
-                    } else {
-                        (None, 0.0)
-                    }
-                });
-            (
-                dur,
-                song.count_in_seconds.unwrap_or(0.0),
-                bpm,
-                ts.numerator(),
-                ts.denominator(),
-                sec_idx,
-                sec_prog,
-            )
-        };
-
-        let song_progress = (pos / dur).clamp(0.0, 1.0);
-        let indices = ActiveIndices {
-            song_index: Some(song_index),
-            section_index,
-            slide_index: None,
-            song_progress: Some(song_progress),
-            section_progress: Some(section_prog),
-            is_playing,
-            looping: false,
-            loop_selection: None,
-            queued_target: None,
-        };
-        apply_active_indices(&indices);
-
-        let musical = media::musical_at(count_in + pos, bpm, ts_num);
-        let transport = TransportState {
-            position: Position::from_time_and_musical(PositionInSeconds::from_seconds(pos), musical),
-            bpm,
-            time_sig_num: ts_num as i32,
-            time_sig_denom: ts_denom as i32,
-            is_playing,
-            is_looping: false,
-            loop_region: None,
-        };
-        let changed = SONG_TRANSPORT
-            .peek()
-            .get(&song_index)
-            .map(|e| *e != transport)
-            .unwrap_or(true);
-        if changed {
-            SONG_TRANSPORT.write().insert(song_index, transport);
-        }
-    }
 
     /// The ready setlist player: a **navigator** of the whole set (left) beside
     /// the current song's transport + **Session / Chart** tabs (right). All the
@@ -843,25 +667,26 @@ mod imp {
             }
         });
 
-        // Navigator section click `(song_idx, section_idx)`: seek within the
-        // current song, or hop to another song (seeking into a just-loaded
-        // song's section is a follow-up — it starts at 0).
-        let on_section_select: Callback<(usize, usize)> =
-            use_callback(move |(sidx, secidx): (usize, usize)| {
+        // Navigator section click `(song_idx, section_idx)` → engine
+        // `seek_to_section` (crosses song boundaries natively). The bridge
+        // echoes the new cursor back into ACTIVE_INDICES.
+        let on_section_select: Callback<(usize, usize)> = use_callback({
+            let mut current_song = current_song;
+            move |(sidx, secidx): (usize, usize)| {
                 if sidx != *current_song.peek() {
-                    goto_song.call(sidx);
-                    return;
+                    current_song.set(sidx); // optimistic
                 }
-                let start = SETLIST_STRUCTURE
-                    .peek()
-                    .songs
-                    .get(sidx)
-                    .and_then(|s| s.sections.get(secidx))
-                    .map(|sec| sec.start_seconds);
-                if let Some(t) = start {
-                    seek.call(t);
+                if let Some(client) = crate::session_engine::client() {
+                    spawn(async move {
+                        if let Err(e) = client.seek_to_section(sidx, secidx).await {
+                            tracing::warn!(
+                                "setlist: seek_to_section({sidx}, {secidx}) failed: {e:?}"
+                            );
+                        }
+                    });
                 }
-            });
+            }
+        });
 
         let tracks = media::stems_to_tracks(&manifest, &stem_ui.read());
         // Does this song carry a guide/click bus? (Drives the mixer's guide
