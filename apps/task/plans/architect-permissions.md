@@ -1,10 +1,11 @@
 # architect::permissions — a framework-level authorization system
 
-Status: DESIGN (2026-07-22). Companion to `collaboration-sharing.md` (the
-share lane is the first consumer) and `billing-access-control.md` (whose
-"identity middleware" becomes the identity half of this). Framework home:
-`libs/architect/permissions` (+ derive support in `libs/architect/macros`),
-consumed by every architect service — Task, signal, session alike.
+Status: IMPLEMENTED through P4 (2026-07-22) — see "Implementation notes"
+at the end for where the build deviated from this design. Companion to
+`collaboration-sharing.md` (the share lane is the first consumer) and
+`billing-access-control.md` (whose "identity middleware" became
+`SessionIdentityResolver`). Framework home: `libs/architect/permissions`
+(+ `permissions/proto`), gate in `architect::permissions_gate`.
 
 ## Why in architect
 
@@ -206,3 +207,41 @@ apps/task/server                       engines constructed per org router +
   later, not a new engine.
 - A policy DSL — `permissions_json` stays plain `(glob, actions)` rules
   until real demand says otherwise.
+
+## Implementation notes (what actually landed, 2026-07-22)
+
+- `libs/architect/permissions` — Principal/Resource/Action/Decision,
+  `PermissionEngine` (+ `survey`), glob matching, `RoleEngine` (JSON role
+  blobs, `with_default_user_role`), `ScopeEngine`, `CompositeEngine`,
+  `MethodPermit`/`ServicePermits`, `AuditSink`. Unit-tested.
+- `libs/architect/permissions/proto` — `CapabilityManifest` +
+  `PermissionsService` (`can`, `capabilities`) with the `Permissions<E, I>`
+  impl. The `#[subscribe]` manifest stream is still future work (needs
+  share mutations to publish from).
+- **Gate = a wrapping `Handler`, not `#[permit]` macro codegen** (P3
+  deviation): vox `ServerMiddleware` can observe but not refuse, so
+  enforcement lives in `architect::permissions_gate::PermissionedRouter<H>`
+  — method-granular via `ServicePermits` tables resolved against service
+  descriptors, fail-closed for unlisted methods of tabled services,
+  `UnlistedPolicy` for untabled services, observe-only rollout mode.
+  Argument-level `{path}` checks remain the service impl's job (same
+  engine, finer resource) — the `#[permit]` macro sugar can still come
+  later and compile down to exactly this.
+- **Denies are encoded in the method's real response wire shape**
+  (`response_wire_shape` + facet-reflect `Partial` dynamic construction of
+  `Err(VoxError::InvalidPayload("permission denied: …"))`), so clients
+  decode the reason verbatim; falls back to type-erased `send_error`.
+- `auth::identity::SessionIdentityResolver` — VALIDATING token → Principal
+  (real `current_session`, 30 s TTL cache). The upgrade of the
+  token-stuffing `AuthServerMiddleware`; billing-access-control S1 is done
+  in substance.
+- Task org lane wired (`apps/task/server`): per-org
+  `PermissionsGate` (role engine with default-role `member` for any
+  validated user — per-row membership sync arrives with shares), permit
+  tables for VaultSync + MediaService, `PermissionsService` mounted from
+  the gate's own engine/resolver, gate wrapped OUTSIDE the snapshot gate
+  per connection. **Observe-only by default**; `TASK_ENFORCE_PERMISSIONS=1`
+  enforces. Schema stamp added.
+- E2E tests (`auth-native-tests::permissions_gate_tests`): real sign-up →
+  bearer → allow/deny/fail-closed/forged-token over a vox memory link;
+  share-lane ScopeEngine + StaticPrincipal guest; observe-only pass-through.

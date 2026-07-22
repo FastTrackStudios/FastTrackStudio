@@ -91,6 +91,11 @@ pub struct OrgAppState {
     /// Org-scoped architect-auth instance opened against
     /// this org's `auth.sqlite`.
     pub auth: AuthState,
+    /// The org lane's permission gate: validated-session identity ×
+    /// role engine × per-service permit tables. OBSERVE-ONLY by default
+    /// (audits would-be denies, enforces nothing) until
+    /// `TASK_ENFORCE_PERMISSIONS=1` — see `plans/architect-permissions.md`.
+    pub permissions: Arc<architect::permissions_gate::PermissionsGate>,
     pub attachments: Arc<attachments::AttachmentServiceImpl>,
     /// File-replication backend rooted at this org's
     /// `vault/` dir.
@@ -1020,9 +1025,12 @@ pub(crate) async fn build_org_state(
             sqlite_conns.push(store.conn().clone());
         }
 
+        let permissions = Arc::new(build_org_permissions_gate(&auth));
+
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
             auth,
+            permissions,
             attachments: attachment_service,
             vault_sync: vault_sync_state,
             vault_collab,
@@ -1419,6 +1427,56 @@ async fn legacy_vox_handler(
 /// with architect's composable layer system; the same router is reused
 /// for the WebSocket transport here and the in-process `LocalServer`
 /// transport (see [`org_local_server`]).
+/// Permit tables for the org lane's permission gate. METHOD-level: the
+/// gate checks the coarse resource (`vault/{path}` ⇒ `vault/**`);
+/// path-exact checks arrive with the share lane (service impls calling the
+/// engine directly). Services without a table pass through
+/// (`UnlistedPolicy::Allow`) so coverage can grow service by service.
+const VAULT_PERMITS: architect_permissions::ServicePermits =
+    architect_permissions::ServicePermits {
+        service: "vault-sync",
+        methods: &[
+            architect_permissions::MethodPermit::new("manifest", "read", "vault/**"),
+            architect_permissions::MethodPermit::new("get_file", "read", "vault/{path}"),
+            architect_permissions::MethodPermit::new("put_file", "write", "vault/{path}"),
+            architect_permissions::MethodPermit::new("delete_file", "write", "vault/{path}"),
+            architect_permissions::MethodPermit::new("folder_index", "read", "vault/**"),
+            architect_permissions::MethodPermit::new("set_folder", "write", "vault/{path}"),
+            architect_permissions::MethodPermit::new("open_collab", "read", "vault/{path}"),
+            architect_permissions::MethodPermit::new("base_views", "read", "vault/{path}"),
+            architect_permissions::MethodPermit::new("subscribe", "read", "vault/**"),
+        ],
+    };
+
+const MEDIA_PERMITS: architect_permissions::ServicePermits =
+    architect_permissions::ServicePermits {
+        service: "media",
+        methods: &[
+            architect_permissions::MethodPermit::new("stat", "read", "media/{content_hash}"),
+            architect_permissions::MethodPermit::new("read", "read", "media/{content_hash}")
+                .audited(),
+        ],
+    };
+
+/// Build the org lane's permission gate: session-validating identity over
+/// THIS org's auth store, role engine with `member` as the default role for
+/// any validated user (per-row membership sync lands with shares), permit
+/// tables for the share-relevant services. Observe-only unless
+/// `TASK_ENFORCE_PERMISSIONS=1`.
+fn build_org_permissions_gate(
+    auth: &AuthState,
+) -> architect::permissions_gate::PermissionsGate {
+    use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
+    let roles = architect_permissions::RoleEngine::new().with_default_user_role("member");
+    let identity = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
+    let enforce = std::env::var("TASK_ENFORCE_PERMISSIONS").is_ok_and(|v| v == "1");
+    PermissionsGate::new(Arc::new(roles), Arc::new(identity))
+        .unlisted(UnlistedPolicy::Allow)
+        .observe_only(!enforce)
+        .permit(vault_proto::descriptor(), VAULT_PERMITS)
+        .permit(media_proto::media_service_service_descriptor(), MEDIA_PERMITS)
+}
+
 /// Schema stamps for every vox service [`org_layer_router`]
 /// mounts — the dev guard against proto/server skew (served in
 /// `/.well-known/task-server.json` as `schema_stamps`). A vox
@@ -1441,6 +1499,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         architect_auth::auth_service_service_descriptor(),
         attachments_proto::attachment_service_service_descriptor(),
         vault_proto::descriptor(),
+        architect_permissions_proto::permissions_service_service_descriptor(),
         agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
         agent_proto::service::sessions::sessions_rpc_service_descriptor(),
         agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
@@ -1534,6 +1593,17 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             vault_proto::descriptor(),
             vault_proto::serve(org.vault_sync.clone()),
+        )
+        // Permissions oracle — the caller's capability manifest, answered
+        // by the SAME engine + identity the org lane's gate enforces with.
+        .with(
+            architect_permissions_proto::permissions_service_service_descriptor(),
+            architect_permissions_proto::PermissionsServiceDispatcher::new(
+                architect_permissions_proto::Permissions::new(
+                    org.permissions.engine(),
+                    org.permissions.identity_resolver(),
+                ),
+            ),
         )
         // Agent-task queue — slim domain trait (claim / complete / set-status).
         .with(
@@ -1862,6 +1932,10 @@ fn serve_org_vox(
     // entry — see `snapshot::GatedRouter`. Free when no snapshot is
     // running.
     let router = snapshot::GatedRouter::new(org_layer_router(&org), gate);
+    // Outermost: the permission gate (deny before snapshot-parking or
+    // dispatch). One shared gate per org, wrapped per connection.
+    let router =
+        architect::permissions_gate::PermissionsGate::wrap_shared(org.permissions.clone(), router);
     ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
         .into_response()
 }

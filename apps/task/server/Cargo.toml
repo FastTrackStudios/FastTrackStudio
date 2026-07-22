@@ -149,6 +149,8 @@ vault-collab = { workspace = true }
 chrono.workspace = true
 architect = { workspace = true, features = ["server", "local"] }
 architect-auth = { workspace = true, features = ["full"] }
+architect-permissions.workspace = true
+architect-permissions-proto.workspace = true
 
 [dev-dependencies]
 vox = { workspace = true, features = ["transport-websocket"] }
