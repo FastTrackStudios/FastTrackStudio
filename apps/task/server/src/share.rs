@@ -201,7 +201,7 @@ pub fn landing_html(link: &StoredLink, app_origin: &str) -> String {
     let label = &link.label;
     let cap = &link.capability;
     let open = format!(
-        "{}/vault?path={}",
+        "{}/vault?path={}&share=1",
         app_origin.trim_end_matches('/'),
         urlencoding_encode(note)
     );

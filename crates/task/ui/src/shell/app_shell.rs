@@ -28,14 +28,20 @@ pub fn AppShell() -> Element {
     // restores exactly what was showing. Desktop-only: everything zen
     // hides is `md:`-gated already, so mobile is unaffected.
     let zen = use_context::<crate::chrome::ZenMode>().0;
+    // Share-link visitors get NO chrome at all (and no presence entry,
+    // no start-page redirect — they must land exactly on the shared view).
+    let share = use_context::<crate::chrome::ShareMode>().0;
+    let chromeless = move || zen() || share;
 
     rsx! {
         // Publishes this client's presence entry (route activity, idle,
         // manual status) on the org channel joined at the app root.
         // Renders nothing; lives here because it needs `use_route`.
-        crate::presence::PresencePublisher {}
-        // One-shot start-page redirect from the user's prefs entity.
-        StartPageRedirect {}
+        if !share {
+            crate::presence::PresencePublisher {}
+            // One-shot start-page redirect from the user's prefs entity.
+            StartPageRedirect {}
+        }
         // Mobile is the primary platform: below `md` the chrome is the
         // top app bar + bottom tab bar. At `md`+ the desktop shell is
         // Obsidian-shaped (plans/vault-views.md): one full-width top
@@ -43,11 +49,11 @@ pub fn AppShell() -> Element {
         // where tabs will live), then icon rail → vault explorer →
         // the open view.
         div { class: "min-h-screen bg-background text-foreground md:flex md:h-screen md:flex-col md:overflow-hidden",
-            if !zen() {
+            if !chromeless() {
                 TopBar {}
             }
             div { class: "md:flex md:min-h-0 md:flex-1",
-            if !zen() {
+            if !chromeless() {
                 div { class: "hidden md:block",
                     crate::shell::rail::IconRail { current: current.clone() }
                 }
@@ -58,13 +64,15 @@ pub fn AppShell() -> Element {
             // vault explorer stops just above it (VS Code-style).
             div { class: "flex flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
                 div { class: "flex flex-col md:min-h-0 md:flex-1 md:flex-row",
-                    if explorer.read().0 && !zen() {
+                    if explorer.read().0 && !chromeless() {
                         div { class: "hidden w-[17rem] shrink-0 border-r border-border/60 md:flex md:min-h-0 md:flex-col md:overflow-hidden",
                             crate::shell::explorer::VaultExplorer {}
                         }
                     }
                     div { class: "flex min-h-screen flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
-                        MobileHeader {}
+                        if !share {
+                            MobileHeader {}
+                        }
                         // Bottom padding keeps content clear of the fixed
                         // tab bar (56px + safe area). On desktop `main` is
                         // the scroll container.
@@ -74,8 +82,10 @@ pub fn AppShell() -> Element {
                                 Outlet::<Route> {}
                             }
                         }
-                        BottomTabBar { current }
-                        FleetingFab {}
+                        if !share {
+                            BottomTabBar { current }
+                            FleetingFab {}
+                        }
                     }
                 }
                 // IDE status line — spans the explorer + view (right of the

@@ -44,11 +44,31 @@ pub struct FleetingOpen(pub Signal<bool>);
 #[derive(Clone, Copy)]
 pub struct ZenMode(pub Signal<bool>);
 
+/// Anonymous share-link mode (`?share=1` in the URL — appended by the
+/// share landing page's Open button): render NO app chrome at all — no
+/// top bar, rail, explorer, tabs, or capture FAB. The visitor gets just
+/// the shared view. Read once at boot; guests don't toggle chrome.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ShareMode(pub bool);
+
+fn detect_share_mode() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.location().search().ok())
+            .map(|q| q.contains("share=1"))
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    false
+}
+
 /// Install the chrome contexts. Call once in the app shell.
 pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
     use_context_provider(|| StatusBarInfo(Signal::new(None)));
     use_context_provider(|| ZenMode(Signal::new(false)));
+    use_context_provider(|| ShareMode(detect_share_mode()));
     use_context_provider(|| TimerResumeHint(Signal::new(None)));
 }
 

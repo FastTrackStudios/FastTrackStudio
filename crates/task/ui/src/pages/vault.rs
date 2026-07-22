@@ -1179,7 +1179,60 @@ pub(crate) fn song_slug_from(text: &str, basename: &str) -> String {
 ///
 /// and the inline flow form `songs: [song-a, song-b]`. Each entry is trimmed
 /// of quotes/whitespace; blanks are dropped.
+/// Songs referenced as standalone `[[SongTitle]]` wikilinks in the note
+/// BODY, in document order — the composable authoring form: one wikilink
+/// per line = one setlist entry, slugified from the link target. Lines may
+/// be plain (`[[Praise]]`) or list items (`- [[Praise]]`, `1. [[Praise]]`).
+pub(crate) fn setlist_songs_from_body(text: &str) -> Vec<String> {
+    // Skip the frontmatter block if present.
+    let body = text
+        .strip_prefix("---")
+        .and_then(|rest| rest.split_once("\n---").map(|(_, b)| b))
+        .unwrap_or(text);
+    let mut out = Vec::new();
+    for line in body.lines() {
+        let t = line.trim();
+        // Allow list markers / numbering before the link.
+        let t = t
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .trim_start_matches(['-', '*', '.', ')'])
+            .trim_start();
+        let Some(inner) = t.strip_prefix("[[").and_then(|r| r.strip_suffix("]]")) else {
+            continue;
+        };
+        // `[[Target|alias]]` → target; `[[Target#section]]` → target.
+        let target = inner
+            .split('|')
+            .next()
+            .unwrap_or(inner)
+            .split('#')
+            .next()
+            .unwrap_or(inner)
+            .trim();
+        // Strip a `Songs/` folder prefix if the link is fully qualified.
+        let target = target.strip_prefix("Songs/").unwrap_or(target);
+        if !target.is_empty() {
+            let slug = slugify(target);
+            if !out.contains(&slug) {
+                out.push(slug);
+            }
+        }
+    }
+    out
+}
+
 pub(crate) fn setlist_songs_from(text: &str) -> Vec<String> {
+    // The composable form wins: standalone [[SongTitle]] wikilinks in the
+    // body, in document order. The frontmatter `songs:` list remains as
+    // the fallback for notes that predate wikilink authoring.
+    let from_body = setlist_songs_from_body(text);
+    if !from_body.is_empty() {
+        return from_body;
+    }
+    setlist_songs_from_frontmatter(text)
+}
+
+fn setlist_songs_from_frontmatter(text: &str) -> Vec<String> {
     let Some(rest) = text.strip_prefix("---") else {
         return Vec::new();
     };
@@ -1670,5 +1723,27 @@ mod song_front_tests {
         let f = song_front_from(text);
         assert_eq!(f.stems.len(), 1);
         assert_eq!(f.stems[0].name, "Bass");
+    }
+}
+
+#[cfg(test)]
+mod setlist_wikilink_tests {
+    use super::{setlist_songs_from, setlist_songs_from_body};
+
+    #[test]
+    fn body_wikilinks_define_the_setlist_in_order() {
+        let note = "---\ntype: setlist\nsongs:\n  - old-entry\n---\n# Set\n\n[[Praise]]\n- [[God, I'm Just Grateful]]\n1. [[Songs/Holy Forever|HF]]\nsome prose [[Not A Row]] inline\n[[Praise]]\n";
+        assert_eq!(
+            setlist_songs_from_body(note),
+            vec!["praise", "god-im-just-grateful", "holy-forever"]
+        );
+        // Body wikilinks WIN over the frontmatter list…
+        assert_eq!(setlist_songs_from(note).first().map(|s| s.as_str()), Some("praise"));
+    }
+
+    #[test]
+    fn frontmatter_fallback_still_works() {
+        let note = "---\ntype: setlist\nsongs:\n  - praise\n  - washed\n---\nNo links here.\n";
+        assert_eq!(setlist_songs_from(note), vec!["praise", "washed"]);
     }
 }

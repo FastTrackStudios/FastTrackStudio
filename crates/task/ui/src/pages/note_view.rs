@@ -433,7 +433,13 @@ pub(crate) fn NoteView(
                                 label: "Setlist",
                                 on_enter: move |_| setlist_fullscreen.set(true),
                             }
-                            crate::pages::setlist_session::SetlistPlayer {
+                            // Embedded view = the STREAMING player (one
+                            // reference track per song over vox MediaService)
+                            // — the multitrack rig lives in the fullscreen
+                            // Experience above.
+                            crate::pages::setlist_stream::SetlistStreamPlayer {
+                                org: home.read().clone(),
+                                title: basename_of(&path).to_string(),
                                 songs: setlist_songs_value.clone(),
                             }
                         }

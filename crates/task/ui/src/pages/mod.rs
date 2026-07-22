@@ -36,6 +36,7 @@ pub mod scripture;
 pub mod session_chart_pane;
 pub mod setlist_audio;
 pub mod share_panel;
+pub mod setlist_stream;
 pub mod setlist_session;
 pub mod experience;
 pub mod keyflow_chart_editor;
